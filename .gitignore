@@ -1,0 +1,90 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+DerivedData/
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Environment files
+.env
+.env.local
+
+# Archives
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Claude internal
+.claude/
+
+# Git worktrees (project-local isolated workspaces)
+.worktrees/
+
+# Cursor / IDE
+.cursor/
+
+# Setup scripts
+push-to-github.sh
+
+# VSIX builds (extension packages)
+*.vsix
+
+# LibreOffice lock files
+.~lock.*
+
+# Xcode user state (binary, changes constantly)
+*.xcuserstate
+
+# Daily summaries (session logs, not production)
+daily-summary-*.md
+
+# Evals / test tooling
+evals/
+
+# HTML prototypes/mockups (design exploration, not production)
+*-mockup.html
+*-prototype.html
+*-preview.html
+*-review.html
+codepet-daily-insights.html
+
+# Extension test-realtime artifacts
+codepet-extension/test-realtime/
+
+# Node.js
+node_modules/
+dist/
+
+# MCP server test files
+codepet-mcp-server/test-*.mjs
+codepet-mcp-server/test-project/

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Export options for direct (non-App-Store) distribution.
+     `developer-id` applies Developer ID signing + Hardened Runtime so the
+     exported .app is ready for notarization. teamID is overwritten by
+     package-macos.sh from $TEAM_ID at export time. -->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>developer-id</string>
+	<key>teamID</key>
+	<string>YL72VTKBR7</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>

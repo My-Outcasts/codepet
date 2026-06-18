@@ -1,0 +1,43 @@
+name: CodePet
+options:
+  bundleIdPrefix: com.murror
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15.0"
+
+packages:
+  FirebaseSDK:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: "11.0.0"
+
+targets:
+  CodePet:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Managers
+      - Models
+      - Views
+      - Services
+      - Menu Bar
+      - Assets.xcassets
+      - path: GoogleService-Info.plist
+        type: file
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.murror.codepet
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.education"
+        INFOPLIST_KEY_CFBundleDisplayName: CodePet
+        SWIFT_VERSION: "5.9"
+    dependencies:
+      - package: FirebaseSDK
+        product: FirebaseCore
+    entitlements:
+      path: CodePet.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.network.client: true

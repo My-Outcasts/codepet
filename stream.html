@@ -320,18 +320,44 @@
   }
   function fail(el, e) { $(el).innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
 
+  let dataShown = false;   // have we rendered real data from any source yet?
+  let snapTime = null;     // "generated" timestamp of the baked snapshot
+
+  // 1) Static snapshot baked by the Pages workflow — same origin, never rate-limited.
+  async function loadSnapshot() {
+    try {
+      const res = await fetch("./stream-data.json", { cache: "no-store" });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (Array.isArray(d.commits))  renderCommits(d.commits);
+      if (Array.isArray(d.pulls))    renderPRs(d.pulls);
+      if (Array.isArray(d.releases)) renderReleases(d.releases);
+      renderCI({ workflow_runs: d.runs || [] });
+      snapTime = d.generated || null;
+      dataShown = true;
+      $("updated").textContent = snapTime ? "snapshot · " + ago(snapTime) : "snapshot loaded";
+    } catch (_) { /* no snapshot yet — the live fetch below will fill in */ }
+  }
+
+  // 2) Live GitHub API — upgrades the snapshot to real-time when quota allows.
+  //    On a rate-limit we keep the snapshot instead of wiping it with red errors.
+  function liveFail(e) {
+    if (dataShown) $("updated").textContent =
+      /rate-limit/i.test(e.message) ? "live paused · " + e.message : "live unavailable";
+    else { fail("feed", e); fail("prs", e); fail("releases", e); $("updated").textContent = e.message; }
+  }
   async function refreshCommits() {
-    try { renderCommits(await gh(`/commits?sha=${BRANCH}&per_page=30`)); pulse(); }
-    catch (e) { fail("feed", e); $("updated").textContent = e.message; }
+    try { renderCommits(await gh(`/commits?sha=${BRANCH}&per_page=30`)); dataShown = true; pulse(); }
+    catch (e) { liveFail(e); }
   }
   async function refreshSlow() {
-    try { renderPRs(await gh(`/pulls?state=open&per_page=20`)); } catch (e) { fail("prs", e); }
-    try { renderReleases(await gh(`/releases?per_page=10`)); } catch (e) { fail("releases", e); }
-    try { renderCI(await gh(`/actions/runs?per_page=8`)); } catch (e) { $("ci").innerHTML = '<div class="empty">CI unavailable.</div>'; }
+    try { renderPRs(await gh(`/pulls?state=open&per_page=20`)); } catch (_) {}
+    try { renderReleases(await gh(`/releases?per_page=10`)); } catch (_) {}
+    try { renderCI(await gh(`/actions/runs?per_page=8`)); } catch (_) {}
   }
   function refreshAll() { refreshCommits(); refreshSlow(); }
 
-  refreshAll();
+  (async () => { await loadSnapshot(); refreshAll(); })();
   setInterval(refreshCommits, COMMIT_POLL);
   setInterval(refreshSlow, SLOW_POLL);
   window.addEventListener("focus", refreshCommits);

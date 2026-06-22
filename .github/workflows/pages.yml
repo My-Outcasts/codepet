@@ -1,0 +1,65 @@
+name: Deploy live work stream
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "*/15 * * * *"   # refresh the snapshot every 15 minutes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bake stream-data.json snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp stream.html index.html _site/
+          api() {
+            curl -s -H "Authorization: Bearer $GH_TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/repos/$REPO$1"
+          }
+          api "/commits?sha=main&per_page=30"   > commits.json
+          api "/pulls?state=open&per_page=20"   > pulls.json
+          api "/releases?per_page=10"           > releases.json
+          api "/actions/runs?per_page=8"        > runs.json
+          jq -n \
+            --slurpfile c commits.json \
+            --slurpfile p pulls.json \
+            --slurpfile r releases.json \
+            --slurpfile runs runs.json \
+            --arg gen "$(date -u +%FT%TZ)" \
+            '{
+              generated: $gen,
+              commits:  (if ($c[0]|type)   == "array" then $c[0]   else [] end),
+              pulls:    (if ($p[0]|type)   == "array" then $p[0]   else [] end),
+              releases: (if ($r[0]|type)   == "array" then $r[0]   else [] end),
+              runs:     ($runs[0].workflow_runs // [])
+            }' > _site/stream-data.json
+          echo "Baked snapshot:" && jq '{generated, commits: (.commits|length), pulls: (.pulls|length), releases: (.releases|length), runs: (.runs|length)}' _site/stream-data.json
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

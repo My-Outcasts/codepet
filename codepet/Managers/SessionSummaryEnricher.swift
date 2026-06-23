@@ -14,6 +14,9 @@ final class SessionSummaryEnricher: ObservableObject {
     private let api: ReflectionAPIClientProtocol
     private let store: SessionSummaryStore
     var projectStore: ProjectStore?
+    /// The Learner Model's data-collection layer. When a session summary carries
+    /// `growth_signals`, they're banked here for the UI today and the model later.
+    var agencyLog: AgencySignalLog?
     var language: String
     private let idleThreshold: TimeInterval
     /// Hard ceiling on a single session-summary stream so a hung SSE connection
@@ -132,6 +135,27 @@ final class SessionSummaryEnricher: ObservableObject {
                 try store.appendSummary(summary)
             } catch {
                 logger.error("failed to persist session summary: \(error.localizedDescription)")
+            }
+
+            // Bank the process-literacy "growth edge" signals for this session.
+            // Absent until the server function is redeployed with the contract.
+            if let dtos = payload.growthSignals, !dtos.isEmpty, let log = agencyLog {
+                let now = Date()
+                let banked = dtos.map { dto in
+                    AgencySignal(
+                        id: "\(session.id)__\(dto.signal)__\(dto.valence)",
+                        sessionId: session.id,
+                        observation: dto.observation,
+                        axis: dto.axis,
+                        signal: dto.signal,
+                        valence: dto.valence,
+                        evidence: dto.evidence,
+                        language: language,
+                        createdAt: now
+                    )
+                }
+                log.record(banked)
+                logger.info("banked \(banked.count) agency signal(s) for \(session.id)")
             }
 
             // Auto-update project brief: overview (description) + changelog entry.

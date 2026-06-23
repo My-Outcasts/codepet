@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Reflection</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Two-pane shell ---- */
+  .reflect { display: flex; gap: var(--sp-5); align-items: flex-start; }
+
+  /* ---- Left: Sessions sidebar ---- */
+  .sidebar { width: 264px; flex: 0 0 264px; position: sticky; top: var(--sp-6); }
+  .grp-head {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    font-size: var(--t-sm); font-weight: 700; color: var(--c-body);
+    padding: 8px 6px; border-radius: var(--r-sm);
+  }
+  .grp-head:hover { background: var(--c-sunken); }
+  .grp-head .caret { font-size: 10px; color: var(--c-muted); width: 12px; }
+  .grp-head .count { margin-left: auto; font-size: var(--t-xs); color: var(--c-faint); font-weight: 600; }
+  .sess {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 10px; border-radius: var(--r-sm); margin: 2px 0 2px 14px;
+    border-left: 2px solid transparent; transition: background .12s;
+  }
+  .sess:hover { background: var(--c-sunken); }
+  .sess.active { background: var(--a-purple-tint); border-left-color: var(--a-purple); }
+  .sess .sdot { width: 8px; height: 8px; border-radius: 3px; margin-top: 5px; flex: 0 0 8px; }
+  .sess .stitle { font-size: var(--t-sm); font-weight: 600; color: var(--c-text); line-height: 1.25; }
+  .sess.active .stitle { color: var(--a-purple-deep); }
+  .sess .pin { margin-left: auto; font-size: 12px; }
+
+  /* ---- Right: Narrative pane ---- */
+  .pane { flex: 1; min-width: 0; }
+  .turns { display: flex; flex-direction: column; gap: var(--sp-5); }
+
+  /* User prompt bubble (right-aligned) */
+  .turn-user { display: flex; justify-content: flex-end; }
+  .bubble-user {
+    max-width: 76%; background: var(--a-purple-tint); color: var(--a-purple-deep);
+    font-size: var(--t-md); font-weight: 500; line-height: 1.5;
+    padding: 12px 16px; border-radius: 16px 16px 4px 16px;
+  }
+  .bubble-user .who { font-size: var(--t-xs); font-weight: 700; color: var(--a-purple); margin-bottom: 4px; letter-spacing: .3px; }
+
+  /* AI narrative (left-aligned, narrator pet) */
+  .turn-ai { display: flex; gap: var(--sp-3); align-items: flex-start; }
+  .narrator {
+    flex: 0 0 40px; width: 40px; height: 40px; border-radius: 12px;
+    background: var(--a-purple-tint); display: grid; place-items: center;
+    box-shadow: var(--sh-card); margin-top: 2px;
+  }
+  .narrator img { width: 30px; height: 30px; }
+  .bubble-ai { max-width: 80%; }
+  .bubble-ai .who { font-size: var(--t-xs); font-weight: 700; color: var(--c-muted); margin-bottom: 6px; letter-spacing: .3px; }
+  .bubble-ai p { margin: 0 0 8px; font-size: var(--t-md); line-height: 1.6; color: var(--c-body); }
+  .bubble-ai p:last-child { margin-bottom: 0; }
+  .tech {
+    border-left: 2px dashed var(--c-hairline); padding: 4px 0 4px 12px; margin-top: 10px;
+    font-size: var(--t-sm); color: var(--c-muted); line-height: 1.5;
+  }
+  code {
+    font-family: var(--f-body); font-weight: 600; font-size: 12px;
+    background: var(--a-purple-tint); color: var(--a-purple-deep);
+    padding: 1px 6px; border-radius: 6px;
+  }
+
+  /* Session header data chips */
+  .data-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page" style="max-width:none">
+
+  <div class="reflect">
+
+    <!-- ============ LEFT SIDEBAR ============ -->
+    <aside class="sidebar card card--tight">
+      <div class="between" style="margin-bottom:var(--sp-3)">
+        <h2 class="t-subttl" style="margin:0">Sessions</h2>
+        <button class="btn btn--sm">+ New</button>
+      </div>
+
+      <!-- Group: codepet-app (expanded) -->
+      <button class="grp-head"><span class="caret">▾</span>codepet-app<span class="count">3</span></button>
+
+      <div class="sess active">
+        <span class="sdot" style="background:var(--a-orange)"></span>
+        <div class="vstack" style="min-width:0">
+          <span class="stitle">Fixed the streak bug</span>
+          <span class="t-xs muted">Today · 2:14 PM</span>
+        </div>
+        <span class="pin">📌</span>
+      </div>
+
+      <div class="sess">
+        <span class="sdot" style="background:var(--a-teal)"></span>
+        <div class="vstack" style="min-width:0">
+          <span class="stitle">Refactored GameState</span>
+          <span class="t-xs muted">Yesterday · 9:40 AM</span>
+        </div>
+      </div>
+
+      <div class="sess">
+        <span class="sdot" style="background:var(--a-blue)"></span>
+        <div class="vstack" style="min-width:0">
+          <span class="stitle">Wired Firebase sync</span>
+          <span class="t-xs muted">Jun 12 · 4:05 PM</span>
+        </div>
+      </div>
+
+      <hr class="divider" style="margin:var(--sp-3) 0" />
+
+      <!-- Group: weather-app (collapsed) -->
+      <button class="grp-head"><span class="caret">▸</span>weather-app<span class="count">5</span></button>
+
+      <hr class="divider" style="margin:var(--sp-3) 0" />
+
+      <!-- Group: portfolio-site (collapsed) -->
+      <button class="grp-head"><span class="caret">▸</span>portfolio-site<span class="count">2</span></button>
+    </aside>
+
+    <!-- ============ RIGHT MAIN PANE ============ -->
+    <section class="pane">
+
+      <!-- Session header -->
+      <div class="card" style="margin-bottom:var(--sp-5)">
+        <p class="t-label" style="margin:0 0 6px">📌 Pinned reflection · codepet-app</p>
+        <h1 class="t-title" style="margin:0 0 var(--sp-3)">Fixed the streak bug</h1>
+        <div class="data-row" style="margin-bottom:var(--sp-3)">
+          <span class="chip">📅 Jun 15, 2026</span>
+          <span class="chip">⏱ 38 min</span>
+          <span class="chip">📁 codepet-app</span>
+        </div>
+        <hr class="divider--dash" style="margin:0 0 var(--sp-3)" />
+        <div class="data-row">
+          <span class="chip chip--accent">🦅 Swift</span>
+          <span class="chip chip--accent">4 files</span>
+          <span class="chip chip--accent">+86 −12 lines</span>
+          <span class="chip chip--accent">2 commits</span>
+        </div>
+      </div>
+
+      <!-- Narrative turns -->
+      <div class="turns">
+
+        <!-- Turn 1 -->
+        <div class="turn-user">
+          <div class="bubble-user">
+            <div class="who">YOU ASKED</div>
+            Why does my streak reset at midnight even when I coded earlier that day?
+          </div>
+        </div>
+        <div class="turn-ai">
+          <div class="narrator"><img class="pixelated" src="../../design-assets/char-byte.svg" alt="byte" /></div>
+          <div class="bubble-ai">
+            <div class="who">BYTE · NARRATOR</div>
+            <p>Ah, a sneaky one. Your streak wasn't lying to you — it was just reading the wrong clock. Every night at midnight the kingdom checked whether you'd visited "today," but it measured the day in UTC while you live and code in your own timezone.</p>
+            <p>So for anyone west of London, a late-afternoon session looked like it belonged to tomorrow that hadn't started yet, and the streak quietly slipped back to zero.</p>
+            <div class="tech"><strong style="color:var(--c-body)">Technical details:</strong> the comparison used <code>Calendar(identifier: .gregorian)</code> with the default UTC timezone instead of <code>Calendar.current</code>.</div>
+          </div>
+        </div>
+
+        <!-- Turn 2 -->
+        <div class="turn-user">
+          <div class="bubble-user">
+            <div class="who">YOU ASKED</div>
+            How do I make the day boundary follow the user's local time?
+          </div>
+        </div>
+        <div class="turn-ai">
+          <div class="narrator"><img class="pixelated" src="../../design-assets/char-byte.svg" alt="byte" /></div>
+          <div class="bubble-ai">
+            <div class="who">BYTE · NARRATOR</div>
+            <p>We handed the calendar a compass. By anchoring it to the device's own timezone, "today" finally meant <em>your</em> today — sunrise to sunrise where you actually sit.</p>
+            <p>Then we compared the stored last-active date against that local day. One quiet line of code, and the midnight gremlin lost its power for good.</p>
+            <div class="tech"><strong style="color:var(--c-body)">Technical details:</strong> switched to <code>calendar.isDateInYesterday(lastActive)</code> and set <code>calendar.timeZone = .current</code> in <code>StreakManager.swift</code>.</div>
+          </div>
+        </div>
+
+        <!-- Turn 3 -->
+        <div class="turn-user">
+          <div class="bubble-user">
+            <div class="who">YOU ASKED</div>
+            Can I prove it's fixed without waiting until tonight?
+          </div>
+        </div>
+        <div class="turn-ai">
+          <div class="narrator"><img class="pixelated" src="../../design-assets/char-byte.svg" alt="byte" /></div>
+          <div class="bubble-ai">
+            <div class="who">BYTE · NARRATOR</div>
+            <p>No need to stay up for the witching hour. We summoned a fake clock and marched it across three midnights in three different timezones — Tokyo, London, and Los Angeles. The streak held steady through every one.</p>
+            <p>Two passing tests later, the bug was sealed away and your 12-day flame is safe.</p>
+            <div class="tech"><strong style="color:var(--c-body)">Technical details:</strong> added <code>testStreakSurvivesLocalMidnight()</code> using an injected <code>Date</code> provider in <code>StreakManagerTests.swift</code>.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Summary card -->
+      <div class="card" style="margin-top:var(--sp-5);background:var(--c-surface-2)">
+        <div class="between" style="margin-bottom:var(--sp-3)">
+          <h2 class="t-subttl" style="margin:0">⭐ Session Summary</h2>
+          <span class="chip chip--accent" style="font-size:13px;padding:7px 13px">+45 XP earned</span>
+        </div>
+        <div class="vstack gap-3">
+          <div class="row" style="gap:var(--sp-2)">
+            <span style="color:var(--a-teal-deep);font-weight:700">✓</span>
+            <span class="t-body">The streak now follows each user's <strong>local timezone</strong>, so late-day sessions count correctly.</span>
+          </div>
+          <div class="row" style="gap:var(--sp-2)">
+            <span style="color:var(--a-teal-deep);font-weight:700">✓</span>
+            <span class="t-body">Replaced UTC date math with <code>Calendar.current</code> across <strong>4 files</strong> in one focused pass.</span>
+          </div>
+          <div class="row" style="gap:var(--sp-2)">
+            <span style="color:var(--a-teal-deep);font-weight:700">✓</span>
+            <span class="t-body">Locked the fix behind a <strong>timezone-crossing test</strong> so this gremlin can never return.</span>
+          </div>
+        </div>
+        <hr class="divider--dash" />
+        <div class="between">
+          <span class="t-sm muted">Quest complete · 2 commits pushed</span>
+          <a class="link" href="#" style="font-size:var(--t-sm);font-weight:600;color:var(--a-purple)">Share reflection →</a>
+        </div>
+      </div>
+
+    </section>
+  </div>
+
+</div></div>
+</body>
+</html>

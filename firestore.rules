@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// Codepet Firestore security rules.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+//
+// This file is the source of truth for the rules — editing them in the Firebase
+// console is overwritten on the next deploy. Keep it in sync with the documents
+// the app actually reads/writes (see CloudSyncService + FeatureFeedbackManager).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- User progress: cloud sync under users/{uid} ---
+    // Each signed-in user (incl. anonymous auth) may read/write only their own
+    // document and anything nested under it. Mirrors "users/{uid}" cloud sync.
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // --- First-experience feedback ---
+    // FeatureFeedbackManager.submit() does a create-only addDocument() to the
+    // top-level `feedback` collection. Clients may CREATE a feedback doc but can
+    // never read, update, or delete one (reads are admin/console-only).
+    //
+    // Validated on create: a signed-in author, a 1-5 integer rating, and a
+    // string feature key. We intentionally do NOT require userId == auth.uid so
+    // a guest (anonymous-auth) submission whose client-side userId lags can't be
+    // silently rejected — tighten this if feedback spoofing ever matters.
+    match /feedback/{docId} {
+      allow create: if request.auth != null
+                    && request.resource.data.rating is int
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5
+                    && request.resource.data.feature is string;
+      allow read, update, delete: if false;
+    }
+
+    // --- Default deny ---
+    // Anything not matched above is closed. New collections must opt in here.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

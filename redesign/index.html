@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Redesign Prototype</title>
+<link rel="stylesheet" href="assets/fonts.css" />
+<link rel="stylesheet" href="styles/tokens.css" />
+<link rel="stylesheet" href="styles/components.css" />
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  .canvas-frame { flex: 1; border: 0; width: 100%; background: var(--c-page); }
+  .rail-btn { cursor: pointer; }
+  .rail-grp-lbl { font-size: 7px; letter-spacing: .6px; color: var(--c-faint); text-transform: uppercase; margin: 6px 0 2px; }
+  .hud .name-chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--t-sm); }
+  .hud .name-chip img { width: 26px; height: 26px; }
+  .hearts { display: inline-flex; gap: 2px; }
+  .hearts img { width: 18px; height: 18px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Left rail (MainTabView, 72px) -->
+  <nav class="rail">
+    <div class="avatar"><img src="../design-assets/char-byte.svg" alt="byte" /></div>
+
+    <div class="rail-btn active" data-screen="screens/home.html" title="Home">🏰<span class="cap">Home</span></div>
+    <div class="rail-btn" data-screen="screens/sessions.html" title="Sessions">⚔️<span class="cap">Quests</span></div>
+    <div class="rail-btn" data-screen="screens/insights.html" title="Insights">📊<span class="cap">Stats</span></div>
+    <div class="rail-btn" data-screen="screens/learn.html" title="Learn">🎓<span class="cap">Learn</span></div>
+    <div class="rail-btn" data-screen="screens/reflection.html" title="Reflection">💬<span class="cap">Logs</span></div>
+    <div class="rail-btn" data-screen="screens/dictionary.html" title="Dictionary">📖<span class="cap">Terms</span></div>
+
+    <div class="spacer"></div>
+
+    <div class="rail-grp-lbl">flows</div>
+    <div class="rail-btn" data-screen="screens/splash.html" title="Splash">✦<span class="cap">Intro</span></div>
+    <div class="rail-btn" data-screen="screens/onboarding.html" title="Onboarding">🧭<span class="cap">Setup</span></div>
+    <div class="rail-btn" data-screen="screens/profile.html" title="Profile">⚙️<span class="cap">You</span></div>
+  </nav>
+
+  <!-- Main column -->
+  <div class="main">
+    <!-- Persistent HUD (GameHUDBar) -->
+    <header class="hud">
+      <span class="hearts" title="Hearts">
+        <img src="../design-assets/hud-heart-filled.svg" alt="" />
+        <img src="../design-assets/hud-heart-filled.svg" alt="" />
+        <img src="../design-assets/hud-heart-filled.svg" alt="" />
+        <img src="../design-assets/hud-heart-filled.svg" alt="" />
+        <img src="../design-assets/hud-heart-empty.svg" alt="" />
+      </span>
+      <span class="hud-stat"><img src="../design-assets/hud-coin.svg" alt="coins" /> 340</span>
+      <span class="hud-stat"><img src="../design-assets/hud-fire-streak.svg" alt="streak" /> 12</span>
+      <span class="hud-stat"><img src="../design-assets/hud-star-xp.svg" alt="xp" /> Lv 6</span>
+      <span class="grow"></span>
+      <span class="t-sm" id="screen-name" style="font-weight:600">Home</span>
+      <span class="name-chip"><img src="../design-assets/char-byte.svg" alt="" /> byte</span>
+    </header>
+
+    <iframe id="canvas" class="canvas-frame" src="screens/home.html" title="screen"></iframe>
+  </div>
+</div>
+
+<script>
+  const frame = document.getElementById('canvas');
+  const label = document.getElementById('screen-name');
+  document.querySelectorAll('.rail-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.rail-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      frame.src = btn.dataset.screen;
+      label.textContent = btn.getAttribute('title');
+    });
+  });
+</script>
+</body>
+</html>

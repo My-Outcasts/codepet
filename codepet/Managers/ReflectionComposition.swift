@@ -82,6 +82,17 @@ final class ReflectionComposition: ObservableObject {
     let sessionEnricher: SessionSummaryEnricher
     let api: ReflectionAPIClient
 
+    /// Project-aware Dictionary: terms detected in the user's real code, with
+    /// AI-generated plain-language cards. The store is the local mirror; the
+    /// enricher detects + fetches on demand (driven by the Dictionary tab).
+    let dictionaryStore: ProjectDictionaryStore
+    let dictionaryEnricher: DictionaryEnricher
+
+    /// The Learner Model's data-collection layer — banks the per-session
+    /// "growth edge" process-literacy signals. Surfaces one sentence today;
+    /// feeds the two-axis model later.
+    let agencyLog: AgencySignalLog
+
     init(language: String = "en") {
         let events = ReflectionEventStore()
         let narratives = NarrativeStore()
@@ -94,7 +105,18 @@ final class ReflectionComposition: ObservableObject {
         self.endStore = ends
         self.api = api
         self.enricher = NarrativeEnricher(api: api, store: narratives, language: language)
-        self.sessionEnricher = SessionSummaryEnricher(api: api, store: summaries, language: language)
+        let sessionEnricher = SessionSummaryEnricher(api: api, store: summaries, language: language)
+        self.sessionEnricher = sessionEnricher
+
+        let agency = AgencySignalLog.shared
+        self.agencyLog = agency
+        sessionEnricher.agencyLog = agency
+
+        let dictStore = ProjectDictionaryStore()
+        self.dictionaryStore = dictStore
+        self.dictionaryEnricher = DictionaryEnricher(api: api)
+        DictionaryPersistence.shared.load(into: dictStore)
+        DictionaryPersistence.shared.startAutoSave(dictStore)
     }
 
     /// Update the language used for all future AI-generated narratives and summaries.

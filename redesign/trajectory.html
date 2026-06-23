@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codepet — Visible trajectory (agency axis made visible)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @font-face{font-family:'Minecraft';src:url('../codepet/Resources/Fonts/Minecraft.ttf') format('truetype');font-display:swap}
+
+  :root{
+    --page:#F4F1EA; --surface:#FBFAF6; --surface-2:#F8F7F2; --well:#EFEDE6;
+    --hairline:#E5E1D8;
+    --t-primary:#1F1B15; --t-body:#3A352D; --t-muted:#7A7264; --t-faint:#A89F90;
+    --accent:#6E8E68; --accent-deep:#4F6B4A; --accent-tint:#E8EEE4; --accent-line:#CBD8C4;
+    --gold:#C99A4E;
+    /* coaching accent — the Learner-Model / agency thread (brandPurple in-app) */
+    --coach:#6E5AA8; --coach-deep:#574593; --coach-tint:#EFEBF7; --coach-line:#D8CFEC;
+    --pixel:'Minecraft','Pixelify Sans',ui-monospace,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --shadow-soft:0 1px 2px rgba(40,36,28,.04), 0 8px 24px rgba(40,36,28,.06);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans); color:var(--t-body);
+    background:
+      radial-gradient(1200px 700px at 80% -10%, #EFE7DC 0%, rgba(239,231,220,0) 60%),
+      radial-gradient(1000px 800px at 0% 110%, #E8E7E0 0%, rgba(232,231,224,0) 55%),
+      var(--page);
+    min-height:100vh; padding:30px 26px 56px; -webkit-font-smoothing:antialiased;
+  }
+  .pixel{font-family:var(--pixel)}
+  .eyebrow{font-family:var(--pixel);font-size:9px;letter-spacing:.5px;color:var(--t-muted);text-transform:uppercase;line-height:1}
+  img.pixel-art{image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges}
+
+  .stage{max-width:1080px;margin:0 auto}
+  .caption{font-family:var(--pixel);font-size:10px;letter-spacing:.4px;color:var(--coach);text-transform:uppercase;margin:26px 4px 9px}
+  .caption:first-child{margin-top:0}
+  .caption .dim{color:var(--t-faint)}
+
+  .window{
+    border-radius:16px;overflow:hidden;border:1px solid var(--hairline);
+    background:var(--surface);box-shadow:var(--shadow-soft);display:grid;grid-template-columns:200px 1fr;min-height:0;position:relative;
+  }
+  .titlebar{position:absolute;top:0;left:0;right:0;height:40px;display:flex;align-items:center;gap:8px;padding:0 14px;z-index:3}
+  .traffic{display:flex;gap:8px}
+  .traffic i{width:11px;height:11px;border-radius:50%;display:block}
+  .traffic .r{background:#ED6A5E}.traffic .y{background:#F4BF50}.traffic .g{background:#61C554}
+
+  .sidebar{
+    background:linear-gradient(180deg, rgba(245,243,237,.9), rgba(238,236,228,.9));
+    border-right:1px solid var(--hairline);padding:44px 12px 14px;display:flex;flex-direction:column;gap:3px;
+  }
+  .nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--t-muted);font-size:13px;font-weight:500}
+  .nav .ic{width:18px;height:18px;border-radius:5px;border:1.5px solid currentColor;opacity:.7;display:grid;place-items:center;font-size:10px}
+  .nav.active{background:var(--accent-tint);color:var(--accent-deep);border:1px solid var(--accent-line)}
+  .nav.active .ic{opacity:1;border-color:var(--accent)}
+  .side-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:8px 8px;border-top:1px solid var(--hairline)}
+  .side-foot img{width:26px;height:26px}
+  .side-foot .nm{font-family:var(--pixel);font-size:10px;color:var(--t-primary)}
+  .side-foot .lv{font-size:11px;color:var(--t-muted)}
+
+  .content{padding:44px 26px 26px;overflow:auto}
+  .page-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px}
+  .page-head h1{font-size:21px;color:var(--t-primary);font-weight:600;letter-spacing:-.2px}
+  .page-head .sub{font-size:13px;color:var(--t-muted)}
+
+  /* ───── SURFACE A: the milestone moment (rare, elevated, one-time) ───── */
+  .milestone{
+    display:flex;gap:18px;align-items:flex-start;padding:22px;border-radius:16px;
+    background:linear-gradient(135deg,#F4EFFB 0%, #ECE6F8 100%);
+    border:1px solid var(--coach-line);
+    box-shadow:0 1px 2px rgba(87,69,147,.05), 0 12px 30px rgba(87,69,147,.10);
+    position:relative;overflow:hidden;
+  }
+  .milestone::after{content:"🌱";position:absolute;right:-6px;bottom:-10px;font-size:90px;opacity:.07;transform:rotate(-8deg)}
+  .milestone .pet{width:84px;height:84px;flex:none;animation:breathe 4.6s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.015)}}
+  .milestone .mtop{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .milestone .pips{letter-spacing:2px;color:var(--coach);font-size:9px}
+  .milestone .mlabel{font-family:var(--pixel);font-size:9px;letter-spacing:.6px;color:var(--coach-deep);text-transform:uppercase}
+  .milestone h2{font-size:18px;color:var(--t-primary);font-weight:600;margin-bottom:8px;letter-spacing:-.1px}
+  .milestone p{font-size:14px;line-height:1.55;color:var(--t-body);max-width:54ch}
+  .milestone p b{font-weight:600;color:var(--t-primary)}
+  .milestone .mfoot{margin-top:13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .evchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--coach-deep);background:rgba(110,90,168,.10);border:1px solid var(--coach-line);border-radius:999px;padding:4px 10px}
+  .fb{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--t-muted)}
+  .fb button{font-size:13px;line-height:1;background:var(--surface);border:1px solid var(--hairline);border-radius:7px;padding:3px 7px;cursor:pointer}
+  .fb button:hover{background:var(--coach-tint);border-color:var(--coach-line)}
+
+  .undercard{margin-top:14px;font-size:12px;color:var(--t-faint);display:flex;align-items:center;gap:7px}
+  .undercard .ic{font-size:11px}
+
+  /* ───── SURFACE B: "How you've grown" — the permanent record ───── */
+  /* two-axis strip: comprehension (Dictionary) + agency (trajectories) */
+  .axes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+  .axis{border:1px solid var(--hairline);border-radius:12px;padding:14px 16px;background:var(--surface)}
+  .axis .alabel{font-family:var(--pixel);font-size:8.5px;letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px}
+  .axis.comp .alabel{color:var(--accent-deep)}
+  .axis.agen .alabel{color:var(--coach-deep)}
+  .axis .anum{font-family:var(--pixel);font-size:30px;line-height:1}
+  .axis.comp .anum{color:var(--accent-deep)}
+  .axis.agen .anum{color:var(--coach-deep)}
+  .axis .adesc{font-size:12px;color:var(--t-muted);margin-top:7px}
+
+  .grown{border:1px solid var(--hairline);border-radius:14px;background:var(--surface);padding:6px 18px 8px}
+  .grown .ghead{display:flex;align-items:baseline;justify-content:space-between;padding:14px 0 6px}
+  .grown .ghead h3{font-size:15px;color:var(--t-primary);font-weight:600}
+  .grown .ghead .gsub{font-size:12px;color:var(--t-faint)}
+  .growrow{display:flex;align-items:center;gap:13px;padding:13px 0;border-bottom:1px solid var(--hairline)}
+  .growrow:last-child{border-bottom:none}
+  .growrow .gic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:10px;flex:none}
+  .growrow.risen .gic{background:var(--coach);color:#fff}
+  .growrow.prog .gic{background:transparent;border:1.5px dashed var(--coach-line);color:var(--coach)}
+  .growrow .gmid{flex:1}
+  .growrow .gname{font-size:13.5px;color:var(--t-primary);font-weight:600}
+  .growrow .gevi{font-size:11.5px;color:var(--t-muted);margin-top:2px}
+  .growrow .gright{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+  .pill{font-family:var(--pixel);font-size:8.5px;letter-spacing:.4px;text-transform:uppercase;padding:3px 9px;border-radius:999px}
+  .pill.strength{color:#fff;background:var(--coach)}
+  .pill.inprog{color:var(--coach-deep);background:var(--coach-tint);border:1px solid var(--coach-line)}
+  .growrow .gdate{font-family:var(--mono);font-size:10.5px;color:var(--t-faint)}
+
+  .legend{max-width:1080px;margin:20px auto 0;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11.5px;color:var(--t-muted)}
+  .legend b{color:var(--t-body)}
+  .legend .k{display:inline-flex;align-items:center;gap:6px}
+  .callout{max-width:1080px;margin:6px auto 0;font-size:12px;color:var(--t-faint)}
+  .callout code{font-family:var(--mono);font-size:11px;background:var(--well);padding:1px 5px;border-radius:5px}
+</style>
+</head>
+<body>
+  <div class="stage">
+
+    <!-- ════════ SURFACE A ════════ -->
+    <div class="caption">Surface A — Reflection · the milestone moment <span class="dim">(rare · one-time · shown the first time a pattern crosses the bar)</span></div>
+
+    <div class="window">
+      <div class="titlebar"><span class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></span></div>
+
+      <aside class="sidebar">
+        <div class="nav active"><span class="ic">❝</span> Reflection</div>
+        <div class="nav"><span class="ic">✎</span> Tips</div>
+        <div class="nav"><span class="ic">A</span> Dictionary</div>
+        <div class="nav"><span class="ic">◔</span> Profile</div>
+        <div class="side-foot">
+          <img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+          <div><div class="nm">byte</div><div class="lv">learning with you</div></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="page-head">
+          <h1>Reflection</h1>
+          <span class="sub">Monday, 22 June</span>
+        </div>
+
+        <div class="milestone">
+          <img class="pet pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+          <div>
+            <div class="mtop">
+              <span class="pips">◆◆◆</span>
+              <span class="mlabel">byte noticed something</span>
+            </div>
+            <h2>You've started checking the AI's work.</h2>
+            <p>When we started, checking what the AI changed was easy to skip. It came up as a growth edge in <b>4 of your first 6 sessions</b>. Over the last two weeks you've been reading the diffs and testing before moving on. That's a real shift in <b>how you build</b>, not just what you built.</p>
+            <div class="mfoot">
+              <span class="evchip">◆ verification · growth → strength</span>
+              <span class="fb"><span>Felt right?</span><button title="yes">👍</button><button title="no">👎</button></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="undercard">
+          <span class="ic">🔒</span>
+          <span>Shown once, then it moves to <b style="color:var(--coach-deep)">Profile → How you've grown</b>. byte won't repeat it.</span>
+        </div>
+      </main>
+    </div>
+
+    <!-- ════════ SURFACE B ════════ -->
+    <div class="caption">Surface B — Profile · “How you've grown” <span class="dim">(the permanent, accumulating record — the part that makes the moat visible)</span></div>
+
+    <div class="window">
+      <div class="titlebar"><span class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></span></div>
+
+      <aside class="sidebar">
+        <div class="nav"><span class="ic">❝</span> Reflection</div>
+        <div class="nav"><span class="ic">✎</span> Tips</div>
+        <div class="nav"><span class="ic">A</span> Dictionary</div>
+        <div class="nav active"><span class="ic">◔</span> Profile</div>
+        <div class="side-foot">
+          <img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+          <div><div class="nm">byte</div><div class="lv">learning with you</div></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="page-head">
+          <h1>Your growth</h1>
+          <span class="sub">since 1 June · 18 sessions</span>
+        </div>
+
+        <!-- two axes of the Learner Model, made visible -->
+        <div class="axes">
+          <div class="axis comp">
+            <div class="alabel">Comprehension · do you understand it</div>
+            <span class="anum">6</span>
+            <div class="adesc">terms mastered, from your code <span style="color:var(--t-faint)">(Dictionary)</span></div>
+          </div>
+          <div class="axis agen">
+            <div class="alabel">Agency · how you direct the AI</div>
+            <span class="anum">2</span>
+            <div class="adesc">habits leveled up <span style="color:var(--t-faint)">(from your sessions)</span></div>
+          </div>
+        </div>
+
+        <div class="grown">
+          <div class="ghead">
+            <h3>How you've grown</h3>
+            <span class="gsub">based on how you've worked, not a quiz</span>
+          </div>
+
+          <div class="growrow risen">
+            <span class="gic">◆</span>
+            <div class="gmid">
+              <div class="gname">Checking the AI's output</div>
+              <div class="gevi">was a growth edge in 4 early sessions · now done as you go</div>
+            </div>
+            <div class="gright">
+              <span class="pill strength">Now a strength</span>
+              <span class="gdate">Jun 22</span>
+            </div>
+          </div>
+
+          <div class="growrow risen">
+            <span class="gic">◆</span>
+            <div class="gmid">
+              <div class="gname">Scoping tasks to the right size</div>
+              <div class="gevi">used to ask for too much at once · now broken into steps</div>
+            </div>
+            <div class="gright">
+              <span class="pill strength">Now a strength</span>
+              <span class="gdate">Jun 10</span>
+            </div>
+          </div>
+
+          <div class="growrow prog">
+            <span class="gic">○</span>
+            <div class="gmid">
+              <div class="gname">Giving the AI the right context</div>
+              <div class="gevi">still comes up — pointing it at the right files up front</div>
+            </div>
+            <div class="gright">
+              <span class="pill inprog">In progress</span>
+              <span class="gdate">latest Jun 21</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <span class="k"><b style="color:var(--coach)">◆ Trajectory</b> = the agency axis made visible (Dictionary = the comprehension axis)</span>
+    <span class="k"><b>Honest by construction:</b> only claims a win when a pattern was a repeated growth edge AND is now affirmatively a strength</span>
+    <span class="k"><b>Regression → silence</b>, never a report card</span>
+  </div>
+  <div class="callout">Visible-trajectory preview. Runs entirely on the <code>AgencySignalLog</code> data the beta already banks — no new server contract. Surface A is rare + one-time; Surface B accumulates. Reuses real Codepet art &amp; Minecraft font; does not touch <code>codepet/</code>.</div>
+
+</body>
+</html>

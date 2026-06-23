@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Quests</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Local garden theming (selected kingdom = Eternal Garden) ---------- */
+  :root { --garden: var(--k-garden); --garden-wash: rgba(240,168,208,.14); --garden-line: rgba(240,168,208,.55); }
+
+  /* ---- Kingdom selector (pill tabs) -------------------------------------- */
+  .ktabs { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-4); }
+  .ktab {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 16px; border-radius: var(--r-pill);
+    background: var(--c-surface); box-shadow: inset 0 0 0 1.5px var(--c-hairline);
+    font-size: var(--t-sm); font-weight: 600; color: var(--c-muted);
+    transition: background .12s, box-shadow .12s, color .12s;
+  }
+  .ktab:hover { background: var(--c-sunken); color: var(--c-body); }
+  .ktab .dot { width: 10px; height: 10px; border-radius: 3px; }
+  .ktab.active { background: var(--garden-wash); box-shadow: inset 0 0 0 2px var(--garden); color: var(--c-text); }
+
+  /* ---- Challenge trail --------------------------------------------------- */
+  .trail { position: relative; }
+  .trail::before {
+    content: ""; position: absolute; left: 27px; top: 28px; bottom: 28px;
+    border-left: 2px dashed var(--c-hairline); z-index: 0;
+  }
+  .node { display: flex; gap: var(--sp-4); position: relative; z-index: 1; align-items: stretch; }
+  .node + .node { margin-top: var(--sp-3); }
+  .tok { flex: 0 0 56px; display: flex; justify-content: center; padding-top: 6px; }
+  .tok .disc {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: var(--f-pixel); font-size: 18px; line-height: 1;
+    border: 3px solid var(--c-hairline); background: var(--c-surface);
+  }
+  .node.done .disc  { background: var(--a-teal-tint);  border-color: var(--a-teal);  color: var(--a-teal-deep); }
+  .node.lock .disc  { background: var(--c-sunken);     border-color: var(--c-hairline); color: var(--c-faint); font-size: 16px; }
+  .node.now  .disc  {
+    background: var(--garden-wash); border-color: var(--garden); color: var(--a-pink-deep);
+    box-shadow: 0 0 0 0 var(--garden-line); animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 var(--garden-line); }
+    50%     { box-shadow: 0 0 0 8px rgba(240,168,208,0); }
+  }
+
+  .node .body { flex: 1; min-width: 0; }
+  .node.lock .body { opacity: .6; }
+  .node.now .body {
+    box-shadow: var(--sh-card), 0 0 0 2px var(--garden);
+    background: linear-gradient(180deg, var(--garden-wash), var(--c-surface) 60%);
+  }
+  .node .body .goal { margin: 2px 0 10px; }
+
+  /* ---- Reward / XP chips ------------------------------------------------- */
+  .chip--xp   { background: var(--a-gold-tint);  color: var(--a-gold-deep); }
+  .chip--coin { background: var(--c-sunken);     color: var(--c-body); }
+  .chip--garden { background: var(--garden-wash); color: var(--a-pink-deep); }
+
+  /* ---- Detail panel ------------------------------------------------------ */
+  .detail-wrap { position: sticky; top: var(--sp-6); }
+  .detail .portrait {
+    width: 96px; height: 96px; margin: 0 auto;
+    background: var(--k-garden-sky); border-radius: 18px;
+    display: grid; place-items: end center; overflow: hidden;
+  }
+  .detail .portrait img { width: 80px; height: 80px; image-rendering: pixelated; }
+  .btn-pixel--garden { background: var(--garden); color: var(--c-ink-line); width: 100%; justify-content: center; }
+  .stars { letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Header + kingdom selector -->
+  <div class="page-head">
+    <div class="between">
+      <div>
+        <p class="t-label">Coding Practice</p>
+        <h1 class="t-display">Quests</h1>
+        <p class="t-lead muted">Practice what you've learned — one challenge at a time.</p>
+      </div>
+      <span class="chip chip--garden" style="font-size:13px;padding:8px 14px">🌸 Eternal Garden · 3 / 7 cleared</span>
+    </div>
+    <div class="ktabs">
+      <span class="ktab"><span class="dot" style="background:var(--k-forge)"></span>The Molten Forge</span>
+      <span class="ktab"><span class="dot" style="background:var(--k-spire)"></span>The Frozen Spire</span>
+      <span class="ktab active"><span class="dot" style="background:var(--k-garden)"></span>The Eternal Garden</span>
+      <span class="ktab"><span class="dot" style="background:var(--k-grove)"></span>The Mystic Grove</span>
+    </div>
+  </div>
+
+  <!-- Two-column: trail + detail -->
+  <section class="row" style="align-items:flex-start">
+
+    <!-- LEFT: challenge trail -->
+    <div style="flex:2;min-width:0">
+      <div class="section-head">
+        <h2 class="t-title">Garden Trail</h2>
+        <span class="t-sm muted">Tier 3 · Advanced</span>
+      </div>
+
+      <div class="trail">
+
+        <!-- 1 done -->
+        <div class="node done">
+          <div class="tok"><div class="disc">✓</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Tool Switching</p>
+              <span class="badge badge--done">Cleared</span>
+            </div>
+            <p class="t-sm goal">Know when to switch AI tools mid-build instead of forcing one.</p>
+            <div class="row-wrap">
+              <span class="chip">📘 Lesson · ★☆☆</span>
+              <span class="chip chip--xp">+10 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 done -->
+        <div class="node done">
+          <div class="tok"><div class="disc">✓</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Scope Management</p>
+              <span class="badge badge--done">Cleared</span>
+            </div>
+            <p class="t-sm goal">Break a big idea into small pieces AI can actually build.</p>
+            <div class="row-wrap">
+              <span class="chip">⚔️ Challenge · ★★☆</span>
+              <span class="chip chip--xp">+25 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 done -->
+        <div class="node done">
+          <div class="tok"><div class="disc">✓</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Design System</p>
+              <span class="badge badge--done">Cleared</span>
+            </div>
+            <p class="t-sm goal">Keep your app's look consistent across every screen.</p>
+            <div class="row-wrap">
+              <span class="chip">📘 Lesson · ★☆☆</span>
+              <span class="chip chip--xp">+10 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 current / available -->
+        <div class="node now">
+          <div class="tok"><div class="disc">▸</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Component Library</p>
+              <span class="badge badge--open">Up Next</span>
+            </div>
+            <p class="t-sm goal">Extract a reusable component set so AI stops reinventing each screen.</p>
+            <div class="row-wrap">
+              <span class="chip chip--garden">⚔️ Challenge · ★★☆</span>
+              <span class="chip chip--coin">🪙 10</span>
+              <span class="chip chip--xp">+25 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5 locked -->
+        <div class="node lock">
+          <div class="tok"><div class="disc">🔒</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Prompt Iteration</p>
+              <span class="badge badge--locked">Locked</span>
+            </div>
+            <p class="t-sm goal">Refine a prompt step by step until the result actually works.</p>
+            <div class="row-wrap">
+              <span class="chip">📘 Lesson · ★☆☆</span>
+              <span class="chip chip--xp">+10 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6 locked -->
+        <div class="node lock">
+          <div class="tok"><div class="disc">🔒</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Refactor Pass</p>
+              <span class="badge badge--locked">Locked</span>
+            </div>
+            <p class="t-sm goal">Clean up AI-generated code without breaking what already runs.</p>
+            <div class="row-wrap">
+              <span class="chip">⚔️ Challenge · ★★☆</span>
+              <span class="chip chip--xp">+25 XP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7 locked boss -->
+        <div class="node lock">
+          <div class="tok"><div class="disc">🔒</div></div>
+          <div class="card body">
+            <div class="between">
+              <p class="t-subttl" style="margin:0">Garden Trial: Ship a Feature</p>
+              <span class="badge badge--locked">Boss</span>
+            </div>
+            <p class="t-sm goal">Take one feature from idea to shipped — planning, building, and review, solo.</p>
+            <div class="row-wrap">
+              <span class="chip">👑 Boss · ★★★</span>
+              <span class="chip chip--xp">+50 XP</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT: detail panel -->
+    <div style="flex:1;min-width:0">
+      <div class="detail-wrap detail">
+        <div class="pixel-shadow">
+          <div class="pixel-card vstack gap-4">
+
+            <span class="chip chip--garden" style="align-self:flex-start">
+              <span class="dot" style="width:9px;height:9px;border-radius:3px;background:var(--k-garden)"></span>
+              The Eternal Garden · Tier 3
+            </span>
+
+            <div>
+              <p class="t-label" style="color:var(--a-pink-deep)">⚔️ Challenge</p>
+              <h2 class="t-title" style="margin:2px 0 0">Component Library</h2>
+            </div>
+
+            <p class="t-sm" style="color:var(--c-body);line-height:1.55;margin:0">
+              Your app is growing and you keep rebuilding the same buttons and cards. Work with
+              Luna to extract a small, reusable component library — then prompt your AI tool to
+              reuse it everywhere instead of reinventing each screen.
+            </p>
+
+            <hr class="divider--dash" style="margin:0" />
+
+            <div class="vstack gap-2">
+              <p class="t-label" style="margin:0">Rewards</p>
+              <div class="row-wrap">
+                <span class="chip chip--coin">🪙 10 Coins</span>
+                <span class="chip chip--xp">+25 XP</span>
+              </div>
+            </div>
+
+            <div class="between">
+              <span class="t-sm"><span class="stars" style="color:var(--a-gold)">★★</span><span class="stars muted">☆</span> &nbsp;Intermediate</span>
+              <span class="t-sm muted">⏱ ~15 min</span>
+            </div>
+
+            <button class="btn-pixel btn-pixel--garden">Start Challenge ▸</button>
+
+            <hr class="divider" style="margin:2px 0" />
+
+            <div class="row" style="align-items:center;gap:var(--sp-3)">
+              <div class="portrait"><img class="pixelated" src="../../design-assets/char-luna.svg" alt="Luna" /></div>
+              <div style="flex:1">
+                <p class="t-sm" style="font-weight:700;margin:0;color:var(--c-text)">Luna</p>
+                <p class="t-sm muted" style="margin:2px 0 0;line-height:1.45">You've got the eye for this — let's make it tidy. 🌸</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</div></div>
+</body>
+</html>

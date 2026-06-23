@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Home</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Pet scene ---- */
+  .pet-scene {
+    border-radius: 18px; overflow: hidden; box-shadow: var(--sh-card);
+    background: var(--k-grove-sky); position: relative; height: 280px;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .pet-scene .biome-tag { position: absolute; top: 14px; left: 16px; }
+  .pet-scene .platform {
+    width: 220px; height: 60px; margin-bottom: 26px; position: relative;
+    background: linear-gradient(180deg,#A8E08A,#7BC562);
+    border-radius: 50%/40%;
+    box-shadow: 0 16px 0 -4px #5DA847, 0 30px 30px rgba(0,0,0,.12);
+  }
+  .pet-scene .pet {
+    position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%);
+    width: 104px; height: 104px; animation: bob 2.4s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(-8px)} }
+  .pet-scene .speech {
+    position: absolute; left: 50%; bottom: 178px; transform: translateX(-50%);
+    background: #fff; padding: 8px 14px; border-radius: 14px; box-shadow: var(--sh-card);
+    font-size: var(--t-sm); font-weight: 600; white-space: nowrap;
+  }
+  .pet-scene .speech::after { content:""; position:absolute; left:50%; bottom:-6px; transform:translateX(-50%); border:6px solid transparent; border-top-color:#fff; border-bottom:0; }
+  .pet-actions { display: flex; gap: var(--sp-2); position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); }
+  .pet-actions .pa {
+    background: rgba(255,255,255,.92); border: 2px solid var(--c-ink-line);
+    font-family: var(--f-pixel); font-size: 11px; padding: 6px 12px; border-radius: 10px;
+    box-shadow: 2px 2px 0 var(--c-ink-line); transition: transform .06s;
+  }
+  .pet-actions .pa:active { transform: translate(2px,2px); box-shadow: none; }
+
+  /* ---- Kingdom cards ---- */
+  .kingdom { border-radius: 16px; overflow: hidden; box-shadow: var(--sh-card); background: var(--c-surface); transition: transform .12s, box-shadow .12s; cursor: pointer; }
+  .kingdom:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+  .kingdom .art { height: 116px; width: 100%; object-fit: cover; image-rendering: auto; background: var(--c-sunken); }
+  .kingdom .meta { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+  .kingdom.locked { filter: grayscale(.5) opacity(.7); }
+  .kingdom .pin { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* ---- Achievements ---- */
+  .ach { display:flex; flex-direction:column; align-items:center; gap:8px; text-align:center; }
+  .ach .medal { width: 56px; height: 56px; border-radius: 16px; display:grid; place-items:center; font-size: 26px; box-shadow: var(--sh-card); }
+  .ach.locked .medal { background: var(--c-sunken); filter: grayscale(1); opacity:.6; }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Greeting -->
+  <div class="page-head between">
+    <div>
+      <p class="t-label">Mystic Grove · Tier 4</p>
+      <h1 class="t-display">Good morning, byte!</h1>
+      <p class="t-lead muted">You're on a 12-day streak — let's keep the kingdom glowing.</p>
+    </div>
+    <span class="chip chip--accent" style="font-size:13px;padding:8px 14px">★ Level 6 · 240 / 400 XP</span>
+  </div>
+
+  <!-- Dashboard stat tiles -->
+  <section class="grid grid-4" style="margin-bottom:var(--sp-6)">
+    <div class="tile tile--orange">
+      <div class="tile-ico">🔥</div>
+      <div class="tile-val">12</div>
+      <div class="tile-lbl">DAY STREAK · BEST 18</div>
+    </div>
+    <div class="tile tile--purple">
+      <div class="tile-ico">★</div>
+      <div class="tile-val">6</div>
+      <div class="tile-lbl">LEVEL</div>
+      <div class="bar" style="background:rgba(255,255,255,.25)"><i style="width:60%;background:#fff"></i></div>
+    </div>
+    <div class="tile tile--teal">
+      <div class="tile-ico">📘</div>
+      <div class="tile-val">18</div>
+      <div class="tile-lbl">LESSONS DONE</div>
+    </div>
+    <div class="tile tile--gold">
+      <div class="tile-ico">🪙</div>
+      <div class="tile-val">340</div>
+      <div class="tile-lbl">COINS</div>
+    </div>
+  </section>
+
+  <!-- Pet + quick panel -->
+  <section class="row" style="margin-bottom:var(--sp-6);align-items:stretch">
+    <div class="pet-scene" style="flex:2">
+      <span class="biome-tag chip" style="background:rgba(255,255,255,.85)">🌿 Mystic Grove</span>
+      <div class="speech">Ready to code something great? ✨</div>
+      <div class="platform"></div>
+      <img class="pet pixelated" src="../../design-assets/char-byte.svg" alt="byte" />
+      <div class="pet-actions">
+        <button class="pa">PET</button>
+        <button class="pa">FEED</button>
+        <button class="pa">PLAY</button>
+        <button class="pa">TRAIN</button>
+      </div>
+    </div>
+    <div class="card" style="flex:1;display:flex;flex-direction:column;gap:var(--sp-3)">
+      <p class="t-subttl" style="margin:0">Pet Care</p>
+      <div class="vstack gap-2">
+        <div class="between"><span class="t-sm">Mood</span><span class="t-sm" style="font-weight:700;color:var(--a-teal-deep)">Happy</span></div>
+        <div class="bar"><i style="width:82%;background:var(--a-teal)"></i></div>
+      </div>
+      <div class="vstack gap-2">
+        <div class="between"><span class="t-sm">Energy</span><span class="t-sm muted">64%</span></div>
+        <div class="bar"><i style="width:64%;background:var(--a-blue)"></i></div>
+      </div>
+      <div class="vstack gap-2">
+        <div class="between"><span class="t-sm">Hunger</span><span class="t-sm muted">Peckish</span></div>
+        <div class="bar"><i style="width:45%;background:var(--a-orange)"></i></div>
+      </div>
+      <hr class="divider" style="margin:6px 0" />
+      <button class="btn" style="justify-content:center">Feed byte · 🪙 5</button>
+      <p class="t-sm muted center" style="margin:0">Next free snack in 2h 10m</p>
+    </div>
+  </section>
+
+  <!-- World map -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">World Map</h2>
+      <a class="link" href="#">View all kingdoms →</a>
+    </div>
+    <div class="grid grid-4">
+      <div class="kingdom">
+        <img class="art" src="../../design-assets/kingdom-molten-forge-v5.png" alt="" />
+        <div class="meta">
+          <div class="between"><span class="pin"><span class="dot" style="background:var(--k-forge)"></span><strong>Molten Forge</strong></span><span class="badge badge--done">8/8</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:100%;background:var(--k-forge)"></i></div>
+        </div>
+      </div>
+      <div class="kingdom">
+        <img class="art" src="../../design-assets/kingdom-frozen-spire-v4.png" alt="" />
+        <div class="meta">
+          <div class="between"><span class="pin"><span class="dot" style="background:var(--k-spire)"></span><strong>Frozen Spire</strong></span><span class="badge badge--done">8/8</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:100%;background:var(--k-spire)"></i></div>
+        </div>
+      </div>
+      <div class="kingdom">
+        <img class="art" src="../../design-assets/kingdom-eternal-garden-v9.png" alt="" />
+        <div class="meta">
+          <div class="between"><span class="pin"><span class="dot" style="background:var(--k-garden)"></span><strong>Eternal Garden</strong></span><span class="badge badge--open">5/8</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:62%;background:var(--k-garden)"></i></div>
+        </div>
+      </div>
+      <div class="kingdom">
+        <img class="art" src="../../design-assets/kingdom-mystic-grove-v5.png" alt="" />
+        <div class="meta">
+          <div class="between"><span class="pin"><span class="dot" style="background:var(--k-grove)"></span><strong>Mystic Grove</strong></span><span class="badge badge--open">2/8</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:25%;background:var(--k-grove)"></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Achievements -->
+  <section>
+    <div class="section-head"><h2 class="t-title">Achievements</h2><a class="link" href="#">12 of 30 →</a></div>
+    <div class="card">
+      <div class="grid" style="grid-template-columns:repeat(6,1fr)">
+        <div class="ach"><div class="medal tile--gold">🏆</div><span class="t-xs muted">First Steps</span></div>
+        <div class="ach"><div class="medal tile--orange">🔥</div><span class="t-xs muted">7-Day Streak</span></div>
+        <div class="ach"><div class="medal tile--teal">📘</div><span class="t-xs muted">10 Lessons</span></div>
+        <div class="ach"><div class="medal tile--purple">⚔️</div><span class="t-xs muted">Forge Master</span></div>
+        <div class="ach locked"><div class="medal">❄️</div><span class="t-xs muted">Spire Champ</span></div>
+        <div class="ach locked"><div class="medal">🌸</div><span class="t-xs muted">Gardener</span></div>
+      </div>
+    </div>
+  </section>
+
+</div></div>
+</body>
+</html>

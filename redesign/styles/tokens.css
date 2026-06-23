@@ -1,0 +1,108 @@
+/* ============================================================================
+   CodePet Redesign — Design Tokens (single source of truth)
+   ----------------------------------------------------------------------------
+   Carries the production tokens from codepet/Views/CodepetTheme.swift verbatim,
+   then adds the scale that makes the UI feel polished: an 8pt spacing system,
+   a deliberate type scale, and tint/shade steps per accent.
+   Direction: "evolve current" — same identity, tighter execution.
+   ============================================================================ */
+
+:root {
+  /* ---- Surfaces ---------------------------------------------------------- */
+  --c-page:        #F8F7F3;  /* warm cream page background      (CodepetTheme:25) */
+  --c-surface:     #FFFFFF;  /* card / panel surface            (CodepetTheme:29) */
+  --c-surface-2:   #FCFBF8;  /* subtly tinted surface  (new)    */
+  --c-sunken:      #F1EFE9;  /* inset wells, track backgrounds (new) */
+  --c-hairline:    #ECE9E2;  /* divider hairline                (CodepetTheme:33) */
+  --c-ink-line:    #2D2B26;  /* pixel-card outline / dark ink   (PixelCard) */
+
+  /* ---- Text -------------------------------------------------------------- */
+  --c-text:        #1F1B15;  /* primary / headline              (CodepetTheme:38) */
+  --c-body:        #332E27;  /* body copy                       (CodepetTheme:41) */
+  --c-muted:       #776F65;  /* labels, captions, helper        (CodepetTheme:44) */
+  --c-faint:       #A79E92;  /* faint meta / placeholders (new) */
+
+  /* ---- Brand accents (base) --------------------------------------------- */
+  --a-purple:      #7C3AED;  /* (CodepetTheme:48) */
+  --a-pink:        #FF6B9D;  /* (CodepetTheme:49) */
+  --a-gold:        #FDB022;  /* (CodepetTheme:50) */
+  --a-teal:        #2DD4BF;  /* (CodepetTheme:51) */
+  --a-orange:      #FF8C42;  /* (CodepetTheme:52) */
+  --a-blue:        #2563EB;  /* (CodepetTheme:53) */
+
+  /* ---- Accent tints (12% wash, for fills/chips/bars-track) --------------- */
+  --a-purple-tint: #EEE6FD;
+  --a-pink-tint:   #FFE6EF;
+  --a-gold-tint:   #FEF0D6;
+  --a-teal-tint:   #DDF7F3;
+  --a-orange-tint: #FFE8D6;
+  --a-blue-tint:   #DCE7FC;
+
+  /* ---- Accent shades (pressed/hover, deeper) ----------------------------- */
+  --a-purple-deep: #5B27B0;
+  --a-pink-deep:   #E0457A;
+  --a-gold-deep:   #D98A09;
+  --a-teal-deep:   #16A394;
+  --a-orange-deep: #E06A1E;
+  --a-blue-deep:   #1B4FC4;
+
+  /* ---- Kingdom / tier accents (SessionsView.swift) ----------------------- */
+  --k-forge:       #FF8040;  /* The Molten Forge   */
+  --k-spire:       #88D0F0;  /* The Frozen Spire   */
+  --k-garden:      #F0A8D0;  /* The Eternal Garden */
+  --k-grove:       #90D870;  /* The Mystic Grove   */
+
+  /* Kingdom scene gradients (HomeView.swift SceneTheme) */
+  --k-forge-sky:   linear-gradient(180deg, #F0D0C0 0%, #F0E8E0 100%);
+  --k-spire-sky:   linear-gradient(180deg, #D0E4F4 0%, #F0F8FE 100%);
+  --k-garden-sky:  linear-gradient(180deg, #F8D8E8 0%, #FEF6F8 100%);
+  --k-grove-sky:   linear-gradient(180deg, #DCF0CC 0%, #F2F9EC 100%);
+
+  /* ---- Status ------------------------------------------------------------ */
+  --s-locked:      #C9C3B8;
+  --s-success:     var(--a-teal);
+  --s-danger:      #F0533F;
+
+  /* ---- Type families ----------------------------------------------------- */
+  --f-pixel: "Minecraft", "Press Start 2P", monospace;  /* titles >=18px */
+  --f-body:  "Inter18", "Inter", system-ui, -apple-system, sans-serif;
+
+  /* ---- Type scale -------------------------------------------------------- */
+  /* Pixel titles (>=18 only — the production threshold) */
+  --t-display: 28px;   /* hero screen titles            */
+  --t-title:   22px;   /* section titles                */
+  --t-subttl:  18px;   /* card titles                   */
+  /* Inter body scale (<18) */
+  --t-lg:      16px;   /* lead body                     */
+  --t-md:      14px;   /* default body                  */
+  --t-sm:      13px;   /* secondary / controls          */
+  --t-xs:      11px;   /* labels, captions, chips       */
+
+  /* ---- Spacing scale (8pt system — the main polish lever) ---------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* ---- Radius ------------------------------------------------------------ */
+  --r-card:  14px;   /* (CodepetTheme:59) */
+  --r-pill:  24px;   /* (CodepetTheme:62) */
+  --r-input: 12px;   /* (CodepetTheme:65) */
+  --r-sm:    8px;
+  --r-chip:  10px;
+
+  /* ---- Shadows ----------------------------------------------------------- */
+  --sh-card:     0 4px 12px rgba(0,0,0,0.08);   /* (CodepetTheme:77-80) */
+  --sh-float:    0 12px 24px rgba(0,0,0,0.12);  /* (CodepetTheme:83-86) */
+  --sh-hover:    0 8px 20px rgba(0,0,0,0.10);
+  --sh-pixel:    4px 4px 0 var(--c-ink-line);   /* PixelCard hard offset */
+
+  /* ---- Layout ------------------------------------------------------------ */
+  --rail-w: 72px;     /* left nav rail (MainTabView)        */
+  --hud-h:  56px;     /* top HUD bar                        */
+  --shell-max: 1280px;
+}

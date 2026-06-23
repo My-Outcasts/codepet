@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codepet — Reflection as landing (beta-minimal)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  @font-face{font-family:'Minecraft';src:url('../codepet/Resources/Fonts/Minecraft.ttf') format('truetype');font-display:swap}
+
+  :root{
+    --page:#F4F1EA; --surface:#FBFAF6; --surface-2:#F8F7F2; --well:#EFEDE6;
+    --hairline:#E5E1D8; --ink:#211E18;
+    --t-primary:#1F1B15; --t-body:#3A352D; --t-muted:#7A7264; --t-faint:#A89F90;
+    --accent:#6E8E68; --accent-deep:#4F6B4A; --accent-tint:#E8EEE4; --accent-line:#CBD8C4;
+    --gold:#C99A4E;
+    /* coaching accent — the "growth edge" / Learner-Model thread (brandPurple in-app) */
+    --coach:#6E5AA8; --coach-tint:#EFEBF7; --coach-line:#D8CFEC;
+    --pixel:'Minecraft','Pixelify Sans',ui-monospace,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --r-card:14px; --r-sm:10px; --gap:16px;
+    --shadow-soft:0 1px 2px rgba(40,36,28,.04), 0 8px 24px rgba(40,36,28,.06);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans); color:var(--t-body);
+    background:
+      radial-gradient(1200px 700px at 78% -10%, #EFE7DC 0%, rgba(239,231,220,0) 60%),
+      radial-gradient(1000px 800px at 0% 110%, #E8E7E0 0%, rgba(232,231,224,0) 55%),
+      var(--page);
+    min-height:100vh; padding:30px 26px 56px; -webkit-font-smoothing:antialiased;
+  }
+  .pixel{font-family:var(--pixel);}
+  .eyebrow{font-family:var(--pixel);font-size:9px;letter-spacing:.5px;color:var(--t-muted);text-transform:uppercase;line-height:1}
+  .mono{font-family:var(--mono);}
+  img.pixel-art{image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges}
+
+  .stage{max-width:1180px;margin:0 auto;position:relative}
+
+  /* ambient menubar — pet presence only, no Debrief popover (post-beta) */
+  .menubar{
+    height:26px;border-radius:8px;background:rgba(28,26,22,.72);backdrop-filter:blur(18px) saturate(1.2);
+    display:flex;align-items:center;justify-content:flex-end;gap:18px;padding:0 12px;color:#EDE9E0;font-size:12px;position:relative;z-index:5;box-shadow:0 1px 0 rgba(255,255,255,.06) inset;
+  }
+  .menubar .mb-item{opacity:.72;font-size:12px}
+  .menubar .pet-chip{display:flex;align-items:center;gap:7px;opacity:1;cursor:default;padding:2px 8px;border-radius:7px;background:rgba(255,255,255,.10)}
+  .menubar .pet-chip img{width:16px;height:16px}
+  .menubar .pet-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(110,142,104,.25);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+
+  .window{
+    margin-top:14px;border-radius:16px;overflow:hidden;border:1px solid var(--hairline);
+    background:var(--surface);box-shadow:var(--shadow-soft);display:grid;grid-template-columns:212px 1fr;min-height:640px;position:relative;z-index:1;
+  }
+  .titlebar{position:absolute;top:0;left:0;right:0;height:42px;display:flex;align-items:center;gap:8px;padding:0 14px;z-index:3}
+  .traffic{display:flex;gap:8px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .traffic .r{background:#ED6A5E}.traffic .y{background:#F4BF50}.traffic .g{background:#61C554}
+
+  .sidebar{
+    background:linear-gradient(180deg, rgba(245,243,237,.9), rgba(238,236,228,.9));backdrop-filter:blur(10px);
+    border-right:1px solid var(--hairline);padding:46px 12px 14px;display:flex;flex-direction:column;gap:3px;
+  }
+  .nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--t-muted);font-size:13px;font-weight:500;cursor:default}
+  .nav .ic{width:18px;height:18px;border-radius:5px;border:1.5px solid currentColor;opacity:.7;display:grid;place-items:center;font-size:10px}
+  .nav.active{background:var(--accent-tint);color:var(--accent-deep);border:1px solid var(--accent-line)}
+  .nav.active .ic{opacity:1;border-color:var(--accent)}
+  .side-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:8px 8px;border-top:1px solid var(--hairline)}
+  .side-foot img{width:26px;height:26px}
+  .side-foot .nm{font-family:var(--pixel);font-size:10px;color:var(--t-primary)}
+  .side-foot .lv{font-size:11px;color:var(--t-muted)}
+
+  .content{padding:46px 22px 22px;overflow:auto}
+  .page-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px}
+  .page-head h1{font-size:22px;color:var(--t-primary);font-weight:600;letter-spacing:-.2px}
+  .page-head .sub{font-size:13px;color:var(--t-muted)}
+
+  .bento{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--gap);grid-auto-rows:minmax(118px,auto)}
+  .card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-card);padding:16px}
+  .card .eyebrow{margin-bottom:10px}
+  .card.tint{background:var(--accent-tint);border-color:var(--accent-line)}
+  .well{background:var(--well);border:1px solid var(--hairline);border-radius:var(--r-sm);box-shadow:inset 0 1px 2px rgba(40,36,28,.05)}
+
+  .btn{font-size:12px;font-weight:600;border:none;cursor:pointer;border-radius:8px;padding:7px 12px;background:var(--accent);color:#fff;font-family:var(--sans)}
+  .btn:hover{background:var(--accent-deep)}
+  .btn.ghost{background:transparent;color:var(--accent-deep);border:1px solid var(--accent-line)}
+
+  /* mood chip — Reflection's mood field drives sprite + a small tag */
+  .mood{font-family:var(--mono);font-size:9px;letter-spacing:.3px;text-transform:uppercase;padding:3px 7px;border-radius:6px;color:var(--accent-deep);background:var(--accent-tint);border:1px solid var(--accent-line);white-space:nowrap}
+
+  /* HERO — latest reflection narrative (the live feature, front and center) */
+  .c-hero{grid-column:span 4;display:flex;gap:18px;align-items:center}
+  .c-hero .pet{width:96px;height:96px;flex:none;animation:breathe 4.6s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.015)}}
+  .c-hero .top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .c-hero h2{font-size:18px;color:var(--t-primary);font-weight:600;margin-bottom:6px}
+  .c-hero p{font-size:13.5px;line-height:1.5;color:var(--t-body);max-width:46ch}
+  .c-hero p b{font-weight:600}
+  .c-hero .meta{margin-top:11px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .pillstreak{display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--hairline);border-radius:999px;padding:5px 11px}
+  .pillstreak .n{font-family:var(--pixel);font-size:13px;color:var(--gold)}
+  .pillstreak span{font-size:12px;color:var(--t-muted)}
+  .fb{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--t-muted)}
+  .fb button{font-size:13px;line-height:1;background:var(--surface);border:1px solid var(--hairline);border-radius:7px;padding:3px 7px;cursor:pointer}
+  .fb button:hover{background:var(--accent-tint);border-color:var(--accent-line)}
+
+  /* growth edge — one gentle process-literacy coaching line per session.
+     The sentence is the "cheap thread" shown today; the structured signal
+     behind it (axis/signal/valence/evidence) banks into the Learner Model. */
+  .growth{display:flex;gap:9px;align-items:flex-start;margin-top:13px;padding:11px 13px;border-radius:10px;background:var(--coach-tint);border:1px solid var(--coach-line)}
+  .growth .turn{color:var(--t-faint);font-size:13px;line-height:1;padding-top:2px;flex:none}
+  .growth .gbody{flex:1}
+  .growth .glabel{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+  .growth .glabel .dia{color:var(--coach);font-size:7px}
+  .growth .glabel .txt{font-family:var(--pixel);font-size:8.5px;letter-spacing:.6px;color:var(--coach);text-transform:uppercase}
+  .growth .gobs{font-size:13px;line-height:1.5;color:var(--t-body)}
+  .growth .gobs b{color:var(--t-primary);font-weight:600}
+  /* lineage affordance — threads this one-session note to the Profile record,
+     so the user sees "today's note" and "how you've grown" are one story. */
+  .growth .gtrack{display:inline-flex;align-items:center;gap:5px;margin-top:9px;font-size:11px;font-weight:600;color:var(--coach);text-decoration:none;cursor:pointer;opacity:.82}
+  .growth .gtrack:hover{opacity:1;text-decoration:underline}
+  .growth .gtrack .ar{font-size:12px}
+
+  /* stat tile — sessions reflected (Reflection metric, not Learner Model) */
+  .c-stat{grid-column:span 2;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+  .c-stat .big{font-family:var(--pixel);font-size:40px;color:var(--accent-deep);line-height:1}
+  .c-stat .lbl{font-size:12px;color:var(--t-muted);margin-top:8px}
+
+  /* session history — Reflection's session feed */
+  .c-history{grid-column:span 4}
+  .hrow{display:flex;gap:12px;align-items:flex-start;padding:11px 12px;border-bottom:1px solid var(--hairline)}
+  .hrow:last-child{border-bottom:none}
+  .hrow .when{font-family:var(--mono);font-size:10.5px;color:var(--t-faint);min-width:92px;padding-top:2px}
+  .hrow .body{flex:1}
+  .hrow .body .snip{font-size:12.5px;color:var(--t-body);line-height:1.45}
+  .hrow .body .snip b{color:var(--accent-deep);font-weight:500;font-family:var(--mono);font-size:11.5px}
+  .hrow .body .row2{display:flex;align-items:center;gap:8px;margin-top:6px}
+
+  /* coding activity heatmap (spans 2 rows) */
+  .c-heat{grid-column:span 2;grid-row:span 2}
+  .heatwrap{padding:12px;margin-top:8px}
+  .heat{display:grid;grid-template-columns:repeat(12,1fr);gap:4px}
+  .heat i{aspect-ratio:1;border-radius:3px;background:var(--hairline);display:block}
+  .heat i.l1{background:#D8E2D2}.heat i.l2{background:#B4C9AC}.heat i.l3{background:#8FB186}.heat i.l4{background:var(--accent)}
+  .heat-legend{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:10px;font-size:10px;color:var(--t-faint)}
+  .heat-legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  .legend{max-width:1180px;margin:18px auto 0;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11.5px;color:var(--t-muted)}
+  .legend b{color:var(--t-body)}
+  .legend .k{display:inline-flex;align-items:center;gap:6px}
+  .callout{max-width:1180px;margin:6px auto 16px;font-size:12px;color:var(--t-faint)}
+</style>
+</head>
+<body>
+  <div class="stage">
+
+    <div class="menubar">
+      <span class="mb-item">􀙇</span>
+      <span class="mb-item mono">16:24</span>
+      <span class="mb-item">Mon 22 Jun</span>
+      <span class="pet-chip"><span class="dot"></span><img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte"><span class="pixel" style="font-size:10px">byte</span></span>
+    </div>
+
+    <div class="window">
+      <div class="titlebar"><span class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></span></div>
+
+      <aside class="sidebar">
+        <div class="nav active"><span class="ic">❝</span> Reflection</div>
+        <div class="nav"><span class="ic">✎</span> Tips</div>
+        <div class="nav"><span class="ic">A</span> Dictionary</div>
+        <div class="nav"><span class="ic">◔</span> Profile</div>
+        <div class="side-foot">
+          <img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+          <div><div class="nm">byte</div><div class="lv">learning with you</div></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="page-head">
+          <h1>Reflection</h1>
+          <span class="sub">Monday, 22 June</span>
+        </div>
+
+        <div class="bento">
+          <!-- HERO: latest narrative -->
+          <div class="card c-hero">
+            <img class="pet pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+            <div>
+              <div class="top"><span class="eyebrow">Latest · today 16:24 · 38 min</span><span class="mood">proud</span></div>
+              <h2>You shipped Google sign-in today.</h2>
+              <p>In <b>LoginView.swift</b> you added Google sign-in, and wrapped the network call in an <b>async</b> function so the screen never froze. That’s the second time async has shown up this week — it’s starting to stick.</p>
+              <div class="meta">
+                <span class="pillstreak"><span class="n">3</span><span>day streak · kept warm</span></span>
+                <span class="fb"><span>Was this helpful?</span><button title="thumbs up">👍</button><button title="thumbs down">👎</button></span>
+              </div>
+              <!-- growth edge: the per-session process-literacy coaching line -->
+              <div class="growth">
+                <span class="turn">↳</span>
+                <div class="gbody">
+                  <div class="glabel"><span class="dia">◆</span><span class="txt">Next rep</span></div>
+                  <div class="gobs">You re-prompted <b>four times</b> for the same sign-in fix before it landed. Next time, try describing the finished result first ("tapping the button signs in and lands on Home"), then let the steps follow.</div>
+                  <a class="gtrack">tracked in your growth <span class="ar">→</span></a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- stat tile: sessions reflected -->
+          <div class="card tint c-stat">
+            <div class="big">12</div>
+            <div class="lbl">sessions reflected<br>· this week</div>
+          </div>
+
+          <!-- SESSION HISTORY: Reflection feed -->
+          <div class="card c-history" style="padding:16px 16px 6px">
+            <span class="eyebrow">Earlier reflections</span>
+            <div style="margin-top:8px">
+              <div class="hrow">
+                <span class="when">Today · 11:02</span>
+                <div class="body">
+                  <div class="snip">You split <b>AuthManager.swift</b> into smaller async functions — easier to follow, and the login flow reads top to bottom now.</div>
+                  <div class="row2"><span class="mood">thinking</span><span class="fb"><button title="thumbs up">👍</button><button title="thumbs down">👎</button></span></div>
+                </div>
+              </div>
+              <div class="hrow">
+                <span class="when">Yesterday</span>
+                <div class="body">
+                  <div class="snip">Tracked down why <b>.env</b> wasn’t loading — the key name had a typo. You added a guard so it fails loudly next time.</div>
+                  <div class="row2"><span class="mood">cheering</span><span class="fb"><button title="thumbs up">👍</button><button title="thumbs down">👎</button></span></div>
+                </div>
+              </div>
+              <div class="hrow">
+                <span class="when">Sun · 20 Jun</span>
+                <div class="body">
+                  <div class="snip">Set up <b>Firebase</b> auth from scratch and got your first user to sign in. Big step — the whole app hangs off this.</div>
+                  <div class="row2"><span class="mood">excited</span><span class="fb"><button title="thumbs up">👍</button><button title="thumbs down">👎</button></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- coding activity heatmap -->
+          <div class="card c-heat">
+            <span class="eyebrow">Your coding · 12 weeks</span>
+            <div class="well heatwrap">
+              <div class="heat" id="heat"></div>
+              <div class="heat-legend">less <i style="background:var(--hairline)"></i><i class="l1" style="background:#D8E2D2"></i><i class="l2" style="background:#B4C9AC"></i><i class="l3" style="background:#8FB186"></i><i class="l4" style="background:var(--accent)"></i> more</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="k"><b>Beta-minimal:</b> no aggregator home — <b>Reflection is the landing</b></span>
+    <span class="k">Nav = Reflection · Tips · Dictionary · Profile</span>
+    <span class="k">Hero + feed = live narratives (real files, mood, 👍/👎)</span>
+    <span class="k"><b style="color:var(--coach)">◆ Growth edge</b> = one process-literacy coaching line / session (the cheap thread)</span>
+    <span class="k">Tips &amp; Dictionary live in their own tabs</span>
+  </div>
+  <div class="callout">Reflection-as-landing variant. Compare with <code>home-beta.html</code> (Today aggregator) and <code>hybrid-mockup.html</code> (post-beta vision). Reuses real Codepet art &amp; Minecraft font; does not touch <code>codepet/</code>.</div>
+
+<script>
+  const heat = document.getElementById('heat');
+  const N = 84; const lv = ['','l1','l2','l3','l4'];
+  for(let i=0;i<N;i++){
+    const cell=document.createElement('i');
+    const r=Math.random();
+    let c = r<0.34?0 : r<0.55?1 : r<0.74?2 : r<0.9?3 : 4;
+    if(i>N-14 && r<0.5) c = Math.min(4, c+2);
+    if(lv[c]) cell.className=lv[c];
+    cell.style.opacity=0; cell.style.transform='scale(.6)';
+    cell.style.transition='opacity .3s ease, transform .35s cubic-bezier(.2,1.2,.4,1)';
+    heat.appendChild(cell);
+    setTimeout(()=>{cell.style.opacity=1;cell.style.transform='none';}, 180 + i*7);
+  }
+</script>
+</body>
+</html>

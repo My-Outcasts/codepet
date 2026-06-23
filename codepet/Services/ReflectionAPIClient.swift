@@ -158,12 +158,29 @@ struct SummarizeSessionResponse: Codable {
         let lesson: String
         let briefUpdate: String?
         let projectOverview: String?
+        /// Process-literacy observations (the "growth edge" + its structured
+        /// signal). Optional with a default so existing call sites and cached
+        /// payloads keep working; absent until the server function is redeployed
+        /// with the growth_signals contract.
+        var growthSignals: [AgencySignalDTO]? = nil
 
         enum CodingKeys: String, CodingKey {
             case summary, lesson
             case briefUpdate = "brief_update"
             case projectOverview = "project_overview"
+            case growthSignals = "growth_signals"
         }
+    }
+
+    /// One agency/process observation as returned by the session summary.
+    /// `observation` is the human-facing growth-edge sentence; the rest is the
+    /// structured signal the Learner Model will later aggregate.
+    struct AgencySignalDTO: Codable, Equatable {
+        let observation: String
+        let axis: String        // "agency" | "comprehension"
+        let signal: String      // scoping|prompting|verification|direction|iteration|context
+        let valence: String     // "growth" | "strength"
+        let evidence: String
     }
 
     enum CodingKeys: String, CodingKey {
@@ -447,6 +464,86 @@ struct DistillReferenceResponse: Codable {
     }
 }
 
+// MARK: - Dictionary DTOs (project-aware personal dictionary)
+
+/// Request for the generateDictionary Cloud Function — turns terms detected in
+/// the user's own code into plain-language, pet-voiced cards. Detection and the
+/// Encountered→Used→Mastered stage live client-side; the server generates only
+/// the card content (and a milestone note when a term is freshly mastered).
+struct GenerateDictionaryRequest: Codable {
+    let language: String            // "vi" | "en"
+    let petPersona: SummarizeTurnRequest.PetPersonaDTO?
+    let project: ProjectDTO?
+    let terms: [TermDTO]
+
+    struct ProjectDTO: Codable {
+        let name: String
+        let brief: String?
+        let tags: [String]?         // ProjectTag rawValues
+    }
+
+    struct SeenInDTO: Codable {
+        let file: String            // e.g. "LoginView.swift"
+        let snippet: String?        // short excerpt (server caps at 200 chars)
+    }
+
+    struct TermDTO: Codable {
+        let term: String            // literal token, e.g. "OAuth"
+        let seenIn: [SeenInDTO]?
+        let evolution: String?      // "encountered" | "used" | "mastered"
+        let topicHint: String?      // "frameworks" | "patterns" | "tools" | ...
+
+        enum CodingKeys: String, CodingKey {
+            case term
+            case seenIn = "seen_in"
+            case evolution
+            case topicHint = "topic_hint"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case language, project, terms
+        case petPersona = "pet_persona"
+    }
+}
+
+/// Response from generateDictionary: one card per requested term (same order),
+/// each echoing its `term` token for client-side mapping back to provenance.
+struct GenerateDictionaryResponse: Codable {
+    let entries: [EntryPayload]
+    let model: String
+    let generatedAt: String
+    let cacheHits: Int
+
+    struct EntryPayload: Codable, Equatable {
+        let term: String
+        let title: String
+        let topic: String           // one of the dynamic topic groups
+        let cardDefinition: String
+        let whatItReallyMeans: String
+        let analogy: String
+        let codeExample: String     // "" if none
+        let whenToUse: String       // "" if N/A
+        let related: [String]
+        let milestoneNote: String   // "" unless freshly mastered
+
+        enum CodingKeys: String, CodingKey {
+            case term, title, topic, analogy, related
+            case cardDefinition = "card_definition"
+            case whatItReallyMeans = "what_it_really_means"
+            case codeExample = "code_example"
+            case whenToUse = "when_to_use"
+            case milestoneNote = "milestone_note"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case entries, model
+        case generatedAt = "generated_at"
+        case cacheHits = "cache_hits"
+    }
+}
+
 // MARK: - Narrative Stream DTOs
 
 enum NarrativeStreamEvent: Equatable {
@@ -481,6 +578,7 @@ protocol ReflectionAPIClientProtocol {
     func fetchPlan(_ request: GeneratePlanRequest) async throws -> GeneratePlanResponse
     func fetchReferenceDistillation(_ request: DistillReferenceRequest) async throws -> DistillReferenceResponse
     func synthesizeBrief(_ request: SynthesizeBriefRequest) async throws -> SynthesizeBriefResponse
+    func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse
 }
 
 extension ReflectionAPIClientProtocol {
@@ -497,6 +595,11 @@ extension ReflectionAPIClientProtocol {
     /// Default so existing conformers (e.g. test mocks) don't have to implement
     /// brief synthesis. The real client overrides this.
     func synthesizeBrief(_ request: SynthesizeBriefRequest) async throws -> SynthesizeBriefResponse {
+        throw ReflectionAPIError.malformedResponse
+    }
+    /// Default so existing conformers (e.g. test mocks) don't have to implement
+    /// dictionary generation. The real client overrides this.
+    func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse {
         throw ReflectionAPIError.malformedResponse
     }
 }
@@ -555,6 +658,7 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     private static let planEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generatePlan")!
     private static let distillEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/distillReference")!
     private static let synthesizeBriefEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/synthesizeBrief")!
+    private static let dictionaryEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateDictionary")!
 
     private let session: URLSession
     private let authTokenProvider: () async throws -> String
@@ -1019,6 +1123,34 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         if http.statusCode == 200 {
             do {
                 return try JSONDecoder().decode(SynthesizeBriefResponse.self, from: data)
+            } catch {
+                throw ReflectionAPIError.malformedResponse
+            }
+        }
+
+        let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: data)
+        throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
+    }
+
+    // MARK: - Dictionary (non-streaming)
+
+    func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse {
+        let token = try await authTokenProvider()
+
+        var urlRequest = URLRequest(url: Self.dictionaryEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = try JSONEncoder().encode(request)
+
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else {
+            throw ReflectionAPIError.malformedResponse
+        }
+
+        if http.statusCode == 200 {
+            do {
+                return try JSONDecoder().decode(GenerateDictionaryResponse.self, from: data)
             } catch {
                 throw ReflectionAPIError.malformedResponse
             }

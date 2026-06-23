@@ -1,0 +1,29 @@
+{
+  "name": "codepet-functions",
+  "version": "0.1.0",
+  "description": "Firebase Cloud Functions for CodePet reflection summaries",
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "jest",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^7.2.5"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  },
+  "private": true
+}

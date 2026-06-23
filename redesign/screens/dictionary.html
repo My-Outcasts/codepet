@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Dictionary</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Search bar ---- */
+  .search {
+    display: flex; align-items: center; gap: var(--sp-3);
+    background: var(--c-surface); border-radius: var(--r-pill);
+    box-shadow: var(--sh-card); padding: 12px 20px; flex: 1;
+  }
+  .search .ico { font-size: 17px; opacity: .7; }
+  .search input {
+    flex: 1; border: 0; outline: 0; background: transparent;
+    font-family: var(--f-body); font-size: var(--t-lg); color: var(--c-body);
+  }
+  .search input::placeholder { color: var(--c-faint); }
+
+  /* ---- Topic filter chips ---- */
+  .topics { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .topic {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--t-sm); font-weight: 600;
+    padding: 7px 14px; border-radius: var(--r-pill);
+    background: var(--c-sunken); color: var(--c-muted);
+    transition: transform .08s ease, filter .1s ease;
+  }
+  .topic:hover { transform: translateY(-1px); }
+  .topic .swatch { width: 9px; height: 9px; border-radius: 3px; }
+  .topic.active { background: var(--c-ink-line); color: #fff; }
+  .topic.active .swatch { background: #fff; }
+
+  /* ---- Term cards ---- */
+  .term {
+    background: var(--c-surface); border-radius: var(--r-card);
+    box-shadow: var(--sh-card); padding: var(--sp-4);
+    border: 2px solid transparent;
+    display: flex; flex-direction: column; gap: var(--sp-2);
+    transition: transform .12s ease, box-shadow .12s ease;
+    cursor: pointer;
+  }
+  .term:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+  .term .def { font-size: var(--t-sm); color: var(--c-muted); line-height: 1.5; }
+  .term.selected { border-color: var(--a-purple); box-shadow: var(--sh-hover); }
+
+  /* topic-tinted tag chips */
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); font-weight: 700; padding: 4px 9px; border-radius: var(--r-chip); width: fit-content; }
+  .tag--variables { background: var(--a-purple-tint); color: var(--a-purple-deep); }
+  .tag--functions { background: var(--a-blue-tint);   color: var(--a-blue-deep); }
+  .tag--control   { background: var(--a-orange-tint); color: var(--a-orange-deep); }
+  .tag--loops     { background: var(--a-teal-tint);   color: var(--a-teal-deep); }
+  .tag--types     { background: var(--a-pink-tint);   color: var(--a-pink-deep); }
+  .tag--tools     { background: var(--a-gold-tint);   color: var(--a-gold-deep); }
+
+  /* ---- Detail panel ---- */
+  .detail { position: sticky; top: var(--sp-6); }
+  .code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: var(--t-sm); line-height: 1.6;
+    background: var(--a-purple-tint); color: var(--a-purple-deep);
+    border-radius: var(--r-sm); padding: var(--sp-3) var(--sp-4);
+    white-space: pre; overflow-x: auto;
+  }
+  .related { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Header -->
+  <div class="page-head">
+    <h1 class="t-display">Dictionary</h1>
+    <p class="t-lead muted">Every term, color-coded by topic. Tap to learn.</p>
+  </div>
+
+  <!-- Search row -->
+  <div class="row" style="align-items:center;margin-bottom:var(--sp-4)">
+    <label class="search">
+      <span class="ico">🔎</span>
+      <input type="text" placeholder="Search terms…" />
+    </label>
+    <span class="chip chip--accent" style="font-size:13px;padding:8px 14px">128 terms</span>
+  </div>
+
+  <!-- Topic filters -->
+  <div class="topics" style="margin-bottom:var(--sp-6)">
+    <button class="topic active"><span class="swatch"></span>All</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-purple)"></span>Variables</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-blue)"></span>Functions</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-orange)"></span>Control Flow</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-teal)"></span>Loops</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-pink)"></span>Data Types</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-gold)"></span>Tools</button>
+    <button class="topic"><span class="swatch" style="background:var(--a-teal-deep)"></span>Web</button>
+  </div>
+
+  <!-- Two-column layout -->
+  <div class="row" style="align-items:flex-start">
+
+    <!-- LEFT: term grid -->
+    <div style="flex:2;min-width:0">
+      <div class="grid grid-2">
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Variable</p>
+          <span class="tag tag--variables"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-purple)"></span>Variables</span>
+          <p class="def">A named container that stores a value you can read or change later.</p>
+        </div>
+
+        <div class="term selected">
+          <p class="t-subttl" style="margin:0">Function</p>
+          <span class="tag tag--functions"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-blue)"></span>Functions</span>
+          <p class="def">A reusable block of code that performs a task and can return a result.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Loop</p>
+          <span class="tag tag--loops"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-teal)"></span>Loops</span>
+          <p class="def">Repeats a block of code until a condition is met, like <code>for</code> or <code>while</code>.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Array</p>
+          <span class="tag tag--types"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-pink)"></span>Data Types</span>
+          <p class="def">An ordered list that holds multiple values under one name, indexed from 0.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Boolean</p>
+          <span class="tag tag--types"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-pink)"></span>Data Types</span>
+          <p class="def">A value that is either <code>true</code> or <code>false</code> — the basis of logic.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Conditional</p>
+          <span class="tag tag--control"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-orange)"></span>Control Flow</span>
+          <p class="def">Runs different code depending on whether a condition is true (<code>if</code>/<code>else</code>).</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">String</p>
+          <span class="tag tag--types"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-pink)"></span>Data Types</span>
+          <p class="def">A sequence of characters used to store text, like <code>"hello"</code>.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Integer</p>
+          <span class="tag tag--types"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-pink)"></span>Data Types</span>
+          <p class="def">A whole number with no decimal point, such as 7, 0, or -42.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Parameter</p>
+          <span class="tag tag--functions"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-blue)"></span>Functions</span>
+          <p class="def">A named input a function accepts so it can work with different values.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Recursion</p>
+          <span class="tag tag--functions"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-blue)"></span>Functions</span>
+          <p class="def">When a function calls itself to solve a smaller piece of the same problem.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">Git Commit</p>
+          <span class="tag tag--tools"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-gold)"></span>Tools</span>
+          <p class="def">A saved snapshot of your code changes, stamped with a message and author.</p>
+        </div>
+
+        <div class="term">
+          <p class="t-subttl" style="margin:0">JSON</p>
+          <span class="tag tag--tools"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-gold)"></span>Tools</span>
+          <p class="def">A lightweight text format for storing and exchanging structured data.</p>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT: detail panel -->
+    <div style="flex:1;min-width:0">
+      <div class="card detail vstack gap-4">
+        <div class="between">
+          <h2 class="t-title" style="margin:0">Function</h2>
+          <span class="tag tag--functions"><span class="dot" style="width:7px;height:7px;border-radius:2px;background:var(--a-blue)"></span>Functions</span>
+        </div>
+
+        <p class="t-body" style="margin:0">
+          A function is a reusable, named block of code that performs a specific task.
+          You define it once, then <em>call</em> it whenever you need it — optionally
+          passing in values (parameters) and getting a value back (return value).
+          Functions keep code organized, readable, and DRY (don't repeat yourself).
+        </p>
+
+        <div class="vstack gap-2">
+          <p class="t-label" style="margin:0">Example</p>
+          <div class="code">def greet(name):
+    return "Hi, " + name
+
+greet("Luna")  # → "Hi, Luna"</div>
+        </div>
+
+        <hr class="divider" style="margin:0" />
+
+        <div class="vstack gap-2">
+          <p class="t-label" style="margin:0">Related terms</p>
+          <div class="related">
+            <span class="chip">Parameter</span>
+            <span class="chip">Return Value</span>
+            <span class="chip">Recursion</span>
+          </div>
+        </div>
+
+        <button class="btn" style="justify-content:center">Start the Functions lesson →</button>
+      </div>
+    </div>
+
+  </div>
+
+</div></div>
+</body>
+</html>

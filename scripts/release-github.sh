@@ -2,10 +2,10 @@
 #
 # Publish (or update) the GitHub Release that hosts Codepet.dmg.
 #
-# Host: My-Outcasts/codepet (PUBLIC → unauthenticated downloads work). The
+# Host: Murror/CodePet-Clean (PUBLIC → unauthenticated downloads work). The
 # website button points at code-pet.com/download/Codepet.dmg, which redirects
 # (see devpet-landing next.config.ts) to:
-#     https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg
+#     https://github.com/Murror/CodePet-Clean/releases/latest/download/Codepet.dmg
 # So this script just publishes the latest release with the .dmg attached;
 # the website URL never changes.
 #
@@ -23,7 +23,7 @@
 #
 set -euo pipefail
 
-REPO="${REPO:-My-Outcasts/codepet}"
+REPO="${REPO:-Murror/CodePet-Clean}"
 DMG="${DMG:-build/Codepet.dmg}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"

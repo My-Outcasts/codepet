@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet Redesign — Style Guide</title>
+<link rel="stylesheet" href="assets/fonts.css" />
+<link rel="stylesheet" href="styles/tokens.css" />
+<link rel="stylesheet" href="styles/components.css" />
+<style>
+  .page { max-width: 980px; }
+  .swatch { border-radius: 12px; height: 72px; box-shadow: var(--sh-card); display: flex; align-items: flex-end; padding: 8px; color: #fff; font-size: 11px; font-weight: 700; }
+  .swatch.dark-ink { color: var(--c-text); }
+  .sw-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .block { margin-bottom: var(--sp-7); }
+  code.tok { font-family: var(--f-pixel); font-size: 11px; color: var(--a-purple-deep); background: var(--a-purple-tint); padding: 2px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="block">
+    <p class="t-label">CodePet · Design System</p>
+    <h1 class="t-display">Style Guide</h1>
+    <p class="t-lead muted">Evolve-current direction — same identity, tighter execution. Every screen consumes these tokens.</p>
+  </div>
+
+  <!-- Color -->
+  <div class="block">
+    <h2 class="t-title">Surfaces &amp; Text</h2>
+    <div class="sw-grid" style="margin-top:16px">
+      <div class="swatch dark-ink" style="background:var(--c-page);border:1px solid var(--c-hairline)">page</div>
+      <div class="swatch dark-ink" style="background:var(--c-surface);border:1px solid var(--c-hairline)">surface</div>
+      <div class="swatch dark-ink" style="background:var(--c-sunken)">sunken</div>
+      <div class="swatch" style="background:var(--c-text)">text</div>
+      <div class="swatch" style="background:var(--c-body)">body</div>
+      <div class="swatch" style="background:var(--c-muted)">muted</div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="t-title">Brand Accents</h2>
+    <div class="sw-grid" style="margin-top:16px">
+      <div class="swatch" style="background:var(--a-purple)">purple</div>
+      <div class="swatch" style="background:var(--a-pink)">pink</div>
+      <div class="swatch dark-ink" style="background:var(--a-gold)">gold</div>
+      <div class="swatch dark-ink" style="background:var(--a-teal)">teal</div>
+      <div class="swatch" style="background:var(--a-orange)">orange</div>
+      <div class="swatch" style="background:var(--a-blue)">blue</div>
+    </div>
+    <p class="t-sm" style="margin-top:12px">Each accent now ships a <strong>tint</strong> (chips/bars) and <strong>shade</strong> (text-on-tint, pressed). Calmer usage — accents earn attention.</p>
+    <div class="sw-grid" style="margin-top:12px">
+      <div class="swatch dark-ink" style="background:var(--a-purple-tint);color:var(--a-purple-deep)">purple·tint</div>
+      <div class="swatch dark-ink" style="background:var(--a-pink-tint);color:var(--a-pink-deep)">pink·tint</div>
+      <div class="swatch dark-ink" style="background:var(--a-gold-tint);color:var(--a-gold-deep)">gold·tint</div>
+      <div class="swatch dark-ink" style="background:var(--a-teal-tint);color:var(--a-teal-deep)">teal·tint</div>
+      <div class="swatch dark-ink" style="background:var(--a-orange-tint);color:var(--a-orange-deep)">orange·tint</div>
+      <div class="swatch dark-ink" style="background:var(--a-blue-tint);color:var(--a-blue-deep)">blue·tint</div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="t-title">Kingdom Tiers</h2>
+    <div class="sw-grid" style="margin-top:16px;grid-template-columns:repeat(4,1fr)">
+      <div class="swatch dark-ink" style="background:var(--k-forge)">Molten Forge</div>
+      <div class="swatch dark-ink" style="background:var(--k-spire)">Frozen Spire</div>
+      <div class="swatch dark-ink" style="background:var(--k-garden)">Eternal Garden</div>
+      <div class="swatch dark-ink" style="background:var(--k-grove)">Mystic Grove</div>
+    </div>
+  </div>
+
+  <!-- Type -->
+  <div class="block">
+    <h2 class="t-title">Typography</h2>
+    <p class="t-sm">Rule: titles ≥18px render in <code class="tok">Minecraft</code>; body &lt;18px renders in <strong>Inter</strong>.</p>
+    <div class="card" style="margin-top:12px">
+      <p class="t-display">Display 28 — Good morning</p>
+      <p class="t-title">Title 22 — Your Progress</p>
+      <p class="t-subttl">Subtitle 18 — The Molten Forge</p>
+      <hr class="divider" />
+      <p class="t-lead">Lead 16 — Inter. The pet sprites stay crisp pixel art; the chrome around them stays soft and modern.</p>
+      <p class="t-body">Body 14 — Inter. Default reading size for descriptions and content.</p>
+      <p class="t-sm">Small 13 — secondary controls and helper copy.</p>
+      <p class="t-label">Label 11 — uppercase meta</p>
+    </div>
+  </div>
+
+  <!-- Components -->
+  <div class="block">
+    <h2 class="t-title">Components</h2>
+
+    <h3 class="t-subttl" style="margin-top:16px">Buttons</h3>
+    <div class="row-wrap" style="align-items:center;margin-top:10px">
+      <button class="btn">Primary</button>
+      <button class="btn--ghost btn">Ghost</button>
+      <button class="btn btn--sm">Small</button>
+      <button class="btn-pixel">PixelButton ▸</button>
+    </div>
+
+    <h3 class="t-subttl" style="margin-top:24px">Chips &amp; badges</h3>
+    <div class="row-wrap" style="align-items:center;margin-top:10px">
+      <span class="chip">streak · 12</span>
+      <span class="chip chip--accent">Level 6</span>
+      <span class="badge badge--done">Completed</span>
+      <span class="badge badge--open">Available</span>
+      <span class="badge badge--locked">Locked</span>
+    </div>
+
+    <h3 class="t-subttl" style="margin-top:24px">Progress</h3>
+    <div class="vstack gap-3" style="margin-top:10px;max-width:360px">
+      <div class="bar"><i style="width:64%"></i></div>
+      <div class="bar"><i style="width:40%;background:var(--a-teal)"></i></div>
+      <div class="bar bar--pixel"><i style="width:75%;background:var(--a-gold)"></i></div>
+    </div>
+
+    <h3 class="t-subttl" style="margin-top:24px">Cards</h3>
+    <div class="row" style="margin-top:10px;align-items:flex-start">
+      <div class="card" style="flex:1">
+        <p class="t-label">Soft modern card</p>
+        <p class="t-body" style="margin:6px 0 0">Rounded 14, soft shadow. Used for content panels and dashboards.</p>
+      </div>
+      <div class="pixel-shadow" style="flex:1">
+        <div class="pixel-card">
+          <p class="t-label" style="margin:0">PixelCard</p>
+          <p class="t-body" style="margin:6px 0 0">Staircase corners, 4px ink outline, hard offset shadow — 8-bit dialog box.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="t-subttl" style="margin-top:24px">Stat tiles</h3>
+    <div class="grid grid-4" style="margin-top:10px">
+      <div class="tile tile--orange"><div class="tile-ico">🔥</div><div class="tile-val">12</div><div class="tile-lbl">DAY STREAK</div></div>
+      <div class="tile tile--purple"><div class="tile-ico">★</div><div class="tile-val">6</div><div class="tile-lbl">LEVEL</div></div>
+      <div class="tile tile--teal"><div class="tile-ico">📘</div><div class="tile-val">18</div><div class="tile-lbl">LESSONS</div></div>
+      <div class="tile tile--gold"><div class="tile-ico">🪙</div><div class="tile-val">340</div><div class="tile-lbl">COINS</div></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

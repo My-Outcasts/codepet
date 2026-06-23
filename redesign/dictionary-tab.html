@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codepet — Dictionary tab (project-aware, beta)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @font-face{font-family:'Minecraft';src:url('../codepet/Resources/Fonts/Minecraft.ttf') format('truetype');font-display:swap}
+
+  :root{
+    --page:#F4F1EA; --surface:#FBFAF6; --surface-2:#F8F7F2; --well:#EFEDE6;
+    --hairline:#E5E1D8; --ink:#211E18;
+    --t-primary:#1F1B15; --t-body:#3A352D; --t-muted:#7A7264; --t-faint:#A89F90;
+    --accent:#6E8E68; --accent-deep:#4F6B4A; --accent-tint:#E8EEE4; --accent-line:#CBD8C4;
+
+    /* dictionary topic accents (match the SwiftUI DiagramAccent palette) */
+    --frameworks:#5B86C9; --frameworks-tint:#E7EDF7;
+    --patterns:#C56B96;   --patterns-tint:#F6E9F0;
+    --tools:#C99A4E;      --tools-tint:#F5ECD9;
+    --language:#7B6BD8;   --language-tint:#ECE9F9;
+    --web:#4FA39A;        --web-tint:#E2F0EE;
+    --concepts:#D98A4E;   --concepts-tint:#F7ECE0;
+    --gold:#C99A4E;
+
+    --pixel:'Minecraft','Pixelify Sans',ui-monospace,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --r-card:14px; --r-sm:10px;
+    --shadow-soft:0 1px 2px rgba(40,36,28,.04), 0 8px 24px rgba(40,36,28,.06);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans); color:var(--t-body);
+    background:
+      radial-gradient(1200px 700px at 78% -10%, #EFE7DC 0%, rgba(239,231,220,0) 60%),
+      radial-gradient(1000px 800px at 0% 110%, #E8E7E0 0%, rgba(232,231,224,0) 55%),
+      var(--page);
+    min-height:100vh; padding:30px 26px 56px; -webkit-font-smoothing:antialiased;
+  }
+  .pixel{font-family:var(--pixel)}
+  .eyebrow{font-family:var(--pixel);font-size:9px;letter-spacing:.5px;color:var(--t-muted);text-transform:uppercase;line-height:1}
+  .mono{font-family:var(--mono)}
+  img.pixel-art{image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges}
+
+  .stage{max-width:1180px;margin:0 auto;position:relative}
+
+  .menubar{
+    height:26px;border-radius:8px;background:rgba(28,26,22,.72);backdrop-filter:blur(18px) saturate(1.2);
+    display:flex;align-items:center;justify-content:flex-end;gap:18px;padding:0 12px;color:#EDE9E0;font-size:12px;position:relative;z-index:5;box-shadow:0 1px 0 rgba(255,255,255,.06) inset;
+  }
+  .menubar .mb-item{opacity:.72;font-size:12px}
+  .menubar .pet-chip{display:flex;align-items:center;gap:7px;opacity:1;cursor:default;padding:2px 8px;border-radius:7px;background:rgba(255,255,255,.10)}
+  .menubar .pet-chip img{width:16px;height:16px}
+  .menubar .pet-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(110,142,104,.25);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+
+  .window{
+    margin-top:14px;border-radius:16px;overflow:hidden;border:1px solid var(--hairline);
+    background:var(--surface);box-shadow:var(--shadow-soft);display:grid;grid-template-columns:200px 1fr;min-height:660px;position:relative;z-index:1;
+  }
+  .titlebar{position:absolute;top:0;left:0;right:0;height:42px;display:flex;align-items:center;gap:8px;padding:0 14px;z-index:3}
+  .traffic{display:flex;gap:8px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .traffic .r{background:#ED6A5E}.traffic .y{background:#F4BF50}.traffic .g{background:#61C554}
+
+  /* OUTER app sidebar (Reflection/Tips/Dictionary/Profile) */
+  .sidebar{
+    background:linear-gradient(180deg, rgba(245,243,237,.9), rgba(238,236,228,.9));backdrop-filter:blur(10px);
+    border-right:1px solid var(--hairline);padding:46px 12px 14px;display:flex;flex-direction:column;gap:3px;
+  }
+  .nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--t-muted);font-size:13px;font-weight:500;cursor:default}
+  .nav .ic{width:18px;height:18px;border-radius:5px;border:1.5px solid currentColor;opacity:.7;display:grid;place-items:center;font-size:10px}
+  .nav.active{background:var(--language-tint);color:var(--language);border:1px solid #D9D2F2}
+  .nav.active .ic{opacity:1;border-color:var(--language)}
+  .side-foot{margin-top:auto;display:flex;align-items:center;gap:9px;padding:8px 8px;border-top:1px solid var(--hairline)}
+  .side-foot img{width:26px;height:26px}
+  .side-foot .nm{font-family:var(--pixel);font-size:10px;color:var(--t-primary)}
+  .side-foot .lv{font-size:11px;color:var(--t-muted)}
+
+  /* the DictionaryView itself = [inner sidebar | cards] */
+  .dict{display:grid;grid-template-columns:184px 1fr;min-height:660px}
+
+  /* INNER dictionary sidebar (two sections) */
+  .dside{border-right:1px solid var(--hairline);padding:44px 10px 16px;overflow:auto;background:var(--surface-2)}
+  .dside .grp{font-family:var(--pixel);font-size:8.5px;letter-spacing:.6px;color:var(--t-faint);text-transform:uppercase;padding:6px 8px 4px}
+  .drow{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:9px;cursor:default;margin-bottom:2px}
+  .drow .di{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+  .drow .dt{font-size:12.5px;font-weight:600;color:var(--t-primary);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drow .dc{font-family:var(--pixel);font-size:9px;padding:1px 6px;border-radius:999px}
+  .drow.on{color:#fff}
+  .drow.on .dt{color:#fff}
+  .drow.on .dc{background:rgba(255,255,255,.22);color:#fff}
+
+  /* cards pane */
+  .pane{padding:44px 26px 26px;overflow:auto}
+  .hero{display:flex;align-items:center;gap:14px;border-radius:var(--r-card);padding:16px 18px;border:1px solid;margin-bottom:14px}
+  .hero .hi{width:50px;height:50px;border-radius:11px;display:grid;place-items:center;color:#fff;font-size:20px;flex:none}
+  .hero h1{font-size:21px;color:var(--t-primary);font-weight:700;letter-spacing:-.2px;line-height:1.1}
+  .hero .hsub{font-size:12.5px;color:var(--t-body);margin-top:4px}
+  .hero .spacer{flex:1}
+  .rescan{display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:600;font-family:var(--sans);color:var(--language);background:var(--language-tint)}
+  .rescan:hover{background:#E2DDF7}
+  .rescan .spin{display:inline-block}
+
+  .search{display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--hairline);border-radius:var(--r-sm);padding:9px 12px;margin-bottom:18px;color:var(--t-faint);font-size:13px}
+
+  .dcard{border:1px solid var(--hairline);border-left-width:3px;border-radius:var(--r-card);background:var(--surface);padding:15px 16px;margin-bottom:13px}
+  .dcard .ch{display:flex;align-items:center;gap:11px}
+  .dcard .mono-badge{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-family:var(--pixel);font-size:13px;flex:none}
+  .dcard .ct{font-size:15.5px;font-weight:700;color:var(--t-primary);flex:1}
+  .dcard .def{font-size:13px;line-height:1.5;color:var(--t-body);margin-top:9px}
+  .dcard .def b{color:var(--t-primary);font-weight:600}
+
+  /* evolution pill */
+  .evo{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font-family:var(--pixel);font-size:8.5px;letter-spacing:.5px;text-transform:uppercase;flex:none}
+  .evo .dots{display:inline-flex;gap:3px}
+  .evo .dots i{width:6px;height:6px;border-radius:50%;display:block}
+
+  /* seen-in provenance */
+  .seen{display:flex;align-items:center;gap:7px;margin-top:11px;flex-wrap:wrap}
+  .seen .lbl{font-family:var(--pixel);font-size:8.5px;color:var(--t-muted);text-transform:uppercase;display:inline-flex;align-items:center;gap:4px}
+  .seen .file{font-family:var(--mono);font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px}
+  .seen .more{font-family:var(--pixel);font-size:8.5px;color:var(--t-faint)}
+
+  /* milestone banner (shown on mastered card) */
+  .mile{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:12.5px;line-height:1.45;color:var(--t-body)}
+  .mile .ico{flex:none;font-size:13px}
+  .mile b{font-weight:600}
+
+  .legend{max-width:1180px;margin:18px auto 0;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11.5px;color:var(--t-muted)}
+  .legend b{color:var(--t-body)}
+  .legend .k{display:inline-flex;align-items:center;gap:6px}
+  .callout{max-width:1180px;margin:6px auto 16px;font-size:12px;color:var(--t-faint)}
+  .callout code{font-family:var(--mono);font-size:11px;background:var(--well);padding:1px 5px;border-radius:5px}
+</style>
+</head>
+<body>
+  <div class="stage">
+
+    <div class="menubar">
+      <span class="mb-item">􀙇</span>
+      <span class="mb-item mono">16:24</span>
+      <span class="mb-item">Mon 22 Jun</span>
+      <span class="pet-chip"><span class="dot"></span><img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte"><span class="pixel" style="font-size:10px">byte</span></span>
+    </div>
+
+    <div class="window">
+      <div class="titlebar"><span class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></span></div>
+
+      <!-- OUTER app nav -->
+      <aside class="sidebar">
+        <div class="nav"><span class="ic">❝</span> Reflection</div>
+        <div class="nav"><span class="ic">✎</span> Tips</div>
+        <div class="nav active"><span class="ic">A</span> Dictionary</div>
+        <div class="nav"><span class="ic">◔</span> Profile</div>
+        <div class="side-foot">
+          <img class="pixel-art" src="../codepet/Assets.xcassets/char-byte.imageset/byte@2x.png" alt="byte">
+          <div><div class="nm">byte</div><div class="lv">learning with you</div></div>
+        </div>
+      </aside>
+
+      <!-- DICTIONARY VIEW: inner sidebar + cards -->
+      <div class="dict">
+
+        <!-- INNER sidebar: two sections -->
+        <aside class="dside">
+          <div class="grp">From your code</div>
+
+          <div class="drow on" style="background:var(--language)">
+            <span class="di" style="background:rgba(255,255,255,.22)">✦</span>
+            <span class="dt">All</span><span class="dc">6</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--frameworks-tint);color:var(--frameworks)">▤</span>
+            <span class="dt">Frameworks</span><span class="dc" style="background:var(--frameworks-tint);color:var(--frameworks)">2</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--patterns-tint);color:var(--patterns)">⌥</span>
+            <span class="dt">Patterns</span><span class="dc" style="background:var(--patterns-tint);color:var(--patterns)">1</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--tools-tint);color:var(--tools)">⚒</span>
+            <span class="dt">Tools</span><span class="dc" style="background:var(--tools-tint);color:var(--tools)">2</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--language-tint);color:var(--language)">{}</span>
+            <span class="dt">Language</span><span class="dc" style="background:var(--language-tint);color:var(--language)">1</span>
+          </div>
+
+          <div class="grp" style="margin-top:12px">Coding Basics</div>
+          <div class="drow">
+            <span class="di" style="background:var(--language-tint);color:var(--language)">◳</span>
+            <span class="dt">Variables &amp; Types</span><span class="dc" style="background:var(--language-tint);color:var(--language)">11</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--patterns-tint);color:var(--patterns)">ƒ</span>
+            <span class="dt">Functions</span><span class="dc" style="background:var(--patterns-tint);color:var(--patterns)">7</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--frameworks-tint);color:var(--frameworks)">⌥</span>
+            <span class="dt">Control Flow</span><span class="dc" style="background:var(--frameworks-tint);color:var(--frameworks)">9</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--tools-tint);color:var(--tools)">⚒</span>
+            <span class="dt">Tools</span><span class="dc" style="background:var(--tools-tint);color:var(--tools)">10</span>
+          </div>
+          <div class="drow">
+            <span class="di" style="background:var(--web-tint);color:var(--web)">◍</span>
+            <span class="dt">Web Basics</span><span class="dc" style="background:var(--web-tint);color:var(--web)">7</span>
+          </div>
+        </aside>
+
+        <!-- CARDS pane -->
+        <main class="pane">
+
+          <!-- project hero -->
+          <div class="hero" style="background:var(--language-tint);border-color:#D9D2F2">
+            <span class="hi" style="background:var(--language)">✦</span>
+            <div>
+              <h1>From your code</h1>
+              <div class="hsub"><b>codepet</b> · 6 terms · 1 mastered</div>
+            </div>
+            <span class="spacer"></span>
+            <button class="rescan"><span class="spin">⟳</span> Rescan</button>
+          </div>
+
+          <div class="search">⌕ &nbsp;<span>Search…</span></div>
+
+          <!-- MASTERED: environment variable -->
+          <div class="dcard" style="border-left-color:var(--gold)">
+            <div class="ch">
+              <span class="mono-badge" style="background:var(--gold)">E</span>
+              <span class="ct">environment variable</span>
+              <span class="evo" style="background:rgba(201,154,78,.14);color:var(--gold)">
+                <span class="dots"><i style="background:var(--gold)"></i><i style="background:var(--gold)"></i><i style="background:var(--gold)"></i></span>
+                Mastered
+              </span>
+            </div>
+            <div class="def">A named value you set <b>outside</b> your code — like a secret key — so it never gets committed. Your app reads it at run time from the environment.</div>
+            <div class="seen">
+              <span class="lbl">▤ seen in</span>
+              <span class="file" style="background:rgba(201,154,78,.14);color:var(--gold)">Config.swift</span>
+              <span class="file" style="background:rgba(201,154,78,.14);color:var(--gold)">AppDelegate.swift</span>
+              <span class="file" style="background:rgba(201,154,78,.14);color:var(--gold)">.env</span>
+            </div>
+            <div class="mile" style="background:rgba(201,154,78,.10)">
+              <span class="ico">✦</span>
+              <div>You've used <b>environment variables</b> across three files now — this one's second nature. Nice instinct keeping secrets out of the repo.</div>
+            </div>
+          </div>
+
+          <!-- USED: async / await -->
+          <div class="dcard" style="border-left-color:var(--frameworks)">
+            <div class="ch">
+              <span class="mono-badge" style="background:var(--frameworks)">A</span>
+              <span class="ct">async / await</span>
+              <span class="evo" style="background:rgba(91,134,201,.14);color:var(--frameworks)">
+                <span class="dots"><i style="background:var(--frameworks)"></i><i style="background:var(--frameworks)"></i><i style="background:rgba(91,134,201,.25)"></i></span>
+                Used
+              </span>
+            </div>
+            <div class="def">A way to run slow work — like a network call — <b>without freezing the screen</b>. <span class="mono" style="font-size:12px">await</span> pauses just that one task until the result is ready.</div>
+            <div class="seen">
+              <span class="lbl">▤ seen in</span>
+              <span class="file" style="background:rgba(91,134,201,.14);color:var(--frameworks)">LoginView.swift</span>
+              <span class="file" style="background:rgba(91,134,201,.14);color:var(--frameworks)">AuthManager.swift</span>
+            </div>
+          </div>
+
+          <!-- USED: Firebase -->
+          <div class="dcard" style="border-left-color:var(--frameworks)">
+            <div class="ch">
+              <span class="mono-badge" style="background:var(--frameworks)">F</span>
+              <span class="ct">Firebase</span>
+              <span class="evo" style="background:rgba(91,134,201,.14);color:var(--frameworks)">
+                <span class="dots"><i style="background:var(--frameworks)"></i><i style="background:var(--frameworks)"></i><i style="background:rgba(91,134,201,.25)"></i></span>
+                Used
+              </span>
+            </div>
+            <div class="def">Google's ready-made backend — sign-in, database, hosting — so you don't have to build and run servers yourself. You wire your app to it.</div>
+            <div class="seen">
+              <span class="lbl">▤ seen in</span>
+              <span class="file" style="background:rgba(91,134,201,.14);color:var(--frameworks)">CodePetApp.swift</span>
+            </div>
+          </div>
+
+          <!-- USED: OAuth (patterns) -->
+          <div class="dcard" style="border-left-color:var(--patterns)">
+            <div class="ch">
+              <span class="mono-badge" style="background:var(--patterns)">O</span>
+              <span class="ct">OAuth</span>
+              <span class="evo" style="background:rgba(197,107,150,.14);color:var(--patterns)">
+                <span class="dots"><i style="background:var(--patterns)"></i><i style="background:var(--patterns)"></i><i style="background:rgba(197,107,150,.25)"></i></span>
+                Used
+              </span>
+            </div>
+            <div class="def">The "Sign in with Google" handshake. Instead of a password, the other service hands your app a <b>token</b> that proves who the user is.</div>
+            <div class="seen">
+              <span class="lbl">▤ seen in</span>
+              <span class="file" style="background:rgba(197,107,150,.14);color:var(--patterns)">LoginView.swift</span>
+            </div>
+          </div>
+
+          <!-- ENCOUNTERED: webhook (no file — mention only) -->
+          <div class="dcard" style="border-left-color:var(--tools)">
+            <div class="ch">
+              <span class="mono-badge" style="background:var(--tools)">W</span>
+              <span class="ct">webhook</span>
+              <span class="evo" style="background:rgba(122,114,100,.12);color:var(--t-muted)">
+                <span class="dots"><i style="background:var(--t-muted)"></i><i style="background:rgba(122,114,100,.25)"></i><i style="background:rgba(122,114,100,.25)"></i></span>
+                Encountered
+              </span>
+            </div>
+            <div class="def">A way for one service to <b>ping yours</b> the moment something happens — instead of you constantly asking "anything new yet?". You mentioned adding one later.</div>
+            <!-- no seen-in row: came up in conversation, not in a file yet -->
+          </div>
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="k"><b>Project-aware Dictionary:</b> terms detected in <b>your real code</b>, not a fixed glossary</span>
+    <span class="k">Two sections — <b>From your code</b> (live) over <b>Coding Basics</b> (static 44)</span>
+    <span class="k"><b>Evolution:</b> Encountered ●○○ → Used ●●○ → Mastered ●●●</span>
+    <span class="k"><b>"seen in"</b> = real file provenance · Rescan re-detects</span>
+  </div>
+  <div class="callout">Dictionary-tab preview for the beta. Mirrors the SwiftUI <code>DictionaryView</code> + <code>ProjectDictionaryCard</code>. Compare with <code>reflection-home.html</code> (landing) and <code>home-beta.html</code>. Reuses real Codepet art &amp; Minecraft font; does not touch <code>codepet/</code>.</div>
+
+</body>
+</html>

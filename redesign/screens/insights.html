@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Insights</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Pixel stat box ---- */
+  .pstat { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+  .pstat .pico { font-size: 22px; line-height: 1; }
+  .pstat .pnum { font-family: var(--f-pixel); font-size: 30px; line-height: 1; color: var(--c-text); }
+  .pstat .pnum--sm { font-size: 22px; }
+  .pstat .plbl { font-size: var(--t-xs); font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--c-muted); }
+
+  /* ---- Streak calendar ---- */
+  .week { display: grid; grid-template-columns: repeat(7,1fr); gap: var(--sp-3); }
+  .day { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .day .dot-day {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    font-family: var(--f-pixel); font-size: 13px; color: #fff;
+    background: linear-gradient(160deg, var(--a-gold) 0%, var(--a-orange) 55%, var(--s-danger) 100%);
+    border: 3px solid var(--c-ink-line); box-shadow: 2px 2px 0 var(--c-ink-line);
+  }
+  .day .dot-day.empty {
+    background: var(--c-sunken); color: var(--c-faint);
+    box-shadow: none; border-color: var(--c-hairline);
+  }
+  .day .dinit { font-size: var(--t-xs); font-weight: 700; color: var(--c-muted); }
+
+  /* ---- Coding stat chip ---- */
+  .cstat {
+    background: var(--c-surface-2); border-radius: var(--r-sm);
+    padding: var(--sp-3); display: flex; flex-direction: column; gap: 4px;
+    box-shadow: inset 0 0 0 1.5px var(--c-hairline);
+  }
+  .cstat .cv { font-family: var(--f-pixel); font-size: 18px; color: var(--c-text); line-height: 1.1; }
+  .cstat .cl { font-size: var(--t-xs); font-weight: 600; color: var(--c-muted); text-transform: uppercase; letter-spacing: .4px; }
+
+  /* ---- Language segmented bar ---- */
+  .langbar { display: flex; height: 18px; border: 3px solid var(--c-ink-line); overflow: hidden; }
+  .langbar > span { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-4); }
+  .legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); font-weight: 600; color: var(--c-body); }
+  .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* ---- Pet reaction bubble ---- */
+  .reaction { display: flex; align-items: center; gap: var(--sp-3); }
+  .reaction img { width: 52px; height: 52px; }
+  .reaction .bubble {
+    position: relative; background: var(--a-purple-tint); color: var(--a-purple-deep);
+    font-size: var(--t-sm); font-weight: 600; padding: 10px 14px; border-radius: 12px;
+  }
+  .reaction .bubble::before {
+    content: ""; position: absolute; left: -7px; top: 50%; transform: translateY(-50%);
+    border: 7px solid transparent; border-right-color: var(--a-purple-tint); border-left: 0;
+  }
+
+  /* ---- Kingdom skill card ---- */
+  .ktree .pin { display: inline-flex; align-items: center; gap: 8px; }
+  .ktree .dot { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* ---- Activity row ---- */
+  .act-row { display: grid; grid-template-columns: 150px 1fr 46px; align-items: center; gap: var(--sp-3); }
+  .act-row .av { font-family: var(--f-pixel); font-size: 13px; color: var(--c-text); text-align: right; }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Header -->
+  <div class="page-head">
+    <p class="t-label">◆ CodePet</p>
+    <h1 class="t-display">Your Progress</h1>
+    <p class="t-lead muted">Every commit, lesson, and streak — byte's been keeping score.</p>
+  </div>
+
+  <!-- Weekly stats -->
+  <section class="grid grid-3" style="margin-bottom:var(--sp-6)">
+    <div class="pixel-shadow"><div class="pixel-card">
+      <div class="pstat">
+        <span class="pico">⚔️</span>
+        <span class="pnum">7</span>
+        <span class="plbl">Challenges</span>
+      </div>
+    </div></div>
+    <div class="pixel-shadow"><div class="pixel-card">
+      <div class="pstat">
+        <span class="pico">🧠</span>
+        <span class="pnum">4</span>
+        <span class="plbl">Skills</span>
+      </div>
+    </div></div>
+    <div class="pixel-shadow"><div class="pixel-card">
+      <div class="pstat">
+        <span class="pico"><img class="pixelated" src="../../design-assets/hud-star-xp.svg" alt="" style="width:22px;height:22px" /></span>
+        <span class="pnum">540</span>
+        <span class="plbl">XP this week</span>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- Streak Calendar -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="card">
+      <div class="between" style="margin-bottom:var(--sp-4)">
+        <p class="t-subttl" style="margin:0">🔥 12-day streak</p>
+        <span class="chip chip--accent">Best · 18 days</span>
+      </div>
+      <div class="week">
+        <div class="day"><div class="dot-day">M</div><span class="dinit">Mon</span></div>
+        <div class="day"><div class="dot-day">T</div><span class="dinit">Tue</span></div>
+        <div class="day"><div class="dot-day">W</div><span class="dinit">Wed</span></div>
+        <div class="day"><div class="dot-day">T</div><span class="dinit">Thu</span></div>
+        <div class="day"><div class="dot-day">F</div><span class="dinit">Fri</span></div>
+        <div class="day"><div class="dot-day empty">S</div><span class="dinit">Sat</span></div>
+        <div class="day"><div class="dot-day empty">S</div><span class="dinit">Sun</span></div>
+      </div>
+      <hr class="divider" />
+      <div class="row" style="align-items:center;gap:var(--sp-2)">
+        <img class="pixelated" src="../../design-assets/hud-fire-streak.svg" alt="" style="width:24px;height:24px" />
+        <p class="t-sm muted" style="margin:0">5 active days this week — code today to light up the weekend.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coding Summary (MCP) -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">This Week's Coding</h2>
+      <span class="chip">⚡ MCP synced · Cursor</span>
+    </div>
+    <div class="card">
+      <div class="grid grid-3" style="margin-bottom:var(--sp-4)">
+        <div class="cstat"><span class="cv">4h 12m</span><span class="cl">Coding time</span></div>
+        <div class="cstat"><span class="cv">1,840</span><span class="cl">Lines changed</span></div>
+        <div class="cstat"><span class="cv">23</span><span class="cl">Commits</span></div>
+        <div class="cstat"><span class="cv">6</span><span class="cl">Bugs fixed</span></div>
+        <div class="cstat"><span class="cv">41</span><span class="cl">Files edited</span></div>
+        <div class="cstat"><span class="cv" style="color:var(--a-teal-deep)">+220</span><span class="cl">Coding XP</span></div>
+      </div>
+
+      <hr class="divider--dash" />
+
+      <p class="t-label" style="margin-bottom:var(--sp-3)">Language Breakdown</p>
+      <div class="langbar" style="margin-bottom:var(--sp-3)">
+        <span style="width:44%;background:var(--a-orange)" title="Swift"></span>
+        <span style="width:30%;background:var(--a-blue)" title="TypeScript"></span>
+        <span style="width:16%;background:var(--a-teal)" title="HTML"></span>
+        <span style="width:10%;background:var(--a-purple)" title="CSS"></span>
+      </div>
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--a-orange)"></span>Swift · 44%</span>
+        <span class="lg"><span class="sw" style="background:var(--a-blue)"></span>TypeScript · 30%</span>
+        <span class="lg"><span class="sw" style="background:var(--a-teal)"></span>HTML · 16%</span>
+        <span class="lg"><span class="sw" style="background:var(--a-purple)"></span>CSS · 10%</span>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="reaction">
+        <img class="pixelated" src="../../design-assets/char-byte.svg" alt="byte" />
+        <div class="bubble">Big week — 23 commits! 🚀 Keep the forge burning.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Skill Tree Progress -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">Skill Tree Progress</h2>
+      <a class="link" href="#">Open skill tree →</a>
+    </div>
+    <div class="grid grid-2 ktree">
+      <div class="card">
+        <div class="between" style="margin-bottom:var(--sp-3)">
+          <span class="pin"><span class="dot" style="background:var(--k-forge)"></span><strong>Molten Forge</strong></span>
+          <span class="badge badge--done">100%</span>
+        </div>
+        <p class="t-sm muted" style="margin:0 0 var(--sp-3)">Variables · Functions · Loops</p>
+        <div class="bar bar--pixel"><i style="width:100%;background:var(--k-forge)"></i></div>
+      </div>
+      <div class="card">
+        <div class="between" style="margin-bottom:var(--sp-3)">
+          <span class="pin"><span class="dot" style="background:var(--k-spire)"></span><strong>Frozen Spire</strong></span>
+          <span class="badge badge--done">100%</span>
+        </div>
+        <p class="t-sm muted" style="margin:0 0 var(--sp-3)">Arrays · Conditionals · Logic</p>
+        <div class="bar bar--pixel"><i style="width:100%;background:var(--k-spire)"></i></div>
+      </div>
+      <div class="card">
+        <div class="between" style="margin-bottom:var(--sp-3)">
+          <span class="pin"><span class="dot" style="background:var(--k-garden)"></span><strong>Eternal Garden</strong></span>
+          <span class="badge badge--open">62%</span>
+        </div>
+        <p class="t-sm muted" style="margin:0 0 var(--sp-3)">Objects · Closures · Recursion</p>
+        <div class="bar bar--pixel"><i style="width:62%;background:var(--k-garden)"></i></div>
+      </div>
+      <div class="card">
+        <div class="between" style="margin-bottom:var(--sp-3)">
+          <span class="pin"><span class="dot" style="background:var(--k-grove)"></span><strong>Mystic Grove</strong></span>
+          <span class="badge badge--open">25%</span>
+        </div>
+        <p class="t-sm muted" style="margin:0 0 var(--sp-3)">Async · Errors · Modules</p>
+        <div class="bar bar--pixel"><i style="width:25%;background:var(--k-grove)"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Statistics grid -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head"><h2 class="t-title">Statistics</h2></div>
+    <div class="grid grid-3">
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">★</span><span class="pnum pnum--sm">6</span><span class="plbl">Level</span>
+      </div></div></div>
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">✨</span><span class="pnum pnum--sm">2,480</span><span class="plbl">Total XP</span>
+      </div></div></div>
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">📘</span><span class="pnum pnum--sm">18</span><span class="plbl">Lessons</span>
+      </div></div></div>
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">⚔️</span><span class="pnum pnum--sm">31</span><span class="plbl">Challenges</span>
+      </div></div></div>
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">🔥</span><span class="pnum pnum--sm">12</span><span class="plbl">Streak</span>
+      </div></div></div>
+      <div class="pixel-shadow"><div class="pixel-card"><div class="pstat">
+        <span class="pico">🏰</span><span class="pnum pnum--sm">4</span><span class="plbl">Tier</span>
+      </div></div></div>
+    </div>
+  </section>
+
+  <!-- Activity Breakdown -->
+  <section>
+    <div class="section-head"><h2 class="t-title">Activity Breakdown</h2></div>
+    <div class="card">
+      <div class="act-row">
+        <span class="t-sm">Skills completed</span>
+        <div class="bar"><i style="width:88%;background:var(--a-teal)"></i></div>
+        <span class="av">14</span>
+      </div>
+      <hr class="divider--dash" />
+      <div class="act-row">
+        <span class="t-sm">Challenges</span>
+        <div class="bar"><i style="width:72%;background:var(--a-purple)"></i></div>
+        <span class="av">31</span>
+      </div>
+      <hr class="divider--dash" />
+      <div class="act-row">
+        <span class="t-sm">Tier progress</span>
+        <div class="bar"><i style="width:50%;background:var(--a-blue)"></i></div>
+        <span class="av">4/8</span>
+      </div>
+      <hr class="divider--dash" />
+      <div class="act-row">
+        <span class="t-sm">Coding XP</span>
+        <div class="bar"><i style="width:64%;background:var(--a-orange)"></i></div>
+        <span class="av">220</span>
+      </div>
+      <hr class="divider--dash" />
+      <div class="act-row">
+        <span class="t-sm">Bugs fixed</span>
+        <div class="bar"><i style="width:30%;background:var(--a-pink)"></i></div>
+        <span class="av">6</span>
+      </div>
+      <hr class="divider--dash" />
+      <div class="act-row">
+        <span class="t-sm">Active days</span>
+        <div class="bar"><i style="width:71%;background:var(--a-gold)"></i></div>
+        <span class="av">5/7</span>
+      </div>
+    </div>
+  </section>
+
+</div></div>
+</body>
+</html>

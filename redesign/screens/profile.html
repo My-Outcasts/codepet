@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Profile</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Hero card (avatar + identity) ---- */
+  .hero {
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column; gap: var(--sp-5);
+  }
+  .hero .band {
+    position: absolute; inset: 0 0 auto 0; height: 132px;
+    background: linear-gradient(150deg, var(--a-purple-tint), var(--c-surface));
+    z-index: 0;
+  }
+  .hero > * { position: relative; z-index: 1; }
+  .hero-top { display: flex; gap: var(--sp-5); align-items: center; }
+  .hero-avatar {
+    width: 120px; height: 120px; flex: 0 0 120px;
+    border-radius: 22px; background: var(--c-surface);
+    box-shadow: var(--sh-card); display: grid; place-items: center;
+    border: 1px solid var(--c-hairline);
+  }
+  .hero-avatar img { width: 96px; height: 96px; }
+  .hero-id { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+  .hero-id .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+  /* ---- Stat strip ---- */
+  .strip {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: var(--sp-3); padding-top: var(--sp-4);
+    border-top: 1px solid var(--c-hairline);
+  }
+  .strip .s {
+    display: flex; align-items: center; gap: var(--sp-3);
+  }
+  .strip .s-ico {
+    width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px;
+    background: var(--c-sunken); display: grid; place-items: center;
+  }
+  .strip .s-ico img { width: 22px; height: 22px; }
+  .strip .s-val { font-family: var(--f-pixel); font-size: 20px; color: var(--c-text); line-height: 1; }
+  .strip .s-lbl { font-size: var(--t-xs); color: var(--c-muted); font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+
+  /* ---- Character switcher tiles ---- */
+  .picker { position: relative; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+  .picker:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+  .picker .sprite-md { margin: 0 auto var(--sp-2); }
+  .picker.sel {
+    box-shadow: 0 0 0 2.5px var(--a-purple), var(--sh-card);
+    background: var(--a-purple-tint);
+  }
+  .picker .check { position: absolute; top: 10px; right: 10px; }
+
+  /* ---- Preference toggles ---- */
+  .pref { padding: var(--sp-3) 0; }
+  .toggle {
+    width: 46px; height: 26px; border-radius: 99px; flex: 0 0 46px;
+    background: var(--c-sunken); position: relative; transition: background .15s;
+    box-shadow: inset 0 0 0 1.5px var(--c-hairline);
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; box-shadow: var(--sh-card); transition: left .15s;
+  }
+  .toggle.on { background: var(--a-teal); box-shadow: none; }
+  .toggle.on::after { left: 23px; }
+
+  /* ---- Danger button ---- */
+  .btn--danger { background: var(--s-danger); color: #fff; }
+  .btn--danger:hover { filter: brightness(1.05); }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Header -->
+  <div class="page-head between">
+    <div>
+      <p class="t-label">Account · CodePet</p>
+      <h1 class="t-display">Profile &amp; Settings</h1>
+    </div>
+    <span class="chip chip--accent" style="font-size:13px;padding:8px 14px">Tier 4 · Mystic Grove</span>
+  </div>
+
+  <!-- 1 · Hero card -->
+  <section class="card hero" style="margin-bottom:var(--sp-6)">
+    <div class="band"></div>
+    <div class="hero-top">
+      <div class="hero-avatar">
+        <img class="pixelated sprite-lg" src="../../design-assets/char-byte.svg" alt="byte" />
+      </div>
+      <div class="hero-id">
+        <h2 class="t-title" style="margin:0">Nguyen</h2>
+        <div class="chips">
+          <span class="chip" style="background:var(--a-teal-tint);color:var(--a-teal-deep)">● Signed in · nguyen@murror.app</span>
+        </div>
+        <p class="t-sm muted" style="margin:0">Companion: <strong style="color:var(--c-body)">byte</strong> the Debugger</p>
+      </div>
+    </div>
+
+    <!-- Stat strip -->
+    <div class="strip">
+      <div class="s">
+        <div class="s-ico"><img src="../../design-assets/hud-star-xp.svg" alt="" /></div>
+        <div><div class="s-val">6</div><div class="s-lbl">Level</div></div>
+      </div>
+      <div class="s">
+        <div class="s-ico"><img src="../../design-assets/hud-fire-streak.svg" alt="" /></div>
+        <div><div class="s-val">12</div><div class="s-lbl">Streak</div></div>
+      </div>
+      <div class="s">
+        <div class="s-ico">📘</div>
+        <div><div class="s-val">18</div><div class="s-lbl">Lessons</div></div>
+      </div>
+      <div class="s">
+        <div class="s-ico"><img src="../../design-assets/hud-coin.svg" alt="" /></div>
+        <div><div class="s-val">340</div><div class="s-lbl">Coins</div></div>
+      </div>
+    </div>
+
+    <!-- XP to next level -->
+    <div class="vstack gap-2">
+      <div class="between">
+        <span class="t-sm" style="font-weight:600;color:var(--c-body)">XP to Level 7</span>
+        <span class="t-sm muted">240 / 400 XP</span>
+      </div>
+      <div class="bar"><i style="width:60%;background:var(--a-purple)"></i></div>
+    </div>
+  </section>
+
+  <!-- 2 · Stats bento -->
+  <section class="grid grid-4" style="margin-bottom:var(--sp-6)">
+    <div class="tile tile--purple">
+      <div class="tile-ico">★</div>
+      <div class="tile-val">2,480</div>
+      <div class="tile-lbl">TOTAL XP</div>
+    </div>
+    <div class="tile tile--orange">
+      <div class="tile-ico">🔥</div>
+      <div class="tile-val">18</div>
+      <div class="tile-lbl">BEST STREAK</div>
+    </div>
+    <div class="tile tile--teal">
+      <div class="tile-ico">⚔️</div>
+      <div class="tile-val">31</div>
+      <div class="tile-lbl">CHALLENGES</div>
+    </div>
+    <div class="tile tile--gold">
+      <div class="tile-ico">🏆</div>
+      <div class="tile-val">12/30</div>
+      <div class="tile-lbl">ACHIEVEMENTS</div>
+    </div>
+  </section>
+
+  <!-- 3 · Your companion -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">Your Companion</h2>
+      <a class="link" href="#">7 starters</a>
+    </div>
+    <div class="grid grid-4">
+      <div class="card center picker sel">
+        <span class="badge badge--done check">✓</span>
+        <img class="pixelated sprite-md" src="../../design-assets/char-byte.svg" alt="byte" />
+        <div class="t-subttl">byte</div>
+        <div class="t-sm muted">Debugger</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-nova.svg" alt="nova" />
+        <div class="t-subttl">nova</div>
+        <div class="t-sm muted">Builder</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-crash.svg" alt="crash" />
+        <div class="t-subttl">crash</div>
+        <div class="t-sm muted">Breaker</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-luna.svg" alt="luna" />
+        <div class="t-subttl">luna</div>
+        <div class="t-sm muted">Designer</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-sage.svg" alt="sage" />
+        <div class="t-subttl">sage</div>
+        <div class="t-sm muted">Mentor</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-glitch.svg" alt="glitch" />
+        <div class="t-subttl">glitch</div>
+        <div class="t-sm muted">Hacker</div>
+      </div>
+      <div class="card center picker">
+        <img class="pixelated sprite-md" src="../../design-assets/char-null.svg" alt="null" />
+        <div class="t-subttl">null</div>
+        <div class="t-sm muted">Void</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Preferences -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">Preferences</h2>
+      <a class="link" href="#">Reset to default</a>
+    </div>
+    <div class="card">
+      <div class="between pref">
+        <div class="vstack">
+          <span style="font-weight:600;color:var(--c-body)">Dark Mode</span>
+          <span class="t-sm muted">Easier on the eyes after sunset</span>
+        </div>
+        <div class="toggle"></div>
+      </div>
+      <hr class="divider" style="margin:0" />
+      <div class="between pref">
+        <div class="vstack">
+          <span style="font-weight:600;color:var(--c-body)">Sound Effects</span>
+          <span class="t-sm muted">Clicks, coins and level-up chimes</span>
+        </div>
+        <div class="toggle on"></div>
+      </div>
+      <hr class="divider" style="margin:0" />
+      <div class="between pref">
+        <div class="vstack">
+          <span style="font-weight:600;color:var(--c-body)">Daily Reminder</span>
+          <span class="t-sm muted">Nudge at 7:00 PM to keep your streak</span>
+        </div>
+        <div class="toggle on"></div>
+      </div>
+      <hr class="divider" style="margin:0" />
+      <div class="between pref">
+        <div class="vstack">
+          <span style="font-weight:600;color:var(--c-body)">Notifications</span>
+          <span class="t-sm muted">Pet care, hearts refilled and new lessons</span>
+        </div>
+        <div class="toggle on"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · Footer -->
+  <section class="between">
+    <div class="row">
+      <button class="btn--ghost btn">Restore Purchases</button>
+      <button class="btn--ghost btn">Manage Account</button>
+    </div>
+    <button class="btn btn--danger">Sign Out</button>
+  </section>
+
+</div></div>
+</body>
+</html>

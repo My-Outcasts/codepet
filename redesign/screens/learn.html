@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Learn</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Expert hero ---- */
+  .hero {
+    background: var(--a-purple-tint);
+    border-radius: 18px; box-shadow: var(--sh-card);
+    padding: var(--sp-5) var(--sp-6);
+    display: flex; align-items: center; gap: var(--sp-5);
+  }
+  .hero .portrait {
+    width: 96px; height: 96px; flex: 0 0 96px;
+    border-radius: 16px; background: var(--c-surface);
+    display: grid; place-items: center; box-shadow: var(--sh-card);
+    animation: bob 2.8s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+  .hero .body { flex: 1; min-width: 0; }
+  .hero .tagline { max-width: 56ch; }
+
+  /* ---- Case-study card ---- */
+  .case { overflow: hidden; padding: 0; transition: transform .12s, box-shadow .12s; cursor: pointer; }
+  .case:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+  .case .band {
+    height: 76px; display: flex; align-items: center; padding: 0 var(--sp-4);
+    font-size: 32px;
+  }
+  .case .body { padding: var(--sp-4); }
+
+  /* ---- Q&A card ---- */
+  .qa { display: flex; gap: var(--sp-3); align-items: flex-start; transition: box-shadow .12s; cursor: pointer; }
+  .qa:hover { box-shadow: var(--sh-hover); }
+  .qa .ind { flex: 0 0 auto; width: 10px; display: flex; justify-content: center; padding-top: 6px; }
+  .qa .ndot { width: 9px; height: 9px; border-radius: 3px; background: var(--a-purple); }
+  .qa .ndot.read { background: var(--c-faint); opacity: .5; }
+  .qa .q-body { flex: 1; min-width: 0; }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- Header -->
+  <div class="page-head">
+    <h1 class="t-display">Learn</h1>
+    <p class="t-lead muted">Build real things, then ask your mentor anything.</p>
+  </div>
+
+  <!-- Expert hero -->
+  <section class="hero" style="margin-bottom:var(--sp-6)">
+    <div class="portrait">
+      <img class="sprite-lg pixelated" src="../../design-assets/char-sage.svg" alt="Astro" />
+    </div>
+    <div class="body">
+      <p class="t-label" style="color:var(--a-purple-deep)">Astro · Your AI Mentor</p>
+      <h2 class="t-title" style="margin:2px 0 6px">Meet Astro</h2>
+      <p class="t-body tagline" style="margin:0 0 var(--sp-3)">
+        I turn the concepts you learn into things you actually ship — small builds, real code,
+        and a patient answer whenever you get stuck. Pick a case study or just ask.
+      </p>
+      <div class="row-wrap" style="margin-bottom:var(--sp-4)">
+        <span class="chip chip--accent">📚 12 case studies</span>
+        <span class="chip chip--accent">★ Lv 6 unlocked</span>
+      </div>
+      <button class="btn">Ask Astro ▸</button>
+    </div>
+  </section>
+
+  <!-- Build-Along Case Studies -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="section-head">
+      <h2 class="t-title">Build-Along Case Studies</h2>
+      <a class="link" href="#">View all →</a>
+    </div>
+    <div class="grid grid-2">
+
+      <div class="card case">
+        <div class="band" style="background:var(--a-teal-tint)">⌨️</div>
+        <div class="body">
+          <div class="between">
+            <p class="t-subttl" style="margin:0">Build a Todo CLI</p>
+            <span class="badge badge--done">Done</span>
+          </div>
+          <p class="t-sm" style="margin:6px 0 var(--sp-3)">Parse arguments and persist tasks to a JSON file from your terminal.</p>
+          <div class="bar"><i style="width:100%;background:var(--a-teal)"></i></div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-xs muted">Step 8 / 8</span>
+            <span class="chip">Beginner</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card case">
+        <div class="band" style="background:var(--a-blue-tint)">🌦️</div>
+        <div class="body">
+          <div class="between">
+            <p class="t-subttl" style="margin:0">Make a Weather App</p>
+            <span class="badge badge--open">In progress</span>
+          </div>
+          <p class="t-sm" style="margin:6px 0 var(--sp-3)">Fetch a live forecast, then render it with clean, reusable components.</p>
+          <div class="bar"><i style="width:37%;background:var(--a-blue)"></i></div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-xs muted">Step 3 / 8</span>
+            <span class="chip">Intermediate</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card case">
+        <div class="band" style="background:var(--a-gold-tint)">🔌</div>
+        <div class="body">
+          <div class="between">
+            <p class="t-subttl" style="margin:0">Your First API Call</p>
+            <span class="badge badge--open">In progress</span>
+          </div>
+          <p class="t-sm" style="margin:6px 0 var(--sp-3)">Send a request, read the response, and handle errors without panic.</p>
+          <div class="bar"><i style="width:62%;background:var(--a-gold)"></i></div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-xs muted">Step 5 / 8</span>
+            <span class="chip">Beginner</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card case">
+        <div class="band" style="background:var(--a-purple-tint)">🎨</div>
+        <div class="body">
+          <div class="between">
+            <p class="t-subttl" style="margin:0">Pixel Art Animator</p>
+            <span class="badge badge--locked">Not started</span>
+          </div>
+          <p class="t-sm" style="margin:6px 0 var(--sp-3)">Loop frames on a canvas grid and export your own sprite animation.</p>
+          <div class="bar"><i style="width:0%;background:var(--a-purple)"></i></div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-xs muted">Step 0 / 10</span>
+            <span class="chip">Advanced</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Ask Astro (Mentor Q&A) -->
+  <section>
+    <div class="section-head">
+      <h2 class="t-title">Ask Astro</h2>
+      <a class="link" href="#">Your history →</a>
+    </div>
+    <div class="vstack gap-3">
+
+      <div class="card case qa">
+        <div class="ind"><span class="ndot"></span></div>
+        <div class="q-body">
+          <div class="between">
+            <p class="t-body" style="margin:0;font-weight:600">What's the difference between == and ===?</p>
+            <span class="badge badge--open">New</span>
+          </div>
+          <p class="t-sm" style="margin:4px 0 0">Both compare values, but === also checks the type — so 0 == "0" is true while 0 === "0"…</p>
+        </div>
+      </div>
+
+      <div class="card case qa">
+        <div class="ind"><span class="ndot"></span></div>
+        <div class="q-body">
+          <div class="between">
+            <p class="t-body" style="margin:0;font-weight:600">When should I use a for loop vs map?</p>
+            <span class="badge badge--open">New</span>
+          </div>
+          <p class="t-sm" style="margin:4px 0 0">Reach for map when you're transforming a list into a new one; use a for loop when you need…</p>
+        </div>
+      </div>
+
+      <div class="card case qa">
+        <div class="ind"><span class="ndot read"></span></div>
+        <div class="q-body">
+          <div class="between">
+            <p class="t-body muted" style="margin:0;font-weight:600">How do I read a stack trace?</p>
+            <span class="t-xs muted">Read</span>
+          </div>
+          <p class="t-sm" style="margin:4px 0 0">Start at the top — that's where the error was thrown. Each line below is the call that led…</p>
+        </div>
+      </div>
+
+      <div class="card case qa">
+        <div class="ind"><span class="ndot read"></span></div>
+        <div class="q-body">
+          <div class="between">
+            <p class="t-body muted" style="margin:0;font-weight:600">Why does my async function return a Promise?</p>
+            <span class="t-xs muted">Read</span>
+          </div>
+          <p class="t-sm" style="margin:4px 0 0">An async function always wraps its result in a Promise. Use await to unwrap the value inside…</p>
+        </div>
+      </div>
+
+      <div class="card case qa">
+        <div class="ind"><span class="ndot read"></span></div>
+        <div class="q-body">
+          <div class="between">
+            <p class="t-body muted" style="margin:0;font-weight:600">What is a closure, in plain words?</p>
+            <span class="t-xs muted">Read</span>
+          </div>
+          <p class="t-sm" style="margin:4px 0 0">A function that remembers the variables around it, even after the outer function has finished…</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</div></div>
+</body>
+</html>

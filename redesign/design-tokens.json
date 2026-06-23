@@ -1,0 +1,140 @@
+{
+  "$description": "CodePet design tokens — import into Figma via the free 'Tokens Studio for Figma' plugin (Import → File). Mirrors redesign/styles/tokens.css and codepet/Views/CodepetTheme.swift.",
+  "$metadata": {
+    "tokenSetOrder": ["codepet"]
+  },
+  "$themes": [],
+  "codepet": {
+    "color": {
+      "surface": {
+        "page":     { "value": "#F8F7F3", "type": "color", "description": "Warm cream page background" },
+        "surface":  { "value": "#FFFFFF", "type": "color", "description": "Card / panel surface" },
+        "surface2": { "value": "#FCFBF8", "type": "color", "description": "Subtly tinted surface" },
+        "sunken":   { "value": "#F1EFE9", "type": "color", "description": "Inset wells / track backgrounds" },
+        "hairline": { "value": "#ECE9E2", "type": "color", "description": "Divider hairline" },
+        "inkLine":  { "value": "#2D2B26", "type": "color", "description": "PixelCard outline / dark ink" }
+      },
+      "text": {
+        "primary": { "value": "#1F1B15", "type": "color" },
+        "body":    { "value": "#332E27", "type": "color" },
+        "muted":   { "value": "#776F65", "type": "color" },
+        "faint":   { "value": "#A79E92", "type": "color" }
+      },
+      "accent": {
+        "purple":      { "value": "#7C3AED", "type": "color" },
+        "purpleTint":  { "value": "#EEE6FD", "type": "color" },
+        "purpleDeep":  { "value": "#5B27B0", "type": "color" },
+        "pink":        { "value": "#FF6B9D", "type": "color" },
+        "pinkTint":    { "value": "#FFE6EF", "type": "color" },
+        "pinkDeep":    { "value": "#E0457A", "type": "color" },
+        "gold":        { "value": "#FDB022", "type": "color" },
+        "goldTint":    { "value": "#FEF0D6", "type": "color" },
+        "goldDeep":    { "value": "#D98A09", "type": "color" },
+        "teal":        { "value": "#2DD4BF", "type": "color" },
+        "tealTint":    { "value": "#DDF7F3", "type": "color" },
+        "tealDeep":    { "value": "#16A394", "type": "color" },
+        "orange":      { "value": "#FF8C42", "type": "color" },
+        "orangeTint":  { "value": "#FFE8D6", "type": "color" },
+        "orangeDeep":  { "value": "#E06A1E", "type": "color" },
+        "blue":        { "value": "#2563EB", "type": "color" },
+        "blueTint":    { "value": "#DCE7FC", "type": "color" },
+        "blueDeep":    { "value": "#1B4FC4", "type": "color" }
+      },
+      "kingdom": {
+        "moltenForge":   { "value": "#FF8040", "type": "color" },
+        "frozenSpire":   { "value": "#88D0F0", "type": "color" },
+        "eternalGarden": { "value": "#F0A8D0", "type": "color" },
+        "mysticGrove":   { "value": "#90D870", "type": "color" }
+      },
+      "status": {
+        "locked":  { "value": "#C9C3B8", "type": "color" },
+        "success": { "value": "#2DD4BF", "type": "color" },
+        "danger":  { "value": "#F0533F", "type": "color" }
+      }
+    },
+
+    "fontFamilies": {
+      "pixel": { "value": "Minecraft", "type": "fontFamilies", "description": "Bitmap pixel font — titles >= 18px" },
+      "body":  { "value": "Inter", "type": "fontFamilies", "description": "Body copy < 18px (ships as Inter 18pt optical)" }
+    },
+    "fontWeights": {
+      "regular":  { "value": "400", "type": "fontWeights" },
+      "medium":   { "value": "500", "type": "fontWeights" },
+      "semibold": { "value": "600", "type": "fontWeights" },
+      "bold":     { "value": "700", "type": "fontWeights" }
+    },
+    "fontSize": {
+      "display": { "value": "28", "type": "fontSizes" },
+      "title":   { "value": "22", "type": "fontSizes" },
+      "subtitle":{ "value": "18", "type": "fontSizes" },
+      "lg":      { "value": "16", "type": "fontSizes" },
+      "md":      { "value": "14", "type": "fontSizes" },
+      "sm":      { "value": "13", "type": "fontSizes" },
+      "xs":      { "value": "11", "type": "fontSizes" }
+    },
+    "typography": {
+      "display": {
+        "value": { "fontFamily": "{codepet.fontFamilies.pixel}", "fontWeight": "400", "fontSize": "{codepet.fontSize.display}", "lineHeight": "110%", "letterSpacing": "0.5px" },
+        "type": "typography", "description": "Hero screen titles" },
+      "title": {
+        "value": { "fontFamily": "{codepet.fontFamilies.pixel}", "fontWeight": "400", "fontSize": "{codepet.fontSize.title}", "lineHeight": "115%", "letterSpacing": "0.4px" },
+        "type": "typography", "description": "Section titles" },
+      "subtitle": {
+        "value": { "fontFamily": "{codepet.fontFamilies.pixel}", "fontWeight": "400", "fontSize": "{codepet.fontSize.subtitle}", "lineHeight": "120%", "letterSpacing": "0.3px" },
+        "type": "typography", "description": "Card titles" },
+      "lead": {
+        "value": { "fontFamily": "{codepet.fontFamilies.body}", "fontWeight": "400", "fontSize": "{codepet.fontSize.lg}", "lineHeight": "145%" },
+        "type": "typography" },
+      "body": {
+        "value": { "fontFamily": "{codepet.fontFamilies.body}", "fontWeight": "400", "fontSize": "{codepet.fontSize.md}", "lineHeight": "145%" },
+        "type": "typography" },
+      "small": {
+        "value": { "fontFamily": "{codepet.fontFamilies.body}", "fontWeight": "400", "fontSize": "{codepet.fontSize.sm}", "lineHeight": "140%" },
+        "type": "typography" },
+      "label": {
+        "value": { "fontFamily": "{codepet.fontFamilies.body}", "fontWeight": "600", "fontSize": "{codepet.fontSize.xs}", "lineHeight": "120%", "letterSpacing": "0.8px", "textCase": "uppercase" },
+        "type": "typography" }
+    },
+
+    "spacing": {
+      "1": { "value": "4",  "type": "spacing" },
+      "2": { "value": "8",  "type": "spacing" },
+      "3": { "value": "12", "type": "spacing" },
+      "4": { "value": "16", "type": "spacing" },
+      "5": { "value": "24", "type": "spacing" },
+      "6": { "value": "32", "type": "spacing" },
+      "7": { "value": "48", "type": "spacing" },
+      "8": { "value": "64", "type": "spacing" }
+    },
+
+    "borderRadius": {
+      "card":  { "value": "14", "type": "borderRadius" },
+      "pill":  { "value": "24", "type": "borderRadius" },
+      "input": { "value": "12", "type": "borderRadius" },
+      "sm":    { "value": "8",  "type": "borderRadius" },
+      "chip":  { "value": "10", "type": "borderRadius" }
+    },
+
+    "borderWidth": {
+      "pixel": { "value": "4", "type": "borderWidth", "description": "PixelCard ink outline" }
+    },
+
+    "boxShadow": {
+      "card": {
+        "value": { "x": "0", "y": "4", "blur": "12", "spread": "0", "color": "#00000014", "type": "dropShadow" },
+        "type": "boxShadow", "description": "Soft card elevation (black 8%)" },
+      "float": {
+        "value": { "x": "0", "y": "12", "blur": "24", "spread": "0", "color": "#0000001F", "type": "dropShadow" },
+        "type": "boxShadow", "description": "Floating panel (black 12%)" },
+      "pixel": {
+        "value": { "x": "4", "y": "4", "blur": "0", "spread": "0", "color": "#2D2B26", "type": "dropShadow" },
+        "type": "boxShadow", "description": "Hard offset 8-bit shadow" }
+    },
+
+    "sizing": {
+      "rail":     { "value": "72",   "type": "sizing", "description": "Left nav rail width" },
+      "hud":      { "value": "56",   "type": "sizing", "description": "Top HUD bar height" },
+      "shellMax": { "value": "1280", "type": "sizing", "description": "Max content width" }
+    }
+  }
+}

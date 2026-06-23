@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Onboarding</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Wizard frame: narrow & centered for a guided feel ---- */
+  .page { max-width: 760px; }
+
+  /* ---- Progress header (sticky) ---- */
+  .wiz-head {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--c-page); padding-top: var(--sp-2);
+    margin: calc(var(--sp-6) * -1) calc(var(--sp-6) * -1) var(--sp-6);
+    padding: var(--sp-4) var(--sp-6);
+    border-bottom: 1px solid var(--c-hairline);
+  }
+  .seg-row { display: flex; gap: var(--sp-2); align-items: center; }
+  .seg {
+    height: 8px; flex: 1; border-radius: 99px; background: var(--c-sunken);
+    transition: background .2s;
+  }
+  .seg.done    { background: var(--a-purple-tint); }
+  .seg.active  { background: var(--a-purple); box-shadow: 0 0 0 3px var(--a-purple-tint); }
+
+  /* ---- Selectable option cards ---- */
+  .opt {
+    background: var(--c-surface); border: 2px solid var(--c-hairline);
+    border-radius: var(--r-card); padding: var(--sp-4);
+    display: flex; align-items: center; gap: var(--sp-3);
+    cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .12s;
+  }
+  .opt:hover { transform: translateY(-2px); box-shadow: var(--sh-hover); }
+  .opt .emo {
+    width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px;
+    background: var(--a-purple-tint); display: grid; place-items: center; font-size: 20px;
+  }
+  .opt .tick {
+    margin-left: auto; width: 24px; height: 24px; border-radius: 99px;
+    border: 2px solid var(--c-hairline); display: grid; place-items: center;
+    color: transparent; font-size: 13px; font-weight: 800; flex: 0 0 24px;
+  }
+  .opt.sel { border-color: var(--a-purple); box-shadow: 0 0 0 4px var(--a-purple-tint); }
+  .opt.sel .tick { background: var(--a-purple); border-color: var(--a-purple); color: #fff; }
+
+  /* ---- Time pills ---- */
+  .pill {
+    flex: 1; text-align: center; padding: 14px 10px; border-radius: var(--r-pill);
+    border: 2px solid var(--c-hairline); background: var(--c-surface);
+    font-weight: 600; cursor: pointer; transition: all .12s;
+    display: flex; flex-direction: column; gap: 2px; align-items: center;
+  }
+  .pill:hover { border-color: var(--a-purple-tint); }
+  .pill .big { font-family: var(--f-pixel); font-size: 18px; color: var(--c-text); }
+  .pill.sel { border-color: var(--a-purple); background: var(--a-purple-tint); }
+  .pill.sel .big { color: var(--a-purple-deep); }
+
+  /* ---- Interest toggle chips ---- */
+  .toggle {
+    cursor: pointer; padding: 8px 14px; font-size: var(--t-sm);
+    border: 2px solid var(--c-hairline); background: var(--c-surface);
+  }
+
+  /* ---- Character tiles ---- */
+  .char {
+    position: relative; background: var(--c-surface); border: 2px solid var(--c-hairline);
+    border-radius: var(--r-card); padding: var(--sp-3); cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+    transition: transform .12s, box-shadow .12s, border-color .12s;
+  }
+  .char:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+  .char .sprite-md { image-rendering: pixelated; }
+  .char .nm { font-family: var(--f-pixel); font-size: 18px; color: var(--c-text); line-height: 1; }
+  .char.sel { border-color: var(--a-purple); box-shadow: 0 0 0 4px var(--a-purple-tint), var(--sh-hover); }
+  .char .pick {
+    position: absolute; top: -8px; right: -8px; width: 26px; height: 26px;
+    border-radius: 99px; background: var(--a-purple); color: #fff;
+    display: grid; place-items: center; font-size: 14px; font-weight: 800;
+    box-shadow: var(--sh-card);
+  }
+
+  /* ---- Meet-the-pet speech panel ---- */
+  .meet { display: flex; align-items: center; gap: var(--sp-4); background: var(--a-purple-tint); }
+  .meet .pet-sprite { width: 80px; height: 80px; image-rendering: pixelated; flex: 0 0 80px; animation: bob 2.4s ease-in-out infinite; }
+  @keyframes bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+  .bubble {
+    position: relative; background: var(--c-surface); border-radius: 16px;
+    padding: var(--sp-3) var(--sp-4); box-shadow: var(--sh-card); flex: 1;
+  }
+  .bubble::after {
+    content: ""; position: absolute; left: -7px; top: 50%; transform: translateY(-50%);
+    border: 7px solid transparent; border-right-color: var(--c-surface); border-left: 0;
+  }
+
+  /* ---- Footer nav ---- */
+  .wiz-foot {
+    position: sticky; bottom: 0; background: var(--c-page);
+    border-top: 1px solid var(--c-hairline);
+    margin: var(--sp-6) calc(var(--sp-6) * -1) calc(var(--sp-8) * -1);
+    padding: var(--sp-4) var(--sp-6);
+  }
+
+  .step-num {
+    width: 26px; height: 26px; border-radius: 99px; background: var(--a-purple);
+    color: #fff; font-family: var(--f-pixel); font-size: 13px;
+    display: inline-grid; place-items: center; margin-right: var(--sp-2);
+  }
+</style>
+</head>
+<body>
+<div class="canvas"><div class="page">
+
+  <!-- ===== Wizard header: progress ===== -->
+  <div class="wiz-head">
+    <div class="between" style="margin-bottom:var(--sp-3)">
+      <div class="row" style="align-items:center;gap:var(--sp-2)">
+        <img class="pixelated" src="../../design-assets/char-nova.svg" alt="" style="width:28px;height:28px" />
+        <span class="t-subttl">Let's set you up</span>
+      </div>
+      <span class="chip chip--accent">Step 4 of 6</span>
+    </div>
+    <div class="seg-row">
+      <span class="seg done"></span>
+      <span class="seg done"></span>
+      <span class="seg done"></span>
+      <span class="seg active"></span>
+      <span class="seg"></span>
+      <span class="seg"></span>
+    </div>
+  </div>
+
+  <!-- ===== STEP A — What brings you ===== -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="vstack gap-2" style="margin-bottom:var(--sp-4)">
+      <h2 class="t-title"><span class="step-num">1</span>What brings you to CodePet?</h2>
+      <p class="t-sm muted" style="margin:0 0 0 34px">Pick the one that fits best — we'll tune your journey.</p>
+    </div>
+    <div class="grid grid-2">
+      <div class="opt sel">
+        <span class="emo">🌱</span>
+        <div class="vstack"><strong>Learn to code from scratch</strong><span class="t-sm muted">Brand new? Perfect start.</span></div>
+        <span class="tick">✓</span>
+      </div>
+      <div class="opt">
+        <span class="emo">⚡</span>
+        <div class="vstack"><strong>Level up my skills</strong><span class="t-sm muted">Sharpen what you know.</span></div>
+        <span class="tick">✓</span>
+      </div>
+      <div class="opt">
+        <span class="emo">🛠️</span>
+        <div class="vstack"><strong>Build a side project</strong><span class="t-sm muted">Ship something real.</span></div>
+        <span class="tick">✓</span>
+      </div>
+      <div class="opt">
+        <span class="emo">✨</span>
+        <div class="vstack"><strong>Just curious &amp; having fun</strong><span class="t-sm muted">Explore at your pace.</span></div>
+        <span class="tick">✓</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- ===== STEP B — Daily goal + interests ===== -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="vstack gap-2" style="margin-bottom:var(--sp-4)">
+      <h2 class="t-title"><span class="step-num">2</span>How much time per day?</h2>
+      <p class="t-sm muted" style="margin:0 0 0 34px">A daily goal keeps your streak — and your pet — happy.</p>
+    </div>
+    <div class="row" style="margin-bottom:var(--sp-5)">
+      <div class="pill"><span class="big">5</span><span class="t-sm muted">min · casual</span></div>
+      <div class="pill sel"><span class="big">10</span><span class="t-sm muted">min · steady</span></div>
+      <div class="pill"><span class="big">20</span><span class="t-sm muted">min · serious</span></div>
+      <div class="pill"><span class="big">30+</span><span class="t-sm muted">min · intense</span></div>
+    </div>
+
+    <p class="t-subttl" style="margin:0 0 var(--sp-3)">Which topics excite you?</p>
+    <div class="row-wrap">
+      <span class="chip chip--accent toggle" style="border-color:var(--a-purple)">✓ Python</span>
+      <span class="chip chip--accent toggle" style="border-color:var(--a-purple)">✓ Web Dev</span>
+      <span class="chip toggle">Games</span>
+      <span class="chip toggle">Data</span>
+      <span class="chip toggle">Apps</span>
+      <span class="chip chip--accent toggle" style="border-color:var(--a-purple)">✓ AI</span>
+      <span class="chip toggle">Automation</span>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- ===== STEP C — Choose your companion ===== -->
+  <section style="margin-bottom:var(--sp-6)">
+    <div class="vstack gap-2" style="margin-bottom:var(--sp-4)">
+      <h2 class="t-title"><span class="step-num">3</span>Choose your companion</h2>
+      <p class="t-sm muted" style="margin:0 0 0 34px">Your pet learns alongside you. You can always switch later.</p>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom:var(--sp-5)">
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-byte.svg" alt="byte" />
+        <span class="nm">byte</span><span class="t-xs muted">curious</span>
+      </div>
+      <div class="char sel">
+        <span class="pick">✓</span>
+        <img class="sprite-md pixelated" src="../../design-assets/char-nova.svg" alt="nova" />
+        <span class="nm">nova</span><span class="t-xs muted">bright</span>
+      </div>
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-crash.svg" alt="crash" />
+        <span class="nm">crash</span><span class="t-xs muted">bold</span>
+      </div>
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-luna.svg" alt="luna" />
+        <span class="nm">luna</span><span class="t-xs muted">calm</span>
+      </div>
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-sage.svg" alt="sage" />
+        <span class="nm">sage</span><span class="t-xs muted">wise</span>
+      </div>
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-glitch.svg" alt="glitch" />
+        <span class="nm">glitch</span><span class="t-xs muted">quirky</span>
+      </div>
+      <div class="char">
+        <img class="sprite-md pixelated" src="../../design-assets/char-null.svg" alt="null" />
+        <span class="nm">null</span><span class="t-xs muted">mysterious</span>
+      </div>
+    </div>
+
+    <!-- Meet nova: first words -->
+    <div class="card meet">
+      <img class="pet-sprite" src="../../design-assets/char-nova.svg" alt="nova" />
+      <div class="bubble">
+        <p class="t-label" style="margin:0 0 4px;color:var(--a-purple-deep)">Meet nova</p>
+        <p style="margin:0;font-weight:600">Hi! I'm nova. Let's build something awesome together! ✨</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Footer nav ===== -->
+  <div class="wiz-foot between">
+    <button class="btn btn--ghost">← Back</button>
+    <span class="t-sm muted">You're almost there</span>
+    <button class="btn">Continue ▸</button>
+  </div>
+
+</div></div>
+</body>
+</html>

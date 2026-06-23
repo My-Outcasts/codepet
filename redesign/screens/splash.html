@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodePet — Welcome</title>
+<link rel="stylesheet" href="../assets/fonts.css" />
+<link rel="stylesheet" href="../styles/tokens.css" />
+<link rel="stylesheet" href="../styles/components.css" />
+<style>
+  /* ---- Splash hero shell ---- */
+  body { background: #F5F3FA; }
+  .splash {
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: var(--sp-7) var(--sp-5);
+    position: relative; overflow: hidden;
+    /* pale purple wash + soft radial brand glow behind the cast */
+    background:
+      radial-gradient(60% 55% at 50% 38%, rgba(124,58,237,.18) 0%, rgba(124,58,237,.07) 38%, rgba(124,58,237,0) 70%),
+      #F5F3FA;
+  }
+
+  /* ---- Bouncing starter cast ---- */
+  .cast {
+    display: flex; align-items: flex-end; justify-content: center;
+    gap: var(--sp-5);
+    margin-bottom: var(--sp-6);
+    flex-wrap: wrap;
+  }
+  .cast .star {
+    width: 72px; height: 72px;
+    animation: splash-bob 2.6s ease-in-out infinite;
+    filter: drop-shadow(0 8px 10px rgba(91,39,176,.18));
+  }
+  @keyframes splash-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-14px); }
+  }
+  .cast .star:nth-child(1) { animation-delay: 0s;     }
+  .cast .star:nth-child(2) { animation-delay: .18s;   }
+  .cast .star:nth-child(3) { animation-delay: .36s;   }
+  .cast .star:nth-child(4) { animation-delay: .54s;   }
+  .cast .star:nth-child(5) { animation-delay: .72s;   }
+  .cast .star:nth-child(6) { animation-delay: .90s;   }
+  .cast .star:nth-child(7) { animation-delay: 1.08s;  }
+
+  /* ---- Wordmark ---- */
+  .wordmark {
+    max-width: 360px; width: 64vw; min-width: 240px;
+    height: auto; margin: 0 auto var(--sp-4);
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  /* multi-color brand underline */
+  .underbar {
+    width: 200px; height: 5px; border-radius: 99px;
+    margin: 0 auto var(--sp-5);
+    background: linear-gradient(90deg,
+      var(--a-purple) 0%, var(--a-pink) 30%,
+      var(--a-gold) 55%, var(--a-teal) 78%, var(--a-orange) 100%);
+    box-shadow: 0 2px 8px rgba(124,58,237,.25);
+  }
+
+  .tagline { margin: 0 0 var(--sp-6); }
+
+  .footer-line { margin-top: var(--sp-7); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cast .star { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="splash">
+
+    <!-- Bouncing starter cast (all 7) -->
+    <div class="cast">
+      <img class="star pixelated" src="../../design-assets/char-byte.svg"   alt="byte" />
+      <img class="star pixelated" src="../../design-assets/char-nova.svg"   alt="nova" />
+      <img class="star pixelated" src="../../design-assets/char-crash.svg"  alt="crash" />
+      <img class="star pixelated" src="../../design-assets/char-luna.svg"   alt="luna" />
+      <img class="star pixelated" src="../../design-assets/char-sage.svg"   alt="sage" />
+      <img class="star pixelated" src="../../design-assets/char-glitch.svg" alt="glitch" />
+      <img class="star pixelated" src="../../design-assets/char-null.svg"   alt="null" />
+    </div>
+
+    <!-- Wordmark + multi-color underline -->
+    <img class="wordmark" src="../../codepet-text-purple-hires.png" alt="codepet" />
+    <div class="underbar"></div>
+
+    <!-- Tagline -->
+    <p class="t-lead muted tagline">Adopt a pet. Learn to code. One journey.</p>
+
+    <!-- Primary CTA -->
+    <button class="btn" style="padding:16px 34px;font-size:var(--t-lg);border-radius:var(--r-pill)">Meet Your Pet ▸</button>
+
+    <!-- Footer -->
+    <p class="muted footer-line" style="font-size:var(--t-xs);letter-spacing:.8px">by MURROR</p>
+
+  </div>
+</div>
+</body>
+</html>

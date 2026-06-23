@@ -1,0 +1,42 @@
+/* CodePet redesign — bundled fonts.
+   Pulls the SAME font files the macOS app ships, so the mockups render
+   pixel-for-pixel like production.
+   Rule (from CodepetTheme.titlePixelSizeThreshold): titles >=18pt use
+   Minecraft bitmap; everything smaller uses Inter. */
+
+@font-face {
+  font-family: "Minecraft";
+  src: url("../../codepet/Resources/Fonts/Minecraft.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter18";
+  src: url("../../codepet/Resources/Fonts/Inter_18pt-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter18";
+  src: url("../../codepet/Resources/Fonts/Inter_18pt-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter18";
+  src: url("../../codepet/Resources/Fonts/Inter_18pt-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter18";
+  src: url("../../codepet/Resources/Fonts/Inter_18pt-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

@@ -88,3 +88,4 @@ dist/
 # MCP server test files
 codepet-mcp-server/test-*.mjs
 codepet-mcp-server/test-project/
+.superpowers/

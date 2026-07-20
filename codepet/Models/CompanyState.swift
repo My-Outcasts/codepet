@@ -24,7 +24,8 @@ struct CompanyState: Codable, Hashable {
     var library: [LibItem]
     var stage: ProjectStage
     var companionId: String
+    var onboardedAt: Date?
 
     static let empty = CompanyState(
-        brief: CompanyBrief(), departments: [], library: [], stage: .idea, companionId: "byte")
+        brief: CompanyBrief(), departments: [], library: [], stage: .idea, companionId: "byte", onboardedAt: nil)
 }

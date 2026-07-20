@@ -9,6 +9,7 @@ struct CompanyDoc: Codable {
     var brief: CompanyBrief?
     var stage: String?
     var companionId: String?
+    var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -22,8 +23,32 @@ enum CompanyData {
             departments: [],
             library: [],
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
-            companionId: doc.companionId ?? "byte"
+            companionId: doc.companionId ?? "byte",
+            onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
         )
+    }
+
+    /// Pure Firestore payload for a brief write — testable without Firestore.
+    static func briefPayload(_ brief: CompanyBrief, onboardedAt: String) -> [String: Any] {
+        var payload: [String: Any] = ["onboardedAt": onboardedAt]
+        if let data = try? JSONEncoder().encode(brief),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            payload["brief"] = dict
+        }
+        return payload
+    }
+
+    /// Write companies/{uid} (brief + onboardedAt), merge. Fail-soft: false on error.
+    /// First native write to companies/{uid}.
+    static func saveBrief(companyId: String, brief: CompanyBrief) async -> Bool {
+        let iso = ISO8601DateFormatter().string(from: Date())
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(briefPayload(brief, onboardedAt: iso), merge: true)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via

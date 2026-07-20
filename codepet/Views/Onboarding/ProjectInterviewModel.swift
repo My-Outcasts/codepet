@@ -35,11 +35,16 @@ final class ProjectInterviewModel: ObservableObject {
     }
 
     /// Enrich (fail-open) and persist. Returns true when a brief was stored.
+    /// A genuinely empty interview (no product signal at all) is a no-op: it
+    /// must NOT persist a blank brief, because `setCompanyBrief` marks the
+    /// project user-owned and permanently demotes from-history auto-synthesis
+    /// (BriefSynthesizer) — losing that safety net for nothing in return.
     func submit(projectId: String, store: ProjectStore, api: ReflectionAPIClientProtocol) async -> Bool {
         isSubmitting = true
         defer { isSubmitting = false }
         let raw = buildBrief()
         let enriched = (try? await api.enrichBrief(raw)) ?? raw   // fail-open
+        guard BriefContext.compose(enriched) != nil else { return false }
         store.setCompanyBrief(projectId: projectId, brief: enriched)
         return true
     }

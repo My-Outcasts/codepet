@@ -32,6 +32,21 @@ final class ProjectInterviewModelTests: XCTestCase {
         XCTAssertTrue(ok)
         XCTAssertEqual(store.companyBrief(for: p.id)?.summary, "Enriched.")
     }
+
+    func testSubmitWithNoSignalDoesNotPersist() async {
+        // All fields left at their defaults (only stageIndex has a non-empty
+        // default) — buildBrief() has no product signal at all.
+        let m = ProjectInterviewModel()
+        let store = ProjectStore()
+        let p = store.detectProject(cwd: "/tmp/x")!
+        // Enrich should not even matter for a no-signal submit, but pass a stub
+        // that would return "signal" to prove the guard runs on the ENRICHED
+        // brief the code actually persists, not some pre-enrich shortcut.
+        let api = EnrichStub(returning: m.buildBrief())
+        let ok = await m.submit(projectId: p.id, store: store, api: api)
+        XCTAssertFalse(ok)
+        XCTAssertNil(store.companyBrief(for: p.id))
+    }
 }
 
 /// Stub returning a fixed enriched brief. Conforms to ReflectionAPIClientProtocol;

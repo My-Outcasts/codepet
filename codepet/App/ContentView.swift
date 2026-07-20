@@ -167,6 +167,10 @@ struct ContentView: View {
         learnProgress.reload()
         sessionStatusStore.reload()
         PetMemoryStore.shared.reload()
+        // A pending founder-interview sheet is per-account state (it targets a
+        // specific project id); clear it so a sheet/submit surviving the swap
+        // can't write under the wrong account.
+        interviewCoordinator.active = nil
     }
 }
 

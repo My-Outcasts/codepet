@@ -29,7 +29,7 @@ struct ProjectInterviewView: View {
                 Button("Skip") { onDone() }
                 Spacer()
                 if step < 5 {
-                    Button("Next") { step += 1 }.disabled(false)
+                    Button("Next") { step += 1 }
                 } else {
                     Button(model.isSubmitting ? "Saving…" : "Finish") {
                         Task { _ = await model.submit(projectId: projectId, store: projectStore, api: api); onDone() }

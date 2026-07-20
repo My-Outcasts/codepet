@@ -10,6 +10,7 @@ struct CompanyDoc: Codable {
     var stage: String?
     var companionId: String?
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
+    var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -24,7 +25,8 @@ enum CompanyData {
             library: [],
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
             companionId: doc.companionId ?? "byte",
-            onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            tasks: doc.tasks ?? []
         )
     }
 
@@ -49,6 +51,34 @@ enum CompanyData {
         } catch {
             return false
         }
+    }
+
+    /// Pure Firestore payload for a tasks write — testable without Firestore.
+    static func tasksPayload(_ tasks: [RoadmapTask]) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(tasks),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["tasks": arr]
+        }
+        return ["tasks": []]
+    }
+
+    /// Write companies/{uid}.tasks, merge. Fail-soft: false on error.
+    static func saveTasks(companyId: String, tasks: [RoadmapTask]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(tasksPayload(tasks), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Fetch the generated roadmap for a company. FAIL-OPEN placeholder: returns `[]`
+    /// until the `scaffoldRoadmap` Cloud Function is aligned to the RoadmapTask shape
+    /// (phase/dependencies) and deployed (needs node 22). `generateRoadmap` treats `[]`
+    /// as "no change", so the board stays empty rather than clearing existing tasks.
+    static func fetchRoadmap(brief: CompanyBrief) async -> [RoadmapTask] {
+        []
     }
 
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via

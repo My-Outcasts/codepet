@@ -10,20 +10,20 @@
 
 ## Global Constraints
 
-- **Two repos.** Swift app: `~/Documents/codepet` (`My-Outcasts/codepet`), branch `feat/project-brief-interview` off `main` (already created). Functions: `~/Documents/Claude/CodePet-Clean/functions` (`Murror/CodePet-Clean`, deploys to Firebase project `devpet-8f4b1`), branch `feat/enrich-brief-fn` off `main`.
+- **Two repos.** Swift app: work in the git worktree `~/Documents/codepet-brief-wt` (`My-Outcasts/codepet`), branch `feat/brief-interview` off `origin/main` — the COMPLETE source of truth (HEAD `a9655c7` "Promote current app as source of truth"). The local `~/Documents/codepet` checkout and `~/Downloads/codepet-main` are STALE partial exports (missing `Views/` + `CapturedEvent`) — do not use them. Functions: `~/Documents/Claude/CodePet-Clean/functions` (`Murror/CodePet-Clean`, deploys to Firebase project `devpet-8f4b1`), branch `feat/enrich-brief-fn` off `main`.
 - **Functions repo is BEHIND the deployed backend.** It defines only `summarizeTurn`, `summarizeSession`, `chatSession`, but the live backend also serves `generatePlan`, `synthesizeBrief`, `generateGuidance`, `distillReference`. **NEVER run a blanket `firebase deploy`** from this checkout — it would delete the 4 undefined-here live functions. Deploy ONLY the new function: `firebase deploy --only functions:enrichBrief`. See Task 3 pre-flight.
 - **Verbatim ports — preserve exact values.** Composer slice limits: `projectName` 120, `oneLiner` 240, `summary` 400, `notes` 800, `categories` 6, `audience` 160, `link` 200, `role` 80, `stage` 80, `founderName` 80. Enrichment clip limits: prompt `projectName` 120 / `oneLiner` 300 / `audience` 200 / `link` 200 / `notes` 2000; merge `summary` 400 / `audience` 200 / `categories` map-clip 40, slice 4. Founder-provided `audience`/`categories` always win over enrichment.
 - **Fail-open everywhere.** Enrichment failure returns the raw brief unchanged (HTTP 200). Skipping the interview is always allowed and leaves the observed-synthesis path intact.
 - **Swift conventions:** `Codable` models; UserDefaults keys prefixed `cp_`; new `ReflectionAPIClientProtocol` methods get a default-throw extension so existing mocks still compile; `Logger(subsystem: "app.murror.codepet", ...)`.
 - **Out of scope / do not touch:** `decisions[]`, roadmap/scaffold generation, companion/theming, credits. Do NOT edit the stale `CLAUDE.md`.
-- **Swift test command:** `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/<TestClass> 2>&1 | tail -20` (run `xcodegen generate` whenever a new `.swift` file is added so XcodeGen picks it up).
+- **Swift test command:** `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/<TestClass> 2>&1 | tail -20`. Scheme is **`codepet`** (lowercase). Do NOT run `xcodegen` — the `.xcodeproj` uses `PBXFileSystemSynchronizedRootGroup`, so new files under `codepet/` and `codepetTests/` are auto-included; adding a file needs no project regeneration.
 - **Functions test command:** `cd ~/Documents/Claude/CodePet-Clean/functions && npm test -- <name>`.
 
 ---
 
 ## File Structure
 
-**Swift app (`~/Documents/codepet`):**
+**Swift app (worktree `~/Documents/codepet-brief-wt`):**
 - Create `codepet/Models/CompanyBrief.swift` — structured brief (Task 1).
 - Create `codepet/Models/BriefContext.swift` — pure composer (Task 2).
 - Modify `codepet/Services/ReflectionAPIClient.swift` — DTOs, endpoint, method, protocol (Task 4).
@@ -77,7 +77,7 @@ final class CompanyBriefTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/CompanyBriefTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/CompanyBriefTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'CompanyBrief' in scope`.
 
 - [ ] **Step 3: Write the model**
@@ -188,7 +188,7 @@ final class BriefContextTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/BriefContextTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefContextTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'BriefContext' in scope`.
 
 - [ ] **Step 3: Write the composer** (verbatim logic port of `briefToContext`)
@@ -554,7 +554,7 @@ final class StubURLProtocol: URLProtocol {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/ReflectionAPIClientEnrichTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ReflectionAPIClientEnrichTests 2>&1 | tail -20`
 Expected: FAIL — `value of type 'ReflectionAPIClient' has no member 'enrichBrief'`.
 
 - [ ] **Step 3: Add DTOs, endpoint, protocol requirement, and method**
@@ -662,7 +662,7 @@ final class ProjectStoreBriefTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/ProjectStoreBriefTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectStoreBriefTests 2>&1 | tail -20`
 Expected: FAIL — no member `setCompanyBrief` / `companyBrief`.
 
 - [ ] **Step 3: Add the field + store methods**
@@ -749,7 +749,7 @@ final class BriefSynthesizerDemotionTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/BriefSynthesizerDemotionTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefSynthesizerDemotionTests 2>&1 | tail -20`
 Expected: FAIL — the synthesizer fires (`wasCalled == true`) because a summarized session with ≥minSessions triggers it.
 
 - [ ] **Step 3: Add the guard**
@@ -849,7 +849,7 @@ final class EnrichStub: ReflectionAPIClientProtocol {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/ProjectInterviewModelTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectInterviewModelTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'ProjectInterviewModel' in scope`.
 
 - [ ] **Step 3: Write the model**
@@ -1008,7 +1008,7 @@ final class InterviewCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'InterviewCoordinator' in scope`.
 
 - [ ] **Step 3: Write the coordinator**
@@ -1058,7 +1058,7 @@ In `codepet/App/ContentView.swift`, add the env object and a sheet on the root `
 
 - [ ] **Step 5: Run test + full build to verify**
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
 Expected: PASS, and the app target builds (sheet wired).
 
 - [ ] **Step 6: Commit**
@@ -1077,7 +1077,7 @@ git commit -m "feat(brief): present founder interview via InterviewCoordinator s
 
 After Task 8, run the full suite once:
 
-Run: `cd ~/Documents/codepet && xcodegen generate && xcodebuild test -project CodePet.xcodeproj -scheme CodePet -destination 'platform=macOS' 2>&1 | tail -30`
+Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -30`
 Expected: all `codepetTests` pass, app builds clean.
 
 Run: `cd ~/Documents/Claude/CodePet-Clean/functions && npm test 2>&1 | tail -20 && npx tsc --noEmit`
@@ -1091,4 +1091,4 @@ Expected: all Jest suites pass, `tsc` clean.
 
 **Type consistency:** `CompanyBrief` fields identical across model, DTO, function interface, and composer. `setCompanyBrief(projectId:brief:)` / `companyBrief(for:)` used consistently in Tasks 5–8. `shouldPrompt(for:)` defined in Task 7, used in Task 8. `ReflectionAPIClientProtocol.enrichBrief` added with default-throw in Task 4, relied on by Tasks 7–8 stubs.
 
-**Known verification gaps for the implementer (resolve while implementing, not blockers):** (a) confirm `ProjectStore`'s real project-insertion API name for test setup (Task 5 note); (b) confirm/reuse an existing `StubURLProtocol` in `codepetTests` (Task 4 note); (c) trim protocol-stub methods to the compiler's actual non-defaulted set (Task 7 note); (d) confirm XcodeGen auto-includes new files under `codepet/` (run `xcodegen generate`; if `sources` are explicit, add the new paths).
+**Known verification gaps for the implementer (resolve while implementing, not blockers):** (a) confirm `ProjectStore`'s real project-insertion API name for test setup (Task 5 note); (b) confirm/reuse an existing `StubURLProtocol` in `codepetTests` (Task 4 note); (c) trim protocol-stub methods to the compiler's actual non-defaulted set (Task 7 note); (d) new files under `codepet/`/`codepetTests/` are auto-included by the project's `PBXFileSystemSynchronizedRootGroup` — no `xcodegen`/project edit needed; there is already an `OnboardingFlow.swift` in `codepet/Views/Onboarding/`, so keep the new `ProjectInterviewView`/`ProjectInterviewModel` names distinct.

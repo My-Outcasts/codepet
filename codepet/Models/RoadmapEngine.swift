@@ -8,7 +8,9 @@ enum RoadmapEngine {
         Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
-    /// A task's dependencies are all satisfied (a missing dep id is treated as satisfied).
+    /// A task's dependencies are all satisfied. A dangling dep id (one not present in the
+    /// task set) is INTENTIONALLY treated as satisfied — fail-open: a task shows ready
+    /// rather than dead-ending the board on a stale/removed dependency.
     private static func depsSatisfied(_ task: RoadmapTask, _ index: [String: RoadmapTask]) -> Bool {
         !task.dependsOn.contains { index[$0]?.done == false }
     }

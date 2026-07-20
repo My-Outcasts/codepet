@@ -16,8 +16,9 @@ struct LibItem: Codable, Hashable, Identifiable {
     var kind: String
 }
 
-/// The single company's in-memory state (companies/{uid}). Departments and
-/// library are typed but empty until later phases populate them.
+/// The single company's in-memory state (companies/{uid}). `tasks` is the
+/// roadmap, populated from Firestore / generation. Departments and library are
+/// typed but empty until later phases populate them.
 struct CompanyState: Codable, Hashable {
     var brief: CompanyBrief
     var departments: [Department]

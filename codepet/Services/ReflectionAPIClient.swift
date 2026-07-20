@@ -580,6 +580,7 @@ protocol ReflectionAPIClientProtocol {
     func synthesizeBrief(_ request: SynthesizeBriefRequest) async throws -> SynthesizeBriefResponse
     func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse
     func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief
+    func scaffoldRoadmap(brief: CompanyBrief, stage: ProjectStage, departments: [RoadmapDeptInput]) async throws -> [RoadmapTask]
 }
 
 extension ReflectionAPIClientProtocol {
@@ -606,6 +607,11 @@ extension ReflectionAPIClientProtocol {
     /// Default so existing conformers (e.g. test mocks) don't have to implement
     /// brief enrichment. The real client overrides this.
     func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief {
+        throw ReflectionAPIError.malformedResponse
+    }
+    /// Default so existing conformers (e.g. test mocks) don't have to implement
+    /// roadmap scaffolding. The real client overrides this.
+    func scaffoldRoadmap(brief: CompanyBrief, stage: ProjectStage, departments: [RoadmapDeptInput]) async throws -> [RoadmapTask] {
         throw ReflectionAPIError.malformedResponse
     }
 }
@@ -655,6 +661,19 @@ struct SynthesizeBriefResponse: Codable {
 struct EnrichBriefRequest: Codable { let brief: CompanyBrief }
 struct EnrichBriefResponse: Codable { let brief: CompanyBrief }
 
+// MARK: - Scaffold Roadmap DTOs
+
+/// One department fed to the scaffoldRoadmap Cloud Function — its health-pillar
+/// key, display name, and the expertise blurb that grounds the generated tasks.
+struct RoadmapDeptInput: Codable { let key: String; let name: String; let expertise: String }
+
+private struct ScaffoldRoadmapRequest: Codable { let brief: CompanyBrief; let stage: String; let departments: [RoadmapDeptInput] }
+private struct ScaffoldRoadmapResponse: Codable {
+    struct Dept: Codable { let key: String; let tasks: [Task] }
+    struct Task: Codable { let title: String; let detail: String; let who: String; let kind: String }
+    let departments: [Dept]
+}
+
 enum ReflectionAPIError: Error {
     case notSignedIn
     case http(status: Int, body: SummarizeTurnError?)
@@ -674,6 +693,7 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     private static let synthesizeBriefEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/synthesizeBrief")!
     private static let dictionaryEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateDictionary")!
     private static let enrichBriefEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/enrichBrief")!
+    private static let scaffoldRoadmapEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/scaffoldRoadmap")!
 
     private let session: URLSession
     private let authTokenProvider: () async throws -> String
@@ -1192,5 +1212,35 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
             catch { throw ReflectionAPIError.malformedResponse }
         }
         throw ReflectionAPIError.http(status: http.statusCode, body: nil)
+    }
+
+    // MARK: - Scaffold Roadmap
+
+    func scaffoldRoadmap(brief: CompanyBrief, stage: ProjectStage, departments: [RoadmapDeptInput]) async throws -> [RoadmapTask] {
+        let token = try await authTokenProvider()
+        var urlRequest = URLRequest(url: Self.scaffoldRoadmapEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = try JSONEncoder().encode(
+            ScaffoldRoadmapRequest(brief: brief, stage: stage.rawValue, departments: departments))
+
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else { throw ReflectionAPIError.malformedResponse }
+        guard http.statusCode == 200 else { throw ReflectionAPIError.http(status: http.statusCode, body: nil) }
+        let decoded: ScaffoldRoadmapResponse
+        do { decoded = try JSONDecoder().decode(ScaffoldRoadmapResponse.self, from: data) }
+        catch { throw ReflectionAPIError.malformedResponse }
+
+        var out: [RoadmapTask] = []
+        for dept in decoded.departments {
+            guard let pillar = HealthPillar(rawValue: dept.key) else { continue }
+            for (i, t) in dept.tasks.enumerated() {
+                out.append(RoadmapTask(
+                    id: "\(dept.key)-\(i)", deptKey: pillar, title: t.title, detail: t.detail,
+                    who: TaskWho(rawValue: t.who) ?? .draft, kind: t.kind, done: false))
+            }
+        }
+        return out
     }
 }

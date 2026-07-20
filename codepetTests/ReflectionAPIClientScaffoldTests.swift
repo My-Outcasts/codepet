@@ -32,4 +32,12 @@ final class ReflectionAPIClientScaffoldTests: XCTestCase {
             brief: CompanyBrief(), stage: .idea, departments: [RoadmapDeptInput(key: "engineering", name: "E", expertise: "x")])
             XCTFail("expected throw") } catch { /* ok */ }
     }
+
+    func testDuplicateDeptBlocksGetUniqueIds() async throws {
+        let body = #"{"departments":[{"key":"engineering","tasks":[{"title":"Ship auth","detail":"Wire sign-in","who":"draft","kind":"build"}]},{"key":"engineering","tasks":[{"title":"Add tests","detail":"Cover auth","who":"draft","kind":"build"}]}]}"#
+        let tasks = try await client(200, body).scaffoldRoadmap(
+            brief: CompanyBrief(projectName: "Codepet"), stage: .building,
+            departments: [RoadmapDeptInput(key: "engineering", name: "Engineering", expertise: "ship")])
+        XCTAssertEqual(tasks.map(\.id), ["engineering-0", "engineering-1"])
+    }
 }

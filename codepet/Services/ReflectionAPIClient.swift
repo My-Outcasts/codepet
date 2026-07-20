@@ -1233,12 +1233,15 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         catch { throw ReflectionAPIError.malformedResponse }
 
         var out: [RoadmapTask] = []
+        var perDeptCount: [String: Int] = [:]
         for dept in decoded.departments {
             guard let pillar = HealthPillar(rawValue: dept.key) else { continue }
-            for (i, t) in dept.tasks.enumerated() {
+            for t in dept.tasks {
+                let idx = perDeptCount[dept.key, default: 0]
                 out.append(RoadmapTask(
-                    id: "\(dept.key)-\(i)", deptKey: pillar, title: t.title, detail: t.detail,
+                    id: "\(dept.key)-\(idx)", deptKey: pillar, title: t.title, detail: t.detail,
                     who: TaskWho(rawValue: t.who) ?? .draft, kind: t.kind, done: false))
+                perDeptCount[dept.key] = idx + 1
             }
         }
         return out

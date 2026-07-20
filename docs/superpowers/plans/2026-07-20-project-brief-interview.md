@@ -77,7 +77,7 @@ final class CompanyBriefTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/CompanyBriefTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/CompanyBriefTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'CompanyBrief' in scope`.
 
 - [ ] **Step 3: Write the model**
@@ -188,7 +188,7 @@ final class BriefContextTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefContextTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefContextTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'BriefContext' in scope`.
 
 - [ ] **Step 3: Write the composer** (verbatim logic port of `briefToContext`)
@@ -554,7 +554,7 @@ final class StubURLProtocol: URLProtocol {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ReflectionAPIClientEnrichTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ReflectionAPIClientEnrichTests 2>&1 | tail -20`
 Expected: FAIL — `value of type 'ReflectionAPIClient' has no member 'enrichBrief'`.
 
 - [ ] **Step 3: Add DTOs, endpoint, protocol requirement, and method**
@@ -662,7 +662,7 @@ final class ProjectStoreBriefTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectStoreBriefTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectStoreBriefTests 2>&1 | tail -20`
 Expected: FAIL — no member `setCompanyBrief` / `companyBrief`.
 
 - [ ] **Step 3: Add the field + store methods**
@@ -749,7 +749,7 @@ final class BriefSynthesizerDemotionTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefSynthesizerDemotionTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/BriefSynthesizerDemotionTests 2>&1 | tail -20`
 Expected: FAIL — the synthesizer fires (`wasCalled == true`) because a summarized session with ≥minSessions triggers it.
 
 - [ ] **Step 3: Add the guard**
@@ -849,7 +849,7 @@ final class EnrichStub: ReflectionAPIClientProtocol {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectInterviewModelTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/ProjectInterviewModelTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'ProjectInterviewModel' in scope`.
 
 - [ ] **Step 3: Write the model**
@@ -1008,7 +1008,7 @@ final class InterviewCoordinatorTests: XCTestCase {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
 Expected: FAIL — `cannot find 'InterviewCoordinator' in scope`.
 
 - [ ] **Step 3: Write the coordinator**
@@ -1058,7 +1058,7 @@ In `codepet/App/ContentView.swift`, add the env object and a sheet on the root `
 
 - [ ] **Step 5: Run test + full build to verify**
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/InterviewCoordinatorTests 2>&1 | tail -20`
 Expected: PASS, and the app target builds (sheet wired).
 
 - [ ] **Step 6: Commit**
@@ -1077,7 +1077,7 @@ git commit -m "feat(brief): present founder interview via InterviewCoordinator s
 
 After Task 8, run the full suite once:
 
-Run: `cd ~/Documents/codepet && xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -30`
+Run: `cd ~/Documents/codepet-brief-wt && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -30`
 Expected: all `codepetTests` pass, app builds clean.
 
 Run: `cd ~/Documents/Claude/CodePet-Clean/functions && npm test 2>&1 | tail -20 && npx tsc --noEmit`

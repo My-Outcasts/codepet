@@ -18,6 +18,8 @@ final class CompanyStore: ObservableObject {
     /// Injectable so tests can supply a stub without Firestore.
     private let loader: (String) async -> CompanyState
     private let saver: (String, CompanyBrief) async -> Bool
+    private let roadmapFetcher: (CompanyBrief) async -> [RoadmapTask]
+    private let tasksSaver: (String, [RoadmapTask]) async -> Bool
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -32,9 +34,13 @@ final class CompanyStore: ObservableObject {
     private(set) var onboardingToken = 0
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
-         saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief) {
+         saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
+         roadmapFetcher: @escaping (CompanyBrief) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
+         tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks) {
         self.loader = loader
         self.saver = saver
+        self.roadmapFetcher = roadmapFetcher
+        self.tasksSaver = tasksSaver
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -82,6 +88,23 @@ final class CompanyStore: ObservableObject {
         guard token == hydrationToken else { return }
         company.onboardedAt = Date()
         isOnboarding = false
+    }
+
+    /// Generate the roadmap (fail-open). Token-guarded: an account switch during the
+    /// fetch discards. An empty result is "no change" (keeps existing tasks).
+    func generateRoadmap() async {
+        let token = hydrationToken
+        let fetched = await roadmapFetcher(company.brief)
+        guard token == hydrationToken, !fetched.isEmpty else { return }
+        company.tasks = fetched
+        if let cid = companyId { _ = await tasksSaver(cid, fetched) }
+    }
+
+    /// Flip a task's done state and persist (fail-soft).
+    func toggleTaskDone(id: String) async {
+        guard let i = company.tasks.firstIndex(where: { $0.id == id }) else { return }
+        company.tasks[i].done.toggle()
+        if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
     }
 
     /// Clear on sign-out / account switch.

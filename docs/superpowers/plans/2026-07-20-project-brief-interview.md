@@ -54,7 +54,7 @@
 ```swift
 // codepetTests/CompanyBriefTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 final class CompanyBriefTests: XCTestCase {
     func testRoundTripsThroughCodableWithOptionalFields() throws {
@@ -151,7 +151,7 @@ git commit -m "feat(brief): CompanyBrief model (verbatim port of web schema)"
 ```swift
 // codepetTests/BriefContextTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 final class BriefContextTests: XCTestCase {
     func testReturnsNilWithoutProductSignal() {
@@ -508,7 +508,7 @@ Expected: `enrichBrief` created at `https://us-central1-devpet-8f4b1.cloudfuncti
 ```swift
 // codepetTests/ReflectionAPIClientEnrichTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 final class ReflectionAPIClientEnrichTests: XCTestCase {
     func testEnrichBriefReturnsMergedBriefFromServer() async throws {
@@ -637,7 +637,7 @@ git commit -m "feat(brief): ReflectionAPIClient.enrichBrief client method"
 ```swift
 // codepetTests/ProjectStoreBriefTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 @MainActor
 final class ProjectStoreBriefTests: XCTestCase {
@@ -727,7 +727,7 @@ git commit -m "feat(brief): persist structured CompanyBrief per project"
 ```swift
 // codepetTests/BriefSynthesizerDemotionTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 @MainActor
 final class BriefSynthesizerDemotionTests: XCTestCase {
@@ -796,7 +796,7 @@ git commit -m "feat(brief): demote BriefSynthesizer over interviewed projects"
 ```swift
 // codepetTests/ProjectInterviewModelTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 @MainActor
 final class ProjectInterviewModelTests: XCTestCase {
@@ -989,7 +989,7 @@ git commit -m "feat(brief): project interview model + view (6-step founder inter
 ```swift
 // codepetTests/InterviewCoordinatorTests.swift
 import XCTest
-@testable import CodePet
+@testable import codepet
 
 @MainActor
 final class InterviewCoordinatorTests: XCTestCase {

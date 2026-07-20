@@ -29,11 +29,14 @@ final class CompanyOnboardingModel: ObservableObject {
     }
 
     /// Enrich (fail-open) then hand to the store to persist + finish onboarding.
+    /// Captures the onboarding token BEFORE the enrich await so a mid-await account
+    /// switch can't misroute the write (the store discards a superseded finish).
     func submit(store: CompanyStore, api: ReflectionAPIClientProtocol) async {
         isSubmitting = true
         defer { isSubmitting = false }
+        let token = store.onboardingToken
         let raw = buildBrief()
         let enriched = (try? await api.enrichBrief(raw)) ?? raw
-        await store.finishOnboarding(brief: enriched)
+        await store.finishOnboarding(brief: enriched, token: token)
     }
 }

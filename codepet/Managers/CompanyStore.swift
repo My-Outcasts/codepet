@@ -24,6 +24,13 @@ final class CompanyStore: ObservableObject {
     /// instead of clobbering newer state.
     private var hydrationToken = 0
 
+    /// The `hydrationToken` in effect when the current onboarding started. The
+    /// model captures this BEFORE the enrich await and passes it to
+    /// `finishOnboarding`; a finish only applies if it still matches — so an
+    /// account switch during the enrich/save await can't write one account's
+    /// brief into another's doc or clobber the newly-hydrated account.
+    private(set) var onboardingToken = 0
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief) {
         self.loader = loader
@@ -48,20 +55,31 @@ final class CompanyStore: ObservableObject {
         company = loaded
         isHydrating = false
         isOnboarding = needsOnboarding
+        onboardingToken = hydrationToken
     }
 
     /// Enrich already happened in the model; here we persist + stamp + leave onboarding.
     /// Fail-soft: a failed cloud write still lets the founder into the app.
-    func finishOnboarding(brief: CompanyBrief) async {
-        if let cid = companyId { _ = await saver(cid, brief) }
+    /// `token` is `onboardingToken` captured by the caller BEFORE the enrich await;
+    /// if an account switch superseded this onboarding (bumping the token) before or
+    /// during the save await, discard without writing the wrong doc or clobbering state.
+    func finishOnboarding(brief: CompanyBrief, token: Int) async {
+        guard token == hydrationToken, let cid = companyId else { return }
+        _ = await saver(cid, brief)
+        guard token == hydrationToken else { return }
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
     }
 
-    /// Skip: stamp with the current (empty) brief so they aren't re-blocked.
+    /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
+    /// directly from the view (no prior await); capture the token at entry and re-check
+    /// after the save await.
     func skipOnboarding() async {
-        if let cid = companyId { _ = await saver(cid, company.brief) }
+        let token = hydrationToken
+        guard let cid = companyId else { return }
+        _ = await saver(cid, company.brief)
+        guard token == hydrationToken else { return }
         company.onboardedAt = Date()
         isOnboarding = false
     }

@@ -13,6 +13,7 @@ struct CodePetApp: App {
     @StateObject private var chatController: SessionChatController
     @StateObject private var hookInstaller = HookInstaller()
     @StateObject private var projectStore = ProjectStore()
+    @StateObject private var companyStore = CompanyStore()
     @StateObject private var interviewCoordinator = InterviewCoordinator()
     @StateObject private var sessionStatusStore = SessionStatusStore()
     @StateObject private var demoController = DemoScriptController()
@@ -63,6 +64,7 @@ struct CodePetApp: App {
                 .environmentObject(chatController)
                 .environmentObject(hookInstaller)
                 .environmentObject(projectStore)
+                .environmentObject(companyStore)
                 .environmentObject(interviewCoordinator)
                 .environmentObject(sessionStatusStore)
                 .environmentObject(demoController)

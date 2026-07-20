@@ -14,6 +14,7 @@ struct ContentView: View {
     @EnvironmentObject var gameState: GameState
     @EnvironmentObject var tipsState: TipsState
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var interviewCoordinator: InterviewCoordinator
     @EnvironmentObject var challengeProgress: ChallengeProgress
     @EnvironmentObject var learnProgress: LearnProgress
@@ -41,8 +42,8 @@ struct ContentView: View {
                 // multi-step onboarding entirely.
                 ReturningSignInView()
             } else {
-                // Authenticated (or guest) — main app
-                MainTabView()
+                // Authenticated (or guest) — the company shell (web product).
+                AppShellView()
             }
         }
         .overlay {
@@ -90,6 +91,7 @@ struct ContentView: View {
             // Scope the session chat file to this account on every sign-in (not
             // just on a switch) so chat history is always isolated per uid.
             chatStore.activate(uid: user.uid)
+            Task { await companyStore.hydrate(companyId: user.uid) }
 
             // Legacy onboarding flag — keep code that still reads it satisfied.
             if !appState.onboardingComplete {
@@ -163,6 +165,7 @@ struct ContentView: View {
         tipsState.reset()
         TipsPersistence.shared.load(into: tipsState)
         projectStore.reload()
+        companyStore.reset()
         challengeProgress.load()
         learnProgress.reload()
         sessionStatusStore.reload()
@@ -182,6 +185,7 @@ struct ContentView: View {
         .environmentObject(GameState())
         .environmentObject(TipsState())
         .environmentObject(ProjectStore())
+        .environmentObject(CompanyStore())
         .environmentObject(InterviewCoordinator())
         .environmentObject(ChallengeProgress())
         .environmentObject(LearnProgress())

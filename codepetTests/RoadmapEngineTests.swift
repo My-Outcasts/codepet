@@ -23,6 +23,25 @@ final class RoadmapEngineTests: XCTestCase {
         XCTAssertEqual(RoadmapEngine.status(for: d, in: all), .codepetCanDo)
     }
 
+    /// Precedence must hold when conditions OVERLAP (not just in isolation):
+    /// done > needsApproval > blocked > needsYou > codepetCanDo.
+    func testStatusPrecedenceWhenConditionsOverlap() {
+        let z = t("z", .find)                                       // an unmet dependency
+        // drafted AND blocked → needsApproval wins over blocked
+        let draftedBlocked = t("a", .build, deps: ["z"], drafted: true)
+        // blocked AND who:.you → blocked wins over needsYou
+        let blockedYou = t("b", .build, who: .you, deps: ["z"])
+        // drafted AND who:.you → needsApproval wins over needsYou
+        let draftedYou = t("c", .build, who: .you, drafted: true)
+        // done AND drafted → done wins over needsApproval
+        let doneDrafted = t("d", .build, done: true, drafted: true)
+        let all = [z, draftedBlocked, blockedYou, draftedYou, doneDrafted]
+        XCTAssertEqual(RoadmapEngine.status(for: draftedBlocked, in: all), .needsApproval)
+        XCTAssertEqual(RoadmapEngine.status(for: blockedYou, in: all), .blocked)
+        XCTAssertEqual(RoadmapEngine.status(for: draftedYou, in: all), .needsApproval)
+        XCTAssertEqual(RoadmapEngine.status(for: doneDrafted, in: all), .done)
+    }
+
     func testNextStepPicksFirstUnblockedByPhaseOrder() {
         // build-phase task is ready; a ship-phase task is also ready but later phase.
         let all = [t("s", .ship), t("f", .find, done: true), t("b", .build, deps: ["f"])]

@@ -41,6 +41,9 @@ struct ContentView: View {
                 // Not signed in — show sign-in (Google + email). Skip the
                 // multi-step onboarding entirely.
                 ReturningSignInView()
+            } else if companyStore.isOnboarding {
+                // Fresh account — first-run founder interview before the shell.
+                CompanyOnboardingView()
             } else {
                 // Authenticated (or guest) — the company shell (web product).
                 AppShellView()

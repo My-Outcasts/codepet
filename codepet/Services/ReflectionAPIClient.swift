@@ -579,6 +579,7 @@ protocol ReflectionAPIClientProtocol {
     func fetchReferenceDistillation(_ request: DistillReferenceRequest) async throws -> DistillReferenceResponse
     func synthesizeBrief(_ request: SynthesizeBriefRequest) async throws -> SynthesizeBriefResponse
     func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse
+    func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief
 }
 
 extension ReflectionAPIClientProtocol {
@@ -600,6 +601,11 @@ extension ReflectionAPIClientProtocol {
     /// Default so existing conformers (e.g. test mocks) don't have to implement
     /// dictionary generation. The real client overrides this.
     func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse {
+        throw ReflectionAPIError.malformedResponse
+    }
+    /// Default so existing conformers (e.g. test mocks) don't have to implement
+    /// brief enrichment. The real client overrides this.
+    func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief {
         throw ReflectionAPIError.malformedResponse
     }
 }
@@ -641,6 +647,14 @@ struct SynthesizeBriefResponse: Codable {
     }
 }
 
+// MARK: - Enrich Brief DTOs
+
+/// Request/response for the enrichBrief Cloud Function — takes the founder's
+/// self-described `CompanyBrief` and returns a server-enriched version (adds
+/// `summary`/`categories`/etc. where the model has enough signal).
+struct EnrichBriefRequest: Codable { let brief: CompanyBrief }
+struct EnrichBriefResponse: Codable { let brief: CompanyBrief }
+
 enum ReflectionAPIError: Error {
     case notSignedIn
     case http(status: Int, body: SummarizeTurnError?)
@@ -659,6 +673,7 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     private static let distillEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/distillReference")!
     private static let synthesizeBriefEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/synthesizeBrief")!
     private static let dictionaryEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateDictionary")!
+    private static let enrichBriefEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/enrichBrief")!
 
     private let session: URLSession
     private let authTokenProvider: () async throws -> String
@@ -1158,5 +1173,24 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
 
         let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: data)
         throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
+    }
+
+    // MARK: - Enrich Brief (non-streaming)
+
+    func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief {
+        let token = try await authTokenProvider()
+        var urlRequest = URLRequest(url: Self.enrichBriefEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = try JSONEncoder().encode(EnrichBriefRequest(brief: brief))
+
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else { throw ReflectionAPIError.malformedResponse }
+        if http.statusCode == 200 {
+            do { return try JSONDecoder().decode(EnrichBriefResponse.self, from: data).brief }
+            catch { throw ReflectionAPIError.malformedResponse }
+        }
+        throw ReflectionAPIError.http(status: http.statusCode, body: nil)
     }
 }

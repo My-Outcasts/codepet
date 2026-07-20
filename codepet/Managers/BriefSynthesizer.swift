@@ -46,6 +46,14 @@ final class BriefSynthesizer: ObservableObject {
         }
 
         for (path, entries) in byProject {
+            // Interview brief is the source of truth — never synthesize over a
+            // project that already has one. Forward-looking defense-in-depth:
+            // covers any future path that could set companyBrief without also
+            // setting the markBriefUserOwned marker, not just today's callers.
+            if projectStore.companyBrief(for: path) != nil {
+                projectStore.markBriefBackfilled(projectPath: path)
+                continue
+            }
             guard !projectStore.briefBackfillDone(projectPath: path) else { continue }
             // User-owned description: never touch it; mark done so we stop checking.
             guard projectStore.briefDescriptionIsSynthesisWritable(projectPath: path) else {

@@ -14,6 +14,7 @@ struct ContentView: View {
     @EnvironmentObject var gameState: GameState
     @EnvironmentObject var tipsState: TipsState
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var interviewCoordinator: InterviewCoordinator
     @EnvironmentObject var challengeProgress: ChallengeProgress
     @EnvironmentObject var learnProgress: LearnProgress
     @EnvironmentObject var sessionStatusStore: SessionStatusStore
@@ -49,6 +50,10 @@ struct ContentView: View {
                 HealthNudgeModal(stage: stage)
                     .transition(.opacity)
             }
+        }
+        .sheet(item: $interviewCoordinator.active) { project in
+            ProjectInterviewView(projectId: project.id) { interviewCoordinator.active = nil }
+                .environmentObject(projectStore)
         }
         .animation(.easeInOut(duration: 0.25), value: demoController.activeHealthModal)
         .animation(.easeInOut(duration: 0.3), value: showSplash)
@@ -162,6 +167,10 @@ struct ContentView: View {
         learnProgress.reload()
         sessionStatusStore.reload()
         PetMemoryStore.shared.reload()
+        // A pending founder-interview sheet is per-account state (it targets a
+        // specific project id); clear it so a sheet/submit surviving the swap
+        // can't write under the wrong account.
+        interviewCoordinator.active = nil
     }
 }
 
@@ -173,6 +182,7 @@ struct ContentView: View {
         .environmentObject(GameState())
         .environmentObject(TipsState())
         .environmentObject(ProjectStore())
+        .environmentObject(InterviewCoordinator())
         .environmentObject(ChallengeProgress())
         .environmentObject(LearnProgress())
         .environmentObject(SessionStatusStore())

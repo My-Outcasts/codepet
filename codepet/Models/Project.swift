@@ -12,6 +12,11 @@ struct Project: Identifiable, Hashable, Codable {
     /// Optional user-provided brief describing the project.
     var brief: String
 
+    /// Structured founder-interview brief (source of truth). When present, the
+    /// flat `brief` string above is its composed render (see BriefContext).
+    /// Optional + defaulted so projects persisted before this field decode cleanly.
+    var companyBrief: CompanyBrief? = nil
+
     /// User-set lifecycle stage. `nil` = let the health engine infer it from
     /// signals (`ProjectHealthEngine.inferStage`). Set explicitly when the user
     /// picks a stage in the Project Health folder header.

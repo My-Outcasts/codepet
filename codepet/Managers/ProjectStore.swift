@@ -308,6 +308,24 @@ final class ProjectStore: ObservableObject {
         return projects[path]?.brief ?? ""
     }
 
+    /// Read the structured founder brief for a project path, if any.
+    func companyBrief(for projectPath: String?) -> CompanyBrief? {
+        guard let path = projectPath else { return nil }
+        return projects[path]?.companyBrief
+    }
+
+    /// Set the structured founder brief. Recomposes the flat `brief` string and
+    /// marks the project user-owned so from-history synthesis never overwrites it.
+    func setCompanyBrief(projectId: String, brief: CompanyBrief) {
+        guard var project = projects[projectId] else { return }
+        project.companyBrief = brief
+        if let composed = BriefContext.compose(brief) { project.brief = composed }
+        projects[projectId] = project
+        markBriefUserOwned(projectPath: projectId)   // persists markers
+        persist()                                    // persists projects dict
+        logger.info("Set founder brief for \(project.displayName)")
+    }
+
     // MARK: - Brief ownership & backfill
 
     /// True only when the user has NOT hand-edited this project's description,

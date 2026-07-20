@@ -10,6 +10,7 @@ import SwiftUI
 struct ProjectBriefCard: View {
     let projectPath: String
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var interviewCoordinator: InterviewCoordinator
     @Environment(\.uiLanguage) private var uiLanguage
 
     @State private var briefText: String = ""
@@ -84,6 +85,24 @@ struct ProjectBriefCard: View {
                 .font(ReflectionTheme.sans(14, weight: .semibold))
                 .foregroundColor(ReflectionTheme.primaryText)
             Spacer()
+            // Guided founder-brief interview. Shown only when this project has no
+            // structured brief yet (the coordinator's request(_:) is gated the same
+            // way, so it opens the interview sheet at the app root).
+            if project?.companyBrief == nil, let p = project {
+                Button {
+                    interviewCoordinator.request(p)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11))
+                        Text(uiLanguage == .vi ? "Thiết lập có hướng dẫn" : "Guided setup")
+                            .font(ReflectionTheme.sans(11, weight: .medium))
+                    }
+                    .foregroundColor(ReflectionTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, hasDescription && !isEditing ? 10 : 0)
+            }
             if hasDescription && !isEditing {
                 Button {
                     briefText = briefParts.description

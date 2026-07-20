@@ -656,4 +656,5 @@ struct InsightsNavIcon: View {
     MainTabView()
         .environmentObject(AppState())
         .environmentObject(AuthManager())
+        .environmentObject(InterviewCoordinator())
 }

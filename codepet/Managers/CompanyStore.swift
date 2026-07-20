@@ -14,6 +14,11 @@ final class CompanyStore: ObservableObject {
     /// Injectable so tests can supply a stub without Firestore.
     private let loader: (String) async -> CompanyState
 
+    /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
+    /// been superseded (account switch mid-flight) and discard its result
+    /// instead of clobbering newer state.
+    private var hydrationToken = 0
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load) {
         self.loader = loader
     }
@@ -22,14 +27,20 @@ final class CompanyStore: ObservableObject {
 
     /// Hydrate the company from Firestore (fail-soft inside the loader).
     func hydrate(companyId: String) async {
+        hydrationToken &+= 1
+        let token = hydrationToken
         isHydrating = true
-        company = await loader(companyId)
+        let loaded = await loader(companyId)
+        guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
+        company = loaded
         isHydrating = false
     }
 
     /// Clear on sign-out / account switch.
     func reset() {
+        hydrationToken &+= 1
         company = .empty
         view = .overview
+        isHydrating = false
     }
 }

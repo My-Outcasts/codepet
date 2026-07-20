@@ -25,4 +25,32 @@ final class CompanyStoreTests: XCTestCase {
         XCTAssertEqual(store.view, .overview)
         XCTAssertEqual(store.company, CompanyState.empty)
     }
+
+    func testResetDuringHydrateWinsAndStaleResultIsDiscarded() async {
+        // Loader suspends on a continuation the test controls, so we can
+        // deterministically call reset() while hydrate() is still in flight.
+        let staleCompany = CompanyState(brief: CompanyBrief(projectName: "Stale"),
+                                         departments: [], library: [], stage: .building, companionId: "nova")
+        var continuation: CheckedContinuation<CompanyState, Never>?
+        let store = CompanyStore(loader: { _ in
+            await withCheckedContinuation { cont in
+                continuation = cont
+            }
+        })
+
+        let hydrateTask = Task { await store.hydrate(companyId: "old-account") }
+
+        // Wait until the loader has actually suspended and captured its continuation.
+        while continuation == nil {
+            await Task.yield()
+        }
+
+        store.reset()
+        continuation?.resume(returning: staleCompany)
+        await hydrateTask.value
+
+        XCTAssertEqual(store.company, CompanyState.empty)
+        XCTAssertEqual(store.view, .overview)
+        XCTAssertFalse(store.isHydrating)
+    }
 }

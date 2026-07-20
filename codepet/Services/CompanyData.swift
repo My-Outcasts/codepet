@@ -29,6 +29,11 @@ enum CompanyData {
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via
     /// JSONSerialization → JSONDecoder (no FirebaseFirestoreSwift dependency;
     /// the doc holds only strings/nested strings, which are JSON-safe).
+    /// Heads-up: a non-JSON-representable Firestore type (e.g. `Timestamp`,
+    /// `GeoPoint`, `DocumentReference`) added to `CompanyDoc` would throw in
+    /// `JSONSerialization.data`/`JSONDecoder.decode` here and silently
+    /// fail-soft to `.empty` — convert such fields to a JSON-safe
+    /// representation (e.g. epoch seconds) before adding them to the doc.
     static func load(companyId: String) async -> CompanyState {
         let db = Firestore.firestore()
         do {

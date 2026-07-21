@@ -24,8 +24,14 @@ struct AppShellView: View {
             HStack(spacing: 0) {
                 sidebar
                 Divider()
-                ShellPlaceholderView(view: companyStore.view)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Group {
+                    if companyStore.view == .overview {
+                        OverviewBoardView()
+                    } else {
+                        ShellPlaceholderView(view: companyStore.view)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if !copilotCollapsed {
                     Divider()
                     copilot

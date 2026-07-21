@@ -20,12 +20,13 @@ struct CompanyState: Codable, Hashable {
     var companionId: String
     var onboardedAt: Date?
     var tasks: [RoadmapTask]
+    var enabledTools: Set<String>
 
-    /// Explicit memberwise init so `tasks` (non-optional) can default to `[]` — existing
-    /// call sites that predate the roadmap phase omit it and keep compiling.
+    /// Explicit memberwise init so `tasks`/`enabledTools` can default — existing call
+    /// sites that predate the roadmap/environment phases omit them and keep compiling.
     init(brief: CompanyBrief, departments: [Department], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
-         tasks: [RoadmapTask] = []) {
+         tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds) {
         self.brief = brief
         self.departments = departments
         self.library = library
@@ -33,6 +34,7 @@ struct CompanyState: Codable, Hashable {
         self.companionId = companionId
         self.onboardedAt = onboardedAt
         self.tasks = tasks
+        self.enabledTools = enabledTools
     }
 
     static let empty = CompanyState(

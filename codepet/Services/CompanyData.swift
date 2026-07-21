@@ -12,6 +12,7 @@ struct CompanyDoc: Codable {
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
+    var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -27,7 +28,8 @@ enum CompanyData {
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
             companionId: doc.companionId ?? "byte",
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
-            tasks: doc.tasks ?? []
+            tasks: doc.tasks ?? [],
+            enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds
         )
     }
 
@@ -88,6 +90,22 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(deliverablesPayload(library), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for an enabled-tools write — testable without Firestore.
+    static func enabledToolsPayload(_ tools: [String]) -> [String: Any] {
+        ["enabledTools": tools]
+    }
+
+    /// Write companies/{uid}.enabledTools, merge. Fail-soft: false on error.
+    static func saveEnabledTools(companyId: String, tools: [String]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(enabledToolsPayload(tools), merge: true)
             return true
         } catch {
             return false

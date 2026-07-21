@@ -27,6 +27,7 @@ final class CompanyStore: ObservableObject {
     private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
+    private let toolsSaver: (String, [String]) async -> Bool
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -46,7 +47,8 @@ final class CompanyStore: ObservableObject {
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
-         librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary) {
+         librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
+         toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -54,6 +56,7 @@ final class CompanyStore: ObservableObject {
         self.chatSender = chatSender
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
+        self.toolsSaver = toolsSaver
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -239,6 +242,16 @@ final class CompanyStore: ObservableObject {
 
     /// Clear the transient run error (e.g. when the board's error line is dismissed).
     func clearRunError() { runError = nil }
+
+    /// Enable/disable a toolkit item and persist (fail-soft).
+    func toggleTool(id: String) async {
+        if company.enabledTools.contains(id) {
+            company.enabledTools.remove(id)
+        } else {
+            company.enabledTools.insert(id)
+        }
+        if let cid = companyId { _ = await toolsSaver(cid, Array(company.enabledTools)) }
+    }
 
     /// Clear on sign-out / account switch.
     func reset() {

@@ -29,4 +29,8 @@ final class MarkdownBlocksTests: XCTestCase {
         XCTAssertEqual(MarkdownBlocks.parse(""), [])
         XCTAssertEqual(MarkdownBlocks.parse("just text"), [.paragraph("just text")])
     }
+    func testExtraSpacingAndCRLFTrimmed() {
+        XCTAssertEqual(MarkdownBlocks.parse("-  item"), [.bullet("item")])   // double space after marker
+        XCTAssertEqual(MarkdownBlocks.parse("# Title\r"), [.heading(level: 1, text: "Title")])  // CRLF
+    }
 }

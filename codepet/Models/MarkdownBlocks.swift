@@ -20,17 +20,21 @@ enum MarkdownBlocks {
                 para = []
             }
         }
+        // Trim newlines too so a CRLF-sourced body doesn't leave a trailing \r.
+        func content(_ s: Substring) -> String {
+            s.trimmingCharacters(in: .whitespaces)
+        }
         for rawLine in md.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { flush(); continue }
             if line.hasPrefix("### ") {
-                flush(); blocks.append(.heading(level: 3, text: String(line.dropFirst(4))))
+                flush(); blocks.append(.heading(level: 3, text: content(line.dropFirst(4))))
             } else if line.hasPrefix("## ") {
-                flush(); blocks.append(.heading(level: 2, text: String(line.dropFirst(3))))
+                flush(); blocks.append(.heading(level: 2, text: content(line.dropFirst(3))))
             } else if line.hasPrefix("# ") {
-                flush(); blocks.append(.heading(level: 1, text: String(line.dropFirst(2))))
+                flush(); blocks.append(.heading(level: 1, text: content(line.dropFirst(2))))
             } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                flush(); blocks.append(.bullet(String(line.dropFirst(2))))
+                flush(); blocks.append(.bullet(content(line.dropFirst(2))))
             } else {
                 para.append(line)
             }

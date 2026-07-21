@@ -128,6 +128,22 @@ final class CompanyStore: ObservableObject {
         if let cid = companyId { _ = await tasksSaver(cid, fetched) }
     }
 
+    /// First-run scaffold: persist the collected brief, then run the fail-open
+    /// roadmap generation — WITHOUT leaving onboarding (the wizard's reveal step
+    /// renders next). Token-guarded like finishOnboarding: an account switch
+    /// during the persist/scaffold awaits discards (returns .empty), so one
+    /// account's brief/tasks can't land under another's doc. Mirrors the web's
+    /// scaffoldFromOnboarding; the reveal is derived from the resulting tasks.
+    func scaffoldFromOnboarding(brief: CompanyBrief, token: Int) async -> OnboardingReveal {
+        guard token == hydrationToken, let cid = companyId else { return .empty }
+        _ = await saver(cid, brief)
+        guard token == hydrationToken else { return .empty }
+        company.brief = brief
+        await generateRoadmap()
+        guard token == hydrationToken else { return .empty }
+        return OnboardingReveal.build(tasks: company.tasks)
+    }
+
     /// Flip a task's done state and persist (fail-soft).
     func toggleTaskDone(id: String) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }) else { return }

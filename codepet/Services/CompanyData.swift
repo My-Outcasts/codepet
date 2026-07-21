@@ -11,6 +11,7 @@ struct CompanyDoc: Codable {
     var companionId: String?
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
+    var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -22,7 +23,7 @@ enum CompanyData {
         return CompanyState(
             brief: doc.brief ?? CompanyBrief(),
             departments: [],
-            library: [],
+            library: doc.library ?? [],
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
             companionId: doc.companionId ?? "byte",
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },

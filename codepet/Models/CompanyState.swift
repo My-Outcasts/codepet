@@ -9,20 +9,13 @@ struct Department: Codable, Hashable, Identifiable {
     var id: String { key }
 }
 
-/// An approved deliverable in the library. Minimal this phase.
-struct LibItem: Codable, Hashable, Identifiable {
-    let id: String
-    var title: String
-    var kind: String
-}
-
 /// The single company's in-memory state (companies/{uid}). `tasks` is the
 /// roadmap, populated from Firestore / generation. Departments and library are
 /// typed but empty until later phases populate them.
 struct CompanyState: Codable, Hashable {
     var brief: CompanyBrief
     var departments: [Department]
-    var library: [LibItem]
+    var library: [Deliverable]
     var stage: ProjectStage
     var companionId: String
     var onboardedAt: Date?
@@ -30,7 +23,7 @@ struct CompanyState: Codable, Hashable {
 
     /// Explicit memberwise init so `tasks` (non-optional) can default to `[]` — existing
     /// call sites that predate the roadmap phase omit it and keep compiling.
-    init(brief: CompanyBrief, departments: [Department], library: [LibItem],
+    init(brief: CompanyBrief, departments: [Department], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
          tasks: [RoadmapTask] = []) {
         self.brief = brief

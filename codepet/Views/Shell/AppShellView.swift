@@ -75,15 +75,8 @@ struct AppShellView: View {
     }
 
     private var copilot: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(uiLanguage == .vi ? "Trợ lý" : "Copilot")
-                .font(.pixelSystem(size: 13, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-            Text(uiLanguage == .vi ? "Trò chuyện sẽ xuất hiện ở đây." : "Chat lands here in a later phase.")
-                .font(.pixelSystem(size: 11)).foregroundColor(CodepetTheme.mutedText)
-            Spacer()
-        }
-        .padding(14)
-        .frame(width: 300, alignment: .top)
+        CopilotChatView()
+            .frame(width: 300)
     }
 }
 

@@ -26,11 +26,16 @@ enum FontRegistrar {
     /// Inter ships as `Inter_18pt-Regular.ttf` but its PS name is
     /// `Inter18pt-Regular`).
     private static let bundled: [(file: String, postScript: String)] = [
-        ("Minecraft",            "Minecraft"),
-        ("Inter_18pt-Regular",   "Inter18pt-Regular"),
-        ("Inter_18pt-Medium",    "Inter18pt-Medium"),
-        ("Inter_18pt-SemiBold",  "Inter18pt-SemiBold"),
-        ("Inter_18pt-Bold",      "Inter18pt-Bold"),
+        ("Minecraft",              "Minecraft"),
+        // Google Sans Flex — the app's sans (matches the web). Inter kept as fallback.
+        ("GoogleSansFlex-Regular", "GoogleSansFlex-Regular"),
+        ("GoogleSansFlex-Medium",  "GoogleSansFlex-Medium"),
+        ("GoogleSansFlex-SemiBold","GoogleSansFlex-SemiBold"),
+        ("GoogleSansFlex-Bold",    "GoogleSansFlex-Bold"),
+        ("Inter_18pt-Regular",     "Inter18pt-Regular"),
+        ("Inter_18pt-Medium",      "Inter18pt-Medium"),
+        ("Inter_18pt-SemiBold",    "Inter18pt-SemiBold"),
+        ("Inter_18pt-Bold",        "Inter18pt-Bold"),
     ]
 
     /// Idempotent: safe to call multiple times. The font URLs are looked up

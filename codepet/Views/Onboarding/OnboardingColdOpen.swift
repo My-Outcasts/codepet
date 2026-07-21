@@ -38,7 +38,7 @@ struct OnboardingColdOpen: View {
                         .foregroundColor(.white)
                      + Text("not just your code.")
                         .foregroundColor(Color(hex: "#a78bfa")))
-                        .font(.system(size: 46, weight: .bold))
+                        .font(CodepetTheme.body(46, weight: .bold))
                         .lineSpacing(3)
                         .shadow(color: Color(hex: "#0c0424").opacity(0.55), radius: 30)
                     Text("Codepet runs the whole company around your product, department by department — and does the work with you, so you always understand what's happening.")
@@ -93,28 +93,50 @@ struct OnboardingColdOpen: View {
     }
 
     private var deptChips: some View {
-        // simple wrapping flow via a fixed-column grid keeps it dependency-free
-        FlowChips(items: OnboardingContent.departments.map { ($0.name, $0.dot) })
-    }
-}
-
-/// Minimal wrapping chip row (no external deps) for the cold-open department chips.
-private struct FlowChips: View {
-    let items: [(String, Color)]
-    var body: some View {
-        // Fixed adaptive grid; chips wrap and left-align.
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90, maximum: 200), spacing: 8, alignment: .leading)],
-                  alignment: .leading, spacing: 8) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+        // Flexbox-style wrap (chips size to content, whole-chip wrapping) — matches
+        // the web's flex-wrap; no mid-word breaking.
+        ChipFlowLayout(spacing: 8) {
+            ForEach(Array(OnboardingContent.departments.enumerated()), id: \.offset) { _, d in
                 HStack(spacing: 7) {
-                    Circle().fill(it.1).frame(width: 7, height: 7)
-                        .shadow(color: it.1, radius: 4)
-                    Text(it.0).font(CodepetTheme.body(12)).foregroundColor(.white.opacity(0.86))
+                    Circle().fill(d.dot).frame(width: 7, height: 7)
+                        .shadow(color: d.dot, radius: 4)
+                    Text(d.name).font(CodepetTheme.body(12)).foregroundColor(.white.opacity(0.86))
+                        .fixedSize()
                 }
                 .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 6)
                 .background(Capsule().fill(Color.white.opacity(0.07)))
                 .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
+        }
+    }
+}
+
+/// A flexbox-style wrapping layout: each subview keeps its natural size and wraps
+/// as a whole unit onto the next row. Left-aligned. macOS 13+ Layout protocol.
+struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0, widest: CGFloat = 0
+        for s in subviews {
+            let sz = s.sizeThatFits(.unspecified)
+            if x + sz.width > maxW, x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
+            x += sz.width + spacing
+            rowH = max(rowH, sz.height)
+            widest = max(widest, x)
+        }
+        return CGSize(width: min(maxW, widest), height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
+        for s in subviews {
+            let sz = s.sizeThatFits(.unspecified)
+            if x + sz.width > bounds.width, x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
+            s.place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y), proposal: ProposedViewSize(sz))
+            x += sz.width + spacing
+            rowH = max(rowH, sz.height)
         }
     }
 }

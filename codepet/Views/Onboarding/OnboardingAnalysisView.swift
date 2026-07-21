@@ -12,7 +12,7 @@ struct OnboardingAnalysisView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("byte is reading \(projectName.isEmpty ? "your project" : projectName)…")
-                .font(.system(size: 20, weight: .semibold))
+                .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             Text("Turning what you told me into a full company plan.")
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)

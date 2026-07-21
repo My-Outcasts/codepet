@@ -203,7 +203,7 @@ struct OnboardingView: View {
 
     private func heading(_ h: String, _ sub: String) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(h).font(.system(size: 20, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
+            Text(h).font(CodepetTheme.body(20, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
             Text(sub).font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
         }.padding(.bottom, 4)
     }
@@ -220,12 +220,12 @@ struct OnboardingView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
     private func chips(_ items: [String], selected: [String], toggle: @escaping (String) -> Void) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80, maximum: 200), spacing: 8, alignment: .leading)],
-                  alignment: .leading, spacing: 8) {
+        ChipFlowLayout(spacing: 8) {
             ForEach(items, id: \.self) { c in
                 let sel = selected.contains(c)
                 Button { toggle(c) } label: {
                     Text(c).font(CodepetTheme.body(13)).fontWeight(sel ? .semibold : .medium)
+                        .fixedSize()
                         .foregroundColor(sel ? OnboardingContent.Palette.accentDeep : CodepetTheme.bodyText)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(Capsule().fill(sel ? OnboardingContent.Palette.accentTint : OnboardingContent.Palette.surface2))

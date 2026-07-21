@@ -105,22 +105,23 @@ enum CodepetTheme {
         return Font.custom("Minecraft", size: size, relativeTo: .body)
     }
 
-    /// Inter sans-serif. Maps SwiftUI weight to the matching Inter weight file
-    /// registered by `FontRegistrar`. We ship Google's 18pt optical variant
-    /// because content sizes sit in the 8–17pt range. Unsupplied weights
-    /// (light/thin/black) fall back to Regular.
+    /// The app's sans — Google Sans Flex, matching the web. Maps SwiftUI weight
+    /// to the matching bundled static weight registered by `FontRegistrar`
+    /// (Inter remains bundled as the fallback family). Unsupplied weights
+    /// (light/thin/black) fall back to Regular. `inter(_:weight:)` is kept as an
+    /// alias so existing call sites are unchanged.
     static func inter(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         _ = FontRegistrar.autoRegister
         let name: String
         switch weight {
         case .black, .heavy, .bold:
-            name = "Inter18pt-Bold"
+            name = "GoogleSansFlex-Bold"
         case .semibold:
-            name = "Inter18pt-SemiBold"
+            name = "GoogleSansFlex-SemiBold"
         case .medium:
-            name = "Inter18pt-Medium"
+            name = "GoogleSansFlex-Medium"
         default:
-            name = "Inter18pt-Regular"
+            name = "GoogleSansFlex-Regular"
         }
         return Font.custom(name, size: size, relativeTo: .body)
     }

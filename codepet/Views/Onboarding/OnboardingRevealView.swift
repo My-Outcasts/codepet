@@ -15,7 +15,7 @@ struct OnboardingRevealView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Here's your company\(name.isEmpty ? "" : ", \(name)").")
-                .font(.system(size: 20, weight: .semibold))
+                .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             (Text("You're a ") + Text(role).bold()
              + Text(" at the ") + Text(stage).bold()
@@ -43,7 +43,7 @@ struct OnboardingRevealView: View {
     private func valueRow(_ head: String, suffix: String = "", bold: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 11) {
             Text("✦")
-                .font(.system(size: 11))
+                .font(CodepetTheme.body(11))
                 .foregroundColor(OnboardingContent.Palette.accentDeep)
                 .frame(width: 26, height: 26)
                 .background(RoundedRectangle(cornerRadius: 8).fill(OnboardingContent.Palette.accentTint))

@@ -44,4 +44,12 @@ enum RoadmapEngine {
     static func tasksByPhase(_ tasks: [RoadmapTask]) -> [RoadmapPhase: [RoadmapTask]] {
         Dictionary(grouping: tasks, by: { $0.phase })
     }
+
+    /// All five phases in `RoadmapPhase.allCases` order, each paired with its tasks
+    /// (empty array when none) — guarantees the board's column set + order regardless
+    /// of which phases currently have tasks.
+    static func orderedColumns(_ tasks: [RoadmapTask]) -> [(phase: RoadmapPhase, tasks: [RoadmapTask])] {
+        let grouped = tasksByPhase(tasks)
+        return RoadmapPhase.allCases.map { (phase: $0, tasks: grouped[$0] ?? []) }
+    }
 }

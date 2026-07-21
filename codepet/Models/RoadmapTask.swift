@@ -43,3 +43,27 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
 
 /// Derived per-task status (the board legend) — computed by RoadmapEngine, not stored.
 enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
+
+extension TaskWho {
+    /// Board chip label — who acts on the task.
+    func label(_ lang: AppLanguage) -> String {
+        switch self {
+        case .does:  return lang == .vi ? "Codepet làm" : "Codepet does"
+        case .draft: return lang == .vi ? "Codepet soạn" : "Codepet drafts"
+        case .you:   return lang == .vi ? "Bạn" : "You"
+        }
+    }
+}
+
+extension TaskStatus {
+    /// Board legend label for the derived status.
+    func label(_ lang: AppLanguage) -> String {
+        switch self {
+        case .done:          return lang == .vi ? "Xong" : "Done"
+        case .codepetCanDo:  return lang == .vi ? "Codepet làm được" : "Codepet can do"
+        case .needsApproval: return lang == .vi ? "Cần duyệt" : "Needs approval"
+        case .needsYou:      return lang == .vi ? "Cần bạn" : "Needs you"
+        case .blocked:       return lang == .vi ? "Cần bước trước" : "Needs earlier steps"
+        }
+    }
+}

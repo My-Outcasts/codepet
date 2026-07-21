@@ -29,6 +29,8 @@ struct AppShellView: View {
                         OverviewBoardView()
                     } else if companyStore.view == .library {
                         LibraryView()
+                    } else if companyStore.view == .environment {
+                        EnvironmentView()
                     } else {
                         ShellPlaceholderView(view: companyStore.view)
                     }

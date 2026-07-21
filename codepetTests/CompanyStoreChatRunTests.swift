@@ -64,6 +64,29 @@ final class CompanyStoreChatRunTests: XCTestCase {
         await s.approveDraft(messageId: mid)
         XCTAssertEqual(s.company.library.count, 1)
     }
+    /// If an Approve races an in-flight Redo, Approve wins: the redo must not overwrite
+    /// the just-approved draft (card body would mismatch the persisted library entry).
+    func testRedoDiscardsWhenApprovedMidRun() async {
+        var ref: CompanyStore?
+        var mid = ""
+        var n = 0
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "On it", runTaskId: "t1") },
+                             taskRunner: { _ in
+                                 n += 1
+                                 if n == 2 { await ref?.approveDraft(messageId: mid) }
+                                 return RunTaskResponse(kind: "doc", title: "WTP", body: n == 1 ? "# first" : "# second")
+                             },
+                             librarySaver: { _, _ in true })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run", language: .en)          // n=1 → draft "# first"
+        mid = s.chatMessages[2].id
+        await s.redoDraft(messageId: mid, language: .en) // n=2 → approve mid-run → redo discards "# second"
+        XCTAssertTrue(s.chatMessages[2].draftApproved)
+        XCTAssertEqual(s.chatMessages[2].draft?.body, "# first")   // not overwritten
+        XCTAssertEqual(s.company.library.first?.body, "# first")   // card matches library
+    }
     func testRedoReplacesDraft() async {
         var body = "# first"
         let s = store(reply: CompanyChatReply(text: "On it", runTaskId: "t1"),

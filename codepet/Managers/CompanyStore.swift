@@ -186,8 +186,11 @@ final class CompanyStore: ObservableObject {
               let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
         let cid = companyId
         let result = await taskRunner(runRequest(for: task, language: language))
+        // Re-check approved too: an Approve that raced this re-run must win (don't
+        // overwrite the just-approved draft's body under an "Added to Library" label).
         guard companyId == cid,
               let j = chatMessages.firstIndex(where: { $0.id == messageId }),
+              !chatMessages[j].draftApproved,
               let fresh = buildDeliverable(from: result, task: task) else { return }
         chatMessages[j].draft = fresh
     }

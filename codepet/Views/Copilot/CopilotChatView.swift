@@ -89,12 +89,24 @@ struct CopilotChatView: View {
     }
 }
 
-/// One chat bubble — me (accent, right) vs companion (surface, left).
+/// One chat bubble — me (accent, right) vs companion (surface, left), OR a draft
+/// deliverable card (Approve/Redo) when the message carries a draft.
 struct CopilotBubble: View {
     let message: CopilotMessage
+    @EnvironmentObject var companyStore: CompanyStore
+    @Environment(\.uiLanguage) private var lang
+    @State private var showDetail = false
     private var isMe: Bool { message.role == .me }
 
     var body: some View {
+        if let draft = message.draft {
+            draftCard(draft)
+        } else {
+            textBubble
+        }
+    }
+
+    private var textBubble: some View {
         HStack {
             if isMe { Spacer(minLength: 24) }
             Text(message.text)
@@ -107,5 +119,59 @@ struct CopilotBubble: View {
             if !isMe { Spacer(minLength: 24) }
         }
         .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+    }
+
+    private func draftCard(_ d: Deliverable) -> some View {
+        HStack {
+            CodepetCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
+                            Text(d.title)
+                                .font(.pixelSystem(size: 12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.primaryText)
+                        }
+                        Text(d.body)
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { showDetail = true }
+
+                    if message.draftApproved {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text(lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library")
+                        }
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentTeal)
+                    } else {
+                        HStack(spacing: 8) {
+                            Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
+                                Text(lang == .vi ? "Duyệt" : "Approve")
+                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(Capsule().fill(CodepetTheme.accentPurple))
+                            }.buttonStyle(.plain)
+                            Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
+                                Text(lang == .vi ? "Làm lại" : "Redo")
+                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.bodyText)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(Capsule().stroke(CodepetTheme.hairline))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Spacer(minLength: 24)
+        }
+        .sheet(isPresented: $showDetail) { DeliverableDetailView(deliverable: d) }
     }
 }

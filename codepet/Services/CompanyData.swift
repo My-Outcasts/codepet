@@ -9,6 +9,10 @@ struct CompanyDoc: Codable {
     var brief: CompanyBrief?
     var stage: String?
     var companionId: String?
+    var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
+    var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
+    var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
+    var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -20,10 +24,116 @@ enum CompanyData {
         return CompanyState(
             brief: doc.brief ?? CompanyBrief(),
             departments: [],
-            library: [],
+            library: doc.library ?? [],
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
-            companionId: doc.companionId ?? "byte"
+            companionId: doc.companionId ?? "byte",
+            onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            tasks: doc.tasks ?? [],
+            enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds
         )
+    }
+
+    /// Pure Firestore payload for a brief write — testable without Firestore.
+    static func briefPayload(_ brief: CompanyBrief, onboardedAt: String) -> [String: Any] {
+        var payload: [String: Any] = ["onboardedAt": onboardedAt]
+        if let data = try? JSONEncoder().encode(brief),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            payload["brief"] = dict
+        }
+        return payload
+    }
+
+    /// Write companies/{uid} (brief + onboardedAt), merge. Fail-soft: false on error.
+    /// First native write to companies/{uid}.
+    static func saveBrief(companyId: String, brief: CompanyBrief) async -> Bool {
+        let iso = ISO8601DateFormatter().string(from: Date())
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(briefPayload(brief, onboardedAt: iso), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a tasks write — testable without Firestore.
+    static func tasksPayload(_ tasks: [RoadmapTask]) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(tasks),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["tasks": arr]
+        }
+        return ["tasks": []]
+    }
+
+    /// Write companies/{uid}.tasks, merge. Fail-soft: false on error.
+    static func saveTasks(companyId: String, tasks: [RoadmapTask]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(tasksPayload(tasks), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a library write — testable without Firestore.
+    static func deliverablesPayload(_ library: [Deliverable]) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(library),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["library": arr]
+        }
+        return ["library": []]
+    }
+
+    /// Write companies/{uid}.library, merge. Fail-soft: false on error.
+    static func saveLibrary(companyId: String, library: [Deliverable]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(deliverablesPayload(library), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a companion write — testable without Firestore.
+    static func companionIdPayload(_ id: String) -> [String: Any] {
+        ["companionId": id]
+    }
+
+    /// Write companies/{uid}.companionId, merge. Fail-soft: false on error.
+    static func saveCompanionId(companyId: String, companionId: String) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(companionIdPayload(companionId), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for an enabled-tools write — testable without Firestore.
+    static func enabledToolsPayload(_ tools: [String]) -> [String: Any] {
+        ["enabledTools": tools]
+    }
+
+    /// Write companies/{uid}.enabledTools, merge. Fail-soft: false on error.
+    static func saveEnabledTools(companyId: String, tools: [String]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(enabledToolsPayload(tools), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Fetch the generated roadmap for a company. FAIL-OPEN placeholder: returns `[]`
+    /// until the `scaffoldRoadmap` Cloud Function is aligned to the RoadmapTask shape
+    /// (phase/dependencies) and deployed (needs node 22). `generateRoadmap` treats `[]`
+    /// as "no change", so the board stays empty rather than clearing existing tasks.
+    static func fetchRoadmap(brief: CompanyBrief) async -> [RoadmapTask] {
+        []
     }
 
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via

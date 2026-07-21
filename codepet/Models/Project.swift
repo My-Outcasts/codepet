@@ -17,11 +17,6 @@ struct Project: Identifiable, Hashable, Codable {
     /// Optional + defaulted so projects persisted before this field decode cleanly.
     var companyBrief: CompanyBrief? = nil
 
-    /// AI-generated build tasks (the roadmap), per department. Defaulted empty so
-    /// projects persisted before this field decode cleanly. Coexists with the
-    /// fixed health rubric.
-    var roadmapTasks: [RoadmapTask] = []
-
     /// User-set lifecycle stage. `nil` = let the health engine infer it from
     /// signals (`ProjectHealthEngine.inferStage`). Set explicitly when the user
     /// picks a stage in the Project Health folder header.

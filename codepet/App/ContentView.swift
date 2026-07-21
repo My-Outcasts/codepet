@@ -41,6 +41,9 @@ struct ContentView: View {
                 // Not signed in — show sign-in (Google + email). Skip the
                 // multi-step onboarding entirely.
                 ReturningSignInView()
+            } else if companyStore.isOnboarding {
+                // Fresh account — first-run founder interview before the shell.
+                CompanyOnboardingView()
             } else {
                 // Authenticated (or guest) — the company shell (web product).
                 AppShellView()
@@ -91,7 +94,13 @@ struct ContentView: View {
             // Scope the session chat file to this account on every sign-in (not
             // just on a switch) so chat history is always isolated per uid.
             chatStore.activate(uid: user.uid)
-            Task { await companyStore.hydrate(companyId: user.uid) }
+            // Hydrate the account's company, then reconcile the shell/game sprite
+            // (appState.activeChar) with the account-scoped companion of record
+            // (company.companionId) so the header, Copilot, and AI persona all agree.
+            Task {
+                await companyStore.hydrate(companyId: user.uid)
+                appState.activeChar = companyStore.company.companionId
+            }
 
             // Legacy onboarding flag — keep code that still reads it satisfied.
             if !appState.onboardingComplete {

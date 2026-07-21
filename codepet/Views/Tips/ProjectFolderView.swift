@@ -615,13 +615,6 @@ struct ProjectFolderContentView: View {
                 pillarContent(pillar)
             }
 
-            // ── Roadmap: next-step beacon + per-department "To build" list ──
-            RoadmapSectionView(
-                projectPath: project.id,
-                stage: report.stage,
-                brief: project.companyBrief ?? CompanyBrief(projectName: project.displayName)
-            )
-
             // ── Coming up later (stage-gated checks) — collapsed by default ──
             if !report.upcoming.isEmpty {
                 upcomingSection

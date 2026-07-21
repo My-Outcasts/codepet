@@ -9,22 +9,34 @@ struct Department: Codable, Hashable, Identifiable {
     var id: String { key }
 }
 
-/// An approved deliverable in the library. Minimal this phase.
-struct LibItem: Codable, Hashable, Identifiable {
-    let id: String
-    var title: String
-    var kind: String
-}
-
-/// The single company's in-memory state (companies/{uid}). Departments and
-/// library are typed but empty until later phases populate them.
+/// The single company's in-memory state (companies/{uid}). `tasks` is the
+/// roadmap and `library` is the delivered work — both loaded from the doc.
+/// Departments is typed but empty until a later phase populates it.
 struct CompanyState: Codable, Hashable {
     var brief: CompanyBrief
     var departments: [Department]
-    var library: [LibItem]
+    var library: [Deliverable]
     var stage: ProjectStage
     var companionId: String
+    var onboardedAt: Date?
+    var tasks: [RoadmapTask]
+    var enabledTools: Set<String>
+
+    /// Explicit memberwise init so `tasks`/`enabledTools` can default — existing call
+    /// sites that predate the roadmap/environment phases omit them and keep compiling.
+    init(brief: CompanyBrief, departments: [Department], library: [Deliverable],
+         stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
+         tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds) {
+        self.brief = brief
+        self.departments = departments
+        self.library = library
+        self.stage = stage
+        self.companionId = companionId
+        self.onboardedAt = onboardedAt
+        self.tasks = tasks
+        self.enabledTools = enabledTools
+    }
 
     static let empty = CompanyState(
-        brief: CompanyBrief(), departments: [], library: [], stage: .idea, companionId: "byte")
+        brief: CompanyBrief(), departments: [], library: [], stage: .idea, companionId: "byte", onboardedAt: nil)
 }

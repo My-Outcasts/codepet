@@ -354,33 +354,6 @@ final class ProjectStore: ObservableObject {
         persistBriefMarkers()
     }
 
-    // MARK: - Roadmap Tasks
-
-    /// Read the AI-generated roadmap tasks for a project path, or empty if unknown.
-    func roadmapTasks(for projectPath: String?) -> [RoadmapTask] {
-        guard let path = projectPath else { return [] }
-        return projects[path]?.roadmapTasks ?? []
-    }
-
-    /// Replace the full set of roadmap tasks for a project (e.g. after a fresh
-    /// generation run).
-    func setRoadmapTasks(projectId: String, tasks: [RoadmapTask]) {
-        guard var project = projects[projectId] else { return }
-        project.roadmapTasks = tasks
-        projects[projectId] = project
-        persist()
-        logger.info("Set \(tasks.count) roadmap tasks for \(project.displayName)")
-    }
-
-    /// Toggle a single roadmap task's `done` state (e.g. "Mark done" / undo).
-    func toggleRoadmapTask(projectId: String, taskId: String) {
-        guard var project = projects[projectId],
-              let i = project.roadmapTasks.firstIndex(where: { $0.id == taskId }) else { return }
-        project.roadmapTasks[i].done.toggle()
-        projects[projectId] = project
-        persist()
-    }
-
     // MARK: - Stage & Attestations (Project Health)
 
     /// Set the lifecycle stage for a project. Passing `nil` reverts to

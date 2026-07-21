@@ -18,8 +18,11 @@ struct OnboardingView: View {
     @State private var d = ObDraft()
     @State private var anShown = 0
     @State private var anDone = false
-    @State private var reveal: OnboardingReveal = .empty
-    @State private var slow = false
+    /// nil = the step-6 scaffold hasn't resolved yet; non-nil = resolved (a real
+    /// summary, or `.empty` on fail-open). The step-7 gate waits for non-nil.
+    @State private var reveal: OnboardingReveal?
+    @State private var streamTask: Task<Void, Never>?
+    @State private var scaffoldTask: Task<Void, Never>?
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -122,7 +125,7 @@ struct OnboardingView: View {
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
         default:
-            OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal)
+            OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
         }
     }
 
@@ -130,7 +133,7 @@ struct OnboardingView: View {
     @ViewBuilder private var footer: some View {
         let pct = CGFloat(step + 1) / CGFloat(OnboardingContent.total)
         HStack(spacing: 14) {
-            if step != 6 || anDone {
+            if step != 6 || (anDone && reveal != nil) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(OnboardingContent.Palette.well).frame(height: 5)
@@ -139,7 +142,7 @@ struct OnboardingView: View {
                 }.frame(width: 150, height: 5)
                 Text("Step \(step + 1) of \(OnboardingContent.total)")
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
-            } else if slow {
+            } else if anDone {   // step 6, animation done but scaffold still resolving
                 Text("Still building your company…")
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
             }
@@ -156,7 +159,7 @@ struct OnboardingView: View {
         case 3: bigButton("Continue", enabled: !d.tech.isEmpty) { step = 4 }
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
-        case 6: if anDone { bigButton("See what I found", enabled: true) { step = 7 } }
+        case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
         default: bigButton("See my company", enabled: true) { finish() }
         }
     }
@@ -164,11 +167,12 @@ struct OnboardingView: View {
     // MARK: actions
 
     private func startAnalysis() {
-        step = 6; anShown = 0; anDone = false; slow = false; reveal = .empty
+        step = 6; anShown = 0; anDone = false; reveal = nil
         let token = companyStore.onboardingToken
         let capturedBrief = brief()
-        // stream the lines
-        Task { @MainActor in
+        streamTask?.cancel(); scaffoldTask?.cancel()
+        // Stream the analysis lines on a fixed cadence (the minimum display time).
+        streamTask = Task { @MainActor in
             for i in 0..<OnboardingContent.analysisLines.count {
                 anShown = i + 1
                 try? await Task.sleep(nanoseconds: 640_000_000)
@@ -176,23 +180,24 @@ struct OnboardingView: View {
             try? await Task.sleep(nanoseconds: 300_000_000)
             anDone = true
         }
-        // run the real (fail-open) scaffold in parallel; min-display already covered by the lines
-        Task { @MainActor in
-            let slowTimer = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 3_500_000_000)
-                if !anDone { slow = true }
-            }
-            reveal = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token)
-            slowTimer.cancel()
-            slow = false
+        // Run the real (fail-open) scaffold in parallel; `reveal` stays nil until it
+        // resolves so the step-7 gate waits for it (and "Still building…" can show).
+        scaffoldTask = Task { @MainActor in
+            let r = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token)
+            if Task.isCancelled { return }
+            reveal = r
         }
     }
 
     private func finish() {
+        streamTask?.cancel(); scaffoldTask?.cancel()
         let token = companyStore.onboardingToken
         Task { await companyStore.finishOnboarding(brief: brief(), token: token) }
     }
-    private func skip() { Task { await companyStore.skipOnboarding() } }
+    private func skip() {
+        streamTask?.cancel(); scaffoldTask?.cancel()
+        Task { await companyStore.skipOnboarding() }
+    }
 
     // MARK: small view helpers
 

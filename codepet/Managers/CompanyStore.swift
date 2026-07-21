@@ -135,12 +135,14 @@ final class CompanyStore: ObservableObject {
     /// account's brief/tasks can't land under another's doc. Mirrors the web's
     /// scaffoldFromOnboarding; the reveal is derived from the resulting tasks.
     func scaffoldFromOnboarding(brief: CompanyBrief, token: Int) async -> OnboardingReveal {
-        guard token == hydrationToken, let cid = companyId else { return .empty }
+        guard token == hydrationToken, !Task.isCancelled, let cid = companyId else { return .empty }
         _ = await saver(cid, brief)
-        guard token == hydrationToken else { return .empty }
+        // Cancellation guard: a Skip during the in-flight scaffold cancels this task,
+        // so we bail before mutating brief/tasks (skip's empty write is the winner).
+        guard token == hydrationToken, !Task.isCancelled else { return .empty }
         company.brief = brief
         await generateRoadmap()
-        guard token == hydrationToken else { return .empty }
+        guard token == hydrationToken, !Task.isCancelled else { return .empty }
         return OnboardingReveal.build(tasks: company.tasks)
     }
 

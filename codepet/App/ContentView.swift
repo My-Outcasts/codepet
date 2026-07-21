@@ -43,7 +43,10 @@ struct ContentView: View {
                 ReturningSignInView()
             } else if companyStore.isOnboarding {
                 // Fresh account — first-run cinematic onboarding before the shell.
+                // .id on the company scopes the wizard's @State per account, so a
+                // mid-onboarding account switch can't inherit the prior draft/step.
                 OnboardingView()
+                    .id(companyStore.companyId)
             } else {
                 // Authenticated (or guest) — the company shell (web product).
                 AppShellView()

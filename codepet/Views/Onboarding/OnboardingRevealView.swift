@@ -19,7 +19,7 @@ struct OnboardingRevealView: View {
                 .foregroundColor(CodepetTheme.primaryText)
             (Text("You're a ") + Text(role).bold()
              + Text(" at the ") + Text(stage).bold()
-             + Text(reveal.ok
+             + Text(reveal.ok && reveal.taskCount > 0
                     ? " stage. I built your roadmap — \(reveal.taskCount) tasks already prepped:"
                     : " stage. I built your roadmap and staffed your departments — here's what I'll take off your plate:"))
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)

@@ -42,8 +42,8 @@ struct ContentView: View {
                 // multi-step onboarding entirely.
                 ReturningSignInView()
             } else if companyStore.isOnboarding {
-                // Fresh account — first-run founder interview before the shell.
-                CompanyOnboardingView()
+                // Fresh account — first-run cinematic onboarding before the shell.
+                OnboardingView()
             } else {
                 // Authenticated (or guest) — the company shell (web product).
                 AppShellView()

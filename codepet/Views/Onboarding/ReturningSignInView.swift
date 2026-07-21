@@ -1,196 +1,190 @@
+// codepet/Views/Onboarding/ReturningSignInView.swift
 import SwiftUI
 
-/// A simplified sign-in screen for returning users who have already completed onboarding.
-/// Shows only the sign-in options (Google + Email) without age gate or onboarding steps.
+/// Returning-user sign-in — faithful port of the web `SignIn` (dark cosmic
+/// auth.jpg world + a light rise-in card). Google + email/password, with the
+/// two native-only extras the web lacks: forgot-password and a guest escape.
+/// View-layer only — all AuthManager wiring is preserved.
 struct ReturningSignInView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var authManager: AuthManager
 
+    @State private var name = ""
     @State private var email = ""
     @State private var password = ""
     @State private var isAuthenticating = false
     @State private var resetSent = false
     @State private var isSignUp = false
+    @State private var appear = false
+    @State private var kenBurns = false
+    @FocusState private var focus: Field?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Field { case name, email, password }
+    private var emailReady: Bool { !email.isEmpty && password.count >= 6 && !isAuthenticating }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            VStack(spacing: 20) {
-                // Logo
-                Image("codepet-text-logo")
-                    .resizable()
-                    .interpolation(.none)
-                    .scaledToFit()
-                    .frame(width: 280)
-
-                Text("Welcome back!")
-                    .font(.pixelSystem(size: 24, weight: .bold))
-                    .foregroundColor(Color(hex: "#2D2B26"))
-
-                Text("Sign in to continue your journey.")
-                    .font(.pixelSystem(size: 14))
-                    .foregroundColor(Color(hex: "#666666"))
+        ZStack {
+            Color(hex: "#0a0818").ignoresSafeArea()
+            GeometryReader { geo in
+                Image("auth")
+                    .resizable().interpolation(.high).scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(kenBurns ? 1.08 : 1.0)
+                    .clipped()
             }
+            .ignoresSafeArea()
+            RadialGradient(colors: [Color(hex: "#080618").opacity(0.34), Color(hex: "#080618").opacity(0.74)],
+                           center: .center, startRadius: 0, endRadius: 640)
+                .ignoresSafeArea()
 
-            Spacer().frame(height: 32)
-
-            // Sign-in form
-            VStack(spacing: 14) {
-                // Error message
-                if let error = authManager.authError, !error.contains("reset email sent") {
-                    Text(error)
-                        .font(.pixelSystem(size: 12))
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                }
-
-                // Sign in with Google
-                Button(action: {
-                    authManager.signInWithGoogle()
-                }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "g.circle.fill")
-                        Text("Sign in with Google")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PixelButtonStyle(
-                    fill: Color.white,
-                    foreground: Color(hex: "#1F2937"),
-                    paddingH: 14,
-                    paddingV: 14,
-                    blockSize: 3,
-                    steps: 2,
-                    borderWidth: 3,
-                    shadowOffset: 4,
-                    font: .pixelSystem(size: 15, weight: .semibold)
-                ))
-
-                // Divider
-                HStack {
-                    Rectangle().fill(Color(hex: "#E0DBEF")).frame(height: 1)
-                    Text("or")
-                        .font(.pixelSystem(size: 11))
-                        .foregroundColor(Color(hex: "#AAAAAA"))
-                    Rectangle().fill(Color(hex: "#E0DBEF")).frame(height: 1)
-                }
-                .padding(.vertical, 4)
-
-                // Email field
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Email")
-                        .font(.pixelSystem(size: 11, weight: .semibold))
-                        .foregroundColor(Color(hex: "#888888"))
-                    TextField("you@example.com", text: $email)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.pixelSystem(size: 14))
-                        .textContentType(.emailAddress)
-                }
-                .padding(.horizontal, 8)
-
-                // Password field
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Password")
-                        .font(.pixelSystem(size: 11, weight: .semibold))
-                        .foregroundColor(Color(hex: "#888888"))
-                    SecureField("Your password", text: $password)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.pixelSystem(size: 14))
-                }
-                .padding(.horizontal, 8)
-
-                // Toggle sign-in / sign-up + forgot password
-                HStack {
-                    Button(isSignUp ? "Already have an account? Sign in" : "New here? Create an account") {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isSignUp.toggle()
-                            resetSent = false
-                            authManager.authError = nil
-                        }
-                    }
-                    .font(.pixelSystem(size: 12))
-                    .foregroundColor(Color(hex: "#7B6BD8"))
-                    .buttonStyle(.plain)
-
-                    if !isSignUp {
-                        Spacer()
-                        Button("Forgot password?") {
-                            guard !email.isEmpty else {
-                                authManager.authError = "Enter your email above first."
-                                return
-                            }
-                            authManager.sendPasswordReset(email: email)
-                            resetSent = true
-                        }
-                        .font(.pixelSystem(size: 12))
-                        .foregroundColor(Color(hex: "#B0A898"))
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                // Reset confirmation
-                if resetSent {
-                    Text("Password reset email sent! Check your inbox.")
-                        .font(.pixelSystem(size: 11))
-                        .foregroundColor(Color(hex: "#20B090"))
-                        .multilineTextAlignment(.center)
-                }
-
-                // Sign-in / sign-up button
-                let emailReady = !email.isEmpty && password.count >= 6 && !isAuthenticating
-                Button(action: {
-                    isAuthenticating = true
-                    authManager.authError = nil
-                    if isSignUp {
-                        authManager.signUpWithEmail(email: email, password: password, name: appState.displayName)
-                    } else {
-                        authManager.signInWithEmail(email: email, password: password)
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        isAuthenticating = false
-                    }
-                }) {
-                    HStack(spacing: 10) {
-                        if isAuthenticating {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "envelope.fill")
-                        }
-                        Text(isAuthenticating ? "Signing in..." : (isSignUp ? "Create Account" : "Sign In"))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PixelButtonStyle(
-                    fill: emailReady ? Color(hex: "#7B6BD8") : Color(hex: "#D0CDE0"),
-                    foreground: .white,
-                    paddingH: 14,
-                    paddingV: 14,
-                    blockSize: 3,
-                    steps: 2,
-                    borderWidth: 3,
-                    shadowOffset: 4,
-                    font: .pixelSystem(size: 15, weight: .semibold)
-                ))
-                .disabled(!emailReady)
-
-                // Skip — continue as a local guest (no Firebase account)
+            VStack(spacing: 16) {
+                card
                 Button("Continue without signing in →") {
                     authManager.authError = nil
                     authManager.isGuestMode = true
                 }
-                .font(.pixelSystem(size: 13))
-                .foregroundColor(Color(hex: "#B0A898"))
+                .font(CodepetTheme.body(13))
+                .foregroundColor(.white.opacity(0.7))
                 .buttonStyle(.plain)
-                .padding(.top, 4)
             }
-            .frame(maxWidth: 340)
-
-            Spacer()
+            .frame(maxWidth: 394)
+            .opacity(appear ? 1 : 0)
+            .offset(y: appear ? 0 : 12)
+            .padding(24)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(hex: "#F5F3FA"))
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.7)) { appear = true }
+            if !reduceMotion {
+                withAnimation(.easeInOut(duration: 34).repeatForever(autoreverses: true)) { kenBurns = true }
+            }
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Codepet")
+                .font(.pixelSystem(size: 30, weight: .bold))
+                .foregroundColor(CodepetTheme.primaryText)
+            Text(isSignUp ? "Create your company." : "Sign in to your company.")
+                .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.mutedText)
+                .padding(.top, 9)
+
+            if let error = authManager.authError, !error.contains("reset email sent") {
+                Text(error)
+                    .font(CodepetTheme.body(13)).foregroundColor(CodepetTheme.accentPink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
+            }
+
+            // Google
+            Button { authManager.signInWithGoogle() } label: {
+                Text("Continue with Google")
+                    .font(CodepetTheme.body(14)).fontWeight(.medium)
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+            }
+            .buttonStyle(.plain).padding(.top, 22)
+
+            // or
+            HStack(spacing: 12) {
+                Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                Text("or").font(CodepetTheme.body(12)).foregroundColor(OnboardingContent.Palette.faint)
+                Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+            }
+            .padding(.vertical, 18)
+
+            // form
+            VStack(spacing: 10) {
+                if isSignUp { field("Your name", text: $name, id: .name) }
+                field("Email", text: $email, id: .email, isEmail: true)
+                field("Password", text: $password, id: .password, secure: true)
+            }
+
+            // forgot password (sign-in only) + reset confirmation
+            if !isSignUp {
+                HStack {
+                    Spacer()
+                    Button("Forgot password?") {
+                        guard !email.isEmpty else {
+                            authManager.authError = "Enter your email above first."
+                            return
+                        }
+                        authManager.sendPasswordReset(email: email)
+                        resetSent = true
+                    }
+                    .font(CodepetTheme.body(12)).foregroundColor(OnboardingContent.Palette.faint)
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 8)
+            }
+            if resetSent {
+                Text("Password reset email sent! Check your inbox.")
+                    .font(CodepetTheme.body(11)).foregroundColor(Color(hex: "#20B090"))
+                    .padding(.top, 6)
+            }
+
+            // submit
+            Button { submit() } label: {
+                HStack(spacing: 8) {
+                    if isAuthenticating { ProgressView().controlSize(.small) }
+                    Text(isAuthenticating ? "Signing in…" : (isSignUp ? "Create company" : "Sign in"))
+                        .font(CodepetTheme.body(14)).fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple))
+                .opacity(emailReady ? 1 : 0.6)
+            }
+            .buttonStyle(.plain).disabled(!emailReady).padding(.top, 14)
+
+            // toggle mode
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isSignUp.toggle(); resetSent = false; authManager.authError = nil
+                }
+            } label: {
+                Text(isSignUp ? "Already have an account? Sign in" : "New here? Create a company")
+                    .font(CodepetTheme.body(13)).foregroundColor(CodepetTheme.mutedText)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain).padding(.top, 18)
+        }
+        .padding(EdgeInsets(top: 34, leading: 32, bottom: 28, trailing: 32))
+        .background(RoundedRectangle(cornerRadius: 20).fill(CodepetTheme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.55), lineWidth: 1))
+        .shadow(color: Color(hex: "#06031c").opacity(0.5), radius: 35, y: 24)
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>, id: Field,
+                       secure: Bool = false, isEmail: Bool = false) -> some View {
+        Group {
+            if secure { SecureField(placeholder, text: text) }
+            else { TextField(placeholder, text: text) }
+        }
+        .textFieldStyle(.plain)
+        .textContentType(isEmail ? .emailAddress : nil)
+        .font(CodepetTheme.body(14))
+        .focused($focus, equals: id)
+        .frame(minHeight: 46)
+        .padding(.horizontal, 14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(focus == id ? OnboardingContent.Palette.accentLine : CodepetTheme.hairline,
+                    lineWidth: focus == id ? 2 : 1))
+    }
+
+    private func submit() {
+        isAuthenticating = true
+        authManager.authError = nil
+        if isSignUp {
+            authManager.signUpWithEmail(email: email, password: password,
+                                        name: name.isEmpty ? appState.displayName : name)
+        } else {
+            authManager.signInWithEmail(email: email, password: password)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { isAuthenticating = false }
     }
 }

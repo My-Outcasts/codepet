@@ -32,13 +32,16 @@ struct CopilotChatView: View {
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
                     }
-                    if companyStore.isCompanionTyping { typingRow }
+                    if companyStore.isCompanionTyping { typingRow.id("typing") }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
+            }
+            .onChange(of: companyStore.isCompanionTyping) { _, typing in
+                if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
         }
     }

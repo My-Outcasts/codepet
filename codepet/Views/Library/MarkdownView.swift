@@ -38,9 +38,13 @@ struct MarkdownView: View {
         }
     }
 
-    /// Inline emphasis via AttributedString(markdown:), plain fallback.
+    /// Inline emphasis via AttributedString(markdown:), plain fallback. Block
+    /// structure is already handled by MarkdownBlocks, so interpret INLINE syntax
+    /// only and preserve whitespace (avoids block re-grouping within a block).
     private func inline(_ text: String) -> Text {
-        if let attr = try? AttributedString(markdown: text) { return Text(attr) }
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        if let attr = try? AttributedString(markdown: text, options: options) { return Text(attr) }
         return Text(text)
     }
 }

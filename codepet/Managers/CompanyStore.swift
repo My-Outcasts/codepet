@@ -11,6 +11,8 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
+    @Published private(set) var chatMessages: [CopilotMessage] = []
+    @Published private(set) var isCompanionTyping = false
 
     /// The hydrated company's id, needed for writes. Set by `hydrate`, cleared by `reset`.
     private(set) var companyId: String?
@@ -20,6 +22,7 @@ final class CompanyStore: ObservableObject {
     private let saver: (String, CompanyBrief) async -> Bool
     private let roadmapFetcher: (CompanyBrief) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
+    private let chatSender: (CompanyChatRequest) async -> String?
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -36,11 +39,13 @@ final class CompanyStore: ObservableObject {
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
-         tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks) {
+         tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
+         chatSender: @escaping (CompanyChatRequest) async -> String? = CompanyChatClient.send) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
         self.tasksSaver = tasksSaver
+        self.chatSender = chatSender
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -107,6 +112,30 @@ final class CompanyStore: ObservableObject {
         if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
     }
 
+    /// Send a founder message to the company companion (single reply, fail-open,
+    /// session-only). Token-guarded: an account switch mid-reply discards the reply.
+    func sendChat(_ raw: String, language: AppLanguage) async {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isCompanionTyping else { return }
+        chatMessages.append(CopilotMessage(role: .me, text: text))
+        isCompanionTyping = true
+        let history = chatMessages.dropLast().suffix(20).map {
+            ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
+        }
+        let req = CompanyChatRequest(
+            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            history: Array(history), userMessage: text)
+        let token = hydrationToken
+        let reply = await chatSender(req)
+        guard token == hydrationToken else { return }
+        let offline = language == .vi
+            ? "Mình không kết nối được lúc này — thử lại sau nhé."
+            : "I can't reach my brain right now — try again in a bit."
+        chatMessages.append(CopilotMessage(role: .companion, text: reply ?? offline))
+        isCompanionTyping = false
+    }
+
     /// Clear on sign-out / account switch.
     func reset() {
         hydrationToken &+= 1
@@ -115,5 +144,7 @@ final class CompanyStore: ObservableObject {
         view = .overview
         isHydrating = false
         isOnboarding = false
+        chatMessages = []
+        isCompanionTyping = false
     }
 }

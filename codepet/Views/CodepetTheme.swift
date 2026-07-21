@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - CodepetTheme
 //
@@ -391,5 +392,39 @@ enum CodepetMarkdown {
             attr[lo..<hi].underlineStyle = Text.LineStyle(pattern: .dot, color: color)
             attr[lo..<hi].link = URL(string: "codepetterm://\(hit.termId)")
         }
+    }
+}
+
+// MARK: - Dynamic (light/dark) color support
+
+extension NSColor {
+    /// Parse "#rrggbb" (mirrors Color(hex:) in Character.swift).
+    convenience init(hex: String) {
+        let s = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var v: UInt64 = 0
+        Scanner(string: s).scanHexInt64(&v)
+        self.init(srgbRed: CGFloat((v & 0xFF0000) >> 16) / 255.0,
+                  green:   CGFloat((v & 0x00FF00) >> 8) / 255.0,
+                  blue:    CGFloat(v & 0x0000FF) / 255.0,
+                  alpha: 1)
+    }
+}
+
+extension CodepetTheme {
+    /// A dynamic NSColor resolving to `light` or `dark` by the drawing appearance.
+    /// Extracted (vs inline in `Color.dyn`) so the flip is unit-testable.
+    static func dynamicNSColor(light: String, dark: String) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(hex: isDark ? dark : light)
+        }
+    }
+}
+
+extension Color {
+    /// A color that resolves to `light` under a light appearance and `dark` under
+    /// a dark appearance — driven by `preferredColorScheme` / the macOS appearance.
+    static func dyn(_ light: String, _ dark: String) -> Color {
+        Color(nsColor: CodepetTheme.dynamicNSColor(light: light, dark: dark))
     }
 }

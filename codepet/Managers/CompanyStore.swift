@@ -28,6 +28,7 @@ final class CompanyStore: ObservableObject {
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
+    private let companionSaver: (String, String) async -> Bool
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -48,7 +49,8 @@ final class CompanyStore: ObservableObject {
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
-         toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools) {
+         toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
+         companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -57,6 +59,7 @@ final class CompanyStore: ObservableObject {
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
+        self.companionSaver = companionSaver
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -242,6 +245,13 @@ final class CompanyStore: ObservableObject {
 
     /// Clear the transient run error (e.g. when the board's error line is dismissed).
     func clearRunError() { runError = nil }
+
+    /// Set + persist the company's companion (fail-soft). Mirrors the toggleTool
+    /// pattern: sync mutate, persist with the captured companyId, no post-await mutation.
+    func setCompanion(id: String) async {
+        company.companionId = id
+        if let cid = companyId { _ = await companionSaver(cid, id) }
+    }
 
     /// Enable/disable a toolkit item and persist (fail-soft).
     func toggleTool(id: String) async {

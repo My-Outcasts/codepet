@@ -96,6 +96,22 @@ enum CompanyData {
         }
     }
 
+    /// Pure Firestore payload for a companion write — testable without Firestore.
+    static func companionIdPayload(_ id: String) -> [String: Any] {
+        ["companionId": id]
+    }
+
+    /// Write companies/{uid}.companionId, merge. Fail-soft: false on error.
+    static func saveCompanionId(companyId: String, companionId: String) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(companionIdPayload(companionId), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Pure Firestore payload for an enabled-tools write — testable without Firestore.
     static func enabledToolsPayload(_ tools: [String]) -> [String: Any] {
         ["enabledTools": tools]

@@ -25,6 +25,20 @@ struct OverviewBoardView: View {
 
     private var board: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let err = companyStore.runError {
+                HStack(spacing: 8) {
+                    Text(err)
+                        .font(.pixelSystem(size: 11, weight: .medium))
+                        .foregroundColor(CodepetTheme.accentOrange)
+                    Spacer()
+                    Button { companyStore.clearRunError() } label: {
+                        Image(systemName: "xmark").font(.system(size: 9))
+                    }
+                    .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.accentOrange.opacity(0.12)))
+            }
             RoadmapHeaderView(tasks: tasks)
             ScrollView(.horizontal, showsIndicators: true) {
                 HStack(alignment: .top, spacing: 14) {

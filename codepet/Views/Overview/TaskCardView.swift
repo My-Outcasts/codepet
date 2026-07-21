@@ -39,6 +39,27 @@ struct TaskCardView: View {
                     tag(task.who.label(lang), color: CodepetTheme.mutedText)
                     tag(status.label(lang), color: statusTint(status))
                 }
+                if status == .codepetCanDo {
+                    Button {
+                        Task { await companyStore.runTask(task, language: lang) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if companyStore.runningTaskIds.contains(task.id) {
+                                ProgressView().controlSize(.mini)
+                                Text(lang == .vi ? "Đang chạy…" : "Running…")
+                            } else {
+                                Image(systemName: "play.fill").font(.system(size: 9))
+                                Text(lang == .vi ? "Chạy" : "Run")
+                            }
+                        }
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(companyStore.runningTaskIds.contains(task.id))
+                }
                 if status == .blocked, let dep = blockedAfter {
                     Text((lang == .vi ? "sau: " : "after: ") + dep)
                         .font(.pixelSystem(size: 10))

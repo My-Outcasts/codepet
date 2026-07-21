@@ -49,7 +49,7 @@ enum OnboardingContent {
     /// Per-step left-panel art (STEP_ART), steps 0...7. Step 0 & 7 reuse ob-team.
     static let stepArt = [
         "ob-team", "ob-couch", "ob-chess", "ob-drummer",
-        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team",
+        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team", "ob-team",
     ]
     static let analysisLines = [
         "Reading what you told me…",
@@ -57,7 +57,7 @@ enum OnboardingContent {
         "Cross-checking your space & stage",
         "Drafting your roadmap to launch",
     ]
-    static let total = 8
+    static let total = 9
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.

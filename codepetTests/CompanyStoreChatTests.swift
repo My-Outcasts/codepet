@@ -4,12 +4,12 @@ import XCTest
 
 @MainActor
 final class CompanyStoreChatTests: XCTestCase {
-    private func store(_ sender: @escaping (CompanyChatRequest) async -> String?) -> CompanyStore {
+    private func store(_ sender: @escaping (CompanyChatRequest) async -> CompanyChatReply?) -> CompanyStore {
         CompanyStore(loader: { _ in .empty }, saver: { _, _ in true }, chatSender: sender)
     }
 
     func testSendAppendsUserThenCompanionReply() async {
-        let s = store { _ in "Hello founder" }
+        let s = store { _ in CompanyChatReply(text: "Hello founder", runTaskId: nil) }
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
@@ -26,13 +26,13 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)
     }
     func testEmptyInputIsNoOp() async {
-        let s = store { _ in "x" }
+        let s = store { _ in CompanyChatReply(text: "x", runTaskId: nil) }
         await s.hydrate(companyId: "u")
         await s.sendChat("   ", language: .en)
         XCTAssertTrue(s.chatMessages.isEmpty)
     }
     func testResetClearsChat() async {
-        let s = store { _ in "x" }
+        let s = store { _ in CompanyChatReply(text: "x", runTaskId: nil) }
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         s.reset()
@@ -43,7 +43,7 @@ final class CompanyStoreChatTests: XCTestCase {
     func testStaleReplyAfterResetDiscarded() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.reset(); return "late reply" })
+                             chatSender: { _ in await ref?.reset(); return CompanyChatReply(text: "late reply", runTaskId: nil) })
         ref = s
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
@@ -55,7 +55,7 @@ final class CompanyStoreChatTests: XCTestCase {
     func testReplyStillAppliesAfterSameUserRehydrate() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.hydrate(companyId: "u"); return "reply" })
+                             chatSender: { _ in await ref?.hydrate(companyId: "u"); return CompanyChatReply(text: "reply", runTaskId: nil) })
         ref = s
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
@@ -67,7 +67,7 @@ final class CompanyStoreChatTests: XCTestCase {
     func testAccountSwitchViaHydrateClearsChatAndDiscardsReply() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.hydrate(companyId: "B"); return "A reply" })
+                             chatSender: { _ in await ref?.hydrate(companyId: "B"); return CompanyChatReply(text: "A reply", runTaskId: nil) })
         ref = s
         await s.hydrate(companyId: "A")
         await s.sendChat("hi", language: .en)

@@ -15,8 +15,14 @@ final class CompanyChatClientTests: XCTestCase {
         let back = try JSONDecoder().decode(CompanyChatRequest.self, from: data)
         XCTAssertEqual(back.history, req.history)
     }
-    func testResponseDecodes() throws {
-        let data = "{\"reply\":\"hi there\"}".data(using: .utf8)!
-        XCTAssertEqual(try JSONDecoder().decode(CompanyChatResponse.self, from: data).reply, "hi there")
+    func testResponseDecodesWithRunTaskId() throws {
+        let data = "{\"reply\":\"On it\",\"run_task_id\":\"t1\"}".data(using: .utf8)!
+        let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)
+        XCTAssertEqual(r.reply, "On it")
+        XCTAssertEqual(r.runTaskId, "t1")
+    }
+    func testResponseDecodesWithoutRunTaskId() throws {
+        let data = "{\"reply\":\"hi\"}".data(using: .utf8)!
+        XCTAssertNil(try JSONDecoder().decode(CompanyChatResponse.self, from: data).runTaskId)
     }
 }

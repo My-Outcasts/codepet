@@ -24,7 +24,7 @@ final class CompanyStore: ObservableObject {
     private let saver: (String, CompanyBrief) async -> Bool
     private let roadmapFetcher: (CompanyBrief) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
-    private let chatSender: (CompanyChatRequest) async -> String?
+    private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
 
@@ -44,7 +44,7 @@ final class CompanyStore: ObservableObject {
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
-         chatSender: @escaping (CompanyChatRequest) async -> String? = CompanyChatClient.send,
+         chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary) {
         self.loader = loader
@@ -152,7 +152,7 @@ final class CompanyStore: ObservableObject {
         let offline = language == .vi
             ? "Mình không kết nối được lúc này — thử lại sau nhé."
             : "I can't reach my brain right now — try again in a bit."
-        chatMessages.append(CopilotMessage(role: .companion, text: reply ?? offline))
+        chatMessages.append(CopilotMessage(role: .companion, text: reply?.text ?? offline))
         isCompanionTyping = false
     }
 

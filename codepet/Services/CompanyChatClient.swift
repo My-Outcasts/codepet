@@ -29,6 +29,18 @@ struct CompanyChatRequest: Codable {
 /// Response body from the companyChat Cloud Function.
 struct CompanyChatResponse: Codable {
     let reply: String
+    let runTaskId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case reply
+        case runTaskId = "run_task_id"
+    }
+}
+
+/// A companion reply — text plus an optional "run this task" action (byte's run_task).
+struct CompanyChatReply: Equatable {
+    let text: String
+    let runTaskId: String?
 }
 
 /// Fail-open client for the (planned) companyChat Cloud Function. Returns the reply
@@ -38,7 +50,7 @@ struct CompanyChatResponse: Codable {
 enum CompanyChatClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/companyChat")!
 
-    static func send(_ req: CompanyChatRequest) async -> String? {
+    static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -49,6 +61,7 @@ enum CompanyChatClient {
               let decoded = try? JSONDecoder().decode(CompanyChatResponse.self, from: data)
         else { return nil }
         let reply = decoded.reply.trimmingCharacters(in: .whitespacesAndNewlines)
-        return reply.isEmpty ? nil : reply
+        guard !reply.isEmpty else { return nil }
+        return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId)
     }
 }

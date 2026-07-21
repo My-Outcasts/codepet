@@ -153,7 +153,43 @@ final class CompanyStore: ObservableObject {
             ? "Mình không kết nối được lúc này — thử lại sau nhé."
             : "I can't reach my brain right now — try again in a bit."
         chatMessages.append(CopilotMessage(role: .companion, text: reply?.text ?? offline))
+        // If byte chose to run a runnable task, produce a draft deliverable inline.
+        if let runId = reply?.runTaskId,
+           let task = company.tasks.first(where: { $0.id == runId }),
+           RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo {
+            let result = await taskRunner(runRequest(for: task, language: language))
+            guard companyId == cid else { return }
+            if let draft = buildDeliverable(from: result, task: task) {
+                chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+            } else {
+                chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                    ? "Không tạo được ngay bây giờ — thử lại nhé."
+                    : "Couldn't generate that just now — try again."))
+            }
+        }
         isCompanionTyping = false
+    }
+
+    /// Approve a chat draft: append it to the library (approved) + persist.
+    func approveDraft(messageId: String) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
+        company.library.append(draft)
+        chatMessages[i].draftApproved = true
+        if let cid = companyId { _ = await librarySaver(cid, company.library) }
+    }
+
+    /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
+    func redoDraft(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
+              let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
+        let cid = companyId
+        let result = await taskRunner(runRequest(for: task, language: language))
+        guard companyId == cid,
+              let j = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let fresh = buildDeliverable(from: result, task: task) else { return }
+        chatMessages[j].draft = fresh
     }
 
     /// Build a RunTaskRequest for a task (grounded on brief + roadmap).

@@ -10,10 +10,15 @@ struct CopilotMessage: Identifiable, Equatable {
     let id: String
     let role: CopilotRole
     let text: String
+    var draft: Deliverable?
+    var draftApproved: Bool
 
-    init(id: String = UUID().uuidString, role: CopilotRole, text: String) {
+    init(id: String = UUID().uuidString, role: CopilotRole, text: String,
+         draft: Deliverable? = nil, draftApproved: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
+        self.draft = draft
+        self.draftApproved = draftApproved
     }
 }

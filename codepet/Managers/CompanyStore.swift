@@ -156,6 +156,27 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
     }
 
+    /// Build a RunTaskRequest for a task (grounded on brief + roadmap).
+    private func runRequest(for task: RoadmapTask, language: AppLanguage) -> RunTaskRequest {
+        RunTaskRequest(
+            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
+    }
+
+    /// Build a Deliverable from a run result — the 6A gates in one place: unique id,
+    /// canonical createdAt, non-empty title (fallback task.title) + body. Returns nil
+    /// on a nil result or empty body — never a malformed deliverable.
+    private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask) -> Deliverable? {
+        let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let result, !body.isEmpty else { return nil }
+        let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Deliverable(
+            id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
+            title: title.isEmpty ? task.title : title, body: body,
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
+    }
+
     /// Run a codepetCanDo task → produce a Deliverable → append to the library + persist.
     /// Fail-open: a nil/empty result surfaces an honest runError and appends nothing.
     /// Task is left as-is. companyId-guarded against account switch mid-run.
@@ -163,26 +184,16 @@ final class CompanyStore: ObservableObject {
         guard !runningTaskIds.contains(task.id) else { return }
         runningTaskIds.insert(task.id)
         runError = nil
-        let req = RunTaskRequest(
-            companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
-            taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
         let cid = companyId
-        let result = await taskRunner(req)
+        let result = await taskRunner(runRequest(for: task, language: language))
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
-        let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let result, !body.isEmpty else {
+        guard let deliverable = buildDeliverable(from: result, task: task) else {
             runError = language == .vi
                 ? "Không tạo được \"\(task.title)\" — thử lại nhé."
                 : "Couldn't generate \"\(task.title)\" — try again."
             return
         }
-        let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let deliverable = Deliverable(
-            id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
-            title: title.isEmpty ? task.title : title, body: body,
-            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
         company.library.append(deliverable)
         if let cid { _ = await librarySaver(cid, company.library) }
     }

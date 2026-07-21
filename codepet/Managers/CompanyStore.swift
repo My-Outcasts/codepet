@@ -73,6 +73,8 @@ final class CompanyStore: ObservableObject {
         if self.companyId != companyId {
             chatMessages = []
             isCompanionTyping = false
+            runningTaskIds = []
+            runError = nil
         }
         self.companyId = companyId
         isHydrating = true

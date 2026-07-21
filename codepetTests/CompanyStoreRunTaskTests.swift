@@ -73,4 +73,15 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertNil(s.runError)
         XCTAssertTrue(s.runningTaskIds.isEmpty)
     }
+    /// An account switch via hydrate(differentId) must clear stale run state so account
+    /// A's error/spinner doesn't bleed into account B (mirrors the chat-state clearing).
+    func testAccountSwitchViaHydrateClearsRunState() async {
+        let s = store({ _ in nil })   // nil → sets runError on account A
+        await s.hydrate(companyId: "A")
+        await s.runTask(task(), language: .en)
+        XCTAssertNotNil(s.runError)
+        await s.hydrate(companyId: "B")
+        XCTAssertNil(s.runError)
+        XCTAssertTrue(s.runningTaskIds.isEmpty)
+    }
 }

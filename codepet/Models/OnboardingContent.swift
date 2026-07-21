@@ -62,12 +62,12 @@ enum OnboardingContent {
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.
     enum Palette {
-        static let surface2 = Color(hex: "#fcfbf8")   // --surface-2
-        static let well = Color(hex: "#f1efe9")       // --well
-        static let faint = Color(hex: "#a79e92")      // --t-4
-        static let accentDeep = Color(hex: "#5b27b0") // --accent-deep
-        static let accentTint = Color(hex: "#eee6fd") // --accent-tint
-        static let accentLine = Color(hex: "#d9c9f7") // --accent-line
-        static let coldBg = Color(hex: "#100a26")     // cold-open / splash bg
+        static let surface2   = Color.dyn("#fcfbf8", "#1b1712")   // --surface-2
+        static let well       = Color.dyn("#f1efe9", "#26211a")   // --well
+        static let faint      = Color.dyn("#a79e92", "#6f685c")   // --t-4
+        static let accentDeep = Color.dyn("#5b27b0", "#7c3aed")   // --accent-deep
+        static let accentTint = Color.dyn("#eee6fd", "#271f3a")   // --accent-tint
+        static let accentLine = Color.dyn("#d9c9f7", "#43356b")   // --accent-line
+        static let coldBg     = Color(hex: "#100a26")             // cold-open / splash — STAYS dark
     }
 }

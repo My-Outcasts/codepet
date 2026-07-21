@@ -1443,5 +1443,6 @@ struct ReflectionTab: View {
         .environmentObject(chatController)
         .environmentObject(DemoScriptController())
         .environmentObject(ProjectStore())
+        .environmentObject(InterviewCoordinator())
         .frame(width: 900, height: 800)
 }

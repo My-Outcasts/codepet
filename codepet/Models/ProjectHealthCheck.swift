@@ -39,7 +39,7 @@ enum ProjectStage: String, Codable, CaseIterable, Identifiable {
 
 /// A dimension of project health. Engineering is what Codepet shipped first;
 /// Business and Growth extend health into "will this make money."
-enum HealthPillar: String, CaseIterable {
+enum HealthPillar: String, Codable, CaseIterable {
     case engineering
     case business
     case marketing

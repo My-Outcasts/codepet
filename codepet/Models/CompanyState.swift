@@ -10,8 +10,8 @@ struct Department: Codable, Hashable, Identifiable {
 }
 
 /// The single company's in-memory state (companies/{uid}). `tasks` is the
-/// roadmap, populated from Firestore / generation. Departments and library are
-/// typed but empty until later phases populate them.
+/// roadmap and `library` is the delivered work — both loaded from the doc.
+/// Departments is typed but empty until a later phase populates it.
 struct CompanyState: Codable, Hashable {
     var brief: CompanyBrief
     var departments: [Department]

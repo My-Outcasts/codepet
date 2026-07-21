@@ -59,6 +59,13 @@ final class CompanyStore: ObservableObject {
     func hydrate(companyId: String) async {
         hydrationToken &+= 1
         let token = hydrationToken
+        // Chat is per-account + session-only. An actual account change clears it
+        // (and any stuck typing); a same-user re-hydrate (token refresh/reconnect)
+        // preserves the in-flight conversation.
+        if self.companyId != companyId {
+            chatMessages = []
+            isCompanionTyping = false
+        }
         self.companyId = companyId
         isHydrating = true
         let loaded = await loader(companyId)
@@ -122,13 +129,16 @@ final class CompanyStore: ObservableObject {
         let history = chatMessages.dropLast().suffix(20).map {
             ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
         }
+        let cid = companyId
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
             history: Array(history), userMessage: text)
-        let token = hydrationToken
         let reply = await chatSender(req)
-        guard token == hydrationToken else { return }
+        // Apply only if we're still on the same account. A real account switch
+        // (companyId changed) already cleared chat + typing in hydrate/reset, so
+        // the stale reply is dropped and typing is never left stuck.
+        guard companyId == cid else { return }
         let offline = language == .vi
             ? "Mình không kết nối được lúc này — thử lại sau nhé."
             : "I can't reach my brain right now — try again in a bit."

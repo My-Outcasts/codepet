@@ -39,7 +39,7 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.isEmpty)
         XCTAssertFalse(s.isCompanionTyping)
     }
-    /// A reply arriving after an account switch (reset bumps the token) must not append.
+    /// A reply arriving after sign-out/reset (companyId cleared) must not append.
     func testStaleReplyAfterResetDiscarded() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
@@ -48,5 +48,31 @@ final class CompanyStoreChatTests: XCTestCase {
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         XCTAssertFalse(s.chatMessages.contains { $0.text == "late reply" })
+        XCTAssertFalse(s.isCompanionTyping)   // reset cleared typing — never stuck
+    }
+    /// A same-user re-hydrate mid-reply (token refresh/reconnect) bumps the token but
+    /// keeps companyId — the reply must still apply and typing must clear (not stick).
+    func testReplyStillAppliesAfterSameUserRehydrate() async {
+        var ref: CompanyStore?
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in await ref?.hydrate(companyId: "u"); return "reply" })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertTrue(s.chatMessages.contains { $0.text == "reply" })
+        XCTAssertFalse(s.isCompanionTyping)
+    }
+    /// An account switch via hydrate(differentId) mid-reply clears the outgoing chat +
+    /// typing and discards the stale reply (no cross-account leak, no stuck typing).
+    func testAccountSwitchViaHydrateClearsChatAndDiscardsReply() async {
+        var ref: CompanyStore?
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in await ref?.hydrate(companyId: "B"); return "A reply" })
+        ref = s
+        await s.hydrate(companyId: "A")
+        await s.sendChat("hi", language: .en)
+        XCTAssertFalse(s.chatMessages.contains { $0.text == "A reply" })  // discarded
+        XCTAssertTrue(s.chatMessages.isEmpty)                            // A's chat cleared on switch
+        XCTAssertFalse(s.isCompanionTyping)                             // not stuck
     }
 }

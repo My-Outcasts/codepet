@@ -8,6 +8,8 @@ struct CompanyOnboardingView: View {
     @StateObject private var model = CompanyOnboardingModel()
     @State private var step = 0
     private let api: ReflectionAPIClientProtocol = ReflectionAPIClient()
+    var prefillBrief: CompanyBrief? = nil
+    var onDone: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -32,8 +34,13 @@ struct CompanyOnboardingView: View {
             }
 
             HStack {
-                Button(uiLanguage == .vi ? "Bỏ qua" : "Skip") { Task { await companyStore.skipOnboarding() } }
-                    .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
+                if let onDone {
+                    Button(uiLanguage == .vi ? "Hủy" : "Cancel") { onDone() }
+                        .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
+                } else {
+                    Button(uiLanguage == .vi ? "Bỏ qua" : "Skip") { Task { await companyStore.skipOnboarding() } }
+                        .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
+                }
                 Spacer()
                 if step < 5 {
                     Button(uiLanguage == .vi ? "Tiếp" : "Next") { step += 1 }
@@ -41,7 +48,7 @@ struct CompanyOnboardingView: View {
                 } else {
                     Button(model.isSubmitting ? (uiLanguage == .vi ? "Đang lưu…" : "Saving…")
                                               : (uiLanguage == .vi ? "Hoàn tất" : "Finish")) {
-                        Task { await model.submit(store: companyStore, api: api) }
+                        Task { await model.submit(store: companyStore, api: api); onDone?() }
                     }
                     .buttonStyle(.plain).foregroundColor(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)
@@ -54,6 +61,7 @@ struct CompanyOnboardingView: View {
         .frame(maxWidth: 460)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(CodepetTheme.pageBackground)
+        .task { if let b = prefillBrief { model.prefill(from: b) } }
     }
 
     private func field(_ title: String, _ text: Binding<String>, _ placeholder: String) -> some View {

@@ -28,6 +28,17 @@ final class CompanyOnboardingModel: ObservableObject {
             projectName: nz(projectName), oneLiner: nz(oneLiner), audience: nz(audience))
     }
 
+    /// Prefill the fields from an existing brief (for edit-from-Settings). Maps the
+    /// stage string back to its index; an absent/unknown stage falls to the default.
+    func prefill(from brief: CompanyBrief) {
+        founderName = brief.founderName ?? ""
+        role = brief.role ?? ""
+        projectName = brief.projectName ?? ""
+        oneLiner = brief.oneLiner ?? ""
+        audience = brief.audience ?? ""
+        stageIndex = brief.stage.flatMap { Self.stages.firstIndex(of: $0) } ?? 2
+    }
+
     /// Enrich (fail-open) then hand to the store to persist + finish onboarding.
     /// Captures the onboarding token BEFORE the enrich await so a mid-await account
     /// switch can't misroute the write (the store discards a superseded finish).

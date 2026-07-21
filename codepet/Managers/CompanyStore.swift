@@ -13,6 +13,8 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isOnboarding: Bool = false
     @Published private(set) var chatMessages: [CopilotMessage] = []
     @Published private(set) var isCompanionTyping = false
+    @Published private(set) var runningTaskIds: Set<String> = []
+    @Published private(set) var runError: String?
 
     /// The hydrated company's id, needed for writes. Set by `hydrate`, cleared by `reset`.
     private(set) var companyId: String?
@@ -23,6 +25,8 @@ final class CompanyStore: ObservableObject {
     private let roadmapFetcher: (CompanyBrief) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
     private let chatSender: (CompanyChatRequest) async -> String?
+    private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
+    private let librarySaver: (String, [Deliverable]) async -> Bool
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -40,12 +44,16 @@ final class CompanyStore: ObservableObject {
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
-         chatSender: @escaping (CompanyChatRequest) async -> String? = CompanyChatClient.send) {
+         chatSender: @escaping (CompanyChatRequest) async -> String? = CompanyChatClient.send,
+         taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
+         librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
         self.tasksSaver = tasksSaver
         self.chatSender = chatSender
+        self.taskRunner = taskRunner
+        self.librarySaver = librarySaver
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -146,6 +154,40 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
     }
 
+    /// Run a codepetCanDo task → produce a Deliverable → append to the library + persist.
+    /// Fail-open: a nil/empty result surfaces an honest runError and appends nothing.
+    /// Task is left as-is. companyId-guarded against account switch mid-run.
+    func runTask(_ task: RoadmapTask, language: AppLanguage) async {
+        guard !runningTaskIds.contains(task.id) else { return }
+        runningTaskIds.insert(task.id)
+        runError = nil
+        let req = RunTaskRequest(
+            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
+        let cid = companyId
+        let result = await taskRunner(req)
+        runningTaskIds.remove(task.id)
+        guard companyId == cid else { return }
+        let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let result, !body.isEmpty else {
+            runError = language == .vi
+                ? "Không tạo được \"\(task.title)\" — thử lại nhé."
+                : "Couldn't generate \"\(task.title)\" — try again."
+            return
+        }
+        let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deliverable = Deliverable(
+            id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
+            title: title.isEmpty ? task.title : title, body: body,
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
+        company.library.append(deliverable)
+        if let cid { _ = await librarySaver(cid, company.library) }
+    }
+
+    /// Clear the transient run error (e.g. when the board's error line is dismissed).
+    func clearRunError() { runError = nil }
+
     /// Clear on sign-out / account switch.
     func reset() {
         hydrationToken &+= 1
@@ -156,5 +198,7 @@ final class CompanyStore: ObservableObject {
         isOnboarding = false
         chatMessages = []
         isCompanionTyping = false
+        runningTaskIds = []
+        runError = nil
     }
 }

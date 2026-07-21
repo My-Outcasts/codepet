@@ -74,6 +74,26 @@ enum CompanyData {
         }
     }
 
+    /// Pure Firestore payload for a library write — testable without Firestore.
+    static func deliverablesPayload(_ library: [Deliverable]) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(library),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["library": arr]
+        }
+        return ["library": []]
+    }
+
+    /// Write companies/{uid}.library, merge. Fail-soft: false on error.
+    static func saveLibrary(companyId: String, library: [Deliverable]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(deliverablesPayload(library), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Fetch the generated roadmap for a company. FAIL-OPEN placeholder: returns `[]`
     /// until the `scaffoldRoadmap` Cloud Function is aligned to the RoadmapTask shape
     /// (phase/dependencies) and deployed (needs node 22). `generateRoadmap` treats `[]`

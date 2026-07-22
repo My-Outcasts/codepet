@@ -18,11 +18,13 @@ struct AppShellView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            HStack(spacing: 0) {
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                if !copilotCollapsed {
-                    Divider()
-                    copilot
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if !copilotCollapsed {
+                        Divider()
+                        copilot.frame(width: geo.size.width * 0.5)   // chat = 50% of the window
+                    }
                 }
             }
         }
@@ -124,8 +126,7 @@ struct AppShellView: View {
     }
 
     private var copilot: some View {
-        CopilotChatView()
-            .frame(width: 300)
+        CopilotChatView()   // width is set by the shell (50% of the window)
     }
 }
 

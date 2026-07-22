@@ -86,10 +86,23 @@ struct OverviewView: View {
         tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != beacon?.id }.first
     }
 
+    private var currentPhase: RoadmapPhase { beacon?.phase ?? .find }
+    private var nextPhaseLabel: String? {
+        let all = RoadmapPhase.allCases
+        guard let i = all.firstIndex(of: currentPhase), i + 1 < all.count else { return nil }
+        return all[i + 1].label(lang)
+    }
+
     private var progressCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(lang == .vi ? "Tiến độ" : "Project Progress")
-                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+            HStack(spacing: 6) {
+                Text(lang == .vi ? "Tiến độ" : "Project Progress")
+                    .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+                Text(currentPhase.label(lang)).font(CodepetTheme.inter(10, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.14)))
+            }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(pct)").font(CodepetTheme.inter(30, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
                 Text("%").font(CodepetTheme.inter(14, weight: .bold)).foregroundColor(CodepetTheme.mutedText)
@@ -98,7 +111,13 @@ struct OverviewView: View {
                         .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.accentBlue)
                 }
             }
-            ProgressView(value: Double(pct), total: 100).tint(CodepetTheme.accentPurple).frame(width: 160)
+            HStack(spacing: 10) {
+                ProgressView(value: Double(pct), total: 100).tint(CodepetTheme.accentPurple).frame(width: 120)
+                if let next = nextPhaseLabel {
+                    Text((lang == .vi ? "Tiếp: " : "Next: ") + next)
+                        .font(CodepetTheme.inter(10, weight: .medium)).foregroundColor(CodepetTheme.mutedText)
+                }
+            }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 13).fill(CodepetTheme.surface))

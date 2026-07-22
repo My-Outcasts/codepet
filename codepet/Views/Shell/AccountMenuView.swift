@@ -35,14 +35,18 @@ struct AccountMenuView: View {
             Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { confirmLogout = true }
         } label: {
             HStack(spacing: 6) {
-                CharacterImage(companyStore.company.companionId, size: 22)
+                // Web-style initial avatar (a CharacterImage label mis-renders huge inside a
+                // borderless Menu — use a text-in-circle instead).
+                Text(String(founderName.prefix(1)).uppercased())
+                    .font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(CodepetTheme.accentPurple))
                 Text(founderName).font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.bodyText)
                 Image(systemName: "chevron.down").font(.system(size: 9)).foregroundColor(CodepetTheme.mutedText)
             }
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(height: 26)
         .confirmationDialog(lang == .vi ? "Đăng xuất khỏi Codepet?" : "Sign out of Codepet?",
                             isPresented: $confirmLogout, titleVisibility: .visible) {
             Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { authManager.signOut() }

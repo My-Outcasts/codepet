@@ -36,7 +36,9 @@ struct RoadmapMapView: View {
                 .padding(20)
             }
             .onAppear {
-                if let b = beacon { withAnimation { proxy.scrollTo(b.id, anchor: .center) } }
+                // Anchor the beacon toward the left so its column + the company root stay
+                // visible (centering an early-phase beacon pushes the left off-screen).
+                if let b = beacon { proxy.scrollTo(b.id, anchor: UnitPoint(x: 0.18, y: 0.45)) }
             }
         }
     }

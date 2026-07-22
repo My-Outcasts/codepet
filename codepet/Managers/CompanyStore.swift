@@ -276,6 +276,30 @@ final class CompanyStore: ObservableObject {
         if let cid { _ = await librarySaver(cid, company.library) }
     }
 
+    /// Run the greeting's "Do it with me" task → append an inline draft (reuses the 6C
+    /// run path). Marks the action consumed (optimistic, idempotent); in-flight +
+    /// account-switch guarded; fail-open honest message on a nil result.
+    func runFirstRunAction(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let action = chatMessages[i].firstRunAction,
+              !chatMessages[i].actionConsumed,
+              let task = company.tasks.first(where: { $0.id == action.taskId }),
+              !runningTaskIds.contains(task.id) else { return }
+        chatMessages[i].actionConsumed = true
+        runningTaskIds.insert(task.id)
+        let cid = companyId
+        let result = await taskRunner(runRequest(for: task, language: language))
+        runningTaskIds.remove(task.id)
+        guard companyId == cid else { return }
+        if let draft = buildDeliverable(from: result, task: task) {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không tạo được ngay bây giờ — thử lại nhé."
+                : "Couldn't generate that just now — try again."))
+        }
+    }
+
     /// Clear the transient run error (e.g. when the board's error line is dismissed).
     func clearRunError() { runError = nil }
 

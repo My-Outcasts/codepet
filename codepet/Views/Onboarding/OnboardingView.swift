@@ -143,7 +143,7 @@ struct OnboardingView: View {
 
     // Progress + primary action.
     @ViewBuilder private var footer: some View {
-        let pct = CGFloat(step + 1) / CGFloat(OnboardingContent.total)
+        let pct = CGFloat(step) / CGFloat(OnboardingContent.total)
         HStack(spacing: 14) {
             if step != 6 || (anDone && reveal != nil) {
                 GeometryReader { geo in
@@ -152,7 +152,7 @@ struct OnboardingView: View {
                         Capsule().fill(CodepetTheme.accentPurple).frame(width: geo.size.width * pct, height: 5)
                     }
                 }.frame(width: 150, height: 5)
-                Text("Step \(step + 1) of \(OnboardingContent.total)")
+                Text("Step \(step) of \(OnboardingContent.total)")
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
             } else if anDone {   // step 6, animation done but scaffold still resolving
                 Text("Still building your company…")
@@ -202,11 +202,6 @@ struct OnboardingView: View {
         }
     }
 
-    private func finish() {
-        streamTask?.cancel(); scaffoldTask?.cancel()
-        let token = companyStore.onboardingToken
-        Task { await companyStore.finishOnboarding(brief: brief(), token: token) }
-    }
     private func finishWithCompanion() {
         streamTask?.cancel(); scaffoldTask?.cancel()
         let token = companyStore.onboardingToken

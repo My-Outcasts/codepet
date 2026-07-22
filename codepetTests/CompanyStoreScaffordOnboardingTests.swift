@@ -13,7 +13,7 @@ final class CompanyStoreScaffordOnboardingTests: XCTestCase {
         let s = CompanyStore(
             loader: { _ in .empty },
             saver: { _, b in savedBrief = b; return true },
-            roadmapFetcher: { _ in [self.task("a"), self.task("b")] },
+            roadmapFetcher: { _, _ in [self.task("a"), self.task("b")] },
             tasksSaver: { _, _ in true }   // stub the tasks write (real CompanyData.saveTasks crashes the test host)
         )
         await s.hydrate(companyId: "u")     // fresh account ⇒ isOnboarding true
@@ -31,7 +31,7 @@ final class CompanyStoreScaffordOnboardingTests: XCTestCase {
 
     func testEmptyScaffoldReturnsNotOk() async {
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             roadmapFetcher: { _ in [] })     // fail-open: no tasks
+                             roadmapFetcher: { _, _ in [] })     // fail-open: no tasks
         await s.hydrate(companyId: "u")
         let reveal = await s.scaffoldFromOnboarding(brief: CompanyBrief(projectName: "X"), token: s.onboardingToken)
         XCTAssertFalse(reveal.ok)
@@ -43,7 +43,7 @@ final class CompanyStoreScaffordOnboardingTests: XCTestCase {
         var savedTo: [String] = []
         let s = CompanyStore(loader: { _ in .empty },
                              saver: { cid, _ in savedTo.append(cid); return true },
-                             roadmapFetcher: { _ in [self.task("a")] })
+                             roadmapFetcher: { _, _ in [self.task("a")] })
         await s.hydrate(companyId: "A")
         let aToken = s.onboardingToken
         s.reset()

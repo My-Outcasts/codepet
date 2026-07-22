@@ -15,6 +15,7 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isCompanionTyping = false
     @Published private(set) var runningTaskIds: Set<String> = []
     @Published private(set) var runError: String?
+    @Published private(set) var isGeneratingRoadmap = false
 
     /// The hydrated company's id, needed for writes. Set by `hydrate`, cleared by `reset`.
     private(set) var companyId: String?
@@ -22,7 +23,7 @@ final class CompanyStore: ObservableObject {
     /// Injectable so tests can supply a stub without Firestore.
     private let loader: (String) async -> CompanyState
     private let saver: (String, CompanyBrief) async -> Bool
-    private let roadmapFetcher: (CompanyBrief) async -> [RoadmapTask]
+    private let roadmapFetcher: (CompanyBrief, AppLanguage) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
     private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
@@ -44,7 +45,7 @@ final class CompanyStore: ObservableObject {
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
-         roadmapFetcher: @escaping (CompanyBrief) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
+         roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
@@ -120,9 +121,13 @@ final class CompanyStore: ObservableObject {
 
     /// Generate the roadmap (fail-open). Token-guarded: an account switch during the
     /// fetch discards. An empty result is "no change" (keeps existing tasks).
-    func generateRoadmap() async {
+    /// Language defaults to `.en` (the onboarding scaffold path is English-only); the
+    /// Overview board passes the live UI language.
+    func generateRoadmap(language: AppLanguage = .en) async {
         let token = hydrationToken
-        let fetched = await roadmapFetcher(company.brief)
+        isGeneratingRoadmap = true
+        defer { if token == hydrationToken { isGeneratingRoadmap = false } }
+        let fetched = await roadmapFetcher(company.brief, language)
         guard token == hydrationToken, !fetched.isEmpty else { return }
         company.tasks = fetched
         if let cid = companyId { _ = await tasksSaver(cid, fetched) }
@@ -293,5 +298,8 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
         runningTaskIds = []
         runError = nil
+        isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
+        // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
+        // "Re-plan" button disabled forever otherwise).
     }
 }

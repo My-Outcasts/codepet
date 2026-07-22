@@ -11,17 +11,54 @@ struct CopilotChatView: View {
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
+    private var companyName: String {
+        let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "Codepet" : n
+    }
+    private var founderName: String {
+        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
+    }
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !companyStore.isCompanionTyping
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            header
+            Divider()
             messageList
+            letsBuild
             Divider()
             inputBar
         }
         .frame(maxHeight: .infinity)
+    }
+
+    // Web Copilot header: "Your team" + "guiding · {company}" + History (stub).
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(lang == .vi ? "Đội của bạn" : "Your team")
+                    .font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
+                Text((lang == .vi ? "đang hỗ trợ · " : "guiding · ") + companyName)
+                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
+            }
+            Spacer()
+            Text(lang == .vi ? "Lịch sử" : "History")
+                .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.mutedText)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    // "Let's build" CTA — stub (the live build session is a later effort).
+    private var letsBuild: some View {
+        Button { } label: {
+            Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
+                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                .background(CodepetTheme.accentPurple.opacity(0.08))
+        }.buttonStyle(.plain)
     }
 
     private var messageList: some View {
@@ -47,12 +84,28 @@ struct CopilotChatView: View {
     }
 
     private var greeting: some View {
-        Text(lang == .vi
-             ? "Chào, mình là \(companionName). Hỏi mình bất cứ điều gì về công ty của bạn."
-             : "Hi, I'm \(companionName). Ask me anything about your company.")
-            .font(.pixelSystem(size: 12))
-            .foregroundColor(CodepetTheme.mutedText)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(lang == .vi
+                 ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
+                 : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
+                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(quickStarts, id: \.self) { chip in
+                    Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
+                        Text(chip).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentPurple)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var quickStarts: [String] {
+        lang == .vi
+            ? ["Nên tập trung vào đâu trước?", "Tóm tắt tình hình công ty", "Điều gì đang cản trở ra mắt?"]
+            : ["What should I focus on first?", "Summarize where my company is", "What\u{2019}s blocking my launch?"]
     }
 
     private var typingRow: some View {
@@ -63,10 +116,10 @@ struct CopilotChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField(lang == .vi ? "Nhắn cho \(companionName)…" : "Message \(companionName)…",
+            TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
                       text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.pixelSystem(size: 12))
+                .font(CodepetTheme.inter(12))
                 .lineLimit(1...4)
                 .focused($inputFocused)
                 .onSubmit(send)

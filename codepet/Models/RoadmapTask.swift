@@ -1,10 +1,10 @@
 // codepet/Models/RoadmapTask.swift
-import Foundation
+import SwiftUI
 
 /// The roadmap board's columns, in order. Mirrors the web Overview board
-/// (Find → Foundation → Build → Ship → Launch).
+/// (Find → Foundation → Build → Ship → Launch → Run & Grow).
 enum RoadmapPhase: String, Codable, CaseIterable, Identifiable {
-    case find, foundation, build, ship, launch
+    case find, foundation, build, ship, launch, grow
     var id: String { rawValue }
     var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
     func label(_ lang: AppLanguage) -> String {
@@ -14,6 +14,7 @@ enum RoadmapPhase: String, Codable, CaseIterable, Identifiable {
         case .build:      return lang == .vi ? "Xây dựng" : "Build"
         case .ship:       return lang == .vi ? "Phát hành" : "Ship"
         case .launch:     return lang == .vi ? "Ra mắt" : "Launch"
+        case .grow:       return lang == .vi ? "Vận hành & Phát triển" : "Run & Grow"
         }
     }
 }
@@ -33,16 +34,33 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
     var dependsOn: [String]
     var done: Bool
     var drafted: Bool
+    /// Owning department key (one of the 8 DEPARTMENTS keys). OPTIONAL: existing saved
+    /// tasks predate this field, and RoadmapTask decodes strictly — a required `dept`
+    /// would fail to decode every stored board. nil == unassigned (pre-department tasks).
+    var dept: String?
 
     init(id: String, title: String, detail: String, phase: RoadmapPhase, who: TaskWho,
-         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false) {
+         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false, dept: String? = nil) {
         self.id = id; self.title = title; self.detail = detail; self.phase = phase
         self.who = who; self.dependsOn = dependsOn; self.done = done; self.drafted = drafted
+        self.dept = dept
     }
 }
 
 /// Derived per-task status (the board legend) — computed by RoadmapEngine, not stored.
 enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
+
+/// Shared status→accent mapping (matches TaskCardView's board colors). Used by the
+/// department task cards; kept here so views don't each redefine it.
+func taskStatusTint(_ s: TaskStatus) -> Color {
+    switch s {
+    case .done:          return CodepetTheme.accentTeal
+    case .codepetCanDo:  return CodepetTheme.accentPurple
+    case .needsApproval: return CodepetTheme.accentGold
+    case .needsYou:      return CodepetTheme.accentBlue   // web KEY: "Needs your input" = blue (#3B82F6)
+    case .blocked:       return CodepetTheme.mutedText
+    }
+}
 
 extension TaskWho {
     /// Board chip label — who acts on the task.

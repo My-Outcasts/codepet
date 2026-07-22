@@ -1,6 +1,7 @@
 // codepet/Services/CompanyData.swift
 import Foundation
 import FirebaseFirestore
+import FirebaseAuth
 
 /// The companies/{uid} Firestore document (mirrors the web CompanyDoc:
 /// lib/firebase/schema.ts). Departments + library live in subcollections
@@ -128,12 +129,35 @@ enum CompanyData {
         }
     }
 
-    /// Fetch the generated roadmap for a company. FAIL-OPEN placeholder: returns `[]`
-    /// until the `scaffoldRoadmap` Cloud Function is aligned to the RoadmapTask shape
-    /// (phase/dependencies) and deployed (needs node 22). `generateRoadmap` treats `[]`
-    /// as "no change", so the board stays empty rather than clearing existing tasks.
-    static func fetchRoadmap(brief: CompanyBrief) async -> [RoadmapTask] {
-        []
+    private static let roadmapEndpoint =
+        URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateRoadmap")!
+
+    private struct RoadmapRequest: Encodable {
+        let language: String
+        let brief: CompanyBrief
+    }
+    private struct RoadmapResponse: Decodable {
+        let tasks: [RoadmapTask]
+    }
+
+    /// Fetch the generated roadmap from the `generateRoadmap` Cloud Function (phase/deps
+    /// RoadmapTask shape). FAIL-OPEN: returns `[]` on no signed-in user / any error /
+    /// non-200 / unreachable — `generateRoadmap` treats `[]` as "no change", so the board
+    /// is never clobbered.
+    static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
+        var req = URLRequest(url: roadmapEndpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let body = try? JSONEncoder().encode(
+            RoadmapRequest(language: language.rawValue, brief: brief)) else { return [] }
+        req.httpBody = body
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(RoadmapResponse.self, from: data)
+        else { return [] }
+        return decoded.tasks
     }
 
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via

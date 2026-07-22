@@ -1,5 +1,6 @@
 // codepet/Services/CompanyChatClient.swift
 import Foundation
+import FirebaseAuth
 
 /// One prior chat turn sent to the CF as history.
 struct ChatTurnDTO: Codable, Equatable {
@@ -51,9 +52,11 @@ enum CompanyChatClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/companyChat")!
 
     static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let body = try? JSONEncoder().encode(req) else { return nil }
         urlRequest.httpBody = body
         guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),

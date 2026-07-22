@@ -46,7 +46,7 @@ enum OnboardingContent {
         ("Sales", Color(hex: "#7ea8ff")),
         ("Support", Color(hex: "#7fd694")),
     ]
-    /// Per-step left-panel art (STEP_ART), steps 0...7. Step 0 & 7 reuse ob-team.
+    /// Per-step left-panel art (STEP_ART), steps 0...8. Steps 0, 7 & 8 reuse ob-team.
     static let stepArt = [
         "ob-team", "ob-couch", "ob-chess", "ob-drummer",
         "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team", "ob-team",
@@ -57,7 +57,10 @@ enum OnboardingContent {
         "Cross-checking your space & stage",
         "Drafting your roadmap to launch",
     ]
-    static let total = 9
+    /// Numbered steps shown to the user (1...8: name, role, tech, project, stage,
+    /// analysis, reveal, companion). Excludes the cinematic cold-open (step 0), which
+    /// carries no "Step X of Y" counter — so the first question reads "Step 1 of 8".
+    static let total = 8
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.

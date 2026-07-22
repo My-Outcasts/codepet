@@ -33,7 +33,7 @@ struct PetCharacter: Identifiable {
     // swiftlint:disable function_body_length
     static let all: [String: PetCharacter] = [
         "byte": PetCharacter(
-            id: "byte", name: "Byte", badge: "The Chaotic Core",
+            id: "byte", name: "Codepet", badge: "The Chaotic Core",
             color: Color(hex: "#8B7BE8"), hexColor: "#8B7BE8",
             personality: "glitchy, chaotic, thinks in fragments",
             domain: "Data / ML",

@@ -43,6 +43,12 @@ struct ContentView: View {
                 // in the company-less, non-persisting shell (companyId is nil until
                 // an account hydrates).
                 ReturningSignInView()
+            } else if companyStore.companyId != authManager.currentUser?.uid || companyStore.isHydrating {
+                // Bootstrapping — signed in, but this account's company hasn't finished
+                // hydrating yet (companyId not yet swapped to this uid, or a hydrate is
+                // in flight). Mirrors the web's "Setting up your company…" gate so we
+                // never flash the shell or onboarding before `isOnboarding` is known.
+                SplashView()
             } else if companyStore.isOnboarding {
                 // Fresh account — first-run cinematic onboarding before the shell.
                 // .id on the company scopes the wizard's @State per account, so a

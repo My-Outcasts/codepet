@@ -9,8 +9,8 @@ struct RoadmapMapView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
-    private let cardW: CGFloat = 200
-    private let cardH: CGFloat = 76
+    private let cardW: CGFloat = 205
+    private let cardH: CGFloat = 84
 
     private var map: RoadmapMap { RoadmapMapLayout.layout(tasks, cardW: cardW, cardH: cardH) }
     private var pos: [String: CGPoint] {
@@ -49,15 +49,24 @@ struct RoadmapMapView: View {
         }
     }
 
-    // Phase-header pills over each column: FIND {done}/{total} … (pad must match the layout).
+    // Phase-header chips over each column (web: a bordered chip per phase, the current
+    // phase a filled purple pill, the done/total count trailing outside). pad must match
+    // the layout.
     private var phaseHeaders: some View {
         let col: CGFloat = 260, pad: CGFloat = 120
+        let current = beacon?.phase
         return ForEach(Array(RoadmapPhase.allCases.enumerated()), id: \.offset) { pi, phase in
             let list = tasks.filter { $0.phase == phase }
             let done = list.filter { $0.done }.count
-            HStack(spacing: 5) {
-                Text(phase.label(lang).uppercased()).font(CodepetTheme.inter(10, weight: .bold))
-                    .foregroundColor(CodepetTheme.mutedText)
+            let isCurrent = phase == current
+            HStack(spacing: 6) {
+                Text(phase.label(lang).uppercased()).font(CodepetTheme.inter(10, weight: .bold)).tracking(0.7)
+                    .foregroundColor(isCurrent ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(isCurrent ? CodepetTheme.accentPurple.opacity(0.16) : CodepetTheme.mutedText.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 7)
+                        .stroke(isCurrent ? CodepetTheme.accentPurple.opacity(0.55) : CodepetTheme.hairline, lineWidth: 1))
                 Text("\(done)/\(list.count)").font(CodepetTheme.inter(10)).foregroundColor(CodepetTheme.mutedText)
             }
             .position(x: pad + CGFloat(pi + 1) * col, y: 4)
@@ -127,13 +136,17 @@ struct RoadmapMapView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
             }
-            HStack(alignment: .top, spacing: 6) {
-                RoundedRectangle(cornerRadius: 3).fill(taskStatusTint(status)).frame(width: 11, height: 11).padding(.top, 1)
+            HStack(alignment: .top, spacing: 8) {
+                statusDot(status)
                 Text(task.title).font(CodepetTheme.inter(12.5, weight: .semibold))
                     .foregroundColor(status == .blocked ? CodepetTheme.mutedText : CodepetTheme.primaryText)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                if status == .blocked {
-                    Image(systemName: "lock.fill").font(.system(size: 9)).foregroundColor(CodepetTheme.mutedText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Web shows a small deliverable/output marker on pending (non-done, non-beacon) cards.
+                if !task.done && !isBeacon {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .stroke(CodepetTheme.mutedText.opacity(0.6), lineWidth: 1)
+                        .frame(width: 11, height: 9).padding(.top, 2)
                 }
             }
             statusChip(status, isBeacon: isBeacon)
@@ -147,6 +160,16 @@ struct RoadmapMapView: View {
         .opacity(status == .blocked ? 0.72 : 1)
         .onTapGesture { if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } } }
         .help(peekText(task, status: status))
+    }
+
+    // Web status indicator: a rounded-square container box holding a small colored square.
+    private func statusDot(_ status: TaskStatus) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.mutedText.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(CodepetTheme.hairline, lineWidth: 1))
+                .frame(width: 28, height: 28)
+            RoundedRectangle(cornerRadius: 4).fill(taskStatusTint(status)).frame(width: 13, height: 13)
+        }
     }
 
     @ViewBuilder private func statusChip(_ status: TaskStatus, isBeacon: Bool) -> some View {

@@ -75,9 +75,6 @@ struct AppShellView: View {
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Capsule().fill(CodepetTheme.primaryText))
                 }.buttonStyle(.plain)
-                Button { copilotCollapsed.toggle() } label: {
-                    Image(systemName: "bubble.left.and.bubble.right").foregroundColor(accent)
-                }.buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)

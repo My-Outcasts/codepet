@@ -2,9 +2,9 @@
 import SwiftUI
 
 /// The roadmap board's columns, in order. Mirrors the web Overview board
-/// (Find → Foundation → Build → Ship → Launch).
+/// (Find → Foundation → Build → Ship → Launch → Run & Grow).
 enum RoadmapPhase: String, Codable, CaseIterable, Identifiable {
-    case find, foundation, build, ship, launch
+    case find, foundation, build, ship, launch, grow
     var id: String { rawValue }
     var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
     func label(_ lang: AppLanguage) -> String {
@@ -14,6 +14,7 @@ enum RoadmapPhase: String, Codable, CaseIterable, Identifiable {
         case .build:      return lang == .vi ? "Xây dựng" : "Build"
         case .ship:       return lang == .vi ? "Phát hành" : "Ship"
         case .launch:     return lang == .vi ? "Ra mắt" : "Launch"
+        case .grow:       return lang == .vi ? "Vận hành & Phát triển" : "Run & Grow"
         }
     }
 }
@@ -56,7 +57,7 @@ func taskStatusTint(_ s: TaskStatus) -> Color {
     case .done:          return CodepetTheme.accentTeal
     case .codepetCanDo:  return CodepetTheme.accentPurple
     case .needsApproval: return CodepetTheme.accentGold
-    case .needsYou:      return CodepetTheme.accentOrange
+    case .needsYou:      return CodepetTheme.accentBlue   // web KEY: "Needs your input" = blue (#3B82F6)
     case .blocked:       return CodepetTheme.mutedText
     }
 }

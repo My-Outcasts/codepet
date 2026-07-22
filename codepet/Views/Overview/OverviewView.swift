@@ -47,10 +47,14 @@ struct OverviewView: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                    .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                HStack(spacing: 7) {
+                    Text("?").font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(.white)
+                        .frame(width: 16, height: 16).background(Circle().fill(CodepetTheme.accentPurple))
+                    Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
+                        .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
                 segmentToggle
             }
         }

@@ -6,6 +6,7 @@ import SwiftUI
 /// Empty → an honest empty card plus a quiet, fail-open generate on appear.
 struct OverviewBoardView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    @Environment(\.uiLanguage) private var lang
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
 
@@ -19,7 +20,7 @@ struct OverviewBoardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            if companyStore.company.tasks.isEmpty { await companyStore.generateRoadmap() }
+            if companyStore.company.tasks.isEmpty { await companyStore.generateRoadmap(language: lang) }
         }
     }
 

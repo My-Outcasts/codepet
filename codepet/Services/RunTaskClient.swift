@@ -1,5 +1,6 @@
 // codepet/Services/RunTaskClient.swift
 import Foundation
+import FirebaseAuth
 
 /// Request body for the runTask Cloud Function.
 struct RunTaskRequest: Codable {
@@ -37,9 +38,11 @@ enum RunTaskClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/runTask")!
 
     static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let body = try? JSONEncoder().encode(req) else { return nil }
         urlRequest.httpBody = body
         guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),

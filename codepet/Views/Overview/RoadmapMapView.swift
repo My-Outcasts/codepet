@@ -18,6 +18,10 @@ struct RoadmapMapView: View {
     }
     private var beacon: RoadmapTask? { RoadmapEngine.nextStep(tasks) }
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
+    private var founderName: String {
+        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? companionName : n
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -36,16 +40,18 @@ struct RoadmapMapView: View {
                 .padding(20)
             }
             .onAppear {
-                // Anchor the beacon toward the left so its column + the company root stay
-                // visible (centering an early-phase beacon pushes the left off-screen).
-                if let b = beacon { proxy.scrollTo(b.id, anchor: UnitPoint(x: 0.18, y: 0.45)) }
+                // Only scroll for a late-phase beacon (Ship/Launch); an early beacon stays at
+                // the origin so the company root + Find column are visible from the start.
+                if let b = beacon, b.phase.order >= 3 {
+                    proxy.scrollTo(b.id, anchor: UnitPoint(x: 0.4, y: 0.45))
+                }
             }
         }
     }
 
-    // Phase-header pills over each column: FIND {done}/{total} …
+    // Phase-header pills over each column: FIND {done}/{total} … (pad must match the layout).
     private var phaseHeaders: some View {
-        let col: CGFloat = 260, pad: CGFloat = 40
+        let col: CGFloat = 260, pad: CGFloat = 120
         return ForEach(Array(RoadmapPhase.allCases.enumerated()), id: \.offset) { pi, phase in
             let list = tasks.filter { $0.phase == phase }
             let done = list.filter { $0.done }.count
@@ -113,13 +119,16 @@ struct RoadmapMapView: View {
         let isBeacon = beacon?.id == task.id
         return VStack(alignment: .leading, spacing: 6) {
             if isBeacon {
-                Text("\(companionName) " + (lang == .vi ? "đang ở đây" : "is here"))
+                // Web shows the FOUNDER's name for a their-task beacon, the companion otherwise
+                // (e.g. "MONA IS HERE" / "BYTE IS HERE").
+                let who = task.who == .you ? founderName : companionName
+                Text(lang == .vi ? "\(who.uppercased()) Ở ĐÂY" : "\(who.uppercased()) IS HERE")
                     .font(CodepetTheme.inter(9, weight: .bold)).foregroundColor(.white)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
             }
             HStack(alignment: .top, spacing: 6) {
-                Circle().fill(taskStatusTint(status)).frame(width: 7, height: 7).padding(.top, 3)
+                RoundedRectangle(cornerRadius: 3).fill(taskStatusTint(status)).frame(width: 11, height: 11).padding(.top, 1)
                 Text(task.title).font(CodepetTheme.inter(12.5, weight: .semibold))
                     .foregroundColor(status == .blocked ? CodepetTheme.mutedText : CodepetTheme.primaryText)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)

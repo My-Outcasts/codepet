@@ -13,7 +13,7 @@ enum RoadmapMapLayout {
     static let rootId = "__root__"
 
     static func layout(_ tasks: [RoadmapTask], col: CGFloat = 260, row: CGFloat = 108,
-                       cardW: CGFloat = 200, cardH: CGFloat = 76, pad: CGFloat = 40) -> RoadmapMap {
+                       cardW: CGFloat = 200, cardH: CGFloat = 76, pad: CGFloat = 120) -> RoadmapMap {
         let phases = RoadmapPhase.allCases
         var byPhase: [RoadmapPhase: [RoadmapTask]] = [:]
         for t in tasks { byPhase[t.phase, default: []].append(t) }

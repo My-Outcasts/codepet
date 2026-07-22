@@ -46,7 +46,7 @@ enum OnboardingContent {
         ("Sales", Color(hex: "#7ea8ff")),
         ("Support", Color(hex: "#7fd694")),
     ]
-    /// Per-step left-panel art (STEP_ART), steps 0...7. Step 0 & 7 reuse ob-team.
+    /// Per-step left-panel art (STEP_ART), steps 0...8. Steps 0, 7 & 8 reuse ob-team.
     static let stepArt = [
         "ob-team", "ob-couch", "ob-chess", "ob-drummer",
         "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team", "ob-team",

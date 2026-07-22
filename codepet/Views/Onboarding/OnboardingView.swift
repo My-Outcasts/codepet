@@ -202,11 +202,6 @@ struct OnboardingView: View {
         }
     }
 
-    private func finish() {
-        streamTask?.cancel(); scaffoldTask?.cancel()
-        let token = companyStore.onboardingToken
-        Task { await companyStore.finishOnboarding(brief: brief(), token: token) }
-    }
     private func finishWithCompanion() {
         streamTask?.cancel(); scaffoldTask?.cancel()
         let token = companyStore.onboardingToken

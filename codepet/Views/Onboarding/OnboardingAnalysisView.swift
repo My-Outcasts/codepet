@@ -1,13 +1,14 @@
 // codepet/Views/Onboarding/OnboardingAnalysisView.swift
 import SwiftUI
 
-/// Step 6 body — "byte is reading {project}…" with streaming analysis lines.
+/// Step 6 body — "Codepet is reading {project}…" with streaming analysis lines.
 /// The controller drives `shown` (how many lines revealed) and `done`.
 struct OnboardingAnalysisView: View {
     let projectName: String
     let shown: Int
     let done: Bool
     @State private var spin = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +45,7 @@ struct OnboardingAnalysisView: View {
             .padding(.top, 8)
         }
         .onAppear {
+            guard !reduceMotion else { return }   // leave the ring static under Reduce Motion
             withAnimation(.linear(duration: 0.7).repeatForever(autoreverses: false)) { spin = true }
         }
     }

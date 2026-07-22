@@ -40,13 +40,6 @@ struct ReturningSignInView: View {
 
             VStack(spacing: 16) {
                 card
-                Button("Continue without signing in →") {
-                    authManager.authError = nil
-                    authManager.isGuestMode = true
-                }
-                .font(CodepetTheme.body(13))
-                .foregroundColor(.white.opacity(0.7))
-                .buttonStyle(.plain)
             }
             .frame(maxWidth: 394)
             .opacity(appear ? 1 : 0)
@@ -58,6 +51,12 @@ struct ReturningSignInView: View {
             if !reduceMotion {
                 withAnimation(.easeInOut(duration: 34).repeatForever(autoreverses: true)) { kenBurns = true }
             }
+        }
+        .onChange(of: authManager.authError) { _, err in
+            // Auth failed → stop the spinner + re-enable the form. Success needs no
+            // reset here: the ContentView gate swaps this view away the moment
+            // currentUser becomes non-nil.
+            if err != nil { isAuthenticating = false }
         }
     }
 
@@ -185,6 +184,8 @@ struct ReturningSignInView: View {
         } else {
             authManager.signInWithEmail(email: email, password: password)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { isAuthenticating = false }
+        // No wall-clock reset: isAuthenticating clears when auth actually resolves
+        // (an error arrives → .onChange above; success swaps this view out). A fixed
+        // timer would re-enable the button mid-flight on a slow network → double submit.
     }
 }

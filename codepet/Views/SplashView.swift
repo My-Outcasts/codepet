@@ -47,21 +47,31 @@ struct SplashView: View {
                     .foregroundColor(.white)
                     .padding(.top, 20)
                     .shadow(color: Color(hex: "#0a041e").opacity(0.7), radius: 9)
-                Button { onContinue?() } label: {
-                    Text("Let's go")
-                        .font(CodepetTheme.body(14))
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 30)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(CodepetTheme.accentPurple))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
-                        .shadow(color: OnboardingContent.Palette.accentDeep.opacity(0.5), radius: 13, y: 8)
+                if onContinue != nil {
+                    Button { onContinue?() } label: {
+                        Text("Let's go")
+                            .font(CodepetTheme.body(14))
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 30)
+                            .padding(.vertical, 12)
+                            .background(Capsule().fill(CodepetTheme.accentPurple))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                            .shadow(color: OnboardingContent.Palette.accentDeep.opacity(0.5), radius: 13, y: 8)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 32)
+                } else {
+                    // Auth / cloud still resolving — passive loading affordance, NOT the
+                    // interactive CTA (there's no onContinue to fire, so a "Let's go"
+                    // button would be a silent no-op).
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                        .padding(.top, 34)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 32)
                 Spacer()
-                Text("click anywhere to continue")
+                Text(onContinue != nil ? "click anywhere to continue" : "Loading…")
                     .font(CodepetTheme.body(11))
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.bottom, 22)

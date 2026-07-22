@@ -37,9 +37,11 @@ struct ContentView: View {
             } else if authManager.isLoading || isLoadingCloudData {
                 // Still checking auth state or loading cloud data
                 SplashView()
-            } else if authManager.currentUser == nil && !authManager.isGuestMode {
-                // Not signed in — show sign-in (Google + email). Skip the
-                // multi-step onboarding entirely.
+            } else if authManager.currentUser == nil {
+                // Not signed in — always show sign-in. Guest mode is blocked, so a
+                // stale persisted cp_isGuestMode can never strand a signed-out user
+                // in the company-less, non-persisting shell (companyId is nil until
+                // an account hydrates).
                 ReturningSignInView()
             } else if companyStore.isOnboarding {
                 // Fresh account — first-run cinematic onboarding before the shell.

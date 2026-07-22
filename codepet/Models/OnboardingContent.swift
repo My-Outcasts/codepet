@@ -57,7 +57,10 @@ enum OnboardingContent {
         "Cross-checking your space & stage",
         "Drafting your roadmap to launch",
     ]
-    static let total = 9
+    /// Numbered steps shown to the user (1...8: name, role, tech, project, stage,
+    /// analysis, reveal, companion). Excludes the cinematic cold-open (step 0), which
+    /// carries no "Step X of Y" counter — so the first question reads "Step 1 of 8".
+    static let total = 8
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.

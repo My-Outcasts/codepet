@@ -225,14 +225,19 @@ class AuthManager: ObservableObject {
 
     // MARK: - Password Reset
 
-    func sendPasswordReset(email: String) {
+    /// Sends a reset email. `completion(true)` only on a real send — so the view's
+    /// green confirmation can't fire on failure; `completion(false)` surfaces a
+    /// friendly error. Success never writes to `authError`.
+    func sendPasswordReset(email: String, completion: ((Bool) -> Void)? = nil) {
         authError = nil
         Auth.auth().sendPasswordReset(withEmail: email) { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
-                    self?.authError = error.localizedDescription
+                    self?.authError = self?.friendlyError(error, context: "Password reset")
+                    completion?(false)
+                } else {
+                    completion?(true)
                 }
-                // Success is shown via resetSent flag in the view — don't write to authError here
             }
         }
     }

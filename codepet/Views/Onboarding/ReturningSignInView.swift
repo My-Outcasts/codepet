@@ -69,7 +69,7 @@ struct ReturningSignInView: View {
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.mutedText)
                 .padding(.top, 9)
 
-            if let error = authManager.authError, !error.contains("reset email sent") {
+            if let error = authManager.authError {
                 Text(error)
                     .font(CodepetTheme.body(13)).foregroundColor(CodepetTheme.accentPink)
                     .fixedSize(horizontal: false, vertical: true)
@@ -111,8 +111,10 @@ struct ReturningSignInView: View {
                             authManager.authError = "Enter your email above first."
                             return
                         }
-                        authManager.sendPasswordReset(email: email)
-                        resetSent = true
+                        resetSent = false
+                        authManager.sendPasswordReset(email: email) { ok in
+                            resetSent = ok   // green confirmation only on a real send
+                        }
                     }
                     .font(CodepetTheme.body(12)).foregroundColor(OnboardingContent.Palette.faint)
                     .buttonStyle(.plain)

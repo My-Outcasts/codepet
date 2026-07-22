@@ -15,7 +15,7 @@ final class OnboardingContentTests: XCTestCase {
         XCTAssertEqual(OnboardingContent.departments.count, 8)
         XCTAssertEqual(OnboardingContent.departments.first?.name, "Engineering")
         XCTAssertEqual(OnboardingContent.analysisLines.count, 4)
-        XCTAssertEqual(OnboardingContent.total, 9)
+        XCTAssertEqual(OnboardingContent.total, 8)
         // step art covers steps 0...8 (9 entries)
         XCTAssertEqual(OnboardingContent.stepArt.count, 9)
         XCTAssertEqual(OnboardingContent.stepArt[0], "ob-team")

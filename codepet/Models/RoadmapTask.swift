@@ -33,11 +33,16 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
     var dependsOn: [String]
     var done: Bool
     var drafted: Bool
+    /// Owning department key (one of the 8 DEPARTMENTS keys). OPTIONAL: existing saved
+    /// tasks predate this field, and RoadmapTask decodes strictly — a required `dept`
+    /// would fail to decode every stored board. nil == unassigned (pre-department tasks).
+    var dept: String?
 
     init(id: String, title: String, detail: String, phase: RoadmapPhase, who: TaskWho,
-         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false) {
+         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false, dept: String? = nil) {
         self.id = id; self.title = title; self.detail = detail; self.phase = phase
         self.who = who; self.dependsOn = dependsOn; self.done = done; self.drafted = drafted
+        self.dept = dept
     }
 }
 

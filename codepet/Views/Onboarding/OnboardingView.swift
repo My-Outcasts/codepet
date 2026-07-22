@@ -6,12 +6,14 @@ import SwiftUI
 /// first run; the reveal/scaffold is fail-open (scaffoldRoadmap CF undeployed).
 struct OnboardingView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    @EnvironmentObject var appState: AppState
 
     struct ObDraft {
         var name = "", role = "", roleLabel = "", tech = ""
         var projName = "", oneLiner = "", audience = "", link = "", notes = ""
         var categories: [String] = []
         var stageIndex = OnboardingContent.defaultStageIndex
+        var pick = ""
     }
 
     @State private var step = 0
@@ -48,6 +50,7 @@ struct OnboardingView: View {
             }
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
+        .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
     }
 
     // Two-panel card: art left (42%), form right.
@@ -74,8 +77,15 @@ struct OnboardingView: View {
                 }
                 .padding(.bottom, 8)
 
-                ScrollView { stepBody.frame(maxWidth: 600, alignment: .leading) }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Group {
+                    if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
+                        ScrollView { stepBody.frame(maxWidth: 600, alignment: .leading) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    } else {                       // vertically centered (.leading = leading + center-vertical)
+                        stepBody.frame(maxWidth: 600, alignment: .leading)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    }
+                }
 
                 footer.frame(maxWidth: 600)
             }
@@ -124,8 +134,10 @@ struct OnboardingView: View {
             OnboardingStageSlider(stageIndex: $d.stageIndex)
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
-        default:
+        case 7:
             OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
+        default:
+            OnboardingCompanionStep(pickedId: $d.pick)
         }
     }
 
@@ -160,7 +172,8 @@ struct OnboardingView: View {
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
-        default: bigButton("See my company", enabled: true) { finish() }
+        case 7: bigButton("Choose your companion", enabled: true) { step = 8 }
+        default: bigButton("Start building", enabled: true) { finishWithCompanion() }
         }
     }
 
@@ -193,6 +206,16 @@ struct OnboardingView: View {
         streamTask?.cancel(); scaffoldTask?.cancel()
         let token = companyStore.onboardingToken
         Task { await companyStore.finishOnboarding(brief: brief(), token: token) }
+    }
+    private func finishWithCompanion() {
+        streamTask?.cancel(); scaffoldTask?.cancel()
+        let token = companyStore.onboardingToken
+        let id = d.pick.isEmpty ? companyStore.company.companionId : d.pick
+        Task {
+            await companyStore.setCompanion(id: id)
+            appState.activeChar = id
+            await companyStore.finishOnboarding(brief: brief(), token: token)
+        }
     }
     private func skip() {
         streamTask?.cancel(); scaffoldTask?.cancel()

@@ -41,7 +41,8 @@ struct AccountMenuView: View {
             }
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .menuIndicator(.hidden)
+        .frame(height: 26)
         .confirmationDialog(lang == .vi ? "Đăng xuất khỏi Codepet?" : "Sign out of Codepet?",
                             isPresented: $confirmLogout, titleVisibility: .visible) {
             Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { authManager.signOut() }

@@ -14,6 +14,66 @@ Settled decisions: web-style **top-bar tabs** (retire the sidebar); **full node-
 
 ---
 
+## GLOBAL CONSTRAINT — Web-matched typography & sizing (applies to EVERY view here + retrofits order 3)
+
+Native currently pixelates all titles ≥18pt (Minecraft via `pixelSystem`) and uses ad-hoc small
+sizes. The web uses **Google Sans Flex at specific px sizes** for everything except the "Codepet"
+brand wordmark. To match the web:
+
+- **Font family:** ALL text uses GSF (`CodepetTheme.inter(_:weight:)`, already loads GSF). The pixel
+  font is used ONLY for the literal "Codepet" brand wordmark (via `CodepetTheme.pixel(_:)`).
+- **`pixelSystem` becomes always-GSF** (drop the ≥18pt→Minecraft branch) so every existing title in
+  the app becomes GSF in one change. The two brand wordmarks that relied on the pixel branch —
+  `SplashView` ("Codepet", 80) and `ReturningSignInView` ("Codepet", 30) — switch to `pixel()` directly.
+- **Type scale (exact web px → SwiftUI pt; use these numbers verbatim), weight = GSF weight:**
+
+  | Role | pt | weight |
+  |---|---|---|
+  | Page title (h1: "Overview", "Your company", "Tasks", "Library") | **28** | .semibold (650) |
+  | Subtitle under h1 | **15** | .regular |
+  | Department row **name** (Company list) | **25** | .semibold |
+  | Department row current-task line | **16** | .regular |
+  | Department row count / `.dr-count` | **14** (bold number **30**) | .regular / .bold |
+  | Task card title (`.tk .tt`) | **14** | .semibold (600) |
+  | Task card detail (`.tk .td`) | **12** | .regular |
+  | Kanban card title (`.kb-title`) | **12.5** | .medium (500) |
+  | Kanban dept label (`.kb-dept`) | **12.5** | .bold (700) |
+  | Nav tab (`.tb-tab`) | **13** | .medium |
+  | Nav count badge (`.ct`) | **9** | .semibold |
+  | Account-menu item | **13.5** | .regular |
+  | Progress big % | **30** | .bold |
+  | Beacon title | **21** | .semibold |
+  | Topbar brand "Codepet" (**PIXEL**) | 15 | — (pixel font) |
+
+- **Component sizing** (padding/radius/gaps) follows the web too where it reads too dense: e.g. `.vhead`
+  padding `22 26 0`, card padding `12 14`, card radius `13`, dept row cover, etc. Match the web's
+  generous scale rather than the current tight one.
+- **Reusable roles:** add named helpers to `CodepetTheme` (e.g. `title()`, `subtitle()`, `cardTitle()`,
+  `cardDetail()`, `navTab()`, `label()`) returning `inter(_, weight:)` at the sizes above, so views
+  reference roles instead of raw numbers and stay consistent. Views may still pass raw sizes where a
+  role doesn't exist, but must use the web px values.
+
+This is **Phase 0** below and is a prerequisite for Phases A–C; it also **retrofits the order-3 views**
+(CompanyView / DepartmentDetailView / TasksView) which currently use `pixelSystem` + undersized text.
+
+---
+
+# PHASE 0 — Typography foundation (prerequisite)
+
+Land the web-matched type system before the view work, so every phase builds on it.
+- **`CodepetTheme.pixelSystem`** → always `inter(size, weight:)` (remove the ≥18pt Minecraft branch).
+- **Brand wordmarks** stay pixel: `SplashView` "Codepet" (80) and `ReturningSignInView` "Codepet" (30)
+  switch from `.pixelSystem` to `CodepetTheme.pixel(_)`. (The topbar brand, Phase A, uses `pixel(15)`.)
+- **Add reusable type roles** to `CodepetTheme` (`title`=inter 28 .semibold, `subtitle`=inter 15,
+  `cardTitle`=inter 14 .semibold, `cardDetail`=inter 12, `navTab`=inter 13 .medium, `label`=inter,
+  etc.) per the type-scale table.
+- **Retrofit the order-3 views** to the scale + sizes: `CompanyView` (dept **name → 25pt**, task line
+  16, count 14/30, "needs you" etc. per web), `DepartmentDetailView` (hero name, rationale, task
+  cards → web sizes), `TasksView` (h1 28, kanban 12.5). Replace `pixelSystem` title usages with GSF
+  roles; bump the undersized text to the web px values.
+- **Verify:** a build succeeds and (visual E2E) the order-3 department UI now reads at web scale with
+  clean GSF titles (no pixelated headings except the brand).
+
 # PHASE A — Top bar (retire the sidebar)
 
 `AppShellView` is restructured: remove the left `sidebar`; a full-width top bar carries nav.

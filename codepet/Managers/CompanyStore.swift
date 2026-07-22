@@ -98,13 +98,23 @@ final class CompanyStore: ObservableObject {
     /// `token` is `onboardingToken` captured by the caller BEFORE the enrich await;
     /// if an account switch superseded this onboarding (bumping the token) before or
     /// during the save await, discard without writing the wrong doc or clobbering state.
-    func finishOnboarding(brief: CompanyBrief, token: Int) async {
+    func finishOnboarding(brief: CompanyBrief, token: Int, language: AppLanguage = .en) async {
         guard token == hydrationToken, let cid = companyId else { return }
         _ = await saver(cid, brief)
         guard token == hydrationToken else { return }
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
+        seedFirstRunGreeting(language: language)
+    }
+
+    /// Seed byte's first-run greeting (name + best first move + optional inline action)
+    /// as one companion message. Called once, at the onboarding→app edge.
+    private func seedFirstRunGreeting(language: AppLanguage) {
+        guard companyId != nil else { return }
+        let next = RoadmapEngine.nextStep(company.tasks)
+        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
+        chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called

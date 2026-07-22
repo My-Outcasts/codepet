@@ -12,13 +12,20 @@ struct CopilotMessage: Identifiable, Equatable {
     let text: String
     var draft: Deliverable?
     var draftApproved: Bool
+    /// First-run "Do it with me" action (greeting message only); nil otherwise.
+    var firstRunAction: FirstRunAction?
+    /// True once the action has been tapped — hides the button.
+    var actionConsumed: Bool
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
-         draft: Deliverable? = nil, draftApproved: Bool = false) {
+         draft: Deliverable? = nil, draftApproved: Bool = false,
+         firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
         self.draft = draft
         self.draftApproved = draftApproved
+        self.firstRunAction = firstRunAction
+        self.actionConsumed = actionConsumed
     }
 }

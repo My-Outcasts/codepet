@@ -21,7 +21,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 account
-                planSection
+                // Plan/billing moved to BillingView (reached via the account menu).
                 about
             }
             .padding(18)

@@ -23,30 +23,7 @@ struct AppShellView: View {
             topBar
             Divider()
             HStack(spacing: 0) {
-                sidebar
-                Divider()
-                Group {
-                    if companyStore.view == .overview {
-                        OverviewBoardView()
-                    } else if companyStore.view == .company {
-                        if let dept = selectedDept {
-                            DepartmentDetailView(deptKey: dept, onBack: { selectedDept = nil })
-                        } else {
-                            CompanyView(onOpen: { selectedDept = $0 })
-                        }
-                    } else if companyStore.view == .tasks {
-                        TasksView()
-                    } else if companyStore.view == .library {
-                        LibraryView()
-                    } else if companyStore.view == .environment {
-                        EnvironmentView()
-                    } else if companyStore.view == .settings {
-                        SettingsView()
-                    } else {
-                        ShellPlaceholderView(view: companyStore.view)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 if !copilotCollapsed {
                     Divider()
                     copilot
@@ -56,37 +33,98 @@ struct AppShellView: View {
         .background(CodepetTheme.pageBackground)
     }
 
+    @ViewBuilder private var content: some View {
+        if companyStore.view == .overview {
+            OverviewBoardView()   // Phase B swaps this to OverviewView()
+        } else if companyStore.view == .company {
+            if let dept = selectedDept {
+                DepartmentDetailView(deptKey: dept, onBack: { selectedDept = nil })
+            } else {
+                CompanyView(onOpen: { selectedDept = $0 })
+            }
+        } else if companyStore.view == .tasks {
+            TasksView()
+        } else if companyStore.view == .library {
+            LibraryView()
+        } else if companyStore.view == .environment {
+            EnvironmentView()
+        } else if companyStore.view == .settings {
+            SettingsView()
+        } else if companyStore.view == .billing {
+            BillingView()
+        } else if companyStore.view == .support {
+            SupportView()
+        } else {
+            ShellPlaceholderView(view: companyStore.view)
+        }
+    }
+
+    // Web-faithful top bar (Topbar.tsx): brand + account menu, center nav tabs, right controls.
     private var topBar: some View {
-        HStack(spacing: 10) {
-            CharacterImage(appState.activeChar, size: 26)
-            Text(companyName).font(.pixelSystem(size: 14, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-            Spacer()
-            Button { copilotCollapsed.toggle() } label: {
-                Image(systemName: "bubble.left.and.bubble.right").foregroundColor(accent)
-            }.buttonStyle(.plain)
+        HStack(spacing: 14) {
+            Text("Codepet").font(CodepetTheme.pixel(15)).foregroundColor(CodepetTheme.primaryText)
+            AccountMenuView()
+            Spacer(minLength: 20)
+            HStack(spacing: 4) {
+                ForEach(AppView.navTabs) { v in navTab(v) }
+            }
+            Spacer(minLength: 20)
+            HStack(spacing: 10) {
+                wakePill
+                Button { selectedDept = nil; companyStore.select(.billing) } label: {
+                    Text(uiLanguage == .vi ? "Nâng cấp" : "Upgrade")
+                        .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(CodepetTheme.primaryText))
+                }.buttonStyle(.plain)
+                Button { copilotCollapsed.toggle() } label: {
+                    Image(systemName: "bubble.left.and.bubble.right").foregroundColor(accent)
+                }.buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(AppView.allCases) { v in
-                Button { selectedDept = nil; companyStore.select(v) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: v.icon).frame(width: 18)
-                        Text(v.title(uiLanguage)).font(.pixelSystem(size: 13, weight: .medium))
-                        Spacer()
-                    }
-                    .foregroundColor(companyStore.view == v ? accent : CodepetTheme.bodyText)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8)
-                        .fill(companyStore.view == v ? accent.opacity(0.12) : Color.clear))
-                }.buttonStyle(.plain)
+    private func navTab(_ v: AppView) -> some View {
+        let on = companyStore.view == v
+        let count = tabCount(v)
+        return Button { selectedDept = nil; companyStore.select(v) } label: {
+            HStack(spacing: 6) {
+                Text(v.title(uiLanguage)).font(CodepetTheme.navTab())
+                    .foregroundColor(on ? accent : CodepetTheme.bodyText)
+                if count > 0 {
+                    Text("\(count)").font(CodepetTheme.inter(9, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(CodepetTheme.accentGold))
+                }
             }
-            Spacer()
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .overlay(alignment: .bottom) { if on { Rectangle().fill(accent).frame(height: 2) } }
+        }.buttonStyle(.plain)
+    }
+
+    private func tabCount(_ v: AppView) -> Int {
+        switch v {
+        case .tasks:       return TopbarCounts.tasks(companyStore.company.tasks)
+        case .library:     return TopbarCounts.library(companyStore.company.library)
+        case .environment: return TopbarCounts.envPending(enabled: companyStore.company.enabledTools)
+        default:           return 0
         }
-        .padding(10)
-        .frame(width: 210, alignment: .top)
+    }
+
+    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
+
+    private var wakePill: some View {
+        Button { selectedDept = nil; companyStore.select(.environment) } label: {
+            HStack(spacing: 5) {
+                Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
+                Text("⚡ " + (uiLanguage == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
+                    .font(CodepetTheme.inter(12, weight: .medium))
+            }
+            .foregroundColor(CodepetTheme.bodyText)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Capsule().fill(accent.opacity(0.1)))
+        }.buttonStyle(.plain)
     }
 
     private var copilot: some View {

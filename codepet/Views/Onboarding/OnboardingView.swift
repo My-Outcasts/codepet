@@ -25,6 +25,7 @@ struct OnboardingView: View {
     @State private var reveal: OnboardingReveal?
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
+    @State private var timeoutTask: Task<Void, Never>?
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -143,7 +144,7 @@ struct OnboardingView: View {
 
     // Progress + primary action.
     @ViewBuilder private var footer: some View {
-        let pct = CGFloat(step) / CGFloat(OnboardingContent.total)
+        let pct = CGFloat(step + 1) / CGFloat(OnboardingContent.total)
         HStack(spacing: 14) {
             if step != 6 || (anDone && reveal != nil) {
                 GeometryReader { geo in
@@ -152,7 +153,7 @@ struct OnboardingView: View {
                         Capsule().fill(CodepetTheme.accentPurple).frame(width: geo.size.width * pct, height: 5)
                     }
                 }.frame(width: 150, height: 5)
-                Text("Step \(step) of \(OnboardingContent.total)")
+                Text("Step \(step + 1) of \(OnboardingContent.total)")
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
             } else if anDone {   // step 6, animation done but scaffold still resolving
                 Text("Still building your company…")
@@ -183,7 +184,7 @@ struct OnboardingView: View {
         step = 6; anShown = 0; anDone = false; reveal = nil
         let token = companyStore.onboardingToken
         let capturedBrief = brief()
-        streamTask?.cancel(); scaffoldTask?.cancel()
+        streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         // Stream the analysis lines on a fixed cadence (the minimum display time).
         streamTask = Task { @MainActor in
             for i in 0..<OnboardingContent.analysisLines.count {
@@ -200,10 +201,18 @@ struct OnboardingView: View {
             if Task.isCancelled { return }
             reveal = r
         }
+        // Hard safety net (mirrors the web's 20s timeout): never leave the founder stuck
+        // on the analysis screen if the scaffold hangs. If no real reveal has arrived,
+        // fall back to the empty (value-props) reveal so the step-7 gate can unlock.
+        timeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if Task.isCancelled { return }
+            if reveal == nil { reveal = .empty }
+        }
     }
 
     private func finishWithCompanion() {
-        streamTask?.cancel(); scaffoldTask?.cancel()
+        streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         let token = companyStore.onboardingToken
         let id = d.pick.isEmpty ? companyStore.company.companionId : d.pick
         Task {
@@ -213,7 +222,7 @@ struct OnboardingView: View {
         }
     }
     private func skip() {
-        streamTask?.cancel(); scaffoldTask?.cancel()
+        streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         Task { await companyStore.skipOnboarding() }
     }
 

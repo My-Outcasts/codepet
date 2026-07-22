@@ -125,6 +125,15 @@ enum CodepetTheme {
         }
         return Font.custom(name, size: size, relativeTo: .body)
     }
+
+    // MARK: Web-matched type roles (GSF at the web's px sizes)
+    static func title() -> Font { inter(28, weight: .semibold) }        // .vhead h1
+    static func subtitle() -> Font { inter(15) }                        // .vhead .sub
+    static func sectionName() -> Font { inter(25, weight: .semibold) }  // .dr-name
+    static func cardTitle() -> Font { inter(14, weight: .semibold) }    // .tk .tt
+    static func cardDetail() -> Font { inter(12) }                      // .tk .td
+    static func navTab() -> Font { inter(13, weight: .medium) }         // .tb-tab
+    static func label(_ size: CGFloat = 12, _ w: Font.Weight = .medium) -> Font { inter(size, weight: w) }
 }
 
 // MARK: - Drop-in `.font(.pixelSystem(size:))` replacement
@@ -140,9 +149,8 @@ extension Font {
         design: Font.Design = .default
     ) -> Font {
         _ = design
-        if size >= CodepetTheme.titlePixelSizeThreshold {
-            return CodepetTheme.pixel(size)
-        }
+        // Web-matched: titles are Google Sans Flex, NOT pixel. Only the "Codepet"
+        // brand wordmark uses CodepetTheme.pixel(_) directly.
         return CodepetTheme.inter(size, weight: weight)
     }
 }

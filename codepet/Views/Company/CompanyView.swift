@@ -29,15 +29,15 @@ struct CompanyView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(lang == .vi ? "Công ty của bạn" : "Your company")
-                    .font(.pixelSystem(size: 22, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-                Text(subtitle).font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
+                Text(subtitle).font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
             }
             Spacer()
             Button {
                 Task { await companyStore.generateRoadmap(language: lang) }
             } label: {
                 Text(replanLabel)
-                    .font(.pixelSystem(size: 11, weight: .medium))
+                    .font(CodepetTheme.inter(12, weight: .medium))
                     .foregroundColor(CodepetTheme.bodyText)
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 8).stroke(CodepetTheme.hairline, lineWidth: 1))
@@ -67,25 +67,25 @@ struct CompanyView: View {
                         .frame(width: 96, height: 64).clipped()
                         .cornerRadius(10)
                     Text(s.department.ab)
-                        .font(.pixelSystem(size: 10, weight: .bold)).foregroundColor(.white)
+                        .font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(s.department.accent.opacity(0.85)).cornerRadius(6)
                         .padding(6)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text(s.department.name).font(.pixelSystem(size: 14, weight: .semibold))
+                        Text(s.department.name).font(CodepetTheme.sectionName())
                             .foregroundColor(CodepetTheme.primaryText)
                         statusPill(s.status, deptAccent: s.department.accent)
                     }
-                    Text(taskLine(s)).font(.pixelSystem(size: 11)).foregroundColor(CodepetTheme.mutedText)
+                    Text(taskLine(s)).font(CodepetTheme.inter(16)).foregroundColor(CodepetTheme.mutedText)
                         .lineLimit(1)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(countLabel(s)).font(.pixelSystem(size: 11)).foregroundColor(CodepetTheme.bodyText)
+                    Text(countLabel(s)).font(CodepetTheme.inter(14)).foregroundColor(CodepetTheme.bodyText)
                     if !later {
-                        Text(lang == .vi ? "Mở" : "Open").font(.pixelSystem(size: 10, weight: .semibold))
+                        Text(lang == .vi ? "Mở" : "Open").font(CodepetTheme.inter(13, weight: .semibold))
                             .foregroundColor(s.department.accent)
                     }
                 }
@@ -104,7 +104,7 @@ struct CompanyView: View {
         let tint = st == .attention ? deptAccent : st.tint
         return HStack(spacing: 4) {
             Circle().fill(tint).frame(width: 6, height: 6)
-            Text(st.label(lang)).font(.pixelSystem(size: 10, weight: .medium)).foregroundColor(tint)
+            Text(st.label(lang)).font(CodepetTheme.inter(11.5, weight: .semibold)).foregroundColor(tint)
         }
         .padding(.horizontal, 7).padding(.vertical, 2)
         .background(Capsule().fill(tint.opacity(0.12)))

@@ -64,7 +64,7 @@ struct ReturningSignInView: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Codepet")
-                .font(.pixelSystem(size: 30, weight: .bold))
+                .font(CodepetTheme.pixel(30))
                 .foregroundColor(CodepetTheme.primaryText)
             Text(isSignUp ? "Create your company." : "Sign in to your company.")
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.mutedText)

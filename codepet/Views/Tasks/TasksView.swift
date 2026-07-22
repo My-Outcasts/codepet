@@ -42,11 +42,11 @@ struct TasksView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Nhiệm vụ" : "Tasks").font(.pixelSystem(size: 22, weight: .bold))
+                Text(lang == .vi ? "Nhiệm vụ" : "Tasks").font(CodepetTheme.title())
                     .foregroundColor(CodepetTheme.primaryText)
                 Text(lang == .vi ? "Việc \(companionName) đang làm, đang soạn, hoặc đang chờ bạn."
                                  : "What \(companionName) is doing, drafting, or waiting on you for.")
-                    .font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
             }
             HStack(alignment: .top, spacing: 12) {
                 ForEach(TaskColumn.allCases, id: \.self) { col in column(col) }
@@ -64,12 +64,12 @@ struct TasksView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Circle().fill(col.dot).frame(width: 7, height: 7)
-                Text(col.label(lang)).font(.pixelSystem(size: 11, weight: .semibold)).foregroundColor(CodepetTheme.bodyText)
-                Text("\(items.count)").font(.pixelSystem(size: 10)).foregroundColor(CodepetTheme.mutedText)
+                Text(col.label(lang)).font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(CodepetTheme.bodyText)
+                Text("\(items.count)").font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
             }
             if items.isEmpty {
                 Text(lang == .vi ? "Trống" : "Nothing here")
-                    .font(.pixelSystem(size: 11)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
                     .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
             } else {
                 ForEach(items) { t in card(t) }
@@ -86,9 +86,9 @@ struct TasksView: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {
-                    Text(d).font(.pixelSystem(size: 10, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+                    Text(d).font(CodepetTheme.inter(12.5, weight: .bold)).foregroundColor(CodepetTheme.mutedText)
                 }
-                Text(t.title).font(.pixelSystem(size: 12, weight: .medium)).foregroundColor(CodepetTheme.primaryText)
+                Text(t.title).font(CodepetTheme.inter(12.5, weight: .medium)).foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

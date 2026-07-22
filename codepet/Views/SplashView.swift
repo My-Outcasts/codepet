@@ -37,7 +37,7 @@ struct SplashView: View {
             VStack(spacing: 0) {
                 Spacer()
                 Text("Codepet")
-                    .font(.pixelSystem(size: 80, weight: .bold))
+                    .font(CodepetTheme.pixel(80))
                     .tracking(2)
                     .foregroundColor(.white)
                     .shadow(color: Color(hex: "#a078ff").opacity(0.55), radius: 17)

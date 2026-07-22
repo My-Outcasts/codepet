@@ -105,7 +105,7 @@ struct CopilotChatView: View {
     private var quickStarts: [String] {
         lang == .vi
             ? ["Nên tập trung vào đâu trước?", "Tóm tắt tình hình công ty", "Điều gì đang cản trở ra mắt?"]
-            : ["What should I focus on first?", "Summarize where my company is", "What's blocking my launch?"]
+            : ["What should I focus on first?", "Summarize where my company is", "What\u{2019}s blocking my launch?"]
     }
 
     private var typingRow: some View {
@@ -116,7 +116,7 @@ struct CopilotChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField(lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…" : "Ask Codepet anything about your company…",
+            TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
                       text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(CodepetTheme.inter(12))

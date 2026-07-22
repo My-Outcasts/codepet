@@ -8,7 +8,6 @@ struct OverviewView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showSecondBrain = false
-    @State private var showLegend = false
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
@@ -26,7 +25,6 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
             chromeRow.padding(.horizontal, 24).padding(.top, 14)
-            if showLegend { legend.padding(.horizontal, 24).padding(.top, 8) }
             if showSecondBrain {
                 Spacer()
                 Text(lang == .vi ? "Bộ não thứ hai — sắp có" : "Second Brain — coming soon")
@@ -49,12 +47,10 @@ struct OverviewView: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                Button { showLegend.toggle() } label: {
-                    Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                        .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
-                }.buttonStyle(.plain)
+                Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
+                    .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
                 segmentToggle
             }
         }
@@ -81,7 +77,13 @@ struct OverviewView: View {
             progressCard
             if let b = beacon { beaconCard(b) }
             Spacer()
+            legend   // web keeps the KEY legend always visible beside progress/beacon
         }
+    }
+
+    // The second founder task that needs input, for the beacon's "Also needs you" line.
+    private var alsoNeedsYou: RoadmapTask? {
+        tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != beacon?.id }.first
     }
 
     private var progressCard: some View {
@@ -115,7 +117,10 @@ struct OverviewView: View {
                     .padding(.horizontal, 16).padding(.vertical, 5)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
             }.buttonStyle(.plain)
-            .disabled(RoadmapEngine.status(for: b, in: tasks) == .needsYou)
+            if let also = alsoNeedsYou {
+                Text((lang == .vi ? "Cũng cần bạn: " : "Also needs you: ") + also.title)
+                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.accentBlue).lineLimit(1)
+            }
         }
         .padding(14)
         .frame(width: 240, alignment: .leading)
@@ -126,14 +131,16 @@ struct OverviewView: View {
     private var legend: some View {
         let items: [(String, Color)] = [
             (lang == .vi ? "Xong" : "Done", taskStatusTint(.done)),
-            (lang == .vi ? "Codepet làm được" : "Codepet can do this", taskStatusTint(.codepetCanDo)),
+            (lang == .vi ? "\(companionName) làm được" : "\(companionName) can do this", taskStatusTint(.codepetCanDo)),
             (lang == .vi ? "Cần bạn nhập" : "Needs your input", taskStatusTint(.needsYou)),
             (lang == .vi ? "Cần duyệt" : "Needs approval", taskStatusTint(.needsApproval)),
             (lang == .vi ? "Cần bước trước" : "Needs earlier steps", taskStatusTint(.blocked)),
         ]
-        return HStack(spacing: 16) {
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(lang == .vi ? "CHÚ THÍCH" : "KEY")
+                .font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(CodepetTheme.mutedText)
             ForEach(items, id: \.0) { it in
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Circle().fill(it.1).frame(width: 7, height: 7)
                     Text(it.0).font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
                 }

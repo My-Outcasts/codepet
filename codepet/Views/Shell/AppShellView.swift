@@ -13,10 +13,6 @@ struct AppShellView: View {
     @State private var selectedDept: String?
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
-    private var companyName: String {
-        let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? (uiLanguage == .vi ? "Công ty của bạn" : "Your company") : n
-    }
 
     var body: some View {
         VStack(spacing: 0) {

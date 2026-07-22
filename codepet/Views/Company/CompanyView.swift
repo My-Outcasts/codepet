@@ -83,7 +83,7 @@ struct CompanyView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(countLabel(s)).font(CodepetTheme.inter(14)).foregroundColor(CodepetTheme.bodyText)
+                    countView(s).foregroundColor(CodepetTheme.bodyText)
                     if !later {
                         Text(lang == .vi ? "Mở" : "Open").font(CodepetTheme.inter(13, weight: .semibold))
                             .foregroundColor(s.department.accent)
@@ -114,9 +114,11 @@ struct CompanyView: View {
         if s.status == .later { return lang == .vi ? "Sẽ đến sau khi bạn tiến bộ" : "Comes later as you progress" }
         return s.currentTaskTitle ?? (lang == .vi ? "Đã xong hết" : "All clear")
     }
-    private func countLabel(_ s: DepartmentSummary) -> String {
-        if s.status == .later { return lang == .vi ? "Sau" : "Later" }
-        if s.pending == 0 { return lang == .vi ? "Đã xong hết" : "All clear" }
-        return lang == .vi ? "\(s.pending) việc" : "\(s.pending) to do"
+    // Web bolds the number specifically (`<b>{pend}</b> to do`).
+    private func countView(_ s: DepartmentSummary) -> Text {
+        if s.status == .later { return Text(lang == .vi ? "Sau" : "Later").font(CodepetTheme.inter(14)) }
+        if s.pending == 0 { return Text(lang == .vi ? "Đã xong hết" : "All clear").font(CodepetTheme.inter(14)) }
+        return Text("\(s.pending)").font(CodepetTheme.inter(18, weight: .bold))
+             + Text(lang == .vi ? " việc" : " to do").font(CodepetTheme.inter(14))
     }
 }

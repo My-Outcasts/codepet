@@ -15,6 +15,7 @@ struct AccountMenuView: View {
         return n.isEmpty ? (lang == .vi ? "Bạn" : "You") : n
     }
     private var email: String? { authManager.currentUser?.email }
+    @State private var confirmLogout = false
 
     var body: some View {
         Menu {
@@ -31,7 +32,7 @@ struct AccountMenuView: View {
                 Button(lang == .vi ? "Tối" : "Dark") { appState.appTheme = .dark }
             }
             Divider()
-            Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { authManager.signOut() }
+            Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { confirmLogout = true }
         } label: {
             HStack(spacing: 6) {
                 CharacterImage(companyStore.company.companionId, size: 22)
@@ -41,5 +42,10 @@ struct AccountMenuView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .confirmationDialog(lang == .vi ? "Đăng xuất khỏi Codepet?" : "Sign out of Codepet?",
+                            isPresented: $confirmLogout, titleVisibility: .visible) {
+            Button(lang == .vi ? "Đăng xuất" : "Log out", role: .destructive) { authManager.signOut() }
+            Button(lang == .vi ? "Huỷ" : "Cancel", role: .cancel) { }
+        }
     }
 }

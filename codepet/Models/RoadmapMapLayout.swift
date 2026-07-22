@@ -52,9 +52,12 @@ enum RoadmapMapLayout {
         }
 
         var edges: [MapEdge] = []
-        let firstPhase = phases.first
+        let idSet = Set(tasks.map { $0.id })
         for t in tasks {
-            if t.dependsOn.isEmpty && t.phase == firstPhase {
+            // Entry node: all deps are outside the roadmap (or none) — the web fans the
+            // company root to every such task, in any phase, so none is left an orphan.
+            let isEntry = t.dependsOn.allSatisfy { !idSet.contains($0) }
+            if isEntry {
                 edges.append(MapEdge(fromId: rootId, toId: t.id, critical: criticalIds.contains(t.id)))
             }
             for dep in t.dependsOn where pos[dep] != nil {

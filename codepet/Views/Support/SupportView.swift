@@ -10,6 +10,7 @@ struct SupportView: View {
     @State private var message = ""
     @State private var sent = false
     @State private var sending = false
+    @State private var failed = false
 
     private var canSend: Bool {
         !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
@@ -29,6 +30,10 @@ struct SupportView: View {
                                      : "Sent — thank you! We'll reply by email.")
                         .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.accentTeal)
                 } else {
+                    if failed {
+                        Text(lang == .vi ? "Không gửi được — thử lại nhé." : "Couldn't send — please try again.")
+                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentOrange)
+                    }
                     TextEditor(text: $message)
                         .font(CodepetTheme.inter(13)).frame(minHeight: 140)
                         .padding(8)
@@ -52,15 +57,23 @@ struct SupportView: View {
     private func send() async {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        sending = true
-        let payload: [String: Any] = [
-            "message": text,
-            "uid": Auth.auth().currentUser?.uid ?? "",
-            "email": Auth.auth().currentUser?.email ?? "",
-            "createdAt": ISO8601DateFormatter().string(from: Date()),
+        sending = true; failed = false
+        // Write to the existing `feedback` collection (the one with a granted security
+        // rule), shaped like FeatureFeedbackManager's payload so the rule accepts it.
+        var payload: [String: Any] = [
+            "feature": "support",
+            "rating": 0,
+            "comment": text,
+            "userId": Auth.auth().currentUser?.uid ?? "anonymous",
+            "platform": "macos",
+            "timestamp": FieldValue.serverTimestamp(),
         ]
-        _ = try? await Firestore.firestore().collection("support").addDocument(data: payload)
-        sending = false
-        sent = true
+        if let email = Auth.auth().currentUser?.email, !email.isEmpty { payload["email"] = email }
+        do {
+            _ = try await Firestore.firestore().collection("feedback").addDocument(data: payload)
+            sending = false; sent = true          // only claim success when the write actually succeeds
+        } catch {
+            sending = false; failed = true
+        }
     }
 }

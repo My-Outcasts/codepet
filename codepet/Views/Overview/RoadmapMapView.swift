@@ -20,17 +20,39 @@ struct RoadmapMapView: View {
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            ZStack(alignment: .topLeading) {
-                edgeLayer
-                ForEach(map.nodes) { node in
-                    nodeView(node)
-                        .frame(width: cardW, height: node.task == nil ? cardH + 8 : cardH)
-                        .position(x: node.x, y: node.y)
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal, .vertical]) {
+                ZStack(alignment: .topLeading) {
+                    edgeLayer
+                    phaseHeaders
+                    ForEach(map.nodes) { node in
+                        nodeView(node)
+                            .frame(width: cardW, height: node.task == nil ? cardH + 8 : cardH)
+                            .position(x: node.x, y: node.y)
+                            .id(node.id)
+                    }
                 }
+                .frame(width: map.size.width, height: map.size.height, alignment: .topLeading)
+                .padding(20)
             }
-            .frame(width: map.size.width, height: map.size.height, alignment: .topLeading)
-            .padding(20)
+            .onAppear {
+                if let b = beacon { withAnimation { proxy.scrollTo(b.id, anchor: .center) } }
+            }
+        }
+    }
+
+    // Phase-header pills over each column: FIND {done}/{total} …
+    private var phaseHeaders: some View {
+        let col: CGFloat = 260, pad: CGFloat = 40
+        return ForEach(Array(RoadmapPhase.allCases.enumerated()), id: \.offset) { pi, phase in
+            let list = tasks.filter { $0.phase == phase }
+            let done = list.filter { $0.done }.count
+            HStack(spacing: 5) {
+                Text(phase.label(lang).uppercased()).font(CodepetTheme.inter(10, weight: .bold))
+                    .foregroundColor(CodepetTheme.mutedText)
+                Text("\(done)/\(list.count)").font(CodepetTheme.inter(10)).foregroundColor(CodepetTheme.mutedText)
+            }
+            .position(x: pad + CGFloat(pi + 1) * col, y: 4)
         }
     }
 
@@ -103,7 +125,7 @@ struct RoadmapMapView: View {
                     Image(systemName: "lock.fill").font(.system(size: 9)).foregroundColor(CodepetTheme.mutedText)
                 }
             }
-            statusChip(status)
+            statusChip(status, isBeacon: isBeacon)
         }
         .padding(10)
         .frame(width: cardW, alignment: .leading)
@@ -116,16 +138,19 @@ struct RoadmapMapView: View {
         .help(peekText(task, status: status))
     }
 
-    @ViewBuilder private func statusChip(_ status: TaskStatus) -> some View {
-        let (label, filled): (String, Bool) = {
+    @ViewBuilder private func statusChip(_ status: TaskStatus, isBeacon: Bool) -> some View {
+        // Only the current/beacon "Start" is a filled hero chip; every other actionable
+        // card is an outline chip (avoids competing CTAs across the whole map).
+        let label: String = {
             switch status {
-            case .done:          return (lang == .vi ? "Xong" : "Done", false)
-            case .codepetCanDo:  return (lang == .vi ? "Bắt đầu" : "Start", true)
-            case .needsApproval: return (lang == .vi ? "Duyệt" : "Review", true)
-            case .needsYou:      return (lang == .vi ? "Cần bạn" : "Add your input", true)
-            case .blocked:       return (lang == .vi ? "Cần bước trước" : "Needs earlier steps", false)
+            case .done:          return lang == .vi ? "Xong" : "Done"
+            case .codepetCanDo:  return lang == .vi ? "Bắt đầu" : "Start"
+            case .needsApproval: return lang == .vi ? "Duyệt" : "Review"
+            case .needsYou:      return lang == .vi ? "Cần bạn" : "Add your input"
+            case .blocked:       return lang == .vi ? "Cần bước trước" : "Needs earlier steps"
             }
         }()
+        let filled = isBeacon && status == .codepetCanDo
         Text(label).font(CodepetTheme.inter(10, weight: .semibold))
             .foregroundColor(filled ? .white : taskStatusTint(status))
             .padding(.horizontal, 8).padding(.vertical, 3)

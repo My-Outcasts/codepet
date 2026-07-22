@@ -97,52 +97,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Plan
-
-    private var planSection: some View {
-        section(lang == .vi ? "Gói" : "Plan") {
-            planCard(.trial, current: true)
-            planCard(.pro, current: false)
-        }
-    }
-
-    private func planCard(_ plan: Plan, current: Bool) -> some View {
-        CodepetCard(fill: current ? CodepetTheme.accentPurple.opacity(0.08) : CodepetTheme.surface) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(plan.title(lang))
-                            .font(.pixelSystem(size: 13, weight: .bold))
-                            .foregroundColor(CodepetTheme.primaryText)
-                        if current {
-                            Text(lang == .vi ? "Hiện tại" : "Current")
-                                .font(.pixelSystem(size: 9, weight: .semibold))
-                                .foregroundColor(CodepetTheme.accentPurple)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.14)))
-                        }
-                    }
-                    Text(plan.priceLine(lang))
-                        .font(.pixelSystem(size: 11, weight: .semibold))
-                        .foregroundColor(CodepetTheme.bodyText)
-                    Text(plan.creditsLine(lang))
-                        .font(.pixelSystem(size: 10))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                if !current {
-                    Text(lang == .vi ? "Quản lý" : "Manage plan")
-                        .font(.pixelSystem(size: 10, weight: .semibold))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Capsule().stroke(CodepetTheme.hairline))
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
+    // Plan/billing moved to BillingView (reached via the account menu).
 
     // MARK: About
 

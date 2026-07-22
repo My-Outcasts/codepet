@@ -28,8 +28,8 @@ struct AccountMenuView: View {
                     .font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(CodepetTheme.accentPurple))
-                Text(founderName).font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.bodyText)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+                Text(founderName).font(CodepetTheme.inter(14, weight: .medium)).foregroundColor(CodepetTheme.bodyText)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
             }
         }
         .buttonStyle(.plain)

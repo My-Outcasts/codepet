@@ -61,20 +61,22 @@ struct AppShellView: View {
 
     // Web-faithful top bar (Topbar.tsx): brand + account menu, center nav tabs, right controls.
     private var topBar: some View {
+        // Web layout: brand + account + nav clustered LEFT (nav right after the account),
+        // then a spacer pushes the right-hand controls to the far edge.
         HStack(spacing: 14) {
-            Text("Codepet").font(CodepetTheme.pixel(15)).foregroundColor(CodepetTheme.primaryText)
+            Text("Codepet").font(CodepetTheme.pixel(16)).foregroundColor(CodepetTheme.primaryText)
             AccountMenuView()
-            Spacer(minLength: 20)
             HStack(spacing: 4) {
                 ForEach(AppView.navTabs) { v in navTab(v) }
             }
+            .padding(.leading, 10)
             Spacer(minLength: 20)
             HStack(spacing: 10) {
                 wakePill
                 Button { selectedDept = nil; companyStore.select(.billing) } label: {
                     Text(uiLanguage == .vi ? "Nâng cấp" : "Upgrade")
-                        .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .font(CodepetTheme.inter(13.5, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 13).padding(.vertical, 7)
                         .background(Capsule().fill(CodepetTheme.primaryText))
                 }.buttonStyle(.plain)
             }
@@ -90,7 +92,7 @@ struct AppShellView: View {
                 Text(v.title(uiLanguage)).font(CodepetTheme.navTab())
                     .foregroundColor(on ? accent : CodepetTheme.bodyText)
                 if count > 0 {
-                    Text("\(count)").font(CodepetTheme.inter(9, weight: .semibold)).foregroundColor(.white)
+                    Text("\(count)").font(CodepetTheme.inter(10, weight: .semibold)).foregroundColor(.white)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(CodepetTheme.accentGold))
                 }
@@ -116,7 +118,7 @@ struct AppShellView: View {
             HStack(spacing: 5) {
                 Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
                 Text("⚡ " + (uiLanguage == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
-                    .font(CodepetTheme.inter(12, weight: .medium))
+                    .font(CodepetTheme.inter(13.5, weight: .medium))
             }
             .foregroundColor(CodepetTheme.bodyText)
             .padding(.horizontal, 12).padding(.vertical, 6)

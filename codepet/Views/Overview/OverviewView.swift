@@ -46,34 +46,38 @@ struct OverviewView: View {
                 Text(subtitle).font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
             }
             Spacer()
-            HStack(spacing: 8) {
-                HStack(spacing: 7) {
-                    Text("?").font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(.white)
-                        .frame(width: 16, height: 16).background(Circle().fill(CodepetTheme.accentPurple))
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("?").font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
+                        .frame(width: 18, height: 18).background(Circle().fill(CodepetTheme.accentPurple))
                     Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                        .font(CodepetTheme.inter(11, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                        .font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.14)))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
                 segmentToggle
             }
         }
     }
 
     private var segmentToggle: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach([false, true], id: \.self) { sb in
+                let on = showSecondBrain == sb
                 Button { showSecondBrain = sb } label: {
                     Text(sb ? (lang == .vi ? "Bộ não" : "Second Brain") : (lang == .vi ? "Lộ trình" : "Roadmap"))
-                        .font(CodepetTheme.inter(11, weight: .semibold))
-                        .foregroundColor(showSecondBrain == sb ? .white : CodepetTheme.bodyText)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(showSecondBrain == sb ? CodepetTheme.accentPurple : Color.clear)
+                        .font(CodepetTheme.inter(13, weight: .semibold))
+                        .foregroundColor(on ? CodepetTheme.accentPurple : CodepetTheme.bodyText)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 9).fill(on ? CodepetTheme.accentPurple.opacity(0.28) : Color.clear))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(on ? CodepetTheme.accentPurple.opacity(0.5) : Color.clear, lineWidth: 1))
                 }.buttonStyle(.plain)
             }
         }
-        .background(Capsule().fill(CodepetTheme.surface))
-        .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
 
     private var chromeRow: some View {

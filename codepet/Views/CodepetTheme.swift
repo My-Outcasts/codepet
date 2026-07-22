@@ -132,7 +132,7 @@ enum CodepetTheme {
     static func sectionName() -> Font { inter(25, weight: .semibold) }  // .dr-name
     static func cardTitle() -> Font { inter(14, weight: .semibold) }    // .tk .tt
     static func cardDetail() -> Font { inter(12) }                      // .tk .td
-    static func navTab() -> Font { inter(13, weight: .medium) }         // .tb-tab
+    static func navTab() -> Font { inter(15, weight: .medium) }         // .tb-tab (web ~15px)
     static func label(_ size: CGFloat = 12, _ w: Font.Weight = .medium) -> Font { inter(size, weight: w) }
 }
 

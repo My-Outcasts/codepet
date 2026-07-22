@@ -73,6 +73,15 @@ struct SettingsView: View {
                         .foregroundColor(CodepetTheme.accentPurple)
                     }
                     Divider()
+                    row(lang == .vi ? "Giao diện" : "Theme") {
+                        Button(appState.appTheme.label(lang)) {
+                            appState.appTheme = appState.appTheme.next
+                        }
+                        .buttonStyle(.plain)
+                        .font(.pixelSystem(size: 12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                    }
+                    Divider()
                     Button { editingBrief = true } label: {
                         rowLabel(lang == .vi ? "Chỉnh sửa hồ sơ công ty" : "Edit company brief",
                                  icon: "square.and.pencil", tint: CodepetTheme.primaryText)

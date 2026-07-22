@@ -87,7 +87,7 @@ struct ThemedBackgroundModifier: ViewModifier {
         content
             .background(colors.background)
             .environment(\.theme, colors)
-            .preferredColorScheme(isDark ? .dark : .light)
+        // preferredColorScheme is now owned by CodePetApp (driven by AppState.appTheme).
     }
 }
 

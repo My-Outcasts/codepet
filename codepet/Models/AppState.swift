@@ -110,6 +110,11 @@ class AppState: ObservableObject {
 
     // Phase 5: Theme & Sound
     @Published var isDarkMode: Bool = false
+    /// Web-product theme preference (System/Light/Dark). Persisted; default System.
+    @Published var appTheme: AppTheme =
+        AppTheme(rawValue: UserDefaults.standard.string(forKey: "cp_appTheme") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(appTheme.rawValue, forKey: "cp_appTheme") }
+    }
     @Published var soundEnabled: Bool = false
 
     // Phase 5: Level-up tracking
@@ -385,9 +390,10 @@ class AppState: ObservableObject {
         }
     }
 
-    /// Toggle dark mode with sound
+    /// Toggle the web-product theme between explicit light/dark (⌘⇧T menu).
     func toggleDarkMode() {
-        isDarkMode.toggle()
+        appTheme = (appTheme == .dark) ? .light : .dark
+        isDarkMode = (appTheme == .dark)   // keep the legacy flag in sync (dead ThemeManager path)
         SoundManager.shared.playTap()
     }
 

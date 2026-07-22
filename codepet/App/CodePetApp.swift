@@ -74,7 +74,8 @@ struct CodePetApp: App {
                 .environmentObject(challengeProgress)
                 .environmentObject(feedbackManager)
                 .frame(minWidth: 400, minHeight: 700)
-                .themed(isDark: appState.isDarkMode)
+                .themed(isDark: appState.appTheme == .dark)
+                .preferredColorScheme(appState.appTheme.colorScheme)
                 .task {
                     projectStore.load()
                     TipsPersistence.shared.load(into: tipsState)

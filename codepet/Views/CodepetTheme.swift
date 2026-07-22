@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - CodepetTheme
 //
@@ -22,35 +23,34 @@ enum CodepetTheme {
 
     /// Page background — warm cream that the marketing site uses across hero,
     /// product, and footer sections.
-    static let pageBackground = Color(red: 0xF8 / 255.0, green: 0xF7 / 255.0, blue: 0xF3 / 255.0)
+    static let pageBackground = Color.dyn("#f8f7f3", "#16130f")
 
-    /// Card / panel surface. Solid white sits cleanly on top of the cream
-    /// background.
-    static let surface = Color.white
+    /// Card / panel surface. Light: white on cream; dark: warm charcoal.
+    static let surface = Color.dyn("#ffffff", "#221d17")
 
     /// Subtle hairline used inside cards for dividers when a stronger
     /// boundary is needed than whitespace alone.
-    static let hairline = Color(red: 0xEC / 255.0, green: 0xE9 / 255.0, blue: 0xE2 / 255.0)
+    static let hairline = Color.dyn("#ece9e2", "#2f2820")
 
     // MARK: Text
 
-    /// Headline / primary text — near-black with a touch of warmth.
-    static let primaryText = Color(red: 0x1F / 255.0, green: 0x1B / 255.0, blue: 0x15 / 255.0)
+    /// Headline / primary text — near-black (light) / near-white (dark).
+    static let primaryText = Color.dyn("#1f1b15", "#f4f1ea")
 
     /// Body copy — slightly softer than headlines.
-    static let bodyText = Color(red: 0x33 / 255.0, green: 0x2E / 255.0, blue: 0x27 / 255.0)
+    static let bodyText = Color.dyn("#332e27", "#d8d2c7")
 
     /// Muted text — labels, captions, helper copy.
-    static let mutedText = Color(red: 0x77 / 255.0, green: 0x70 / 255.0, blue: 0x65 / 255.0)
+    static let mutedText = Color.dyn("#776f65", "#9e9789")
 
-    // MARK: Brand accents (mirrors the marketing site)
+    // MARK: Brand accents (mirrors the web; accent lightens in dark)
 
-    static let accentPurple = Color(red: 0x7C / 255.0, green: 0x3A / 255.0, blue: 0xED / 255.0)
-    static let accentPink   = Color(red: 0xFF / 255.0, green: 0x6B / 255.0, blue: 0x9D / 255.0)
-    static let accentGold   = Color(red: 0xFD / 255.0, green: 0xB0 / 255.0, blue: 0x22 / 255.0)
-    static let accentTeal   = Color(red: 0x2D / 255.0, green: 0xD4 / 255.0, blue: 0xBF / 255.0)
-    static let accentOrange = Color(red: 0xFF / 255.0, green: 0x8C / 255.0, blue: 0x42 / 255.0)
-    static let accentBlue   = Color(red: 0x25 / 255.0, green: 0x63 / 255.0, blue: 0xEB / 255.0)
+    static let accentPurple = Color.dyn("#7c3aed", "#9d6bf5")
+    static let accentPink   = Color.dyn("#ff6b9d", "#ff85ac")
+    static let accentGold   = Color.dyn("#fdb022", "#fdc352")
+    static let accentTeal   = Color.dyn("#2dd4bf", "#3fe0cb")
+    static let accentOrange = Color.dyn("#ff8c42", "#ff9b5e")
+    static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
 
     // MARK: Geometry
 
@@ -105,22 +105,23 @@ enum CodepetTheme {
         return Font.custom("Minecraft", size: size, relativeTo: .body)
     }
 
-    /// Inter sans-serif. Maps SwiftUI weight to the matching Inter weight file
-    /// registered by `FontRegistrar`. We ship Google's 18pt optical variant
-    /// because content sizes sit in the 8–17pt range. Unsupplied weights
-    /// (light/thin/black) fall back to Regular.
+    /// The app's sans — Google Sans Flex, matching the web. Maps SwiftUI weight
+    /// to the matching bundled static weight registered by `FontRegistrar`
+    /// (Inter remains bundled as the fallback family). Unsupplied weights
+    /// (light/thin/black) fall back to Regular. `inter(_:weight:)` is kept as an
+    /// alias so existing call sites are unchanged.
     static func inter(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         _ = FontRegistrar.autoRegister
         let name: String
         switch weight {
         case .black, .heavy, .bold:
-            name = "Inter18pt-Bold"
+            name = "GoogleSansFlex-Bold"
         case .semibold:
-            name = "Inter18pt-SemiBold"
+            name = "GoogleSansFlex-SemiBold"
         case .medium:
-            name = "Inter18pt-Medium"
+            name = "GoogleSansFlex-Medium"
         default:
-            name = "Inter18pt-Regular"
+            name = "GoogleSansFlex-Regular"
         }
         return Font.custom(name, size: size, relativeTo: .body)
     }
@@ -390,5 +391,39 @@ enum CodepetMarkdown {
             attr[lo..<hi].underlineStyle = Text.LineStyle(pattern: .dot, color: color)
             attr[lo..<hi].link = URL(string: "codepetterm://\(hit.termId)")
         }
+    }
+}
+
+// MARK: - Dynamic (light/dark) color support
+
+extension NSColor {
+    /// Parse "#rrggbb" (mirrors Color(hex:) in Character.swift).
+    convenience init(hex: String) {
+        let s = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var v: UInt64 = 0
+        Scanner(string: s).scanHexInt64(&v)
+        self.init(srgbRed: CGFloat((v & 0xFF0000) >> 16) / 255.0,
+                  green:   CGFloat((v & 0x00FF00) >> 8) / 255.0,
+                  blue:    CGFloat(v & 0x0000FF) / 255.0,
+                  alpha: 1)
+    }
+}
+
+extension CodepetTheme {
+    /// A dynamic NSColor resolving to `light` or `dark` by the drawing appearance.
+    /// Extracted (vs inline in `Color.dyn`) so the flip is unit-testable.
+    static func dynamicNSColor(light: String, dark: String) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(hex: isDark ? dark : light)
+        }
+    }
+}
+
+extension Color {
+    /// A color that resolves to `light` under a light appearance and `dark` under
+    /// a dark appearance — driven by `preferredColorScheme` / the macOS appearance.
+    static func dyn(_ light: String, _ dark: String) -> Color {
+        Color(nsColor: CodepetTheme.dynamicNSColor(light: light, dark: dark))
     }
 }

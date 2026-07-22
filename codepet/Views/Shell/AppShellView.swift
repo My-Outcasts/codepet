@@ -10,6 +10,7 @@ struct AppShellView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
     @State private var copilotCollapsed = false
+    @State private var selectedDept: String?
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
     private var companyName: String {
@@ -27,6 +28,14 @@ struct AppShellView: View {
                 Group {
                     if companyStore.view == .overview {
                         OverviewBoardView()
+                    } else if companyStore.view == .company {
+                        if let dept = selectedDept {
+                            DepartmentDetailView(deptKey: dept, onBack: { selectedDept = nil })
+                        } else {
+                            CompanyView(onOpen: { selectedDept = $0 })
+                        }
+                    } else if companyStore.view == .tasks {
+                        TasksView()
                     } else if companyStore.view == .library {
                         LibraryView()
                     } else if companyStore.view == .environment {
@@ -62,7 +71,7 @@ struct AppShellView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(AppView.allCases) { v in
-                Button { companyStore.select(v) } label: {
+                Button { if v != .company { selectedDept = nil }; companyStore.select(v) } label: {
                     HStack(spacing: 10) {
                         Image(systemName: v.icon).frame(width: 18)
                         Text(v.title(uiLanguage)).font(.pixelSystem(size: 13, weight: .medium))

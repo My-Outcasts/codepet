@@ -15,6 +15,7 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isCompanionTyping = false
     @Published private(set) var runningTaskIds: Set<String> = []
     @Published private(set) var runError: String?
+    @Published private(set) var isGeneratingRoadmap = false
 
     /// The hydrated company's id, needed for writes. Set by `hydrate`, cleared by `reset`.
     private(set) var companyId: String?
@@ -124,6 +125,8 @@ final class CompanyStore: ObservableObject {
     /// Overview board passes the live UI language.
     func generateRoadmap(language: AppLanguage = .en) async {
         let token = hydrationToken
+        isGeneratingRoadmap = true
+        defer { if token == hydrationToken { isGeneratingRoadmap = false } }
         let fetched = await roadmapFetcher(company.brief, language)
         guard token == hydrationToken, !fetched.isEmpty else { return }
         company.tasks = fetched

@@ -1,5 +1,5 @@
 // codepet/Models/RoadmapTask.swift
-import Foundation
+import SwiftUI
 
 /// The roadmap board's columns, in order. Mirrors the web Overview board
 /// (Find → Foundation → Build → Ship → Launch).
@@ -48,6 +48,18 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
 
 /// Derived per-task status (the board legend) — computed by RoadmapEngine, not stored.
 enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
+
+/// Shared status→accent mapping (matches TaskCardView's board colors). Used by the
+/// department task cards; kept here so views don't each redefine it.
+func taskStatusTint(_ s: TaskStatus) -> Color {
+    switch s {
+    case .done:          return CodepetTheme.accentTeal
+    case .codepetCanDo:  return CodepetTheme.accentPurple
+    case .needsApproval: return CodepetTheme.accentGold
+    case .needsYou:      return CodepetTheme.accentOrange
+    case .blocked:       return CodepetTheme.mutedText
+    }
+}
 
 extension TaskWho {
     /// Board chip label — who acts on the task.

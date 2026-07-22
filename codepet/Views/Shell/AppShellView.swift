@@ -35,7 +35,7 @@ struct AppShellView: View {
 
     @ViewBuilder private var content: some View {
         if companyStore.view == .overview {
-            OverviewBoardView()   // Phase B swaps this to OverviewView()
+            OverviewView()
         } else if companyStore.view == .company {
             if let dept = selectedDept {
                 DepartmentDetailView(deptKey: dept, onBack: { selectedDept = nil })

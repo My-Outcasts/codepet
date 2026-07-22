@@ -294,6 +294,12 @@ final class CompanyStore: ObservableObject {
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
         } else {
+            // Restore the one-tap action so the "try again" copy stays honest (the task
+            // was never drafted/done). Double-tap stays safe: runningTaskIds is already
+            // clear and the in-flight guard held for the duration of the await.
+            if let gi = chatMessages.firstIndex(where: { $0.id == messageId }) {
+                chatMessages[gi].actionConsumed = false
+            }
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))

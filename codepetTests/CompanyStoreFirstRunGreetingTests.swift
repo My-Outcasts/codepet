@@ -57,4 +57,18 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
         await s.runFirstRunAction(messageId: id, language: .en)   // second call is a no-op
         XCTAssertEqual(s.chatMessages.count, 2)                    // greeting + one draft only
     }
+
+    func testRunFirstRunActionFailOpenRestoresActionAndAppendsMessage() async {
+        let t = RoadmapTask(id: "t1", title: "Landing page", detail: "d", phase: .find, who: .does)
+        let state = seeded(tasks: [t], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true },
+                             taskRunner: { _ in nil })
+        await s.hydrate(companyId: "u")
+        await s.finishOnboarding(brief: state.brief, token: s.onboardingToken, language: .en)
+        let id = s.chatMessages[0].id
+        await s.runFirstRunAction(messageId: id, language: .en)
+        XCTAssertFalse(s.chatMessages[0].actionConsumed)   // button restored
+        XCTAssertEqual(s.chatMessages.count, 2)            // greeting + honest fail-open message
+        XCTAssertNil(s.chatMessages[1].draft)
+    }
 }

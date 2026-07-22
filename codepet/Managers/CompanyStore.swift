@@ -298,5 +298,8 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
         runningTaskIds = []
         runError = nil
+        isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
+        // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
+        // "Re-plan" button disabled forever otherwise).
     }
 }

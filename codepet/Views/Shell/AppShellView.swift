@@ -71,7 +71,7 @@ struct AppShellView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(AppView.allCases) { v in
-                Button { if v != .company { selectedDept = nil }; companyStore.select(v) } label: {
+                Button { selectedDept = nil; companyStore.select(v) } label: {
                     HStack(spacing: 10) {
                         Image(systemName: v.icon).frame(width: 18)
                         Text(v.title(uiLanguage)).font(.pixelSystem(size: 13, weight: .medium))

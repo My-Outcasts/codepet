@@ -28,7 +28,7 @@ enum TaskColumn: CaseIterable {
         case .upNext:   return CodepetTheme.accentPurple
         case .awaiting: return CodepetTheme.accentGold
         case .yourMove: return CodepetTheme.accentBlue
-        case .done:     return CodepetTheme.accentTeal
+        case .done:     return Color(hex: "#10B981")   // web's exact Done green
         }
     }
 }

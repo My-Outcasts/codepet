@@ -60,7 +60,7 @@ struct CompanyView: View {
 
     private func row(_ s: DepartmentSummary) -> some View {
         let later = s.status == .later
-        return Button { if !later { onOpen(s.department.key) } } label: {
+        return Button { onOpen(s.department.key) } label: {   // web opens dormant depts too (empty list)
             HStack(spacing: 12) {
                 ZStack(alignment: .bottomLeading) {
                     Image(s.department.coverAsset).resizable().scaledToFill()
@@ -76,7 +76,7 @@ struct CompanyView: View {
                     HStack(spacing: 8) {
                         Text(s.department.name).font(.pixelSystem(size: 14, weight: .semibold))
                             .foregroundColor(CodepetTheme.primaryText)
-                        statusPill(s.status)
+                        statusPill(s.status, deptAccent: s.department.accent)
                     }
                     Text(taskLine(s)).font(.pixelSystem(size: 11)).foregroundColor(CodepetTheme.mutedText)
                         .lineLimit(1)
@@ -98,13 +98,16 @@ struct CompanyView: View {
         .buttonStyle(.plain)
     }
 
-    private func statusPill(_ st: DepartmentStatus) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(st.tint).frame(width: 6, height: 6)
-            Text(st.label(lang)).font(.pixelSystem(size: 10, weight: .medium)).foregroundColor(st.tint)
+    private func statusPill(_ st: DepartmentStatus, deptAccent: Color) -> some View {
+        // Web colors the "needs you" pill with the row's own department accent (--rc);
+        // ready/idle/later keep their fixed status tints.
+        let tint = st == .attention ? deptAccent : st.tint
+        return HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(st.label(lang)).font(.pixelSystem(size: 10, weight: .medium)).foregroundColor(tint)
         }
         .padding(.horizontal, 7).padding(.vertical, 2)
-        .background(Capsule().fill(st.tint.opacity(0.12)))
+        .background(Capsule().fill(tint.opacity(0.12)))
     }
 
     private func taskLine(_ s: DepartmentSummary) -> String {

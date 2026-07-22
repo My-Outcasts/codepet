@@ -20,7 +20,9 @@ struct AppShellView: View {
             Divider()
             GeometryReader { geo in
                 HStack(spacing: 0) {
-                    content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .bottomTrailing) { chatToggle.padding(20) }
                     if !copilotCollapsed {
                         Divider()
                         copilot.frame(width: geo.size.width * 0.5)   // chat = 50% of the window
@@ -124,6 +126,21 @@ struct AppShellView: View {
 
     private var copilot: some View {
         CopilotChatView()   // width is set by the shell (50% of the window)
+    }
+
+    // Floating companion launcher (web: the "C" circle over the map) — the only control
+    // that opens/closes the 50% chat panel, since the top bar has no chat button.
+    private var chatToggle: some View {
+        Button { copilotCollapsed.toggle() } label: {
+            Text("C").font(CodepetTheme.pixel(22)).foregroundColor(CodepetTheme.accentPurple)
+                .frame(width: 46, height: 46)
+                .background(Circle().fill(Color(red: 0.93, green: 0.91, blue: 0.98)))
+                .overlay(Circle().stroke(CodepetTheme.accentPurple.opacity(0.35), lineWidth: 1))
+                .shadow(color: .black.opacity(0.28), radius: 8, y: 2)
+        }
+        .buttonStyle(.plain)
+        .help(copilotCollapsed ? (uiLanguage == .vi ? "Mở trò chuyện" : "Open chat")
+                               : (uiLanguage == .vi ? "Đóng trò chuyện" : "Close chat"))
     }
 }
 

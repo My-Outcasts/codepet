@@ -153,7 +153,7 @@ final class FeatureFeedbackManager: ObservableObject {
         if let email = user?.email, !email.isEmpty { data["email"] = email }
         if !trimmed.isEmpty { data["comment"] = trimmed }
 
-        if !AppEnvironment.isRunningTests {
+        if !AppEnvironment.isRunningTests && !ServerLoggingGate.isOptedOut {
             db.collection("feedback").addDocument(data: data) { error in
                 if let error = error {
                     print("[Feedback] submit error: \(error.localizedDescription)")

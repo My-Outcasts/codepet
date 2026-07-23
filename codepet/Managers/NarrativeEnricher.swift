@@ -108,7 +108,7 @@ final class NarrativeEnricher: ObservableObject {
                 return .ready
             } catch let err as ReflectionAPIError {
                 switch err {
-                case .notSignedIn, .http(401, _):
+                case .notSignedIn, .optedOut, .http(401, _):
                     return recordFailure(turn.id, reason: .auth, error: err)
                 case .http(429, _):
                     return recordFailure(turn.id, reason: .quota, error: err)

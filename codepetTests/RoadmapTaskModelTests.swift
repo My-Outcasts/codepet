@@ -5,9 +5,10 @@ import XCTest
 final class RoadmapTaskModelTests: XCTestCase {
     func testPhaseOrderAndLabels() {
         XCTAssertEqual(RoadmapPhase.allCases.map(\.rawValue),
-                       ["find", "foundation", "build", "ship", "launch"])
+                       ["find", "foundation", "build", "ship", "launch", "grow"])
         XCTAssertEqual(RoadmapPhase.find.order, 0)
         XCTAssertEqual(RoadmapPhase.launch.order, 4)
+        XCTAssertEqual(RoadmapPhase.grow.order, 5)
         for p in RoadmapPhase.allCases {
             XCTAssertFalse(p.label(.en).isEmpty); XCTAssertFalse(p.label(.vi).isEmpty)
         }

@@ -2,9 +2,10 @@ import XCTest
 @testable import codepet
 
 final class AppViewTests: XCTestCase {
-    func testCoversTheSevenWebDestinations() {
+    func testCoversAllAppDestinations() {
         XCTAssertEqual(AppView.allCases.map(\.rawValue),
-                       ["overview", "company", "roadmap", "tasks", "library", "environment", "settings"])
+                       ["overview", "company", "roadmap", "tasks", "library",
+                        "environment", "settings", "billing", "support"])
     }
     func testEveryCaseHasTitleAndIcon() {
         for v in AppView.allCases {

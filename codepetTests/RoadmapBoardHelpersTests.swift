@@ -7,17 +7,17 @@ final class RoadmapBoardHelpersTests: XCTestCase {
         RoadmapTask(id: id, title: id, detail: "", phase: phase, who: .does)
     }
 
-    func testOrderedColumnsAllFivePhasesInOrder() {
+    func testOrderedColumnsAllPhasesInOrder() {
         let tasks = [t("a", .build), t("b", .find), t("c", .build)]
         let cols = RoadmapEngine.orderedColumns(tasks)
-        XCTAssertEqual(cols.map(\.phase), RoadmapPhase.allCases)   // Find..Launch, all 5
-        XCTAssertEqual(cols.map(\.phase.order), [0, 1, 2, 3, 4])
-        XCTAssertEqual(cols[0].tasks.map(\.id), ["b"])            // find
-        XCTAssertEqual(cols[2].tasks.map(\.id), ["a", "c"])       // build, input order preserved
-        XCTAssertTrue(cols[3].tasks.isEmpty)                      // ship — empty phase present
-        XCTAssertTrue(cols[4].tasks.isEmpty)                     // launch — empty phase present
+        XCTAssertEqual(cols.map(\.phase), RoadmapPhase.allCases)   // every phase, in declared order
+        XCTAssertEqual(cols.map(\.phase.order), Array(0..<RoadmapPhase.allCases.count))
+        XCTAssertEqual(cols[RoadmapPhase.find.order].tasks.map(\.id), ["b"])
+        XCTAssertEqual(cols[RoadmapPhase.build.order].tasks.map(\.id), ["a", "c"]) // input order preserved
+        XCTAssertTrue(cols[RoadmapPhase.ship.order].tasks.isEmpty)   // empty phase still present
+        XCTAssertTrue(cols[RoadmapPhase.launch.order].tasks.isEmpty)
     }
-    func testOrderedColumnsEmptyInputStillFivePhases() {
+    func testOrderedColumnsEmptyInputStillAllPhases() {
         XCTAssertEqual(RoadmapEngine.orderedColumns([]).map(\.phase), RoadmapPhase.allCases)
         XCTAssertTrue(RoadmapEngine.orderedColumns([]).allSatisfy { $0.tasks.isEmpty })
     }

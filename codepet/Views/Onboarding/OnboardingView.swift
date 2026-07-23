@@ -218,7 +218,7 @@ struct OnboardingView: View {
         Task {
             await companyStore.setCompanion(id: id)
             appState.activeChar = id
-            await companyStore.finishOnboarding(brief: brief(), token: token)
+            await companyStore.finishOnboarding(brief: brief(), token: token, language: appState.uiLanguage)
         }
     }
     private func skip() {

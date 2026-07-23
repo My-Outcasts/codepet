@@ -98,13 +98,23 @@ final class CompanyStore: ObservableObject {
     /// `token` is `onboardingToken` captured by the caller BEFORE the enrich await;
     /// if an account switch superseded this onboarding (bumping the token) before or
     /// during the save await, discard without writing the wrong doc or clobbering state.
-    func finishOnboarding(brief: CompanyBrief, token: Int) async {
+    func finishOnboarding(brief: CompanyBrief, token: Int, language: AppLanguage = .en) async {
         guard token == hydrationToken, let cid = companyId else { return }
         _ = await saver(cid, brief)
         guard token == hydrationToken else { return }
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
+        seedFirstRunGreeting(language: language)
+    }
+
+    /// Seed byte's first-run greeting (name + best first move + optional inline action)
+    /// as one companion message. Called once, at the onboarding→app edge.
+    private func seedFirstRunGreeting(language: AppLanguage) {
+        guard companyId != nil else { return }
+        let next = RoadmapEngine.nextStep(company.tasks)
+        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
+        chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
@@ -264,6 +274,36 @@ final class CompanyStore: ObservableObject {
         }
         company.library.append(deliverable)
         if let cid { _ = await librarySaver(cid, company.library) }
+    }
+
+    /// Run the greeting's "Do it with me" task → append an inline draft (reuses the 6C
+    /// run path). Marks the action consumed (optimistic, idempotent); in-flight +
+    /// account-switch guarded; fail-open honest message on a nil result.
+    func runFirstRunAction(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let action = chatMessages[i].firstRunAction,
+              !chatMessages[i].actionConsumed,
+              let task = company.tasks.first(where: { $0.id == action.taskId }),
+              !runningTaskIds.contains(task.id) else { return }
+        chatMessages[i].actionConsumed = true
+        runningTaskIds.insert(task.id)
+        let cid = companyId
+        let result = await taskRunner(runRequest(for: task, language: language))
+        runningTaskIds.remove(task.id)
+        guard companyId == cid else { return }
+        if let draft = buildDeliverable(from: result, task: task) {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+        } else {
+            // Restore the one-tap action so the "try again" copy stays honest (the task
+            // was never drafted/done). Double-tap stays safe: runningTaskIds is already
+            // clear and the in-flight guard held for the duration of the await.
+            if let gi = chatMessages.firstIndex(where: { $0.id == messageId }) {
+                chatMessages[gi].actionConsumed = false
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không tạo được ngay bây giờ — thử lại nhé."
+                : "Couldn't generate that just now — try again."))
+        }
     }
 
     /// Clear the transient run error (e.g. when the board's error line is dismissed).

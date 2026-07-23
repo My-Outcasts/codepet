@@ -154,9 +154,28 @@ struct CopilotBubble: View {
     var body: some View {
         if let draft = message.draft {
             draftCard(draft)
+        } else if let action = message.firstRunAction, !message.actionConsumed {
+            VStack(alignment: .leading, spacing: 8) {
+                textBubble
+                actionButton(action)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             textBubble
         }
+    }
+
+    private func actionButton(_ action: FirstRunAction) -> some View {
+        Button {
+            Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
+        } label: {
+            Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
+                .font(.pixelSystem(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.accentPurple))
+        }
+        .buttonStyle(.plain)
     }
 
     private var textBubble: some View {

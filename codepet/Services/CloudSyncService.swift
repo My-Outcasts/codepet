@@ -11,6 +11,10 @@ class CloudSyncService: ObservableObject {
     /// Save all app state to Firestore
     func saveToCloud(userId: String, appState: AppState) {
         guard !AppEnvironment.isRunningTests else { return }
+        guard !ServerLoggingGate.isOptedOut else {
+            print("[CloudSync] Skipped — account opted out of server logging")
+            return
+        }
         let userData: [String: Any] = [
             "totalXP": appState.totalXP,
             "userLevel": appState.userLevel,

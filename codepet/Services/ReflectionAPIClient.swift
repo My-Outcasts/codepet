@@ -657,6 +657,7 @@ struct EnrichBriefResponse: Codable { let brief: CompanyBrief }
 
 enum ReflectionAPIError: Error {
     case notSignedIn
+    case optedOut
     case http(status: Int, body: SummarizeTurnError?)
     case malformedResponse
     case network(Error)
@@ -684,6 +685,9 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     ) {
         self.session = session
         self.authTokenProvider = authTokenProvider ?? {
+            guard !ServerLoggingGate.isOptedOut else {
+                throw ReflectionAPIError.optedOut
+            }
             guard let user = Auth.auth().currentUser else {
                 throw ReflectionAPIError.notSignedIn
             }

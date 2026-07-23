@@ -1,4 +1,25 @@
 import Foundation
+import FirebaseAuth
+
+/// Centralized opt-out for ALL off-device data transmission.
+///
+/// Any signed-in account whose email is in `optedOutEmails` has every server
+/// data flow disabled: Firestore progress sync (`CloudSyncService`), the Cloud
+/// Functions reflection pipeline (`ReflectionAPIClient`), and feedback uploads
+/// (`FeatureFeedbackManager`). Local-only features (auth, on-disk state,
+/// reading `~/.codepet`) are unaffected — nothing leaves the device.
+enum ServerLoggingGate {
+    /// Emails (compared lowercased) for which all uploads/logging are disabled.
+    static let optedOutEmails: Set<String> = [
+        "giang@murror.app"
+    ]
+
+    /// True when the currently signed-in account has opted out of server logging.
+    static var isOptedOut: Bool {
+        guard let email = Auth.auth().currentUser?.email else { return false }
+        return optedOutEmails.contains(email.lowercased())
+    }
+}
 
 enum AppEnvironment {
     /// True when the process is running inside an XCTest bundle.

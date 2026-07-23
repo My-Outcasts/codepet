@@ -46,7 +46,7 @@ TEAM_ID=ABCDE12345 NOTARY_PROFILE=my-profile ./scripts/package-macos.sh
 
 ## Host it (GitHub Releases)
 
-One command publishes the `.dmg` to a GitHub Release on **`Murror/CodePet-Clean`**
+One command publishes the `.dmg` to a GitHub Release on **`My-Outcasts/codepet`**
 (public, so downloads need no auth):
 
 ```sh
@@ -59,7 +59,7 @@ creates/updates the release, attaches `build/Codepet.dmg`, and marks it
 **latest**, so this stable permalink always points at the newest build:
 
 ```
-https://github.com/Murror/CodePet-Clean/releases/latest/download/Codepet.dmg
+https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg
 ```
 
 The website button already points at **`code-pet.com/download/Codepet.dmg`**,

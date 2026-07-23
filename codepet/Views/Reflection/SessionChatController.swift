@@ -84,7 +84,7 @@ final class SessionChatController: ObservableObject {
 
     private static func map(_ apiError: ReflectionAPIError) -> ChatError {
         switch apiError {
-        case .notSignedIn:
+        case .notSignedIn, .optedOut:
             return .notSignedIn
         case .http(let status, let body):
             if status == 429 {

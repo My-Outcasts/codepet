@@ -2,12 +2,222 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="refresh" content="0; url=./stream.html" />
-<link rel="canonical" href="./stream.html" />
-<title>Codepet · Live Work Stream</title>
-<script>location.replace("./stream.html");</script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codepet · Download for macOS</title>
+<meta name="description" content="Download Codepet — your AI coding companion for macOS. Adopt a pixel-art pet that guides you through learning to code." />
+<style>
+  :root {
+    --bg: #F5F3FA;
+    --panel: #ffffff;
+    --ink: #2D2B26;
+    --muted: #6b6580;
+    --line: #e7e2f2;
+    --accent: #7B6BD8;
+    --accent-deep: #534AB7;
+    --accent-soft: #efe9ff;
+    --green: #34b56a;
+    --amber: #e0a93a;
+    --red: #e0564a;
+    --radius: 14px;
+    --shadow: 0 1px 0 rgba(45,43,38,.04), 0 8px 24px rgba(83,74,183,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16141f; --panel: #1f1c2b; --ink: #ece9f5; --muted: #9a93b3;
+      --line: #2c2840; --accent: #9d8ff0; --accent-deep: #b9aeff; --accent-soft: #272340;
+      --shadow: 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, var(--accent-soft), transparent 60%), var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  a { color: var(--accent-deep); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  /* Header */
+  header.top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 40px; }
+  .mark {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+    color: #fff; display: grid; place-items: center;
+    font-weight: 800; font-size: 22px; letter-spacing: -1px;
+    box-shadow: var(--shadow);
+    image-rendering: pixelated;
+  }
+  .title h1 { margin: 0; font-size: 19px; letter-spacing: -.2px; }
+  .title p { margin: 1px 0 0; font-size: 12.5px; color: var(--muted); }
+  .spacer { flex: 1 1 auto; }
+  .ghlink { font-size: 12.5px; color: var(--muted); }
+
+  /* Hero */
+  .hero { text-align: center; margin-bottom: 36px; }
+  .hero .badge {
+    display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--accent-deep);
+    background: var(--accent-soft); padding: 5px 12px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h2 { margin: 0 0 10px; font-size: 34px; line-height: 1.15; letter-spacing: -.6px; }
+  .hero p.lede { margin: 0 auto 28px; font-size: 16px; color: var(--muted); max-width: 480px; }
+
+  .dl {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 16px; font-weight: 650; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+    padding: 14px 26px; border-radius: 12px;
+    box-shadow: var(--shadow); transition: transform .12s ease, opacity .2s ease;
+  }
+  .dl:hover { text-decoration: none; transform: translateY(-1px); }
+  .dl:active { transform: translateY(0); }
+  .dl[aria-disabled="true"] { opacity: .5; pointer-events: none; cursor: default; }
+  .dl svg { width: 20px; height: 20px; }
+  .dl-meta { margin-top: 12px; font-size: 13px; color: var(--muted); min-height: 18px; }
+  .dl-meta .err { color: var(--amber); }
+
+  /* Panels */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; margin-bottom: 18px; }
+  .panel h3 {
+    margin: 0; padding: 13px 18px; font-size: 13px; letter-spacing: .02em;
+    text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line);
+  }
+  .panel .body { padding: 6px 18px 14px; }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    position: relative; padding: 12px 0 12px 40px; border-top: 1px solid var(--line); font-size: 14.5px;
+  }
+  ol.steps li:first-child { border-top: none; }
+  ol.steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 0; top: 12px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent-deep);
+    font-size: 12.5px; font-weight: 700; display: grid; place-items: center;
+  }
+  ol.steps strong { font-weight: 650; }
+  .note {
+    font-size: 13px; color: var(--muted); background: var(--accent-soft);
+    border-radius: 10px; padding: 11px 14px; margin-top: 14px;
+  }
+  kbd {
+    font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+    background: var(--accent-soft); color: var(--accent-deep);
+    padding: 1px 6px; border-radius: 6px;
+  }
+
+  .footer { margin-top: 30px; font-size: 12.5px; color: var(--muted); text-align: center; }
+  .footer a { color: var(--muted); }
+</style>
 </head>
 <body>
-Redirecting to the <a href="./stream.html">Codepet live work stream</a>…
+<div class="wrap">
+
+  <header class="top">
+    <div class="mark">C</div>
+    <div class="title">
+      <h1>Codepet</h1>
+      <p>An AI coding companion by <a href="https://murror.app" target="_blank" rel="noopener">MURROR</a></p>
+    </div>
+    <div class="spacer"></div>
+    <a class="ghlink" id="streamlink" href="./stream.html">Work stream &rarr;</a>
+  </header>
+
+  <section class="hero">
+    <span class="badge">macOS app</span>
+    <h2>Adopt a pet.<br/>Learn to code.</h2>
+    <p class="lede">7 pixel-art characters, 16 skills, one journey. Codepet guides you through learning to code — right from your Mac.</p>
+
+    <a class="dl" id="dlbtn" href="https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v10.6l3.3-3.3 1.4 1.4-5.7 5.7-5.7-5.7 1.4-1.4 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
+      <span id="dlbtn-label">Download for macOS</span>
+    </a>
+    <div class="dl-meta" id="dlmeta">Requires macOS 13 or later · Apple Silicon &amp; Intel</div>
+  </section>
+
+  <div class="panel">
+    <h3>Installing Codepet</h3>
+    <div class="body">
+      <ol class="steps">
+        <li>Open <strong>Codepet.dmg</strong> and drag <strong>Codepet</strong> into your <strong>Applications</strong> folder.</li>
+        <li>Open <strong>Applications</strong>, then <strong>right-click Codepet ▸ Open</strong>.</li>
+        <li>In the dialog, click <strong>Open</strong> once. After this first time, it launches normally.</li>
+      </ol>
+      <div class="note">
+        If macOS says it &ldquo;cannot be opened,&rdquo; go to <strong>System Settings ▸ Privacy &amp; Security</strong>,
+        scroll to the Codepet message, and click <strong>Open Anyway</strong>. Codepet is notarized by Apple, so this
+        is just a one-time confirmation — no &ldquo;unidentified developer&rdquo; block.
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/My-Outcasts/codepet" target="_blank" rel="noopener">View on GitHub</a>
+    &nbsp;·&nbsp;
+    <a href="./stream.html">Live work stream</a>
+  </div>
+
+</div>
+
+<script>
+  // Pull the latest release so we can show version/size and gracefully handle
+  // the "no build published yet" state. Public repo → no auth needed.
+  // The button's href is the stable permalink and always works once a release
+  // exists; this only enriches it (or disables it if there's nothing to grab).
+  (async function () {
+    const OWNER = "My-Outcasts", REPO = "codepet";
+    const btn   = document.getElementById("dlbtn");
+    const label = document.getElementById("dlbtn-label");
+    const meta  = document.getElementById("dlmeta");
+    const REQ   = "Requires macOS 13 or later · Apple Silicon &amp; Intel";
+
+    const mb  = (b) => (b / 1048576).toFixed(1) + " MB";
+    const ago = (iso) => {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    };
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`, {
+        headers: { Accept: "application/vnd.github+json" }
+      });
+
+      if (res.status === 404) {
+        // No release cut yet — disable the button instead of linking to a 404.
+        btn.setAttribute("aria-disabled", "true");
+        label.textContent = "Coming soon";
+        meta.innerHTML = "No build published yet — check back shortly.";
+        return;
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+
+      const rel = await res.json();
+      const dmg = (rel.assets || []).find((a) => /\.dmg$/i.test(a.name));
+
+      if (!dmg) {
+        btn.setAttribute("aria-disabled", "true");
+        label.textContent = "Coming soon";
+        meta.innerHTML = "Latest release has no .dmg attached yet.";
+        return;
+      }
+
+      // Prefer the asset's direct URL; permalink in href is the fallback.
+      btn.href = dmg.browser_download_url;
+      const ver = rel.tag_name || rel.name || "";
+      const parts = [ver && ver.replace(/^v/, ""), mb(dmg.size), ago(rel.published_at || rel.created_at)]
+        .filter(Boolean)
+        .join(" · ");
+      meta.innerHTML = parts + "<br/>" + REQ;
+    } catch (e) {
+      // API hiccup / rate limit — leave the permalink button live, just note it.
+      meta.innerHTML = REQ;
+    }
+  })();
+</script>
 </body>
 </html>

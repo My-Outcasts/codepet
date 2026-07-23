@@ -392,7 +392,7 @@ private struct SkeletonPulseModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .opacity(0.4 + 0.3 * sin(phase))
+            .opacity(0.4 + 0.3 * sin(Double(phase)))
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                     phase = .pi

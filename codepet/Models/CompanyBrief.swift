@@ -34,4 +34,17 @@ struct CompanyBrief: Codable, Hashable, Equatable {
         self.summary = summary; self.notes = notes; self.link = link
         self.categories = categories; self.audience = audience
     }
+
+    /// True when the brief carries any founder-supplied signal. Mirrors the web
+    /// gating check (`Object.keys(brief).length > 0`): any non-empty field counts.
+    var hasAnySignal: Bool {
+        func s(_ v: String?) -> Bool {
+            guard let v else { return false }
+            return !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return s(founderName) || s(role) || s(tech) || s(stage)
+            || s(projectName) || s(oneLiner) || s(summary) || s(notes)
+            || s(link) || s(audience)
+            || !(categories?.isEmpty ?? true)
+    }
 }

@@ -99,6 +99,33 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         XCTAssertEqual(roadmapSawSummary, "ENRICHED")         // roadmap generated from enriched
     }
 
+    /// Regression (finding I1): the wizard's final "Start building" step must finish
+    /// onboarding with the store's already-enriched `company.brief` — NOT a freshly
+    /// reconstructed raw draft — or the enriched summary/audience/categories get
+    /// clobbered by finishOnboarding's persist+assign. Simulates the real call site
+    /// (OnboardingView.finishWithCompanion): scaffold enriches, then finish is called
+    /// with `s.company.brief` (the fix), and the enrichment must survive in both the
+    /// saved brief and in-memory state.
+    func testEnrichedBriefSurvivesScaffoldThenFinish() async {
+        var savedBrief: CompanyBrief?
+        let s = CompanyStore(
+            loader: { _ in .empty },
+            saver: { _, b in savedBrief = b; return true },
+            roadmapFetcher: { _, _ in [] },
+            enricher: { raw in var e = raw; e.summary = "ENRICHED"; return e }
+        )
+        await s.hydrate(companyId: "u")
+        let token = s.onboardingToken
+        _ = await s.scaffoldFromOnboarding(brief: CompanyBrief(projectName: "Codepet"), token: token)
+        XCTAssertEqual(s.company.brief.summary, "ENRICHED")   // sanity: scaffold enriched it
+
+        // Finish using the store's current (enriched) brief, as the fixed call site does.
+        await s.finishOnboarding(brief: s.company.brief, token: token)
+
+        XCTAssertEqual(savedBrief?.summary, "ENRICHED")       // persisted brief still enriched
+        XCTAssertEqual(s.company.brief.summary, "ENRICHED")   // in-memory brief still enriched
+    }
+
     func testScaffoldFailsOpenWhenEnrichThrows() async {
         struct E: Error {}
         var savedBrief: CompanyBrief?

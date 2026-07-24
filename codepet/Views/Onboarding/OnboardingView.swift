@@ -218,7 +218,13 @@ struct OnboardingView: View {
         Task {
             await companyStore.setCompanion(id: id)
             appState.activeChar = id
-            await companyStore.finishOnboarding(brief: brief(), token: token, language: appState.uiLanguage)
+            // Pass the store's current (already-enriched, by scaffoldFromOnboarding)
+            // brief — NOT the local raw `brief()` draft — so finishOnboarding doesn't
+            // clobber the enriched summary/audience/categories with unenriched values.
+            // Steps 6-8 never edit brief fields, so company.brief is authoritative here;
+            // if enrichment failed (fail-open) it already equals the raw brief, so this
+            // is safe in all cases.
+            await companyStore.finishOnboarding(brief: companyStore.company.brief, token: token, language: appState.uiLanguage)
         }
     }
     private func skip() {

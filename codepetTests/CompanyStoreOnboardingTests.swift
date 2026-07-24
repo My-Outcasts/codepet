@@ -22,6 +22,16 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         await s.hydrate(companyId: "u")
         XCTAssertFalse(s.isOnboarding)
     }
+    /// Regression: a legacy/partial brief with only `role` (no product text) and no
+    /// stamp counts as onboarded on web; native must not re-onboard it.
+    func testNotNeededWhenBriefHasOnlyRole() async {
+        let seeded = CompanyState(brief: CompanyBrief(role: "Founder"),
+                                  departments: [], library: [], stage: .building,
+                                  companionId: "byte", onboardedAt: nil)
+        let s = store(loader: { _ in seeded })
+        await s.hydrate(companyId: "u")
+        XCTAssertFalse(s.isOnboarding)
+    }
     func testFinishOnboardingSavesStampsAndClears() async {
         var savedBrief: CompanyBrief?
         let s = store(loader: { _ in .empty }, saver: { _, b in savedBrief = b; return true })

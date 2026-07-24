@@ -65,9 +65,10 @@ final class CompanyStore: ObservableObject {
 
     func select(_ view: AppView) { self.view = view }
 
-    /// Mirrors the web: onboard unless a stamp exists OR the brief already has signal.
+    /// Mirrors the web (`Boolean(onboardedAt) || Object.keys(brief).length > 0`):
+    /// onboard only when there is no stamp AND the brief has no signal at all.
     var needsOnboarding: Bool {
-        company.onboardedAt == nil && BriefContext.compose(company.brief) == nil
+        company.onboardedAt == nil && !company.brief.hasAnySignal
     }
 
     /// Hydrate the company from Firestore (fail-soft inside the loader).

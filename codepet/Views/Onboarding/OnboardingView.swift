@@ -223,8 +223,16 @@ struct OnboardingView: View {
             // clobber the enriched summary/audience/categories with unenriched values.
             // Steps 6-8 never edit brief fields, so company.brief is authoritative here;
             // if enrichment failed (fail-open) it already equals the raw brief, so this
-            // is safe in all cases.
-            await companyStore.finishOnboarding(brief: companyStore.company.brief, token: token, language: appState.uiLanguage)
+            // is safe in all cases. EXCEPT: if "Start building" was reached while the
+            // scaffold Task was still in-flight, the `scaffoldTask?.cancel()` above can
+            // trip a cancellation guard in scaffoldFromOnboarding before it ever assigns
+            // `company.brief = enriched`, leaving company.brief at its empty default.
+            // Guard against persisting that empty brief (which would be worse than the
+            // enrichment-clobber bug this fixed — it'd lose the user's step 1-5 inputs
+            // too): fall back to the raw local draft whenever the store's brief carries
+            // no signal.
+            let finishBrief = companyStore.company.brief.hasAnySignal ? companyStore.company.brief : brief()
+            await companyStore.finishOnboarding(brief: finishBrief, token: token, language: appState.uiLanguage)
         }
     }
     private func skip() {

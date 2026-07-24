@@ -141,4 +141,33 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         XCTAssertEqual(savedBrief?.projectName, "Raw")        // raw brief used, not blocked
         XCTAssertNil(savedBrief?.summary)                     // no enrichment applied
     }
+
+    /// Regression (finding I2): if "Start building" is reached while the step-6
+    /// scaffold Task is still in-flight, `finishWithCompanion`'s `scaffoldTask?.cancel()`
+    /// can trip a cancellation guard inside `scaffoldFromOnboarding` BEFORE it ever
+    /// assigns `company.brief = enriched` — leaving `company.brief` at its empty
+    /// default. The view-level fix (OnboardingView.finishWithCompanion) guards against
+    /// persisting that empty brief by choosing:
+    ///   `company.brief.hasAnySignal ? company.brief : brief()` (the raw step 1-5 draft)
+    /// `finishWithCompanion` is a private SwiftUI View func and not directly unit-
+    /// testable, so this test pins the discriminator at the store/model boundary that
+    /// the fix relies on: an empty `CompanyBrief` must read `hasAnySignal == false`
+    /// (triggering the raw-draft fallback), while a populated/enriched brief — the
+    /// happy path and the fail-open path — must read `hasAnySignal == true` (using the
+    /// store's brief, preserving enrichment). If either flips, the view's fallback
+    /// branch stops firing when it should (or fires when it shouldn't).
+    func testFinishWithEmptyBriefFallbackContract() {
+        // Race outcome: scaffold cancelled before `company.brief = enriched` ran.
+        let racedEmpty = CompanyBrief()
+        XCTAssertFalse(racedEmpty.hasAnySignal)                // must fall back to brief()
+
+        // Happy path: scaffold completed and enriched the brief.
+        var enriched = CompanyBrief(projectName: "Codepet", oneLiner: "x")
+        enriched.summary = "ENRICHED"
+        XCTAssertTrue(enriched.hasAnySignal)                   // must use company.brief as-is
+
+        // Fail-open path: enrichment threw, company.brief == the raw brief (still signal).
+        let failOpenRaw = CompanyBrief(projectName: "Codepet", oneLiner: "x")
+        XCTAssertTrue(failOpenRaw.hasAnySignal)                // must use company.brief as-is
+    }
 }

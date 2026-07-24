@@ -30,6 +30,7 @@ final class CompanyStore: ObservableObject {
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
+    private let enricher: (CompanyBrief) async throws -> CompanyBrief
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -51,7 +52,8 @@ final class CompanyStore: ObservableObject {
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
-         companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId) {
+         companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
+         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) }) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -61,6 +63,7 @@ final class CompanyStore: ObservableObject {
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
+        self.enricher = enricher
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -94,7 +97,8 @@ final class CompanyStore: ObservableObject {
         onboardingToken = hydrationToken
     }
 
-    /// Enrich already happened in the model; here we persist + stamp + leave onboarding.
+    /// Persist + stamp + leave onboarding. (Enrichment happens earlier, in
+    /// scaffoldFromOnboarding for the first-run path, or in the Settings model.)
     /// Fail-soft: a failed cloud write still lets the founder into the app.
     /// `token` is `onboardingToken` captured by the caller BEFORE the enrich await;
     /// if an account switch superseded this onboarding (bumping the token) before or
@@ -152,11 +156,16 @@ final class CompanyStore: ObservableObject {
     /// scaffoldFromOnboarding; the reveal is derived from the resulting tasks.
     func scaffoldFromOnboarding(brief: CompanyBrief, token: Int) async -> OnboardingReveal {
         guard token == hydrationToken, !Task.isCancelled, let cid = companyId else { return .empty }
-        _ = await saver(cid, brief)
+        // Enrich (fail-open, mirrors web /api/scaffold): fill summary/audience/etc
+        // before planning so a founder who skipped optional fields still gets a
+        // full roadmap. A throw/timeout falls back to the raw brief.
+        let enriched = (try? await enricher(brief)) ?? brief
+        guard token == hydrationToken, !Task.isCancelled else { return .empty }
+        _ = await saver(cid, enriched)
         // Cancellation guard: a Skip during the in-flight scaffold cancels this task,
         // so we bail before mutating brief/tasks (skip's empty write is the winner).
         guard token == hydrationToken, !Task.isCancelled else { return .empty }
-        company.brief = brief
+        company.brief = enriched
         await generateRoadmap()
         guard token == hydrationToken, !Task.isCancelled else { return .empty }
         return OnboardingReveal.build(tasks: company.tasks)

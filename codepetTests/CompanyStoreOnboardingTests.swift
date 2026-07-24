@@ -5,8 +5,10 @@ import XCTest
 @MainActor
 final class CompanyStoreOnboardingTests: XCTestCase {
     private func store(loader: @escaping (String) async -> CompanyState,
-                       saver: @escaping (String, CompanyBrief) async -> Bool = { _, _ in true }) -> CompanyStore {
-        CompanyStore(loader: loader, saver: saver)
+                       saver: @escaping (String, CompanyBrief) async -> Bool = { _, _ in true },
+                       roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = { _, _ in [] },
+                       enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { $0 }) -> CompanyStore {
+        CompanyStore(loader: loader, saver: saver, roadmapFetcher: roadmapFetcher, enricher: enricher)
     }
 
     func testNeedsOnboardingWhenNoStampAndNoBriefSignal() async {
@@ -78,5 +80,38 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         await s.finishOnboarding(brief: CompanyBrief(projectName: "A-Co"), token: aToken)
         XCTAssertEqual(s.company.brief.projectName, "B-Co")  // B not clobbered
         XCTAssertFalse(savedTo.contains("B"))                // A's brief not written to B
+    }
+
+    func testScaffoldPersistsEnrichedBriefBeforeRoadmap() async {
+        var savedBrief: CompanyBrief?
+        var roadmapSawSummary: String?
+        let s = CompanyStore(
+            loader: { _ in .empty },
+            saver: { _, b in savedBrief = b; return true },
+            roadmapFetcher: { brief, _ in roadmapSawSummary = brief.summary; return [] },
+            enricher: { raw in var e = raw; e.summary = "ENRICHED"; return e }
+        )
+        await s.hydrate(companyId: "u")
+        _ = await s.scaffoldFromOnboarding(brief: CompanyBrief(projectName: "Codepet"),
+                                           token: s.onboardingToken)
+        XCTAssertEqual(savedBrief?.summary, "ENRICHED")       // enriched brief persisted
+        XCTAssertEqual(s.company.brief.summary, "ENRICHED")   // enriched brief in state
+        XCTAssertEqual(roadmapSawSummary, "ENRICHED")         // roadmap generated from enriched
+    }
+
+    func testScaffoldFailsOpenWhenEnrichThrows() async {
+        struct E: Error {}
+        var savedBrief: CompanyBrief?
+        let s = CompanyStore(
+            loader: { _ in .empty },
+            saver: { _, b in savedBrief = b; return true },
+            roadmapFetcher: { _, _ in [] },
+            enricher: { _ in throw E() }
+        )
+        await s.hydrate(companyId: "u")
+        _ = await s.scaffoldFromOnboarding(brief: CompanyBrief(projectName: "Raw"),
+                                           token: s.onboardingToken)
+        XCTAssertEqual(savedBrief?.projectName, "Raw")        // raw brief used, not blocked
+        XCTAssertNil(savedBrief?.summary)                     // no enrichment applied
     }
 }

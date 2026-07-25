@@ -93,7 +93,7 @@ struct DocViewer: View {
                         .fill(CodepetTheme.accentPurple.opacity(0.1))
                 )
 
-            ForEach(sections, id: \.h) { section in
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(section.h)
                         .font(.pixelSystem(size: 14, weight: .bold))
@@ -109,7 +109,7 @@ struct DocViewer: View {
                     Text(lang == .vi ? "Tiếp theo" : "Next")
                         .font(.pixelSystem(size: 12, weight: .semibold))
                         .foregroundColor(CodepetTheme.mutedText)
-                    ForEach(next, id: \.self) { line in
+                    ForEach(Array(next.enumerated()), id: \.offset) { _, line in
                         HStack(alignment: .top, spacing: 8) {
                             Text("•").foregroundColor(CodepetTheme.mutedText)
                             Text(line)
@@ -170,7 +170,7 @@ struct PlanViewer: View {
             if let changes = payload.changes, !changes.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     label("Changes", "Thay đổi")
-                    ForEach(changes, id: \.area) { change in
+                    ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(change.area)
                                 .font(.pixelSystem(size: 12, weight: .semibold))
@@ -192,7 +192,7 @@ struct PlanViewer: View {
             if let verify = payload.verify, !verify.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     label("Verify", "Kiểm chứng")
-                    ForEach(verify, id: \.self) { check in
+                    ForEach(Array(verify.enumerated()), id: \.offset) { _, check in
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "checkmark.circle").foregroundColor(CodepetTheme.accentTeal)
                             Text(check)

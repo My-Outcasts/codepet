@@ -92,15 +92,15 @@ struct DeliverableDetailView: View {
             ScrollView {
                 Group {
                     switch deliverable.kind {
-                    case .checklist where deliverable.payload?.items != nil:
+                    case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):
                         ChecklistViewer(items: deliverable.payload!.items!)
-                    case .doc where deliverable.payload?.call != nil:
+                    case .doc where !(deliverable.payload?.call?.isEmpty ?? true):
                         DocViewer(call: deliverable.payload!.call!,
                                   sections: deliverable.payload?.sections ?? [],
                                   next: deliverable.payload?.next ?? [])
-                    case .plan where deliverable.payload?.goal != nil:
+                    case .plan where !(deliverable.payload?.goal?.isEmpty ?? true):
                         PlanViewer(payload: deliverable.payload!)
-                    case .dms where deliverable.payload?.messages != nil:
+                    case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
                         DmsViewer(messages: deliverable.payload!.messages!)
                     default:
                         MarkdownView(markdown: deliverable.body)

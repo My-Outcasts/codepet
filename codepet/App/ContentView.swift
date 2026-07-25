@@ -79,6 +79,11 @@ struct ContentView: View {
                 // Signed out — intentionally keep the stored UID and in-memory
                 // data: a same-account re-login is then unchanged, and a different
                 // account signing in next still trips the UID comparison below.
+                // Real sign-out (a prior sign-in exists): return to the brand splash
+                // before the sign-in screen, mirroring web Gate's wasAuthed/splashSeen.
+                if PersistenceManager.shared.currentUserId != nil {
+                    withAnimation { showSplash = true }
+                }
                 return
             }
             // NOTE: anonymous (PIN) users flow through the same isolation path as

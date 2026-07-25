@@ -137,9 +137,13 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         // Stub both savers — approveTask's persistence path would otherwise hit real
         // CompanyData.saveLibrary/saveTasks (Firestore) with an unconfigured FirebaseApp
         // in the test bundle and crash (SIGABRT), not the Xcode 26.2 teardown bug.
+        // decisionExtractor is stubbed too: approveTask now fires a fire-and-forget
+        // rememberFromApproval, and its default hits DecisionsClient.extract (live
+        // Firebase Auth) — same unconfigured-FirebaseApp crash risk.
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
-                             librarySaver: { _, _ in true })
+                             librarySaver: { _, _ in true },
+                             decisionExtractor: { _, _ in [] })
         await s.hydrate(companyId: "u")
         await s.approveTask(id: "t1")
         XCTAssertEqual(s.company.library.count, 1)        // moved to library once
@@ -160,5 +164,39 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         await s.approveTask(id: "t1")
         XCTAssertTrue(s.company.library.isEmpty)
         XCTAssertFalse(s.company.tasks[0].done)
+    }
+
+    func testApproveExtractsMergesAndPersistsDecisions() async {
+        var savedDecisions: [DecisionEntry]?
+        let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
+                                  drafted: true, draft: Deliverable(kind: .doc, title: "Pricing", body: "Plus $4/mo", sourceTaskId: "t1"))
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [drafted])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             librarySaver: { _, _ in true },
+                             decisionsSaver: { _, d in savedDecisions = d; return true },
+                             decisionExtractor: { _, _ in [ExtractedDecision(topic: "pricing", statement: "Plus $4/mo", source: "Pricing")] })
+        await s.hydrate(companyId: "u")
+        await s.approveTask(id: "t1")
+        // fire-and-forget Task — allow it to run
+        await Task.yield(); try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(s.company.decisions.first?.topic, "pricing")
+        XCTAssertEqual(savedDecisions?.first?.statement, "Plus $4/mo")
+    }
+    func testApproveFailOpenWhenExtractorReturnsEmpty() async {
+        let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
+                                  drafted: true, draft: Deliverable(kind: .doc, title: "X", body: "y", sourceTaskId: "t1"))
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [drafted])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             librarySaver: { _, _ in true },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.approveTask(id: "t1")
+        await Task.yield(); try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(s.company.decisions.isEmpty)   // nothing extracted → unchanged
+        XCTAssertTrue(s.company.tasks[0].done)        // approval still completed
     }
 }

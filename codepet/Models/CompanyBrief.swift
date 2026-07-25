@@ -24,15 +24,24 @@ struct CompanyBrief: Codable, Hashable, Equatable {
     var categories: [String]?
     /// Who the product is for (target user / customer).
     var audience: String?
+    /// Founder's immediate goal for the next few weeks (drives task priority).
+    /// Filled by the first-run enrichment interview; raw founder text, not distilled.
+    var goal: String?
+    /// Real traction/assets: waitlist, users, revenue, anything live.
+    var traction: String?
+    /// The problem the product solves + who feels it most (sharpens positioning).
+    var problem: String?
 
     init(founderName: String? = nil, role: String? = nil, tech: String? = nil,
          stage: String? = nil, projectName: String? = nil, oneLiner: String? = nil,
          summary: String? = nil, notes: String? = nil, link: String? = nil,
-         categories: [String]? = nil, audience: String? = nil) {
+         categories: [String]? = nil, audience: String? = nil,
+         goal: String? = nil, traction: String? = nil, problem: String? = nil) {
         self.founderName = founderName; self.role = role; self.tech = tech
         self.stage = stage; self.projectName = projectName; self.oneLiner = oneLiner
         self.summary = summary; self.notes = notes; self.link = link
         self.categories = categories; self.audience = audience
+        self.goal = goal; self.traction = traction; self.problem = problem
     }
 
     /// True when the brief carries any founder-supplied signal. Mirrors the web
@@ -44,7 +53,7 @@ struct CompanyBrief: Codable, Hashable, Equatable {
         }
         return s(founderName) || s(role) || s(tech) || s(stage)
             || s(projectName) || s(oneLiner) || s(summary) || s(notes)
-            || s(link) || s(audience)
+            || s(link) || s(audience) || s(goal) || s(traction) || s(problem)
             || !(categories?.isEmpty ?? true)
     }
 }

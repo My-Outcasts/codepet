@@ -38,12 +38,18 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
     /// tasks predate this field, and RoadmapTask decodes strictly — a required `dept`
     /// would fail to decode every stored board. nil == unassigned (pre-department tasks).
     var dept: String?
+    /// A generated-but-unapproved deliverable awaiting the founder's approval. Set by
+    /// runTask (moves the task to "Awaiting approval"); moved into the library and
+    /// cleared on approve. OPTIONAL: legacy tasks predate it and decode to nil.
+    var draft: Deliverable?
 
     init(id: String, title: String, detail: String, phase: RoadmapPhase, who: TaskWho,
-         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false, dept: String? = nil) {
+         dependsOn: [String] = [], done: Bool = false, drafted: Bool = false, dept: String? = nil,
+         draft: Deliverable? = nil) {
         self.id = id; self.title = title; self.detail = detail; self.phase = phase
         self.who = who; self.dependsOn = dependsOn; self.done = done; self.drafted = drafted
         self.dept = dept
+        self.draft = draft
     }
 }
 

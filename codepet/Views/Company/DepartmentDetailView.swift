@@ -99,7 +99,8 @@ private struct DepartmentTaskCard: View {
     @ViewBuilder private var actionButton: some View {
         let running = companyStore.runningTaskIds.contains(task.id)
         Button {
-            Task { await companyStore.runTask(task, language: lang) }
+            if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
+            else { Task { await companyStore.runTask(task, language: lang) } }
         } label: {
             HStack(spacing: 5) {
                 if running { ProgressView().controlSize(.mini) }

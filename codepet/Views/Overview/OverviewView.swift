@@ -138,7 +138,11 @@ struct OverviewView: View {
                 .font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(CodepetTheme.accentPurple)
             Text(b.title).font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            Button { Task { await companyStore.runTask(b, language: lang) } } label: {
+            Button {
+                let st = RoadmapEngine.status(for: b, in: tasks)
+                if st == .needsApproval { Task { await companyStore.approveTask(id: b.id) } }
+                else { Task { await companyStore.runTask(b, language: lang) } }
+            } label: {
                 Text(lang == .vi ? "Bắt đầu" : "Start")
                     .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 16).padding(.vertical, 5)

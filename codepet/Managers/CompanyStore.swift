@@ -255,11 +255,15 @@ final class CompanyStore: ObservableObject {
             createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
     }
 
-    /// Run a codepetCanDo task → produce a Deliverable → append to the library + persist.
-    /// Fail-open: a nil/empty result surfaces an honest runError and appends nothing.
-    /// Task is left as-is. companyId-guarded against account switch mid-run.
+    /// Run a codepetCanDo task → produce a Deliverable → stash it as the task's `draft`
+    /// and mark the task `drafted` (moves it to "Awaiting approval"). Does NOT write the
+    /// library — the deliverable is copied there only on approve. Dedupe: a task already
+    /// drafted & awaiting approval is not re-run (mirrors web's "you already have a
+    /// draft"), so repeat taps never duplicate work. Fail-open + account-guarded.
     func runTask(_ task: RoadmapTask, language: AppLanguage) async {
         guard !runningTaskIds.contains(task.id) else { return }
+        if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
+           company.tasks[i].drafted, !company.tasks[i].done { return }   // already drafted → no regen
         runningTaskIds.insert(task.id)
         runError = nil
         let cid = companyId
@@ -272,8 +276,26 @@ final class CompanyStore: ObservableObject {
                 : "Couldn't generate \"\(task.title)\" — try again."
             return
         }
-        company.library.append(deliverable)
-        if let cid { _ = await librarySaver(cid, company.library) }
+        guard let i = company.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        company.tasks[i].draft = deliverable
+        company.tasks[i].drafted = true
+        if let cid { _ = await tasksSaver(cid, company.tasks) }
+    }
+
+    /// Approve a task's draft: copy it into the library exactly once, mark the task done,
+    /// and clear the draft/drafted state. Persists both tasks + library. Idempotent — a
+    /// task with no pending draft, or already done, is a no-op (no duplicate library entry).
+    func approveTask(id: String) async {
+        guard let i = company.tasks.firstIndex(where: { $0.id == id }),
+              let draft = company.tasks[i].draft, !company.tasks[i].done else { return }
+        company.library.append(draft)
+        company.tasks[i].done = true
+        company.tasks[i].drafted = false
+        company.tasks[i].draft = nil
+        if let cid = companyId {
+            _ = await librarySaver(cid, company.library)
+            _ = await tasksSaver(cid, company.tasks)
+        }
     }
 
     /// Run the greeting's "Do it with me" task → append an inline draft (reuses the 6C

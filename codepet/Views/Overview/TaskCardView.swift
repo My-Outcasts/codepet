@@ -60,6 +60,21 @@ struct TaskCardView: View {
                     .buttonStyle(.plain)
                     .disabled(companyStore.runningTaskIds.contains(task.id))
                 }
+                if status == .needsApproval {
+                    Button {
+                        Task { await companyStore.approveTask(id: task.id) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark").font(.system(size: 9))
+                            Text(lang == .vi ? "Duyệt" : "Approve")
+                        }
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(CodepetTheme.accentGold))
+                    }
+                    .buttonStyle(.plain)
+                }
                 if status == .blocked, let dep = blockedAfter {
                     Text((lang == .vi ? "sau: " : "after: ") + dep)
                         .font(.pixelSystem(size: 10))

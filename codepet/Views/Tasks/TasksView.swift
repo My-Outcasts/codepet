@@ -82,7 +82,9 @@ struct TasksView: View {
 
     private func card(_ t: RoadmapTask) -> some View {
         Button {
-            if !t.done { Task { await companyStore.runTask(t, language: lang) } }
+            let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
+            if st == .needsApproval { Task { await companyStore.approveTask(id: t.id) } }
+            else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {

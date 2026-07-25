@@ -28,6 +28,7 @@ struct RunTaskResponse: Codable {
     let kind: String
     let title: String
     let body: String
+    var payload: DeliverablePayload?
 }
 
 /// Fail-open client for the (planned) runTask Cloud Function. Returns the decoded

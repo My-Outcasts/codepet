@@ -197,7 +197,7 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             history: Array(history), userMessage: text)
         let reply = await chatSender(req)
         // Apply only if we're still on the same account. A real account switch
@@ -255,7 +255,7 @@ final class CompanyStore: ObservableObject {
     private func runRequest(for task: RoadmapTask, language: AppLanguage) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
     }
 

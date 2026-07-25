@@ -19,6 +19,8 @@ struct SummaryView: View {
                 autopilotBar
                 statChips
                 recentWins
+                hereCard
+                achievements
             }
             .padding(18)
             .frame(maxWidth: 620, alignment: .leading)
@@ -157,5 +159,90 @@ struct SummaryView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: You are here (stage progress) — optional stretch
+    private var hereCard: some View {
+        let stage = companyStore.company.stage
+        let stageCount = ProjectStage.allCases.count
+        let pct = RoadmapEngine.progressPercent(companyStore.company.tasks)
+        return CodepetCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Text(lang == .vi ? "Bạn đang ở đây →" : "You are here →")
+                        .font(.pixelSystem(size: 14, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    Spacer()
+                    Text("\(stage.order + 1)/\(stageCount)")
+                        .font(.pixelSystem(size: 11, weight: .medium))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                Text(stage.label(lang))
+                    .font(.pixelSystem(size: 18, weight: .bold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(CodepetTheme.mutedText.opacity(0.15))
+                        Capsule().fill(CodepetTheme.accentPurple)
+                            .frame(width: geo.size.width * CGFloat(pct) / 100)
+                    }
+                }
+                .frame(height: 10)
+                Text(lang == .vi ? "\(pct)% lộ trình đã hoàn thành" : "\(pct)% of roadmap done")
+                    .font(.pixelSystem(size: 11, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: Achievements strip — static playful copy, optional stretch
+    private struct AchievementBadge {
+        let icon: String
+        let label: L10n
+    }
+
+    private static let achievementBadges: [AchievementBadge] = [
+        AchievementBadge(icon: "🚀", label: L10n(vi: "Đã khởi động", en: "Kicked off")),
+        AchievementBadge(icon: "🤖", label: L10n(vi: "Bật tự động", en: "Autopilot on")),
+        AchievementBadge(icon: "📦", label: L10n(vi: "Giao hàng đầu tiên", en: "First delivery")),
+        AchievementBadge(icon: "🔥", label: L10n(vi: "Đang giữ đà", en: "On a streak")),
+        AchievementBadge(icon: "🧭", label: L10n(vi: "Đã vạch lộ trình", en: "Roadmap mapped")),
+        AchievementBadge(icon: "✨", label: L10n(vi: "Giao việc nhanh", en: "Shipping fast")),
+    ]
+
+    private var achievements: some View {
+        let badges = Self.achievementBadges
+        return CodepetCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(lang == .vi ? "Thành tích" : "Achievements")
+                    .font(.pixelSystem(size: 14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(badges.prefix(3)), id: \.icon) { achievementChip($0) }
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(Array(badges.dropFirst(3)), id: \.icon) { achievementChip($0) }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func achievementChip(_ badge: AchievementBadge) -> some View {
+        HStack(spacing: 5) {
+            Text(badge.icon).font(.pixelSystem(size: 13))
+            Text(badge.label(lang))
+                .font(.pixelSystem(size: 11, weight: .medium))
+                .foregroundColor(CodepetTheme.primaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(CodepetTheme.surface))
+        .overlay(Capsule().stroke(CodepetTheme.mutedText.opacity(0.2), lineWidth: 1))
     }
 }

@@ -39,5 +39,19 @@ final class DecisionsTests: XCTestCase {
         let s = Decisions.composeDecisions([DecisionEntry(topic: "pricing", statement: "$4/mo", source: nil, updatedAt: nil)])
         XCTAssertTrue(s.contains("honor these"))
         XCTAssertTrue(s.contains("- pricing: $4/mo"))
+
+        // Full verbatim assertion to catch accidental edits to the conflict-note paragraph
+        let expected = "Decisions the founder has locked in — honor these; never contradict or silently re-open them:\n"
+            + "- pricing: $4/mo"
+            + "\nIf the current work genuinely conflicts with one, do NOT quietly override it and do NOT ignore the conflict: stay consistent with the decision, and add one short, clearly-marked note flagging the tension so the founder can decide (e.g. \"Note: this holds to your decision that <…>; tell me if you want to revisit it\")."
+        XCTAssertEqual(s, expected)
+    }
+
+    func testNormalizeCapsKeepingRecent() {
+        let entries = (0..<31).map { DecisionEntry(topic: "t\($0)", statement: "s", source: nil, updatedAt: Double($0)) }
+        let out = Decisions.normalizeDecisions(entries)
+        XCTAssertEqual(out.count, 30)
+        XCTAssertTrue(out.contains { $0.topic == "t30" })   // newest kept
+        XCTAssertFalse(out.contains { $0.topic == "t0" })   // oldest evicted
     }
 }

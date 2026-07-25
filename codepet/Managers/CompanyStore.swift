@@ -263,7 +263,7 @@ final class CompanyStore: ObservableObject {
     func runTask(_ task: RoadmapTask, language: AppLanguage) async {
         guard !runningTaskIds.contains(task.id) else { return }
         if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
-           company.tasks[i].drafted, !company.tasks[i].done { return }   // already drafted → no regen
+           company.tasks[i].done || company.tasks[i].drafted { return }   // done or already drafted → no regen/dup
         runningTaskIds.insert(task.id)
         runError = nil
         let cid = companyId

@@ -23,6 +23,14 @@ enum RoadmapEngine {
         return task.who == .you ? .needsYou : .codepetCanDo
     }
 
+    /// Resolve the deliverable a done task produced — the library item whose
+    /// `sourceTaskId` matches the task's id. `nil` when none is found: legacy tasks
+    /// predate `sourceTaskId`, or the task's deliverable was never generated. Pure —
+    /// no network, no mutation; callers no-op the tap when this returns nil.
+    static func deliverable(for task: RoadmapTask, in library: [Deliverable]) -> Deliverable? {
+        library.first { $0.sourceTaskId == task.id }
+    }
+
     /// The beacon: the first not-done, dependency-satisfied task by phase order then position.
     static func nextStep(_ tasks: [RoadmapTask]) -> RoadmapTask? {
         let index = byId(tasks)

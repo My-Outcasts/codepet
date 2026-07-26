@@ -46,6 +46,11 @@ final class CompanyStore: ObservableObject {
     /// brief into another's doc or clobber the newly-hydrated account.
     private(set) var onboardingToken = 0
 
+    /// First-run enrichment interview progress: the empty gaps to ask + the index
+    /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
+    /// no interview is active.
+    private var interviewState: (gaps: [InterviewGap], idx: Int)?
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
@@ -116,7 +121,9 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
-        seedFirstRunGreeting(language: language)
+        if !startEnrichInterviewIfNeeded(language: language) {
+            seedFirstRunGreeting(language: language)
+        }
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)
@@ -126,6 +133,63 @@ final class CompanyStore: ObservableObject {
         let next = RoadmapEngine.nextStep(company.tasks)
         let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
         chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
+    }
+
+    /// First-run only: after the brief is saved + stamped, ask the ≤3 plan-shaping
+    /// questions the onboarding brief is missing (goal / traction / problem), one at
+    /// a time. A full brief means no gaps → caller falls through to the greeting.
+    /// Returns true when an interview was started (so the caller skips the greeting).
+    private func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
+        guard companyId != nil else { return false }
+        let gaps = EnrichInterview.detectGaps(company.brief)
+        guard !gaps.isEmpty else { return false }
+        interviewState = (gaps: gaps, idx: 0)
+        askInterviewGap(gaps[0], language: language)
+        return true
+    }
+
+    /// Append one interview question as a companion message carrying its gap. The
+    /// message text is the question itself, so once answered the card collapses to a
+    /// plain bubble showing that question (matches the web `answered` branch).
+    private func askInterviewGap(_ gap: InterviewGap, language: AppLanguage) {
+        let q = EnrichInterview.question(for: gap, language: language)
+        chatMessages.append(CopilotMessage(role: .companion, text: q.ask, interview: gap))
+    }
+
+    /// Answer (or skip) the current interview question. A non-blank answer is saved
+    /// RAW (trimmed, no distillation) into the brief field and persisted via the
+    /// existing saver — durable on mid-interview drop-off. Blank/nil = skip: advance
+    /// without saving. Then ask the next gap, or hand off to the first-run greeting.
+    func answerInterview(messageId: String, gap: InterviewGap, answer: String?, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              !chatMessages[i].interviewAnswered else { return }
+        chatMessages[i].interviewAnswered = true
+
+        let trimmed = (answer ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            // Echo the founder's answer as their own chat bubble (matches web),
+            // so their input stays visible instead of vanishing on send.
+            chatMessages.append(CopilotMessage(role: .me, text: trimmed))
+        }
+        if !trimmed.isEmpty, let cid = companyId {
+            switch gap {
+            case .goal: company.brief.goal = trimmed
+            case .traction: company.brief.traction = trimmed
+            case .problem: company.brief.problem = trimmed
+            }
+            _ = await saver(cid, company.brief)
+            guard companyId == cid else { return }  // account switched mid-await → bail
+        }
+
+        guard var st = interviewState else { return }
+        st.idx += 1
+        if st.idx < st.gaps.count {
+            interviewState = st
+            askInterviewGap(st.gaps[st.idx], language: language)
+        } else {
+            interviewState = nil
+            seedFirstRunGreeting(language: language)
+        }
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
@@ -397,5 +461,6 @@ final class CompanyStore: ObservableObject {
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
+        interviewState = nil
     }
 }

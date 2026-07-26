@@ -149,6 +149,7 @@ struct CopilotBubble: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
+    @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
     var body: some View {
@@ -160,6 +161,8 @@ struct CopilotBubble: View {
                 actionButton(action)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let gap = message.interview, !message.interviewAnswered {
+            interviewCard(gap)
         } else {
             textBubble
         }
@@ -176,6 +179,61 @@ struct CopilotBubble: View {
                 .background(Capsule().fill(CodepetTheme.accentPurple))
         }
         .buttonStyle(.plain)
+    }
+
+    /// First-run enrichment interview: question + why-line + free-text answer,
+    /// Send (saves raw text to the brief) or Skip (advances without saving).
+    private func interviewCard(_ gap: InterviewGap) -> some View {
+        let q = EnrichInterview.question(for: gap, language: lang)
+        let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(q.ask)
+                    .font(.pixelSystem(size: 12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(q.why)
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
+                          text: $interviewDraft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.pixelSystem(size: 12))
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
+                HStack(spacing: 8) {
+                    Button {
+                        let answer = interviewDraft
+                        interviewDraft = ""
+                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
+                    } label: {
+                        Text(lang == .vi ? "Gửi" : "Send")
+                            .font(.pixelSystem(size: 10, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
+                    }
+                    .buttonStyle(.plain).disabled(!canSend)
+                    Button {
+                        interviewDraft = ""
+                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
+                    } label: {
+                        Text(lang == .vi ? "Bỏ qua" : "Skip")
+                            .font(.pixelSystem(size: 10, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(Capsule().stroke(CodepetTheme.hairline))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CodepetTheme.surface))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 24)
+        }
     }
 
     private var textBubble: some View {

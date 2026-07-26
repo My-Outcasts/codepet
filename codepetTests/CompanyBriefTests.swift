@@ -46,4 +46,23 @@ final class CompanyBriefTests: XCTestCase {
     func testHasAnySignal_projectNameIsTrue() {
         XCTAssertTrue(CompanyBrief(projectName: "Codepet").hasAnySignal)
     }
+
+    func testGoalTractionProblemRoundTrip() throws {
+        let brief = CompanyBrief(goal: "Ship v1", traction: "40 on waitlist", problem: "Recaps are manual")
+        let data = try JSONEncoder().encode(brief)
+        let decoded = try JSONDecoder().decode(CompanyBrief.self, from: data)
+        XCTAssertEqual(decoded, brief)
+    }
+
+    func testOldDocDecodesNewFieldsToNil() throws {
+        let decoded = try JSONDecoder().decode(CompanyBrief.self, from: Data("{}".utf8))
+        XCTAssertNil(decoded.goal)
+        XCTAssertNil(decoded.traction)
+        XCTAssertNil(decoded.problem)
+    }
+
+    func testHasAnySignal_goalOnlyIsTrue() { XCTAssertTrue(CompanyBrief(goal: "Ship v1").hasAnySignal) }
+    func testHasAnySignal_tractionOnlyIsTrue() { XCTAssertTrue(CompanyBrief(traction: "40 users").hasAnySignal) }
+    func testHasAnySignal_problemOnlyIsTrue() { XCTAssertTrue(CompanyBrief(problem: "Manual recaps").hasAnySignal) }
+    func testHasAnySignal_blankGoalIsFalse() { XCTAssertFalse(CompanyBrief(goal: "  ").hasAnySignal) }
 }

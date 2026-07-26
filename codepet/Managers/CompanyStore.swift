@@ -297,7 +297,8 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+                                          library: company.library, query: text),
             history: Array(history), userMessage: text)
 
         let placeholderId = UUID().uuidString

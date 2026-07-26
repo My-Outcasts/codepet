@@ -8,6 +8,7 @@ struct OverviewView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showSecondBrain = false
+    @State private var showMapIntro = false
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
@@ -47,15 +48,19 @@ struct OverviewView: View {
             }
             Spacer()
             HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Text("?").font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
-                        .frame(width: 18, height: 18).background(Circle().fill(CodepetTheme.accentPurple))
-                    Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                        .font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                Button { showMapIntro = true } label: {
+                    HStack(spacing: 8) {
+                        Text("?").font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
+                            .frame(width: 18, height: 18).background(Circle().fill(CodepetTheme.accentPurple))
+                        Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
+                            .font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.14)))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
                 }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.14)))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
+                .buttonStyle(.plain)
+                .popover(isPresented: $showMapIntro) { mapIntroBriefing }
                 segmentToggle
             }
         }
@@ -157,6 +162,32 @@ struct OverviewView: View {
         .frame(width: 240, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 13).fill(CodepetTheme.accentPurple.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(CodepetTheme.accentPurple.opacity(0.3), lineWidth: 1))
+    }
+
+    // Reopens the "how to read this map" briefing (web: OverviewSection.tsx openIntro),
+    // showing current phase status + the KEY legend already computed below.
+    private var mapIntroBriefing: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
+                .font(CodepetTheme.inter(13, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
+            VStack(alignment: .leading, spacing: 4) {
+                Text((lang == .vi ? "Giai đoạn hiện tại: " : "Current phase: ") + currentPhase.label(lang))
+                    .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
+                if let next = nextPhaseLabel {
+                    Text((lang == .vi ? "Tiếp theo: " : "Next: ") + next)
+                        .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                }
+                if let title = beacon?.title {
+                    Text((lang == .vi ? "Bước tiếp theo: " : "Up next: ") + title)
+                        .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Divider()
+            legend
+        }
+        .padding(16)
+        .frame(width: 260, alignment: .leading)
     }
 
     private var legend: some View {

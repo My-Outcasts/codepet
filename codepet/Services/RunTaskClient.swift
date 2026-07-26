@@ -11,6 +11,12 @@ struct RunTaskRequest: Codable {
     let taskId: String
     let taskTitle: String
     let taskDetail: String
+    /// Set only on a revise re-run (chip tap or free-form redo-with-note): the
+    /// instruction to apply ("Make it shorter", etc). `nil` on a blind redo/first run.
+    var reviseNote: String? = nil
+    /// The current draft body, sent alongside `reviseNote` so the CF revises in
+    /// place instead of regenerating from scratch. `nil` on a blind redo/first run.
+    var current: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -20,6 +26,8 @@ struct RunTaskRequest: Codable {
         case taskId = "task_id"
         case taskTitle = "task_title"
         case taskDetail = "task_detail"
+        case reviseNote = "revise_note"
+        case current
     }
 }
 

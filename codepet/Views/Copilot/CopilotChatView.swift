@@ -531,6 +531,23 @@ struct CopilotBubble: View {
                                     .background(Capsule().stroke(CodepetTheme.hairline))
                             }.buttonStyle(.plain)
                         }
+                        // Revise chips: one-tap re-runs of THIS draft with a targeted
+                        // instruction (vs. Redo's blind re-run). Same visibility gate as
+                        // Redo — hidden once approved.
+                        HStack(spacing: 6) {
+                            ForEach(ReviseKind.allCases, id: \.self) { kind in
+                                Button {
+                                    Task { await companyStore.redoDraft(messageId: message.id, language: lang,
+                                                                         reviseNote: kind.note(lang)) }
+                                } label: {
+                                    Text(kind.label(lang))
+                                        .font(.pixelSystem(size: 9, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.mutedText)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Capsule().stroke(CodepetTheme.hairline))
+                                }.buttonStyle(.plain)
+                            }
+                        }
                     }
                 }
                 .padding(12)
@@ -539,5 +556,36 @@ struct CopilotBubble: View {
             Spacer(minLength: 24)
         }
         .sheet(isPresented: $showDetail) { DeliverableDetailView(deliverable: d) }
+    }
+}
+
+/// The 3 one-tap revise chips on a draft card: a targeted re-run (vs. Redo's blind
+/// re-run) that threads a short instruction + the draft's current body into the
+/// RunTaskRequest so the CF revises in place.
+private enum ReviseKind: CaseIterable {
+    case shorter, moreDetail, punchier
+
+    /// Chip label (short, matches Approve/Redo's terse pill style).
+    func label(_ lang: AppLanguage) -> String {
+        switch (self, lang) {
+        case (.shorter, .vi): return "Ngắn gọn hơn"
+        case (.shorter, _): return "Shorter"
+        case (.moreDetail, .vi): return "Chi tiết hơn"
+        case (.moreDetail, _): return "More detail"
+        case (.punchier, .vi): return "Ấn tượng hơn"
+        case (.punchier, _): return "Punchier"
+        }
+    }
+
+    /// The `reviseNote` sent to the CF — a full instruction, not the terse chip label.
+    func note(_ lang: AppLanguage) -> String {
+        switch (self, lang) {
+        case (.shorter, .vi): return "Làm ngắn gọn hơn"
+        case (.shorter, _): return "Make it shorter"
+        case (.moreDetail, .vi): return "Thêm chi tiết hơn"
+        case (.moreDetail, _): return "Add more detail"
+        case (.punchier, .vi): return "Làm ấn tượng hơn"
+        case (.punchier, _): return "Make it punchier"
+        }
     }
 }

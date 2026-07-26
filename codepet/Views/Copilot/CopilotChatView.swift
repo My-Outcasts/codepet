@@ -26,6 +26,14 @@ struct CopilotChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
     }
+    /// True while a chat turn is in flight — gates the History toggle here and
+    /// (via `ThreadListView`'s own copy of this) the "New chat"/switch/delete
+    /// row controls, so the UI can't trigger a mid-stream thread repoint even
+    /// though `CompanyStore` also guards it at the source. Mirrors `canSend`'s
+    /// existing streaming gate.
+    private var isChatBusy: Bool {
+        companyStore.isCompanionTyping || companyStore.isStreaming
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,9 +65,11 @@ struct CopilotChatView: View {
             Button { showHistory.toggle() } label: {
                 Text(lang == .vi ? "Lịch sử" : "History")
                     .font(CodepetTheme.inter(11, weight: .medium))
-                    .foregroundColor(showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                    .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
+                                     : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
             }
             .buttonStyle(.plain)
+            .disabled(isChatBusy)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
@@ -172,6 +182,16 @@ struct ThreadListView: View {
     @State private var now = Date()
 
     private var rows: [ChatThread] { sortThreadsByRecent(companyStore.threads) }
+    /// Gates "New chat" + per-row switch/delete while a turn is in flight —
+    /// mirrors `CopilotChatView.isChatBusy` (also gates the History toggle
+    /// that opens this panel). Rename is left enabled: it only edits a title
+    /// in `threads`, it never repoints `chatMessages`, so it can't corrupt an
+    /// in-flight stream. `CompanyStore.newChat()`/`switchThread(_:)`/
+    /// `deleteThread(_:)` guard the same condition independently — this is UI
+    /// affordance on top of that store-level guard, not a substitute for it.
+    private var isChatBusy: Bool {
+        companyStore.isCompanionTyping || companyStore.isStreaming
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -184,9 +204,11 @@ struct ThreadListView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.accentPurple))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isChatBusy ? CodepetTheme.accentPurple.opacity(0.5) : CodepetTheme.accentPurple))
             }
             .buttonStyle(.plain)
+            .disabled(isChatBusy)
             .padding(12)
 
             if rows.isEmpty {
@@ -242,6 +264,7 @@ struct ThreadListView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isChatBusy)
 
                     Menu {
                         Button {
@@ -255,6 +278,7 @@ struct ThreadListView: View {
                         } label: {
                             Label(lang == .vi ? "Xóa" : "Delete", systemImage: "trash")
                         }
+                        .disabled(isChatBusy)
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .foregroundColor(CodepetTheme.mutedText)

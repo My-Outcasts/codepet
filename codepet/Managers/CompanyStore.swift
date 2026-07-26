@@ -319,7 +319,17 @@ final class CompanyStore: ObservableObject {
     /// thread doesn't appear in `threads` until it actually holds a message (the
     /// next flush creates it) — mirrors the web, where an unused "new chat" isn't
     /// a real row in the history list either.
+    ///
+    /// No-op while a chat turn is in flight (`isStreaming`/`isCompanionTyping`):
+    /// `sendMessage` streams `.delta`s and appends `.done` chips straight into
+    /// `chatMessages` by id, so repointing the buffer mid-turn would silently
+    /// drop the in-flight reply (delta lookups fail against the new buffer) and
+    /// leak its `.done` chips into whatever thread became active. This is
+    /// defense in depth — `CopilotChatView` also disables the controls that
+    /// call these while streaming — so a stream survives even if some other
+    /// caller bypasses the UI.
     func newChat() {
+        guard !isStreaming, !isCompanionTyping else { return }
         flushActiveThread()
         activeThreadId = UUID().uuidString
         chatMessages = []
@@ -328,7 +338,11 @@ final class CompanyStore: ObservableObject {
     /// Switch the working buffer to a different thread: flush the outgoing one,
     /// then load the target's messages. Switching to the thread already active
     /// is a no-op (would otherwise round-trip the buffer through itself).
+    ///
+    /// Also a no-op while a chat turn is in flight — see `newChat()`'s doc
+    /// comment for why repointing `chatMessages` mid-stream corrupts state.
     func switchThread(_ id: String) {
+        guard !isStreaming, !isCompanionTyping else { return }
         guard id != activeThreadId else { return }
         flushActiveThread()
         activeThreadId = id
@@ -350,7 +364,13 @@ final class CompanyStore: ObservableObject {
     /// thread (loading its messages into the buffer); with nothing left, opens
     /// a fresh new chat — `chatMessages` is cleared FIRST so `newChat()`'s
     /// flush has nothing to (wrongly) resurrect from the just-deleted thread.
+    ///
+    /// No-op while a chat turn is in flight — gated for consistency with
+    /// `newChat()`/`switchThread(_:)` even though deleting a non-active thread
+    /// alone wouldn't repoint `chatMessages`: deleting the ACTIVE thread mid-
+    /// stream would, via the fallback/`newChat()` branches below.
     func deleteThread(_ id: String) {
+        guard !isStreaming, !isCompanionTyping else { return }
         threads.removeAll { $0.id == id }
         guard id == activeThreadId else { return }
         if let fallback = pickFallbackThreadId(after: id, in: threads) {

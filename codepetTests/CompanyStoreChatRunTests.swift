@@ -175,6 +175,44 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertNil(s.chatMessages.last?.draft)
     }
 
+    /// The exact double-fire bug: byte replies with ONLY a run-task decision
+    /// and NO chat text — the stream yields ZERO deltas then
+    /// `.done(runTaskId:)`. Gating the fallback on empty text (instead of "no
+    /// `.done` received") used to trip the fallback here too, firing a SECOND
+    /// `chatSender` call and running `handleRunTaskId` again for the same
+    /// task — a duplicate CF call and a duplicate draft card. Must now: never
+    /// call `chatSender`, run the task exactly once, append exactly one
+    /// draft, and fill the placeholder with the canned lead-in instead of
+    /// leaving it blank.
+    func testStreamingDoneRunTaskOnlyNoDeltasNoFallbackNoDoubleDraft() async {
+        var runnerCalls = 0
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: "t1"))
+                continuation.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a run-task-only .done"); return nil },
+                             chatStreamer: streamer,
+                             taskRunner: { _ in
+                                 runnerCalls += 1
+                                 return RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1")
+                             },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
+        XCTAssertEqual(runnerCalls, 1)                              // handleRunTaskId fired exactly once
+        let placeholder = s.chatMessages[1]
+        XCTAssertFalse(placeholder.text.isEmpty)                    // canned lead-in, not left blank
+        XCTAssertNil(placeholder.draft)
+        let draftMessages = s.chatMessages.filter { $0.draft?.sourceTaskId == "t1" }
+        XCTAssertEqual(draftMessages.count, 1)                      // exactly ONE draft, not two
+        XCTAssertFalse(s.isStreaming)
+        XCTAssertFalse(s.isCompanionTyping)
+    }
+
     /// `sendChat` must populate the request's `runnable` from the company's
     /// current codepetCanDo tasks (mirrors the web's openTasks filter).
     func testSendChatPopulatesRunnableFromCodepetCanDoTasks() async {

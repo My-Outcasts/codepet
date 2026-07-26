@@ -314,6 +314,7 @@ final class CompanyStore: ObservableObject {
 
         var streamedText = ""
         var streamThrew = false
+        var receivedDone = false
         do {
             for try await event in chatStreamer(req) {
                 // Checked before touching state on every event: a switch mid-stream
@@ -331,6 +332,7 @@ final class CompanyStore: ObservableObject {
                     // handling must fire here too — not just in the fallback
                     // below (previously the only place it ran, back when
                     // streaming usually failed pre-deploy).
+                    receivedDone = true
                     await handleRunTaskId(runTaskId, cid: cid, language: language)
                     guard companyId == cid else { return }
                 }
@@ -340,7 +342,16 @@ final class CompanyStore: ObservableObject {
         }
         guard companyId == cid else { return }
 
-        if streamThrew || streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // Gate the fallback on "no `.done` frame was received", NOT on empty
+        // text: byte can legitimately reply with only a run-task decision and
+        // no chat text (zero deltas, then `.done(runTaskId:)`). Falling back
+        // on empty text there would fire a SECOND chatSender call and run
+        // handleRunTaskId AGAIN for the same task — a duplicate CF call and a
+        // duplicate draft card. A well-formed `.done` (even empty-text)
+        // means the stream succeeded, so no fallback. The pre-deploy safety
+        // net still works: a plain-JSON (non-SSE) response parses to zero
+        // frames, so `.done` never fires and `!receivedDone` is true.
+        if streamThrew || !receivedDone {
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
@@ -351,6 +362,15 @@ final class CompanyStore: ObservableObject {
             }
             await handleRunTaskId(reply?.runTaskId, cid: cid, language: language)
             guard companyId == cid else { return }
+        } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // A `.done` was received but byte sent zero chat text (a
+            // run-task-only reply) — don't leave the placeholder blank.
+            let leadIn = language == .vi
+                ? "Được rồi — mình chuẩn bị việc đó ngay đây."
+                : "On it — putting that together now."
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                chatMessages[i].text = leadIn
+            }
         }
         isCompanionTyping = false
         isStreaming = false

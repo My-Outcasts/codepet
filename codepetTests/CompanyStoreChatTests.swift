@@ -127,13 +127,22 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)   // cleared by end of send regardless; covered above too
     }
 
-    /// An empty-but-clean stream (e.g. the live CF still answering with a single
-    /// JSON body pre-deploy: the SSE parser finds no frames and the stream just
-    /// ends) must trigger the SAME fallback as a thrown error.
+    /// A stream that yields ZERO frames at all — no `.delta`, no `.done` — the
+    /// exact shape the live CF collapses to pre-deploy: a plain JSON body with
+    /// no `event:`/`data:` lines parses to zero SSE frames, so the stream just
+    /// ends with nothing yielded and no `.done` ever fires.
+    private static let noFramesStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish() }
+    }
+
+    /// A genuinely empty, clean stream (zero frames, no `.done`) must trigger
+    /// the SAME fallback as a thrown error — this is the deploy-order-safety
+    /// net, distinct from a well-formed `.done` carrying no chat text (that
+    /// case must NOT fall back — see CompanyStoreChatRunTests).
     func testEmptyCleanStreamFallsBackToChatSender() async {
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in CompanyChatReply(text: "from JSON fallback", runTaskId: nil) },
-                             chatStreamer: Self.streamer(deltas: []))
+                             chatStreamer: Self.noFramesStreamer)
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         XCTAssertEqual(s.chatMessages.count, 2)

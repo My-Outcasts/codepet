@@ -9,11 +9,19 @@ struct EnvironmentView: View {
 
     private var enabled: Set<String> { companyStore.company.enabledTools }
     private var recs: [ToolItem] { Toolkit.recommended.filter { !enabled.contains($0.id) } }
+    // Recommended-but-off connectors — the accounts still needing a founder to connect
+    // them (same "needs you" tag basis the recommendation rows already show).
+    private var needsYouCount: Int { recs.filter { $0.category == .connectors }.count }
+    private var stageLabel: String {
+        let s = (companyStore.company.brief.stage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (s.isEmpty ? "Building" : s).lowercased()
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                companionLine
                 if !recs.isEmpty { recommendations }
                 ForEach(ToolCategory.allCases) { cat in
                     categorySection(cat)
@@ -34,6 +42,35 @@ struct EnvironmentView: View {
                  : "Set up Codepet's toolkit — skills, connectors, and agents — so it can do more of the work for you.")
                 .font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
         }
+    }
+
+    // Companion "why this toolkit" line (web env-byte): explains the recommendation set
+    // in the founder's own stage, and flags how many accounts still need connecting.
+    private var companionLine: some View {
+        HStack(alignment: .top, spacing: 10) {
+            CharacterImage(companyStore.company.companionId, size: 28)
+            Text(companionText)
+                .font(.pixelSystem(size: 12))
+                .foregroundColor(CodepetTheme.bodyText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.25), lineWidth: 1))
+    }
+
+    private var companionText: String {
+        if lang == .vi {
+            let base = "Dựa trên giai đoạn \(stageLabel), đây là bộ công cụ mình sẽ thiết lập"
+            return needsYouCount > 0
+                ? base + " — bạn chỉ cần kết nối \(needsYouCount) tài khoản."
+                : base + "."
+        }
+        let base = "Based on your \(stageLabel), here's the toolkit I'd set up"
+        return needsYouCount > 0
+            ? base + " — you just need to connect \(needsYouCount) account\(needsYouCount > 1 ? "s" : "")."
+            : base + "."
     }
 
     private var recommendations: some View {

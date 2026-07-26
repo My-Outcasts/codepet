@@ -6,8 +6,9 @@ import Foundation
 /// mirrors the RoadmapEngine / DepartmentCatalog pure-derivation pattern.
 ///
 /// The web panel's Usage section (sessions/commits/PRs/hours-saved) and its
-/// Decisions/Milestones rows are intentionally omitted — native has no LedgerEvent or
+/// Milestones row are intentionally omitted — native has no LedgerEvent or
 /// tracking subsystem to back them, and this struct never fabricates counts.
+/// Decisions IS backed (company.decisions is a real, synced list) and included below.
 struct SecondBrainData {
 
     /// One department's topic tally (native analogue of the web `topicCounts` row).
@@ -20,6 +21,7 @@ struct SecondBrainData {
     let deliverables: Int        // company.library.count
     let tasksTotal: Int          // company.tasks.count
     let tasksDone: Int           // done tasks
+    let decisions: Int           // company.decisions.count
     let topics: [Topic]          // per-dept task counts, count>0, desc then catalog order
     let nextTask: RoadmapTask?   // RoadmapEngine.nextStep
     let nextDeptName: String?    // department name for nextTask.dept
@@ -33,6 +35,7 @@ struct SecondBrainData {
         self.deliverables = company.library.count
         self.tasksTotal = company.tasks.count
         self.tasksDone = company.tasks.filter { $0.done }.count
+        self.decisions = company.decisions.count
 
         // Per-department task counts (native analogue of web topicCounts): tally the
         // dept-tagged tasks, drop empties, sort by count desc then catalog order.

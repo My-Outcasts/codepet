@@ -9,6 +9,9 @@ struct OverviewView: View {
     @Environment(\.uiLanguage) private var lang
     @State private var showSecondBrain = false
     @State private var showMapIntro = false
+    // Opened when the beacon's "Also needs you" task resolves to `.done` (mirrors
+    // RoadmapMapView.taskCard's own openDeliverable sheet).
+    @State private var openDeliverable: Deliverable?
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
@@ -27,7 +30,11 @@ struct OverviewView: View {
             header.padding(.horizontal, 24).padding(.top, 22)
             chromeRow.padding(.horizontal, 24).padding(.top, 14)
             if showSecondBrain {
-                SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang)
+                SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang,
+                                 onOpenDept: { key in
+                                     companyStore.selectedDeptKey = key
+                                     companyStore.select(.company)
+                                 })
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, 24).padding(.top, 14)
             } else {
@@ -36,6 +43,7 @@ struct OverviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
+        .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
     }
 
     private var header: some View {
@@ -97,6 +105,16 @@ struct OverviewView: View {
         tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != beacon?.id }.first
     }
 
+    // Same per-status dispatch as RoadmapMapView.taskCard.onTapGesture, reused here so
+    // tapping the beacon's "Also needs you" task does the right thing for its status.
+    private func dispatch(_ task: RoadmapTask) {
+        let status = RoadmapEngine.status(for: task, in: tasks)
+        if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
+        else if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
+        else if status == .needsYou { Task { await companyStore.walkThroughTask(task, language: lang) } }
+        else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
+    }
+
     private var currentPhase: RoadmapPhase { beacon?.phase ?? .find }
     private var nextPhaseLabel: String? {
         let all = RoadmapPhase.allCases
@@ -152,8 +170,11 @@ struct OverviewView: View {
                     .background(Capsule().fill(CodepetTheme.accentPurple))
             }.buttonStyle(.plain)
             if let also = alsoNeedsYou {
-                Text((lang == .vi ? "Cũng cần bạn: " : "Also needs you: ") + also.title)
-                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.accentBlue).lineLimit(1)
+                Button { dispatch(also) } label: {
+                    Text((lang == .vi ? "Cũng cần bạn: " : "Also needs you: ") + also.title)
+                        .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.accentBlue).lineLimit(1)
+                        .underline()
+                }.buttonStyle(.plain)
             }
         }
         .padding(14)

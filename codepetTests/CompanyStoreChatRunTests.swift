@@ -9,12 +9,20 @@ final class CompanyStoreChatRunTests: XCTestCase {
                      companionId: "byte", onboardedAt: Date(),
                      tasks: [RoadmapTask(id: "t1", title: "Survey users", detail: "wtp", phase: .find, who: .does)])
     }
+    /// A `chatStreamer` that throws before yielding anything — forces the
+    /// fallback-to-`chatSender` path deterministically, with no network and no
+    /// dependency on `Auth.auth()` (unconfigured under XCTest).
+    private static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+    }
+
     private func store(reply: CompanyChatReply?,
                        runner: @escaping (RunTaskRequest) async -> RunTaskResponse?,
                        saver: @escaping (String, [Deliverable]) async -> Bool = { _, _ in true })
         -> CompanyStore {
         CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
-                     chatSender: { _ in reply }, taskRunner: runner, librarySaver: saver)
+                     chatSender: { _ in reply }, chatStreamer: Self.failingStreamer,
+                     taskRunner: runner, librarySaver: saver)
     }
 
     func testRunnableReplyProducesDraftNotInLibrary() async {
@@ -72,6 +80,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
         var n = 0
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
                              chatSender: { _ in CompanyChatReply(text: "On it", runTaskId: "t1") },
+                             chatStreamer: Self.failingStreamer,
                              taskRunner: { _ in
                                  n += 1
                                  if n == 2 { await ref?.approveDraft(messageId: mid) }

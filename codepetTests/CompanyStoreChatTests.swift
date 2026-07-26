@@ -4,8 +4,16 @@ import XCTest
 
 @MainActor
 final class CompanyStoreChatTests: XCTestCase {
+    /// A `chatStreamer` that throws before yielding anything — exercises the
+    /// fallback-to-`chatSender` path deterministically, with no network and no
+    /// dependency on `Auth.auth()` (unconfigured under XCTest).
+    private static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+    }
+
     private func store(_ sender: @escaping (CompanyChatRequest) async -> CompanyChatReply?) -> CompanyStore {
-        CompanyStore(loader: { _ in .empty }, saver: { _, _ in true }, chatSender: sender)
+        CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                     chatSender: sender, chatStreamer: Self.failingStreamer)
     }
 
     func testSendAppendsUserThenCompanionReply() async {
@@ -43,7 +51,8 @@ final class CompanyStoreChatTests: XCTestCase {
     func testStaleReplyAfterResetDiscarded() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.reset(); return CompanyChatReply(text: "late reply", runTaskId: nil) })
+                             chatSender: { _ in await ref?.reset(); return CompanyChatReply(text: "late reply", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer)
         ref = s
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
@@ -55,7 +64,8 @@ final class CompanyStoreChatTests: XCTestCase {
     func testReplyStillAppliesAfterSameUserRehydrate() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.hydrate(companyId: "u"); return CompanyChatReply(text: "reply", runTaskId: nil) })
+                             chatSender: { _ in await ref?.hydrate(companyId: "u"); return CompanyChatReply(text: "reply", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer)
         ref = s
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
@@ -67,12 +77,66 @@ final class CompanyStoreChatTests: XCTestCase {
     func testAccountSwitchViaHydrateClearsChatAndDiscardsReply() async {
         var ref: CompanyStore?
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
-                             chatSender: { _ in await ref?.hydrate(companyId: "B"); return CompanyChatReply(text: "A reply", runTaskId: nil) })
+                             chatSender: { _ in await ref?.hydrate(companyId: "B"); return CompanyChatReply(text: "A reply", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer)
         ref = s
         await s.hydrate(companyId: "A")
         await s.sendChat("hi", language: .en)
         XCTAssertFalse(s.chatMessages.contains { $0.text == "A reply" })  // discarded
         XCTAssertTrue(s.chatMessages.isEmpty)                            // A's chat cleared on switch
         XCTAssertFalse(s.isCompanionTyping)                             // not stuck
+    }
+
+    // MARK: - Streaming
+
+    /// A synthetic `chatStreamer` yielding `.delta`s then `.done` — no throw.
+    private static func streamer(deltas: [String], model: String = "m", cacheHit: Bool = false)
+        -> (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        { _ in
+            AsyncThrowingStream { continuation in
+                for d in deltas { continuation.yield(.delta(d)) }
+                continuation.yield(.done(model: model, cacheHit: cacheHit))
+                continuation.finish()
+            }
+        }
+    }
+
+    /// Deltas accumulate in place into the SAME placeholder message; the
+    /// non-streaming `chatSender` must never be consulted (post-deploy path).
+    func testStreamingDeltasAccumulateIntoPlaceholderNoFallback() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: ["On it", ", boss"]))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
+        XCTAssertEqual(s.chatMessages.count, 2)          // one placeholder, filled in place — no extra message
+        XCTAssertEqual(s.chatMessages.last?.text, "On it, boss")
+        XCTAssertFalse(s.isCompanionTyping)
+    }
+
+    /// Typing flips off on the FIRST delta (typing → streaming transition), before
+    /// the stream completes.
+    func testIsCompanionTypingClearsOnFirstDelta() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["hi"]))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertFalse(s.isCompanionTyping)   // cleared by end of send regardless; covered above too
+    }
+
+    /// An empty-but-clean stream (e.g. the live CF still answering with a single
+    /// JSON body pre-deploy: the SSE parser finds no frames and the stream just
+    /// ends) must trigger the SAME fallback as a thrown error.
+    func testEmptyCleanStreamFallsBackToChatSender() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "from JSON fallback", runTaskId: nil) },
+                             chatStreamer: Self.streamer(deltas: []))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.count, 2)
+        XCTAssertEqual(s.chatMessages.last?.text, "from JSON fallback")
+        XCTAssertFalse(s.isCompanionTyping)
     }
 }

@@ -9,7 +9,9 @@ enum CopilotRole { case me, companion }
 struct CopilotMessage: Identifiable, Equatable {
     let id: String
     let role: CopilotRole
-    let text: String
+    /// `var` (not `let`): a streaming companion reply is filled in place, chunk
+    /// by chunk, into this same message (found by `id`) rather than replaced.
+    var text: String
     var draft: Deliverable?
     var draftApproved: Bool
     /// First-run "Do it with me" action (greeting message only); nil otherwise.

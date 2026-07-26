@@ -160,6 +160,11 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].interviewAnswered = true
 
         let trimmed = (answer ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            // Echo the founder's answer as their own chat bubble (matches web),
+            // so their input stays visible instead of vanishing on send.
+            chatMessages.append(CopilotMessage(role: .me, text: trimmed))
+        }
         if !trimmed.isEmpty, let cid = companyId {
             switch gap {
             case .goal: company.brief.goal = trimmed

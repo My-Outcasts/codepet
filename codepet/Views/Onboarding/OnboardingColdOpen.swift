@@ -7,9 +7,12 @@ struct OnboardingColdOpen: View {
     let onStart: () -> Void
     let onSkip: () -> Void
     @State private var kenBurns = false
+    @State private var px: CGFloat = 0   // pointer parallax, -1...1
+    @State private var py: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        GeometryReader { root in
         ZStack(alignment: .topTrailing) {
             OnboardingContent.Palette.coldBg.ignoresSafeArea()
             GeometryReader { geo in
@@ -17,6 +20,7 @@ struct OnboardingColdOpen: View {
                     .resizable().interpolation(.high).scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(kenBurns ? 1.08 : 1.0)
+                    .offset(x: px * 6, y: py * 6)   // subtle depth parallax
                     .clipped()
             }
             .ignoresSafeArea()
@@ -30,6 +34,10 @@ struct OnboardingColdOpen: View {
                 ],
                 startPoint: .leading, endPoint: .trailing
             ).ignoresSafeArea()
+
+            Starfield()
+                .offset(x: px * 14, y: py * 14)
+                .ignoresSafeArea()
 
             HStack {
                 VStack(alignment: .leading, spacing: 0) {
@@ -84,6 +92,19 @@ struct OnboardingColdOpen: View {
             }
             .buttonStyle(.plain)
             .padding(20)
+        }
+        .onContinuousHover { phase in
+            guard !reduceMotion else { return }
+            switch phase {
+            case .active(let p):
+                withAnimation(.easeOut(duration: 0.25)) {
+                    px = clampNorm(p.x, 0, root.size.width)
+                    py = clampNorm(p.y, 0, root.size.height)
+                }
+            case .ended:
+                withAnimation(.easeOut(duration: 0.4)) { px = 0; py = 0 }
+            }
+        }
         }
         .onAppear {
             if !reduceMotion {

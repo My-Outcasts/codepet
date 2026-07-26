@@ -13,6 +13,7 @@ struct EnvironmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                header
                 if !recs.isEmpty { recommendations }
                 ForEach(ToolCategory.allCases) { cat in
                     categorySection(cat)
@@ -22,6 +23,17 @@ struct EnvironmentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(lang == .vi ? "Môi trường Claude Code của bạn" : "Your Claude Code environment")
+                .font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
+            Text(lang == .vi
+                 ? "Thiết lập bộ công cụ của Codepet — kỹ năng, kết nối và trợ lý — để nó có thể làm nhiều việc hơn cho bạn."
+                 : "Set up Codepet's toolkit — skills, connectors, and agents — so it can do more of the work for you.")
+                .font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
+        }
     }
 
     private var recommendations: some View {
@@ -52,6 +64,12 @@ struct EnvironmentView: View {
                                 .padding(.horizontal, 10).padding(.vertical, 4)
                                 .background(Capsule().fill(item.category.tint))
                         }.buttonStyle(.plain)
+                        if item.category == .connectors && !enabled.contains(item.id) {
+                            Text(lang == .vi ? "cần bạn" : "needs you")
+                                .font(.pixelSystem(size: 9, weight: .bold))
+                                .foregroundColor(item.category.tint)
+                                .textCase(.uppercase)
+                        }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)

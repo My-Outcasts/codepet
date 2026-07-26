@@ -89,7 +89,25 @@ struct DeliverableDetailView: View {
             }
             .padding(16)
             Divider()
-            ScrollView { MarkdownView(markdown: deliverable.body).padding(16) }
+            ScrollView {
+                Group {
+                    switch deliverable.kind {
+                    case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):
+                        ChecklistViewer(items: deliverable.payload!.items!)
+                    case .doc where !(deliverable.payload?.call?.isEmpty ?? true):
+                        DocViewer(call: deliverable.payload!.call!,
+                                  sections: deliverable.payload?.sections ?? [],
+                                  next: deliverable.payload?.next ?? [])
+                    case .plan where !(deliverable.payload?.goal?.isEmpty ?? true):
+                        PlanViewer(payload: deliverable.payload!)
+                    case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
+                        DmsViewer(messages: deliverable.payload!.messages!)
+                    default:
+                        MarkdownView(markdown: deliverable.body)
+                    }
+                }
+                .padding(16)
+            }
         }
         .frame(minWidth: 460, minHeight: 420)
         .background(CodepetTheme.pageBackground)

@@ -5,9 +5,11 @@ import Foundation
 /// short roadmap summary, sent to the companyChat CF as `context`. Always returns
 /// a non-empty string.
 enum ChatContext {
-    static func compose(brief: CompanyBrief, tasks: [RoadmapTask]) -> String {
+    static func compose(brief: CompanyBrief, tasks: [RoadmapTask], decisions: [DecisionEntry] = []) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
+        let d = Decisions.composeDecisions(decisions)
+        if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")
         if let next = RoadmapEngine.nextStep(tasks) {
             parts.append("Next step: \(next.title).")

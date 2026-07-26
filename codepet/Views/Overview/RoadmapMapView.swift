@@ -163,6 +163,7 @@ struct RoadmapMapView: View {
         .onTapGesture {
             if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
             else if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
+            else if status == .needsYou { Task { await companyStore.walkThroughTask(task, language: lang) } }
             else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
         }
         .help(peekText(task, status: status))

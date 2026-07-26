@@ -149,4 +149,44 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.last?.text, "from JSON fallback")
         XCTAssertFalse(s.isCompanionTyping)
     }
+
+    // MARK: - walkThroughTask
+
+    private static func task(who: TaskWho = .you) -> RoadmapTask {
+        RoadmapTask(id: "t1", title: "Talk to 5 potential customers", detail: "Focus on their current workaround.",
+                    phase: .find, who: who)
+    }
+
+    /// `walkThroughTask` appends a founder message mentioning the task's title and
+    /// routes through the SAME streamed chat path as `sendChat` (a grounded companion
+    /// reply arrives) — it must NOT call `taskRunner` (no deliverable is generated;
+    /// this is guidance, not a run).
+    func testWalkThroughTaskAppendsFounderMessageAndStreamsReply() async {
+        var taskRunnerCalled = false
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: ["Here's how: step one, step two."]),
+                             taskRunner: { _ in taskRunnerCalled = true; return nil })
+        await s.hydrate(companyId: "u")
+        await s.walkThroughTask(Self.task(), language: .en)
+
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
+        XCTAssertTrue(s.chatMessages.first?.text.contains("Talk to 5 potential customers") ?? false)
+        XCTAssertEqual(s.chatMessages.last?.text, "Here's how: step one, step two.")
+        XCTAssertFalse(taskRunnerCalled)
+        XCTAssertFalse(s.isCompanionTyping)
+        XCTAssertFalse(s.isStreaming)
+    }
+
+    /// Vietnamese composes the VI ask and still routes through the grounded stream.
+    func testWalkThroughTaskVietnamese() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Đây là cách làm."]))
+        await s.hydrate(companyId: "u")
+        await s.walkThroughTask(Self.task(), language: .vi)
+
+        XCTAssertTrue(s.chatMessages.first?.text.contains("Talk to 5 potential customers") ?? false)
+        XCTAssertEqual(s.chatMessages.last?.text, "Đây là cách làm.")
+    }
 }

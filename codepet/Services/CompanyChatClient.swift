@@ -8,6 +8,14 @@ struct ChatTurnDTO: Codable, Equatable {
     let text: String
 }
 
+/// One task byte is allowed to run, sent alongside the request so the CF can
+/// decide whether to set `run_task_id` in its reply. Mirrors the web's
+/// `openTasks` shape — just `id` + `title`, no other roadmap fields needed.
+struct RunnableRef: Codable, Equatable {
+    let id: String
+    let title: String
+}
+
 /// Request body for the companyChat Cloud Function.
 struct CompanyChatRequest: Codable {
     let companyId: String?
@@ -16,6 +24,7 @@ struct CompanyChatRequest: Codable {
     let context: String
     let history: [ChatTurnDTO]
     let userMessage: String
+    let runnable: [RunnableRef]
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -24,6 +33,21 @@ struct CompanyChatRequest: Codable {
         case context
         case history
         case userMessage = "user_message"
+        case runnable
+    }
+
+    /// `runnable` defaults to empty so existing call sites (and older tests
+    /// built before this field existed) keep compiling without every caller
+    /// having to name it explicitly.
+    init(companyId: String?, language: String, companionId: String, context: String,
+         history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = []) {
+        self.companyId = companyId
+        self.language = language
+        self.companionId = companionId
+        self.context = context
+        self.history = history
+        self.userMessage = userMessage
+        self.runnable = runnable
     }
 }
 
@@ -51,7 +75,9 @@ struct CompanyChatReply: Equatable {
 /// companionChat CF, just a different endpoint.
 enum CompanyChatStreamEvent: Equatable {
     case delta(String)
-    case done(model: String, cacheHit: Bool)
+    /// `runTaskId` mirrors the JSON response's `run_task_id` — non-nil when byte
+    /// decided to run one of the `runnable` tasks it was offered.
+    case done(model: String, cacheHit: Bool, runTaskId: String?)
 }
 
 /// Small body decoded from an `event: error` frame or a non-200 HTTP response.
@@ -192,10 +218,13 @@ enum CompanyChatClient {
             struct DonePayload: Codable {
                 let model: String
                 let cacheHit: Bool
-                enum CodingKeys: String, CodingKey { case model; case cacheHit = "cache_hit" }
+                let runTaskId: String?
+                enum CodingKeys: String, CodingKey {
+                    case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
+                }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
-                continuation.yield(.done(model: d.model, cacheHit: d.cacheHit))
+                continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, runTaskId: d.runTaskId))
             }
         case "error":
             let parsed = try? JSONDecoder().decode(CompanyChatStreamErrorBody.self, from: payload)

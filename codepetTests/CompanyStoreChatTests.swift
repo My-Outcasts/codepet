@@ -90,12 +90,13 @@ final class CompanyStoreChatTests: XCTestCase {
     // MARK: - Streaming
 
     /// A synthetic `chatStreamer` yielding `.delta`s then `.done` — no throw.
-    private static func streamer(deltas: [String], model: String = "m", cacheHit: Bool = false)
+    private static func streamer(deltas: [String], model: String = "m", cacheHit: Bool = false,
+                                 runTaskId: String? = nil)
         -> (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         { _ in
             AsyncThrowingStream { continuation in
                 for d in deltas { continuation.yield(.delta(d)) }
-                continuation.yield(.done(model: model, cacheHit: cacheHit))
+                continuation.yield(.done(model: model, cacheHit: cacheHit, runTaskId: runTaskId))
                 continuation.finish()
             }
         }

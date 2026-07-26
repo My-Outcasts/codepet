@@ -114,4 +114,84 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertEqual(s.chatMessages[2].draft?.body, "# second")
         XCTAssertNotEqual(s.chatMessages[2].draft?.id, firstId)   // fresh deliverable
     }
+
+    // MARK: - Streaming run_task_id (the streaming success path is now the
+    // common one; run-task handling must fire from the streamed `.done` frame
+    // too, not just the non-streaming fallback below).
+
+    /// A synthetic streaming `chatStreamer` yielding one lead-in delta then
+    /// `.done` carrying `runTaskId` — never throws, so `chatSender` (the
+    /// fallback) must never be consulted.
+    private static func runTaskStreamer(leadIn: String, runTaskId: String?)
+        -> (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(.delta(leadIn))
+                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: runTaskId))
+                continuation.finish()
+            }
+        }
+    }
+
+    func testStreamingDoneWithRunTaskIdProducesDraftNoFallback() async {
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.runTaskStreamer(leadIn: "On it", runTaskId: "t1"),
+                             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
+        XCTAssertEqual(s.chatMessages[1].text, "On it")           // lead-in, filled via deltas
+        let draftMsg = s.chatMessages[2]
+        XCTAssertEqual(draftMsg.draft?.sourceTaskId, "t1")
+        XCTAssertFalse(draftMsg.draft?.id.isEmpty ?? true)
+        XCTAssertTrue(s.company.library.isEmpty)                  // draft NOT in library
+        XCTAssertFalse(s.isCompanionTyping)
+        XCTAssertFalse(s.isStreaming)
+    }
+
+    func testStreamingDoneWithUnknownRunTaskIdNoDraft() async {
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.runTaskStreamer(leadIn: "hm", runTaskId: "nope"),
+                             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# y") },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.count, 2)                   // me + lead-in only
+        XCTAssertNil(s.chatMessages.last?.draft)
+    }
+
+    func testStreamingDoneWithNilRunTaskIdIsNoOp() async {
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.runTaskStreamer(leadIn: "hi", runTaskId: nil),
+                             taskRunner: { _ in XCTFail("taskRunner must not run without a runTaskId"); return nil },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.count, 2)
+        XCTAssertNil(s.chatMessages.last?.draft)
+    }
+
+    /// `sendChat` must populate the request's `runnable` from the company's
+    /// current codepetCanDo tasks (mirrors the web's openTasks filter).
+    func testSendChatPopulatesRunnableFromCodepetCanDoTasks() async {
+        var capturedRunnable: [RunnableRef]?
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { req in
+            capturedRunnable = req.runnable
+            return AsyncThrowingStream { continuation in
+                continuation.yield(.delta("hi"))
+                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: nil))
+                continuation.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer,
+                             taskRunner: { _ in nil }, decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(capturedRunnable, [RunnableRef(id: "t1", title: "Survey users")])
+    }
 }

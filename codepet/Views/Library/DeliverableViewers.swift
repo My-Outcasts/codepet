@@ -2,12 +2,15 @@
 import SwiftUI
 import AppKit
 
-/// Four typed deliverable viewers, one per structured `DeliverableKind`. Each
-/// reads its slice of `DeliverablePayload` and renders it natively — no
-/// markdown parsing — matching the CodepetTheme house style used elsewhere in
-/// the Library. Callers wrap these in a `ScrollView` (see
-/// `DeliverableDetailView`); view-only interactions (toggling a checkbox,
-/// marking a DM "sent") live in local `@State` and are never persisted.
+/// Seven typed deliverable viewers, one per (mostly) structured
+/// `DeliverableKind`. The first four read their slice of `DeliverablePayload`
+/// and render it natively — no markdown parsing. `.legal`/`.post`/`.email`
+/// carry no structured payload from the backend; they render `title` + `body`
+/// (via `MarkdownView` for the body) inside kind-appropriate chrome instead.
+/// All match the CodepetTheme house style used elsewhere in the Library.
+/// Callers wrap these in a `ScrollView` (see `DeliverableDetailView`);
+/// view-only interactions (toggling a checkbox, marking a DM "sent") live in
+/// local `@State` and are never persisted.
 
 // MARK: - ChecklistViewer
 
@@ -283,6 +286,207 @@ struct DmsViewer: View {
                 )
                 .codepetShadow(CodepetTheme.cardShadow)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - LegalViewer
+
+/// Renders a `.legal` deliverable as a formal document "sheet": a heading, a
+/// static "Draft" subline, the markdown `body`, and a disclaimer footer. This
+/// kind carries no structured payload — content comes straight from `title` +
+/// `body`.
+struct LegalViewer: View {
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(deliverable.title)
+                        .font(.pixelSystem(size: 15, weight: .bold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    Text(lang == .vi ? "Bản nháp" : "Draft")
+                        .font(.pixelSystem(size: 11, weight: .medium))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+
+                Divider()
+
+                MarkdownView(markdown: deliverable.body)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                    .fill(CodepetTheme.surface)
+            )
+            .codepetShadow(CodepetTheme.cardShadow)
+
+            Text(lang == .vi
+                 ? "Bản nháp — không phải tư vấn pháp lý."
+                 : "Draft — not legal advice.")
+                .font(.pixelSystem(size: 11))
+                .foregroundColor(CodepetTheme.mutedText)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(deliverable.body, forType: .string)
+            } label: {
+                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(CodepetPillButtonStyle(
+                fill: CodepetTheme.surface,
+                foreground: CodepetTheme.primaryText,
+                paddingH: 12, paddingV: 6,
+                font: .pixelSystem(size: 11, weight: .semibold)))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - PostViewer
+
+/// Renders a `.post` deliverable as a social-post card: a round avatar with
+/// the title's initial, the `body` as post text, and a muted, clearly
+/// decorative stats row (no live counts are tracked natively).
+struct PostViewer: View {
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    private var initial: String {
+        String(deliverable.title.trimmingCharacters(in: .whitespaces).first ?? "C").uppercased()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Text(initial)
+                        .font(.pixelSystem(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(CodepetTheme.accentPurple))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(deliverable.title)
+                            .font(.pixelSystem(size: 13, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                        Text(lang == .vi ? "vừa xong" : "now")
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                    Spacer()
+                }
+
+                MarkdownView(markdown: deliverable.body)
+
+                HStack(spacing: 18) {
+                    statItem(icon: "bubble.right", count: 12, label: lang == .vi ? "Trả lời" : "Replies")
+                    statItem(icon: "arrow.2.squarepath", count: 8, label: lang == .vi ? "Chia sẻ lại" : "Reposts")
+                    statItem(icon: "heart", count: 46, label: lang == .vi ? "Thích" : "Likes")
+                    Spacer()
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                    .fill(CodepetTheme.surface)
+            )
+            .codepetShadow(CodepetTheme.cardShadow)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(deliverable.body, forType: .string)
+            } label: {
+                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(CodepetPillButtonStyle(
+                fill: CodepetTheme.surface,
+                foreground: CodepetTheme.primaryText,
+                paddingH: 12, paddingV: 6,
+                font: .pixelSystem(size: 11, weight: .semibold)))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Decorative stat chip — icon + placeholder count + label. Purely
+    /// visual flavor; no real engagement data is tracked natively.
+    private func statItem(icon: String, count: Int, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text("\(count)")
+                .font(.pixelSystem(size: 11, weight: .semibold))
+            Text(label)
+        }
+        .font(.pixelSystem(size: 11))
+        .foregroundColor(CodepetTheme.mutedText)
+    }
+}
+
+// MARK: - EmailViewer
+
+/// Renders an `.email` deliverable as an email-client chrome: a header bar
+/// (Subject/From/preheader) over the markdown `body` rendered as the email
+/// content.
+struct EmailViewer: View {
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(lang == .vi ? "Chủ đề:" : "Subject:")
+                            .font(.pixelSystem(size: 11, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                        Text(deliverable.title)
+                            .font(.pixelSystem(size: 13, weight: .bold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                    }
+                    HStack(spacing: 6) {
+                        Text(lang == .vi ? "Từ:" : "From:")
+                            .font(.pixelSystem(size: 11, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                        Text("Codepet")
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.bodyText)
+                    }
+                    Text(lang == .vi ? "Email nháp do Codepet tạo" : "Draft email generated by Codepet")
+                        .font(.pixelSystem(size: 11))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .padding(.top, 2)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(CodepetTheme.accentPurple.opacity(0.06))
+
+                Divider()
+
+                MarkdownView(markdown: deliverable.body)
+                    .padding(12)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                    .fill(CodepetTheme.surface)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous))
+            .codepetShadow(CodepetTheme.cardShadow)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(deliverable.body, forType: .string)
+            } label: {
+                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(CodepetPillButtonStyle(
+                fill: CodepetTheme.surface,
+                foreground: CodepetTheme.primaryText,
+                paddingH: 12, paddingV: 6,
+                font: .pixelSystem(size: 11, weight: .semibold)))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

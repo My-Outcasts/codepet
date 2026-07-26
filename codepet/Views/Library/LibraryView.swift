@@ -102,6 +102,12 @@ struct DeliverableDetailView: View {
                         PlanViewer(payload: deliverable.payload!)
                     case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
                         DmsViewer(messages: deliverable.payload!.messages!)
+                    case .legal:
+                        LegalViewer(deliverable: deliverable)
+                    case .post:
+                        PostViewer(deliverable: deliverable)
+                    case .email:
+                        EmailViewer(deliverable: deliverable)
                     default:
                         MarkdownView(markdown: deliverable.body)
                     }

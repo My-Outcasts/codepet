@@ -38,8 +38,9 @@ final class SecondBrainDataTests: XCTestCase {
     }
 
     func testCompanionNameResolves() {
-        XCTAssertEqual(SecondBrainData(company: company(companionId: "byte")).companionName,
-                       PetCharacter.all["byte"]?.name ?? "Codepet")
+        // "nova" → "Nova" is a real hit distinguishable from the fallback (unlike
+        // "byte", whose name literally IS "Codepet"), so this catches a broken lookup.
+        XCTAssertEqual(SecondBrainData(company: company(companionId: "nova")).companionName, "Nova")
         XCTAssertEqual(SecondBrainData(company: company(companionId: "nope")).companionName,
                        "Codepet")
     }

@@ -13,6 +13,14 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isOnboarding: Bool = false
     @Published private(set) var chatMessages: [CopilotMessage] = []
     @Published private(set) var isCompanionTyping = false
+    /// True for the WHOLE duration of a chat send — from the placeholder's append
+    /// until the stream (or its fallback) fully completes. Unlike `isCompanionTyping`
+    /// (which flips off on the first delta, typing→streaming), this stays up while
+    /// tokens are still arriving, so the UI can keep Send disabled for the entire
+    /// stream instead of re-enabling mid-response. Reset alongside `isCompanionTyping`
+    /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
+    /// and `sendChat`'s unconditional tail) — never stuck true.
+    @Published private(set) var isStreaming = false
     @Published private(set) var runningTaskIds: Set<String> = []
     @Published private(set) var runError: String?
     @Published private(set) var isGeneratingRoadmap = false
@@ -90,6 +98,7 @@ final class CompanyStore: ObservableObject {
         if self.companyId != companyId {
             chatMessages = []
             isCompanionTyping = false
+            isStreaming = false
             runningTaskIds = []
             runError = nil
         }
@@ -192,10 +201,12 @@ final class CompanyStore: ObservableObject {
     /// landing in the new account's conversation.
     ///
     /// Flow: append the user message, append an EMPTY companion placeholder (stable
-    /// id), then consume `chatStreamer`. Each `.delta` is appended into the
-    /// placeholder in place (found by id) — `isCompanionTyping` flips off on the
-    /// first token, mirroring `SessionChatController`'s typing→streaming transition.
-    /// `.done` is a no-op: the placeholder already holds the full text.
+    /// id), flip `isStreaming` on, then consume `chatStreamer`. Each `.delta` is
+    /// appended into the placeholder in place (found by id) — `isCompanionTyping`
+    /// flips off on the first token, mirroring `SessionChatController`'s
+    /// typing→streaming transition, while `isStreaming` stays true for the WHOLE
+    /// send (stream + any fallback) so the UI can keep Send disabled the entire
+    /// time. `.done` is a no-op: the placeholder already holds the full text.
     ///
     /// Fallback (REQUIRED for deploy-order safety): if the stream throws — network
     /// failure, a non-200, an `event: error` frame, a typed `CompanyChatStreamError`
@@ -207,7 +218,7 @@ final class CompanyStore: ObservableObject {
     /// runTaskId/draft-run chaining, and the account guard.
     func sendChat(_ raw: String, language: AppLanguage) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isCompanionTyping else { return }
+        guard !text.isEmpty, !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
         let history = chatMessages.dropLast().suffix(20).map {
@@ -221,6 +232,7 @@ final class CompanyStore: ObservableObject {
 
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
+        isStreaming = true
 
         var streamedText = ""
         var streamThrew = false
@@ -270,6 +282,7 @@ final class CompanyStore: ObservableObject {
             }
         }
         isCompanionTyping = false
+        isStreaming = false
     }
 
     /// Approve a chat draft: append it to the library (approved) + persist.
@@ -421,6 +434,7 @@ final class CompanyStore: ObservableObject {
         isOnboarding = false
         chatMessages = []
         isCompanionTyping = false
+        isStreaming = false
         runningTaskIds = []
         runError = nil
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an

@@ -10,9 +10,9 @@ final class SecondBrainDataTests: XCTestCase {
     }
 
     private func company(tasks: [RoadmapTask] = [], library: [Deliverable] = [],
-                         companionId: String = "byte") -> CompanyState {
+                         companionId: String = "byte", decisions: [DecisionEntry] = []) -> CompanyState {
         CompanyState(brief: CompanyBrief(), departments: [], library: library,
-                     stage: .idea, companionId: companionId, tasks: tasks)
+                     stage: .idea, companionId: companionId, tasks: tasks, decisions: decisions)
     }
 
     func testCountsAndTopics() {
@@ -37,6 +37,14 @@ final class SecondBrainDataTests: XCTestCase {
         XCTAssertEqual(data.nextDeptName, "Design")
     }
 
+    func testDecisionsCount() {
+        let entries = [DecisionEntry(topic: "pricing", statement: "$9/mo", source: nil, updatedAt: nil),
+                       DecisionEntry(topic: "naming", statement: "Codepet", source: nil, updatedAt: nil)]
+        let data = SecondBrainData(company: company(decisions: entries))
+        XCTAssertEqual(data.decisions, 2)
+        XCTAssertEqual(SecondBrainData(company: company()).decisions, 0)
+    }
+
     func testCompanionNameResolves() {
         // "nova" → "Nova" is a real hit distinguishable from the fallback (unlike
         // "byte", whose name literally IS "Codepet"), so this catches a broken lookup.
@@ -49,6 +57,7 @@ final class SecondBrainDataTests: XCTestCase {
         let data = SecondBrainData(company: company())
         XCTAssertEqual(data.deliverables, 0)
         XCTAssertEqual(data.tasksTotal, 0)
+        XCTAssertEqual(data.decisions, 0)
         XCTAssertTrue(data.topics.isEmpty)
         XCTAssertNil(data.nextTask)
         XCTAssertNil(data.nextDeptName)

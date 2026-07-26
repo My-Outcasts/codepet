@@ -1,5 +1,6 @@
 // codepet/Views/Settings/SettingsView.swift
 import SwiftUI
+import FirebaseAuth
 
 /// The Settings view — Account (companion / language / edit brief / sign out),
 /// Plan (static Trial + Pro cards), and About. CF-free; no live billing.
@@ -16,6 +17,12 @@ struct SettingsView: View {
     private var companions: [PetCharacter] {
         PetCharacter.all.values.sorted { $0.id < $1.id }
     }
+    // Same founder-name fallback idiom as AccountMenuView.founderName.
+    private var founderName: String {
+        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? (lang == .vi ? "Bạn" : "You") : n
+    }
+    private var email: String? { authManager.currentUser?.email }
 
     var body: some View {
         ScrollView {
@@ -36,8 +43,35 @@ struct SettingsView: View {
 
     // MARK: Account
 
+    // Identity card at the top of Account: avatar initial + founder name + email,
+    // same idioms AccountMenuView uses (founderName fallback, authManager email).
+    private var accountIdentityCard: some View {
+        CodepetCard {
+            HStack(spacing: 10) {
+                Text(String(founderName.prefix(1)).uppercased())
+                    .font(.pixelSystem(size: 14, weight: .bold)).foregroundColor(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(CodepetTheme.accentPurple))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(founderName)
+                        .font(.pixelSystem(size: 13, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    if let email {
+                        Text(email)
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(12)
+        }
+    }
+
     private var account: some View {
         section(lang == .vi ? "Tài khoản" : "Account") {
+            accountIdentityCard
             Text(lang == .vi ? "Bạn đồng hành" : "Companion")
                 .font(.pixelSystem(size: 11, weight: .medium))
                 .foregroundColor(CodepetTheme.mutedText)

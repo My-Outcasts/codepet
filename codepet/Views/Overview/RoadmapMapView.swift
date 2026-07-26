@@ -212,6 +212,26 @@ struct RoadmapMapView: View {
         if !task.detail.isEmpty { parts.append(task.detail) }
         let deps = task.dependsOn.compactMap { id in tasks.first { $0.id == id }?.title }
         if !deps.isEmpty { parts.append((lang == .vi ? "Mở khoá sau: " : "Unlocks after: ") + deps.joined(separator: ", ")) }
+        parts.append(peekSentence(status))
         return parts.joined(separator: "\n")
+    }
+
+    // The peek's plain-language "click to do X" line (web RoadmapView.peekSentence),
+    // appended to the tooltip so the founder learns the card's next action without
+    // opening chat first.
+    private func peekSentence(_ status: TaskStatus) -> String {
+        switch status {
+        case .codepetCanDo:
+            return lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để bắt đầu."
+                               : "\(companionName)'s next move. Click to start."
+        case .needsYou:
+            return lang == .vi ? "Cần bạn nhập. Nhấn để thêm." : "Your input needed. Click to add it."
+        case .needsApproval:
+            return lang == .vi ? "Bản nháp đã sẵn sàng. Nhấn để xem lại." : "Draft ready. Click to review."
+        case .done:
+            return lang == .vi ? "Xong. Nhấn để mở." : "Done. Click to open."
+        case .blocked:
+            return lang == .vi ? "Cần hoàn thành các bước trước." : "Needs earlier steps first."
+        }
     }
 }

@@ -1,14 +1,19 @@
 // codepet/Views/Overview/SecondBrainPanel.swift
 import SwiftUI
 
-/// The Overview "Second Brain" info rail — a read-only panel of real Codepet data
-/// (deliverables/tasks counts, active model + companion, the next move, per-department
+/// The Overview "Second Brain" info rail — a panel of real Codepet data (deliverables/
+/// tasks/decisions counts, active model + companion, the next move, per-department
 /// topic counts), ported from the web SecondBrainPanel and fed by the pure SecondBrainData
-/// aggregation. The web Usage section and the Decisions/Milestones rows are omitted:
-/// native has no tracking/LedgerEvent, decisions, or stage-history to back them.
+/// aggregation. The "Do this next" row and each "Topics" row are tappable shortcuts into
+/// that department (web parity: SecondBrainPanel's click-through rows), via `onOpenDept`.
+/// The web Usage section and the Milestones row are omitted: native has no tracking/
+/// LedgerEvent or stage-history to back them.
 struct SecondBrainPanel: View {
     let data: SecondBrainData
     let lang: AppLanguage
+    /// Opens the given department key (web parity: the "Do this next" + "Topics"
+    /// rows are click-through shortcuts into Company, not dead-end labels).
+    let onOpenDept: (String) -> Void
 
     var body: some View {
         ScrollView {
@@ -30,6 +35,7 @@ struct SecondBrainPanel: View {
             row(lang == .vi ? "Sản phẩm" : "Deliverables", "\(data.deliverables)")
             row(lang == .vi ? "Việc đã xong" : "Tasks done", "\(data.tasksDone)")
             row(lang == .vi ? "Tổng số việc" : "Total tasks", "\(data.tasksTotal)")
+            row(lang == .vi ? "Quyết định" : "Decisions", "\(data.decisions)")
         }
     }
 
@@ -43,7 +49,7 @@ struct SecondBrainPanel: View {
     private var nextSection: some View {
         section(lang == .vi ? "Làm điều này tiếp" : "Do this next") {
             if let t = data.nextTask {
-                VStack(alignment: .leading, spacing: 2) {
+                let row = VStack(alignment: .leading, spacing: 2) {
                     Text(t.title)
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
@@ -58,6 +64,12 @@ struct SecondBrainPanel: View {
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9).fill(CodepetTheme.accentBlue.opacity(0.08)))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(CodepetTheme.accentBlue.opacity(0.3), lineWidth: 1))
+
+                if let dept = t.dept {
+                    Button { onOpenDept(dept) } label: { row }.buttonStyle(.plain)
+                } else {
+                    row
+                }
             } else {
                 Text(lang == .vi ? "Bạn đã theo kịp mọi thứ." : "You're all caught up.")
                     .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
@@ -72,16 +84,18 @@ struct SecondBrainPanel: View {
                     .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
             } else {
                 ForEach(data.topics) { t in
-                    HStack {
-                        Text(t.department.name)
-                            .font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTheme.bodyText)
-                        Spacer()
-                        Text("\(t.count)")
-                            .font(CodepetTheme.inter(12.5, weight: .semibold))
-                            .foregroundColor(CodepetTheme.accentBlue)
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.surface))
+                    Button { onOpenDept(t.department.key) } label: {
+                        HStack {
+                            Text(t.department.name)
+                                .font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTheme.bodyText)
+                            Spacer()
+                            Text("\(t.count)")
+                                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                                .foregroundColor(CodepetTheme.accentBlue)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.surface))
+                    }.buttonStyle(.plain)
                 }
             }
         }

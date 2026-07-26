@@ -55,10 +55,13 @@ final class CompanyChatClientTests: XCTestCase {
         guard collected.count == 3 else { return }
         XCTAssertEqual(collected[0], .delta("On it "))
         XCTAssertEqual(collected[1], .delta("boss"))
-        if case let .done(model, cacheHit, runTaskId) = collected[2] {
+        if case let .done(model, cacheHit, action) = collected[2] {
             XCTAssertEqual(model, "claude-sonnet-5")
             XCTAssertTrue(cacheHit)
-            XCTAssertNil(runTaskId)
+            XCTAssertNil(action.runTaskId)
+            XCTAssertNil(action.nav)
+            XCTAssertNil(action.setup)
+            XCTAssertTrue(action.remember.isEmpty)
         } else {
             XCTFail("expected .done")
         }
@@ -80,8 +83,8 @@ final class CompanyChatClientTests: XCTestCase {
         }
         XCTAssertEqual(collected.count, 2)
         guard collected.count == 2 else { return }
-        if case let .done(_, _, runTaskId) = collected[1] {
-            XCTAssertEqual(runTaskId, "t1")
+        if case let .done(_, _, action) = collected[1] {
+            XCTAssertEqual(action.runTaskId, "t1")
         } else {
             XCTFail("expected .done")
         }

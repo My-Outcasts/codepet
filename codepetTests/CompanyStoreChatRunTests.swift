@@ -127,7 +127,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
         { _ in
             AsyncThrowingStream { continuation in
                 continuation.yield(.delta(leadIn))
-                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: runTaskId))
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: runTaskId)))
                 continuation.finish()
             }
         }
@@ -188,7 +188,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
         var runnerCalls = 0
         let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
             AsyncThrowingStream { continuation in
-                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: "t1"))
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: "t1")))
                 continuation.finish()
             }
         }
@@ -221,7 +221,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
             capturedRunnable = req.runnable
             return AsyncThrowingStream { continuation in
                 continuation.yield(.delta("hi"))
-                continuation.yield(.done(model: "m", cacheHit: false, runTaskId: nil))
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction()))
                 continuation.finish()
             }
         }

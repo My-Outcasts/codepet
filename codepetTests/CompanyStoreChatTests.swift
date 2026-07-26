@@ -91,12 +91,14 @@ final class CompanyStoreChatTests: XCTestCase {
 
     /// A synthetic `chatStreamer` yielding `.delta`s then `.done` — no throw.
     private static func streamer(deltas: [String], model: String = "m", cacheHit: Bool = false,
-                                 runTaskId: String? = nil)
+                                 runTaskId: String? = nil, nav: NavAction? = nil,
+                                 setup: SetupAction? = nil, remember: [RememberedFact] = [])
         -> (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         { _ in
             AsyncThrowingStream { continuation in
                 for d in deltas { continuation.yield(.delta(d)) }
-                continuation.yield(.done(model: model, cacheHit: cacheHit, runTaskId: runTaskId))
+                let action = ChatDoneAction(runTaskId: runTaskId, nav: nav, setup: setup, remember: remember)
+                continuation.yield(.done(model: model, cacheHit: cacheHit, action: action))
                 continuation.finish()
             }
         }
@@ -148,6 +150,102 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.count, 2)
         XCTAssertEqual(s.chatMessages.last?.text, "from JSON fallback")
         XCTAssertFalse(s.isCompanionTyping)
+    }
+
+    // MARK: - navigate / setup / remember (chat tools)
+
+    /// A `.done` carrying `nav` appends a nav-chip message (not an auto-navigate);
+    /// tapping it (`activateNav`) then selects the resolved `AppView`.
+    func testDoneWithNavAppendsChipAndActivateNavSelects() async {
+        let nav = NavAction(destination: "tasks", target: nil)
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: ["Here"], nav: nav))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("where should I look?", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
+        XCTAssertEqual(s.chatMessages.last?.navChip, nav)
+        XCTAssertEqual(s.view, .overview)   // unchanged until the chip is tapped
+        s.activateNav(nav)
+        XCTAssertEqual(s.view, .tasks)
+    }
+
+    /// `nav(department)` resolves `target` to a `DepartmentCatalog` key and opens
+    /// that department's detail view (`selectedDeptKey`), not just the roster.
+    func testActivateNavDepartmentSetsSelectedDeptKey() async {
+        let nav = NavAction(destination: "department", target: "Engineering")
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        s.activateNav(nav)
+        XCTAssertEqual(s.view, .company)
+        XCTAssertEqual(s.selectedDeptKey, "eng")
+    }
+
+    /// A `.done` carrying `setup` appends a setup-suggestion message; the enable
+    /// action is GUARDED — an already-enabled tool is never toggled off.
+    func testDoneWithSetupAppendsSuggestionAndActivateSetupIsGuarded() async {
+        let setup = SetupAction(category: "connectors", name: "GitHub")   // defaultOn: true — already enabled
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: ["Here"], setup: setup))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("what should I turn on?", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.setupSuggestion, setup)
+        XCTAssertTrue(s.company.enabledTools.contains("github"))
+        await s.activateSetup(setup)
+        XCTAssertTrue(s.company.enabledTools.contains("github"))   // still on — not flipped off
+    }
+
+    /// Enabling an OFF tool via `activateSetup` resolves {category,name} → the
+    /// `Toolkit` item id and turns it on (persisting via `toolsSaver`).
+    func testActivateSetupEnablesOffTool() async {
+        var savedIds: [String] = []
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: Self.failingStreamer,
+                             toolsSaver: { _, ids in savedIds = ids; return true })
+        await s.hydrate(companyId: "u")
+        XCTAssertFalse(s.company.enabledTools.contains("notion"))
+        await s.activateSetup(SetupAction(category: "connectors", name: "Notion"))
+        XCTAssertTrue(s.company.enabledTools.contains("notion"))
+        XCTAssertTrue(savedIds.contains("notion"))
+    }
+
+    /// A `.done` carrying `remember` facts auto-merges into `company.decisions`,
+    /// persists via `decisionsSaver`, and appends one transient "Noted" chip per fact.
+    func testDoneWithRememberMergesDecisionsAndAppendsNotedChip() async {
+        var savedDecisions: [DecisionEntry] = []
+        let fact = RememberedFact(topic: "pricing", statement: "$10/mo")
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: ["Got it"], remember: [fact]),
+                             decisionsSaver: { _, decisions in savedDecisions = decisions; return true })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("we're pricing at $10/mo", language: .en)
+        XCTAssertTrue(s.company.decisions.contains { $0.topic == "pricing" && $0.statement == "$10/mo" })
+        XCTAssertTrue(savedDecisions.contains { $0.topic == "pricing" })
+        XCTAssertTrue(s.chatMessages.contains { $0.noted?.first?.topic == "pricing" })
+    }
+
+    /// `sendChat` populates `env_setup` from the company's currently-OFF toolkit
+    /// items (mirrors the web's off-toolkit filter).
+    func testSendChatPopulatesEnvSetupFromOffTools() async {
+        var capturedEnvSetup: [SetupItemDTO]?
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { req in
+            capturedEnvSetup = req.envSetup
+            return AsyncThrowingStream { continuation in
+                continuation.yield(.delta("hi"))
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction()))
+                continuation.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        let names = Set((capturedEnvSetup ?? []).map(\.name))
+        XCTAssertTrue(names.contains("Notion"))    // OFF by default
+        XCTAssertFalse(names.contains("GitHub"))   // ON by default — must not be offered
     }
 
     // MARK: - walkThroughTask

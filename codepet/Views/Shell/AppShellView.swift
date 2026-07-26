@@ -10,7 +10,6 @@ struct AppShellView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
     @State private var copilotCollapsed = false
-    @State private var selectedDept: String?
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
 
@@ -39,10 +38,10 @@ struct AppShellView: View {
         } else if companyStore.view == .overview {
             OverviewView()
         } else if companyStore.view == .company {
-            if let dept = selectedDept {
-                DepartmentDetailView(deptKey: dept, onBack: { selectedDept = nil })
+            if let dept = companyStore.selectedDeptKey {
+                DepartmentDetailView(deptKey: dept, onBack: { companyStore.selectedDeptKey = nil })
             } else {
-                CompanyView(onOpen: { selectedDept = $0 })
+                CompanyView(onOpen: { companyStore.selectedDeptKey = $0 })
             }
         } else if companyStore.view == .tasks {
             TasksView()
@@ -75,7 +74,7 @@ struct AppShellView: View {
             Spacer(minLength: 20)
             HStack(spacing: 10) {
                 wakePill
-                Button { selectedDept = nil; companyStore.select(.billing) } label: {
+                Button { companyStore.selectedDeptKey = nil; companyStore.select(.billing) } label: {
                     Text(uiLanguage == .vi ? "Nâng cấp" : "Upgrade")
                         .font(CodepetTheme.inter(13.5, weight: .semibold)).foregroundColor(.white)
                         .padding(.horizontal, 13).padding(.vertical, 7)
@@ -89,7 +88,7 @@ struct AppShellView: View {
     private func navTab(_ v: AppView) -> some View {
         let on = companyStore.view == v
         let count = tabCount(v)
-        return Button { selectedDept = nil; companyStore.select(v) } label: {
+        return Button { companyStore.selectedDeptKey = nil; companyStore.select(v) } label: {
             HStack(spacing: 6) {
                 Text(v.title(uiLanguage)).font(CodepetTheme.navTab())
                     .foregroundColor(on ? accent : CodepetTheme.bodyText)
@@ -116,7 +115,7 @@ struct AppShellView: View {
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
     private var wakePill: some View {
-        Button { selectedDept = nil; companyStore.select(.environment) } label: {
+        Button { companyStore.selectedDeptKey = nil; companyStore.select(.environment) } label: {
             HStack(spacing: 5) {
                 Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
                 Text("⚡ " + (uiLanguage == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))

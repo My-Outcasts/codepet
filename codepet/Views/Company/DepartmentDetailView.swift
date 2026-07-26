@@ -107,6 +107,7 @@ private struct DepartmentTaskCard: View {
         let running = companyStore.runningTaskIds.contains(task.id)
         Button {
             if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
+            else if task.who == .you { Task { await companyStore.walkThroughTask(task, language: lang) } }
             else { Task { await companyStore.runTask(task, language: lang) } }
         } label: {
             HStack(spacing: 5) {

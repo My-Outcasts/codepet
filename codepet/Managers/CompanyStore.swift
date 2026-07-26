@@ -263,12 +263,52 @@ final class CompanyStore: ObservableObject {
         if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
     }
 
-    /// Send a founder message to the company companion — streamed, with a graceful
-    /// fallback to the non-streaming client. Session-only. Token-guarded throughout:
-    /// an account switch at any await point (mid-stream or mid-fallback-reply)
-    /// discards this send's remaining work — hydrate/reset already cleared chat +
-    /// typing for a real switch, so a stale write is silently dropped rather than
-    /// landing in the new account's conversation.
+    /// Send a founder-typed message to the company companion. Trims + validates,
+    /// then hands off to `sendMessage` (the shared streamed-send core — see its
+    /// doc comment for the full flow, fallback, and token-guard semantics).
+    func sendChat(_ raw: String, language: AppLanguage) async {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        await sendMessage(text, language: language)
+    }
+
+    /// Founder taps "Walk me through it" on a `.you` task (department card / Tasks
+    /// board `yourMove` card / roadmap-map `needsYou` node) — byte can't run these,
+    /// so instead of `runTask` (which would fabricate a deliverable) this composes a
+    /// natural founder ask for step-by-step guidance and routes it through the SAME
+    /// grounded chat-send path as a typed message: the reply is streamed and grounded
+    /// on the department summary + prior work (via `ChatContext.compose`), so the
+    /// guidance is specific to this task, not generic. `taskRunner` is never touched.
+    func walkThroughTask(_ task: RoadmapTask, language: AppLanguage) async {
+        await sendMessage(Self.walkThroughMessage(for: task, language: language), language: language)
+    }
+
+    /// Compose the founder's ask for `walkThroughTask` — mirrors how a founder would
+    /// type it themselves, so it reads as a normal chat turn (not a special command).
+    private static func walkThroughMessage(for task: RoadmapTask, language: AppLanguage) -> String {
+        let detail = task.detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch language {
+        case .vi:
+            var msg = "Hướng dẫn mình tự làm việc này: \(task.title)."
+            if !detail.isEmpty { msg += " \(detail)" }
+            return msg
+        case .en:
+            var msg = "Walk me through how to do this myself: \(task.title)."
+            if !detail.isEmpty { msg += " \(detail)" }
+            return msg
+        }
+    }
+
+    /// Core of a chat send: append the founder's message, stream a grounded companion
+    /// reply (fallback to the non-streaming client), and handle any `run_task_id` the
+    /// reply carries. Shared by `sendChat` (typed founder text) and `walkThroughTask`
+    /// (composed guidance ask) — both are ordinary chat turns from byte's point of
+    /// view, differing only in what text is sent. `text` is assumed non-empty/trimmed
+    /// by the caller. Session-only. Token-guarded throughout: an account switch at
+    /// any await point (mid-stream or mid-fallback-reply) discards this send's
+    /// remaining work — hydrate/reset already cleared chat + typing for a real
+    /// switch, so a stale write is silently dropped rather than landing in the new
+    /// account's conversation.
     ///
     /// Flow: append the user message, append an EMPTY companion placeholder (stable
     /// id), flip `isStreaming` on, then consume `chatStreamer`. Each `.delta` is
@@ -286,9 +326,8 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    func sendChat(_ raw: String, language: AppLanguage) async {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isCompanionTyping, !isStreaming else { return }
+    private func sendMessage(_ text: String, language: AppLanguage) async {
+        guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
         let history = chatMessages.dropLast().suffix(20).map {

@@ -87,6 +87,7 @@ struct TasksView: View {
             let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
             if st == .needsApproval { Task { await companyStore.approveTask(id: t.id) } }
             else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
+            else if st == .needsYou { Task { await companyStore.walkThroughTask(t, language: lang) } }
             else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }
         } label: {
             VStack(alignment: .leading, spacing: 3) {

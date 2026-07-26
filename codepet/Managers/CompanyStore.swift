@@ -269,7 +269,7 @@ final class CompanyStore: ObservableObject {
         return Deliverable(
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
             title: title.isEmpty ? task.title : title, body: body,
-            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload)
     }
 
     /// Run a codepetCanDo task → produce a Deliverable → stash it as the task's `draft`

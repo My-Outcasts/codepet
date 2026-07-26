@@ -166,6 +166,18 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertFalse(s.company.tasks[0].done)
     }
 
+    func testRunTaskCarriesStructuredPayloadOntoDraft() async {
+        let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does)
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [drafted])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+            taskRunner: { _ in RunTaskResponse(kind: "checklist", title: "C", body: "md",
+                payload: DeliverablePayload(items: [ChecklistItem(t: "Step", done: false)])) })
+        await s.hydrate(companyId: "u")
+        await s.runTask(s.company.tasks[0], language: .en)
+        XCTAssertEqual(s.company.tasks[0].draft?.payload?.items?.first?.t, "Step")
+    }
     func testApproveExtractsMergesAndPersistsDecisions() async {
         var savedDecisions: [DecisionEntry]?
         let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,

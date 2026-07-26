@@ -31,6 +31,8 @@ final class CompanyStore: ObservableObject {
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
+    private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
+    private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -53,7 +55,9 @@ final class CompanyStore: ObservableObject {
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
-         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) }) {
+         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
+         decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
+         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -64,6 +68,8 @@ final class CompanyStore: ObservableObject {
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
         self.enricher = enricher
+        self.decisionsSaver = decisionsSaver
+        self.decisionExtractor = decisionExtractor
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -191,7 +197,7 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             history: Array(history), userMessage: text)
         let reply = await chatSender(req)
         // Apply only if we're still on the same account. A real account switch
@@ -226,6 +232,7 @@ final class CompanyStore: ObservableObject {
         company.library.append(draft)
         chatMessages[i].draftApproved = true
         if let cid = companyId { _ = await librarySaver(cid, company.library) }
+        Task { await rememberFromApproval(draft) }
     }
 
     /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
@@ -248,7 +255,7 @@ final class CompanyStore: ObservableObject {
     private func runRequest(for task: RoadmapTask, language: AppLanguage) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
     }
 
@@ -298,6 +305,7 @@ final class CompanyStore: ObservableObject {
     func approveTask(id: String) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }),
               let draft = company.tasks[i].draft, !company.tasks[i].done else { return }
+        let approved = draft
         company.library.append(draft)
         company.tasks[i].done = true
         company.tasks[i].drafted = false
@@ -306,6 +314,22 @@ final class CompanyStore: ObservableObject {
             _ = await librarySaver(cid, company.library)
             _ = await tasksSaver(cid, company.tasks)
         }
+        Task { await rememberFromApproval(approved) }
+    }
+
+    /// Fire-and-forget after an approval: extract durable decisions the deliverable locks
+    /// in, merge into memory, persist. Account-guarded + fail-open — a failed extract leaves
+    /// decisions unchanged; the approval already happened. `dept` comes from the source task.
+    private func rememberFromApproval(_ deliverable: Deliverable) async {
+        let cid = companyId
+        let dept = company.tasks.first { $0.id == deliverable.sourceTaskId }?.dept ?? ""
+        let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
+                                         type: deliverable.kind.rawValue, out: deliverable.body)
+        let extracted = await decisionExtractor(dto, company.decisions)
+        guard companyId == cid, !extracted.isEmpty else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
     /// Run the greeting's "Do it with me" task → append an inline draft (reuses the 6C

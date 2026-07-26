@@ -13,8 +13,12 @@ final class CompanyStoreChatRunTests: XCTestCase {
                        runner: @escaping (RunTaskRequest) async -> RunTaskResponse?,
                        saver: @escaping (String, [Deliverable]) async -> Bool = { _, _ in true })
         -> CompanyStore {
+        // decisionExtractor stubbed: approveDraft now fires a fire-and-forget
+        // rememberFromApproval, and its default hits DecisionsClient.extract (live
+        // Firebase Auth) — would crash with an unconfigured FirebaseApp in the test bundle.
         CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
-                     chatSender: { _ in reply }, taskRunner: runner, librarySaver: saver)
+                     chatSender: { _ in reply }, taskRunner: runner, librarySaver: saver,
+                     decisionExtractor: { _, _ in [] })
     }
 
     func testRunnableReplyProducesDraftNotInLibrary() async {
@@ -77,7 +81,8 @@ final class CompanyStoreChatRunTests: XCTestCase {
                                  if n == 2 { await ref?.approveDraft(messageId: mid) }
                                  return RunTaskResponse(kind: "doc", title: "WTP", body: n == 1 ? "# first" : "# second")
                              },
-                             librarySaver: { _, _ in true })
+                             librarySaver: { _, _ in true },
+                             decisionExtractor: { _, _ in [] })
         ref = s
         await s.hydrate(companyId: "u")
         await s.sendChat("run", language: .en)          // n=1 → draft "# first"

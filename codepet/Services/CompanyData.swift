@@ -14,6 +14,7 @@ struct CompanyDoc: Codable {
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
+    var decisions: [DecisionEntry]?  // JSON-safe; nil → empty
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -30,7 +31,8 @@ enum CompanyData {
             companionId: doc.companionId ?? "byte",
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
             tasks: doc.tasks ?? [],
-            enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds
+            enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
+            decisions: Decisions.normalizeDecisions(doc.decisions ?? [])
         )
     }
 
@@ -123,6 +125,26 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(enabledToolsPayload(tools), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a decisions write — testable without Firestore.
+    static func decisionsPayload(_ decisions: [DecisionEntry]) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(decisions),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["decisions": arr]
+        }
+        return ["decisions": []]
+    }
+
+    /// Write companies/{uid}.decisions, merge. Fail-soft: false on error.
+    static func saveDecisions(companyId: String, decisions: [DecisionEntry]) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(decisionsPayload(decisions), merge: true)
             return true
         } catch {
             return false

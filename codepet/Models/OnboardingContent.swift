@@ -4,6 +4,20 @@ import SwiftUI
 /// Ported constants for the first-run cinematic onboarding (verbatim from the web
 /// app's lib/data.ts + Onboarding.tsx). English-only by design.
 enum OnboardingContent {
+    /// Per-step colour grade laid over the art panel (web STEP_GRADE), applied soft-light.
+    /// One hue per scene, steps 0...8. Alpha baked in (0.22–0.28) to match web.
+    static let stepGrade: [Color] = [
+        Color(red: 124/255, green: 58/255,  blue: 237/255).opacity(0.28), // 0
+        Color(red: 255/255, green: 157/255, blue: 107/255).opacity(0.24), // 1
+        Color(red: 110/255, green: 168/255, blue: 255/255).opacity(0.24), // 2
+        Color(red: 79/255,  green: 224/255, blue: 207/255).opacity(0.24), // 3
+        Color(red: 208/255, green: 140/255, blue: 245/255).opacity(0.26), // 4
+        Color(red: 242/255, green: 201/255, blue: 76/255 ).opacity(0.22), // 5
+        Color(red: 126/255, green: 168/255, blue: 255/255).opacity(0.26), // 6
+        Color(red: 124/255, green: 58/255,  blue: 237/255).opacity(0.26), // 7
+        Color(red: 124/255, green: 58/255,  blue: 237/255).opacity(0.26), // 8
+    ]
+
     /// (display label, stable key) — the numbered single-select on the role step.
     static let roles: [(label: String, key: String)] = [
         ("Founder building a product", "founder"),

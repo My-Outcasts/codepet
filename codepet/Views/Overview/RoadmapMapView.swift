@@ -8,6 +8,7 @@ struct RoadmapMapView: View {
     let tasks: [RoadmapTask]
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @State private var openDeliverable: Deliverable?
 
     private let cardW: CGFloat = 205
     private let cardH: CGFloat = 84
@@ -47,6 +48,7 @@ struct RoadmapMapView: View {
                 }
             }
         }
+        .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
     }
 
     // Phase-header chips over each column (web: a bordered chip per phase, the current
@@ -158,7 +160,10 @@ struct RoadmapMapView: View {
             isBeacon ? CodepetTheme.accentPurple : CodepetTheme.hairline, lineWidth: isBeacon ? 1.6 : 1))
         .shadow(color: isBeacon ? CodepetTheme.accentPurple.opacity(0.3) : .clear, radius: 10)
         .opacity(status == .blocked ? 0.72 : 1)
-        .onTapGesture { if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } } }
+        .onTapGesture {
+            if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
+            else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
+        }
         .help(peekText(task, status: status))
     }
 

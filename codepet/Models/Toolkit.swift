@@ -107,4 +107,15 @@ enum Toolkit {
     }
     static var recommended: [ToolItem] { catalog.filter(\.recommended) }
     static var defaultEnabledIds: Set<String> { Set(catalog.filter(\.defaultOn).map(\.id)) }
+
+    /// Resolve a chat `setup`/`env_setup` {category,name} pair to its catalog item —
+    /// case-insensitive, category+name first, falling back to name alone (category
+    /// strings on the wire aren't guaranteed to match `ToolCategory.rawValue` exactly).
+    static func find(category: String, name: String) -> ToolItem? {
+        let cat = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let nm = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !nm.isEmpty else { return nil }
+        return catalog.first { $0.category.rawValue == cat && $0.name.lowercased() == nm }
+            ?? catalog.first { $0.name.lowercased() == nm }
+    }
 }

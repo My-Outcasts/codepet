@@ -24,6 +24,11 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var runningTaskIds: Set<String> = []
     @Published private(set) var runError: String?
     @Published private(set) var isGeneratingRoadmap = false
+    /// The Company view's open department, if any — PROMOTED from AppShellView's
+    /// former `@State private var selectedDept` so a chat `navigate(department)`
+    /// action (via `activateNav`) can open it too, not just a tap in CompanyView.
+    /// `AppShellView` reads/writes this directly; nil shows the department roster.
+    @Published var selectedDeptKey: String?
 
     /// The hydrated company's id, needed for writes. Set by `hydrate`, cleared by `reset`.
     private(set) var companyId: String?
@@ -341,11 +346,16 @@ final class CompanyStore: ObservableObject {
             .filter { RoadmapEngine.status(for: $0, in: company.tasks) == .codepetCanDo }
             .prefix(60)
             .map { RunnableRef(id: $0.id, title: $0.title) }
+        // The currently-OFF toolkit items — lets the CF decide whether to
+        // suggest turning one on (`setup` in the reply).
+        let envSetup = Toolkit.catalog
+            .filter { !company.enabledTools.contains($0.id) }
+            .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text),
-            history: Array(history), userMessage: text, runnable: Array(runnable))
+            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
@@ -366,13 +376,14 @@ final class CompanyStore: ObservableObject {
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
-                case .done(_, _, let runTaskId):
+                case .done(_, _, let action):
                     // Streaming is now the common success path, so run_task_id
-                    // handling must fire here too — not just in the fallback
-                    // below (previously the only place it ran, back when
-                    // streaming usually failed pre-deploy).
+                    // (and nav/setup/remember) handling must fire here too —
+                    // not just in the fallback below (previously the only
+                    // place run_task_id ran, back when streaming usually
+                    // failed pre-deploy).
                     receivedDone = true
-                    await handleRunTaskId(runTaskId, cid: cid, language: language)
+                    await handleDoneAction(action, cid: cid, language: language)
                     guard companyId == cid else { return }
                 }
             }
@@ -399,7 +410,9 @@ final class CompanyStore: ObservableObject {
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = reply?.text ?? offline
             }
-            await handleRunTaskId(reply?.runTaskId, cid: cid, language: language)
+            let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
+                                         setup: reply?.setup, remember: reply?.remember ?? [])
+            await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
         } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // A `.done` was received but byte sent zero chat text (a
@@ -436,6 +449,84 @@ final class CompanyStore: ObservableObject {
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
         }
+    }
+
+    /// Dispatch a `.done` frame's actions — shared by the streaming `.done` case and
+    /// the non-streaming JSON fallback. `runTaskId`/`nav`/`setup` are mutually
+    /// exclusive (the CF sets ≤1), so at most one of the three branches below does
+    /// anything; `remember` is orthogonal and always runs alongside. Each step
+    /// re-checks `companyId == cid` (via its own handler) so an account switch
+    /// mid-await stops the rest from landing in a different account's chat.
+    private func handleDoneAction(_ action: ChatDoneAction, cid: String?, language: AppLanguage) async {
+        await handleRunTaskId(action.runTaskId, cid: cid, language: language)
+        guard companyId == cid else { return }
+        await handleNav(action.nav, cid: cid)
+        guard companyId == cid else { return }
+        await handleSetup(action.setup, cid: cid)
+        guard companyId == cid else { return }
+        await handleRemember(action.remember, cid: cid)
+    }
+
+    /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which
+    /// shows a chip the founder taps). Tapping it later calls `activateNav`.
+    private func handleNav(_ nav: NavAction?, cid: String?) async {
+        guard let nav, companyId == cid else { return }
+        chatMessages.append(CopilotMessage(role: .companion, text: "", navChip: nav))
+    }
+
+    /// `setup`: append a tappable enable-card. Tapping it later calls `activateSetup`
+    /// (guarded — never flips an already-on tool off).
+    private func handleSetup(_ setup: SetupAction?, cid: String?) async {
+        guard let setup, companyId == cid else { return }
+        chatMessages.append(CopilotMessage(role: .companion, text: "", setupSuggestion: setup))
+    }
+
+    /// `remember`: AUTO-merge + persist immediately (background memory, like the
+    /// web) — no approval gate, unlike a draft. Mirrors `rememberFromApproval`'s
+    /// merge+persist; appends one transient "Noted" chip per fact so the founder
+    /// sees what stuck.
+    private func handleRemember(_ facts: [RememberedFact], cid: String?) async {
+        guard !facts.isEmpty, companyId == cid else { return }
+        let extracted = facts.map { ExtractedDecision(topic: $0.topic, statement: $0.statement, source: "chat") }
+        let now = Date().timeIntervalSince1970 * 1000
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        if let cid { _ = await decisionsSaver(cid, company.decisions) }
+        guard companyId == cid else { return }
+        for fact in facts {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
+        }
+    }
+
+    /// Resolve + apply a tapped nav chip — mirrors `AppView.from(navDestination:)`.
+    /// `department` additionally resolves `target` to a `DepartmentCatalog` key and
+    /// opens that department's detail view (`selectedDeptKey`) instead of the roster;
+    /// any other destination clears it so the tab opens on its default content.
+    func activateNav(_ nav: NavAction) {
+        guard let dest = AppView.from(navDestination: nav.destination) else { return }
+        selectedDeptKey = nav.destination == "department" ? Self.resolveDepartmentKey(nav.target) : nil
+        select(dest)
+    }
+
+    /// Resolve a `nav(department)` action's `target` to a `DepartmentCatalog` key —
+    /// exact key match first (already-a-key targets), then a case-insensitive name
+    /// match (the CF may send the human-readable department name instead).
+    private static func resolveDepartmentKey(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let byKey = DepartmentCatalog.find(trimmed.lowercased()) { return byKey.key }
+        let lowered = trimmed.lowercased()
+        return DepartmentCatalog.all.first { $0.name.lowercased() == lowered }?.key
+    }
+
+    /// Resolve a tapped setup card's {category,name} to a `Toolkit` item and enable
+    /// it — GUARDED: `toggleTool` is a true toggle, so only call it when the item is
+    /// currently OFF (an already-on item, or a stale/duplicate tap, must never flip
+    /// it back off).
+    func activateSetup(_ setup: SetupAction) async {
+        guard let item = Toolkit.find(category: setup.category, name: setup.name),
+              !company.enabledTools.contains(item.id) else { return }
+        await toggleTool(id: item.id)
     }
 
     /// Approve a chat draft: append it to the library (approved) + persist.
@@ -612,5 +703,6 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        selectedDeptKey = nil
     }
 }

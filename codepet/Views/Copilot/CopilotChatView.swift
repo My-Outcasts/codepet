@@ -156,6 +156,12 @@ struct CopilotBubble: View {
     var body: some View {
         if let draft = message.draft {
             draftCard(draft)
+        } else if let nav = message.navChip {
+            navChip(nav)
+        } else if let setup = message.setupSuggestion {
+            setupCard(setup)
+        } else if let facts = message.noted, !facts.isEmpty {
+            notedChip(facts)
         } else if let action = message.firstRunAction, !message.actionConsumed {
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
@@ -180,6 +186,79 @@ struct CopilotBubble: View {
                 .background(Capsule().fill(CodepetTheme.accentPurple))
         }
         .buttonStyle(.plain)
+    }
+
+    /// A tappable "go here" chip from byte's `nav` action — NOT auto-navigated
+    /// (mirrors the web: the founder taps to move). Tapping resolves + applies
+    /// the destination via `CompanyStore.activateNav` (sync — `select`/
+    /// `selectedDeptKey` are plain mutations, no await needed).
+    private func navChip(_ nav: NavAction) -> some View {
+        let label = AppView.from(navDestination: nav.destination)?.title(lang) ?? nav.destination
+        return HStack {
+            Button { companyStore.activateNav(nav) } label: {
+                Text((lang == .vi ? "Đi tới " : "Go to ") + label)
+                    .font(.pixelSystem(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(CodepetTheme.accentPurple))
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 24)
+        }
+    }
+
+    /// A tappable "turn this on" card from byte's `setup` action. Resolves the
+    /// wire {category,name} to its `Toolkit` item for the display name/why-line
+    /// and the category-appropriate enable verb; tapping runs the GUARDED
+    /// enable in `CompanyStore.activateSetup` (never flips an already-on item off).
+    private func setupCard(_ setup: SetupAction) -> some View {
+        let item = Toolkit.find(category: setup.category, name: setup.name)
+        let name = item?.name ?? setup.name
+        let why = item?.why
+        let verb = item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable")
+        return HStack {
+            CodepetCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(name)
+                        .font(.pixelSystem(size: 12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    if let why, !why.isEmpty {
+                        Text(why)
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button { Task { await companyStore.activateSetup(setup) } } label: {
+                        Text(verb)
+                            .font(.pixelSystem(size: 10, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(Capsule().fill(CodepetTheme.accentPurple))
+                    }.buttonStyle(.plain)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Spacer(minLength: 24)
+        }
+    }
+
+    /// A transient "Noted" chip per remembered fact — memory is already merged +
+    /// persisted (`CompanyStore.handleRemember`) by the time this renders, so
+    /// there is no tap/approval affordance here, just an acknowledgement.
+    private func notedChip(_ facts: [RememberedFact]) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(facts, id: \.topic) { fact in
+                    Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
+                        .font(.pixelSystem(size: 10))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(CodepetTheme.surface))
+                }
+            }
+            Spacer(minLength: 24)
+        }
     }
 
     /// First-run enrichment interview: question + why-line + free-text answer,

@@ -16,6 +16,38 @@ struct RunnableRef: Codable, Equatable {
     let title: String
 }
 
+/// One currently-OFF toolkit item, sent alongside the request so the CF can
+/// decide whether to suggest turning it on (`setup` in the reply). Mirrors
+/// `Toolkit.catalog` items not yet in `company.enabledTools`.
+struct SetupItemDTO: Codable, Equatable {
+    let category: String
+    let name: String
+    let why: String?
+}
+
+/// A "go here" suggestion from byte — rendered as a tappable chip, never
+/// auto-navigated (mirrors the web). `target` is an optional extra hint
+/// (e.g. a department key) used only by some destinations.
+struct NavAction: Codable, Equatable {
+    let destination: String
+    let target: String?
+}
+
+/// A "turn this on" suggestion from byte — rendered as a tappable enable
+/// card. Resolved to a `ToolItem` via `Toolkit.find(category:name:)`.
+struct SetupAction: Codable, Equatable {
+    let category: String
+    let name: String
+}
+
+/// One durable fact byte decided to remember — auto-merged into
+/// `company.decisions` (no approval needed), then surfaced as a transient
+/// "Noted" chip.
+struct RememberedFact: Codable, Equatable {
+    let topic: String
+    let statement: String
+}
+
 /// Request body for the companyChat Cloud Function.
 struct CompanyChatRequest: Codable {
     let companyId: String?
@@ -25,6 +57,9 @@ struct CompanyChatRequest: Codable {
     let history: [ChatTurnDTO]
     let userMessage: String
     let runnable: [RunnableRef]
+    /// The founder's currently-OFF toolkit items — lets the CF decide whether
+    /// to suggest enabling one (`setup` in the reply).
+    let envSetup: [SetupItemDTO]
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -34,13 +69,15 @@ struct CompanyChatRequest: Codable {
         case history
         case userMessage = "user_message"
         case runnable
+        case envSetup = "env_setup"
     }
 
-    /// `runnable` defaults to empty so existing call sites (and older tests
-    /// built before this field existed) keep compiling without every caller
-    /// having to name it explicitly.
+    /// `runnable`/`envSetup` default to empty so existing call sites (and
+    /// older tests built before these fields existed) keep compiling without
+    /// every caller having to name them explicitly.
     init(companyId: String?, language: String, companionId: String, context: String,
-         history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = []) {
+         history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
+         envSetup: [SetupItemDTO] = []) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -48,6 +85,7 @@ struct CompanyChatRequest: Codable {
         self.history = history
         self.userMessage = userMessage
         self.runnable = runnable
+        self.envSetup = envSetup
     }
 }
 
@@ -55,29 +93,66 @@ struct CompanyChatRequest: Codable {
 struct CompanyChatResponse: Codable {
     let reply: String
     let runTaskId: String?
+    let nav: NavAction?
+    let setup: SetupAction?
+    let remember: [RememberedFact]?
 
     enum CodingKeys: String, CodingKey {
         case reply
         case runTaskId = "run_task_id"
+        case nav
+        case setup
+        case remember
     }
 }
 
-/// A companion reply — text plus an optional "run this task" action (byte's run_task).
+/// A companion reply — text plus optional actions (byte's run_task/nav/setup/remember).
+/// navigate/setup/runTaskId are mutually exclusive (at most one is non-nil);
+/// remember is orthogonal and can co-occur with any of them.
 struct CompanyChatReply: Equatable {
     let text: String
     let runTaskId: String?
+    let nav: NavAction?
+    let setup: SetupAction?
+    let remember: [RememberedFact]
+
+    init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
+         setup: SetupAction? = nil, remember: [RememberedFact] = []) {
+        self.text = text
+        self.runTaskId = runTaskId
+        self.nav = nav
+        self.setup = setup
+        self.remember = remember
+    }
 }
 
 // MARK: - Streaming
+
+/// The actions a `done` frame (or the JSON fallback response) can carry.
+/// `runTaskId`/`nav`/`setup` are mutually exclusive (≤1 non-nil); `remember`
+/// is orthogonal and can co-occur with any of them.
+struct ChatDoneAction: Equatable {
+    let runTaskId: String?
+    let nav: NavAction?
+    let setup: SetupAction?
+    let remember: [RememberedFact]
+
+    init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
+         remember: [RememberedFact] = []) {
+        self.runTaskId = runTaskId
+        self.nav = nav
+        self.setup = setup
+        self.remember = remember
+    }
+}
 
 /// One event from the companyChat SSE stream. Mirrors `ChatStreamEvent`
 /// (ReflectionAPIClient's chatSessionStream) — same wire shapes, same
 /// companionChat CF, just a different endpoint.
 enum CompanyChatStreamEvent: Equatable {
     case delta(String)
-    /// `runTaskId` mirrors the JSON response's `run_task_id` — non-nil when byte
-    /// decided to run one of the `runnable` tasks it was offered.
-    case done(model: String, cacheHit: Bool, runTaskId: String?)
+    /// `action` mirrors the JSON response's `run_task_id`/`nav`/`setup`/`remember`.
+    case done(model: String, cacheHit: Bool, action: ChatDoneAction)
 }
 
 /// Small body decoded from an `event: error` frame or a non-200 HTTP response.
@@ -114,7 +189,8 @@ enum CompanyChatClient {
         else { return nil }
         let reply = decoded.reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return nil }
-        return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId)
+        return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
+                                 setup: decoded.setup, remember: decoded.remember ?? [])
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -219,12 +295,18 @@ enum CompanyChatClient {
                 let model: String
                 let cacheHit: Bool
                 let runTaskId: String?
+                let nav: NavAction?
+                let setup: SetupAction?
+                let remember: [RememberedFact]?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
+                    case nav; case setup; case remember
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
-                continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, runTaskId: d.runTaskId))
+                let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
+                                             remember: d.remember ?? [])
+                continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             }
         case "error":
             let parsed = try? JSONDecoder().decode(CompanyChatStreamErrorBody.self, from: payload)

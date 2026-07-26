@@ -22,11 +22,22 @@ struct CopilotMessage: Identifiable, Equatable {
     var interview: InterviewGap?
     /// True once the founder has answered or skipped — collapses the card to a plain bubble.
     var interviewAnswered: Bool
+    /// A tapped-to-navigate suggestion from `.done`'s `nav` action; nil for ordinary text.
+    /// Rendered as a chip — tapping routes through `CompanyStore.activateNav`.
+    var navChip: NavAction?
+    /// A tapped-to-enable suggestion from `.done`'s `setup` action; nil for ordinary text.
+    /// Rendered as an enable card — tapping routes through `CompanyStore.activateSetup`.
+    var setupSuggestion: SetupAction?
+    /// Transient "Noted" fact(s) from `.done`'s `remember` action. Memory is already
+    /// merged + persisted by the time this renders (auto, not approval-gated).
+    var noted: [RememberedFact]?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
-         interview: InterviewGap? = nil, interviewAnswered: Bool = false) {
+         interview: InterviewGap? = nil, interviewAnswered: Bool = false,
+         navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
+         noted: [RememberedFact]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -36,5 +47,8 @@ struct CopilotMessage: Identifiable, Equatable {
         self.actionConsumed = actionConsumed
         self.interview = interview
         self.interviewAnswered = interviewAnswered
+        self.navChip = navChip
+        self.setupSuggestion = setupSuggestion
+        self.noted = noted
     }
 }

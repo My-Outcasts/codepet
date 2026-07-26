@@ -26,6 +26,24 @@ enum AppView: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Resolve a chat `nav` action's `destination` string to an `AppView` —
+    /// mirrors the web's own destination→route map. `department` (a specific
+    /// dept's detail view, not a top-level tab) resolves to `.company`; the
+    /// caller (CompanyStore.activateNav) additionally sets `selectedDeptKey`
+    /// from `target` so `.company` opens on that department, not the roster.
+    /// Unknown destinations return nil so an unresolvable chip is a no-op.
+    static func from(navDestination raw: String) -> AppView? {
+        switch raw {
+        case "roadmap":     return .overview
+        case "tasks":       return .tasks
+        case "library":     return .library
+        case "company":     return .company
+        case "environment": return .environment
+        case "department":  return .company
+        default:            return nil
+        }
+    }
+
     /// SF Symbol shown in the sidebar.
     var icon: String {
         switch self {

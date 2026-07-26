@@ -26,6 +26,7 @@ struct OnboardingView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
     @State private var timeoutTask: Task<Void, Never>?
+    @FocusState private var nameFocused: Bool
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -52,6 +53,10 @@ struct OnboardingView: View {
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
         .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
+        .onChange(of: step) { newStep in
+            // Autofocus the name field when entering step 1 (deferred so the field is mounted).
+            if newStep == 1 { DispatchQueue.main.async { nameFocused = true } }
+        }
     }
 
     // Two-panel card: art left (42%), form right.
@@ -62,6 +67,11 @@ struct OnboardingView: View {
                 .frame(width: 360)
                 .frame(maxHeight: .infinity)
                 .clipped()
+                .overlay(
+                    OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
+                        .blendMode(.softLight)
+                )
+                .compositingGroup()   // isolate the soft-light blend to the art panel
                 .id(step) // re-fade on step change
             Divider()
             VStack(alignment: .leading, spacing: 0) {
@@ -102,6 +112,8 @@ struct OnboardingView: View {
             heading("First — what should I call you?", "I'll use it when I walk you through your company.")
             label("Your name")
             textField("e.g. Mona", text: $d.name)
+                .focused($nameFocused)
+                .onSubmit { if !d.name.trimmed.isEmpty { step = 2 } }
         case 2:
             heading("Which best describes you?", "This shapes how I explain each department to you.")
             OnboardingOptionList(options: OnboardingContent.roles, selectedKey: Binding(

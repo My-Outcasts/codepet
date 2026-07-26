@@ -43,6 +43,8 @@ final class CompanyStore: ObservableObject {
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
+    private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
+    private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -56,6 +58,11 @@ final class CompanyStore: ObservableObject {
     /// brief into another's doc or clobber the newly-hydrated account.
     private(set) var onboardingToken = 0
 
+    /// First-run enrichment interview progress: the empty gaps to ask + the index
+    /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
+    /// no interview is active.
+    private var interviewState: (gaps: [InterviewGap], idx: Int)?
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
@@ -66,7 +73,9 @@ final class CompanyStore: ObservableObject {
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
-         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) }) {
+         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
+         decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
+         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -78,6 +87,8 @@ final class CompanyStore: ObservableObject {
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
         self.enricher = enricher
+        self.decisionsSaver = decisionsSaver
+        self.decisionExtractor = decisionExtractor
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -125,7 +136,9 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
-        seedFirstRunGreeting(language: language)
+        if !startEnrichInterviewIfNeeded(language: language) {
+            seedFirstRunGreeting(language: language)
+        }
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)
@@ -135,6 +148,63 @@ final class CompanyStore: ObservableObject {
         let next = RoadmapEngine.nextStep(company.tasks)
         let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
         chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
+    }
+
+    /// First-run only: after the brief is saved + stamped, ask the ≤3 plan-shaping
+    /// questions the onboarding brief is missing (goal / traction / problem), one at
+    /// a time. A full brief means no gaps → caller falls through to the greeting.
+    /// Returns true when an interview was started (so the caller skips the greeting).
+    private func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
+        guard companyId != nil else { return false }
+        let gaps = EnrichInterview.detectGaps(company.brief)
+        guard !gaps.isEmpty else { return false }
+        interviewState = (gaps: gaps, idx: 0)
+        askInterviewGap(gaps[0], language: language)
+        return true
+    }
+
+    /// Append one interview question as a companion message carrying its gap. The
+    /// message text is the question itself, so once answered the card collapses to a
+    /// plain bubble showing that question (matches the web `answered` branch).
+    private func askInterviewGap(_ gap: InterviewGap, language: AppLanguage) {
+        let q = EnrichInterview.question(for: gap, language: language)
+        chatMessages.append(CopilotMessage(role: .companion, text: q.ask, interview: gap))
+    }
+
+    /// Answer (or skip) the current interview question. A non-blank answer is saved
+    /// RAW (trimmed, no distillation) into the brief field and persisted via the
+    /// existing saver — durable on mid-interview drop-off. Blank/nil = skip: advance
+    /// without saving. Then ask the next gap, or hand off to the first-run greeting.
+    func answerInterview(messageId: String, gap: InterviewGap, answer: String?, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              !chatMessages[i].interviewAnswered else { return }
+        chatMessages[i].interviewAnswered = true
+
+        let trimmed = (answer ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            // Echo the founder's answer as their own chat bubble (matches web),
+            // so their input stays visible instead of vanishing on send.
+            chatMessages.append(CopilotMessage(role: .me, text: trimmed))
+        }
+        if !trimmed.isEmpty, let cid = companyId {
+            switch gap {
+            case .goal: company.brief.goal = trimmed
+            case .traction: company.brief.traction = trimmed
+            case .problem: company.brief.problem = trimmed
+            }
+            _ = await saver(cid, company.brief)
+            guard companyId == cid else { return }  // account switched mid-await → bail
+        }
+
+        guard var st = interviewState else { return }
+        st.idx += 1
+        if st.idx < st.gaps.count {
+            interviewState = st
+            askInterviewGap(st.gaps[st.idx], language: language)
+        } else {
+            interviewState = nil
+            seedFirstRunGreeting(language: language)
+        }
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
@@ -227,7 +297,7 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             history: Array(history), userMessage: text)
 
         let placeholderId = UUID().uuidString
@@ -292,6 +362,7 @@ final class CompanyStore: ObservableObject {
         company.library.append(draft)
         chatMessages[i].draftApproved = true
         if let cid = companyId { _ = await librarySaver(cid, company.library) }
+        Task { await rememberFromApproval(draft) }
     }
 
     /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
@@ -314,7 +385,7 @@ final class CompanyStore: ObservableObject {
     private func runRequest(for task: RoadmapTask, language: AppLanguage) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
     }
 
@@ -328,7 +399,7 @@ final class CompanyStore: ObservableObject {
         return Deliverable(
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
             title: title.isEmpty ? task.title : title, body: body,
-            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id)
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload)
     }
 
     /// Run a codepetCanDo task → produce a Deliverable → stash it as the task's `draft`
@@ -364,6 +435,7 @@ final class CompanyStore: ObservableObject {
     func approveTask(id: String) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }),
               let draft = company.tasks[i].draft, !company.tasks[i].done else { return }
+        let approved = draft
         company.library.append(draft)
         company.tasks[i].done = true
         company.tasks[i].drafted = false
@@ -372,6 +444,22 @@ final class CompanyStore: ObservableObject {
             _ = await librarySaver(cid, company.library)
             _ = await tasksSaver(cid, company.tasks)
         }
+        Task { await rememberFromApproval(approved) }
+    }
+
+    /// Fire-and-forget after an approval: extract durable decisions the deliverable locks
+    /// in, merge into memory, persist. Account-guarded + fail-open — a failed extract leaves
+    /// decisions unchanged; the approval already happened. `dept` comes from the source task.
+    private func rememberFromApproval(_ deliverable: Deliverable) async {
+        let cid = companyId
+        let dept = company.tasks.first { $0.id == deliverable.sourceTaskId }?.dept ?? ""
+        let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
+                                         type: deliverable.kind.rawValue, out: deliverable.body)
+        let extracted = await decisionExtractor(dto, company.decisions)
+        guard companyId == cid, !extracted.isEmpty else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
     /// Run the greeting's "Do it with me" task → append an inline draft (reuses the 6C
@@ -440,5 +528,6 @@ final class CompanyStore: ObservableObject {
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
+        interviewState = nil
     }
 }

@@ -60,4 +60,17 @@ final class RoadmapEngineTests: XCTestCase {
         XCTAssertEqual(RoadmapEngine.progressPercent([]), 0)
         XCTAssertEqual(RoadmapEngine.tasksByPhase(all)[.build]?.count, 2)
     }
+
+    func testDeliverableResolvesBySourceTaskId() {
+        let done = t("a", .build, done: true)
+        let lib = [Deliverable(kind: .doc, title: "Doc A", body: "b", sourceTaskId: "a")]
+        XCTAssertEqual(RoadmapEngine.deliverable(for: done, in: lib)?.title, "Doc A")
+    }
+
+    func testDeliverableNilWhenNoLibraryMatchOrEmptyLibrary() {
+        let done = t("a", .build, done: true)
+        XCTAssertNil(RoadmapEngine.deliverable(for: done, in: []))
+        let other = [Deliverable(kind: .doc, title: "Other", body: "b", sourceTaskId: "z")]
+        XCTAssertNil(RoadmapEngine.deliverable(for: done, in: other))
+    }
 }

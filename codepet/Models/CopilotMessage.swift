@@ -18,10 +18,15 @@ struct CopilotMessage: Identifiable, Equatable {
     var firstRunAction: FirstRunAction?
     /// True once the action has been tapped — hides the button.
     var actionConsumed: Bool
+    /// First-run enrichment interview: the gap this message asks about; nil otherwise.
+    var interview: InterviewGap?
+    /// True once the founder has answered or skipped — collapses the card to a plain bubble.
+    var interviewAnswered: Bool
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
-         firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false) {
+         firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
+         interview: InterviewGap? = nil, interviewAnswered: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
@@ -29,5 +34,7 @@ struct CopilotMessage: Identifiable, Equatable {
         self.draftApproved = draftApproved
         self.firstRunAction = firstRunAction
         self.actionConsumed = actionConsumed
+        self.interview = interview
+        self.interviewAnswered = interviewAnswered
     }
 }

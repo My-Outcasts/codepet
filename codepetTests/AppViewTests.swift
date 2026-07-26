@@ -4,7 +4,7 @@ import XCTest
 final class AppViewTests: XCTestCase {
     func testCoversAllAppDestinations() {
         XCTAssertEqual(AppView.allCases.map(\.rawValue),
-                       ["overview", "company", "roadmap", "tasks", "library",
+                       ["overview", "summary", "company", "roadmap", "tasks", "library",
                         "environment", "settings", "billing", "support"])
     }
     func testEveryCaseHasTitleAndIcon() {

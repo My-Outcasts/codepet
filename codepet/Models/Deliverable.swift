@@ -1,6 +1,30 @@
 // codepet/Models/Deliverable.swift
 import Foundation
 
+struct ChecklistItem: Codable, Hashable { var t: String; var done: Bool }
+struct DocSection: Codable, Hashable { var h: String; var p: String }
+struct PlanChange: Codable, Hashable { var area: String; var edit: String }
+struct DmMessage: Codable, Hashable { var name: String; var note: String; var msg: String }
+
+/// Structured per-kind fields returned by the runTask CF (A1). All optional — one
+/// kind's fields are populated at a time; nil for legacy/markdown-only deliverables.
+struct DeliverablePayload: Codable, Hashable {
+    // checklist
+    var items: [ChecklistItem]?
+    // doc
+    var call: String?
+    var sections: [DocSection]?
+    var next: [String]?
+    // plan
+    var goal: String?
+    var steps: [String]?
+    var changes: [PlanChange]?
+    var verify: [String]?
+    var risks: String?
+    // dms
+    var messages: [DmMessage]?
+}
+
 /// A deliverable kind — mirrors the web StructuredKind, plus `.other` for unknown
 /// values. Rendering is uniform (markdown); kind drives only the badge + icon.
 enum DeliverableKind: String, Codable, CaseIterable {
@@ -60,14 +84,16 @@ struct Deliverable: Codable, Hashable, Identifiable {
     var body: String
     var createdAt: String?    // ISO-8601 (JSON-safe; newest-first sort is lexicographic)
     var sourceTaskId: String?
+    var payload: DeliverablePayload?
 
     init(id: String = UUID().uuidString, kind: DeliverableKind, title: String, body: String,
-         createdAt: String? = nil, sourceTaskId: String? = nil) {
+         createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
         self.body = body
         self.createdAt = createdAt
         self.sourceTaskId = sourceTaskId
+        self.payload = payload
     }
 }

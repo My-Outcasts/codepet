@@ -651,12 +651,17 @@ final class CompanyStore: ObservableObject {
     }
 
     /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
-    func redoDraft(messageId: String, language: AppLanguage) async {
+    /// `reviseNote` nil → blind re-run (unchanged behavior). Non-nil (a revise chip
+    /// tap) → threads the note plus the draft's CURRENT body into the request so the
+    /// CF revises in place instead of regenerating from scratch.
+    func redoDraft(messageId: String, language: AppLanguage, reviseNote: String? = nil) async {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
               let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
         let cid = companyId
-        let result = await taskRunner(runRequest(for: task, language: language))
+        let result = await taskRunner(runRequest(for: task, language: language,
+                                                  reviseNote: reviseNote,
+                                                  current: reviseNote != nil ? draft.body : nil))
         // Re-check approved too: an Approve that raced this re-run must win (don't
         // overwrite the just-approved draft's body under an "Added to Library" label).
         guard companyId == cid,
@@ -666,12 +671,16 @@ final class CompanyStore: ObservableObject {
         chatMessages[j].draft = fresh
     }
 
-    /// Build a RunTaskRequest for a task (grounded on brief + roadmap).
-    private func runRequest(for task: RoadmapTask, language: AppLanguage) -> RunTaskRequest {
+    /// Build a RunTaskRequest for a task (grounded on brief + roadmap). `reviseNote`/
+    /// `current` default nil — a first run or blind redo sends neither (unchanged
+    /// wire shape); only a revise chip tap sets both.
+    private func runRequest(for task: RoadmapTask, language: AppLanguage,
+                             reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
-            taskId: task.id, taskTitle: task.title, taskDetail: task.detail)
+            taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
+            reviseNote: reviseNote, current: current)
     }
 
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,

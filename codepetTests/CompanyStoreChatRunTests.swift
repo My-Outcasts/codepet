@@ -115,6 +115,46 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertNotEqual(s.chatMessages[2].draft?.id, firstId)   // fresh deliverable
     }
 
+    /// A revise chip tap (`redoDraft(...reviseNote:)`) must thread BOTH the note
+    /// and the draft's CURRENT body into the RunTaskRequest, and still replace the
+    /// draft on the same message — the wire contract + replace-in-place semantics
+    /// the revise chips depend on.
+    func testRedoWithReviseNoteSendsNoteAndCurrentBody() async {
+        var captured: RunTaskRequest?
+        let s = store(reply: CompanyChatReply(text: "On it", runTaskId: "t1"),
+                      runner: { req in
+                          captured = req
+                          return RunTaskResponse(kind: "doc", title: "WTP", body: "# shorter")
+                      })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run", language: .en)   // n=1 (no capture assertions here) → draft "# Q1"
+        let mid = s.chatMessages[2].id
+        let firstId = s.chatMessages[2].draft?.id
+        let originalBody = s.chatMessages[2].draft?.body
+        await s.redoDraft(messageId: mid, language: .en, reviseNote: "Make it shorter")
+        XCTAssertEqual(captured?.reviseNote, "Make it shorter")
+        XCTAssertEqual(captured?.current, originalBody)   // the draft's body BEFORE this redo
+        XCTAssertEqual(s.chatMessages[2].draft?.body, "# shorter")   // draft replaced
+        XCTAssertNotEqual(s.chatMessages[2].draft?.id, firstId)      // fresh deliverable, same message
+    }
+
+    /// A blind redo (no reviseNote, e.g. the existing Redo button) must send neither
+    /// field — the wire shape stays unchanged for the pre-existing call path.
+    func testRedoWithoutReviseNoteSendsNeitherField() async {
+        var captured: RunTaskRequest?
+        let s = store(reply: CompanyChatReply(text: "On it", runTaskId: "t1"),
+                      runner: { req in
+                          captured = req
+                          return RunTaskResponse(kind: "doc", title: "WTP", body: "# again")
+                      })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run", language: .en)
+        let mid = s.chatMessages[2].id
+        await s.redoDraft(messageId: mid, language: .en)
+        XCTAssertNil(captured?.reviseNote)
+        XCTAssertNil(captured?.current)
+    }
+
     // MARK: - Streaming run_task_id (the streaming success path is now the
     // common one; run-task handling must fire from the streamed `.done` frame
     // too, not just the non-streaming fallback below).

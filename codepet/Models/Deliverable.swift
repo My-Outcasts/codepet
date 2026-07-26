@@ -7,8 +7,39 @@ struct PlanChange: Codable, Hashable { var area: String; var edit: String }
 struct DmMessage: Codable, Hashable { var name: String; var note: String; var msg: String }
 
 // calendar
-struct CalendarItem: Codable, Hashable { var day: String; var kind: String; var body: String }
-struct CalendarWeek: Codable, Hashable { var label: String; var items: [CalendarItem] }
+struct CalendarItem: Codable, Hashable {
+    var day: String
+    var kind: String
+    var body: String
+
+    private enum CodingKeys: String, CodingKey { case day, kind, body }
+
+    /// All fields are soft-optional here: a missing `day`/`kind`/`body` on one item
+    /// degrades to "" rather than throwing and nuking the whole calendar payload.
+    /// The genuinely-required anchor lives one level up, at `CalendarPayload.weeks`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        day = try c.decodeIfPresent(String.self, forKey: .day) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+    }
+}
+struct CalendarWeek: Codable, Hashable {
+    var label: String
+    var items: [CalendarItem]
+
+    private enum CodingKeys: String, CodingKey { case label, items }
+
+    /// Soft: a missing `label` or `items` on one week degrades to "" / [] rather than
+    /// throwing. The required anchor is `CalendarPayload.weeks` (below), which stays a
+    /// plain `decode` — a payload with no `weeks` key at all still throws → `.calendar`
+    /// stays nil via `try?` in `DeliverablePayload`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        items = try c.decodeIfPresent([CalendarItem].self, forKey: .items) ?? []
+    }
+}
 struct CalendarPayload: Codable, Hashable { var weeks: [CalendarWeek] }
 
 // sheet
@@ -45,6 +76,49 @@ struct SitePayload: Codable, Hashable {
     var finalCta: String
     var accent: String
     var footNote: String
+
+    private enum CodingKeys: String, CodingKey {
+        case title, brand, kicker, headline, headlineHi, sub, ctaPrimary, ctaSecondary
+        case howEyebrow, howTitle, steps, featEyebrow, featTitle, features, quote, quoteBy
+        case finalTitle, finalSub, finalCta, accent, footNote
+    }
+
+    /// Custom decode: `title`, `brand`, `headline`, `ctaPrimary`, `finalTitle`,
+    /// `finalCta` are the REQUIRED anchor fields — used unconditionally (no
+    /// `.isEmpty` guard) by `SiteViewer.buildHTML`, so they stay a plain `decode`
+    /// and still THROW when absent. This preserves the steps-collision fix: a PLAN
+    /// payload has neither `title` nor `headline`, so `SitePayload.init` throws and
+    /// `.site` stays nil via `try?` in `DeliverablePayload`.
+    ///
+    /// Every other field here is genuinely soft content — each is guarded by
+    /// `.isEmpty` in `buildHTML` (or, for `accent`, by `safeHex`'s fallback) — so a
+    /// CF omitting e.g. `quoteBy` (no testimonial byline) degrades that one field to
+    /// "" / [] instead of throwing away the whole site payload.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        brand = try c.decode(String.self, forKey: .brand)
+        headline = try c.decode(String.self, forKey: .headline)
+        ctaPrimary = try c.decode(String.self, forKey: .ctaPrimary)
+        finalTitle = try c.decode(String.self, forKey: .finalTitle)
+        finalCta = try c.decode(String.self, forKey: .finalCta)
+
+        kicker = try c.decodeIfPresent(String.self, forKey: .kicker) ?? ""
+        headlineHi = try c.decodeIfPresent(String.self, forKey: .headlineHi) ?? ""
+        sub = try c.decodeIfPresent(String.self, forKey: .sub) ?? ""
+        ctaSecondary = try c.decodeIfPresent(String.self, forKey: .ctaSecondary) ?? ""
+        howEyebrow = try c.decodeIfPresent(String.self, forKey: .howEyebrow) ?? ""
+        howTitle = try c.decodeIfPresent(String.self, forKey: .howTitle) ?? ""
+        steps = try c.decodeIfPresent([SiteContent].self, forKey: .steps) ?? []
+        featEyebrow = try c.decodeIfPresent(String.self, forKey: .featEyebrow) ?? ""
+        featTitle = try c.decodeIfPresent(String.self, forKey: .featTitle) ?? ""
+        features = try c.decodeIfPresent([SiteContent].self, forKey: .features) ?? []
+        quote = try c.decodeIfPresent(String.self, forKey: .quote) ?? ""
+        quoteBy = try c.decodeIfPresent(String.self, forKey: .quoteBy) ?? ""
+        finalSub = try c.decodeIfPresent(String.self, forKey: .finalSub) ?? ""
+        accent = try c.decodeIfPresent(String.self, forKey: .accent) ?? ""
+        footNote = try c.decodeIfPresent(String.self, forKey: .footNote) ?? ""
+    }
 }
 
 // screens
@@ -57,6 +131,25 @@ struct Screen: Codable, Hashable {
     var art: String
     var cta: String
     var note: String
+
+    private enum CodingKeys: String, CodingKey { case name, time, kick, title, sub, art, cta, note }
+
+    /// `name`, `time`, `title`, `art` stay required (plain `decode`) — the anchor
+    /// fields for a screen. `kick`/`sub`/`cta`/`note` are soft content and degrade to
+    /// "" rather than throwing, so a CF omitting e.g. `note` on one screen doesn't
+    /// nuke the whole screens payload.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        time = try c.decode(String.self, forKey: .time)
+        title = try c.decode(String.self, forKey: .title)
+        art = try c.decode(String.self, forKey: .art)
+
+        kick = try c.decodeIfPresent(String.self, forKey: .kick) ?? ""
+        sub = try c.decodeIfPresent(String.self, forKey: .sub) ?? ""
+        cta = try c.decodeIfPresent(String.self, forKey: .cta) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+    }
 }
 struct ScreensPayload: Codable, Hashable { var screens: [Screen] }
 

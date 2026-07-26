@@ -436,10 +436,24 @@ struct PostViewer: View {
 /// Mirrors web's CalendarViewer (components/artifact/viewers.tsx) in spirit.
 struct CalendarViewer: View {
     let payload: CalendarPayload
+    @Environment(\.uiLanguage) private var lang
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)]
 
     var body: some View {
+        Group {
+            if payload.weeks.isEmpty {
+                Text(lang == .vi ? "Chưa có mục nào." : "No entries yet.")
+                    .font(.pixelSystem(size: 12))
+                    .foregroundColor(CodepetTheme.mutedText)
+            } else {
+                weeksList
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var weeksList: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(Array(payload.weeks.enumerated()), id: \.offset) { _, week in
                 VStack(alignment: .leading, spacing: 8) {

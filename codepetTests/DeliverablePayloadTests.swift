@@ -91,6 +91,41 @@ final class DeliverablePayloadTests: XCTestCase {
         XCTAssertNil(back.payload?.screens)
     }
 
+    // MARK: - site soft-field hardening (missing soft field degrades; missing anchor still falls back)
+
+    func testSitePayloadMissingSoftFieldDegradesToEmpty() throws {
+        // No `quoteBy` at all (e.g. a site with no testimonial byline). All other
+        // required anchor fields are present, so `.site` must still decode.
+        let json = #"""
+        {"id":"si2","kind":"site","title":"Site","body":"md","payload":{
+            "title":"T","brand":"B","headline":"H","ctaPrimary":"Go",
+            "finalTitle":"Final","finalCta":"Start",
+            "steps":[{"h":"Step 1","p":"Do a thing"}],
+            "features":[{"h":"Feature 1","p":"Does a thing"}],
+            "quote":"Great"
+        }}
+        """#
+        let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
+        XCTAssertNotNil(back.payload?.site)
+        XCTAssertEqual(back.payload?.site?.title, "T")
+        XCTAssertEqual(back.payload?.site?.quoteBy, "")
+        XCTAssertEqual(back.payload?.site?.kicker, "")
+        XCTAssertEqual(back.payload?.site?.accent, "")
+    }
+
+    func testSitePayloadMissingAnchorFieldStaysNil() throws {
+        // Missing the REQUIRED anchor field `title` — this must still throw and fall
+        // back to nil, proving the steps-collision fix still holds (a PLAN payload has
+        // no `title`/`headline` either, so it must not masquerade as a site).
+        let json = #"""
+        {"id":"si3","kind":"site","title":"Site","body":"md","payload":{
+            "brand":"B","headline":"H","ctaPrimary":"Go","finalTitle":"Final","finalCta":"Start"
+        }}
+        """#
+        let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
+        XCTAssertNil(back.payload?.site)
+    }
+
     // MARK: - screens
 
     func testDecodesScreensPayload() throws {

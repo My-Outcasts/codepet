@@ -295,11 +295,18 @@ final class CompanyStore: ObservableObject {
             ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
         }
         let cid = companyId
+        // Tasks byte is allowed to run this turn — mirrors the web's openTasks
+        // filter (codepetCanDo == not done, not already drafted, deps satisfied,
+        // not a founder-only task). Capped so the payload stays small.
+        let runnable = company.tasks
+            .filter { RoadmapEngine.status(for: $0, in: company.tasks) == .codepetCanDo }
+            .prefix(60)
+            .map { RunnableRef(id: $0.id, title: $0.title) }
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text),
-            history: Array(history), userMessage: text)
+            history: Array(history), userMessage: text, runnable: Array(runnable))
 
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
@@ -307,6 +314,7 @@ final class CompanyStore: ObservableObject {
 
         var streamedText = ""
         var streamThrew = false
+        var receivedDone = false
         do {
             for try await event in chatStreamer(req) {
                 // Checked before touching state on every event: a switch mid-stream
@@ -319,8 +327,14 @@ final class CompanyStore: ObservableObject {
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
-                case .done:
-                    break
+                case .done(_, _, let runTaskId):
+                    // Streaming is now the common success path, so run_task_id
+                    // handling must fire here too — not just in the fallback
+                    // below (previously the only place it ran, back when
+                    // streaming usually failed pre-deploy).
+                    receivedDone = true
+                    await handleRunTaskId(runTaskId, cid: cid, language: language)
+                    guard companyId == cid else { return }
                 }
             }
         } catch {
@@ -328,7 +342,16 @@ final class CompanyStore: ObservableObject {
         }
         guard companyId == cid else { return }
 
-        if streamThrew || streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // Gate the fallback on "no `.done` frame was received", NOT on empty
+        // text: byte can legitimately reply with only a run-task decision and
+        // no chat text (zero deltas, then `.done(runTaskId:)`). Falling back
+        // on empty text there would fire a SECOND chatSender call and run
+        // handleRunTaskId AGAIN for the same task — a duplicate CF call and a
+        // duplicate draft card. A well-formed `.done` (even empty-text)
+        // means the stream succeeded, so no fallback. The pre-deploy safety
+        // net still works: a plain-JSON (non-SSE) response parses to zero
+        // frames, so `.done` never fires and `!receivedDone` is true.
+        if streamThrew || !receivedDone {
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
@@ -337,23 +360,43 @@ final class CompanyStore: ObservableObject {
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = reply?.text ?? offline
             }
-            // If byte chose to run a runnable task, produce a draft deliverable inline.
-            if let runId = reply?.runTaskId,
-               let task = company.tasks.first(where: { $0.id == runId }),
-               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo {
-                let result = await taskRunner(runRequest(for: task, language: language))
-                guard companyId == cid else { return }
-                if let draft = buildDeliverable(from: result, task: task) {
-                    chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
-                } else {
-                    chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
-                        ? "Không tạo được ngay bây giờ — thử lại nhé."
-                        : "Couldn't generate that just now — try again."))
-                }
+            await handleRunTaskId(reply?.runTaskId, cid: cid, language: language)
+            guard companyId == cid else { return }
+        } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // A `.done` was received but byte sent zero chat text (a
+            // run-task-only reply) — don't leave the placeholder blank.
+            let leadIn = language == .vi
+                ? "Được rồi — mình chuẩn bị việc đó ngay đây."
+                : "On it — putting that together now."
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                chatMessages[i].text = leadIn
             }
         }
         isCompanionTyping = false
         isStreaming = false
+    }
+
+    /// If byte chose to run a runnable task, produce a draft deliverable inline —
+    /// shared by both the streaming `.done` case and the non-streaming fallback,
+    /// so a `run_task_id` fires on whichever path yielded it (never both: a
+    /// stream that finishes clean and non-empty never reaches the fallback, and
+    /// the fallback only runs when the stream threw or yielded no text).
+    /// `cid` is the `companyId` captured at the start of `sendChat` — re-checked
+    /// after the `taskRunner` await so an account switch mid-run can't append
+    /// this account's draft into a different (already-hydrated) account's chat.
+    private func handleRunTaskId(_ runId: String?, cid: String?, language: AppLanguage) async {
+        guard let runId,
+              let task = company.tasks.first(where: { $0.id == runId }),
+              RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
+        let result = await taskRunner(runRequest(for: task, language: language))
+        guard companyId == cid else { return }
+        if let draft = buildDeliverable(from: result, task: task) {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không tạo được ngay bây giờ — thử lại nhé."
+                : "Couldn't generate that just now — try again."))
+        }
     }
 
     /// Approve a chat draft: append it to the library (approved) + persist.

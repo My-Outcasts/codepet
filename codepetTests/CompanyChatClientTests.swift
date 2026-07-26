@@ -55,12 +55,53 @@ final class CompanyChatClientTests: XCTestCase {
         guard collected.count == 3 else { return }
         XCTAssertEqual(collected[0], .delta("On it "))
         XCTAssertEqual(collected[1], .delta("boss"))
-        if case let .done(model, cacheHit) = collected[2] {
+        if case let .done(model, cacheHit, runTaskId) = collected[2] {
             XCTAssertEqual(model, "claude-sonnet-5")
             XCTAssertTrue(cacheHit)
+            XCTAssertNil(runTaskId)
         } else {
             XCTFail("expected .done")
         }
+    }
+
+    func testSendStreamDoneCarriesRunTaskId() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: delta\ndata: {\"text\":\"On it\"}\n\n".data(using: .utf8)!,
+            "event: done\ndata: {\"model\":\"claude-sonnet-5\",\"cache_hit\":false,\"run_task_id\":\"t1\"}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(),
+            session: mockedCompanyChatSession(),
+            authTokenProvider: { "fake" }
+        ) {
+            collected.append(ev)
+        }
+        XCTAssertEqual(collected.count, 2)
+        guard collected.count == 2 else { return }
+        if case let .done(_, _, runTaskId) = collected[1] {
+            XCTAssertEqual(runTaskId, "t1")
+        } else {
+            XCTFail("expected .done")
+        }
+    }
+
+    func testRequestEncodesRunnable() throws {
+        let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
+                                     context: "ctx", history: [], userMessage: "hi",
+                                     runnable: [RunnableRef(id: "t1", title: "Survey users")])
+        let data = try JSONEncoder().encode(req)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let runnable = json?["runnable"] as? [[String: Any]]
+        XCTAssertEqual(runnable?.first?["id"] as? String, "t1")
+        XCTAssertEqual(runnable?.first?["title"] as? String, "Survey users")
+    }
+
+    func testRequestDefaultsRunnableToEmpty() throws {
+        let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
+                                     context: "ctx", history: [], userMessage: "hi")
+        XCTAssertTrue(req.runnable.isEmpty)
     }
 
     func testSendStreamSplitChunkParsesCorrectly() async throws {

@@ -36,6 +36,7 @@ enum TaskColumn: CaseIterable {
 struct TasksView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @State private var openDeliverable: Deliverable?
 
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
@@ -53,6 +54,7 @@ struct TasksView: View {
             }
         }
         .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
     }
 
     private func tasks(in col: TaskColumn) -> [RoadmapTask] {
@@ -85,6 +87,7 @@ struct TasksView: View {
             let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
             if st == .needsApproval { Task { await companyStore.approveTask(id: t.id) } }
             else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
+            else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {

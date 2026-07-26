@@ -27,11 +27,9 @@ struct OverviewView: View {
             header.padding(.horizontal, 24).padding(.top, 22)
             chromeRow.padding(.horizontal, 24).padding(.top, 14)
             if showSecondBrain {
-                Spacer()
-                Text(lang == .vi ? "Bộ não thứ hai — sắp có" : "Second Brain — coming soon")
-                    .font(CodepetTheme.inter(14)).foregroundColor(CodepetTheme.mutedText)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Spacer()
+                SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 24).padding(.top, 14)
             } else {
                 RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
             }

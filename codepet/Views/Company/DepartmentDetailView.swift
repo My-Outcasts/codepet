@@ -64,6 +64,7 @@ private struct DepartmentTaskCard: View {
     let task: RoadmapTask
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @State private var openDeliverable: Deliverable?
     private var status: TaskStatus { RoadmapEngine.status(for: task, in: companyStore.company.tasks) }
 
     var body: some View {
@@ -85,8 +86,13 @@ private struct DepartmentTaskCard: View {
                 }
             }
             if task.done {
-                Text(lang == .vi ? "✓ Đã duyệt · đã giao" : "✓ Approved · delivered")
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentTeal)
+                Button {
+                    openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+                } label: {
+                    Text(lang == .vi ? "✓ Đã duyệt · đã giao" : "✓ Approved · delivered")
+                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentTeal)
+                }
+                .buttonStyle(.plain)
             } else {
                 actionButton
             }
@@ -94,6 +100,7 @@ private struct DepartmentTaskCard: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+        .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
     }
 
     @ViewBuilder private var actionButton: some View {

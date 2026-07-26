@@ -11,7 +11,20 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
+    /// `chatMessages` is the ACTIVE thread's live working buffer — the view keeps
+    /// rendering it exactly as before. `newChat`/`switchThread`/`deleteThread` flush
+    /// the buffer into its outgoing `ChatThread` entry (in `threads`) and load the
+    /// incoming one; a send just appends into this buffer and, at the end of the
+    /// turn, flushes so the thread list's title/`updatedAt` stay current. Session-only
+    /// (mirrors `chatMessages`'s own non-Codable, in-memory contract) — see `ChatThreads.swift`.
     @Published private(set) var chatMessages: [CopilotMessage] = []
+    /// Every thread that has EVER held a message this session, active or not.
+    /// An in-progress "new chat" with nothing sent yet has no entry here (lazily
+    /// created by `flushActiveThread` on its first non-empty flush).
+    @Published private(set) var threads: [ChatThread] = []
+    /// The thread `chatMessages` currently belongs to. Nil only before the very
+    /// first message of the session is sent (no thread exists yet to point at).
+    @Published private(set) var activeThreadId: String?
     @Published private(set) var isCompanionTyping = false
     /// True for the WHOLE duration of a chat send — from the placeholder's append
     /// until the stream (or its fallback) fully completes. Unlike `isCompanionTyping`
@@ -113,6 +126,8 @@ final class CompanyStore: ObservableObject {
         // preserves the in-flight conversation.
         if self.companyId != companyId {
             chatMessages = []
+            threads = []
+            activeThreadId = nil
             isCompanionTyping = false
             isStreaming = false
             runningTaskIds = []
@@ -277,6 +292,96 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language)
     }
 
+    // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
+
+    /// Flush the working buffer (`chatMessages`) into its `ChatThread` entry —
+    /// creating the entry (and `activeThreadId`, if unset) lazily on its first
+    /// non-empty flush, deriving a title once while still untitled, and bumping
+    /// `updatedAt` so the thread list re-sorts to the top. A no-op on an empty
+    /// buffer: an as-yet-unused "new chat" never appears in the thread list.
+    private func flushActiveThread() {
+        guard !chatMessages.isEmpty else { return }
+        let id = activeThreadId ?? UUID().uuidString
+        activeThreadId = id
+        let now = Date()
+        if let i = threads.firstIndex(where: { $0.id == id }) {
+            threads[i].messages = chatMessages
+            threads[i].updatedAt = now
+            if threads[i].title == nil { threads[i].title = deriveThreadTitle(chatMessages) }
+        } else {
+            threads.append(ChatThread(id: id, title: deriveThreadTitle(chatMessages),
+                                       messages: chatMessages, createdAt: now, updatedAt: now))
+        }
+    }
+
+    /// Start a fresh, empty conversation: flush the outgoing thread (if it ever
+    /// held anything), then point the working buffer at a brand-new id. The new
+    /// thread doesn't appear in `threads` until it actually holds a message (the
+    /// next flush creates it) — mirrors the web, where an unused "new chat" isn't
+    /// a real row in the history list either.
+    ///
+    /// No-op while a chat turn is in flight (`isStreaming`/`isCompanionTyping`):
+    /// `sendMessage` streams `.delta`s and appends `.done` chips straight into
+    /// `chatMessages` by id, so repointing the buffer mid-turn would silently
+    /// drop the in-flight reply (delta lookups fail against the new buffer) and
+    /// leak its `.done` chips into whatever thread became active. This is
+    /// defense in depth — `CopilotChatView` also disables the controls that
+    /// call these while streaming — so a stream survives even if some other
+    /// caller bypasses the UI.
+    func newChat() {
+        guard !isStreaming, !isCompanionTyping else { return }
+        flushActiveThread()
+        activeThreadId = UUID().uuidString
+        chatMessages = []
+    }
+
+    /// Switch the working buffer to a different thread: flush the outgoing one,
+    /// then load the target's messages. Switching to the thread already active
+    /// is a no-op (would otherwise round-trip the buffer through itself).
+    ///
+    /// Also a no-op while a chat turn is in flight — see `newChat()`'s doc
+    /// comment for why repointing `chatMessages` mid-stream corrupts state.
+    func switchThread(_ id: String) {
+        guard !isStreaming, !isCompanionTyping else { return }
+        guard id != activeThreadId else { return }
+        flushActiveThread()
+        activeThreadId = id
+        chatMessages = threads.first(where: { $0.id == id })?.messages ?? []
+    }
+
+    /// Rename a thread. A blank/whitespace-only title clears back to nil — the
+    /// view shows "New chat" for that same nil, re-deriving from the thread's
+    /// first message the next time it would matter (deriving again is harmless:
+    /// `flushActiveThread` only sets a title while it's nil).
+    func renameThread(_ id: String, title: String) {
+        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        threads[i].title = trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Delete a thread. Deleting a non-active thread just removes it. Deleting
+    /// the ACTIVE thread falls back to the most-recently-updated remaining
+    /// thread (loading its messages into the buffer); with nothing left, opens
+    /// a fresh new chat — `chatMessages` is cleared FIRST so `newChat()`'s
+    /// flush has nothing to (wrongly) resurrect from the just-deleted thread.
+    ///
+    /// No-op while a chat turn is in flight — gated for consistency with
+    /// `newChat()`/`switchThread(_:)` even though deleting a non-active thread
+    /// alone wouldn't repoint `chatMessages`: deleting the ACTIVE thread mid-
+    /// stream would, via the fallback/`newChat()` branches below.
+    func deleteThread(_ id: String) {
+        guard !isStreaming, !isCompanionTyping else { return }
+        threads.removeAll { $0.id == id }
+        guard id == activeThreadId else { return }
+        if let fallback = pickFallbackThreadId(after: id, in: threads) {
+            activeThreadId = fallback
+            chatMessages = threads.first(where: { $0.id == fallback })?.messages ?? []
+        } else {
+            chatMessages = []
+            newChat()
+        }
+    }
+
     /// Founder taps "Walk me through it" on a `.you` task (department card / Tasks
     /// board `yourMove` card / roadmap-map `needsYou` node) — byte can't run these,
     /// so instead of `runTask` (which would fabricate a deliverable) this composes a
@@ -426,6 +531,12 @@ final class CompanyStore: ObservableObject {
         }
         isCompanionTyping = false
         isStreaming = false
+        // Flush this turn into its thread — bumps `updatedAt` (re-sorts the thread
+        // list) and, on the very first turn, derives the thread's title + mints
+        // its id. Every early `return` above only fires on an account switch,
+        // where hydrate() already reset chatMessages/threads for the new account —
+        // nothing stale to flush there.
+        flushActiveThread()
     }
 
     /// If byte chose to run a runnable task, produce a draft deliverable inline —
@@ -695,6 +806,8 @@ final class CompanyStore: ObservableObject {
         isHydrating = false
         isOnboarding = false
         chatMessages = []
+        threads = []
+        activeThreadId = nil
         isCompanionTyping = false
         isStreaming = false
         runningTaskIds = []

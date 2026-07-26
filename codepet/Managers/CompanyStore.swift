@@ -13,6 +13,14 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isOnboarding: Bool = false
     @Published private(set) var chatMessages: [CopilotMessage] = []
     @Published private(set) var isCompanionTyping = false
+    /// True for the WHOLE duration of a chat send — from the placeholder's append
+    /// until the stream (or its fallback) fully completes. Unlike `isCompanionTyping`
+    /// (which flips off on the first delta, typing→streaming), this stays up while
+    /// tokens are still arriving, so the UI can keep Send disabled for the entire
+    /// stream instead of re-enabling mid-response. Reset alongside `isCompanionTyping`
+    /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
+    /// and `sendChat`'s unconditional tail) — never stuck true.
+    @Published private(set) var isStreaming = false
     @Published private(set) var runningTaskIds: Set<String> = []
     @Published private(set) var runError: String?
     @Published private(set) var isGeneratingRoadmap = false
@@ -26,6 +34,10 @@ final class CompanyStore: ObservableObject {
     private let roadmapFetcher: (CompanyBrief, AppLanguage) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
     private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
+    /// Streaming counterpart of `chatSender`, injectable the same way (tests
+    /// supply a synthetic `AsyncThrowingStream`). `chatSender` stays wired in
+    /// as `sendChat`'s fallback — see its doc comment.
+    private let chatStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error>
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
@@ -56,6 +68,7 @@ final class CompanyStore: ObservableObject {
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
+         chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { CompanyChatClient.sendStream($0) },
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
@@ -68,6 +81,7 @@ final class CompanyStore: ObservableObject {
         self.roadmapFetcher = roadmapFetcher
         self.tasksSaver = tasksSaver
         self.chatSender = chatSender
+        self.chatStreamer = chatStreamer
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
@@ -95,6 +109,7 @@ final class CompanyStore: ObservableObject {
         if self.companyId != companyId {
             chatMessages = []
             isCompanionTyping = false
+            isStreaming = false
             runningTaskIds = []
             runError = nil
         }
@@ -248,11 +263,32 @@ final class CompanyStore: ObservableObject {
         if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
     }
 
-    /// Send a founder message to the company companion (single reply, fail-open,
-    /// session-only). Token-guarded: an account switch mid-reply discards the reply.
+    /// Send a founder message to the company companion — streamed, with a graceful
+    /// fallback to the non-streaming client. Session-only. Token-guarded throughout:
+    /// an account switch at any await point (mid-stream or mid-fallback-reply)
+    /// discards this send's remaining work — hydrate/reset already cleared chat +
+    /// typing for a real switch, so a stale write is silently dropped rather than
+    /// landing in the new account's conversation.
+    ///
+    /// Flow: append the user message, append an EMPTY companion placeholder (stable
+    /// id), flip `isStreaming` on, then consume `chatStreamer`. Each `.delta` is
+    /// appended into the placeholder in place (found by id) — `isCompanionTyping`
+    /// flips off on the first token, mirroring `SessionChatController`'s
+    /// typing→streaming transition, while `isStreaming` stays true for the WHOLE
+    /// send (stream + any fallback) so the UI can keep Send disabled the entire
+    /// time. `.done` is a no-op: the placeholder already holds the full text.
+    ///
+    /// Fallback (REQUIRED for deploy-order safety): if the stream throws — network
+    /// failure, a non-200, an `event: error` frame, a typed `CompanyChatStreamError`
+    /// — OR it finishes clean but yielded no text at all (the shape the live CF
+    /// collapses to pre-deploy: a plain JSON body with no `event:`/`data:` lines
+    /// parses to zero SSE frames, so the stream just ends with nothing yielded),
+    /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
+    /// placeholder — preserving every existing semantic: the offline copy, the
+    /// runTaskId/draft-run chaining, and the account guard.
     func sendChat(_ raw: String, language: AppLanguage) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isCompanionTyping else { return }
+        guard !text.isEmpty, !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
         let history = chatMessages.dropLast().suffix(20).map {
@@ -263,30 +299,60 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
             history: Array(history), userMessage: text)
-        let reply = await chatSender(req)
-        // Apply only if we're still on the same account. A real account switch
-        // (companyId changed) already cleared chat + typing in hydrate/reset, so
-        // the stale reply is dropped and typing is never left stuck.
+
+        let placeholderId = UUID().uuidString
+        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
+        isStreaming = true
+
+        var streamedText = ""
+        var streamThrew = false
+        do {
+            for try await event in chatStreamer(req) {
+                // Checked before touching state on every event: a switch mid-stream
+                // must bail before writing into the (already-reset) new account.
+                guard companyId == cid else { return }
+                switch event {
+                case .delta(let chunk):
+                    if isCompanionTyping { isCompanionTyping = false }
+                    streamedText += chunk
+                    if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                        chatMessages[i].text = streamedText
+                    }
+                case .done:
+                    break
+                }
+            }
+        } catch {
+            streamThrew = true
+        }
         guard companyId == cid else { return }
-        let offline = language == .vi
-            ? "Mình không kết nối được lúc này — thử lại sau nhé."
-            : "I can't reach my brain right now — try again in a bit."
-        chatMessages.append(CopilotMessage(role: .companion, text: reply?.text ?? offline))
-        // If byte chose to run a runnable task, produce a draft deliverable inline.
-        if let runId = reply?.runTaskId,
-           let task = company.tasks.first(where: { $0.id == runId }),
-           RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo {
-            let result = await taskRunner(runRequest(for: task, language: language))
+
+        if streamThrew || streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let reply = await chatSender(req)
             guard companyId == cid else { return }
-            if let draft = buildDeliverable(from: result, task: task) {
-                chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
-            } else {
-                chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
-                    ? "Không tạo được ngay bây giờ — thử lại nhé."
-                    : "Couldn't generate that just now — try again."))
+            let offline = language == .vi
+                ? "Mình không kết nối được lúc này — thử lại sau nhé."
+                : "I can't reach my brain right now — try again in a bit."
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                chatMessages[i].text = reply?.text ?? offline
+            }
+            // If byte chose to run a runnable task, produce a draft deliverable inline.
+            if let runId = reply?.runTaskId,
+               let task = company.tasks.first(where: { $0.id == runId }),
+               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo {
+                let result = await taskRunner(runRequest(for: task, language: language))
+                guard companyId == cid else { return }
+                if let draft = buildDeliverable(from: result, task: task) {
+                    chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+                } else {
+                    chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                        ? "Không tạo được ngay bây giờ — thử lại nhé."
+                        : "Couldn't generate that just now — try again."))
+                }
             }
         }
         isCompanionTyping = false
+        isStreaming = false
     }
 
     /// Approve a chat draft: append it to the library (approved) + persist.
@@ -456,6 +522,7 @@ final class CompanyStore: ObservableObject {
         isOnboarding = false
         chatMessages = []
         isCompanionTyping = false
+        isStreaming = false
         runningTaskIds = []
         runError = nil
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an

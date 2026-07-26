@@ -20,7 +20,8 @@ struct CopilotChatView: View {
         return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
     }
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !companyStore.isCompanionTyping
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming
     }
 
     var body: some View {

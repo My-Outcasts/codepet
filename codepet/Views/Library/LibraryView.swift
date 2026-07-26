@@ -102,6 +102,10 @@ struct DeliverableDetailView: View {
                         PlanViewer(payload: deliverable.payload!)
                     case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
                         DmsViewer(messages: deliverable.payload!.messages!)
+                    case .calendar where deliverable.payload?.calendar != nil:
+                        CalendarViewer(payload: deliverable.payload!.calendar!)
+                    case .sheet where deliverable.payload?.sheet != nil:
+                        SheetViewer(payload: deliverable.payload!.sheet!)
                     case .legal:
                         LegalViewer(deliverable: deliverable)
                     case .post:

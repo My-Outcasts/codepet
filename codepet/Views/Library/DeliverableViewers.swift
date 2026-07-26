@@ -426,6 +426,208 @@ struct PostViewer: View {
     }
 }
 
+// MARK: - CalendarViewer
+
+/// Renders a calendar payload: for each `week`, a section with the week's
+/// `label`, then an adaptive grid of item cards — each showing `day`, a
+/// `kind` chip (mirrors DmsViewer's note-chip idiom), and the `body` line.
+/// Mirrors web's CalendarViewer (components/artifact/viewers.tsx) in spirit.
+struct CalendarViewer: View {
+    let payload: CalendarPayload
+
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(Array(payload.weeks.enumerated()), id: \.offset) { _, week in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(week.label)
+                        .font(.pixelSystem(size: 13, weight: .bold))
+                        .foregroundColor(CodepetTheme.primaryText)
+
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                        ForEach(Array(week.items.enumerated()), id: \.offset) { _, item in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Text(item.day)
+                                        .font(.pixelSystem(size: 11, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.mutedText)
+                                    Spacer()
+                                    Text(item.kind)
+                                        .font(.pixelSystem(size: 9, weight: .medium))
+                                        .foregroundColor(CodepetTheme.accentPurple)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                                }
+                                Text(item.body)
+                                    .font(.pixelSystem(size: 11))
+                                    .foregroundColor(CodepetTheme.bodyText)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .fill(CodepetTheme.surface)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - SheetViewer
+
+/// Renders a sheet payload as a live financial model: 4 range sliders (price,
+/// waitlist, conversion, churn) seeded from each `SheetInput.val`, ranged
+/// `min...max` and stepped `step`, driving a live recompute via
+/// `SheetModel.compute` — a Swift port of web's `computeSheetModel`
+/// (lib/ai/sheetModel.ts). Sliders are local `@State` only: this is a
+/// read-only deliverable, so nothing here is ever written back to the store.
+/// Also renders the payload's `summary` and a disclaimer footer, matching
+/// web's SheetViewer in spirit.
+struct SheetViewer: View {
+    @State private var price: Double
+    @State private var waitlist: Double
+    @State private var conversion: Double
+    @State private var churn: Double
+
+    private let priceRange: ClosedRange<Double>
+    private let priceStep: Double
+    private let waitlistRange: ClosedRange<Double>
+    private let waitlistStep: Double
+    private let conversionRange: ClosedRange<Double>
+    private let conversionStep: Double
+    private let churnRange: ClosedRange<Double>
+    private let churnStep: Double
+
+    private let summary: String?
+
+    @Environment(\.uiLanguage) private var lang
+
+    init(payload: SheetPayload) {
+        _price = State(initialValue: payload.price.val)
+        _waitlist = State(initialValue: payload.waitlist.val)
+        _conversion = State(initialValue: payload.conversion.val)
+        _churn = State(initialValue: payload.churn.val)
+        priceRange = Self.safeRange(payload.price)
+        priceStep = Swift.max(1, payload.price.step)
+        waitlistRange = Self.safeRange(payload.waitlist)
+        waitlistStep = Swift.max(1, payload.waitlist.step)
+        conversionRange = Self.safeRange(payload.conversion)
+        conversionStep = Swift.max(1, payload.conversion.step)
+        churnRange = Self.safeRange(payload.churn)
+        churnStep = Swift.max(1, payload.churn.step)
+        summary = payload.summary
+    }
+
+    /// A degenerate range (max ≤ min, as could arrive from a malformed payload)
+    /// would crash SwiftUI's `Slider`; fall back to a 1-wide range instead.
+    private static func safeRange(_ input: SheetInput) -> ClosedRange<Double> {
+        input.min < input.max ? input.min...input.max : input.min...(input.min + 1)
+    }
+
+    private var model: SheetModel {
+        SheetModel.compute(price: price, waitlist: waitlist, conversion: conversion, churn: churn)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                sliderRow(lang == .vi ? "Giá gói Pro / tháng" : "Pro price / mo",
+                          value: $price, range: priceRange, step: priceStep,
+                          display: "$\(Int(price.rounded()))")
+                sliderRow(lang == .vi ? "Danh sách chờ" : "Waitlist size",
+                          value: $waitlist, range: waitlistRange, step: waitlistStep,
+                          display: "\(Int(waitlist.rounded()))")
+                sliderRow(lang == .vi ? "Chờ → trả phí" : "Waitlist → paid",
+                          value: $conversion, range: conversionRange, step: conversionStep,
+                          display: "\(Int(conversion.rounded()))%")
+                sliderRow(lang == .vi ? "Rời bỏ hàng tháng" : "Monthly churn",
+                          value: $churn, range: churnRange, step: churnStep,
+                          display: "\(Int(churn.rounded()))%")
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                    .fill(CodepetTheme.surface)
+            )
+            .codepetShadow(CodepetTheme.cardShadow)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                outCell(lang == .vi ? "Người dùng trả phí" : "Paid users", value: "\(model.paid)")
+                outCell(lang == .vi ? "MRR khởi điểm" : "Seed MRR", value: fmtCurrency(model.mrr), hero: true)
+                outCell(lang == .vi ? "ARR ước tính" : "Run-rate ARR", value: fmtCurrency(model.arr))
+                outCell(lang == .vi ? "LTV / người dùng" : "LTV / user", value: fmtCurrency(Double(model.ltv)))
+                outCell(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life", value: "\(model.life)mo")
+                outCell(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users", value: "\(model.breakeven)")
+            }
+
+            if let summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.pixelSystem(size: 12))
+                    .foregroundColor(CodepetTheme.bodyText)
+            }
+
+            Text(lang == .vi
+                 ? "Dự báo do Codepet soạn từ dữ liệu bạn nhập — không phải tư vấn tài chính. Hãy kiểm chứng trước khi dựa vào."
+                 : "Projections Codepet drafted from your inputs — not financial advice. Verify the figures before you rely on them.")
+                .font(.pixelSystem(size: 11))
+                .foregroundColor(CodepetTheme.mutedText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
+                            step: Double, display: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(.pixelSystem(size: 12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+                Spacer()
+                Text(display)
+                    .font(.pixelSystem(size: 12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+            }
+            Slider(value: value, in: range, step: step)
+                .tint(CodepetTheme.accentPurple)
+        }
+    }
+
+    private func outCell(_ label: String, value: String, hero: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.pixelSystem(size: 10, weight: .medium))
+                .foregroundColor(CodepetTheme.mutedText)
+            Text(value)
+                .font(.pixelSystem(size: hero ? 16 : 14, weight: .bold))
+                .foregroundColor(hero ? CodepetTheme.accentPurple : CodepetTheme.primaryText)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                .fill(CodepetTheme.surface)
+        )
+    }
+
+    /// Ports web's `fmt` helper (lib/helpers.ts): `$1.4k` above 1000, plain
+    /// dollars below — a bare integer when the rounded value has no fractional
+    /// part (matching JS Number stringification dropping a trailing `.0`).
+    private func fmtCurrency(_ n: Double) -> String {
+        guard n >= 1000 else { return "$\(Int(n.rounded()))" }
+        let k = (n / 100).rounded() / 10
+        if k == k.rounded() {
+            return "$\(Int(k))k"
+        }
+        return "$\(String(format: "%.1f", k))k"
+    }
+}
+
 // MARK: - EmailViewer
 
 /// Renders an `.email` deliverable as an email-client chrome: a header bar

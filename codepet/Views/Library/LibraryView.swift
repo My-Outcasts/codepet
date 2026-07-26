@@ -106,6 +106,10 @@ struct DeliverableDetailView: View {
                         CalendarViewer(payload: deliverable.payload!.calendar!)
                     case .sheet where deliverable.payload?.sheet != nil:
                         SheetViewer(payload: deliverable.payload!.sheet!)
+                    case .site where deliverable.payload?.site != nil:
+                        SiteViewer(payload: deliverable.payload!.site!)
+                    case .screens where deliverable.payload?.screens != nil:
+                        ScreensViewer(payload: deliverable.payload!.screens!)
                     case .legal:
                         LegalViewer(deliverable: deliverable)
                     case .post:

@@ -18,7 +18,7 @@ struct AppRailView: View {
                 .frame(height: 40)
             ForEach(AppView.navTabs) { item($0) }
             Spacer()
-            AccountMenuView().padding(.bottom, 10)
+            AccountMenuView(compact: true).padding(.bottom, 10)
         }
         .frame(width: Self.width)
         .padding(.top, 8)

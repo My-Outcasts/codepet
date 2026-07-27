@@ -5,7 +5,6 @@ import SwiftUI
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
-    @State private var draft = ""
     @FocusState private var inputFocused: Bool
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
@@ -23,7 +22,7 @@ struct CopilotChatView: View {
         return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
     }
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
     }
     /// True while a chat turn is in flight — gates the History toggle here and
@@ -140,7 +139,7 @@ struct CopilotChatView: View {
     private var inputBar: some View {
         HStack(spacing: 8) {
             TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
-                      text: $draft, axis: .vertical)
+                      text: $companyStore.chatDraft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(CodepetTheme.inter(12))
                 .lineLimit(1...4)
@@ -159,8 +158,8 @@ struct CopilotChatView: View {
 
     private func send() {
         guard canSend else { return }
-        let text = draft
-        draft = ""
+        let text = companyStore.chatDraft
+        companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
         Task { await companyStore.sendChat(text, language: lang) }
     }

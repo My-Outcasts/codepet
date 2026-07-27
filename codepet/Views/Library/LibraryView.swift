@@ -186,19 +186,21 @@ struct LibraryView: View {
 
     private func chip(_ label: String, count: Int, key: String) -> some View {
         let on = activeFilter == key
-        return HStack(spacing: 5) {
-            Text(label).font(.pixelSystem(size: 11, weight: .semibold))
-            Text("\(count)")
-                .font(.pixelSystem(size: 10, weight: .bold))
-                .foregroundColor(on ? Color.white.opacity(0.85) : CodepetTheme.mutedText)
+        return Button { filter = key } label: {
+            HStack(spacing: 5) {
+                Text(label).font(.pixelSystem(size: 11, weight: .semibold))
+                Text("\(count)")
+                    .font(.pixelSystem(size: 10, weight: .bold))
+                    .foregroundColor(on ? Color.white.opacity(0.85) : CodepetTheme.mutedText)
+            }
+            .foregroundColor(on ? .white : CodepetTheme.bodyText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(on ? CodepetTheme.accentPurple : CodepetTheme.surface))
+            .overlay(Capsule().stroke(on ? Color.clear : CodepetTheme.hairline, lineWidth: 1))
+            .contentShape(Capsule())
         }
-        .foregroundColor(on ? .white : CodepetTheme.bodyText)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(on ? CodepetTheme.accentPurple : CodepetTheme.surface))
-        .overlay(Capsule().stroke(on ? Color.clear : CodepetTheme.hairline, lineWidth: 1))
-        .contentShape(Capsule())
-        .onTapGesture { filter = key }
+        .buttonStyle(.plain)
     }
 
     // MARK: Department group

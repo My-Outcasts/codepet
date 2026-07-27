@@ -13,11 +13,12 @@ struct ChatComposer: View {
     var canSend: Bool
     var focus: FocusState<Bool>.Binding
     var placeholder: String
-    var quickActions: [String]
+    var quickActions: [QuickAction]
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
 
     @Environment(\.uiLanguage) private var lang
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -45,12 +46,17 @@ struct ChatComposer: View {
                 .stroke(CodepetTheme.hairline)
         )
         .codepetShadow(CodepetTheme.floatingShadow)
+        .shadow(color: reduceTransparency ? .clear : CodepetTheme.accentPurple.opacity(0.22), radius: 22)
     }
 
     private var quickActionsMenu: some View {
         Menu {
-            ForEach(quickActions, id: \.self) { qa in
-                Button(qa) { onQuickAction(qa) }
+            ForEach(quickActions) { qa in
+                Button {
+                    onQuickAction(qa.title)
+                } label: {
+                    Label(qa.title, systemImage: qa.systemImage)
+                }
             }
         } label: {
             Image(systemName: "plus")
@@ -101,7 +107,14 @@ struct ChatComposer: View {
                 .foregroundColor(.white)
                 .frame(width: 34, height: 34)
                 .background(
-                    Circle().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                    Circle().fill(
+                        canSend
+                            ? AnyShapeStyle(LinearGradient(
+                                gradient: Gradient(colors: [CodepetTheme.accentPurple, CodepetTheme.accentPink]),
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            : AnyShapeStyle(CodepetTheme.mutedText)
+                    )
+                    .shadow(color: canSend ? CodepetTheme.accentPurple.opacity(0.55) : .clear, radius: 10)
                 )
         }
         .buttonStyle(.plain)
@@ -119,7 +132,10 @@ private struct ChatComposerPreviewHost: View {
             draft: $draft, mode: $mode, canSend: !draft.isEmpty,
             focus: $focused,
             placeholder: "Ask anything about your company…",
-            quickActions: ["Run a task", "Review the roadmap"],
+            quickActions: [
+                QuickAction(title: "Run a task", systemImage: "checklist"),
+                QuickAction(title: "Review the roadmap", systemImage: "map"),
+            ],
             onSend: {}, onQuickAction: { _ in }
         )
         .frame(width: 640)

@@ -1,5 +1,6 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
+import AppKit
 
 /// The Copilot column: a company-grounded chat with the founder's companion.
 struct CopilotChatView: View {
@@ -98,9 +99,12 @@ struct CopilotChatView: View {
     }
 
     private var typingRow: some View {
-        Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is typing…")
-            .font(.pixelSystem(size: 11))
-            .foregroundColor(CodepetTheme.mutedText)
+        HStack(spacing: 10) {
+            CompanionOrb(size: 28, glow: false)
+            Text(lang == .vi ? "Đang suy nghĩ…" : "Thinking…")
+                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.mutedText)
+            Spacer(minLength: 24)
+        }
     }
 
     /// The one composer instance, reused in the empty hero and docked in an
@@ -125,12 +129,14 @@ struct CopilotChatView: View {
             : "Ask \(companionName) anything about your company…"
     }
 
-    /// Capability quick-actions — the strings are complete intents, so they are
+    /// Capability quick-actions — the titles are complete intents, so they are
     /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`.
-    private var quickActions: [String] {
-        lang == .vi
-            ? ["Chạy một tác vụ", "Xem lộ trình", "Thiết lập một phòng ban", "Tóm tắt tình hình công ty"]
-            : ["Run a task", "Review the roadmap", "Set up a department", "Summarize where we are"]
+    private var quickActions: [QuickAction] {
+        let en = ["Run a task", "Review the roadmap", "Set up a department", "Summarize where we are"]
+        let vi = ["Chạy một tác vụ", "Xem lộ trình", "Thiết lập một phòng ban", "Tóm tắt tình hình công ty"]
+        let icons = ["checklist", "map", "square.grid.2x2", "doc.text"]
+        let titles = lang == .vi ? vi : en
+        return zip(titles, icons).map { QuickAction(title: $0.0, systemImage: $0.1) }
     }
 
     /// Send a canned capability prompt through the normal chat path. Bypasses
@@ -473,6 +479,7 @@ struct CopilotBubble: View {
     /// before appending the real reply, so it's always transient.
     private var producingRow: some View {
         HStack {
+            CompanionOrb(size: 28, glow: false)
             Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
                 .font(.pixelSystem(size: 11))
                 .foregroundColor(CodepetTheme.mutedText)
@@ -481,18 +488,63 @@ struct CopilotBubble: View {
     }
 
     private var textBubble: some View {
-        HStack {
-            if isMe { Spacer(minLength: 24) }
-            Text(message.text)
-                .font(.pixelSystem(size: 12))
-                .foregroundColor(isMe ? .white : CodepetTheme.primaryText)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isMe ? CodepetTheme.accentPurple : CodepetTheme.surface))
-                .fixedSize(horizontal: false, vertical: true)
-            if !isMe { Spacer(minLength: 24) }
+        Group {
+            if isMe {
+                HStack {
+                    Spacer(minLength: 24)
+                    Text(message.text)
+                        .font(.pixelSystem(size: 12))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(CodepetTheme.accentPurple))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    CompanionOrb(size: 28, glow: false)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(message.text)
+                            .font(.pixelSystem(size: 12))
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(CodepetTheme.surface))
+                            .fixedSize(horizontal: false, vertical: true)
+                        companionActions
+                    }
+                    Spacer(minLength: 24)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+    }
+
+    /// Copy + Regenerate on a companion text bubble. Regenerate is a pure
+    /// client-side resend of the last `me` message through the normal chat
+    /// path — no backend "regenerate" endpoint exists.
+    private var companionActions: some View {
+        HStack(spacing: 14) {
+            Button { copyText() } label: {
+                Image(systemName: "doc.on.doc").font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            Button { regenerate() } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+        }
+    }
+
+    private func copyText() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text, forType: .string)
+    }
+
+    private func regenerate() {
+        guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
+        guard let lastUser = companyStore.chatMessages.last(where: { $0.role == .me })?.text else { return }
+        Task { await companyStore.sendChat(lastUser, language: lang) }
     }
 
     private func draftCard(_ d: Deliverable) -> some View {

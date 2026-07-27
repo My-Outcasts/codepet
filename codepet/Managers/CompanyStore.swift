@@ -7,7 +7,7 @@ import Combine
 /// role as the top-level store (ProjectStore/reflection are being retired).
 @MainActor
 final class CompanyStore: ObservableObject {
-    @Published var view: AppView = .overview
+    @Published var view: AppView = .chat
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false

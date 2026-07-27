@@ -4,9 +4,20 @@ import XCTest
 final class AppViewTests: XCTestCase {
     func testCoversAllAppDestinations() {
         XCTAssertEqual(AppView.allCases.map(\.rawValue),
-                       ["overview", "summary", "company", "roadmap", "tasks", "library",
-                        "environment", "settings", "billing", "support"])
+                       ["chat", "roadmap", "secondBrain", "tasks", "library",
+                        "environment", "company", "settings", "billing", "support"])
     }
+
+    func testRailShowsSixDestinationsInOrder() {
+        XCTAssertEqual(AppView.navTabs, [.chat, .roadmap, .secondBrain, .tasks, .library, .environment])
+    }
+
+    func testRoadmapNavDestinationResolvesToRoadmapNotOverview() {
+        XCTAssertEqual(AppView.from(navDestination: "roadmap"), .roadmap)
+        XCTAssertEqual(AppView.from(navDestination: "department"), .company)
+        XCTAssertNil(AppView.from(navDestination: "nope"))
+    }
+
     func testEveryCaseHasTitleAndIcon() {
         for v in AppView.allCases {
             XCTAssertFalse(v.title(.en).isEmpty)

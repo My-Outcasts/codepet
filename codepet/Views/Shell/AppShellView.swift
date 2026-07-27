@@ -33,11 +33,7 @@ struct AppShellView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if companyStore.view == .summary {
-            SummaryView()
-        } else if companyStore.view == .overview {
-            OverviewView()
-        } else if companyStore.view == .company {
+        if companyStore.view == .company {
             if let dept = companyStore.selectedDeptKey {
                 DepartmentDetailView(deptKey: dept, onBack: { companyStore.selectedDeptKey = nil })
             } else {

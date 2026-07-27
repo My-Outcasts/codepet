@@ -393,6 +393,9 @@ Relocates Overview's chrome. `progressCard`, `beaconCard`, `legend` and `mapIntr
 - Create: `codepet/Views/Roadmap/RoadmapView.swift`
 - Move: `codepet/Views/Overview/RoadmapMapView.swift` → `codepet/Views/Roadmap/RoadmapMapView.swift`
 - Move: `codepet/Views/Overview/TaskCardView.swift` → `codepet/Views/Roadmap/TaskCardView.swift`
+- Delete: `codepet/Views/Overview/OverviewView.swift`
+
+`RoadmapView` supersedes `OverviewView`, and Task 1 already removed the `.overview` branch from `AppShellView`, so `OverviewView` is unreferenced by the time this task starts. It is deleted here, in the same commit, so this is a move rather than a copy — leaving both files in place would put ~250 duplicated lines on the branch for three tasks.
 
 **Interfaces:**
 - Consumes: `RoadmapDispatch` (Task 2); `RoadmapEngine.progressPercent(_:)`, `.nextStep(_:)`, `.status(for:in:)`, `.deliverable(for:in:)`; `taskStatusTint(_:)`; `RoadmapMapView(tasks:)`; `DeliverableDetailView(deliverable:)`; `RoadmapPhase.allCases` / `.label(_:)`; `CompanyStore.runTask/walkThroughTask/approveTask/generateRoadmap/select`
@@ -629,21 +632,29 @@ struct RoadmapView: View {
 }
 ```
 
-- [ ] **Step 3: Build to verify it compiles**
+- [ ] **Step 3: Delete the superseded page**
+
+`OverviewView` is unreferenced from Task 1 onward, and `RoadmapView` now carries its chrome. Remove it in this commit so the change reads as a move:
+
+```bash
+cd ~/Developer/codepet && git rm -q codepet/Views/Overview/OverviewView.swift
+```
+
+- [ ] **Step 4: Build to verify it compiles**
 
 ```bash
 cd ~/Developer/codepet && xcodebuild -project CodePet.xcodeproj -scheme codepet \
   -configuration Debug -destination 'platform=macOS,arch=arm64' build 2>&1 | tail -5
 ```
 
-Expected: `** BUILD SUCCEEDED **`. If it fails on `RoadmapMapView` not found, the `git mv` in Step 1 did not complete — re-run it.
+Expected: `** BUILD SUCCEEDED **`. If it fails on `RoadmapMapView` not found, the `git mv` in Step 1 did not complete — re-run it. If it fails on `OverviewView` not found, something still references it — find it with `grep -rn OverviewView codepet` and stop; that reference should have gone in Task 1.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 cd ~/Developer/codepet
-git add codepet/Views/Roadmap
-git commit -m "feat: add Roadmap page carrying Overview's chrome"
+git add -A codepet/Views/Roadmap codepet/Views/Overview
+git commit -m "feat: replace Overview page with a standalone Roadmap page"
 ```
 
 ---
@@ -847,11 +858,12 @@ git commit -m "feat: rail-based shell with chat as the full-width default surfac
 ### Task 7: Delete the retired surfaces
 
 **Files:**
-- Delete: `codepet/Views/Overview/OverviewView.swift`, `OverviewBoardView.swift`, `RoadmapHeaderView.swift`, `PhaseColumnView.swift`
+- Delete: `codepet/Views/Overview/OverviewBoardView.swift`, `RoadmapHeaderView.swift`, `PhaseColumnView.swift`
 - Delete: `codepet/Views/Summary/SummaryView.swift`, `codepet/Models/SummaryData.swift`, `codepetTests/SummaryDataTests.swift`
-- Modify: `project.yml`
 
-**Interfaces:** none produced; removes `OverviewView`, `SummaryView`, `SummaryData`.
+`OverviewView.swift` was already deleted in Task 4. The three files above it are dead code that predates this work — they are unreachable from the shipping shell today.
+
+**Interfaces:** none produced; removes `SummaryView`, `SummaryData`.
 
 - [ ] **Step 1: Confirm nothing still references them**
 
@@ -867,8 +879,7 @@ Expected: no output. Any hit must be resolved before deleting.
 
 ```bash
 cd ~/Developer/codepet
-git rm -q codepet/Views/Overview/OverviewView.swift \
-          codepet/Views/Overview/OverviewBoardView.swift \
+git rm -q codepet/Views/Overview/OverviewBoardView.swift \
           codepet/Views/Overview/RoadmapHeaderView.swift \
           codepet/Views/Overview/PhaseColumnView.swift \
           codepet/Views/Summary/SummaryView.swift \

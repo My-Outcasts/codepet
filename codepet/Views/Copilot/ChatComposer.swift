@@ -62,7 +62,8 @@ struct ChatComposer: View {
                         .stroke(CodepetTheme.hairline)
                 )
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
     }
@@ -87,7 +88,8 @@ struct ChatComposer: View {
                     .stroke(CodepetTheme.hairline)
             )
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
     }

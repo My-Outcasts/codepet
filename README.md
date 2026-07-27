@@ -4,12 +4,12 @@
 guides you through learning to build with agentic coding tools — 7 characters, 16 skills,
 one journey.
 
-> Native SwiftUI app for macOS 13+. Built with Firebase (Auth + Firestore).
+> Native SwiftUI app for macOS 26.2+. Built with Firebase (Auth + Firestore).
 
 ## Requirements
 
-- macOS 13 or later
-- Xcode 15 or later
+- macOS 26.2 or later
+- Xcode 16 or later (verified on 26.4)
 - A Firebase project (the bundled `GoogleService-Info.plist` points at the Codepet project)
 
 ## Build & run

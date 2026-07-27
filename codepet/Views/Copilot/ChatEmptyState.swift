@@ -23,7 +23,7 @@ struct ChatEmptyState<Composer: View>: View {
                 .padding(.horizontal, 24)
 
             composer
-                .frame(maxWidth: 680)
+                .frame(maxWidth: 720)
 
             pills
         }
@@ -85,7 +85,7 @@ struct ChatEmptyState<Composer: View>: View {
         ],
         onQuickAction: { _ in }
     ) {
-        RoundedRectangle(cornerRadius: 16).fill(CodepetTheme.surface).frame(height: 96).frame(maxWidth: 680)
+        RoundedRectangle(cornerRadius: 16).fill(CodepetTheme.surface).frame(height: 96).frame(maxWidth: 720)
     }
     .frame(width: 900, height: 620)
 }

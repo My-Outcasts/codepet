@@ -48,7 +48,12 @@ struct CopilotChatView: View {
             } else {
                 messageList
                 Divider()
-                composerView.padding(10)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    composerView.padding(10).frame(maxWidth: 720)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxHeight: .infinity)
@@ -80,14 +85,19 @@ struct CopilotChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(companyStore.chatMessages) { m in
-                        CopilotBubble(message: m).id(m.id)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(companyStore.chatMessages) { m in
+                            CopilotBubble(message: m).id(m.id)
+                        }
+                        if companyStore.isCompanionTyping { typingRow.id("typing") }
                     }
-                    if companyStore.isCompanionTyping { typingRow.id("typing") }
+                    .padding(12)
+                    .frame(maxWidth: 720, alignment: .leading)
+                    Spacer(minLength: 0)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }

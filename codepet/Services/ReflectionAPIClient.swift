@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseCore
 
 // MARK: - DTOs
 
@@ -688,7 +689,11 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
             guard !ServerLoggingGate.isOptedOut else {
                 throw ReflectionAPIError.optedOut
             }
-            guard let user = Auth.auth().currentUser else {
+            // `Auth.auth()` fatal-errors when the default FirebaseApp isn't
+            // configured (e.g. this provider is invoked at launch under XCTest,
+            // where configure() is skipped). Treat unconfigured as "not signed
+            // in" so the pipeline degrades instead of crashing the process.
+            guard FirebaseApp.app() != nil, let user = Auth.auth().currentUser else {
                 throw ReflectionAPIError.notSignedIn
             }
             do {

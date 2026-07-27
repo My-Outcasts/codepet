@@ -1,10 +1,12 @@
 // codepet/Views/Shell/AppShellView.swift
 import SwiftUI
 
-/// The app's top-level shell — a native port of the web AppRoot: a sidebar of
-/// AppView destinations, a content area switching on the store's view, and a
-/// (placeholder) Copilot panel. Styled in CodepetTheme; the selected item and
-/// accents follow the active companion's color.
+/// The app's top-level shell — a left navigation rail (`AppRailView`), a slim top
+/// bar carrying the current destination's name plus the wake pill and Upgrade
+/// button, and a content area switching on the store's view. Chat is the default
+/// destination and occupies the full content area; it is no longer a docked panel.
+/// Styled in CodepetTheme; the rail's selected item and accents follow the active
+/// companion's color.
 struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState

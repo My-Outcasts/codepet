@@ -72,11 +72,14 @@ struct RoadmapView: View {
         }
     }
 
+    // The second founder task that needs input, for the beacon's "Also needs you" line.
     private var alsoNeedsYou: RoadmapTask? {
         tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != beacon?.id }.first
     }
 
-    /// Routes a task tap through the pure rule, then follows streaming actions to chat.
+    /// Route a task tap through the pure `RoadmapDispatch` rule, then follow the two
+    /// streaming actions (run, walk-through) to chat, where their output appears.
+    /// Approve and open-deliverable resolve in place and do not navigate.
     private func dispatch(_ task: RoadmapTask) {
         let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks))
         switch action {
@@ -156,6 +159,10 @@ struct RoadmapView: View {
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(CodepetTheme.accentPurple.opacity(0.3), lineWidth: 1))
     }
 
+    // The beacon dot's continuous radar-ping (web: `beaconPing` keyframe — a ring
+    // scaling 1→2.9 while fading .5→0, looping). A plain ring behind the solid dot,
+    // driven by local `@State` toggled once in `onAppear`; `repeatForever` handles
+    // the loop, so there's nothing to invalidate/tear down.
     private var beaconPingDot: some View {
         ZStack {
             Circle().fill(CodepetTheme.accentPurple)
@@ -171,6 +178,8 @@ struct RoadmapView: View {
         }
     }
 
+    // Reopens the "how to read this map" briefing (web: OverviewSection.tsx openIntro),
+    // showing current phase status + the KEY legend already computed below.
     private var mapIntroBriefing: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")

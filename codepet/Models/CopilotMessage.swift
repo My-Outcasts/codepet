@@ -31,13 +31,17 @@ struct CopilotMessage: Identifiable, Equatable {
     /// Transient "Noted" fact(s) from `.done`'s `remember` action. Memory is already
     /// merged + persisted by the time this renders (auto, not approval-gated).
     var noted: [RememberedFact]?
+    /// True for the transient "producing…" placeholder appended by
+    /// `CompanyStore.handleRunTaskId` while a chat-initiated `run_task` is in
+    /// flight — removed (never persisted) once the run resolves, win or lose.
+    var producing: Bool
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
-         noted: [RememberedFact]? = nil) {
+         noted: [RememberedFact]? = nil, producing: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
@@ -50,5 +54,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.navChip = navChip
         self.setupSuggestion = setupSuggestion
         self.noted = noted
+        self.producing = producing
     }
 }

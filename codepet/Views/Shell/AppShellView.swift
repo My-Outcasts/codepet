@@ -1,18 +1,15 @@
 // codepet/Views/Shell/AppShellView.swift
 import SwiftUI
 
-/// The app's top-level shell — a native port of the web AppRoot: a sidebar of
-/// AppView destinations, a content area switching on the store's view, and a
-/// (placeholder) Copilot panel. Styled in CodepetTheme; the selected item and
-/// accents follow the active companion's color.
+/// The app's top-level shell — a native port of the web AppRoot: the left
+/// `SidebarView` (brand, New chat, Recent, Workspace nav, Upgrade/account) and a
+/// full-width content area switching on the store's view (chat is the default).
+/// Styled in CodepetTheme.
 struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
-    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
 
     @State private var sidebarCollapsed = false
-
-    private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
 
     var body: some View {
         HStack(spacing: 0) {

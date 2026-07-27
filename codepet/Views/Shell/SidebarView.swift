@@ -7,16 +7,15 @@ import SwiftUI
 /// top-bar tabs), and a pinned Upgrade/account footer. Native port of the
 /// purple-brand mock (`scratchpad/chat-v4-sidebar.png`).
 ///
-/// NOT WIRED YET — `AppShellView` still renders its own top bar; SB-2 swaps
-/// the shell layout to place this view alongside `content`. SB-1 only adds
-/// this file so it can be reviewed/built in isolation.
+/// Wired in `AppShellView`, which renders this view alongside the full-width
+/// `content` and owns the `collapsed` state (see the `collapsed` binding below).
 struct SidebarView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
-    /// Collapse affordance — SB-2 will own the real binding (hosted in
-    /// `AppShellView`'s `@State`); the chevron here just flips whatever is
-    /// passed in.
+    /// Collapse affordance — the real binding is hosted in `AppShellView`'s
+    /// `@State sidebarCollapsed`; the chevron here just flips it (the shell then
+    /// hides this view and shows a reveal button over the content).
     @Binding var collapsed: Bool
 
     @State private var renamingId: String?
@@ -228,7 +227,12 @@ struct SidebarView: View {
                             .font(.system(size: 11))
                             .foregroundColor(CodepetTheme.mutedText)
                     }
-                    .menuStyle(.borderlessButton)
+                    // .button + .plain (not .borderlessButton) so macOS doesn't
+                    // append a system disclosure chevron next to the ellipsis —
+                    // same fix as the composer menus (df83ef8).
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
                     .frame(width: 18)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 7)

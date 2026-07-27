@@ -581,8 +581,9 @@ struct CopilotBubble: View {
 
 /// The 3 one-tap revise chips on a draft card: a targeted re-run (vs. Redo's blind
 /// re-run) that threads a short instruction + the draft's current body into the
-/// RunTaskRequest so the CF revises in place.
-private enum ReviseKind: CaseIterable {
+/// RunTaskRequest so the CF revises in place. Internal (not private) so the Tasks
+/// draft-preview sheet reuses the exact same labels/notes.
+enum ReviseKind: CaseIterable {
     case shorter, moreDetail, punchier
 
     /// Chip label (short, matches Approve/Redo's terse pill style).

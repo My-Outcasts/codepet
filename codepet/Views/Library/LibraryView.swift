@@ -526,40 +526,49 @@ struct DeliverableDetailView: View {
             .padding(16)
             Divider()
             ScrollView {
-                Group {
-                    switch deliverable.kind {
-                    case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):
-                        ChecklistViewer(items: deliverable.payload!.items!)
-                    case .doc where !(deliverable.payload?.call?.isEmpty ?? true):
-                        DocViewer(call: deliverable.payload!.call!,
-                                  sections: deliverable.payload?.sections ?? [],
-                                  next: deliverable.payload?.next ?? [])
-                    case .plan where !(deliverable.payload?.goal?.isEmpty ?? true):
-                        PlanViewer(payload: deliverable.payload!)
-                    case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
-                        DmsViewer(messages: deliverable.payload!.messages!)
-                    case .calendar where deliverable.payload?.calendar != nil:
-                        CalendarViewer(payload: deliverable.payload!.calendar!)
-                    case .sheet where deliverable.payload?.sheet != nil:
-                        SheetViewer(payload: deliverable.payload!.sheet!)
-                    case .site where deliverable.payload?.site != nil:
-                        SiteViewer(payload: deliverable.payload!.site!)
-                    case .screens where deliverable.payload?.screens != nil:
-                        ScreensViewer(payload: deliverable.payload!.screens!)
-                    case .legal:
-                        LegalViewer(deliverable: deliverable)
-                    case .post:
-                        PostViewer(deliverable: deliverable)
-                    case .email:
-                        EmailViewer(deliverable: deliverable)
-                    default:
-                        MarkdownView(markdown: deliverable.body)
-                    }
-                }
-                .padding(16)
+                DeliverableBodyView(deliverable: deliverable).padding(16)
             }
         }
         .frame(minWidth: 460, minHeight: 420)
         .background(CodepetTheme.pageBackground)
+    }
+}
+
+/// The typed body rendering for a deliverable — the kind→viewer dispatch shared by
+/// the Library's detail sheet and the Tasks draft-preview sheet, so both render every
+/// deliverable kind identically without duplicating the switch.
+struct DeliverableBodyView: View {
+    let deliverable: Deliverable
+    var body: some View {
+        Group {
+            switch deliverable.kind {
+            case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):
+                ChecklistViewer(items: deliverable.payload!.items!)
+            case .doc where !(deliverable.payload?.call?.isEmpty ?? true):
+                DocViewer(call: deliverable.payload!.call!,
+                          sections: deliverable.payload?.sections ?? [],
+                          next: deliverable.payload?.next ?? [])
+            case .plan where !(deliverable.payload?.goal?.isEmpty ?? true):
+                PlanViewer(payload: deliverable.payload!)
+            case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
+                DmsViewer(messages: deliverable.payload!.messages!)
+            case .calendar where deliverable.payload?.calendar != nil:
+                CalendarViewer(payload: deliverable.payload!.calendar!)
+            case .sheet where deliverable.payload?.sheet != nil:
+                SheetViewer(payload: deliverable.payload!.sheet!)
+            case .site where deliverable.payload?.site != nil:
+                SiteViewer(payload: deliverable.payload!.site!)
+            case .screens where deliverable.payload?.screens != nil:
+                ScreensViewer(payload: deliverable.payload!.screens!)
+            case .legal:
+                LegalViewer(deliverable: deliverable)
+            case .post:
+                PostViewer(deliverable: deliverable)
+            case .email:
+                EmailViewer(deliverable: deliverable)
+            default:
+                MarkdownView(markdown: deliverable.body)
+            }
+        }
     }
 }

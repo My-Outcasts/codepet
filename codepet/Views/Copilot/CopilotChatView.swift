@@ -9,9 +9,6 @@ struct CopilotChatView: View {
     @State private var draft = ""
     @State private var mode: ChatMode = .ask
     @FocusState private var inputFocused: Bool
-    /// Toggles the "History" thread switcher over the message list. Session-only
-    /// UI state — the History stub (see the header) now activates this.
-    @State private var showHistory = false
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
@@ -43,22 +40,10 @@ struct CopilotChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
     }
-    /// True while a chat turn is in flight — gates the History toggle here and
-    /// (via `ThreadListView`'s own copy of this) the "New chat"/switch/delete
-    /// row controls, so the UI can't trigger a mid-stream thread repoint even
-    /// though `CompanyStore` also guards it at the source. Mirrors `canSend`'s
-    /// existing streaming gate.
-    private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
-    }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            if showHistory {
-                ThreadListView(showHistory: $showHistory)
-            } else if companyStore.chatMessages.isEmpty {
+            if companyStore.chatMessages.isEmpty {
                 ChatEmptyState(line1: greetingLine1,
                                line2: greetingLine2,
                                quickActions: quickActions,
@@ -68,38 +53,10 @@ struct CopilotChatView: View {
             } else {
                 messageList
                 Divider()
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    composerView.padding(10).frame(maxWidth: 720)
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity)
+                composerView.padding(10)
             }
         }
         .frame(maxHeight: .infinity)
-    }
-
-    // Web Copilot header: "Your team" + "guiding · {company}" + History toggle
-    // (was an inert stub — now opens/closes the thread switcher below).
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(lang == .vi ? "Đội của bạn" : "Your team")
-                    .font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
-                Text((lang == .vi ? "đang hỗ trợ · " : "guiding · ") + companyName)
-                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
-            }
-            Spacer()
-            Button { showHistory.toggle() } label: {
-                Text(lang == .vi ? "Lịch sử" : "History")
-                    .font(CodepetTheme.inter(11, weight: .medium))
-                    .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
-                                     : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-            }
-            .buttonStyle(.plain)
-            .disabled(isChatBusy)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
     private var messageList: some View {
@@ -189,7 +146,6 @@ struct CopilotChatView: View {
     /// mode-shaping (the string already expresses the intent). Guarded like send.
     private func runQuickAction(_ text: String) {
         guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
-        showHistory = false
         Task { await companyStore.sendChat(text, language: lang) }
     }
 
@@ -197,145 +153,11 @@ struct CopilotChatView: View {
         guard canSend else { return }
         let text = mode.shape(draft, language: lang)
         draft = ""
-        showHistory = false   // sending always returns to the live conversation
         Task { await companyStore.sendChat(text, language: lang) }
         // Re-assert focus: the composer moves between the empty-state and docked
         // `if/else` branches once `chatMessages` goes empty→non-empty, so SwiftUI
         // rebuilds the TextField and drops focus after the first send.
         inputFocused = true
-    }
-}
-
-/// The "History" panel: session-only multi-thread switcher — "+ New chat", one
-/// row per thread (title/relative time, active row highlighted), rename + delete
-/// per row. Tapping a row switches threads and closes the panel. Level 1: pure
-/// `CompanyStore` state, no persistence. Native port of the web `ThreadList()`.
-struct ThreadListView: View {
-    @EnvironmentObject var companyStore: CompanyStore
-    @Environment(\.uiLanguage) private var lang
-    @Binding var showHistory: Bool
-    @State private var renamingId: String?
-    @State private var renameDraft = ""
-    // Stamped once at appear (not read live in the body) so relative times don't
-    // recompute on every re-render — the panel remounts each time History opens,
-    // which is when the times should refresh. Mirrors the web's lazy `useState`.
-    @State private var now = Date()
-
-    private var rows: [ChatThread] { sortThreadsByRecent(companyStore.threads) }
-    /// Gates "New chat" + per-row switch/delete while a turn is in flight —
-    /// mirrors `CopilotChatView.isChatBusy` (also gates the History toggle
-    /// that opens this panel). Rename is left enabled: it only edits a title
-    /// in `threads`, it never repoints `chatMessages`, so it can't corrupt an
-    /// in-flight stream. `CompanyStore.newChat()`/`switchThread(_:)`/
-    /// `deleteThread(_:)` guard the same condition independently — this is UI
-    /// affordance on top of that store-level guard, not a substitute for it.
-    private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                companyStore.newChat()
-                showHistory = false
-            } label: {
-                Text("+ " + (lang == .vi ? "Đoạn chat mới" : "New chat"))
-                    .font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isChatBusy ? CodepetTheme.accentPurple.opacity(0.5) : CodepetTheme.accentPurple))
-            }
-            .buttonStyle(.plain)
-            .disabled(isChatBusy)
-            .padding(12)
-
-            if rows.isEmpty {
-                Text(lang == .vi ? "Chưa có đoạn chat nào." : "No chats yet.")
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 12)
-                Spacer()
-            } else {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(rows) { thread in
-                            threadRow(thread)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.bottom, 12)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear { now = Date() }
-    }
-
-    private func threadRow(_ thread: ChatThread) -> some View {
-        let isActive = thread.id == companyStore.activeThreadId
-        return Group {
-            if renamingId == thread.id {
-                HStack(spacing: 6) {
-                    TextField(lang == .vi ? "Đổi tên đoạn chat" : "Rename chat", text: $renameDraft)
-                        .textFieldStyle(.plain)
-                        .font(CodepetTheme.inter(12))
-                        .onSubmit { commitRename(thread.id) }
-                    Button(lang == .vi ? "Lưu" : "Save") { commitRename(thread.id) }
-                        .buttonStyle(.plain)
-                        .font(CodepetTheme.inter(11, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentPurple)
-                }
-                .padding(10)
-            } else {
-                HStack(spacing: 6) {
-                    Button {
-                        companyStore.switchThread(thread.id)
-                        showHistory = false
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(thread.title ?? (lang == .vi ? "Đoạn chat mới" : "New chat"))
-                                .font(CodepetTheme.inter(12, weight: isActive ? .semibold : .regular))
-                                .foregroundColor(CodepetTheme.primaryText)
-                                .lineLimit(1)
-                            Text(relativeTime(thread.updatedAt, now: now))
-                                .font(CodepetTheme.inter(10))
-                                .foregroundColor(CodepetTheme.mutedText)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isChatBusy)
-
-                    Menu {
-                        Button {
-                            renameDraft = thread.title ?? ""
-                            renamingId = thread.id
-                        } label: {
-                            Label(lang == .vi ? "Đổi tên" : "Rename", systemImage: "pencil")
-                        }
-                        Button(role: .destructive) {
-                            companyStore.deleteThread(thread.id)
-                        } label: {
-                            Label(lang == .vi ? "Xóa" : "Delete", systemImage: "trash")
-                        }
-                        .disabled(isChatBusy)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .frame(width: 22)
-                }
-                .padding(10)
-            }
-        }
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isActive ? CodepetTheme.accentPurple.opacity(0.08) : CodepetTheme.surface))
-    }
-
-    private func commitRename(_ id: String) {
-        companyStore.renameThread(id, title: renameDraft)
-        renamingId = nil
     }
 }
 

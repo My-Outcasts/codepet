@@ -37,6 +37,9 @@ struct TasksView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var openDeliverable: Deliverable?
+    /// The awaiting-approval task whose draft is open in the preview sheet. Set by a
+    /// tap on an Awaiting card; the sheet shows the draft + Revise/Approve controls.
+    @State private var previewTask: RoadmapTask?
 
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
@@ -55,6 +58,7 @@ struct TasksView: View {
         }
         .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
     }
 
     private func tasks(in col: TaskColumn) -> [RoadmapTask] {
@@ -85,7 +89,7 @@ struct TasksView: View {
     private func card(_ t: RoadmapTask) -> some View {
         Button {
             let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
-            if st == .needsApproval { Task { await companyStore.approveTask(id: t.id) } }
+            if st == .needsApproval { previewTask = t }
             else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
             else if st == .needsYou { Task { await companyStore.walkThroughTask(t, language: lang) } }
             else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }

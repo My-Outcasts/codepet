@@ -196,6 +196,40 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertEqual(s.company.decisions.first?.topic, "pricing")
         XCTAssertEqual(savedDecisions?.first?.statement, "Plus $4/mo")
     }
+    func testReviseTaskDraftReplacesDraftInPlaceAndPersists() async {
+        var savedTasks: [RoadmapTask] = []
+        var sentReq: RunTaskRequest?
+        let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
+                                  drafted: true, draft: Deliverable(kind: .doc, title: "D", body: "long body", sourceTaskId: "t1"))
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [drafted])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, tasks in savedTasks = tasks; return true },
+                             taskRunner: { req in sentReq = req; return RunTaskResponse(kind: "doc", title: "D2", body: "short") })
+        await s.hydrate(companyId: "u")
+        await s.reviseTaskDraft(taskId: "t1", reviseNote: "Make it shorter", language: .en)
+        XCTAssertEqual(sentReq?.reviseNote, "Make it shorter")   // note threaded through
+        XCTAssertEqual(sentReq?.current, "long body")            // current body threaded through
+        XCTAssertEqual(s.company.tasks[0].draft?.body, "short")  // draft replaced in place
+        XCTAssertEqual(s.company.tasks[0].draft?.title, "D2")
+        XCTAssertTrue(s.company.tasks[0].drafted)                // still awaiting approval
+        XCTAssertFalse(s.company.tasks[0].done)                  // not approved
+        XCTAssertTrue(s.company.library.isEmpty)                 // never touches library
+        XCTAssertEqual(savedTasks.count, 1)                      // persisted via tasksSaver
+    }
+
+    func testReviseTaskDraftNoOpWhenNoDraft() async {
+        var runs = 0
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(),
+                                tasks: [RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does)])
+        let s = CompanyStore(loader: { _ in seed },
+                             taskRunner: { _ in runs += 1; return RunTaskResponse(kind: "doc", title: "X", body: "y") })
+        await s.hydrate(companyId: "u")
+        await s.reviseTaskDraft(taskId: "t1", reviseNote: "Make it shorter", language: .en)
+        XCTAssertEqual(runs, 0)   // no draft → never runs
+    }
+
     func testApproveFailOpenWhenExtractorReturnsEmpty() async {
         let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
                                   drafted: true, draft: Deliverable(kind: .doc, title: "X", body: "y", sourceTaskId: "t1"))

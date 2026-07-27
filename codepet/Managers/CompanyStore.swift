@@ -679,6 +679,26 @@ final class CompanyStore: ObservableObject {
         chatMessages[j].draft = fresh
     }
 
+    /// Revise a task's pending draft in place (task analog of `redoDraft`, for the
+    /// draft-preview sheet's revise chips). Threads the note + the draft's CURRENT
+    /// body into the run so the CF revises rather than regenerates, then replaces
+    /// `company.tasks[i].draft` and persists via `tasksSaver` (where the draft lives —
+    /// same as `runTask`). Account/state-guarded on both await boundaries: a no-op if
+    /// the task is gone, done, or no longer drafted (e.g. an approve raced this run).
+    func reviseTaskDraft(taskId: String, reviseNote: String, language: AppLanguage) async {
+        guard let task = company.tasks.first(where: { $0.id == taskId }),
+              let draft = task.draft, !task.done, task.drafted else { return }
+        let cid = companyId
+        let result = await taskRunner(runRequest(for: task, language: language,
+                                                 reviseNote: reviseNote, current: draft.body))
+        guard companyId == cid,
+              let j = company.tasks.firstIndex(where: { $0.id == taskId }),
+              !company.tasks[j].done, company.tasks[j].drafted,
+              let fresh = buildDeliverable(from: result, task: task) else { return }
+        company.tasks[j].draft = fresh
+        if let cid { _ = await tasksSaver(cid, company.tasks) }
+    }
+
     /// Build a RunTaskRequest for a task (grounded on brief + roadmap). `reviseNote`/
     /// `current` default nil — a first run or blind redo sends neither (unchanged
     /// wire shape); only a revise chip tap sets both.

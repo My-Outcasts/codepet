@@ -65,6 +65,9 @@ private struct DepartmentTaskCard: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var openDeliverable: Deliverable?
+    /// Set when tapping "Review & approve" — opens the draft-preview sheet (shared with
+    /// the Tasks board) instead of approving blindly.
+    @State private var previewTask: RoadmapTask?
     private var status: TaskStatus { RoadmapEngine.status(for: task, in: companyStore.company.tasks) }
 
     var body: some View {
@@ -101,12 +104,13 @@ private struct DepartmentTaskCard: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
     }
 
     @ViewBuilder private var actionButton: some View {
         let running = companyStore.runningTaskIds.contains(task.id)
         Button {
-            if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
+            if status == .needsApproval { previewTask = task }
             else if task.who == .you { Task { await companyStore.walkThroughTask(task, language: lang) } }
             else { Task { await companyStore.runTask(task, language: lang) } }
         } label: {

@@ -1,7 +1,7 @@
-// codepet/Views/Overview/SecondBrainPanel.swift
+// codepet/Views/SecondBrain/SecondBrainPanel.swift
 import SwiftUI
 
-/// The Overview "Second Brain" info rail — a panel of real Codepet data (deliverables/
+/// The Second Brain info rail — a panel of real Codepet data (deliverables/
 /// tasks/decisions counts, active model + companion, the next move, per-department
 /// topic counts), ported from the web SecondBrainPanel and fed by the pure SecondBrainData
 /// aggregation. The "Do this next" row and each "Topics" row are tappable shortcuts into

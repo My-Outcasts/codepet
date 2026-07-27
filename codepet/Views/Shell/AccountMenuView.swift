@@ -8,6 +8,11 @@ import FirebaseAuth
 /// `Menu`, because a borderless `Menu` mis-renders a rich custom label on macOS
 /// (the avatar/name collapse to a bare disclosure). This gives web-exact chrome.
 struct AccountMenuView: View {
+    /// True in the left rail (64 pt wide): renders only the avatar, omitting the
+    /// name text + chevron that would otherwise overflow the rail. Defaults false
+    /// so existing call sites (the old top bar) render unchanged.
+    var compact: Bool = false
+
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var authManager: AuthManager
@@ -28,8 +33,10 @@ struct AccountMenuView: View {
                     .font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(CodepetTheme.accentPurple))
-                Text(founderName).font(CodepetTheme.inter(14, weight: .medium)).foregroundColor(CodepetTheme.bodyText)
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+                if !compact {
+                    Text(founderName).font(CodepetTheme.inter(14, weight: .medium)).foregroundColor(CodepetTheme.bodyText)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
+                }
             }
         }
         .buttonStyle(.plain)

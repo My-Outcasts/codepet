@@ -1,26 +1,25 @@
-// codepet/Views/Overview/OverviewView.swift
+// codepet/Views/Roadmap/RoadmapView.swift
 import SwiftUI
 
-/// The Overview page (web OverviewSection.tsx): title/subtitle + Roadmap/Second-Brain
-/// toggle + "how to read this map" + progress/beacon chrome + KEY legend, over the
-/// node-graph map. Second Brain is a stub ("coming soon").
-struct OverviewView: View {
+/// The Roadmap page — was the left half of the retired Overview toggle, and now
+/// owns the chrome that page carried: progress, the beacon, the KEY legend and the
+/// "how to read this map" briefing, over the node-graph map.
+struct RoadmapView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
-    @State private var showSecondBrain = false
     @State private var showMapIntro = false
-    // Drives the beacon dot's continuous radar-ping (web: `beaconPing` keyframe).
-    // Pure animation state — never touches the roadmap/task data.
     @State private var beaconPinging = false
-    // Opened when the beacon's "Also needs you" task resolves to `.done` (mirrors
-    // RoadmapMapView.taskCard's own openDeliverable sheet).
     @State private var openDeliverable: Deliverable?
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
     private var beacon: RoadmapTask? { RoadmapEngine.nextStep(tasks) }
-    private var needsYouCount: Int { tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou }.count }
-    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
+    private var needsYouCount: Int {
+        tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou }.count
+    }
+    private var companionName: String {
+        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
     private var subtitle: String {
         let p = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -32,17 +31,7 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
             chromeRow.padding(.horizontal, 24).padding(.top, 14)
-            if showSecondBrain {
-                SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang,
-                                 onOpenDept: { key in
-                                     companyStore.selectedDeptKey = key
-                                     companyStore.select(.company)
-                                 })
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 24).padding(.top, 14)
-            } else {
-                RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
@@ -52,46 +41,26 @@ struct OverviewView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Tổng quan" : "Overview").font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
-                Text(subtitle).font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
+                Text(lang == .vi ? "Lộ trình" : "Roadmap")
+                    .font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
+                Text(subtitle).font(CodepetTheme.subtitle())
+                    .foregroundColor(CodepetTheme.mutedText).lineLimit(1)
             }
             Spacer()
-            HStack(spacing: 10) {
-                Button { showMapIntro = true } label: {
-                    HStack(spacing: 8) {
-                        Text("?").font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
-                            .frame(width: 18, height: 18).background(Circle().fill(CodepetTheme.accentPurple))
-                        Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                            .font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.14)))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
+            Button { showMapIntro = true } label: {
+                HStack(spacing: 8) {
+                    Text("?").font(CodepetTheme.inter(11, weight: .bold)).foregroundColor(.white)
+                        .frame(width: 18, height: 18).background(Circle().fill(CodepetTheme.accentPurple))
+                    Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
+                        .font(CodepetTheme.inter(13, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
                 }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showMapIntro) { mapIntroBriefing }
-                segmentToggle
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple.opacity(0.14)))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
             }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showMapIntro) { mapIntroBriefing }
         }
-    }
-
-    private var segmentToggle: some View {
-        HStack(spacing: 4) {
-            ForEach([false, true], id: \.self) { sb in
-                let on = showSecondBrain == sb
-                Button { showSecondBrain = sb } label: {
-                    Text(sb ? (lang == .vi ? "Bộ não" : "Second Brain") : (lang == .vi ? "Lộ trình" : "Roadmap"))
-                        .font(CodepetTheme.inter(13, weight: .semibold))
-                        .foregroundColor(on ? CodepetTheme.accentPurple : CodepetTheme.bodyText)
-                        .padding(.horizontal, 14).padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 9).fill(on ? CodepetTheme.accentPurple.opacity(0.28) : Color.clear))
-                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(on ? CodepetTheme.accentPurple.opacity(0.5) : Color.clear, lineWidth: 1))
-                }.buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
 
     private var chromeRow: some View {
@@ -99,7 +68,7 @@ struct OverviewView: View {
             progressCard
             if let b = beacon { beaconCard(b) }
             Spacer()
-            legend   // web keeps the KEY legend always visible beside progress/beacon
+            legend
         }
     }
 
@@ -108,14 +77,19 @@ struct OverviewView: View {
         tasks.filter { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != beacon?.id }.first
     }
 
-    // Same per-status dispatch as RoadmapMapView.taskCard.onTapGesture, reused here so
-    // tapping the beacon's "Also needs you" task does the right thing for its status.
+    /// Route a task tap through the pure `RoadmapDispatch` rule, then follow the two
+    /// streaming actions (run, walk-through) to chat, where their output appears.
+    /// Approve and open-deliverable resolve in place and do not navigate.
     private func dispatch(_ task: RoadmapTask) {
-        let status = RoadmapEngine.status(for: task, in: tasks)
-        if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
-        else if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
-        else if status == .needsYou { Task { await companyStore.walkThroughTask(task, language: lang) } }
-        else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
+        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks))
+        switch action {
+        case .run:              Task { await companyStore.runTask(task, language: lang) }
+        case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
+        case .approve:          Task { await companyStore.approveTask(id: task.id) }
+        case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+        case .none:             break
+        }
+        if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
     }
 
     private var currentPhase: RoadmapPhase { beacon?.phase ?? .find }
@@ -165,11 +139,7 @@ struct OverviewView: View {
             }
             Text(b.title).font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            Button {
-                let st = RoadmapEngine.status(for: b, in: tasks)
-                if st == .needsApproval { Task { await companyStore.approveTask(id: b.id) } }
-                else { Task { await companyStore.runTask(b, language: lang) } }
-            } label: {
+            Button { dispatch(b) } label: {
                 Text(lang == .vi ? "Bắt đầu" : "Start")
                     .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 16).padding(.vertical, 5)

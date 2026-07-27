@@ -7,7 +7,7 @@ import Combine
 /// role as the top-level store (ProjectStore/reflection are being retired).
 @MainActor
 final class CompanyStore: ObservableObject {
-    @Published var view: AppView = .overview
+    @Published var view: AppView = .chat
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
@@ -18,6 +18,10 @@ final class CompanyStore: ObservableObject {
     /// turn, flushes so the thread list's title/`updatedAt` stay current. Session-only
     /// (mirrors `chatMessages`'s own non-Codable, in-memory contract) — see `ChatThreads.swift`.
     @Published private(set) var chatMessages: [CopilotMessage] = []
+    /// The composer's in-progress text. Lives on the store, not the view, because the
+    /// shell tears `CopilotChatView` down on every navigation and a roadmap dispatch
+    /// now navigates to chat programmatically.
+    @Published var chatDraft: String = ""
     /// Every thread that has EVER held a message this session, active or not.
     /// An in-progress "new chat" with nothing sent yet has no entry here (lazily
     /// created by `flushActiveThread` on its first non-empty flush).
@@ -839,10 +843,11 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         company = .empty
-        view = .overview
+        view = .chat
         isHydrating = false
         isOnboarding = false
         chatMessages = []
+        chatDraft = ""
         threads = []
         activeThreadId = nil
         isCompanionTyping = false

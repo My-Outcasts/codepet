@@ -1,40 +1,40 @@
 import Foundation
 
-/// The web app's top-level views (components/AppRoot.tsx), minus Giang's Build
-/// Coach (summary/build/install). Drives the app shell's sidebar + content.
+/// The app's top-level destinations. Chat is the primary surface; Roadmap and
+/// Second Brain are the two halves of the retired Overview page.
 enum AppView: String, CaseIterable, Identifiable {
-    case overview, summary, company, roadmap, tasks, library, environment, settings, billing, support
+    case chat, roadmap, secondBrain, tasks, library, environment, company, settings, billing, support
 
     var id: String { rawValue }
 
-    /// The primary destinations shown as top-bar tabs (web Topbar). Settings /
-    /// Billing / Support are reached via the account menu; Roadmap is folded into Overview.
-    static let navTabs: [AppView] = [.summary, .overview, .company, .tasks, .library, .environment]
+    /// Destinations shown in the left rail, in order. Settings / billing / support are
+    /// reached from the account menu. Company is in the rail because Second Brain's
+    /// department rows always open a specific department, never the Departments index —
+    /// and that index holds the only manual "Re-plan for my stage" trigger.
+    static let navTabs: [AppView] = [.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment]
 
     func title(_ lang: AppLanguage) -> String {
         switch self {
-        case .summary:     return lang == .vi ? "Tóm tắt" : "Summary"
-        case .overview:    return lang == .vi ? "Tổng quan" : "Overview"
-        case .company:     return lang == .vi ? "Công ty" : "Company"
+        case .chat:        return lang == .vi ? "Trò chuyện" : "Chat"
         case .roadmap:     return lang == .vi ? "Lộ trình" : "Roadmap"
+        case .secondBrain: return lang == .vi ? "Bộ não" : "Second Brain"
         case .tasks:       return lang == .vi ? "Nhiệm vụ" : "Tasks"
         case .library:     return lang == .vi ? "Thư viện" : "Library"
         case .environment: return lang == .vi ? "Môi trường" : "Environment"
+        case .company:     return lang == .vi ? "Công ty" : "Company"
         case .settings:    return lang == .vi ? "Cài đặt" : "Settings"
         case .billing:     return lang == .vi ? "Thanh toán" : "Billing & Usage"
         case .support:     return lang == .vi ? "Hỗ trợ" : "Support"
         }
     }
 
-    /// Resolve a chat `nav` action's `destination` string to an `AppView` —
-    /// mirrors the web's own destination→route map. `department` (a specific
-    /// dept's detail view, not a top-level tab) resolves to `.company`; the
-    /// caller (CompanyStore.activateNav) additionally sets `selectedDeptKey`
-    /// from `target` so `.company` opens on that department, not the roster.
-    /// Unknown destinations return nil so an unresolvable chip is a no-op.
+    /// Resolve a chat `nav` action's `destination` string. `department` resolves to
+    /// `.company`; the caller additionally sets `selectedDeptKey` from `target` so
+    /// `.company` opens on that department. Unknown destinations return nil so an
+    /// unresolvable chip is a no-op.
     static func from(navDestination raw: String) -> AppView? {
         switch raw {
-        case "roadmap":     return .overview
+        case "roadmap":     return .roadmap
         case "tasks":       return .tasks
         case "library":     return .library
         case "company":     return .company
@@ -44,16 +44,16 @@ enum AppView: String, CaseIterable, Identifiable {
         }
     }
 
-    /// SF Symbol shown in the sidebar.
+    /// SF Symbol shown in the rail.
     var icon: String {
         switch self {
-        case .summary:     return "sparkles"
-        case .overview:    return "square.grid.2x2"
-        case .company:     return "building.2"
+        case .chat:        return "bubble.left"
         case .roadmap:     return "map"
+        case .secondBrain: return "brain"
         case .tasks:       return "checklist"
         case .library:     return "books.vertical"
         case .environment: return "wrench.and.screwdriver"
+        case .company:     return "building.2"
         case .settings:    return "gearshape"
         case .billing:     return "creditcard"
         case .support:     return "questionmark.circle"

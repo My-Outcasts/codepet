@@ -44,6 +44,7 @@ struct ChatComposer: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(CodepetTheme.hairline)
         )
+        .codepetShadow(CodepetTheme.floatingShadow)
     }
 
     private var quickActionsMenu: some View {

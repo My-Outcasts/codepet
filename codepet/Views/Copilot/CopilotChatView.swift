@@ -147,6 +147,10 @@ struct CopilotChatView: View {
         draft = ""
         showHistory = false   // sending always returns to the live conversation
         Task { await companyStore.sendChat(text, language: lang) }
+        // Re-assert focus: the composer moves between the empty-state and docked
+        // `if/else` branches once `chatMessages` goes empty→non-empty, so SwiftUI
+        // rebuilds the TextField and drops focus after the first send.
+        inputFocused = true
     }
 }
 

@@ -33,8 +33,10 @@ chat, roadmap, secondBrain, tasks, library, environment, company, settings, bill
 
 - **Added:** `chat`, `secondBrain`.
 - **Removed:** `overview`, `summary`.
-- `navTabs` → `[.chat, .roadmap, .secondBrain, .tasks, .library, .environment]` — the six rail destinations, in that order.
-- `company`, `settings`, `billing`, `support` remain valid destinations but are off-rail: `company` is reached from Second Brain's department rows, the other three from the account menu.
+- `navTabs` → `[.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment]` — the seven rail destinations, in that order.
+- `settings`, `billing`, `support` are off-rail, reached from the account menu.
+
+An earlier draft of this spec put Company off-rail on the assumption that Second Brain's department rows reached it. They do not — those rows always set a department key and open that department's detail view, never the Departments index, which holds the only manual "Re-plan for my stage" trigger. A whole-branch review caught it.
 - `from(navDestination:)` currently maps `"roadmap"` → `.overview` deliberately ("Roadmap is folded into Overview"). It now maps `"roadmap"` → `.roadmap`. `"department"` continues to resolve to `.company`.
 - `icon` and `title(_:)` gain `chat` (`"bubble.left"`, "Chat" / "Trò chuyện") and `secondBrain` (`"brain"`, "Second Brain" / "Bộ não"); the `overview` and `summary` entries are deleted.
 

@@ -7,9 +7,11 @@ enum AppView: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Destinations shown in the left rail, in order. `company` is reached from a
-    /// Second Brain department row; settings / billing / support from the account menu.
-    static let navTabs: [AppView] = [.chat, .roadmap, .secondBrain, .tasks, .library, .environment]
+    /// Destinations shown in the left rail, in order. Settings / billing / support are
+    /// reached from the account menu. Company is in the rail because Second Brain's
+    /// department rows always open a specific department, never the Departments index —
+    /// and that index holds the only manual "Re-plan for my stage" trigger.
+    static let navTabs: [AppView] = [.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment]
 
     func title(_ lang: AppLanguage) -> String {
         switch self {

@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The chat empty state: a centered, personalized hero greeting (time-of-day +
-/// founder name, purple-gradient second line), a soft purple brand wash, the
-/// composer (injected so the parent keeps ownership of draft/mode), and a
-/// 2-column grid of capability quick-action cards. Replaces the old
-/// company-only greeting + pill row.
+/// founder name, purple-gradient second line), the composer (injected so the
+/// parent keeps ownership of draft/mode), and a 2-column grid of capability
+/// quick-action cards. Replaces the old company-only greeting + pill row. The
+/// ambient purple wash now lives in `ChatBackdrop` (applied by `CopilotChatView`
+/// behind both the empty and active states), not here.
 struct ChatEmptyState<Composer: View>: View {
     let line1: String
     let line2: String

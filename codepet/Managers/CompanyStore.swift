@@ -551,8 +551,16 @@ final class CompanyStore: ObservableObject {
         guard let runId,
               let task = company.tasks.first(where: { $0.id == runId }),
               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
+        // Transparency step: a transient "producing…" placeholder shows while the
+        // draft is generated (this run isn't tracked in `runningTaskIds` — that set
+        // only covers taps on the map/beacon card — so a chat message is the
+        // simplest robust signal). Always removed below before the real reply
+        // lands, on BOTH the success and failure branch, so it can never get stuck.
+        let producingId = UUID().uuidString
+        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: "", producing: true))
         let result = await taskRunner(runRequest(for: task, language: language))
-        guard companyId == cid else { return }
+        guard companyId == cid else { return }  // account switch already cleared chatMessages
+        chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
         } else {

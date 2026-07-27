@@ -9,6 +9,16 @@ struct RoadmapMapView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var openDeliverable: Deliverable?
+    // Drives the "IS HERE" beacon node marker's continuous radar-ping — a native
+    // accent mirroring the Overview beacon card's `beaconPing` pulse (the web map
+    // node itself doesn't animate this). Pure animation state, no data change.
+    @State private var beaconPinging = false
+    // Last-seen status per task id, for the one-time "state-unlock" pulse below.
+    // Session-only diff state — never persisted, never mutates `tasks` itself.
+    @State private var prevStatuses: [String: TaskStatus] = [:]
+    // Task ids whose card should be mid-pulse right now (cleared after the pulse
+    // finishes so the next unlock can trigger it again).
+    @State private var justUnlockedIds: Set<String> = []
 
     private let cardW: CGFloat = 205
     private let cardH: CGFloat = 84
@@ -46,9 +56,34 @@ struct RoadmapMapView: View {
                 if let b = beacon, b.phase.order >= 3 {
                     proxy.scrollTo(b.id, anchor: UnitPoint(x: 0.4, y: 0.45))
                 }
+                detectUnlocks(tasks)
             }
+            .onChange(of: tasks) { _, newTasks in detectUnlocks(newTasks) }
         }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+    }
+
+    private func statusMap(_ ts: [RoadmapTask]) -> [String: TaskStatus] {
+        Dictionary(uniqueKeysWithValues: ts.map { ($0.id, RoadmapEngine.status(for: $0, in: ts)) })
+    }
+
+    /// One-time "state-unlock" pulse (web: `.rm-pulse`) — when a task's status
+    /// transitions INTO `.codepetCanDo` (it was blocked/needsYou/needsApproval a
+    /// moment ago and just became runnable), flash its card once so a completed
+    /// step visibly lights up the next move. Pure `@State` diff, mirroring the
+    /// web's prev/now signature compare — never mutates `tasks` or persists.
+    private func detectUnlocks(_ newTasks: [RoadmapTask]) {
+        let now = statusMap(newTasks)
+        guard !prevStatuses.isEmpty else { prevStatuses = now; return }  // first render — nothing to compare yet
+        let fresh = now.filter { id, status in
+            status == .codepetCanDo && prevStatuses[id] != nil && prevStatuses[id] != .codepetCanDo
+        }.map(\.key)
+        prevStatuses = now
+        guard !fresh.isEmpty else { return }
+        justUnlockedIds.formUnion(fresh)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            justUnlockedIds.subtract(fresh)
+        }
     }
 
     // Phase-header chips over each column (web: a bordered chip per phase, the current
@@ -133,10 +168,13 @@ struct RoadmapMapView: View {
                 // Web shows the FOUNDER's name for a their-task beacon, the companion otherwise
                 // (e.g. "MONA IS HERE" / "BYTE IS HERE").
                 let who = task.who == .you ? founderName : companionName
-                Text(lang == .vi ? "\(who.uppercased()) Ở ĐÂY" : "\(who.uppercased()) IS HERE")
-                    .font(CodepetTheme.inter(9, weight: .bold)).foregroundColor(.white)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(CodepetTheme.accentPurple))
+                HStack(spacing: 5) {
+                    beaconNodePingDot
+                    Text(lang == .vi ? "\(who.uppercased()) Ở ĐÂY" : "\(who.uppercased()) IS HERE")
+                        .font(CodepetTheme.inter(9, weight: .bold)).foregroundColor(.white)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(CodepetTheme.accentPurple))
             }
             HStack(alignment: .top, spacing: 8) {
                 statusDot(status)
@@ -160,6 +198,7 @@ struct RoadmapMapView: View {
             isBeacon ? CodepetTheme.accentPurple : CodepetTheme.hairline, lineWidth: isBeacon ? 1.6 : 1))
         .shadow(color: isBeacon ? CodepetTheme.accentPurple.opacity(0.3) : .clear, radius: 10)
         .opacity(status == .blocked ? 0.72 : 1)
+        .unlockPulse(justUnlockedIds.contains(task.id))
         .onTapGesture {
             if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
             else if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
@@ -167,6 +206,24 @@ struct RoadmapMapView: View {
             else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
         }
         .help(peekText(task, status: status))
+    }
+
+    // The "IS HERE" beacon node marker's continuous radar-ping: a white ring
+    // scaling out + fading behind the solid dot, looping via `repeatForever`
+    // (nothing to invalidate/tear down). Local `@State` only — no data change.
+    private var beaconNodePingDot: some View {
+        ZStack {
+            Circle().fill(Color.white)
+                .frame(width: 6, height: 6)
+                .scaleEffect(beaconPinging ? 2.6 : 1)
+                .opacity(beaconPinging ? 0 : 0.6)
+            Circle().fill(Color.white).frame(width: 6, height: 6)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                beaconPinging = true
+            }
+        }
     }
 
     // Web status indicator: a rounded-square container box holding a small colored square.
@@ -233,5 +290,30 @@ struct RoadmapMapView: View {
         case .blocked:
             return lang == .vi ? "Cần hoàn thành các bước trước." : "Needs earlier steps first."
         }
+    }
+}
+
+/// The one-time card-unlock pulse (web `.rm-pulse`): a brief scale bump that
+/// plays once whenever `trigger` flips false→true, then settles back — never a
+/// looping animation. `RoadmapMapView.taskCard` passes
+/// `justUnlockedIds.contains(task.id)` as `trigger`.
+private struct UnlockPulseModifier: ViewModifier {
+    let trigger: Bool
+    @State private var scale: CGFloat = 1.0
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            .onChange(of: trigger) { _, isPulsing in
+                guard isPulsing else { return }
+                withAnimation(.easeOut(duration: 0.16)) { scale = 1.06 }
+                withAnimation(.easeOut(duration: 0.5).delay(0.16)) { scale = 1.0 }
+            }
+    }
+}
+
+private extension View {
+    func unlockPulse(_ trigger: Bool) -> some View {
+        modifier(UnlockPulseModifier(trigger: trigger))
     }
 }

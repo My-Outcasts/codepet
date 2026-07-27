@@ -9,6 +9,9 @@ struct OverviewView: View {
     @Environment(\.uiLanguage) private var lang
     @State private var showSecondBrain = false
     @State private var showMapIntro = false
+    // Drives the beacon dot's continuous radar-ping (web: `beaconPing` keyframe).
+    // Pure animation state — never touches the roadmap/task data.
+    @State private var beaconPinging = false
     // Opened when the beacon's "Also needs you" task resolves to `.done` (mirrors
     // RoadmapMapView.taskCard's own openDeliverable sheet).
     @State private var openDeliverable: Deliverable?
@@ -155,8 +158,11 @@ struct OverviewView: View {
 
     private func beaconCard(_ b: RoadmapTask) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("\(companionName.uppercased()) · " + (lang == .vi ? "LÀM ĐIỀU NÀY TIẾP" : "DO THIS NEXT"))
-                .font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(CodepetTheme.accentPurple)
+            HStack(spacing: 8) {
+                beaconPingDot
+                Text("\(companionName.uppercased()) · " + (lang == .vi ? "LÀM ĐIỀU NÀY TIẾP" : "DO THIS NEXT"))
+                    .font(CodepetTheme.inter(10, weight: .bold)).foregroundColor(CodepetTheme.accentPurple)
+            }
             Text(b.title).font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             Button {
@@ -181,6 +187,25 @@ struct OverviewView: View {
         .frame(width: 240, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 13).fill(CodepetTheme.accentPurple.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(CodepetTheme.accentPurple.opacity(0.3), lineWidth: 1))
+    }
+
+    // The beacon dot's continuous radar-ping (web: `beaconPing` keyframe — a ring
+    // scaling 1→2.9 while fading .5→0, looping). A plain ring behind the solid dot,
+    // driven by local `@State` toggled once in `onAppear`; `repeatForever` handles
+    // the loop, so there's nothing to invalidate/tear down.
+    private var beaconPingDot: some View {
+        ZStack {
+            Circle().fill(CodepetTheme.accentPurple)
+                .frame(width: 13, height: 13)
+                .scaleEffect(beaconPinging ? 2.9 : 1)
+                .opacity(beaconPinging ? 0 : 0.5)
+            Circle().fill(CodepetTheme.accentPurple).frame(width: 13, height: 13)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                beaconPinging = true
+            }
+        }
     }
 
     // Reopens the "how to read this map" briefing (web: OverviewSection.tsx openIntro),

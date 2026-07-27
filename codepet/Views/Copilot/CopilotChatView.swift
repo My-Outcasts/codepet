@@ -309,8 +309,14 @@ struct CopilotBubble: View {
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
+    private var companionName: String {
+        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
+
     var body: some View {
-        if let draft = message.draft {
+        if message.producing {
+            producingRow
+        } else if let draft = message.draft {
             draftCard(draft)
         } else if let nav = message.navChip {
             navChip(nav)
@@ -468,6 +474,20 @@ struct CopilotBubble: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CodepetTheme.surface))
             .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 24)
+        }
+    }
+
+    /// The chat-run step-transparency indicator (web: a "producing" beat before the
+    /// draft card lands). Mirrors `CopilotChatView.typingRow`'s plain, no-bubble
+    /// style — not a filled chat bubble — so it reads as ambient status, not a
+    /// message. `CompanyStore.handleRunTaskId` removes this row (win or lose)
+    /// before appending the real reply, so it's always transient.
+    private var producingRow: some View {
+        HStack {
+            Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
+                .font(.pixelSystem(size: 11))
+                .foregroundColor(CodepetTheme.mutedText)
             Spacer(minLength: 24)
         }
     }

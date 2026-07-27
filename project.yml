@@ -1,43 +1,103 @@
+# xcodegen manifest — DESCRIPTIVE ONLY, not a rebuild path.
+#
+# CodePet.xcodeproj is committed and is the source of truth. Nothing in CI or
+# in scripts/ runs xcodegen.
+#
+# Two things to know before trusting this file:
+#
+#   1. It cannot reproduce the project. CodePet.xcodeproj uses
+#      PBXFileSystemSynchronizedRootGroup (Xcode 16+ synchronized folders,
+#      objectVersion 77), where membership follows the folder on disk. xcodegen
+#      emits classic PBXGroup/PBXBuildFile references instead, so regenerating
+#      yields a structurally different project. That is also why
+#      GoogleService-Info.plist appears nowhere in project.pbxproj — it is
+#      bundled by virtue of living inside codepet/.
+#
+#   2. It had drifted badly and would not have built: target named CodePet
+#      instead of codepet, source paths missing the codepet/ prefix (so they
+#      resolved to a non-existent ./App), macOS 13.0 instead of 26.2, Swift 5.9
+#      instead of 5.0, bundle id com.murror.codepet instead of app.murror.codepet,
+#      entitlements pointing at the unused root copy, four of five SPM
+#      dependencies undeclared, three source directories missing, and no test
+#      target at all.
+#
+# Every value below is now mirrored from CodePet.xcodeproj/project.pbxproj.
+# If you change a build setting there, change it here too — or delete this file
+# rather than let it rot again.
+
 name: CodePet
 options:
-  bundleIdPrefix: com.murror
+  bundleIdPrefix: app.murror
   deploymentTarget:
-    macOS: "13.0"
-  xcodeVersion: "15.0"
+    macOS: "26.2"
+  xcodeVersion: "26.4"
 
 packages:
   FirebaseSDK:
     url: https://github.com/firebase/firebase-ios-sdk
-    from: "11.0.0"
+    from: "12.11.0"
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: "8.0.0"
 
 targets:
-  CodePet:
+  codepet:
     type: application
     platform: macOS
     sources:
-      - App
-      - Managers
-      - Models
-      - Views
-      - Services
-      - Menu Bar
-      - Assets.xcassets
-      - path: GoogleService-Info.plist
+      - codepet/App
+      - codepet/Demo
+      - codepet/Managers
+      - codepet/Models
+      - codepet/Notification
+      - codepet/Resources
+      - codepet/Services
+      - codepet/Views
+      - codepet/Menu Bar
+      - codepet/Assets.xcassets
+      - path: codepet/GoogleService-Info.plist
         type: file
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.murror.codepet
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        PRODUCT_NAME: codepet
+        PRODUCT_BUNDLE_IDENTIFIER: app.murror.codepet
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "2"
+        SWIFT_VERSION: "5.0"
+        DEVELOPMENT_TEAM: YL72VTKBR7
+        CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_FILE: codepet/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.education"
         INFOPLIST_KEY_CFBundleDisplayName: CodePet
-        SWIFT_VERSION: "5.9"
     dependencies:
       - package: FirebaseSDK
+        product: FirebaseAuth
+      - package: FirebaseSDK
         product: FirebaseCore
+      - package: FirebaseSDK
+        product: FirebaseFirestore
+      - package: GoogleSignIn
+        product: GoogleSignIn
+      - package: GoogleSignIn
+        product: GoogleSignInSwift
     entitlements:
-      path: CodePet.entitlements
+      path: codepet/codepet.entitlements
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
+
+  codepetTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - codepetTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.murror.codepet.tests
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: true
+        DEVELOPMENT_TEAM: YL72VTKBR7
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: codepet

@@ -9,7 +9,6 @@ struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
-    @State private var copilotCollapsed = false
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
 
@@ -17,26 +16,20 @@ struct AppShellView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            GeometryReader { geo in
-                HStack(spacing: 0) {
-                    content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(alignment: .bottomTrailing) { chatToggle.padding(20) }
-                    if !copilotCollapsed {
-                        Divider()
-                        copilot.frame(width: geo.size.width * 0.5)   // chat = 50% of the window
-                    }
-                }
-            }
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(CodepetTheme.pageBackground)
     }
 
     @ViewBuilder private var content: some View {
-        if companyStore.view == .summary {
+        if companyStore.view == .chat {
+            CopilotChatView()
+        } else if companyStore.view == .summary {
             SummaryView()
-        } else if companyStore.view == .overview {
-            OverviewView()
+        } else if companyStore.view == .roadmap {
+            RoadmapView()
+        } else if companyStore.view == .secondBrain {
+            SecondBrainView()
         } else if companyStore.view == .company {
             if let dept = companyStore.selectedDeptKey {
                 DepartmentDetailView(deptKey: dept, onBack: { companyStore.selectedDeptKey = nil })
@@ -65,7 +58,9 @@ struct AppShellView: View {
         // Web layout: brand + account + nav clustered LEFT (nav right after the account),
         // then a spacer pushes the right-hand controls to the far edge.
         HStack(spacing: 14) {
-            Text("Codepet").font(CodepetTheme.pixel(16)).foregroundColor(CodepetTheme.primaryText)
+            Button { companyStore.selectedDeptKey = nil; companyStore.select(.chat) } label: {
+                Text("Codepet").font(CodepetTheme.pixel(16)).foregroundColor(CodepetTheme.primaryText)
+            }.buttonStyle(.plain)
             AccountMenuView()
             HStack(spacing: 4) {
                 ForEach(AppView.navTabs) { v in navTab(v) }
@@ -125,25 +120,6 @@ struct AppShellView: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(Capsule().fill(accent.opacity(0.1)))
         }.buttonStyle(.plain)
-    }
-
-    private var copilot: some View {
-        CopilotChatView()   // width is set by the shell (50% of the window)
-    }
-
-    // Floating companion launcher (web: the "C" circle over the map) — the only control
-    // that opens/closes the 50% chat panel, since the top bar has no chat button.
-    private var chatToggle: some View {
-        Button { copilotCollapsed.toggle() } label: {
-            Text("C").font(CodepetTheme.pixel(22)).foregroundColor(CodepetTheme.accentPurple)
-                .frame(width: 46, height: 46)
-                .background(Circle().fill(Color(red: 0.93, green: 0.91, blue: 0.98)))
-                .overlay(Circle().stroke(CodepetTheme.accentPurple.opacity(0.35), lineWidth: 1))
-                .shadow(color: .black.opacity(0.28), radius: 8, y: 2)
-        }
-        .buttonStyle(.plain)
-        .help(copilotCollapsed ? (uiLanguage == .vi ? "Mở trò chuyện" : "Open chat")
-                               : (uiLanguage == .vi ? "Đóng trò chuyện" : "Close chat"))
     }
 }
 

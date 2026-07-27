@@ -1,11 +1,11 @@
 // codepet/Views/Overview/SecondBrainView.swift
 import SwiftUI
 
-/// Standalone Second Brain page (extracted from OverviewView, Task IA-1). Shows the
-/// same header chrome as Overview — "how to read this map" pill, Project-Progress
-/// card, beacon "do this next" card, and the KEY legend — minus the Roadmap/Second-
-/// Brain toggle (that toggle is retired once Roadmap and Second Brain become
-/// separate nav tabs), over the `SecondBrainPanel` body.
+/// Standalone Second Brain page (extracted from the now-retired combined overview
+/// screen, Task IA-1). Shows the same header chrome that screen had — "how to read
+/// this map" pill, Project-Progress card, beacon "do this next" card, and the KEY
+/// legend — minus the Roadmap/Second-Brain toggle (that toggle is retired once
+/// Roadmap and Second Brain become separate nav tabs), over the `SecondBrainPanel` body.
 struct SecondBrainView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang

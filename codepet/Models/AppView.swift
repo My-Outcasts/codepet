@@ -3,20 +3,22 @@ import Foundation
 /// The web app's top-level views (components/AppRoot.tsx), minus Giang's Build
 /// Coach (summary/build/install). Drives the app shell's sidebar + content.
 enum AppView: String, CaseIterable, Identifiable {
-    case overview, summary, company, roadmap, tasks, library, environment, settings, billing, support
+    case chat, summary, company, roadmap, secondBrain, tasks, library, environment, settings, billing, support
 
     var id: String { rawValue }
 
     /// The primary destinations shown as top-bar tabs (web Topbar). Settings /
-    /// Billing / Support are reached via the account menu; Roadmap is folded into Overview.
-    static let navTabs: [AppView] = [.summary, .overview, .company, .tasks, .library, .environment]
+    /// Billing / Support are reached via the account menu; chat is the full-width
+    /// home (reached via the wordmark), not a tab.
+    static let navTabs: [AppView] = [.summary, .roadmap, .secondBrain, .company, .tasks, .library, .environment]
 
     func title(_ lang: AppLanguage) -> String {
         switch self {
+        case .chat:        return lang == .vi ? "Trò chuyện" : "Chat"
         case .summary:     return lang == .vi ? "Tóm tắt" : "Summary"
-        case .overview:    return lang == .vi ? "Tổng quan" : "Overview"
         case .company:     return lang == .vi ? "Công ty" : "Company"
         case .roadmap:     return lang == .vi ? "Lộ trình" : "Roadmap"
+        case .secondBrain: return lang == .vi ? "Bộ não thứ hai" : "Second Brain"
         case .tasks:       return lang == .vi ? "Nhiệm vụ" : "Tasks"
         case .library:     return lang == .vi ? "Thư viện" : "Library"
         case .environment: return lang == .vi ? "Môi trường" : "Environment"
@@ -34,7 +36,7 @@ enum AppView: String, CaseIterable, Identifiable {
     /// Unknown destinations return nil so an unresolvable chip is a no-op.
     static func from(navDestination raw: String) -> AppView? {
         switch raw {
-        case "roadmap":     return .overview
+        case "roadmap":     return .roadmap
         case "tasks":       return .tasks
         case "library":     return .library
         case "company":     return .company
@@ -47,10 +49,11 @@ enum AppView: String, CaseIterable, Identifiable {
     /// SF Symbol shown in the sidebar.
     var icon: String {
         switch self {
+        case .chat:        return "message"
         case .summary:     return "sparkles"
-        case .overview:    return "square.grid.2x2"
         case .company:     return "building.2"
         case .roadmap:     return "map"
+        case .secondBrain: return "brain"
         case .tasks:       return "checklist"
         case .library:     return "books.vertical"
         case .environment: return "wrench.and.screwdriver"

@@ -8,9 +8,16 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
                      companionId: "byte", onboardedAt: nil, tasks: tasks)
     }
 
+    /// A brief with no enrichment gaps, so `finishOnboarding` seeds the greeting
+    /// directly instead of starting the interview.
+    private func completeBrief() -> CompanyBrief {
+        CompanyBrief(founderName: "Mona", projectName: "Codepet",
+                     goal: "Ship v1", traction: "None yet", problem: "Founders lose context")
+    }
+
     func testFinishSeedsGreetingWithActionFromNextStep() async {
         let t = RoadmapTask(id: "t1", title: "Write your landing page", detail: "", phase: .find, who: .does)
-        let state = seeded(tasks: [t], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let state = seeded(tasks: [t], brief: completeBrief())
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true })
         await s.hydrate(companyId: "u")
         await s.finishOnboarding(brief: state.brief, token: s.onboardingToken, language: .en)
@@ -23,7 +30,7 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
     }
 
     func testFinishWithNoTasksSeedsGreetingWithoutAction() async {
-        let state = seeded(tasks: [], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let state = seeded(tasks: [], brief: completeBrief())
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true })
         await s.hydrate(companyId: "u")
         await s.finishOnboarding(brief: state.brief, token: s.onboardingToken, language: .en)
@@ -33,7 +40,7 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
 
     func testRunFirstRunActionAppendsDraftAndConsumes() async {
         let t = RoadmapTask(id: "t1", title: "Landing page", detail: "d", phase: .find, who: .does)
-        let state = seeded(tasks: [t], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let state = seeded(tasks: [t], brief: completeBrief())
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true },
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "Landing page", body: "# Hello") })
         await s.hydrate(companyId: "u")
@@ -47,7 +54,7 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
 
     func testRunFirstRunActionIsIdempotentOnceConsumed() async {
         let t = RoadmapTask(id: "t1", title: "Landing page", detail: "d", phase: .find, who: .does)
-        let state = seeded(tasks: [t], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let state = seeded(tasks: [t], brief: completeBrief())
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true },
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# y") })
         await s.hydrate(companyId: "u")
@@ -60,7 +67,7 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
 
     func testRunFirstRunActionFailOpenRestoresActionAndAppendsMessage() async {
         let t = RoadmapTask(id: "t1", title: "Landing page", detail: "d", phase: .find, who: .does)
-        let state = seeded(tasks: [t], brief: CompanyBrief(founderName: "Mona", projectName: "Codepet"))
+        let state = seeded(tasks: [t], brief: completeBrief())
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true },
                              taskRunner: { _ in nil })
         await s.hydrate(companyId: "u")
@@ -70,5 +77,40 @@ final class CompanyStoreFirstRunGreetingTests: XCTestCase {
         XCTAssertFalse(s.chatMessages[0].actionConsumed)   // button restored
         XCTAssertEqual(s.chatMessages.count, 2)            // greeting + honest fail-open message
         XCTAssertNil(s.chatMessages[1].draft)
+    }
+
+    func testSparseBriefStartsInterviewInsteadOfGreeting() async {
+        let t = RoadmapTask(id: "t1", title: "Write your landing page", detail: "", phase: .find, who: .does)
+        let sparse = CompanyBrief(founderName: "Mona", projectName: "Codepet")
+        let state = seeded(tasks: [t], brief: sparse)
+        let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true })
+        await s.hydrate(companyId: "u")
+        await s.finishOnboarding(brief: sparse, token: s.onboardingToken, language: .en)
+        XCTAssertEqual(s.chatMessages.count, 1)
+        XCTAssertEqual(s.chatMessages[0].interview, .goal)
+        XCTAssertNil(s.chatMessages[0].firstRunAction, "greeting must wait for the interview")
+    }
+
+    func testGreetingSeededAfterFinalInterviewGapAnswered() async {
+        let t = RoadmapTask(id: "t1", title: "Write your landing page", detail: "", phase: .find, who: .does)
+        let sparse = CompanyBrief(founderName: "Mona", projectName: "Codepet")
+        let state = seeded(tasks: [t], brief: sparse)
+        let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true })
+        await s.hydrate(companyId: "u")
+        await s.finishOnboarding(brief: sparse, token: s.onboardingToken, language: .en)
+
+        for (gap, answer) in [(InterviewGap.goal, "Ship v1"),
+                              (.traction, "None yet"),
+                              (.problem, "Founders lose context")] {
+            guard let q = s.chatMessages.last(where: { $0.interview == gap }) else {
+                return XCTFail("expected a question for \(gap)")
+            }
+            await s.answerInterview(messageId: q.id, gap: gap, answer: answer, language: .en)
+        }
+
+        guard let greeting = s.chatMessages.last else { return XCTFail("no messages") }
+        XCTAssertEqual(greeting.role, .companion)
+        XCTAssertEqual(greeting.firstRunAction?.taskId, "t1")
+        XCTAssertTrue(greeting.text.contains("Write your landing page"))
     }
 }

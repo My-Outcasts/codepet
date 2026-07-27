@@ -131,7 +131,7 @@ No view introduces a literal hex. The root `preferredColorScheme(appState.appThe
 ## Testing
 
 - **`ChatLandingStateTests` (new).** Greeting at hour boundaries (11:59/12:00, 17:59/18:00); greeting with and without `founderName`; card counts derived from a fixture `[RoadmapTask]`; `isEmpty` true when tasks are empty; beacon excluded from `needsYouCount`.
-- **`AppViewTests.swift:7`** asserts the exact case list and must be updated — it is the only test coupled to the enum.
+- **Four references to the removed `.overview` case must be updated.** `AppViewTests.swift:7` asserts the case list; `CompanyStore.swift:842` sets `view = .overview` inside `reset()`; and `CompanyStoreTests.swift:25`, `CompanyStoreTests.swift:53` and `CompanyStoreChatTests.swift:168` assert the store's default destination. All become `.chat`. (An earlier draft of this spec claimed `AppViewTests.swift:7` was the only coupled site — that came from a truncated grep and was wrong; the missing `CompanyStore.swift:842` broke the build during implementation.)
 - **New case** in the same file for `AppView.from(navDestination: "roadmap") == .roadmap`.
 - **Unaffected:** `RoadmapEngineTests`, `RoadmapMapLayoutTests`, `TopbarCountsTests`, `SecondBrainDataTests`, `ChatThreadsTests`, `FirstRunGreetingTests` — no engine or pure model changes.
 - **Removed:** `SummaryDataTests`, together with the type it covers (see Files). `SummaryData` is referenced only by `SummaryView` and that test, so nothing else breaks.
@@ -156,7 +156,8 @@ Visual verification is the founder's: the agent shell has no Screen Recording pe
 - `codepet/Views/Shell/AppShellView.swift` — rail + slim top bar, docked panel removed
 - `codepet/Views/CodepetTheme.swift` — `chatCanvas`, `chatBloom`
 - `codepet/Views/Copilot/CopilotChatView.swift` → `codepet/Views/Chat/ChatView.swift`
-- `codepetTests/AppViewTests.swift`
+- `codepetTests/AppViewTests.swift`, `codepetTests/CompanyStoreTests.swift`, `codepetTests/CompanyStoreChatTests.swift` — the `.overview` assertions become `.chat`
+- `CodePet.xcodeproj/xcshareddata/xcschemes/codepet.xcscheme` — drop the empty `<TestPlans>` element, which made Xcode ignore `<Testables>` and left the scheme with no working test action
 
 **Moved**
 - `Views/Overview/RoadmapMapView.swift`, `TaskCardView.swift` → `Views/Roadmap/`

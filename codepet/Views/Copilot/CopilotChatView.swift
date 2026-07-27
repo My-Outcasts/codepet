@@ -54,8 +54,12 @@ struct CopilotChatView: View {
                     }
                 } else {
                     messageList
-                    Divider()
-                    composerView.padding(10)
+                    HStack {
+                        Spacer(minLength: 0)
+                        composerView.frame(maxWidth: 720)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 10)
                 }
             }
             .frame(maxHeight: .infinity)

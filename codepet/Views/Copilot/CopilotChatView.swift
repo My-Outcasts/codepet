@@ -54,7 +54,7 @@ struct CopilotChatView: View {
                     }
                 } else {
                     messageList
-                    HStack {
+                    HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         composerView.frame(maxWidth: 720)
                         Spacer(minLength: 0)

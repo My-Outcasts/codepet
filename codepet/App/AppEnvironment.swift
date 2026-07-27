@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseCore
 
 /// Centralized opt-out for ALL off-device data transmission.
 ///
@@ -16,7 +17,12 @@ enum ServerLoggingGate {
 
     /// True when the currently signed-in account has opted out of server logging.
     static var isOptedOut: Bool {
-        guard let email = Auth.auth().currentUser?.email else { return false }
+        // `Auth.auth()` fatal-errors when the default FirebaseApp isn't
+        // configured (e.g. under XCTest, where `CodePetApp` skips
+        // `FirebaseApp.configure()`). Degrade to "not opted out" instead of
+        // crashing — real uploads are gated by `isRunningTests` at their sites.
+        guard FirebaseApp.app() != nil,
+              let email = Auth.auth().currentUser?.email else { return false }
         return optedOutEmails.contains(email.lowercased())
     }
 }

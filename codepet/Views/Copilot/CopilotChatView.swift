@@ -19,10 +19,6 @@ struct CopilotChatView: View {
         let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return n.isEmpty ? "Codepet" : n
     }
-    private var founderName: String {
-        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
-    }
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
@@ -46,7 +42,7 @@ struct CopilotChatView: View {
                 ChatEmptyState(companyName: companyName,
                                quickActions: quickActions,
                                onQuickAction: runQuickAction) {
-                    composerView.frame(maxWidth: 680)
+                    composerView
                 }
             } else {
                 messageList
@@ -83,7 +79,7 @@ struct CopilotChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
                     }
@@ -487,7 +483,7 @@ struct CopilotBubble: View {
                 .font(.pixelSystem(size: 12))
                 .foregroundColor(isMe ? .white : CodepetTheme.primaryText)
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isMe ? CodepetTheme.accentPurple : CodepetTheme.surface))
                 .fixedSize(horizontal: false, vertical: true)
             if !isMe { Spacer(minLength: 24) }

@@ -6,6 +6,7 @@ struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var draft = ""
+    @State private var mode: ChatMode = .ask
     @FocusState private var inputFocused: Bool
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
@@ -41,12 +42,17 @@ struct CopilotChatView: View {
             Divider()
             if showHistory {
                 ThreadListView(showHistory: $showHistory)
+            } else if companyStore.chatMessages.isEmpty {
+                ChatEmptyState(companyName: companyName,
+                               quickActions: quickActions,
+                               onQuickAction: runQuickAction) {
+                    composerView.frame(maxWidth: 680)
+                }
             } else {
                 messageList
-                letsBuild
+                Divider()
+                composerView.padding(10)
             }
-            Divider()
-            inputBar
         }
         .frame(maxHeight: .infinity)
     }
@@ -74,21 +80,10 @@ struct CopilotChatView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    // "Let's build" CTA — stub (the live build session is a later effort).
-    private var letsBuild: some View {
-        Button { } label: {
-            Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
-                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                .background(CodepetTheme.accentPurple.opacity(0.08))
-        }.buttonStyle(.plain)
-    }
-
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if companyStore.chatMessages.isEmpty { greeting }
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
                     }
@@ -106,60 +101,53 @@ struct CopilotChatView: View {
         }
     }
 
-    private var greeting: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(lang == .vi
-                 ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
-                 : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
-                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(quickStarts, id: \.self) { chip in
-                    Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
-                        Text(chip).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
-                    }.buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var quickStarts: [String] {
-        lang == .vi
-            ? ["Nên tập trung vào đâu trước?", "Tóm tắt tình hình công ty", "Điều gì đang cản trở ra mắt?"]
-            : ["What should I focus on first?", "Summarize where my company is", "What\u{2019}s blocking my launch?"]
-    }
-
     private var typingRow: some View {
         Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is typing…")
             .font(.pixelSystem(size: 11))
             .foregroundColor(CodepetTheme.mutedText)
     }
 
-    private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
-                      text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(CodepetTheme.inter(12))
-                .lineLimit(1...4)
-                .focused($inputFocused)
-                .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-        }
-        .padding(10)
+    /// The one composer instance, reused in the empty hero and docked in an
+    /// active conversation. State (draft/mode/focus) stays here so both
+    /// placements share the same value.
+    private var composerView: some View {
+        ChatComposer(
+            draft: $draft,
+            mode: $mode,
+            canSend: canSend,
+            focus: $inputFocused,
+            placeholder: placeholder,
+            quickActions: quickActions,
+            onSend: send,
+            onQuickAction: runQuickAction
+        )
+    }
+
+    private var placeholder: String {
+        lang == .vi
+            ? "Hỏi \(companionName) bất cứ điều gì về công ty…"
+            : "Ask \(companionName) anything about your company…"
+    }
+
+    /// Capability quick-actions — the strings are complete intents, so they are
+    /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`.
+    private var quickActions: [String] {
+        lang == .vi
+            ? ["Chạy một tác vụ", "Xem lộ trình", "Thiết lập một phòng ban", "Tóm tắt tình hình công ty"]
+            : ["Run a task", "Review the roadmap", "Set up a department", "Summarize where we are"]
+    }
+
+    /// Send a canned capability prompt through the normal chat path. Bypasses
+    /// mode-shaping (the string already expresses the intent). Guarded like send.
+    private func runQuickAction(_ text: String) {
+        guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
+        showHistory = false
+        Task { await companyStore.sendChat(text, language: lang) }
     }
 
     private func send() {
         guard canSend else { return }
-        let text = draft
+        let text = mode.shape(draft, language: lang)
         draft = ""
         showHistory = false   // sending always returns to the live conversation
         Task { await companyStore.sendChat(text, language: lang) }

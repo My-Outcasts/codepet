@@ -11,9 +11,9 @@ struct CompanionOrb: View {
         Circle()
             .fill(AngularGradient(
                 gradient: Gradient(colors: [
-                    CodepetTheme.accentPurple, CodepetTheme.accentPink,
-                    CodepetTheme.accentBlue, CodepetTheme.accentTeal,
-                    CodepetTheme.accentPurple]),
+                    CodepetTheme.accentPurple, Color.dyn("#b98cf7", "#b98cf7"),
+                    CodepetTheme.accentPink, Color.dyn("#7c3aed", "#7c3aed"),
+                    CodepetTheme.accentBlue, CodepetTheme.accentPurple]),
                 center: .center))
             .overlay(                     // glossy top-left highlight
                 Circle().fill(RadialGradient(

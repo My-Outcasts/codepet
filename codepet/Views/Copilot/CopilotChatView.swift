@@ -20,6 +20,25 @@ struct CopilotChatView: View {
         let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return n.isEmpty ? "Codepet" : n
     }
+    private var founderName: String {
+        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
+    }
+    /// "Good morning/afternoon/evening, {founder}." — first line of the empty-state
+    /// greeting, in the plain primary text color (line 2 carries the purple gradient).
+    private var greetingLine1: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        let part: String
+        switch h {
+        case ..<12:  part = lang == .vi ? "Chào buổi sáng" : "Good morning"
+        case 12..<18: part = lang == .vi ? "Chào buổi chiều" : "Good afternoon"
+        default:      part = lang == .vi ? "Chào buổi tối" : "Good evening"
+        }
+        return "\(part), \(founderName)."
+    }
+    private var greetingLine2: String {
+        lang == .vi ? "Hôm nay mình xây gì cho \(companyName)?" : "What should we build for \(companyName) today?"
+    }
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
@@ -40,7 +59,8 @@ struct CopilotChatView: View {
             if showHistory {
                 ThreadListView(showHistory: $showHistory)
             } else if companyStore.chatMessages.isEmpty {
-                ChatEmptyState(companyName: companyName,
+                ChatEmptyState(line1: greetingLine1,
+                               line2: greetingLine2,
                                quickActions: quickActions,
                                onQuickAction: runQuickAction) {
                     composerView
@@ -140,13 +160,29 @@ struct CopilotChatView: View {
     }
 
     /// Capability quick-actions — the titles are complete intents, so they are
-    /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`.
+    /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`. Each also
+    /// carries a short localized "why" detail shown as helper text on its card.
     private var quickActions: [QuickAction] {
         let en = ["Run a task", "Review the roadmap", "Set up a department", "Summarize where we are"]
         let vi = ["Chạy một tác vụ", "Xem lộ trình", "Thiết lập một phòng ban", "Tóm tắt tình hình công ty"]
+        let detailsEn = [
+            "Ship a real deliverable from your roadmap.",
+            "See what's next and what's blocking launch.",
+            "Bring Marketing, Legal, or Finance online.",
+            "A quick read on the whole company.",
+        ]
+        let detailsVi = [
+            "Tạo một sản phẩm thực từ lộ trình.",
+            "Xem việc tiếp theo và điều đang cản trở.",
+            "Kích hoạt Marketing, Pháp lý hoặc Tài chính.",
+            "Tóm tắt nhanh toàn công ty.",
+        ]
         let icons = ["checklist", "map", "square.grid.2x2", "doc.text"]
         let titles = lang == .vi ? vi : en
-        return zip(titles, icons).map { QuickAction(title: $0.0, systemImage: $0.1) }
+        let details = lang == .vi ? detailsVi : detailsEn
+        return (0..<titles.count).map { i in
+            QuickAction(title: titles[i], systemImage: icons[i], detail: details[i])
+        }
     }
 
     /// Send a canned capability prompt through the normal chat path. Bypasses

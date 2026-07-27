@@ -43,7 +43,11 @@ struct ChatComposer: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(CodepetTheme.hairline)
+                .stroke(LinearGradient(
+                    gradient: Gradient(colors: [
+                        CodepetTheme.accentPurple, Color.dyn("#7c3aed", "#7c3aed"), CodepetTheme.accentPink]),
+                    startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 1.2)
         )
         .codepetShadow(CodepetTheme.floatingShadow)
         .shadow(color: reduceTransparency ? .clear : CodepetTheme.accentPurple.opacity(0.22), radius: 22)
@@ -133,8 +137,10 @@ private struct ChatComposerPreviewHost: View {
             focus: $focused,
             placeholder: "Ask anything about your company…",
             quickActions: [
-                QuickAction(title: "Run a task", systemImage: "checklist"),
-                QuickAction(title: "Review the roadmap", systemImage: "map"),
+                QuickAction(title: "Run a task", systemImage: "checklist",
+                            detail: "Ship a real deliverable from your roadmap."),
+                QuickAction(title: "Review the roadmap", systemImage: "map",
+                            detail: "See what's next and what's blocking launch."),
             ],
             onSend: {}, onQuickAction: { _ in }
         )

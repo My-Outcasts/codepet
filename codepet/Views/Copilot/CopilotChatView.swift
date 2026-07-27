@@ -42,21 +42,24 @@ struct CopilotChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if companyStore.chatMessages.isEmpty {
-                ChatEmptyState(line1: greetingLine1,
-                               line2: greetingLine2,
-                               quickActions: quickActions,
-                               onQuickAction: runQuickAction) {
-                    composerView
+        ZStack {
+            ChatBackdrop()
+            VStack(spacing: 0) {
+                if companyStore.chatMessages.isEmpty {
+                    ChatEmptyState(line1: greetingLine1,
+                                   line2: greetingLine2,
+                                   quickActions: quickActions,
+                                   onQuickAction: runQuickAction) {
+                        composerView
+                    }
+                } else {
+                    messageList
+                    Divider()
+                    composerView.padding(10)
                 }
-            } else {
-                messageList
-                Divider()
-                composerView.padding(10)
             }
+            .frame(maxHeight: .infinity)
         }
-        .frame(maxHeight: .infinity)
     }
 
     private var messageList: some View {

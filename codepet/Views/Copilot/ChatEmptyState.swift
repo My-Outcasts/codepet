@@ -13,40 +13,21 @@ struct ChatEmptyState<Composer: View>: View {
     @ViewBuilder var composer: Composer
 
     @Environment(\.uiLanguage) private var lang
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        ZStack {
-            brandWash
-            VStack(spacing: 28) {
-                CompanionOrb(size: 78)
+        VStack(spacing: 28) {
+            CompanionOrb(size: 78)
 
-                greeting
-                    .padding(.horizontal, 24)
+            greeting
+                .padding(.horizontal, 24)
 
-                composer
-                    .frame(maxWidth: 720)
+            composer
+                .frame(maxWidth: 720)
 
-                cards
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 40)
-        }
-    }
-
-    /// Soft purple radial wash behind the whole empty-state column — suppressed
-    /// under Reduce Transparency.
-    private var brandWash: some View {
-        Group {
-            if !reduceTransparency {
-                RadialGradient(
-                    gradient: Gradient(colors: [CodepetTheme.accentPurple.opacity(0.16), .clear]),
-                    center: .center, startRadius: 0, endRadius: 420)
-                .blur(radius: 60)
-                .allowsHitTesting(false)
-            }
+            cards
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 40)
     }
 
     /// Line 1: time-of-day + founder name, plain primary text. Line 2: the

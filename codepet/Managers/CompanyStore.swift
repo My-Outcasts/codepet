@@ -233,6 +233,16 @@ final class CompanyStore: ObservableObject {
         }
     }
 
+    /// The enrichment question currently awaiting an answer, if any — the last
+    /// companion message carrying an unanswered `interview` gap. Lets the main
+    /// composer answer the question conversationally (no embedded form): the view
+    /// routes a send here instead of `sendChat` while this is non-nil.
+    var pendingInterview: (id: String, gap: InterviewGap)? {
+        guard let m = chatMessages.last(where: { $0.interview != nil && !$0.interviewAnswered }),
+              let gap = m.interview else { return nil }
+        return (m.id, gap)
+    }
+
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
     /// directly from the view (no prior await); capture the token at entry and re-check
     /// after the save await.

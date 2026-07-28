@@ -139,6 +139,16 @@ struct CopilotChatView: View {
 
     private func send() {
         guard canSend else { return }
+        // A pending enrichment question answers conversationally: the composer text
+        // IS the answer (raw, no mode-shaping), routed to answerInterview.
+        if let pending = companyStore.pendingInterview {
+            let answer = companyStore.chatDraft
+            companyStore.chatDraft = ""
+            Task { await companyStore.answerInterview(messageId: pending.id, gap: pending.gap,
+                                                      answer: answer, language: lang) }
+            inputFocused = true
+            return
+        }
         let text = mode.shape(companyStore.chatDraft, language: lang)
         companyStore.chatDraft = ""
         Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
@@ -156,7 +166,6 @@ struct CopilotBubble: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
-    @State private var interviewDraft = ""
     @State private var reaction: Bool?   // nil = none, true = up, false = down
     private var isMe: Bool { message.role == .me }
 
@@ -185,7 +194,7 @@ struct CopilotBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let gap = message.interview, !message.interviewAnswered {
-            interviewCard(gap)
+            interviewMessage(gap)
         } else {
             textBubble
         }
@@ -279,58 +288,36 @@ struct CopilotBubble: View {
         }
     }
 
-    /// First-run enrichment interview: question + why-line + free-text answer,
-    /// Send (saves raw text to the brief) or Skip (advances without saving).
-    private func interviewCard(_ gap: InterviewGap) -> some View {
+    /// First-run enrichment question, rendered conversationally: byte asks it as a
+    /// normal companion message (orb + question + why-line), and the founder answers
+    /// in the MAIN composer (send() routes to answerInterview while this is pending).
+    /// A subtle Skip link advances without saving. No embedded form/box.
+    private func interviewMessage(_ gap: InterviewGap) -> some View {
         let q = EnrichInterview.question(for: gap, language: lang)
-        let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack {
-            MessageCard(hue: MessageCardStyle.hue(for: .interview, companionAccent: companionAccent)) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(q.ask)
-                        .font(CodepetTheme.inter(15, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(q.why)
-                        .font(CodepetTheme.inter(13))
+        return HStack(alignment: .top, spacing: 10) {
+            CompanionOrb(size: 28, glow: false)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(q.ask)
+                    .font(CodepetTheme.inter(15))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(q.why)
+                    .font(CodepetTheme.inter(13))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await companyStore.answerInterview(messageId: message.id, gap: gap,
+                                                              answer: nil, language: lang) }
+                } label: {
+                    Text(lang == .vi ? "Bỏ qua" : "Skip")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
                         .foregroundColor(CodepetTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
-                              text: $interviewDraft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(CodepetTheme.inter(14))
-                        .lineLimit(1...4)
-                        .padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
-                    HStack(spacing: 8) {
-                        Button {
-                            let answer = interviewDraft
-                            interviewDraft = ""
-                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
-                        } label: {
-                            Text(lang == .vi ? "Gửi" : "Send")
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12).padding(.vertical, 5)
-                                .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-                        }
-                        .buttonStyle(.plain).disabled(!canSend)
-                        Button {
-                            interviewDraft = ""
-                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
-                        } label: {
-                            Text(lang == .vi ? "Bỏ qua" : "Skip")
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.mutedText)
-                                .padding(.horizontal, 12).padding(.vertical, 5)
-                                .background(Capsule().stroke(CodepetTheme.hairline))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
+                .buttonStyle(.plain)
             }
             Spacer(minLength: 24)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The chat-run step-transparency indicator (web: a "producing" beat before the

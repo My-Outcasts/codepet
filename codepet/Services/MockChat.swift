@@ -192,6 +192,21 @@ enum MockChat {
             **Done when**: a stranger can land, drop an email, and you can see it come through.
             """)
         }
+        if t.contains("brand") || t.contains("logo") || t.contains("look") || t.contains("visual") {
+            return ("doc", """
+            A calm, confident visual direction you can apply everywhere.
+
+            **Palette** — one ink (`#1f1b15`), one paper (`#f4f1ea`), one accent (a violet, `#7c3aed`). \
+            Restraint reads as premium; add a second accent only when you truly need it.
+
+            **Type** — a friendly grotesk for headers, a readable sans for body. One family, two weights beats five fonts.
+
+            **Logo mark** — a simple, single-color glyph that survives at 16px (favicon) and in one color \
+            (stamps, watermarks). Wordmark = the name set in your header weight, tightened.
+
+            **Rule of thumb** — pick the boring, consistent option; recognizability comes from repetition, not novelty.
+            """)
+        }
         if t.contains("pricing") || t.contains("price") {
             return ("doc", """
             **Model** — credits, not a seat/day cap: chat feels unlimited, deliverables spend.
@@ -238,6 +253,20 @@ enum MockChat {
         """)
     }
 
+    /// A fully canned, onboarded company for `CompanyData.load` — so mock mode is
+    /// self-contained (no Firestore, no real account needed) and the fan-out has a
+    /// deterministic roadmap with THREE distinct runnable departments (mkt / eng /
+    /// design) → "Run my next moves" fans out to 3 parallel agents, all offline.
+    static func company() -> CompanyState {
+        var brief = CompanyBrief()
+        brief.founderName = "Mona"
+        brief.projectName = "Codepet"
+        brief.oneLiner = "Your AI cofounder that runs the whole company with you."
+        brief.stage = "building"
+        return CompanyState(brief: brief, departments: [], library: [], stage: .building,
+                            companionId: "byte", onboardedAt: Date(), tasks: roadmap())
+    }
+
     /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the
     /// board, the chat's `runnable` list (Codepet-can-do tasks), and the
     /// "needs you" landing card all have something to show offline. The three
@@ -253,6 +282,9 @@ enum MockChat {
             RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
                         detail: "A simple email capture so early interest isn't lost.",
                         phase: .build, who: .does, dept: "eng"),
+            RoadmapTask(id: "mock-brand", title: "Design your brand look",
+                        detail: "A simple visual direction — colors, type, and a logo mark.",
+                        phase: .foundation, who: .draft, dept: "design"),
             RoadmapTask(id: "mock-interviews", title: "Talk to 5 potential users",
                         detail: "Book and run five short discovery calls this week.",
                         phase: .find, who: .you, dept: "mkt"),

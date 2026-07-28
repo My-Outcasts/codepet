@@ -194,6 +194,9 @@ enum CompanyData {
     /// fail-soft to `.empty` — convert such fields to a JSON-safe
     /// representation (e.g. epoch seconds) before adding them to the doc.
     static func load(companyId: String) async -> CompanyState {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.company() }
+        #endif
         let db = Firestore.firestore()
         do {
             let snap = try await db.collection("companies").document(companyId).getDocument()

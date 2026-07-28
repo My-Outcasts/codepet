@@ -17,6 +17,10 @@ struct CopilotChatView: View {
     /// Max width of the conversation column + composer — matches Claude Code's
     /// comfortable centered reading width (both stay in sync via this one value).
     private let chatColumnWidth: CGFloat = 760
+    /// Minimum side gutter kept at ALL window sizes so the column shrinks to fit a
+    /// narrow window (never edge-to-edge) and the message list + composer share the
+    /// exact same left/right edges — the Claude-style responsive behavior.
+    private let chatGutter: CGFloat = 24
 
     // Thread header (name dropdown + Share).
     @State private var renamingThread = false
@@ -153,12 +157,11 @@ struct CopilotChatView: View {
                 } else {
                     chatHeader
                     messageList
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        composerView.frame(maxWidth: chatColumnWidth)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 10)
+                    composerView
+                        .frame(maxWidth: chatColumnWidth)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, chatGutter)
+                        .padding(.vertical, 10)
                 }
             }
             .frame(maxHeight: .infinity)
@@ -168,21 +171,17 @@ struct CopilotChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(companyStore.chatMessages) { m in
-                            CopilotBubble(message: m).id(m.id)
-                        }
-                        if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(companyStore.chatMessages) { m in
+                        CopilotBubble(message: m).id(m.id)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 40)
-                    .padding(.bottom, 16)
-                    .frame(maxWidth: chatColumnWidth, alignment: .leading)
-                    Spacer(minLength: 0)
+                    if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
                 }
+                .padding(.top, 40)
+                .padding(.bottom, 16)
+                .frame(maxWidth: chatColumnWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, chatGutter)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }

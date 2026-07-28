@@ -52,6 +52,9 @@ enum CodepetTheme {
     static let accentOrange = Color.dyn("#ff8c42", "#ff9b5e")
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
 
+    static let chatCanvas  = Color.dyn("#f8f7f3", "#16130f")   // matches pageBackground
+    static let chatOrbCore = Color.dyn("#0E0A16", "#040208")   // the orb's luminous core
+
     // MARK: Geometry
 
     /// Default card corner radius — gentle ~14pt curve on stat cards and

@@ -6,6 +6,7 @@ struct PetCharacter: Identifiable {
     let badge: String
     let color: Color
     let hexColor: String
+    let secondHexColor: String
     let personality: String
     let domain: String
     let greeting: [String]
@@ -28,13 +29,15 @@ struct PetCharacter: Identifiable {
     /// Asset catalog image name: "char-byte", "char-nova", etc.
     var imageName: String { "char-\(id)" }
 
+    var secondColor: Color { Color(hex: secondHexColor) }
+
     static let starters = ["byte", "nova", "crash", "luna", "sage", "glitch", "null"]
 
     // swiftlint:disable function_body_length
     static let all: [String: PetCharacter] = [
         "byte": PetCharacter(
             id: "byte", name: "Codepet", badge: "The Chaotic Core",
-            color: Color(hex: "#8B7BE8"), hexColor: "#8B7BE8",
+            color: Color(hex: "#8B7BE8"), hexColor: "#8B7BE8", secondHexColor: "#4EC9D4",
             personality: "glitchy, chaotic, thinks in fragments",
             domain: "Data / ML",
             greeting: ["*static crackle* ...hey.", "Fragments loading... oh, it's you."],
@@ -48,7 +51,7 @@ struct PetCharacter: Identifiable {
         ),
         "nova": PetCharacter(
             id: "nova", name: "Nova", badge: "The Firestarter",
-            color: Color(hex: "#FF8C00"), hexColor: "#FF8C00",
+            color: Color(hex: "#FF8C00"), hexColor: "#FF8C00", secondHexColor: "#6EA8FF",
             personality: "energetic, bold, moves fast",
             domain: "Frontend Dev",
             greeting: ["Let's BUILD! 🔥", "Speed run? Speed run."],
@@ -62,7 +65,7 @@ struct PetCharacter: Identifiable {
         ),
         "crash": PetCharacter(
             id: "crash", name: "Crash", badge: "The Brawler Bug",
-            color: Color(hex: "#E04040"), hexColor: "#E04040",
+            color: Color(hex: "#E04040"), hexColor: "#E04040", secondHexColor: "#F0A860",
             personality: "tough love, breaks things to learn",
             domain: "Backend Dev",
             greeting: ["SMASH first, ask questions later!", "You again? Good. Let's break stuff."],
@@ -76,7 +79,7 @@ struct PetCharacter: Identifiable {
         ),
         "luna": PetCharacter(
             id: "luna", name: "Luna", badge: "The Creative Builder",
-            color: Color(hex: "#5B8DEF"), hexColor: "#5B8DEF",
+            color: Color(hex: "#5B8DEF"), hexColor: "#5B8DEF", secondHexColor: "#C99BF0",
             personality: "warm, encouraging, creative",
             domain: "Designer (UX/UI)",
             greeting: ["Hey you~ ready to create something?", "I had an idea while you were gone..."],
@@ -90,7 +93,7 @@ struct PetCharacter: Identifiable {
         ),
         "sage": PetCharacter(
             id: "sage", name: "Sage", badge: "The Zen Debugger",
-            color: Color(hex: "#20B090"), hexColor: "#20B090",
+            color: Color(hex: "#20B090"), hexColor: "#20B090", secondHexColor: "#FDC352",
             personality: "calm, wise, methodical",
             domain: "Product Owner",
             greeting: ["Breathe. Then build.", "The bug is not in the code. It's in the approach."],
@@ -104,7 +107,7 @@ struct PetCharacter: Identifiable {
         ),
         "glitch": PetCharacter(
             id: "glitch", name: "Glitch", badge: "The Punk Hacker",
-            color: Color(hex: "#E0508C"), hexColor: "#E0508C",
+            color: Color(hex: "#E0508C"), hexColor: "#E0508C", secondHexColor: "#5AD0E0",
             personality: "rebellious, clever, unconventional",
             domain: "DevOps",
             greeting: ["Rules? Where we're going, we don't need rules.", "Hack the planet! ...or at least this component."],
@@ -118,7 +121,7 @@ struct PetCharacter: Identifiable {
         ),
         "null": PetCharacter(
             id: "null", name: "Null", badge: "The Chaos Gremlin",
-            color: Color(hex: "#80C830"), hexColor: "#80C830",
+            color: Color(hex: "#80C830"), hexColor: "#80C830", secondHexColor: "#5AD0E0",
             personality: "chaotic, silly, unpredictable",
             domain: "Mobile Dev",
             greeting: ["¿¡HOLA!? Did someone say chaos?", "I deleted something important! Just kidding. ...or am I?"],

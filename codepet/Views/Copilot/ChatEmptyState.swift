@@ -23,7 +23,7 @@ struct ChatEmptyState<Composer: View>: View {
                 .padding(.horizontal, 24)
 
             composer
-                .frame(maxWidth: 720)
+                .frame(maxWidth: 600)
 
             cards
         }
@@ -54,7 +54,7 @@ struct ChatEmptyState<Composer: View>: View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             ForEach(quickActions, id: \.id) { card($0) }
         }
-        .frame(maxWidth: 720)
+        .frame(maxWidth: 600)
     }
 
     private func card(_ qa: QuickAction) -> some View {

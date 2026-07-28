@@ -56,7 +56,7 @@ struct CopilotChatView: View {
                     messageList
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        composerView.frame(maxWidth: 720)
+                        composerView.frame(maxWidth: 600)
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 10)
@@ -78,7 +78,7 @@ struct CopilotChatView: View {
                         if companyStore.isCompanionTyping { typingRow.id("typing") }
                     }
                     .padding(12)
-                    .frame(maxWidth: 720, alignment: .leading)
+                    .frame(maxWidth: 600, alignment: .leading)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)

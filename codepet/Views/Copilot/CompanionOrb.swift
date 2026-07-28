@@ -1,5 +1,23 @@
 import SwiftUI
 
+/// The chat avatar for a message. A department SPECIALIST (non-nil `companionId`)
+/// shows its pet character sprite — the pet visibly "appears"; the HOST (nil)
+/// keeps the abstract orb. Used by message bubbles, the thinking row, and the
+/// execute-log so the identity rule lives in one place.
+struct CompanionAvatar: View {
+    var companionId: String? = nil
+    var size: CGFloat = 28
+    var isWorking: Bool = false
+
+    var body: some View {
+        if let id = companionId {
+            CharacterImage(id, size: size)
+        } else {
+            CompanionOrb(size: size, glow: false, isWorking: isWorking)
+        }
+    }
+}
+
 /// A luminous, companion-tinted sphere — the companion's identity in chat
 /// (hero focal, message avatar, thinking indicator). Reads the active companion's
 /// two hues from the store so switching companion re-tints every orb. Pure

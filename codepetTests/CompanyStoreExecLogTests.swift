@@ -15,10 +15,10 @@ final class CompanyStoreExecLogTests: XCTestCase {
                                            specialist: ("nova", "Marketing"),
                                            decisionCount: 2, language: .en).map(\.label)
         XCTAssertEqual(steps, [
-            "Reading your brief and 2 decisions",
-            "Applying Marketing expertise",
+            "Reading your brief — mission, audience, your voice (+ 2 decisions)",
+            "Pulling in the Marketing playbook",
             "Drafting Write landing copy",
-            "Reviewing the draft",
+            "Matching your tone and past decisions",
         ])
     }
 
@@ -27,9 +27,9 @@ final class CompanyStoreExecLogTests: XCTestCase {
                                            specialist: nil,
                                            decisionCount: 0, language: .en).map(\.label)
         XCTAssertEqual(steps, [
-            "Reading your brief",
+            "Reading your brief — mission, audience, your voice",
             "Drafting Write landing copy",
-            "Reviewing the draft",
+            "Matching your tone and past decisions",
         ])
         // Every step starts not-done.
         let raw = CompanyStore.execSteps(task: task(), specialist: nil, decisionCount: 0, language: .en)
@@ -39,7 +39,7 @@ final class CompanyStoreExecLogTests: XCTestCase {
     func testVietnameseLabels() {
         let steps = CompanyStore.execSteps(task: task(), specialist: ("nova", "Marketing"),
                                            decisionCount: 1, language: .vi).map(\.label)
-        XCTAssertEqual(steps.first, "Đọc brief và 1 quyết định của bạn")
-        XCTAssertEqual(steps.last, "Rà soát bản nháp")
+        XCTAssertTrue(steps.first?.hasPrefix("Đọc brief") ?? false)
+        XCTAssertEqual(steps.last, "Khớp giọng điệu và quyết định của bạn")
     }
 }

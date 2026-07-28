@@ -330,7 +330,8 @@ struct CopilotBubble: View {
         // otherwise fall back to the plain thinking row. `text` carries the task
         // title, `companionId` the acting specialist.
         if let steps = message.execSteps, !steps.isEmpty {
-            ExecLogRow(steps: steps, companionId: message.companionId)
+            ExecLogRow(taskTitle: message.text, deptName: message.deptName,
+                       steps: steps, companionId: message.companionId)
         } else {
             ChatThinkingRow(taskTitle: message.text.isEmpty ? nil : message.text,
                             companionId: message.companionId)
@@ -355,7 +356,7 @@ struct CopilotBubble: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
                 HStack(alignment: .top, spacing: 10) {
-                    CompanionOrb(size: 28, glow: false, companionId: message.companionId)
+                    CompanionAvatar(companionId: message.companionId, size: 28)
                     VStack(alignment: .leading, spacing: 6) {
                         // A department specialist labels itself "Name · Dept" so the
                         // handoff reads as a real teammate stepping in.

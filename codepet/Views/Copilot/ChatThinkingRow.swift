@@ -17,7 +17,7 @@ struct ChatThinkingRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CompanionOrb(size: 28, glow: false, isWorking: true, companionId: companionId)
+            CompanionAvatar(companionId: companionId, size: 28, isWorking: true)
             shimmerLabel
             Spacer(minLength: 24)
         }

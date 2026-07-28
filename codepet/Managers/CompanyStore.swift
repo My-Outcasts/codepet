@@ -618,14 +618,16 @@ final class CompanyStore: ObservableObject {
         let vi = language == .vi
         var out: [ExecStep] = []
         let ctx = decisionCount > 0
-            ? (vi ? "Đọc brief và \(decisionCount) quyết định của bạn" : "Reading your brief and \(decisionCount) decisions")
-            : (vi ? "Đọc brief của bạn" : "Reading your brief")
+            ? (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu (và \(decisionCount) quyết định)"
+                  : "Reading your brief — mission, audience, your voice (+ \(decisionCount) decisions)")
+            : (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu của bạn"
+                  : "Reading your brief — mission, audience, your voice")
         out.append(ExecStep(label: ctx))
         if let s = specialist {
-            out.append(ExecStep(label: vi ? "Áp dụng chuyên môn \(s.deptName)" : "Applying \(s.deptName) expertise"))
+            out.append(ExecStep(label: vi ? "Vận dụng cẩm nang \(s.deptName)" : "Pulling in the \(s.deptName) playbook"))
         }
         out.append(ExecStep(label: vi ? "Soạn \(task.title)" : "Drafting \(task.title)"))
-        out.append(ExecStep(label: vi ? "Rà soát bản nháp" : "Reviewing the draft"))
+        out.append(ExecStep(label: vi ? "Khớp giọng điệu và quyết định của bạn" : "Matching your tone and past decisions"))
         return out
     }
 

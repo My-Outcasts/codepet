@@ -17,11 +17,44 @@ final class OnboardingLayoutTests: XCTestCase {
         XCTAssertEqual(OnboardingLayout.artWidth(container: 1400), 588, accuracy: 0.01)
     }
 
-    func testArtPanelClampsOnWideDisplaysInsteadOfDominating() {
-        // 42% of a 2560pt display would be 1075pt; the upper clamp holds it at 620.
-        XCTAssertEqual(OnboardingLayout.artWidth(container: 1512), 620, accuracy: 0.01)
-        XCTAssertEqual(OnboardingLayout.artWidth(container: 2560), 620, accuracy: 0.01)
-        XCTAssertEqual(OnboardingLayout.artWidth(container: 5120), 620, accuracy: 0.01)
+    func testArtPanelKeepsIts42PercentShareOnWideDisplays() {
+        // No upper clamp — the web's `.ob-art` is a straight 42% at any width. An
+        // earlier 620pt ceiling reduced this to 24% at 2560pt, recreating the collapsed
+        // composition the original fixed 360pt width caused.
+        XCTAssertEqual(OnboardingLayout.artWidth(container: 1512), 635.04, accuracy: 0.01)
+        XCTAssertEqual(OnboardingLayout.artWidth(container: 2560), 1075.2, accuracy: 0.01)
+        XCTAssertEqual(OnboardingLayout.artWidth(container: 5120), 2150.4, accuracy: 0.01)
+    }
+
+    func testArtPanelStaysAProportionNotACeiling() {
+        // The ratio must hold across the whole realistic range, not just at one width.
+        for w in stride(from: CGFloat(800), through: 3200, by: 100) {
+            let ratio = OnboardingLayout.artWidth(container: w) / w
+            XCTAssertEqual(ratio, 0.42, accuracy: 0.001, "art panel drifted off 42% at \(w)pt")
+        }
+    }
+
+    /// 600pt is a max-width, not a fixed width — below ~1256pt the column compresses,
+    /// exactly as the web's `.ob-body { width: 100%; max-width: 600px }` does.
+    /// Threshold: w − 0.42w − 128 ≥ 600  ⇒  w ≥ 1255.17.
+    private func formRoom(_ w: CGFloat) -> CGFloat {
+        w - OnboardingLayout.artWidth(container: w) - 128
+    }
+
+    func testFullMeasureFitsOnceTheWindowIsFullScreenSized() {
+        for w in stride(from: CGFloat(1280), through: 3200, by: 100) {
+            XCTAssertGreaterThanOrEqual(formRoom(w), 600, "form measure squeezed at \(w)pt")
+        }
+    }
+
+    func testMeasureCompressesGracefullyBelowThatThresholdRatherThanBreaking() {
+        // Still positive and usable everywhere down to the 560pt minimum window —
+        // the regression being guarded against is a negative width, not a narrow one.
+        for w in stride(from: CGFloat(560), to: 1280, by: 20) {
+            XCTAssertGreaterThan(formRoom(w), 0, "form panel collapsed at \(w)pt")
+        }
+        XCTAssertLessThan(formRoom(1200), 600)   // documents the compression, 568pt
+        XCTAssertGreaterThan(formRoom(1260), 600) // just above the threshold
     }
 
     func testArtPanelClampsOnNarrowWindowsSoTheFormStillFits() {

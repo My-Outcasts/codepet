@@ -6,10 +6,15 @@ import SwiftUI
 /// they happen to take at the ~860pt design width, which is why the flow degraded
 /// as the window grew. Extracted for unit testing, like `StageSliderMath`.
 enum OnboardingLayout {
-    /// Web: `.ob-art { width: 42% }`. Clamped so the panel still leaves room for the
-    /// form at the minimum window width, and doesn't dominate an ultra-wide display.
+    /// Web: `.ob-art { width: 42% }` — a straight percentage with no ceiling, so the
+    /// art keeps its share of the window at any size. Only a lower bound is applied,
+    /// to keep the panel legible (and the form solvent) at the 560pt minimum window.
+    ///
+    /// An upper clamp was tried and removed: capping at 620 put the panel at 24% of a
+    /// 2560pt display, which is the same collapsed composition the fixed 360pt width
+    /// caused — just less severe. Verified against a render, not arithmetic.
     static func artWidth(container: CGFloat) -> CGFloat {
-        min(620, max(320, container * 0.42))
+        max(320, container * 0.42)
     }
     /// Web: `.ob-cold-in h1 { font-size: clamp(34px, 4vw, 52px) }`.
     static func coldHeadline(container: CGFloat) -> CGFloat {

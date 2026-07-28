@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import FirebaseCore
 import GoogleSignIn
 
@@ -42,6 +43,16 @@ struct CodePetApp: App {
         _chatController = StateObject(wrappedValue: chatController)
     }
 
+    /// Force the app's effective appearance so the CodepetTheme dyn NSColor tokens
+    /// re-resolve on a Light/Dark pick. `.system` → nil (follow macOS).
+    private static func applyAppearance(_ theme: AppTheme) {
+        switch theme {
+        case .system: NSApplication.shared.appearance = nil
+        case .light:  NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case .dark:   NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -80,6 +91,13 @@ struct CodePetApp: App {
                 .frame(minWidth: 560, minHeight: 700)
                 .themed(isDark: appState.appTheme == .dark)
                 .preferredColorScheme(appState.appTheme.colorScheme)
+                // preferredColorScheme drives SwiftUI-native colors, but the
+                // CodepetTheme.dyn tokens resolve via dynamic NSColor keyed on the
+                // app's EFFECTIVE appearance — which preferredColorScheme does NOT
+                // force. So a Light/Dark pick would leave the tokens on the system
+                // appearance. Force NSApp.appearance to make every dyn token flip.
+                .onChange(of: appState.appTheme) { _, theme in Self.applyAppearance(theme) }
+                .onAppear { Self.applyAppearance(appState.appTheme) }
                 .task {
                     projectStore.load()
                     TipsPersistence.shared.load(into: tipsState)

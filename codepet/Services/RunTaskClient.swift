@@ -47,6 +47,9 @@ enum RunTaskClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/runTask")!
 
     static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
+        #if DEBUG
+        if MockChat.enabled { return await MockChat.runResult(req) }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"

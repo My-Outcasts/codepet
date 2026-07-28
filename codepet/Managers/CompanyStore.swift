@@ -304,10 +304,10 @@ final class CompanyStore: ObservableObject {
     /// Send a founder-typed message to the company companion. Trims + validates,
     /// then hands off to `sendMessage` (the shared streamed-send core — see its
     /// doc comment for the full flow, fallback, and token-guard semantics).
-    func sendChat(_ raw: String, language: AppLanguage) async {
+    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        await sendMessage(text, language: language)
+        await sendMessage(text, language: language, department: department)
     }
 
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
@@ -454,7 +454,7 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    private func sendMessage(_ text: String, language: AppLanguage) async {
+    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
@@ -477,7 +477,7 @@ final class CompanyStore: ObservableObject {
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text),
+                                          library: company.library, query: text, focusDepartment: department),
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
         let placeholderId = UUID().uuidString

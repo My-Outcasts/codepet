@@ -172,6 +172,9 @@ struct CopilotBubble: View {
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
+    private var companionAccent: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
+    }
 
     var body: some View {
         if message.producing {
@@ -198,16 +201,18 @@ struct CopilotBubble: View {
     }
 
     private func actionButton(_ action: FirstRunAction) -> some View {
-        Button {
-            Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
-        } label: {
-            Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
-                .font(.pixelSystem(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(CodepetTheme.accentPurple))
+        MessageCard(hue: MessageCardStyle.hue(for: .firstRunAction, companionAccent: companionAccent)) {
+            Button {
+                Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
+            } label: {
+                Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(CodepetTheme.accentPurple))
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     /// A tappable "go here" chip from byte's `nav` action — NOT auto-navigated
@@ -217,14 +222,16 @@ struct CopilotBubble: View {
     private func navChip(_ nav: NavAction) -> some View {
         let label = AppView.from(navDestination: nav.destination)?.title(lang) ?? nav.destination
         return HStack {
-            Button { companyStore.activateNav(nav) } label: {
-                Text((lang == .vi ? "Đi tới " : "Go to ") + label)
-                    .font(.pixelSystem(size: 11, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(Capsule().fill(CodepetTheme.accentPurple))
+            MessageCard(hue: MessageCardStyle.hue(for: .navChip, companionAccent: companionAccent)) {
+                Button { companyStore.activateNav(nav) } label: {
+                    Text((lang == .vi ? "Đi tới " : "Go to ") + label)
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             Spacer(minLength: 24)
         }
     }
@@ -239,27 +246,25 @@ struct CopilotBubble: View {
         let why = item?.why
         let verb = item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable")
         return HStack {
-            CodepetCard {
+            MessageCard(hue: MessageCardStyle.hue(for: .setupSuggestion, companionAccent: companionAccent)) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(name)
-                        .font(.pixelSystem(size: 12, weight: .semibold))
+                        .font(CodepetTheme.inter(14, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                     if let why, !why.isEmpty {
                         Text(why)
-                            .font(.pixelSystem(size: 11))
+                            .font(CodepetTheme.inter(13))
                             .foregroundColor(CodepetTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Button { Task { await companyStore.activateSetup(setup) } } label: {
                         Text(verb)
-                            .font(.pixelSystem(size: 10, weight: .semibold))
+                            .font(CodepetTheme.inter(12, weight: .semibold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 12).padding(.vertical, 5)
                             .background(Capsule().fill(CodepetTheme.accentPurple))
                     }.buttonStyle(.plain)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 24)
         }
@@ -270,13 +275,13 @@ struct CopilotBubble: View {
     /// there is no tap/approval affordance here, just an acknowledgement.
     private func notedChip(_ facts: [RememberedFact]) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(facts, id: \.topic) { fact in
-                    Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
-                        .font(.pixelSystem(size: 10))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(CodepetTheme.surface))
+            MessageCard(hue: MessageCardStyle.hue(for: .noted, companionAccent: companionAccent)) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(facts, id: \.topic) { fact in
+                        Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
+                            .font(CodepetTheme.inter(13))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
                 }
             }
             Spacer(minLength: 24)
@@ -289,51 +294,50 @@ struct CopilotBubble: View {
         let q = EnrichInterview.question(for: gap, language: lang)
         let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return HStack {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(q.ask)
-                    .font(.pixelSystem(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(q.why)
-                    .font(.pixelSystem(size: 11))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
-                          text: $interviewDraft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.pixelSystem(size: 12))
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
-                HStack(spacing: 8) {
-                    Button {
-                        let answer = interviewDraft
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Gửi" : "Send")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
+            MessageCard(hue: MessageCardStyle.hue(for: .interview, companionAccent: companionAccent)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(q.ask)
+                        .font(CodepetTheme.inter(15, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(q.why)
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
+                              text: $interviewDraft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(CodepetTheme.inter(14))
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
+                    HStack(spacing: 8) {
+                        Button {
+                            let answer = interviewDraft
+                            interviewDraft = ""
+                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
+                        } label: {
+                            Text(lang == .vi ? "Gửi" : "Send")
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
+                        }
+                        .buttonStyle(.plain).disabled(!canSend)
+                        Button {
+                            interviewDraft = ""
+                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
+                        } label: {
+                            Text(lang == .vi ? "Bỏ qua" : "Skip")
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(Capsule().stroke(CodepetTheme.hairline))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain).disabled(!canSend)
-                    Button {
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Bỏ qua" : "Skip")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().stroke(CodepetTheme.hairline))
-                    }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CodepetTheme.surface))
-            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 24)
         }
     }
@@ -354,7 +358,7 @@ struct CopilotBubble: View {
                 HStack {
                     Spacer(minLength: 24)
                     Text(message.text)
-                        .font(.pixelSystem(size: 12))
+                        .font(CodepetTheme.inter(15))
                         .foregroundColor(.white)
                         .padding(.horizontal, 10).padding(.vertical, 7)
                         .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -367,7 +371,7 @@ struct CopilotBubble: View {
                     CompanionOrb(size: 28, glow: false)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(message.text)
-                            .font(.pixelSystem(size: 12))
+                            .font(CodepetTheme.inter(15))
                             .foregroundColor(CodepetTheme.primaryText)
                             .padding(.horizontal, 10).padding(.vertical, 7)
                             .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -410,17 +414,17 @@ struct CopilotBubble: View {
 
     private func draftCard(_ d: Deliverable) -> some View {
         HStack {
-            CodepetCard {
+            MessageCard(hue: message.draftApproved ? CodepetTheme.accentTeal : CodepetTheme.accentGold) {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
                             Text(d.title)
-                                .font(.pixelSystem(size: 12, weight: .semibold))
+                                .font(CodepetTheme.inter(15, weight: .semibold))
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
                         Text(d.body)
-                            .font(.pixelSystem(size: 11))
+                            .font(CodepetTheme.inter(13))
                             .foregroundColor(CodepetTheme.mutedText)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -433,20 +437,20 @@ struct CopilotBubble: View {
                             Image(systemName: "checkmark.circle.fill")
                             Text(lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library")
                         }
-                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .font(CodepetTheme.inter(12, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentTeal)
                     } else {
                         HStack(spacing: 8) {
                             Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
                                 Text(lang == .vi ? "Duyệt" : "Approve")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .font(CodepetTheme.inter(12, weight: .semibold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().fill(CodepetTheme.accentPurple))
                             }.buttonStyle(.plain)
                             Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
                                 Text(lang == .vi ? "Làm lại" : "Redo")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .font(CodepetTheme.inter(12, weight: .semibold))
                                     .foregroundColor(CodepetTheme.bodyText)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().stroke(CodepetTheme.hairline))
@@ -462,7 +466,7 @@ struct CopilotBubble: View {
                                                                          reviseNote: kind.note(lang)) }
                                 } label: {
                                     Text(kind.label(lang))
-                                        .font(.pixelSystem(size: 9, weight: .semibold))
+                                        .font(CodepetTheme.inter(11, weight: .semibold))
                                         .foregroundColor(CodepetTheme.mutedText)
                                         .padding(.horizontal, 8).padding(.vertical, 3)
                                         .background(Capsule().stroke(CodepetTheme.hairline))
@@ -471,8 +475,6 @@ struct CopilotBubble: View {
                         }
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 24)
         }

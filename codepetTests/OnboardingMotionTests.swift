@@ -119,13 +119,9 @@ final class OnboardingMotionTests: XCTestCase {
         XCTAssertLessThan(OnboardingMotion.artCrossfade, OnboardingMotion.artSettle / 3)
     }
 
-    func testArtEnterScaleAndParallax() {
+    func testArtEnterScaleOverscansSoNoEdgeShowsDuringTheSettle() {
         XCTAssertEqual(OnboardingMotion.artEnterScale, 1.07)
-        XCTAssertEqual(OnboardingMotion.artParallax, 8)
-        // Enter scale has to exceed the parallax shift as a fraction of the panel,
-        // or the ±8px offset would expose an edge during the settle.
-        let minPanel: CGFloat = 320
-        let overscan = (OnboardingMotion.artEnterScale - 1) * minPanel / 2
-        XCTAssertGreaterThan(overscan, OnboardingMotion.artParallax)
+        // Must be > 1, or the layer would settle outward and reveal the panel edge.
+        XCTAssertGreaterThan(OnboardingMotion.artEnterScale, 1.0)
     }
 }

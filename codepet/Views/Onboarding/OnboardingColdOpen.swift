@@ -22,9 +22,10 @@ struct OnboardingColdOpen: View {
                     .resizable().interpolation(.high).scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(kenBurns ? OnboardingMotion.kenBurnsScale : 1.0)
-                    // Ken Burns drift (`translate(-1.2%,-1.6%)`) plus pointer parallax.
-                    .offset(x: (kenBurns ? drift.width : 0) + px * 6,
-                            y: (kenBurns ? drift.height : 0) + py * 6)
+                    // Ken Burns drift only (`translate(-1.2%,-1.6%)`). The pointer
+                    // parallax that used to ride on top of this was removed.
+                    .offset(x: kenBurns ? drift.width : 0,
+                            y: kenBurns ? drift.height : 0)
                     .clipped()
             }
             .ignoresSafeArea()

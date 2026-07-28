@@ -51,11 +51,7 @@ struct OnboardingView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
     @State private var timeoutTask: Task<Void, Never>?
-    /// Pointer parallax for the art panel, -1...1 — mirrors OnboardingColdOpen.
-    @State private var px: CGFloat = 0
-    @State private var py: CGFloat = 0
     @FocusState private var nameFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -101,14 +97,14 @@ struct OnboardingView: View {
         GeometryReader { card in
             HStack(spacing: 0) {
                 // `.ob-art span` — layers crossfade over 1.1s while the incoming one
-                // settles from scale(1.07) to 1 over 7s, plus ±8px pointer parallax.
+                // settles from scale(1.07) to 1 over 7s. The web also drifts these with
+                // the pointer; not ported (distracting in use).
                 // The .id drives the ZStack transition, so only two layers are ever live.
                 ZStack {
                     OnboardingArtLayer(
                         name: OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)],
                         width: OnboardingLayout.artWidth(container: card.size.width),
-                        grade: OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)],
-                        px: px, py: py
+                        grade: OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
                     )
                     .id(step)
                     .transition(.opacity)
@@ -151,18 +147,6 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .overlay(alignment: .topTrailing) { skipPill }
-            .onContinuousHover { phase in
-                guard !reduceMotion else { return }
-                switch phase {
-                case .active(let p):
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        px = clampNorm(p.x, 0, card.size.width)
-                        py = clampNorm(p.y, 0, card.size.height)
-                    }
-                case .ended:
-                    withAnimation(.easeOut(duration: 0.4)) { px = 0; py = 0 }
-                }
-            }
         }
         .background(CodepetTheme.surface)
     }

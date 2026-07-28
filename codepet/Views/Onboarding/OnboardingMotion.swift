@@ -74,11 +74,12 @@ enum OnboardingMotion {
     static let hintOpacityLow: Double = 0.42
     static let hintOpacityHigh: Double = 0.72
 
-    // .ob-art span — `transition: opacity 1.1s, transform 7s`, scale 1.07 → 1, ±8px parallax.
+    // .ob-art span — `transition: opacity 1.1s, transform 7s`, scale 1.07 → 1.
+    // The web also offsets these by the pointer; that parallax is deliberately not
+    // ported — mouse-tracking movement on the art was distracting in use.
     static let artCrossfade: Double = 1.1
     static let artSettle: Double = 7
     static let artEnterScale: CGFloat = 1.07
-    static let artParallax: CGFloat = 8
 }
 
 // MARK: - riseIn
@@ -175,22 +176,17 @@ struct TitleSweep<Mask: View>: View {
 
 /// One layer of `.ob-art`. Enters at `scale(1.07)` and settles to 1 over 7s while the
 /// ZStack crossfades it in over 1.1s — the web's split
-/// `transition: opacity 1.1s, transform 7s`.
+/// `transition: opacity 1.1s, transform 7s`. No pointer parallax by design.
 struct OnboardingArtLayer: View {
     let name: String
     let width: CGFloat
     let grade: Color
-    let px: CGFloat
-    let py: CGFloat
 
     @State private var settled = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let scale: CGFloat = (settled || reduceMotion) ? 1.0 : OnboardingMotion.artEnterScale
-        let shift = reduceMotion ? CGSize.zero
-            : CGSize(width: px * -OnboardingMotion.artParallax,
-                     height: py * -OnboardingMotion.artParallax)
         return Image(name)
             .resizable()
             .interpolation(.high)
@@ -198,7 +194,6 @@ struct OnboardingArtLayer: View {
             .frame(width: width)
             .frame(maxHeight: .infinity)
             .scaleEffect(scale)
-            .offset(x: shift.width, y: shift.height)
             .clipped()
             .overlay(grade.blendMode(.softLight))
             .compositingGroup()

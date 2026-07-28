@@ -8,10 +8,17 @@ struct CopilotChatView: View {
     @Environment(\.uiLanguage) private var lang
     @State private var draft = ""
     @State private var mode: ChatMode = .ask
+    @State private var selectedDept: Department?
     @FocusState private var inputFocused: Bool
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
+    private var companionAccent: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
+    }
+    private var companionAccent2: Color {
+        PetCharacter.all[companyStore.company.companionId]?.secondColor ?? CodepetTheme.accentPink
     }
     private var companyName: String {
         let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,6 +110,10 @@ struct CopilotChatView: View {
             focus: $inputFocused,
             placeholder: placeholder,
             quickActions: quickActions,
+            accent: companionAccent,
+            accent2: companionAccent2,
+            isBusy: companyStore.isCompanionTyping || companyStore.isStreaming,
+            selectedDept: $selectedDept,
             onSend: send,
             onQuickAction: runQuickAction
         )
@@ -144,14 +155,14 @@ struct CopilotChatView: View {
     /// mode-shaping (the string already expresses the intent). Guarded like send.
     private func runQuickAction(_ text: String) {
         guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
-        Task { await companyStore.sendChat(text, language: lang) }
+        Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
     }
 
     private func send() {
         guard canSend else { return }
         let text = mode.shape(draft, language: lang)
         draft = ""
-        Task { await companyStore.sendChat(text, language: lang) }
+        Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
         // Re-assert focus: the composer moves between the empty-state and docked
         // `if/else` branches once `chatMessages` goes empty→non-empty, so SwiftUI
         // rebuilds the TextField and drops focus after the first send.

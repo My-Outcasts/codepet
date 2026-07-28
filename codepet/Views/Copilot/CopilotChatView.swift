@@ -14,6 +14,112 @@ struct CopilotChatView: View {
     /// comfortable centered reading width (both stay in sync via this one value).
     private let chatColumnWidth: CGFloat = 760
 
+    // Thread header (name dropdown + Share).
+    @State private var renamingThread = false
+    @State private var threadRenameDraft = ""
+    @State private var shareCopied = false
+
+    private var activeThreadTitle: String {
+        companyStore.threads.first { $0.id == companyStore.activeThreadId }?.title
+            ?? (lang == .vi ? "Đoạn chat mới" : "New chat")
+    }
+    /// Recent threads for the header switcher, newest-first (active one excluded — it's the label).
+    private var recentThreads: [ChatThread] {
+        sortThreadsByRecent(companyStore.threads)
+            .filter { $0.id != companyStore.activeThreadId }
+            .prefix(8).map { $0 }
+    }
+    private var isChatBusy: Bool { companyStore.isCompanionTyping || companyStore.isStreaming }
+
+    /// A slim top bar: the active thread's name as a dropdown switcher (New chat +
+    /// recent threads + Rename), plus Share (copies the transcript). Leading inset
+    /// clears the shell's sidebar-collapse toggle when the sidebar is hidden.
+    private var chatHeader: some View {
+        HStack(spacing: 8) {
+            threadMenu
+            Spacer(minLength: 8)
+            shareButton
+        }
+        .padding(.leading, 44)
+        .padding(.trailing, 16)
+        .padding(.vertical, 8)
+        .alert(lang == .vi ? "Đổi tên đoạn chat" : "Rename chat", isPresented: $renamingThread) {
+            TextField(lang == .vi ? "Tên" : "Name", text: $threadRenameDraft)
+            Button(lang == .vi ? "Lưu" : "Save") {
+                if let id = companyStore.activeThreadId { companyStore.renameThread(id, title: threadRenameDraft) }
+            }
+            Button(lang == .vi ? "Hủy" : "Cancel", role: .cancel) {}
+        }
+    }
+
+    private var threadMenu: some View {
+        Menu {
+            Button { companyStore.newChat() } label: {
+                Label(lang == .vi ? "Đoạn chat mới" : "New chat", systemImage: "square.and.pencil")
+            }.disabled(isChatBusy)
+            if !recentThreads.isEmpty {
+                Section(lang == .vi ? "Gần đây" : "Recent") {
+                    ForEach(recentThreads) { t in
+                        Button {
+                            companyStore.switchThread(t.id)
+                        } label: {
+                            Text(t.title ?? (lang == .vi ? "Đoạn chat mới" : "New chat"))
+                        }.disabled(isChatBusy)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                threadRenameDraft = activeThreadTitle
+                renamingThread = true
+            } label: {
+                Label(lang == .vi ? "Đổi tên đoạn này" : "Rename this chat", systemImage: "pencil")
+            }.disabled(companyStore.activeThreadId == nil)
+        } label: {
+            HStack(spacing: 5) {
+                Text(activeThreadTitle)
+                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var shareButton: some View {
+        Button { copyTranscript() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: shareCopied ? "checkmark" : "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+                Text(shareCopied ? (lang == .vi ? "Đã sao chép" : "Copied")
+                                 : (lang == .vi ? "Chia sẻ" : "Share"))
+                    .font(CodepetTheme.inter(12, weight: .medium))
+            }
+            .foregroundColor(shareCopied ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Copy the active thread's transcript (plain text) to the clipboard. No
+    /// share-link backend yet — an honest local copy the founder can paste anywhere.
+    private func copyTranscript() {
+        let text = companyStore.chatMessages.compactMap { m -> String? in
+            let body = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else { return nil }
+            let who = m.role == .me ? (lang == .vi ? "Bạn" : "You") : companionName
+            return "\(who): \(body)"
+        }.joined(separator: "\n\n")
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        shareCopied = true
+        Task { try? await Task.sleep(nanoseconds: 1_600_000_000); shareCopied = false }
+    }
+
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
@@ -41,6 +147,7 @@ struct CopilotChatView: View {
                         composerView
                     }
                 } else {
+                    chatHeader
                     messageList
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)

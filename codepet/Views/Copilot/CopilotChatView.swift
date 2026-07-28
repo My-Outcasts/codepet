@@ -4,6 +4,10 @@ import AppKit
 
 /// The Copilot column: a company-grounded chat with the founder's companion.
 struct CopilotChatView: View {
+    /// Whether the shell's sidebar is collapsed — the header insets to clear the
+    /// floating collapse toggle only then; flush-left when the sidebar is open.
+    var sidebarCollapsed: Bool = false
+
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var mode: ChatMode = .ask
@@ -40,7 +44,7 @@ struct CopilotChatView: View {
             Spacer(minLength: 8)
             shareButton
         }
-        .padding(.leading, 44)
+        .padding(.leading, sidebarCollapsed ? 44 : 16)
         .padding(.trailing, 16)
         .padding(.vertical, 8)
         .alert(lang == .vi ? "Đổi tên đoạn chat" : "Rename chat", isPresented: $renamingThread) {
@@ -481,7 +485,11 @@ struct CopilotBubble: View {
                             .font(CodepetTheme.inter(15))
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
-                        companionActions
+                        // Hide copy/regenerate/thumbs until the reply has text — an
+                        // empty streaming placeholder shouldn't show an action bar.
+                        if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            companionActions
+                        }
                     }
                     Spacer(minLength: 24)
                 }

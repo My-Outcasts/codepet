@@ -33,9 +33,20 @@ final class ChatThreadsTests: XCTestCase {
                        String(repeating: "a", count: 40) + "\u{2026}")
     }
 
-    func testDeriveThreadTitleNilWhenNoMeMessage() {
+    func testDeriveThreadTitleNilWhenEmpty() {
         XCTAssertNil(deriveThreadTitle([]))
-        XCTAssertNil(deriveThreadTitle([companion("hi there")]))
+    }
+
+    /// A thread with only byte's seeded question/greeting (no founder message yet)
+    /// now falls back to that message so it gets a distinguishable name, not "New chat".
+    func testDeriveThreadTitleFallsBackToCompanionWhenNoMe() {
+        XCTAssertEqual(deriveThreadTitle([companion("hi there")]), "hi there")
+    }
+
+    /// The founder's first message still wins over an earlier companion message.
+    func testDeriveThreadTitlePrefersMeOverCompanion() {
+        XCTAssertEqual(deriveThreadTitle([companion("byte's question"), me("my real topic")]),
+                       "my real topic")
     }
 
     func testDeriveThreadTitleNilWhenFirstMeMessageIsBlank() {

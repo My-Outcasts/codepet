@@ -30,7 +30,12 @@ private let threadTitleMax = 40
 /// ellipsis. Returns nil when there is no `.me` message yet, OR its text is
 /// blank — the view falls back to "New chat" for either case, same as the web.
 func deriveThreadTitle(_ messages: [CopilotMessage]) -> String? {
-    guard let first = messages.first(where: { $0.role == .me }) else { return nil }
+    // Prefer the founder's first message; fall back to the first non-empty
+    // message of ANY role so a thread that so far only holds byte's seeded
+    // question/greeting still gets a distinguishable name instead of "New chat".
+    let source = messages.first(where: { $0.role == .me && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+        ?? messages.first(where: { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    guard let first = source else { return nil }
     let collapsed = first.text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !collapsed.isEmpty else { return nil }

@@ -325,12 +325,16 @@ struct CopilotBubble: View {
     /// a filled chat bubble — so it reads as ambient status, not a message.
     /// `CompanyStore.handleRunTaskId` removes this row (win or lose) before
     /// appending the real reply, so it's always transient.
-    private var producingRow: some View {
-        // The producing placeholder carries the task title in `text` and the acting
-        // specialist in `companionId`, so the thinking row names the work and shows
-        // the right pet's orb.
-        ChatThinkingRow(taskTitle: message.text.isEmpty ? nil : message.text,
-                        companionId: message.companionId)
+    @ViewBuilder private var producingRow: some View {
+        // With an execute-log, show the live step checklist (how the agent works);
+        // otherwise fall back to the plain thinking row. `text` carries the task
+        // title, `companionId` the acting specialist.
+        if let steps = message.execSteps, !steps.isEmpty {
+            ExecLogRow(steps: steps, companionId: message.companionId)
+        } else {
+            ChatThinkingRow(taskTitle: message.text.isEmpty ? nil : message.text,
+                            companionId: message.companionId)
+        }
     }
 
     private var textBubble: some View {

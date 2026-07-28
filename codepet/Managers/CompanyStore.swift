@@ -604,6 +604,25 @@ final class CompanyStore: ObservableObject {
     /// `cid` is the `companyId` captured at the start of `sendChat` — re-checked
     /// after the `taskRunner` await so an account switch mid-run can't append
     /// this account's draft into a different (already-hydrated) account's chat.
+    /// The execute-log steps for a run — a truthful description of the pipeline the
+    /// deliverable goes through (the request genuinely carries the brief, decisions,
+    /// and department context). Revealed progressively as the run proceeds.
+    static func execSteps(task: RoadmapTask, specialist: (companionId: String, deptName: String)?,
+                          decisionCount: Int, language: AppLanguage) -> [ExecStep] {
+        let vi = language == .vi
+        var out: [ExecStep] = []
+        let ctx = decisionCount > 0
+            ? (vi ? "Đọc brief và \(decisionCount) quyết định của bạn" : "Reading your brief and \(decisionCount) decisions")
+            : (vi ? "Đọc brief của bạn" : "Reading your brief")
+        out.append(ExecStep(label: ctx))
+        if let s = specialist {
+            out.append(ExecStep(label: vi ? "Áp dụng chuyên môn \(s.deptName)" : "Applying \(s.deptName) expertise"))
+        }
+        out.append(ExecStep(label: vi ? "Soạn \(task.title)" : "Drafting \(task.title)"))
+        out.append(ExecStep(label: vi ? "Rà soát bản nháp" : "Reviewing the draft"))
+        return out
+    }
+
     /// The specialist for a task's owning department, if it maps to a companion
     /// other than the host — used to attribute the run's producing row + draft.
     private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
@@ -625,13 +644,37 @@ final class CompanyStore: ObservableObject {
         // Attribute a department-owned task to its specialist: the producing row
         // (and the draft) carry the specialist's orb + "Name · Dept" label, so the
         // right pet is visibly working on the task. The producing placeholder's
-        // `text` holds the task title so ChatThinkingRow can name the work.
+        // `text` holds the task title; `execSteps` drives the execute-log.
         let specialist = taskSpecialist(for: task)
+        let steps = Self.execSteps(task: task, specialist: specialist,
+                                   decisionCount: company.decisions.count, language: language)
         let producingId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
-                                           companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                           companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                           execSteps: steps))
+        // Reveal the steps progressively (all but the last) while the run is in
+        // flight — transparency into how the deliverable is produced. The last step
+        // stays "working" until the real result lands.
+        let reveal = Task { [cid] in
+            for idx in 0..<max(0, steps.count - 1) {
+                try? await Task.sleep(nanoseconds: 480_000_000)
+                if Task.isCancelled { return }
+                guard companyId == cid,
+                      let mi = chatMessages.firstIndex(where: { $0.id == producingId }) else { return }
+                chatMessages[mi].execSteps?[idx].done = true
+            }
+        }
         let result = await taskRunner(runRequest(for: task, language: language))
+        reveal.cancel()
         guard companyId == cid else { return }  // account switch already cleared chatMessages
+        // Result is in: mark every step done and hold a short beat so the completed
+        // log reads before it collapses into the draft card.
+        if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
+           let count = chatMessages[mi].execSteps?.count {
+            for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
+        }
+        try? await Task.sleep(nanoseconds: 320_000_000)
+        guard companyId == cid else { return }
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,

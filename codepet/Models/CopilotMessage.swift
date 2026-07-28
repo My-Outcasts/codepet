@@ -4,6 +4,17 @@ import Foundation
 /// Who authored a Copilot chat message.
 enum CopilotRole { case me, companion }
 
+/// One line in a run's execute-log — the "how the agent is working" transparency
+/// shown while a task is being produced. `done` flips as the step completes.
+struct ExecStep: Identifiable, Equatable {
+    let id: String
+    let label: String
+    var done: Bool
+    init(id: String = UUID().uuidString, label: String, done: Bool = false) {
+        self.id = id; self.label = label; self.done = done
+    }
+}
+
 /// One Copilot chat message (session-only; not persisted this phase). Named to
 /// avoid the reflection `ChatMessage`.
 struct CopilotMessage: Identifiable, Equatable {
@@ -42,6 +53,9 @@ struct CopilotMessage: Identifiable, Equatable {
     /// The department this message's specialist leads (e.g. "Marketing"), shown
     /// as a "Name · Dept" sender label. nil when spoken by the host.
     var deptName: String?
+    /// The run's execute-log steps (transparency), on the transient `producing`
+    /// placeholder only. Revealed/completed as the run proceeds; nil = no log.
+    var execSteps: [ExecStep]?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
@@ -49,7 +63,8 @@ struct CopilotMessage: Identifiable, Equatable {
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
-         companionId: String? = nil, deptName: String? = nil) {
+         companionId: String? = nil, deptName: String? = nil,
+         execSteps: [ExecStep]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -65,5 +80,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.producing = producing
         self.companionId = companionId
         self.deptName = deptName
+        self.execSteps = execSteps
     }
 }

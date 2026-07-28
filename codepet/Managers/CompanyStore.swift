@@ -69,6 +69,11 @@ final class CompanyStore: ObservableObject {
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
+    // Chat persistence seam (companies/{uid}/threads). Injectable + fail-soft so
+    // tests never touch Firestore.
+    private let threadSaver: (String, ChatThread) async -> Bool
+    private let threadDeleter: (String, String) async -> Bool
+    private let threadsLoader: (String) async -> [ChatThread]
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -99,7 +104,10 @@ final class CompanyStore: ObservableObject {
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
-         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
+         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract,
+         threadSaver: @escaping (String, ChatThread) async -> Bool = ChatPersistence.saveThread,
+         threadDeleter: @escaping (String, String) async -> Bool = ChatPersistence.deleteThread,
+         threadsLoader: @escaping (String) async -> [ChatThread] = ChatPersistence.loadThreads) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -113,6 +121,9 @@ final class CompanyStore: ObservableObject {
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
+        self.threadSaver = threadSaver
+        self.threadDeleter = threadDeleter
+        self.threadsLoader = threadsLoader
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -130,7 +141,8 @@ final class CompanyStore: ObservableObject {
         // Chat is per-account + session-only. An actual account change clears it
         // (and any stuck typing); a same-user re-hydrate (token refresh/reconnect)
         // preserves the in-flight conversation.
-        if self.companyId != companyId {
+        let accountChanged = self.companyId != companyId
+        if accountChanged {
             chatMessages = []
             threads = []
             activeThreadId = nil
@@ -144,6 +156,15 @@ final class CompanyStore: ObservableObject {
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
         company = loaded
+        // Hydrate the persisted Recent list on an account change (a same-user
+        // re-hydrate keeps the live in-memory threads, which may be newer than
+        // Firestore). We open to the empty hero — activeThreadId stays nil and
+        // chatMessages empty — so history lives in the switcher, not auto-opened.
+        if accountChanged {
+            let persisted = await threadsLoader(companyId)
+            guard token == hydrationToken else { return }
+            threads = persisted
+        }
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
@@ -344,6 +365,12 @@ final class CompanyStore: ObservableObject {
             threads.append(ChatThread(id: id, title: deriveThreadTitle(chatMessages),
                                        messages: chatMessages, createdAt: now, updatedAt: now))
         }
+        // Persist the flushed thread (fail-soft, fire-and-forget). The captured
+        // companyId keeps the write scoped to THIS account even if it switches
+        // mid-flight, and `.persistable` (inside the saver) strips transient run state.
+        if let cid = companyId, let thread = threads.first(where: { $0.id == id }) {
+            Task { _ = await threadSaver(cid, thread) }
+        }
     }
 
     /// Start a fresh, empty conversation: flush the outgoing thread (if it ever
@@ -389,6 +416,7 @@ final class CompanyStore: ObservableObject {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         threads[i].title = trimmed.isEmpty ? nil : trimmed
+        if let cid = companyId { let thread = threads[i]; Task { _ = await threadSaver(cid, thread) } }
     }
 
     /// Delete a thread. Deleting a non-active thread just removes it. Deleting
@@ -404,6 +432,7 @@ final class CompanyStore: ObservableObject {
     func deleteThread(_ id: String) {
         guard !isStreaming, !isCompanionTyping else { return }
         threads.removeAll { $0.id == id }
+        if let cid = companyId { Task { _ = await threadDeleter(cid, id) } }
         guard id == activeThreadId else { return }
         if let fallback = pickFallbackThreadId(after: id, in: threads) {
             activeThreadId = fallback

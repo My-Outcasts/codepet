@@ -3,7 +3,7 @@ import Foundation
 
 /// One of the three plan-shaping brief fields the first-run interview fills,
 /// in priority order. Verbatim-logic port of the web `Gap` (lib/ai/enrichInterview.ts).
-enum InterviewGap: String, CaseIterable, Equatable {
+enum InterviewGap: String, CaseIterable, Equatable, Codable {
     case goal, traction, problem
 }
 

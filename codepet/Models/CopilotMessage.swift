@@ -2,11 +2,11 @@
 import Foundation
 
 /// Who authored a Copilot chat message.
-enum CopilotRole { case me, companion }
+enum CopilotRole: String, Codable { case me, companion }
 
 /// One line in a run's execute-log — the "how the agent is working" transparency
 /// shown while a task is being produced. `done` flips as the step completes.
-struct ExecStep: Identifiable, Equatable {
+struct ExecStep: Identifiable, Equatable, Codable {
     let id: String
     let label: String
     var done: Bool
@@ -17,7 +17,7 @@ struct ExecStep: Identifiable, Equatable {
 
 /// One Copilot chat message (session-only; not persisted this phase). Named to
 /// avoid the reflection `ChatMessage`.
-struct CopilotMessage: Identifiable, Equatable {
+struct CopilotMessage: Identifiable, Equatable, Codable {
     let id: String
     let role: CopilotRole
     /// `var` (not `let`): a streaming companion reply is filled in place, chunk

@@ -1,12 +1,11 @@
 // codepet/Managers/ChatThreads.swift
 import Foundation
 
-/// One session-only chat conversation — a named bucket of `CopilotMessage`s.
-/// Deliberately NOT Codable: Level 1 multi-thread history is in-memory only,
-/// same as `chatMessages` itself (see `CopilotMessage`'s doc comment). Native
-/// port of the web `ThreadMeta` (`lib/firebase/schema.ts`) + its message array,
-/// merged into one struct since there's no persistence layer to split them.
-struct ChatThread: Identifiable, Equatable {
+/// One chat conversation — a named bucket of `CopilotMessage`s. Codable so a
+/// thread can be persisted to `companies/{uid}/threads/{id}` and hydrated on
+/// launch. Native port of the web `ThreadMeta` (`lib/firebase/schema.ts`) + its
+/// message array, merged into one struct.
+struct ChatThread: Identifiable, Equatable, Codable {
     let id: String
     /// nil until the founder's first message derives one (or a rename sets a
     /// non-blank title) — rendered as "New chat" by the view, mirrors the web.
@@ -14,6 +13,17 @@ struct ChatThread: Identifiable, Equatable {
     var messages: [CopilotMessage]
     let createdAt: Date
     var updatedAt: Date
+
+    /// A copy safe to PERSIST: drops transient "producing" placeholders (they
+    /// exist only mid-run) and clears streaming-only `execSteps`, so a saved
+    /// thread never resurrects a half-finished run on the next launch.
+    var persistable: ChatThread {
+        var copy = self
+        copy.messages = messages
+            .filter { !$0.producing }
+            .map { m in var mm = m; mm.execSteps = nil; return mm }
+        return copy
+    }
 }
 
 // Pure, unit-testable helpers behind the thread switcher — ported from the

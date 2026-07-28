@@ -172,14 +172,14 @@ struct CopilotChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 24) {
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
                     }
                     if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
                 }
                 .padding(.top, 40)
-                .padding(.bottom, 16)
+                .padding(.bottom, 24)
                 .frame(maxWidth: chatColumnWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, chatGutter)
@@ -460,8 +460,9 @@ struct CopilotBubble: View {
                     Spacer(minLength: 24)
                     Text(message.text)
                         .font(CodepetTheme.inter(15))
+                        .lineSpacing(4)
                         .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
                         .background(UnevenRoundedRectangle(
                             cornerRadii: .init(topLeading: 14, bottomLeading: 14,
                                                bottomTrailing: 4, topTrailing: 14),
@@ -472,7 +473,7 @@ struct CopilotBubble: View {
             } else {
                 HStack(alignment: .top, spacing: 10) {
                     CompanionAvatar(companionId: message.companionId, size: 28)
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         // A department specialist labels itself "Name · Dept" so the
                         // handoff reads as a real teammate stepping in.
                         if let dept = message.deptName,
@@ -483,6 +484,7 @@ struct CopilotBubble: View {
                         }
                         Text(message.text)
                             .font(CodepetTheme.inter(15))
+                            .lineSpacing(4)
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                         // Hide copy/regenerate/thumbs until the reply has text — an

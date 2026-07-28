@@ -10,6 +10,10 @@ struct CopilotChatView: View {
     @State private var selectedDept: Department?
     @FocusState private var inputFocused: Bool
 
+    /// Max width of the conversation column + composer — matches Claude Code's
+    /// comfortable centered reading width (both stay in sync via this one value).
+    private let chatColumnWidth: CGFloat = 760
+
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
@@ -40,7 +44,7 @@ struct CopilotChatView: View {
                     messageList
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        composerView.frame(maxWidth: 600)
+                        composerView.frame(maxWidth: chatColumnWidth)
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 10)
@@ -64,7 +68,7 @@ struct CopilotChatView: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 40)
                     .padding(.bottom, 16)
-                    .frame(maxWidth: 600, alignment: .leading)
+                    .frame(maxWidth: chatColumnWidth, alignment: .leading)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)

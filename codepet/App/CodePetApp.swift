@@ -55,7 +55,16 @@ struct CodePetApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+#if DEBUG
+                // Dev-only: `-CODEPET_MOCK_GALLERY YES` swaps the root for the
+                // chat-mocks gallery so the scenario mockups are viewable in a
+                // running build (see ChatMocksGalleryView).
+                if MockGallery.enabled { ChatMocksGalleryView() } else { ContentView() }
+#else
+                ContentView()
+#endif
+            }
                 .environment(\.font, CodepetTheme.body(13))
                 .environment(\.uiLanguage, appState.uiLanguage)
                 .environmentObject(appState)

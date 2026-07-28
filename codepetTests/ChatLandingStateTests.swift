@@ -13,15 +13,19 @@ final class ChatLandingStateTests: XCTestCase {
         return c
     }
 
-    /// A small fixture spanning: one done task, one drafted (→ needsApproval),
-    /// one who==.you not-done (→ needsYou), and one codepetCanDo task — enough
-    /// to exercise beacon selection + both counts.
+    /// A small fixture spanning: one done task, one who==.you not-done at the
+    /// EARLIEST phase/position (→ this is the beacon, status .needsYou), one
+    /// drafted task (→ needsApproval), and a SECOND independent who==.you task
+    /// (→ needsYou, but not the beacon). This deliberately makes the beacon
+    /// itself a .needsYou task so `needsYouCount`'s "exclude the beacon's id"
+    /// clause is actually exercised: without it, needsYouCount would double
+    /// count the beacon instead of reporting just the other needsYou task.
     private func fixtureTasks() -> [RoadmapTask] {
         [
             RoadmapTask(id: "t1", title: "Set up repo", detail: "", phase: .find, who: .does, done: true),
-            RoadmapTask(id: "t2", title: "Draft brand brief", detail: "", phase: .foundation, who: .draft, drafted: true),
-            RoadmapTask(id: "t3", title: "Pick a name", detail: "", phase: .foundation, who: .you),
-            RoadmapTask(id: "t4", title: "Write landing copy", detail: "", phase: .build, who: .does),
+            RoadmapTask(id: "t2", title: "Pick a name", detail: "", phase: .foundation, who: .you),
+            RoadmapTask(id: "t3", title: "Draft brand brief", detail: "", phase: .foundation, who: .draft, drafted: true),
+            RoadmapTask(id: "t4", title: "Write landing copy", detail: "", phase: .build, who: .you),
         ]
     }
 
@@ -45,8 +49,15 @@ final class ChatLandingStateTests: XCTestCase {
         let tasks = fixtureTasks()
         let s = ChatLandingState(company: company(tasks: tasks), now: date(hour: 9), language: .en)
         XCTAssertEqual(s.beacon?.id, RoadmapEngine.nextStep(tasks)?.id)
+        // The beacon itself must be a .needsYou task, otherwise the exclusion
+        // clause below is never actually exercised.
+        XCTAssertEqual(RoadmapEngine.status(for: s.beacon!, in: tasks), .needsYou)
         XCTAssertEqual(s.awaitingApprovalCount, tasks.filter { RoadmapEngine.status(for: $0, in: tasks) == .needsApproval }.count)
-        XCTAssertEqual(s.needsYouCount, tasks.filter { RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != s.beacon?.id }.count)
+        let expectedNeedsYouExcludingBeacon = tasks.filter {
+            RoadmapEngine.status(for: $0, in: tasks) == .needsYou && $0.id != s.beacon?.id
+        }.count
+        XCTAssertGreaterThanOrEqual(expectedNeedsYouExcludingBeacon, 1)
+        XCTAssertEqual(s.needsYouCount, expectedNeedsYouExcludingBeacon)
         XCTAssertFalse(s.isEmpty)
     }
 }

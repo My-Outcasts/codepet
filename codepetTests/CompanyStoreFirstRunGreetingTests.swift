@@ -3,6 +3,12 @@ import XCTest
 
 @MainActor
 final class CompanyStoreFirstRunGreetingTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // "Do it with me" now runs through the execute-log path; keep it instant.
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+    }
     private func seeded(tasks: [RoadmapTask], brief: CompanyBrief) -> CompanyState {
         CompanyState(brief: brief, departments: [], library: [], stage: .idea,
                      companionId: "byte", onboardedAt: nil, tasks: tasks)

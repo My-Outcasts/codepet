@@ -644,15 +644,20 @@ final class CompanyStore: ObservableObject {
         guard let runId,
               let task = company.tasks.first(where: { $0.id == runId }),
               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
-        // Transparency step: a transient "producing…" placeholder shows while the
-        // draft is generated (this run isn't tracked in `runningTaskIds` — that set
-        // only covers taps on the map/beacon card — so a chat message is the
-        // simplest robust signal). Always removed below before the real reply
-        // lands, on BOTH the success and failure branch, so it can never get stuck.
-        // Attribute a department-owned task to its specialist: the producing row
-        // (and the draft) carry the specialist's orb + "Name · Dept" label, so the
-        // right pet is visibly working on the task. The producing placeholder's
-        // `text` holds the task title; `execSteps` drives the execute-log.
+        await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// The single inline-run path shared by EVERY chat run (typed "run" command
+    /// AND the greeting's "Do it with me"), so "how the agent works" shows the same
+    /// everywhere: a transient producing placeholder drives the execute-log — a
+    /// step checklist revealed progressively (transparency, not a snap-to-done) —
+    /// attributed to the task's department specialist (pet sprite + "Name · Dept").
+    /// The last step stays "working" until BOTH the reveal and the real result
+    /// finish, then it collapses into the draft card. Returns true if a draft was
+    /// appended (false → an honest "couldn't generate" bubble). Account-guarded
+    /// via `cid` so a mid-run account switch can't land in another account's chat.
+    @discardableResult
+    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage) async -> Bool {
         let specialist = taskSpecialist(for: task)
         let steps = Self.execSteps(task: task, specialist: specialist,
                                    decisionCount: company.decisions.count, language: language)
@@ -660,10 +665,6 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
                                            companionId: specialist?.companionId, deptName: specialist?.deptName,
                                            execSteps: steps))
-        // Reveal the steps progressively (all but the last) so the log always
-        // ANIMATES sequentially regardless of how fast the run returns — real
-        // transparency, not a snap-to-done. Runs concurrently with the actual run;
-        // the last step stays "working" until BOTH the reveal and the result finish.
         let reveal = Task { [cid] in
             for idx in 0..<max(0, steps.count - 1) {
                 try? await Task.sleep(nanoseconds: Self.execStepNanos)
@@ -674,23 +675,23 @@ final class CompanyStore: ObservableObject {
         }
         let result = await taskRunner(runRequest(for: task, language: language))
         _ = await reveal.value   // let every revealed step land before finishing
-        guard companyId == cid else { return }  // account switch already cleared chatMessages
-        // Result is in: mark every step done and hold a short beat so the completed
-        // log reads before it collapses into the draft card.
+        guard companyId == cid else { return false }
         if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
            let count = chatMessages[mi].execSteps?.count {
             for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
         }
         try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
-        guard companyId == cid else { return }
+        guard companyId == cid else { return false }
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName))
+            return true
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
+            return false
         }
     }
 
@@ -920,21 +921,16 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].actionConsumed = true
         runningTaskIds.insert(task.id)
         let cid = companyId
-        let result = await taskRunner(runRequest(for: task, language: language))
+        // Same execute-log run path as a typed "run" command, so the greeting's
+        // "Do it with me" also shows how the agent works (+ specialist).
+        let ok = await produceDraftInline(for: task, cid: cid, language: language)
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
-        if let draft = buildDeliverable(from: result, task: task) {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
-        } else {
-            // Restore the one-tap action so the "try again" copy stays honest (the task
-            // was never drafted/done). Double-tap stays safe: runningTaskIds is already
-            // clear and the in-flight guard held for the duration of the await.
-            if let gi = chatMessages.firstIndex(where: { $0.id == messageId }) {
-                chatMessages[gi].actionConsumed = false
-            }
-            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
-                ? "Không tạo được ngay bây giờ — thử lại nhé."
-                : "Couldn't generate that just now — try again."))
+        if !ok, let gi = chatMessages.firstIndex(where: { $0.id == messageId }) {
+            // Restore the one-tap action so the "try again" copy stays honest (the
+            // task was never drafted/done). produceDraftInline already appended the
+            // honest failure bubble.
+            chatMessages[gi].actionConsumed = false
         }
     }
 

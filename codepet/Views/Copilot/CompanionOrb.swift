@@ -9,12 +9,17 @@ struct CompanionOrb: View {
     var size: CGFloat = 78
     var glow: Bool = true
     var isWorking: Bool = false
+    /// Override the companion this orb renders (a per-message department
+    /// specialist). nil → the account's active/global companion.
+    var companionId: String? = nil
 
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    private var character: PetCharacter? { PetCharacter.all[companyStore.company.companionId] }
+    private var character: PetCharacter? {
+        PetCharacter.all[companionId ?? companyStore.company.companionId]
+    }
     private var hue1: Color { character?.color ?? CodepetTheme.accentPurple }
     private var hue2: Color { character?.secondColor ?? CodepetTheme.accentPink }
 

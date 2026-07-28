@@ -35,13 +35,21 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `CompanyStore.handleRunTaskId` while a chat-initiated `run_task` is in
     /// flight — removed (never persisted) once the run resolves, win or lose.
     var producing: Bool
+    /// The specialist companion speaking THIS message (a department handoff);
+    /// nil = the host/global companion. Drives the orb tint + sender name so a
+    /// department pet can appear per message. See `deptName`.
+    var companionId: String?
+    /// The department this message's specialist leads (e.g. "Marketing"), shown
+    /// as a "Name · Dept" sender label. nil when spoken by the host.
+    var deptName: String?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
-         noted: [RememberedFact]? = nil, producing: Bool = false) {
+         noted: [RememberedFact]? = nil, producing: Bool = false,
+         companionId: String? = nil, deptName: String? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -55,5 +63,7 @@ struct CopilotMessage: Identifiable, Equatable {
         self.setupSuggestion = setupSuggestion
         self.noted = noted
         self.producing = producing
+        self.companionId = companionId
+        self.deptName = deptName
     }
 }

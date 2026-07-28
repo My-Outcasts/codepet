@@ -326,8 +326,11 @@ struct CopilotBubble: View {
     /// `CompanyStore.handleRunTaskId` removes this row (win or lose) before
     /// appending the real reply, so it's always transient.
     private var producingRow: some View {
-        // Pass a real title if the producing message carries one; else nil → "Working on it…".
-        ChatThinkingRow(taskTitle: nil)
+        // The producing placeholder carries the task title in `text` and the acting
+        // specialist in `companionId`, so the thinking row names the work and shows
+        // the right pet's orb.
+        ChatThinkingRow(taskTitle: message.text.isEmpty ? nil : message.text,
+                        companionId: message.companionId)
     }
 
     private var textBubble: some View {
@@ -348,8 +351,16 @@ struct CopilotBubble: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
                 HStack(alignment: .top, spacing: 10) {
-                    CompanionOrb(size: 28, glow: false)
+                    CompanionOrb(size: 28, glow: false, companionId: message.companionId)
                     VStack(alignment: .leading, spacing: 6) {
+                        // A department specialist labels itself "Name · Dept" so the
+                        // handoff reads as a real teammate stepping in.
+                        if let dept = message.deptName,
+                           let persona = message.companionId.flatMap({ PetCharacter.all[$0] }) {
+                            Text("\(persona.name) · \(dept)")
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(persona.color)
+                        }
                         Text(message.text)
                             .font(CodepetTheme.inter(15))
                             .foregroundColor(CodepetTheme.primaryText)

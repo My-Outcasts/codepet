@@ -7,6 +7,8 @@ import SwiftUI
 struct ChatThinkingRow: View {
     /// A real in-flight title, or nil for a plain chat turn (→ "Working on it…").
     var taskTitle: String? = nil
+    /// The specialist working (a department handoff); nil → the global companion.
+    var companionId: String? = nil
 
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -15,7 +17,7 @@ struct ChatThinkingRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CompanionOrb(size: 28, glow: false, isWorking: true)
+            CompanionOrb(size: 28, glow: false, isWorking: true, companionId: companionId)
             shimmerLabel
             Spacer(minLength: 24)
         }

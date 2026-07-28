@@ -468,6 +468,18 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
+    /// The specialist companion to bring in for this turn, if a department is in
+    /// focus — from the explicit chip, else a department named in the text. Returns
+    /// nil when no department applies, it has no mapped companion, or it maps to the
+    /// current host companion (no visible handoff needed).
+    private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
+        let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
+        guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
+    }
+
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
@@ -494,8 +506,21 @@ final class CompanyStore: ObservableObject {
                                           library: company.library, query: text, focusDepartment: department),
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
+        // Department handoff: if a specialist leads this turn (chip focus or a
+        // department named in the text), the host posts a one-line handoff and the
+        // reply is spoken by that specialist (orb re-tint + "Name · Dept" label).
+        let specialist = actingSpecialist(text: text, department: department)
+        if let s = specialist {
+            let name = PetCharacter.all[s.companionId]?.name ?? (language == .vi ? "chuyên gia" : "your specialist")
+            let handoff = language == .vi
+                ? "Mời \(name) — phụ trách \(s.deptName) — vào cùng nhé."
+                : "Bringing in \(name), your \(s.deptName) lead —"
+            chatMessages.append(CopilotMessage(role: .companion, text: handoff))
+        }
+
         let placeholderId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
+        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
+                                           companionId: specialist?.companionId, deptName: specialist?.deptName))
         isStreaming = true
 
         var streamedText = ""
@@ -579,6 +604,15 @@ final class CompanyStore: ObservableObject {
     /// `cid` is the `companyId` captured at the start of `sendChat` — re-checked
     /// after the `taskRunner` await so an account switch mid-run can't append
     /// this account's draft into a different (already-hydrated) account's chat.
+    /// The specialist for a task's owning department, if it maps to a companion
+    /// other than the host — used to attribute the run's producing row + draft.
+    private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
+        guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
+    }
+
     private func handleRunTaskId(_ runId: String?, cid: String?, language: AppLanguage) async {
         guard let runId,
               let task = company.tasks.first(where: { $0.id == runId }),
@@ -588,13 +622,20 @@ final class CompanyStore: ObservableObject {
         // only covers taps on the map/beacon card — so a chat message is the
         // simplest robust signal). Always removed below before the real reply
         // lands, on BOTH the success and failure branch, so it can never get stuck.
+        // Attribute a department-owned task to its specialist: the producing row
+        // (and the draft) carry the specialist's orb + "Name · Dept" label, so the
+        // right pet is visibly working on the task. The producing placeholder's
+        // `text` holds the task title so ChatThinkingRow can name the work.
+        let specialist = taskSpecialist(for: task)
         let producingId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: "", producing: true))
+        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
+                                           companionId: specialist?.companionId, deptName: specialist?.deptName))
         let result = await taskRunner(runRequest(for: task, language: language))
         guard companyId == cid else { return }  // account switch already cleared chatMessages
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
+                                               companionId: specialist?.companionId, deptName: specialist?.deptName))
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."

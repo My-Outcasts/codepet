@@ -167,6 +167,7 @@ struct CopilotBubble: View {
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
     @State private var interviewDraft = ""
+    @State private var reaction: Bool?   // nil = none, true = up, false = down
     private var isMe: Bool { message.role == .me }
 
     private var companionName: String {
@@ -361,8 +362,10 @@ struct CopilotBubble: View {
                         .font(CodepetTheme.inter(15))
                         .foregroundColor(.white)
                         .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(CodepetTheme.accentPurple))
+                        .background(UnevenRoundedRectangle(
+                            cornerRadii: .init(topLeading: 14, bottomLeading: 14,
+                                               bottomTrailing: 4, topTrailing: 14),
+                            style: .continuous).fill(CodepetTheme.accentPurple))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -373,9 +376,6 @@ struct CopilotBubble: View {
                         Text(message.text)
                             .font(CodepetTheme.inter(15))
                             .foregroundColor(CodepetTheme.primaryText)
-                            .padding(.horizontal, 10).padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(CodepetTheme.surface))
                             .fixedSize(horizontal: false, vertical: true)
                         companionActions
                     }
@@ -398,6 +398,16 @@ struct CopilotBubble: View {
                 Image(systemName: "arrow.clockwise").font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText)
             }.buttonStyle(.plain)
             .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            Button { react(true) } label: {
+                Image(systemName: reaction == true ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .font(.system(size: 13))
+                    .foregroundColor(reaction == true ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            Button { react(false) } label: {
+                Image(systemName: reaction == false ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .font(.system(size: 13))
+                    .foregroundColor(reaction == false ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
         }
     }
 
@@ -410,6 +420,11 @@ struct CopilotBubble: View {
         guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
         guard let lastUser = companyStore.chatMessages.last(where: { $0.role == .me })?.text else { return }
         Task { await companyStore.sendChat(lastUser, language: lang) }
+    }
+
+    private func react(_ helpful: Bool) {
+        reaction = helpful
+        companyStore.reactToMessage(messageId: message.id, helpful: helpful)
     }
 
     private func draftCard(_ d: Deliverable) -> some View {

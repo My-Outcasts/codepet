@@ -1,6 +1,8 @@
 // codepet/Managers/CompanyStore.swift
 import Foundation
 import Combine
+import FirebaseFirestore
+import FirebaseAuth
 
 /// The app's primary store — the single company (companies/{uid}) + the active
 /// view. Native port of the web `useApp`/`lib/store`. Replaces ProjectStore's
@@ -281,6 +283,22 @@ final class CompanyStore: ObservableObject {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }) else { return }
         company.tasks[i].done.toggle()
         if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
+    }
+
+    /// Record a per-message thumb up/down to the `feedback` collection. Fire-and-
+    /// forget, create-only, guarded like FeatureFeedbackManager — never writes
+    /// under XCTest or when server logging is opted out.
+    func reactToMessage(messageId: String, helpful: Bool) {
+        guard !AppEnvironment.isRunningTests, !ServerLoggingGate.isOptedOut else { return }
+        var data = MessageFeedback(
+            messageId: messageId, helpful: helpful,
+            companyId: companyId ?? "unknown", userId: Auth.auth().currentUser?.uid ?? "anonymous",
+            companionId: company.companionId
+        ).firestoreData()
+        data["timestamp"] = FieldValue.serverTimestamp()
+        Firestore.firestore().collection("feedback").addDocument(data: data) { error in
+            if let error { print("[Feedback] chat reaction error: \(error.localizedDescription)") }
+        }
     }
 
     /// Send a founder-typed message to the company companion. Trims + validates,

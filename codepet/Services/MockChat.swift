@@ -66,26 +66,36 @@ enum MockChat {
         // long → multi-paragraph rendering / scroll.
         if msg.contains("long") {
             return ("""
-            Here\u{2019}s a fuller take. First, the fastest way to learn is to put something \
-            small in front of real people this week — even a rough version teaches you more \
-            than another week of planning.
+            Here's the fuller version. The trap at your stage isn't a lack of ideas — it's \
+            spending another week refining instead of getting one real signal. So the whole \
+            game right now is compressing the loop between 'I think this is true' and 'a real \
+            user just showed me it's true (or not).'
 
-            Second, keep your scope brutally narrow: one problem, one type of user, one clear \
-            outcome. Everything else is a distraction until that core loop works.
+            Concretely, that's three moves. First, put your value into one sentence a stranger \
+            gets in five seconds and stick it somewhere public — a landing hero is fine. Second, \
+            book five 20-minute calls with people who actually have the problem; you're there to \
+            learn, not pitch. Third, ship the smallest thing they can touch — a rough version \
+            teaches you more than a polished mock ever will.
 
-            Third, write down what you expect to happen before you ship, then compare. That \
-            gap between expectation and reality is where the real product insight lives.
+            The reason this order matters: positioning tells you what to build, the calls tell \
+            you if anyone cares, and shipping tells you the truth. Skip the middle and you'll \
+            build something beautiful that no one asked for.
 
-            Want me to turn any of this into a concrete plan you can act on?
+            Want me to draft the positioning sentence, or the outreach message for those calls?
             """, ChatDoneAction())
         }
 
         // default reply.
         return ("""
-        Good question — let\u{2019}s break it down. For the next few weeks I\u{2019}d focus on three \
-        moves: first, lock your core value proposition into a single clear sentence; second, get \
-        five real user conversations booked this week; and third, ship the smallest thing they \
-        can actually try. Want me to draft a plan for any of these?
+        Here's how I'd think about it. Your leverage right now is momentum, not polish — the \
+        goal this week is one real signal from one real user, not a perfect plan.
+
+        So: (1) write your positioning in a single sentence and put it where a stranger can \
+        see it, (2) book five short calls with people who have the problem, and (3) ship the \
+        smallest thing they can actually touch. Do those three and you'll know more by Friday \
+        than another month of planning would tell you.
+
+        Want me to draft the positioning line or the outreach message to get those calls booked?
         """, ChatDoneAction())
     }
 
@@ -122,26 +132,110 @@ enum MockChat {
         }
     }
 
-    /// Canned deliverable for `RunTaskClient.run` — so a `run_task_id` produces a
-    /// real inline draft card (Approve / Open / Redo) offline.
+    /// Canned deliverable for `RunTaskClient.run` — a `run_task_id` produces a
+    /// realistic inline draft card (Approve / Open / Redo) offline, tailored to
+    /// the task so demo screenshots read like genuine Codepet output.
     static func runResult(_ req: RunTaskRequest) async -> RunTaskResponse? {
         try? await Task.sleep(nanoseconds: 700_000_000)  // "producing…" beat
-        let note = req.reviseNote.map { "\n\n_Revised per: \($0)_" } ?? ""
-        let body = """
-        ## \(req.taskTitle)
+        let (kind, body) = deliverable(for: req.taskTitle)
+        let note = req.reviseNote.map { "\n\n_Revised per your note: \($0)_" } ?? ""
+        return RunTaskResponse(kind: kind, title: req.taskTitle, body: body + note, payload: nil)
+    }
 
-        A first draft to get you moving. Treat this as a starting point, not the final word.
+    /// A realistic deliverable (kind + markdown body) tailored to the task title.
+    private static func deliverable(for title: String) -> (kind: String, body: String) {
+        let t = title.lowercased()
+        if t.contains("positioning") || t.contains("value prop") {
+            return ("doc", """
+            For solo founders drowning in scattered docs and stalled momentum, **Codepet** is the \
+            AI cofounder that turns your company into one living workspace — it plans your next \
+            move, does the work with you, and remembers every decision. Unlike a generic AI chat \
+            or a stack of disconnected tools, Codepet is grounded in *your* company and acts, not \
+            just answers.
 
-        **Objective** — \(req.taskDetail.isEmpty ? "Move this task forward with a concrete first step." : req.taskDetail)
+            **One-liner** — Codepet is the AI cofounder that runs your company's busywork so you \
+            can build.
 
-        **Suggested steps**
-        1. Define what "done" looks like in one sentence.
-        2. Do the smallest version of it today.
-        3. Get one piece of real feedback before polishing.
+            **Why it works**
+            - Names a sharp, real pain (scattered context, no momentum).
+            - Says exactly who it's for (early solo founders), not 'everyone'.
+            - Draws the contrast (grounded + acts vs. generic chat).
 
-        **Watch out for** — scope creep and polishing before validating.\(note)
-        """
-        return RunTaskResponse(kind: "plan", title: req.taskTitle, body: body, payload: nil)
+            **Use it in**: your landing hero, the first line of your pitch, the App Store subtitle.
+            """)
+        }
+        if t.contains("landing") || t.contains("copy") || t.contains("website") {
+            return ("post", """
+            **Headline** — Your AI cofounder, not another chatbot.
+
+            **Subhead** — Codepet plans your next move, does the work with you, and remembers \
+            every decision — grounded in your actual company.
+
+            **Benefit bullets**
+            - **Always knows your context.** No re-explaining — it reads your brief, roadmap, and decisions.
+            - **Does the work, not just talk.** Drafts, plans, and deliverables you approve in one tap.
+            - **A team of specialists.** Marketing, Engineering, and Design pets step in for their domain.
+
+            **Primary CTA** — Start free   ·   **Secondary** — See how it works
+            """)
+        }
+        if t.contains("waitlist") || t.contains("signup") || t.contains("sign up") {
+            return ("checklist", """
+            A no-backend email capture you can ship today.
+
+            1. **Pick the tool** — a hosted form (Tally / Typeform) or a one-field section on your landing page.
+            2. **Ask for one thing** — email only. Every extra field drops conversion.
+            3. **Set the confirmation** — a short 'you're on the list' message + what to expect next.
+            4. **Wire the storage** — form → a sheet or your Firestore `waitlist` collection.
+            5. **Add a share nudge** — 'Want in sooner? Share your link.'
+
+            **Done when**: a stranger can land, drop an email, and you can see it come through.
+            """)
+        }
+        if t.contains("pricing") || t.contains("price") {
+            return ("doc", """
+            **Model** — credits, not a seat/day cap: chat feels unlimited, deliverables spend.
+
+            - **Trial** — 7 days, ~150 credits, then it stops (no permanent free tier).
+            - **Pro — $20/mo** — 800 credits included; overage auto-billed at $0.05/credit.
+
+            **Why this shape**
+            - Chat is cheap (~0.25 credit/msg) so exploring feels free; the real cost is generation.
+            - One price, no BYOK — simpler to reason about and simpler to sell.
+
+            You can change any number later — ship a price, then let real usage tell you.
+            """)
+        }
+        if t.contains("user") || t.contains("interview") || t.contains("talk to") || t.contains("discovery") {
+            return ("doc", """
+            **Goal** — understand the problem, not pitch. 20 minutes each.
+
+            **Opening** — 'I'm trying to learn, not sell. Walk me through the last time you ran into this.'
+
+            **Core questions**
+            1. When did you last hit this? What did you actually do?
+            2. What's the most frustrating part — and why that part?
+            3. What have you tried? What did it cost you (time or money)?
+            4. If you had a magic fix, what would it do for you?
+
+            **Close** — 'Who else should I talk to?' and ask to follow up.
+
+            **Watch for**: stories about real behavior over opinions ('I would probably…').
+            """)
+        }
+        // default: a crisp weekly plan.
+        return ("plan", """
+        A first cut to get you moving — treat it as a starting point, not the final word.
+
+        **The move** — take '\(title)' from idea to a concrete first step this week.
+
+        **This week**
+        1. Define what 'done' looks like in a single sentence.
+        2. Ship the smallest version today — rough is fine.
+        3. Get one piece of real feedback before you polish anything.
+
+        **Watch out for** — scope creep and polishing before you've validated the core.
+        """)
     }
 
     /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the

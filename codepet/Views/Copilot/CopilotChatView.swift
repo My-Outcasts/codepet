@@ -417,6 +417,25 @@ struct CopilotBubble: View {
         companyStore.reactToMessage(messageId: message.id, helpful: helpful)
     }
 
+    /// A clean one-glance preview of a deliverable body for the card: drop leading
+    /// markdown heading lines (the card already shows the title), then strip inline
+    /// markdown markers so raw `##`/`**`/`` ` `` never leak into the preview.
+    static func previewText(_ body: String) -> String {
+        var lines = body.components(separatedBy: "\n")
+        // Drop leading blank + heading lines.
+        while let first = lines.first,
+              first.trimmingCharacters(in: .whitespaces).isEmpty
+                || first.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            lines.removeFirst()
+        }
+        let cleaned = lines.joined(separator: " ")
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "#", with: "")
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func draftCard(_ d: Deliverable) -> some View {
         HStack {
             MessageCard(hue: message.draftApproved ? CodepetTheme.accentTeal : CodepetTheme.accentGold) {
@@ -428,9 +447,9 @@ struct CopilotBubble: View {
                                 .font(CodepetTheme.inter(15, weight: .semibold))
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
-                        Text(d.body)
+                        Text(Self.previewText(d.body))
                             .font(CodepetTheme.inter(13))
-                            .foregroundColor(CodepetTheme.mutedText)
+                            .foregroundColor(CodepetTheme.bodyText)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }

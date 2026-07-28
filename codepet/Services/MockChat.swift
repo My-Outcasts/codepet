@@ -143,5 +143,29 @@ enum MockChat {
         """
         return RunTaskResponse(kind: "plan", title: req.taskTitle, body: body, payload: nil)
     }
+
+    /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the
+    /// board, the chat's `runnable` list (Codepet-can-do tasks), and the
+    /// "needs you" landing card all have something to show offline. The three
+    /// `.draft`/`.does` tasks with no deps resolve to `codepetCanDo` → runnable.
+    static func roadmap() -> [RoadmapTask] {
+        [
+            RoadmapTask(id: "mock-positioning", title: "Draft your positioning statement",
+                        detail: "One clear sentence: who it's for, what it does, why it's different.",
+                        phase: .foundation, who: .draft, dept: "mkt"),
+            RoadmapTask(id: "mock-landing", title: "Write your landing page copy",
+                        detail: "Headline, subhead, and three benefit bullets for the waitlist page.",
+                        phase: .build, who: .draft, dept: "mkt"),
+            RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
+                        detail: "A simple email capture so early interest isn't lost.",
+                        phase: .build, who: .does, dept: "eng"),
+            RoadmapTask(id: "mock-interviews", title: "Talk to 5 potential users",
+                        detail: "Book and run five short discovery calls this week.",
+                        phase: .find, who: .you, dept: "mkt"),
+            RoadmapTask(id: "mock-pricing", title: "Decide your pricing",
+                        detail: "Pick a starting price and model — you can change it later.",
+                        phase: .foundation, who: .you, dept: "fin"),
+        ]
+    }
 }
 #endif

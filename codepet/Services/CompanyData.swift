@@ -167,6 +167,9 @@ enum CompanyData {
     /// non-200 / unreachable — `generateRoadmap` treats `[]` as "no change", so the board
     /// is never clobbered.
     static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.roadmap() }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
         var req = URLRequest(url: roadmapEndpoint)
         req.httpMethod = "POST"

@@ -178,6 +178,8 @@ final class CompanyStore: ObservableObject {
             isCompanionTyping = false
             isStreaming = false
             runningTaskIds = []
+            activeAgentRuns = []
+            isFanningOut = false
             runError = nil
         }
         self.companyId = companyId
@@ -1149,6 +1151,8 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
         isStreaming = false
         runningTaskIds = []
+        activeAgentRuns = []
+        isFanningOut = false
         runError = nil
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the

@@ -13,8 +13,16 @@ struct MessageCard<Content: View>: View {
         content
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(hue.opacity(0.12)))
+            // Opaque surface base FIRST, then the hue tint on top — i.e. "hue @12%
+            // over surface" per the spec. Without the surface base the card is only
+            // a translucent tint over ChatBackdrop's wash, washing out pale hues
+            // (gold/teal) and the reading text in light mode.
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(CodepetTheme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(hue.opacity(0.12)))
+            )
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(hue.opacity(0.9), lineWidth: 1))
     }

@@ -604,6 +604,12 @@ final class CompanyStore: ObservableObject {
     /// `cid` is the `companyId` captured at the start of `sendChat` — re-checked
     /// after the `taskRunner` await so an account switch mid-run can't append
     /// this account's draft into a different (already-hydrated) account's chat.
+    /// Execute-log pacing (tunable; tests set to 0 to stay instant). `stepNanos`
+    /// is the delay between revealing each step; `doneBeatNanos` is the hold after
+    /// the result lands so the completed log reads before collapsing to the draft.
+    static var execStepNanos: UInt64 = 420_000_000
+    static var execDoneBeatNanos: UInt64 = 260_000_000
+
     /// The execute-log steps for a run — a truthful description of the pipeline the
     /// deliverable goes through (the request genuinely carries the brief, decisions,
     /// and department context). Revealed progressively as the run proceeds.
@@ -652,20 +658,20 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
                                            companionId: specialist?.companionId, deptName: specialist?.deptName,
                                            execSteps: steps))
-        // Reveal the steps progressively (all but the last) while the run is in
-        // flight — transparency into how the deliverable is produced. The last step
-        // stays "working" until the real result lands.
+        // Reveal the steps progressively (all but the last) so the log always
+        // ANIMATES sequentially regardless of how fast the run returns — real
+        // transparency, not a snap-to-done. Runs concurrently with the actual run;
+        // the last step stays "working" until BOTH the reveal and the result finish.
         let reveal = Task { [cid] in
             for idx in 0..<max(0, steps.count - 1) {
-                try? await Task.sleep(nanoseconds: 480_000_000)
-                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
                 guard companyId == cid,
                       let mi = chatMessages.firstIndex(where: { $0.id == producingId }) else { return }
                 chatMessages[mi].execSteps?[idx].done = true
             }
         }
         let result = await taskRunner(runRequest(for: task, language: language))
-        reveal.cancel()
+        _ = await reveal.value   // let every revealed step land before finishing
         guard companyId == cid else { return }  // account switch already cleared chatMessages
         // Result is in: mark every step done and hold a short beat so the completed
         // log reads before it collapses into the draft card.
@@ -673,7 +679,7 @@ final class CompanyStore: ObservableObject {
            let count = chatMessages[mi].execSteps?.count {
             for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
         }
-        try? await Task.sleep(nanoseconds: 320_000_000)
+        try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
         guard companyId == cid else { return }
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {

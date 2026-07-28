@@ -85,6 +85,12 @@ enum OnboardingContent {
         static let accentDeep = Color.dyn("#5b27b0", "#7c3aed")   // --accent-deep
         static let accentTint = Color.dyn("#eee6fd", "#271f3a")   // --accent-tint
         static let accentLine = Color.dyn("#d9c9f7", "#43356b")   // --accent-line
+        // Stage-slider ticks. The web hardcodes these (`.sb-tick` #dad3c5 / .major
+        // #cbc3b2) with no dark override, so they glare against a dark panel. Light
+        // values kept identical; dark values added — a deliberate divergence, sitting
+        // between --hairline and --t-4 so the ticks stay legible without shouting.
+        static let tickMinor  = Color.dyn("#dad3c5", "#3a332a")
+        static let tickMajor  = Color.dyn("#cbc3b2", "#4a4238")
         static let coldBg     = Color(hex: "#100a26")             // cold-open / splash — STAYS dark
     }
 }

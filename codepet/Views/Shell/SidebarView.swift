@@ -20,6 +20,11 @@ struct SidebarView: View {
 
     @State private var renamingId: String?
     @State private var renameDraft = ""
+    /// Measured height of the Recent list's content — a ScrollView is greedy
+    /// along its scroll axis, so without this it would hold the full
+    /// `recentMaxHeight` even with two threads and leave dead space above the
+    /// Workspace divider. See `recentSection`.
+    @State private var recentContentHeight: CGFloat = 0
     // Stamped on appear so relative times don't recompute on every re-render —
     // mirrors `ThreadListView`'s own `now`.
     @State private var now = Date()
@@ -27,6 +32,9 @@ struct SidebarView: View {
     private var isChatBusy: Bool {
         companyStore.isCompanionTyping || companyStore.isStreaming
     }
+
+    /// Ceiling for the Recent list before it starts scrolling.
+    private static let recentMaxHeight: CGFloat = 260
 
     private var newChatGradient: LinearGradient {
         LinearGradient(colors: [CodepetTheme.accentPurple, CodepetTheme.accentPink],
@@ -162,8 +170,13 @@ struct SidebarView: View {
                         }
                     }
                     .padding(.bottom, 4)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        recentContentHeight = $0
+                    }
                 }
-                .frame(maxHeight: 260)
+                // Hug the content until it outgrows the cap, then scroll — a
+                // plain `maxHeight` would reserve all 260pt for two threads.
+                .frame(height: min(recentContentHeight, Self.recentMaxHeight))
             }
         }
     }

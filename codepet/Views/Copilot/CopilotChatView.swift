@@ -233,7 +233,7 @@ struct CopilotChatView: View {
             quickActions: quickActions,
             accent: companionAccent,
             accent2: companionAccent2,
-            isBusy: companyStore.isCompanionTyping || companyStore.isStreaming,
+            isBusy: companyStore.isCompanionTyping || companyStore.isStreaming || companyStore.isFanningOut,
             selectedDept: $selectedDept,
             onSend: send,
             onQuickAction: runQuickAction

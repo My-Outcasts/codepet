@@ -37,7 +37,7 @@ struct CopilotChatView: View {
             .filter { $0.id != companyStore.activeThreadId }
             .prefix(8).map { $0 }
     }
-    private var isChatBusy: Bool { companyStore.isCompanionTyping || companyStore.isStreaming }
+    private var isChatBusy: Bool { companyStore.isCompanionTyping || companyStore.isStreaming || companyStore.isFanningOut }
 
     /// A slim top bar: the active thread's name as a dropdown switcher (New chat +
     /// recent threads + Rename), plus Share (copies the transcript). Leading inset
@@ -139,7 +139,7 @@ struct CopilotChatView: View {
     }
     private var canSend: Bool {
         !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !companyStore.isCompanionTyping && !companyStore.isStreaming
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
     }
 
     var body: some View {
@@ -177,6 +177,9 @@ struct CopilotChatView: View {
                         CopilotBubble(message: m).id(m.id)
                     }
                     if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
+                    if !companyStore.activeAgentRuns.isEmpty {
+                        AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
+                    }
                 }
                 .padding(.top, 40)
                 .padding(.bottom, 24)
@@ -196,6 +199,9 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            .onChange(of: companyStore.activeAgentRuns.count) { _, count in
+                if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
         }
     }
@@ -240,6 +246,10 @@ struct CopilotChatView: View {
             : "Ask \(companionName) anything about your company…"
     }
 
+    /// The stable label for the parallel fan-out chip — compared in runQuickAction to
+    /// route the tap to fanOutNextMoves instead of the normal chat-send path.
+    private var fanOutTitle: String { lang == .vi ? "Chạy các bước tiếp theo" : "Run my next moves" }
+
     /// Capability quick-actions — the titles are complete intents, so they are
     /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`. Each also
     /// carries a short localized "why" detail shown as helper text on its card.
@@ -261,15 +271,23 @@ struct CopilotChatView: View {
         let icons = ["checklist", "map", "square.grid.2x2", "doc.text"]
         let titles = lang == .vi ? vi : en
         let details = lang == .vi ? detailsVi : detailsEn
-        return (0..<titles.count).map { i in
+        let base = (0..<titles.count).map { i in
             QuickAction(title: titles[i], systemImage: icons[i], detail: details[i])
         }
+        return [QuickAction(title: fanOutTitle, systemImage: "bolt.horizontal.circle",
+                            detail: lang == .vi
+                                ? "Chạy song song các việc tiếp theo trên nhiều phòng ban."
+                                : "Run your next tasks across departments in parallel.")] + base
     }
 
     /// Send a canned capability prompt through the normal chat path. Bypasses
     /// mode-shaping (the string already expresses the intent). Guarded like send.
     private func runQuickAction(_ text: String) {
-        guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
+        guard !companyStore.isCompanionTyping, !companyStore.isStreaming, !companyStore.isFanningOut else { return }
+        if text == fanOutTitle {
+            Task { await companyStore.fanOutNextMoves(language: lang) }
+            return
+        }
         Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
     }
 

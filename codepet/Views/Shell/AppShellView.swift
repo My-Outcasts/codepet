@@ -34,8 +34,6 @@ struct AppShellView: View {
     @ViewBuilder private var content: some View {
         if companyStore.view == .chat {
             CopilotChatView()
-        } else if companyStore.view == .summary {
-            SummaryView()
         } else if companyStore.view == .roadmap {
             RoadmapView()
         } else if companyStore.view == .secondBrain {

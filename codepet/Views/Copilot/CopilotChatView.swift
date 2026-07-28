@@ -6,7 +6,6 @@ import AppKit
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
-    @State private var draft = ""
     @State private var mode: ChatMode = .ask
     @State private var selectedDept: Department?
     @FocusState private var inputFocused: Bool
@@ -21,7 +20,7 @@ struct CopilotChatView: View {
         PetCharacter.all[companyStore.company.companionId]?.secondColor ?? CodepetTheme.accentPink
     }
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
     }
 
@@ -33,7 +32,7 @@ struct CopilotChatView: View {
                     ChatEmptyState(
                         state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
                         onOpenRoadmap: { companyStore.selectedDeptKey = nil; companyStore.select(.roadmap) },
-                        onStarter: { draft = $0; inputFocused = true }
+                        onStarter: { companyStore.chatDraft = $0; inputFocused = true }
                     ) {
                         composerView
                     }
@@ -82,7 +81,7 @@ struct CopilotChatView: View {
     /// placements share the same value.
     private var composerView: some View {
         ChatComposer(
-            draft: $draft,
+            draft: $companyStore.chatDraft,
             mode: $mode,
             canSend: canSend,
             focus: $inputFocused,
@@ -138,8 +137,8 @@ struct CopilotChatView: View {
 
     private func send() {
         guard canSend else { return }
-        let text = mode.shape(draft, language: lang)
-        draft = ""
+        let text = mode.shape(companyStore.chatDraft, language: lang)
+        companyStore.chatDraft = ""
         Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
         // Re-assert focus: the composer moves between the empty-state and docked
         // `if/else` branches once `chatMessages` goes empty→non-empty, so SwiftUI

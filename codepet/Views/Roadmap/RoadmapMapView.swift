@@ -1,7 +1,7 @@
-// codepet/Views/Overview/RoadmapMapView.swift
+// codepet/Views/Roadmap/RoadmapMapView.swift
 import SwiftUI
 
-/// The Overview node-graph map (web RoadmapView): a scrollable canvas of dependency
+/// The Roadmap node-graph map (web RoadmapView): a scrollable canvas of dependency
 /// edges under phase-positioned task cards, with a company root, status colors, a
 /// beacon "{companion} is here" node, and critical-path highlighting.
 struct RoadmapMapView: View {
@@ -200,10 +200,15 @@ struct RoadmapMapView: View {
         .opacity(status == .blocked ? 0.72 : 1)
         .unlockPulse(justUnlockedIds.contains(task.id))
         .onTapGesture {
-            if status == .codepetCanDo { Task { await companyStore.runTask(task, language: lang) } }
-            else if status == .needsApproval { Task { await companyStore.approveTask(id: task.id) } }
-            else if status == .needsYou { Task { await companyStore.walkThroughTask(task, language: lang) } }
-            else if status == .done { openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library) }
+            let action = RoadmapDispatch.action(for: status)
+            switch action {
+            case .run:             Task { await companyStore.runTask(task, language: lang) }
+            case .walkThrough:     Task { await companyStore.walkThroughTask(task, language: lang) }
+            case .approve:         Task { await companyStore.approveTask(id: task.id) }
+            case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+            case .none:            break
+            }
+            if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
         }
         .help(peekText(task, status: status))
     }

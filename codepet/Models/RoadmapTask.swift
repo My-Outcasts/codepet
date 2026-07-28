@@ -56,7 +56,7 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
 /// Derived per-task status (the board legend) — computed by RoadmapEngine, not stored.
 enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
 
-/// Shared status→accent mapping (matches TaskCardView's board colors). Used by the
+/// Shared status→accent mapping (matches RoadmapMapView's board colors). Used by the
 /// department task cards; kept here so views don't each redefine it.
 func taskStatusTint(_ s: TaskStatus) -> Color {
     switch s {

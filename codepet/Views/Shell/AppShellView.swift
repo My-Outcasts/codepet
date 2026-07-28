@@ -37,6 +37,8 @@ struct AppShellView: View {
             SummaryView()
         } else if companyStore.view == .overview {
             OverviewView()
+        } else if companyStore.view == .team {
+            TeamChatView()
         } else if companyStore.view == .company {
             if let dept = companyStore.selectedDeptKey {
                 DepartmentDetailView(deptKey: dept, onBack: { companyStore.selectedDeptKey = nil })

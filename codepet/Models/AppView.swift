@@ -3,18 +3,20 @@ import Foundation
 /// The web app's top-level views (components/AppRoot.tsx), minus Giang's Build
 /// Coach (summary/build/install). Drives the app shell's sidebar + content.
 enum AppView: String, CaseIterable, Identifiable {
-    case overview, summary, company, roadmap, tasks, library, environment, settings, billing, support
+    case overview, summary, team, company, roadmap, tasks, library, environment, settings, billing, support
 
     var id: String { rawValue }
 
     /// The primary destinations shown as top-bar tabs (web Topbar). Settings /
     /// Billing / Support are reached via the account menu; Roadmap is folded into Overview.
-    static let navTabs: [AppView] = [.summary, .overview, .company, .tasks, .library, .environment]
+    /// `team` is the multi-agent demo (client-side simulated).
+    static let navTabs: [AppView] = [.summary, .overview, .team, .company, .tasks, .library, .environment]
 
     func title(_ lang: AppLanguage) -> String {
         switch self {
         case .summary:     return lang == .vi ? "Tóm tắt" : "Summary"
         case .overview:    return lang == .vi ? "Tổng quan" : "Overview"
+        case .team:        return lang == .vi ? "Đội ngũ" : "Team"
         case .company:     return lang == .vi ? "Công ty" : "Company"
         case .roadmap:     return lang == .vi ? "Lộ trình" : "Roadmap"
         case .tasks:       return lang == .vi ? "Nhiệm vụ" : "Tasks"
@@ -49,6 +51,7 @@ enum AppView: String, CaseIterable, Identifiable {
         switch self {
         case .summary:     return "sparkles"
         case .overview:    return "square.grid.2x2"
+        case .team:        return "person.3"
         case .company:     return "building.2"
         case .roadmap:     return "map"
         case .tasks:       return "checklist"

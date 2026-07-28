@@ -67,6 +67,28 @@ func pickFallbackThreadId(after deletedId: String, in threads: [ChatThread]) -> 
     sortThreadsByRecent(threads.filter { $0.id != deletedId }).first?.id
 }
 
+/// How long after its last message a thread still counts as the founder's
+/// current working stretch. Inside it, launch resumes that thread; outside it,
+/// launch opens the live hero instead — so quitting and reopening keeps your
+/// place, while a new day still starts on the time-of-day greeting and the
+/// roadmap landing cards. One constant to tune.
+let threadResumeWindow: TimeInterval = 8 * 3600
+
+/// Which thread launch should reopen, or nil to land on the empty hero. The
+/// newest thread that actually holds messages, provided it was touched within
+/// `window`. `now` is a parameter (not `Date()` inside) for testability, same as
+/// `relativeTime`. A future-dated `updatedAt` (clock skew from another device)
+/// counts as recent rather than stale.
+///
+/// Order-agnostic: callers may pass threads in any order (a Firestore query's
+/// ordering isn't guaranteed to survive a decode-and-filter pass), so this sorts
+/// before picking rather than trusting the input.
+func pickResumeThreadId(in threads: [ChatThread], now: Date, within window: TimeInterval = threadResumeWindow) -> String? {
+    guard let newest = sortThreadsByRecent(threads).first(where: { !$0.messages.isEmpty }) else { return nil }
+    guard now.timeIntervalSince(newest.updatedAt) <= window else { return nil }
+    return newest.id
+}
+
 /// Compact relative time for the history list — "just now" under a minute,
 /// then minutes/hours/days. English only (the pure helper stays language-
 /// neutral like the rest of `ChatThreads`; the view localizes surrounding

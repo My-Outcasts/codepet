@@ -184,12 +184,33 @@ struct CopilotChatView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, chatGutter)
             }
+            // A transcript that arrives already-populated — a resumed thread on
+            // launch, or a switch into an existing one — never fires the count
+            // change below, so it would open scrolled to its OLDEST message.
+            // Jump to the newest without animation (no scroll-through-history
+            // on launch); deferred one runloop turn so the list has laid out.
+            .onAppear { scrollToLatest(proxy) }
+            .onChange(of: companyStore.activeThreadId) { _, _ in scrollToLatest(proxy) }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
+        }
+    }
+
+    /// Pin the list to its last message with no animation. Deferred to the next
+    /// runloop turn because `onAppear` fires before the rows have laid out, and
+    /// `scrollTo` against an unlaid-out list is a no-op.
+    /// The target is read INSIDE the deferred block, not captured before it: a
+    /// thread switch sets `activeThreadId` and repoints `chatMessages` as two
+    /// mutations, so reading eagerly can capture the outgoing thread's last id
+    /// and scroll to a row that no longer exists (a silent no-op).
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            guard let last = companyStore.chatMessages.last?.id else { return }
+            proxy.scrollTo(last, anchor: .bottom)
         }
     }
 

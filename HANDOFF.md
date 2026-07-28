@@ -28,4 +28,7 @@ Mock is keyword-routed: any question → advisor reply; `run my first task` → 
 - **Two parallel sessions** run — own branch, own worktree, serialized app testing (one launches at a time). See memory `codepet-parallel-session-protocol`.
 
 ## Next candidates (not started)
-Resume-last-thread on launch · message-cap per thread · search Recent · clear-all-history. Add a W1 board row before building (the board is the source of truth).
+Message-cap per thread · search Recent · clear-all-history. Add a W1 board row before building (the board is the source of truth).
+
+## Resume-last-thread on launch (built, unverified in-app)
+Launch now reopens the newest thread when it was touched inside `threadResumeWindow` (**8h**), else opens the live hero — founder's call, so a new day still starts on the time-of-day greeting + roadmap cards. Pure `pickResumeThreadId(in:now:within:)` in `ChatThreads.swift`, called from `CompanyStore.hydrate`. Two adjacent fixes came with it: the transcript now pins to its newest message when it arrives already-populated (resume, or switching into an existing thread — it used to open at the OLDEST message, since it only scrolled on a message-COUNT change), and the enrichment interview survives a relaunch (`interviewState` is session-only, so answering a resumed question used to save the answer and then go silent; `EnrichInterview.remainingGaps` rebuilds the cursor from the brief minus what the transcript already answered, so a skip stays skipped). 8 new tests; full suite green. **Not yet exercised in the running app** — needs a signed build + a real quit/relaunch inside the window.

@@ -83,6 +83,58 @@ final class ChatThreadsTests: XCTestCase {
         XCTAssertNil(pickFallbackThreadId(after: "a", in: threads))
     }
 
+    // MARK: - pickResumeThreadId
+
+    private func thread(_ id: String, _ updatedAt: Date, messages: [CopilotMessage]) -> ChatThread {
+        ChatThread(id: id, title: id, messages: messages, createdAt: updatedAt, updatedAt: updatedAt)
+    }
+
+    func testPickResumeThreadIdReturnsMostRecentInsideTheWindow() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let threads = [thread("a", now.addingTimeInterval(-3600), messages: [me("older")]),
+                       thread("b", now.addingTimeInterval(-600), messages: [me("newest")]),
+                       thread("c", now.addingTimeInterval(-1800), messages: [me("middle")])]
+        XCTAssertEqual(pickResumeThreadId(in: threads, now: now), "b")
+    }
+
+    func testPickResumeThreadIdNilWhenTheLastThreadIsStale() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        // Quit last evening, reopening the next morning → land on the hero, not
+        // yesterday's transcript.
+        let threads = [thread("a", now.addingTimeInterval(-15 * 3600), messages: [me("yesterday")])]
+        XCTAssertNil(pickResumeThreadId(in: threads, now: now))
+    }
+
+    func testPickResumeThreadIdWindowBoundaryIsInclusive() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let atEdge = [thread("a", now.addingTimeInterval(-threadResumeWindow), messages: [me("hi")])]
+        XCTAssertEqual(pickResumeThreadId(in: atEdge, now: now), "a")
+        let pastEdge = [thread("a", now.addingTimeInterval(-threadResumeWindow - 1), messages: [me("hi")])]
+        XCTAssertNil(pickResumeThreadId(in: pastEdge, now: now))
+    }
+
+    func testPickResumeThreadIdNilWhenNoThreads() {
+        XCTAssertNil(pickResumeThreadId(in: [], now: Date()))
+    }
+
+    /// A decoded doc with no messages left (nothing but stripped run state) is not
+    /// something to resume INTO — fall through to the newest thread that has
+    /// content, so launch never opens a blank transcript with no hero either.
+    func testPickResumeThreadIdSkipsMessagelessThreads() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let threads = [thread("empty", now.addingTimeInterval(-60), messages: []),
+                       thread("real", now.addingTimeInterval(-300), messages: [me("hi")])]
+        XCTAssertEqual(pickResumeThreadId(in: threads, now: now), "real")
+    }
+
+    /// Clock skew (a thread stamped slightly in the future by another device)
+    /// must not read as "stale" and drop the founder onto the hero.
+    func testPickResumeThreadIdToleratesFutureTimestamps() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let threads = [thread("a", now.addingTimeInterval(120), messages: [me("hi")])]
+        XCTAssertEqual(pickResumeThreadId(in: threads, now: now), "a")
+    }
+
     // MARK: - relativeTime
 
     func testRelativeTimeFormatsRecentTimes() {

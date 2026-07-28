@@ -158,12 +158,19 @@ final class CompanyStore: ObservableObject {
         company = loaded
         // Hydrate the persisted Recent list on an account change (a same-user
         // re-hydrate keeps the live in-memory threads, which may be newer than
-        // Firestore). We open to the empty hero — activeThreadId stays nil and
-        // chatMessages empty — so history lives in the switcher, not auto-opened.
+        // Firestore). Then resume where the founder left off IF they were here
+        // recently (`pickResumeThreadId`) — otherwise activeThreadId stays nil
+        // and the buffer stays empty, opening the live hero. Resuming is safe:
+        // persisted threads are `.persistable` projections, so no half-finished
+        // run (producing placeholders, execSteps) comes back with them.
         if accountChanged {
             let persisted = await threadsLoader(companyId)
             guard token == hydrationToken else { return }
             threads = persisted
+            if let resumeId = pickResumeThreadId(in: persisted, now: Date()) {
+                activeThreadId = resumeId
+                chatMessages = persisted.first(where: { $0.id == resumeId })?.messages ?? []
+            }
         }
         isHydrating = false
         isOnboarding = needsOnboarding
@@ -243,11 +250,36 @@ final class CompanyStore: ObservableObject {
             guard companyId == cid else { return }  // account switched mid-await → bail
         }
 
-        guard var st = interviewState else { return }
+        // No cursor means the founder quit mid-interview and relaunched into a
+        // resumed thread: `interviewState` is session-only, while the questions
+        // themselves persisted with the thread. Rebuild the cursor from the brief
+        // and carry the chain on, rather than saving this one answer and going
+        // silent (no next question, no greeting).
+        guard var st = interviewState else {
+            resumeInterviewAfterRelaunch(language: language)
+            return
+        }
         st.idx += 1
         if st.idx < st.gaps.count {
             interviewState = st
             askInterviewGap(st.gaps[st.idx], language: language)
+        } else {
+            interviewState = nil
+            seedFirstRunGreeting(language: language)
+        }
+    }
+
+    /// Pick the interview back up after a relaunch: the remaining gaps are the
+    /// brief's still-empty fields MINUS every gap the transcript already shows
+    /// answered (so a skipped question isn't re-asked forever — a skip leaves its
+    /// field empty on purpose). Nothing left → hand off to the first-run greeting,
+    /// exactly as a normally-completed interview does.
+    private func resumeInterviewAfterRelaunch(language: AppLanguage) {
+        let answered = chatMessages.compactMap { $0.interviewAnswered ? $0.interview : nil }
+        let remaining = EnrichInterview.remainingGaps(company.brief, answered: answered)
+        if let next = remaining.first {
+            interviewState = (gaps: remaining, idx: 0)
+            askInterviewGap(next, language: language)
         } else {
             interviewState = nil
             seedFirstRunGreeting(language: language)

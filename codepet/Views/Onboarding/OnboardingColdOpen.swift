@@ -46,7 +46,8 @@ struct OnboardingColdOpen: View {
                         .foregroundColor(.white)
                      + Text("not just your code.")
                         .foregroundColor(Color(hex: "#a78bfa")))
-                        .font(CodepetTheme.body(46, weight: .bold))
+                        .font(CodepetTheme.body(OnboardingLayout.coldHeadline(container: root.size.width),
+                                                weight: .bold))
                         .lineSpacing(3)
                         .shadow(color: Color(hex: "#0c0424").opacity(0.55), radius: 30)
                     Text("Codepet runs the whole company around your product, department by department — and does the work with you, so you always understand what's happening.")
@@ -77,7 +78,7 @@ struct OnboardingColdOpen: View {
                     Spacer()
                 }
                 .frame(maxWidth: 580, alignment: .leading)
-                .padding(.leading, 90)
+                .padding(.leading, OnboardingLayout.coldLeading(container: root.size.width))
                 .padding(.trailing, 40)
                 Spacer()
             }

@@ -73,7 +73,11 @@ struct CodePetApp: App {
                 .environmentObject(learnProgress)
                 .environmentObject(challengeProgress)
                 .environmentObject(feedbackManager)
-                .frame(minWidth: 400, minHeight: 700)
+                // 560 = the onboarding card's real floor: a 320pt clamped art panel
+                // (OnboardingLayout.artWidth) + the form's 64pt horizontal padding either
+                // side + room for the 600pt measure to compress into. At 400 the form
+                // panel was driven to a negative width and the layout clipped.
+                .frame(minWidth: 560, minHeight: 700)
                 .themed(isDark: appState.appTheme == .dark)
                 .preferredColorScheme(appState.appTheme.colorScheme)
                 .task {

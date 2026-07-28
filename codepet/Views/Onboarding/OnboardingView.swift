@@ -1,6 +1,26 @@
 // codepet/Views/Onboarding/OnboardingView.swift
 import SwiftUI
 
+/// Pure layout maths for the onboarding chrome. The web sizes these fluidly (a
+/// percentage or a CSS `clamp()`); the first native port froze them at the values
+/// they happen to take at the ~860pt design width, which is why the flow degraded
+/// as the window grew. Extracted for unit testing, like `StageSliderMath`.
+enum OnboardingLayout {
+    /// Web: `.ob-art { width: 42% }`. Clamped so the panel still leaves room for the
+    /// form at the minimum window width, and doesn't dominate an ultra-wide display.
+    static func artWidth(container: CGFloat) -> CGFloat {
+        min(620, max(320, container * 0.42))
+    }
+    /// Web: `.ob-cold-in h1 { font-size: clamp(34px, 4vw, 52px) }`.
+    static func coldHeadline(container: CGFloat) -> CGFloat {
+        min(52, max(34, container * 0.04))
+    }
+    /// Web: `.ob-cold-in { margin-left: clamp(40px, 9vw, 150px) }`.
+    static func coldLeading(container: CGFloat) -> CGFloat {
+        min(150, max(40, container * 0.09))
+    }
+}
+
 /// First-run cinematic onboarding — faithful English-only port of the web
 /// `Onboarding` (8 steps 0–7). Replaces the 6-field CompanyOnboardingView at
 /// first run; the reveal/scaffold is fail-open (scaffoldRoadmap CF undeployed).
@@ -59,51 +79,79 @@ struct OnboardingView: View {
         }
     }
 
-    // Two-panel card: art left (42%), form right.
+    /// Web `.ob-body.tall` — project & companion steps top-align instead of centring.
+    private var isTallStep: Bool { step == 4 || step == 8 }
+
+    // Two-panel card, mirroring the web `.obcard`:
+    //   `.ob-art  { flex: none; width: 42% }`      — proportional, not a fixed width
+    //   `.ob-main { flex: 1; overflow: auto }`     — every step scrolls
+    //   `.ob-top / .ob-body / .ob-foot { max-width: 600px }`
+    // Skip is deliberately NOT in the top row: on the web it's `.skip-pre`, absolutely
+    // positioned against the whole screen, so Back never gets pushed away from it.
     private var card: some View {
-        HStack(spacing: 0) {
-            Image(OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)])
-                .resizable().interpolation(.high).scaledToFill()
-                .frame(width: 360)
-                .frame(maxHeight: .infinity)
-                .clipped()
-                .overlay(
-                    OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
-                        .blendMode(.softLight)
-                )
-                .compositingGroup()   // isolate the soft-light blend to the art panel
-                .id(step) // re-fade on step change
-            Divider()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    if step != 6 {
-                        Button(action: { step = max(0, step - 1) }) {
-                            Text("← Back").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                        }.buttonStyle(.plain)
+        GeometryReader { card in
+            HStack(spacing: 0) {
+                Image(OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)])
+                    .resizable().interpolation(.high).scaledToFill()
+                    .frame(width: OnboardingLayout.artWidth(container: card.size.width))
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+                    .overlay(
+                        OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
+                            .blendMode(.softLight)
+                    )
+                    .compositingGroup()   // isolate the soft-light blend to the art panel
+                    .id(step) // re-fade on step change
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    // `.ob-top` — Back only, held to the same 600pt measure as the body
+                    // and footer so the controls stay with the content on a wide window.
+                    HStack {
+                        if step != 6 {
+                            Button(action: { step = max(0, step - 1) }) {
+                                Text("← Back").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
+                            }.buttonStyle(.plain)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer()
-                    Button(action: skip) {
-                        Text("Skip onboarding →").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                    }.buttonStyle(.plain)
-                }
-                .padding(.bottom, 8)
+                    .frame(maxWidth: 600)
+                    .padding(.bottom, 8)
 
-                Group {
-                    if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
-                        ScrollView { stepBody.frame(maxWidth: 600, alignment: .leading) }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    } else {                       // vertically centered (.leading = leading + center-vertical)
-                        stepBody.frame(maxWidth: 600, alignment: .leading)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    // `.ob-main { overflow: auto }` + `.ob-body { justify-content: center }`:
+                    // the step column is centred while it fits and scrolls once it doesn't,
+                    // so a long reveal (server-driven task count) can always reach the footer.
+                    GeometryReader { area in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) { stepBody }
+                                .frame(maxWidth: 600, alignment: .leading)
+                                .frame(minHeight: area.size.height,
+                                       alignment: isTallStep ? .top : .center)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
 
-                footer.frame(maxWidth: 600)
+                    footer.frame(maxWidth: 600)
+                }
+                .padding(.horizontal, 64).padding(.vertical, 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 64).padding(.vertical, 40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .overlay(alignment: .topTrailing) { skipPill }
         }
         .background(CodepetTheme.surface)
+    }
+
+    /// Web `.ob .skip-pre` — a pill pinned to the card's top-trailing corner.
+    private var skipPill: some View {
+        Button(action: skip) {
+            Text("Skip onboarding →")
+                .font(CodepetTheme.body(12)).fontWeight(.semibold)
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.surface))
+                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 20).padding(.trailing, 24)
     }
 
     @ViewBuilder private var stepBody: some View {

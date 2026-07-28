@@ -16,11 +16,15 @@ struct OnboardingColdOpen: View {
         ZStack(alignment: .topTrailing) {
             OnboardingContent.Palette.coldBg.ignoresSafeArea()
             GeometryReader { geo in
+                let drift = OnboardingMotion.kenBurnsDrift(width: geo.size.width,
+                                                           height: geo.size.height)
                 Image("ob-team")
                     .resizable().interpolation(.high).scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .scaleEffect(kenBurns ? 1.08 : 1.0)
-                    .offset(x: px * 6, y: py * 6)   // subtle depth parallax
+                    .scaleEffect(kenBurns ? OnboardingMotion.kenBurnsScale : 1.0)
+                    // Ken Burns drift (`translate(-1.2%,-1.6%)`) plus pointer parallax.
+                    .offset(x: (kenBurns ? drift.width : 0) + px * 6,
+                            y: (kenBurns ? drift.height : 0) + py * 6)
                     .clipped()
             }
             .ignoresSafeArea()
@@ -50,19 +54,25 @@ struct OnboardingColdOpen: View {
                                                 weight: .bold))
                         .lineSpacing(3)
                         .shadow(color: Color(hex: "#0c0424").opacity(0.55), radius: 30)
+                        .riseIn(OnboardingMotion.riseCold, delay: OnboardingMotion.coldHeadlineDelay)
                     Text("Codepet runs the whole company around your product, department by department — and does the work with you, so you always understand what's happening.")
                         .font(CodepetTheme.body(16))
                         .foregroundColor(Color(hex: "#f0eefc").opacity(0.95))
                         .lineSpacing(4)
                         .frame(maxWidth: 500, alignment: .leading)
                         .padding(.top, 20)
+                        .riseIn(OnboardingMotion.riseCold, delay: OnboardingMotion.coldParagraphDelay)
 
-                    Text("CODEPET RUNS ALL \(OnboardingContent.departments.count) DEPARTMENTS")
-                        .font(CodepetTheme.body(11)).fontWeight(.semibold)
-                        .tracking(1.2)
-                        .foregroundColor(.white.opacity(0.5))
-                        .padding(.top, 26).padding(.bottom, 11)
-                    deptChips.frame(maxWidth: 540, alignment: .leading)
+                    // `.ob-depts { animation-delay: .5s }` — eyebrow + chips rise together.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("CODEPET RUNS ALL \(OnboardingContent.departments.count) DEPARTMENTS")
+                            .font(CodepetTheme.body(11)).fontWeight(.semibold)
+                            .tracking(1.2)
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.top, 26).padding(.bottom, 11)
+                        deptChips.frame(maxWidth: 540, alignment: .leading)
+                    }
+                    .riseIn(OnboardingMotion.riseCold, delay: OnboardingMotion.coldChipsDelay)
 
                     Button(action: onStart) {
                         Text("Set up my company")
@@ -75,6 +85,7 @@ struct OnboardingColdOpen: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 30)
+                    .riseIn(OnboardingMotion.riseCold, delay: OnboardingMotion.coldChipsDelay)
                     Spacer()
                 }
                 .frame(maxWidth: 580, alignment: .leading)

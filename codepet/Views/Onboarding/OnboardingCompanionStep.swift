@@ -12,9 +12,11 @@ struct OnboardingCompanionStep: View {
             Text("Choose your companion.")
                 .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
+                .riseIn(delay: OnboardingMotion.stepHeadingDelay)
             Text("Pick who'll accompany you as you build. You can change this anytime in the sidebar.")
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
                 .padding(.top, 9)
+                .riseIn(delay: OnboardingMotion.stepSubDelay)
 
             ChipFlowLayout(spacing: 12) {
                 ForEach(PetCharacter.starters, id: \.self) { id in

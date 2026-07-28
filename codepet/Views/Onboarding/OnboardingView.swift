@@ -51,7 +51,11 @@ struct OnboardingView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
     @State private var timeoutTask: Task<Void, Never>?
+    /// Pointer parallax for the art panel, -1...1 — mirrors OnboardingColdOpen.
+    @State private var px: CGFloat = 0
+    @State private var py: CGFloat = 0
     @FocusState private var nameFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -96,17 +100,20 @@ struct OnboardingView: View {
     private var card: some View {
         GeometryReader { card in
             HStack(spacing: 0) {
-                Image(OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)])
-                    .resizable().interpolation(.high).scaledToFill()
-                    .frame(width: OnboardingLayout.artWidth(container: card.size.width))
-                    .frame(maxHeight: .infinity)
-                    .clipped()
-                    .overlay(
-                        OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
-                            .blendMode(.softLight)
+                // `.ob-art span` — layers crossfade over 1.1s while the incoming one
+                // settles from scale(1.07) to 1 over 7s, plus ±8px pointer parallax.
+                // The .id drives the ZStack transition, so only two layers are ever live.
+                ZStack {
+                    OnboardingArtLayer(
+                        name: OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)],
+                        width: OnboardingLayout.artWidth(container: card.size.width),
+                        grade: OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)],
+                        px: px, py: py
                     )
-                    .compositingGroup()   // isolate the soft-light blend to the art panel
-                    .id(step) // re-fade on step change
+                    .id(step)
+                    .transition(.opacity)
+                }
+                .animation(.easeInOut(duration: OnboardingMotion.artCrossfade), value: step)
                 Divider()
                 VStack(alignment: .leading, spacing: 0) {
                     // `.ob-top` — Back only, held to the same 600pt measure as the body
@@ -127,7 +134,10 @@ struct OnboardingView: View {
                     // so a long reveal (server-driven task count) can always reach the footer.
                     GeometryReader { area in
                         ScrollView {
+                            // .id(step) gives each step fresh views so the `riseIn`
+                            // stagger replays on advance, as new DOM nodes do on the web.
                             VStack(alignment: .leading, spacing: 0) { stepBody }
+                                .id(step)
                                 .frame(maxWidth: 600, alignment: .leading)
                                 .frame(minHeight: area.size.height,
                                        alignment: isTallStep ? .top : .center)
@@ -141,6 +151,18 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .overlay(alignment: .topTrailing) { skipPill }
+            .onContinuousHover { phase in
+                guard !reduceMotion else { return }
+                switch phase {
+                case .active(let p):
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        px = clampNorm(p.x, 0, card.size.width)
+                        py = clampNorm(p.y, 0, card.size.height)
+                    }
+                case .ended:
+                    withAnimation(.easeOut(duration: 0.4)) { px = 0; py = 0 }
+                }
+            }
         }
         .background(CodepetTheme.surface)
     }
@@ -172,9 +194,11 @@ struct OnboardingView: View {
             OnboardingOptionList(options: OnboardingContent.roles, selectedKey: Binding(
                 get: { d.role },
                 set: { k in d.role = k; d.roleLabel = OnboardingContent.roles.first(where: { $0.key == k })?.label ?? "" }))
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 3:
             heading("How hands-on are you with the code?", "So I know how deep to go on the technical side.")
             OnboardingOptionList(options: OnboardingContent.tech, selectedKey: $d.tech)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 4:
             heading("Now — what are you building?",
                     "A name and one clear sentence — that line is what I read to tailor your whole plan. Everything else is optional but sharpens it.")
@@ -185,6 +209,7 @@ struct OnboardingView: View {
             chips(OnboardingContent.categories, selected: d.categories) { c in
                 if d.categories.contains(c) { d.categories.removeAll { $0 == c } } else { d.categories.append(c) }
             }
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
             label("Who's it for? (optional)")
             textField("e.g. solo founders shipping their first product", text: $d.audience)
             label("Link (optional — website, repo, or Figma)")
@@ -195,15 +220,20 @@ struct OnboardingView: View {
                 .scrollContentBackground(.hidden)   // hide TextEditor's default backing (macOS 13+)
                 .padding(8).background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 5:
             heading("Where are you today?", "This sets your starting point on the roadmap.")
             OnboardingStageSlider(stageIndex: $d.stageIndex)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 7:
             OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         default:
             OnboardingCompanionStep(pickedId: $d.pick)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         }
     }
 
@@ -307,16 +337,20 @@ struct OnboardingView: View {
 
     // MARK: small view helpers
 
+    // `.ob-body > *` staggering: h2 at 40ms, p at .12s, everything after at .2s.
     private func heading(_ h: String, _ sub: String) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(h).font(CodepetTheme.body(20, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
+                .riseIn(delay: OnboardingMotion.stepHeadingDelay)
             Text(sub).font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
+                .riseIn(delay: OnboardingMotion.stepSubDelay)
         }.padding(.bottom, 4)
     }
     private func label(_ t: String) -> some View {
         Text(t).font(CodepetTheme.body(12)).fontWeight(.semibold)
             .foregroundColor(CodepetTheme.primaryText).padding(.top, 18).padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
     }
     private func textField(_ ph: String, text: Binding<String>) -> some View {
         TextField(ph, text: text)
@@ -324,6 +358,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 14).padding(.vertical, 13)
             .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
     }
     private func chips(_ items: [String], selected: [String], toggle: @escaping (String) -> Void) -> some View {
         ChipFlowLayout(spacing: 8) {

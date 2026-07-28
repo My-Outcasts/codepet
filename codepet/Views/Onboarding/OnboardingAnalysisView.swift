@@ -15,9 +15,11 @@ struct OnboardingAnalysisView: View {
             Text("Codepet is reading \(projectName.isEmpty ? "your project" : projectName)…")
                 .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
+                .riseIn(delay: OnboardingMotion.stepHeadingDelay)
             Text("Turning what you told me into a full company plan.")
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
                 .padding(.top, 9)
+                .riseIn(delay: OnboardingMotion.stepSubDelay)
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(0..<max(0, min(shown, OnboardingContent.analysisLines.count)), id: \.self) { i in

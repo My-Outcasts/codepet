@@ -20,29 +20,6 @@ struct CopilotChatView: View {
     private var companionAccent2: Color {
         PetCharacter.all[companyStore.company.companionId]?.secondColor ?? CodepetTheme.accentPink
     }
-    private var companyName: String {
-        let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? "Codepet" : n
-    }
-    private var founderName: String {
-        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
-    }
-    /// "Good morning/afternoon/evening, {founder}." — first line of the empty-state
-    /// greeting, in the plain primary text color (line 2 carries the purple gradient).
-    private var greetingLine1: String {
-        let h = Calendar.current.component(.hour, from: Date())
-        let part: String
-        switch h {
-        case ..<12:  part = lang == .vi ? "Chào buổi sáng" : "Good morning"
-        case 12..<18: part = lang == .vi ? "Chào buổi chiều" : "Good afternoon"
-        default:      part = lang == .vi ? "Chào buổi tối" : "Good evening"
-        }
-        return "\(part), \(founderName)."
-    }
-    private var greetingLine2: String {
-        lang == .vi ? "Hôm nay mình xây gì cho \(companyName)?" : "What should we build for \(companyName) today?"
-    }
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming
@@ -53,10 +30,11 @@ struct CopilotChatView: View {
             ChatBackdrop()
             VStack(spacing: 0) {
                 if companyStore.chatMessages.isEmpty {
-                    ChatEmptyState(line1: greetingLine1,
-                                   line2: greetingLine2,
-                                   quickActions: quickActions,
-                                   onQuickAction: runQuickAction) {
+                    ChatEmptyState(
+                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        onOpenRoadmap: { companyStore.selectedDeptKey = nil; companyStore.select(.roadmap) },
+                        onStarter: { draft = $0; inputFocused = true }
+                    ) {
                         composerView
                     }
                 } else {

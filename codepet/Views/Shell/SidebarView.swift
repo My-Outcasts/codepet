@@ -60,14 +60,9 @@ struct SidebarView: View {
                 companyStore.selectedDeptKey = nil
                 companyStore.select(.chat)
             } label: {
-                HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(newChatGradient)
-                        .frame(width: 22, height: 22)
-                    Text("Codepet")
-                        .font(CodepetTheme.pixel(16))
-                        .foregroundColor(CodepetTheme.primaryText)
-                }
+                Text("Codepet")
+                    .font(CodepetTheme.pixel(16))
+                    .foregroundColor(CodepetTheme.primaryText)
             }
             .buttonStyle(.plain)
 

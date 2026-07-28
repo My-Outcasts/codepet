@@ -26,9 +26,15 @@ enum OnboardingLayout {
     }
 }
 
-/// First-run cinematic onboarding — faithful English-only port of the web
-/// `Onboarding` (8 steps 0–7). Replaces the 6-field CompanyOnboardingView at
-/// first run; the reveal/scaffold is fail-open (scaffoldRoadmap CF undeployed).
+/// First-run cinematic onboarding — English-only port of the web `Onboarding`,
+/// 8 steps 0–7: cold open → name → role → tech → project → stage → analysis → reveal.
+/// Replaces the 6-field CompanyOnboardingView at first run; the reveal/scaffold is
+/// fail-open (scaffoldRoadmap CF undeployed).
+///
+/// Deliberate divergence from the web: the web's 9th step, the companion picker, is
+/// cut. Choosing a pet before meeting any of them is a decision without information,
+/// and it sat between the reveal and getting to work. The company keeps its default
+/// companion and the picker lives in Settings.
 struct OnboardingView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
@@ -38,7 +44,6 @@ struct OnboardingView: View {
         var projName = "", oneLiner = "", audience = "", link = "", notes = ""
         var categories: [String] = []
         var stageIndex = OnboardingContent.defaultStageIndex
-        var pick = ""
     }
 
     @State private var step = 0
@@ -77,15 +82,14 @@ struct OnboardingView: View {
             }
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
-        .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
         .onChange(of: step) { newStep in
             // Autofocus the name field when entering step 1 (deferred so the field is mounted).
             if newStep == 1 { DispatchQueue.main.async { nameFocused = true } }
         }
     }
 
-    /// Web `.ob-body.tall` — project & companion steps top-align instead of centring.
-    private var isTallStep: Bool { step == 4 || step == 8 }
+    /// Web `.ob-body.tall` — the project step top-aligns instead of centring.
+    private var isTallStep: Bool { step == 4 }
 
     // Two-panel card, mirroring the web `.obcard`:
     //   `.ob-art  { flex: none; width: 42% }`      — proportional, not a fixed width
@@ -212,11 +216,8 @@ struct OnboardingView: View {
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
                 .riseIn(delay: OnboardingMotion.stepRestDelay)
-        case 7:
+        default:   // 7 — the reveal is the last screen; "Start building" finishes here.
             OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
-                .riseIn(delay: OnboardingMotion.stepRestDelay)
-        default:
-            OnboardingCompanionStep(pickedId: $d.pick)
                 .riseIn(delay: OnboardingMotion.stepRestDelay)
         }
     }
@@ -252,8 +253,7 @@ struct OnboardingView: View {
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
-        case 7: bigButton("Choose your companion", enabled: true) { step = 8 }
-        default: bigButton("Start building", enabled: true) { finishWithCompanion() }
+        default: bigButton("Start building", enabled: true) { finish() }
         }
     }
 
@@ -290,17 +290,18 @@ struct OnboardingView: View {
         }
     }
 
-    private func finishWithCompanion() {
+    private func finish() {
         streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         let token = companyStore.onboardingToken
-        let id = d.pick.isEmpty ? companyStore.company.companionId : d.pick
         Task {
-            await companyStore.setCompanion(id: id)
-            appState.activeChar = id
+            // No companion picker in the flow any more, so nothing to persist here —
+            // the company keeps its default companion. Still mirror it onto appState so
+            // the app opens with the same character the store holds (Settings changes it).
+            appState.activeChar = companyStore.company.companionId
             // Pass the store's current (already-enriched, by scaffoldFromOnboarding)
             // brief — NOT the local raw `brief()` draft — so finishOnboarding doesn't
             // clobber the enriched summary/audience/categories with unenriched values.
-            // Steps 6-8 never edit brief fields, so company.brief is authoritative here;
+            // Steps 6-7 never edit brief fields, so company.brief is authoritative here;
             // if enrichment failed (fail-open) it already equals the raw brief, so this
             // is safe in all cases. EXCEPT: if "Start building" was reached while the
             // scaffold Task was still in-flight, the `scaffoldTask?.cancel()` above can

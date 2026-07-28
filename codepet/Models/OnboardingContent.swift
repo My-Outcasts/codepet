@@ -15,7 +15,6 @@ enum OnboardingContent {
         Color(red: 242/255, green: 201/255, blue: 76/255 ).opacity(0.22), // 5
         Color(red: 126/255, green: 168/255, blue: 255/255).opacity(0.26), // 6
         Color(red: 124/255, green: 58/255,  blue: 237/255).opacity(0.26), // 7
-        Color(red: 124/255, green: 58/255,  blue: 237/255).opacity(0.26), // 8
     ]
 
     /// (display label, stable key) — the numbered single-select on the role step.
@@ -60,10 +59,10 @@ enum OnboardingContent {
         ("Sales", Color(hex: "#7ea8ff")),
         ("Support", Color(hex: "#7fd694")),
     ]
-    /// Per-step left-panel art (STEP_ART), steps 0...8. Steps 0, 7 & 8 reuse ob-team.
+    /// Per-step left-panel art (STEP_ART), steps 0...7. Steps 0 & 7 reuse ob-team.
     static let stepArt = [
         "ob-team", "ob-couch", "ob-chess", "ob-drummer",
-        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team", "ob-team",
+        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team",
     ]
     static let analysisLines = [
         "Reading what you told me…",
@@ -73,8 +72,13 @@ enum OnboardingContent {
     ]
     /// Total onboarding screens INCLUDING the cinematic cold-open (step 0). The footer
     /// counts `step + 1` of `total` — matching the web (`OB_TOTAL`), where the cold-open
-    /// is counted but renders no footer, so the first question reads "Step 2 of 9".
-    static let total = 9
+    /// is counted but renders no footer, so the first question reads "Step 2 of 8".
+    ///
+    /// 8, not the web's 9: the companion-picker step was cut. It asked the founder to
+    /// choose a pet before they had met any of them, which is a decision without
+    /// information — so the default companion carries through and the picker lives in
+    /// Settings, where it can be changed once the choice actually means something.
+    static let total = 8
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.

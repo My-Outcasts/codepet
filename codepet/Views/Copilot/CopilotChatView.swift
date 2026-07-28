@@ -61,7 +61,9 @@ struct CopilotChatView: View {
                         }
                         if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
                     }
-                    .padding(12)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 40)
+                    .padding(.bottom, 16)
                     .frame(maxWidth: 600, alignment: .leading)
                     Spacer(minLength: 0)
                 }

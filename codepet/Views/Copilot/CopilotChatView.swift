@@ -318,7 +318,7 @@ struct CopilotBubble: View {
             } label: {
                 Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
                     .font(CodepetTheme.inter(13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
             }
@@ -337,7 +337,7 @@ struct CopilotBubble: View {
                 Button { companyStore.activateNav(nav) } label: {
                     Text((lang == .vi ? "Đi tới " : "Go to ") + label)
                         .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(Capsule().fill(CodepetTheme.accentPurple))
                 }
@@ -371,7 +371,7 @@ struct CopilotBubble: View {
                     Button { Task { await companyStore.activateSetup(setup) } } label: {
                         Text(verb)
                             .font(CodepetTheme.inter(12, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                             .padding(.horizontal, 12).padding(.vertical, 5)
                             .background(Capsule().fill(CodepetTheme.accentPurple))
                     }.buttonStyle(.plain)
@@ -456,7 +456,7 @@ struct CopilotBubble: View {
                     Spacer(minLength: 24)
                     Text(message.text)
                         .font(CodepetTheme.inter(15))
-                        .foregroundColor(.white)
+                        .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                         .padding(.horizontal, 10).padding(.vertical, 7)
                         .background(UnevenRoundedRectangle(
                             cornerRadii: .init(topLeading: 14, bottomLeading: 14,
@@ -582,7 +582,7 @@ struct CopilotBubble: View {
                             Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
                                 Text(lang == .vi ? "Duyệt" : "Approve")
                                     .font(CodepetTheme.inter(12, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().fill(CodepetTheme.accentPurple))
                             }.buttonStyle(.plain)

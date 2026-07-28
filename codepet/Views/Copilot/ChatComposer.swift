@@ -148,7 +148,7 @@ struct ChatComposer: View {
         Button(action: onSend) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(canSend ? CodepetTheme.onAccent(accent) : .white)
                 .frame(width: 34, height: 34)
                 .background(
                     Circle().fill(

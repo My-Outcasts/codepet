@@ -285,7 +285,7 @@ struct SidebarView: View {
                 if count > 0 {
                     Text("\(count)")
                         .font(CodepetTheme.inter(10, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentGold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Capsule().fill(CodepetTheme.accentGold))
                 }

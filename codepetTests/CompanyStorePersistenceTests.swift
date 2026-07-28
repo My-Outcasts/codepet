@@ -97,6 +97,46 @@ final class CompanyStorePersistenceTests: XCTestCase {
         XCTAssertEqual(spy.saved.last?.id, "recent")
     }
 
+    // MARK: - The DEBUG resume-window override
+
+    /// Only a positive override counts. A stray key reading 0 must NOT be taken
+    /// literally as "resume nothing, ever".
+    func testResumeWindowHonoursOnlyAPositiveOverride() {
+        let key = "CODEPET_RESUME_WINDOW_SECONDS"
+        let defaults = UserDefaults.standard
+        defer { defaults.removeObject(forKey: key) }
+
+        defaults.removeObject(forKey: key)
+        XCTAssertEqual(CompanyStore.resumeWindow, threadResumeWindow)
+
+        defaults.set(10.0, forKey: key)
+        XCTAssertEqual(CompanyStore.resumeWindow, 10)
+
+        defaults.set(0.0, forKey: key)
+        XCTAssertEqual(CompanyStore.resumeWindow, threadResumeWindow)
+
+        defaults.set(-5.0, forKey: key)
+        XCTAssertEqual(CompanyStore.resumeWindow, threadResumeWindow)
+    }
+
+    /// The override is what `hydrate` actually resumes against — a thread just
+    /// outside a tiny window opens the hero.
+    func testHydrateRespectsTheOverriddenWindow() async {
+        let key = "CODEPET_RESUME_WINDOW_SECONDS"
+        UserDefaults.standard.set(2.0, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let spy = Spy()
+        let now = Date()
+        spy.toLoad = [ChatThread(id: "a", title: "Recent", messages: [CopilotMessage(role: .me, text: "hi")],
+                                 createdAt: now.addingTimeInterval(-120), updatedAt: now.addingTimeInterval(-30))]
+        let s = store(spy)
+        await s.hydrate(companyId: "u")
+        XCTAssertNil(s.activeThreadId, "30s old is stale under a 2s window")
+        XCTAssertTrue(s.chatMessages.isEmpty)
+        XCTAssertEqual(s.threads.count, 1, "still hydrated into Recent")
+    }
+
     // MARK: - Resuming a thread that stopped mid enrichment interview
 
     /// A persisted thread whose last message is byte's unanswered `gap` question.

@@ -134,6 +134,26 @@ final class CompanyStore: ObservableObject {
         company.onboardedAt == nil && !company.brief.hasAnySignal
     }
 
+    /// The resume window this launch actually uses. Release builds always use
+    /// `threadResumeWindow` (8h). A DEBUG build honours an override so the STALE
+    /// branch — which otherwise needs a thread untouched for eight hours — can be
+    /// exercised in seconds, same idiom as `CODEPET_MOCK_CHAT`:
+    ///
+    ///   open -n <app> --args -CODEPET_RESUME_WINDOW_SECONDS 10
+    ///   defaults write app.murror.codepet CODEPET_RESUME_WINDOW_SECONDS 10   # persistent
+    ///   defaults delete app.murror.codepet CODEPET_RESUME_WINDOW_SECONDS     # back to 8h
+    ///
+    /// Only a POSITIVE override counts: an absent or unparseable key reads as 0
+    /// through `double(forKey:)`, and 0 would mean "resume nothing, ever" — a
+    /// silent behaviour change on any build that happened to carry a stray key.
+    static var resumeWindow: TimeInterval {
+        #if DEBUG
+        let override = UserDefaults.standard.double(forKey: "CODEPET_RESUME_WINDOW_SECONDS")
+        if override > 0 { return override }
+        #endif
+        return threadResumeWindow
+    }
+
     /// Hydrate the company from Firestore (fail-soft inside the loader).
     func hydrate(companyId: String) async {
         hydrationToken &+= 1
@@ -167,7 +187,7 @@ final class CompanyStore: ObservableObject {
             let persisted = await threadsLoader(companyId)
             guard token == hydrationToken else { return }
             threads = persisted
-            if let resumeId = pickResumeThreadId(in: persisted, now: Date()) {
+            if let resumeId = pickResumeThreadId(in: persisted, now: Date(), within: Self.resumeWindow) {
                 activeThreadId = resumeId
                 chatMessages = persisted.first(where: { $0.id == resumeId })?.messages ?? []
             }

@@ -778,6 +778,13 @@ final class CompanyStore: ObservableObject {
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName))
+            // Reflect the run on the roadmap so the task leaves the "next moves" set
+            // and can't be re-run into a duplicate draft (mirrors the board runTask).
+            if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
+                company.tasks[ti].draft = draft
+                company.tasks[ti].drafted = true
+                if let cid { _ = await tasksSaver(cid, company.tasks) }
+            }
             return true
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
@@ -961,7 +968,16 @@ final class CompanyStore: ObservableObject {
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
         company.library.append(draft)
         chatMessages[i].draftApproved = true
-        if let cid = companyId { _ = await librarySaver(cid, company.library) }
+        // Complete the source roadmap task so it leaves the "next moves" set — a
+        // chat-run approval finishes the task just like the board's approveTask.
+        if let tid = draft.sourceTaskId, let ti = company.tasks.firstIndex(where: { $0.id == tid }) {
+            company.tasks[ti].done = true
+            company.tasks[ti].drafted = false
+            company.tasks[ti].draft = nil
+        }
+        let cid = companyId
+        if let cid { _ = await librarySaver(cid, company.library) }
+        if let cid { _ = await tasksSaver(cid, company.tasks) }
         Task { await rememberFromApproval(draft) }
     }
 

@@ -282,9 +282,16 @@ struct CopilotChatView: View {
 
     /// Send a canned capability prompt through the normal chat path. Bypasses
     /// mode-shaping (the string already expresses the intent). Guarded like send.
+    /// True if `text` is the fan-out command — the chip title OR the same phrase
+    /// typed into the composer (en or vi) — so typing it works like tapping the chip.
+    private func isFanOutPhrase(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t == "run my next moves" || t == "chạy các bước tiếp theo"
+    }
+
     private func runQuickAction(_ text: String) {
         guard !companyStore.isCompanionTyping, !companyStore.isStreaming, !companyStore.isFanningOut else { return }
-        if text == fanOutTitle {
+        if isFanOutPhrase(text) {
             Task { await companyStore.fanOutNextMoves(language: lang) }
             return
         }
@@ -300,6 +307,13 @@ struct CopilotChatView: View {
             companyStore.chatDraft = ""
             Task { await companyStore.answerInterview(messageId: pending.id, gap: pending.gap,
                                                       answer: answer, language: lang) }
+            inputFocused = true
+            return
+        }
+        // Typing the fan-out phrase works like tapping the "Run my next moves" chip.
+        if isFanOutPhrase(companyStore.chatDraft) {
+            companyStore.chatDraft = ""
+            Task { await companyStore.fanOutNextMoves(language: lang) }
             inputFocused = true
             return
         }

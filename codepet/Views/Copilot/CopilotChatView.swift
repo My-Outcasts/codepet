@@ -75,7 +75,7 @@ struct CopilotChatView: View {
                         ForEach(companyStore.chatMessages) { m in
                             CopilotBubble(message: m).id(m.id)
                         }
-                        if companyStore.isCompanionTyping { typingRow.id("typing") }
+                        if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
                     }
                     .padding(12)
                     .frame(maxWidth: 600, alignment: .leading)
@@ -89,15 +89,6 @@ struct CopilotChatView: View {
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
-        }
-    }
-
-    private var typingRow: some View {
-        HStack(spacing: 10) {
-            CompanionOrb(size: 28, glow: false)
-            Text(lang == .vi ? "Đang suy nghĩ…" : "Thinking…")
-                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 24)
         }
     }
 
@@ -348,18 +339,13 @@ struct CopilotBubble: View {
     }
 
     /// The chat-run step-transparency indicator (web: a "producing" beat before the
-    /// draft card lands). Mirrors `CopilotChatView.typingRow`'s plain, no-bubble
-    /// style — not a filled chat bubble — so it reads as ambient status, not a
-    /// message. `CompanyStore.handleRunTaskId` removes this row (win or lose)
-    /// before appending the real reply, so it's always transient.
+    /// draft card lands). Mirrors `ChatThinkingRow`'s plain, no-bubble style — not
+    /// a filled chat bubble — so it reads as ambient status, not a message.
+    /// `CompanyStore.handleRunTaskId` removes this row (win or lose) before
+    /// appending the real reply, so it's always transient.
     private var producingRow: some View {
-        HStack {
-            CompanionOrb(size: 28, glow: false)
-            Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 24)
-        }
+        // Pass a real title if the producing message carries one; else nil → "Working on it…".
+        ChatThinkingRow(taskTitle: nil)
     }
 
     private var textBubble: some View {

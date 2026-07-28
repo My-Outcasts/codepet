@@ -31,9 +31,17 @@ enum MockChat {
     private static func route(_ req: CompanyChatRequest) -> (text: String, action: ChatDoneAction) {
         let msg = req.userMessage.lowercased()
 
-        // run → produce → approve (the core loop). Needs a runnable task.
+        // run → produce → approve (the core loop). Needs a runnable task. Pick the
+        // runnable whose TITLE shares a 4+ char word with the message (so "run
+        // privacy" / "run faq" / "run outreach" each hit that department's task);
+        // fall back to the first runnable for a bare "run".
         if msg.contains("run") || msg.contains("draft") || msg.contains("produce") {
-            if let task = req.runnable.first {
+            let picked = req.runnable.first { r in
+                r.title.lowercased().split(whereSeparator: { !$0.isLetter }).contains { w in
+                    w.count >= 4 && msg.contains(String(w))
+                }
+            } ?? req.runnable.first
+            if let task = picked {
                 return ("On it — drafting \u{201C}\(task.title)\u{201D} for you now\u{2026}",
                         ChatDoneAction(runTaskId: task.id))
             }
@@ -207,6 +215,76 @@ enum MockChat {
             **Rule of thumb** — pick the boring, consistent option; recognizability comes from repetition, not novelty.
             """)
         }
+        if t.contains("outreach") || t.contains("cold") || t.contains("sales") || t.contains("email") {
+            return ("email", """
+            **Subject** — a quick idea for {{company}}
+
+            Hi {{name}} — I'll keep this short. I'm building Codepet, an AI cofounder that runs a \
+            solo founder's whole company — it plans the next move, does the work with you, and \
+            remembers every decision.
+
+            I noticed {{company}} is {{specific observation}} — that's exactly the kind of momentum \
+            problem it's built for. Worth a 15-minute look?
+
+            No pitch deck, just a live demo. Reply "yes" and I'll send a time.
+
+            — Mona
+
+            _Tip: keep the ask tiny (a 15-min look), personalize line 2, and cut everything else._
+            """)
+        }
+        if t.contains("faq") || t.contains("support") || t.contains("help center") {
+            return ("doc", """
+            The first questions new users ask — answer them before they have to write in.
+
+            **What is Codepet?** An AI cofounder that runs your company's busywork — it plans, does \
+            the work with you, and remembers your decisions.
+
+            **Do I need to know how to code?** No. Codepet drafts and produces; you approve.
+
+            **Is my data private?** Your company context is yours; we don't train on it.
+
+            **How is it priced?** A credit model — chat feels free, deliverables spend. Trial, then Pro.
+
+            **Can I cancel anytime?** Yes, one tap in Settings — no email required.
+
+            _Add each real question you get to this list; it doubles as your objection-handling script._
+            """)
+        }
+        if t.contains("deploy") || t.contains("release") || t.contains("ops") {
+            return ("checklist", """
+            Ship a release the same safe way every time.
+
+            1. **Green build** — tests pass locally and in CI.
+            2. **Version bump** — tag the release; write a one-line changelog.
+            3. **Backup / migration** — run pending DB migrations; confirm a rollback path.
+            4. **Deploy to staging** — smoke-test the critical flow end to end.
+            5. **Promote to prod** — deploy, then re-run the smoke test live.
+            6. **Watch** — check errors/latency for 15 minutes; keep the rollback command ready.
+
+            **Done when**: the critical flow works in prod and dashboards are clean.
+            """)
+        }
+        if t.contains("privacy") || t.contains("policy") || t.contains("legal") || t.contains("terms") {
+            return ("legal", """
+            _Plain-language draft — have a lawyer review before you publish._
+
+            **Privacy Policy — Codepet**
+
+            **What we collect** — your account email, the company context you enter, and basic usage \
+            analytics. We do **not** sell your data or train public models on your company content.
+
+            **Why** — to run the product for you (generate work, remember decisions) and to keep it reliable.
+
+            **Your choices** — export or delete your data anytime from Settings; deleting your account \
+            removes your company content.
+
+            **Sharing** — only with the infrastructure providers needed to run the service (hosting, \
+            auth, payments), under their own terms.
+
+            **Contact** — privacy@codepet.app for any request.
+            """)
+        }
         if t.contains("pricing") || t.contains("price") {
             return ("doc", """
             **Model** — credits, not a seat/day cap: chat feels unlimited, deliverables spend.
@@ -273,24 +351,37 @@ enum MockChat {
     /// `.draft`/`.does` tasks with no deps resolve to `codepetCanDo` → runnable.
     static func roadmap() -> [RoadmapTask] {
         [
-            RoadmapTask(id: "mock-positioning", title: "Draft your positioning statement",
-                        detail: "One clear sentence: who it's for, what it does, why it's different.",
-                        phase: .foundation, who: .draft, dept: "mkt"),
-            RoadmapTask(id: "mock-landing", title: "Write your landing page copy",
-                        detail: "Headline, subhead, and three benefit bullets for the waitlist page.",
-                        phase: .build, who: .draft, dept: "mkt"),
-            RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
-                        detail: "A simple email capture so early interest isn't lost.",
-                        phase: .build, who: .does, dept: "eng"),
+            // ONE Codepet-can-do task per department (all 8) so every department's
+            // card is testable. Each title carries a keyword ("run <keyword>") the
+            // mock router matches to this task; each maps to a tailored deliverable.
             RoadmapTask(id: "mock-brand", title: "Design your brand look",
                         detail: "A simple visual direction — colors, type, and a logo mark.",
-                        phase: .foundation, who: .draft, dept: "design"),
+                        phase: .foundation, who: .draft, dept: "design"),   // run brand
+            RoadmapTask(id: "mock-landing", title: "Write your landing page copy",
+                        detail: "Headline, subhead, and three benefit bullets.",
+                        phase: .foundation, who: .draft, dept: "mkt"),       // run landing
+            RoadmapTask(id: "mock-pricing", title: "Draft a simple pricing plan",
+                        detail: "A starting price + model you can change later.",
+                        phase: .foundation, who: .draft, dept: "fin"),       // run pricing
+            RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
+                        detail: "A simple email capture so early interest isn't lost.",
+                        phase: .build, who: .does, dept: "eng"),             // run waitlist
+            RoadmapTask(id: "mock-outreach", title: "Write a cold outreach email",
+                        detail: "A short first-touch email to a potential customer.",
+                        phase: .build, who: .draft, dept: "sales"),          // run outreach
+            RoadmapTask(id: "mock-faq", title: "Draft a support FAQ",
+                        detail: "Answers to the first questions new users will ask.",
+                        phase: .build, who: .draft, dept: "support"),        // run faq
+            RoadmapTask(id: "mock-deploy", title: "Set up a deploy checklist",
+                        detail: "The steps to ship a release safely, every time.",
+                        phase: .ship, who: .does, dept: "ops"),              // run deploy
+            RoadmapTask(id: "mock-privacy", title: "Draft a privacy policy",
+                        detail: "A plain-language policy covering what you collect and why.",
+                        phase: .ship, who: .draft, dept: "legal"),           // run privacy
+            // A "needs you" task so the landing card + roadmap show that state too.
             RoadmapTask(id: "mock-interviews", title: "Talk to 5 potential users",
                         detail: "Book and run five short discovery calls this week.",
                         phase: .find, who: .you, dept: "mkt"),
-            RoadmapTask(id: "mock-pricing", title: "Decide your pricing",
-                        detail: "Pick a starting price and model — you can change it later.",
-                        phase: .foundation, who: .you, dept: "fin"),
         ]
     }
 }

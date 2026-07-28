@@ -31,10 +31,25 @@ enum MockChat {
     private static func route(_ req: CompanyChatRequest) -> (text: String, action: ChatDoneAction) {
         let msg = req.userMessage.lowercased()
 
-        // run → produce → approve (the core loop). Needs a runnable task. Pick the
-        // runnable whose TITLE shares a 4+ char word with the message (so "run
-        // privacy" / "run faq" / "run outreach" each hit that department's task);
-        // fall back to the first runnable for a bare "run".
+        // summarize → a grounded read of where the project stands (guided flow start).
+        if msg.contains("summar") {
+            return ("""
+            Here\u{2019}s where Codepet stands. You\u{2019}re **building** \u{2014} the product exists, and the job \
+            now is getting it in front of real users. Your foundation is mostly in place; what\u{2019}s \
+            missing is the launch surface (landing, waitlist) and the go-to-market basics (pricing, \
+            outreach).
+
+            **The one thing that matters this week:** one real signal from one real user \u{2014} \
+            everything on your roadmap should serve that.
+
+            Ask me **\u{201C}What should I focus on now?\u{201D}** and I\u{2019}ll point you at the single next move.
+            """, ChatDoneAction())
+        }
+
+        // run → produce → approve (one task at a time). Pick the runnable whose TITLE
+        // shares a 4+ char word with the message (so "run privacy"/"run faq" hit that
+        // department's task); a bare "run it" falls back to the first (the next move).
+        // The reply previews the NEXT step so the guided flow keeps moving.
         if msg.contains("run") || msg.contains("draft") || msg.contains("produce") {
             let picked = req.runnable.first { r in
                 r.title.lowercased().split(whereSeparator: { !$0.isLetter }).contains { w in
@@ -42,10 +57,33 @@ enum MockChat {
                 }
             } ?? req.runnable.first
             if let task = picked {
-                return ("On it — drafting \u{201C}\(task.title)\u{201D} for you now\u{2026}",
+                let after = req.runnable.first { $0.id != task.id }
+                let nextLine = after.map {
+                    "\n\nOnce you approve this, your next move is **\($0.title)** (\(deptName(forRunnableId: $0.id))) \u{2014} ask \u{201C}what\u{2019}s next?\u{201D}"
+                } ?? "\n\nThat\u{2019}s your last open move \u{2014} nice work."
+                return ("On it \u{2014} drafting \u{201C}\(task.title)\u{201D} for you now\u{2026}\(nextLine)",
                         ChatDoneAction(runTaskId: task.id))
             }
             return ("You don\u{2019}t have a task I can run right now — everything\u{2019}s either done or waiting on you.",
+                    ChatDoneAction())
+        }
+
+        // focus / what's next → suggest ONE specific next task in its department, with
+        // a why + an offer to run it. The core of the guided, one-at-a-time flow.
+        if msg.contains("focus") || msg.contains("what should i") || msg.contains("next")
+            || msg.contains("guide me") || msg.contains("where do i start") {
+            if let next = req.runnable.first {
+                let dept = deptName(forRunnableId: next.id)
+                let after = req.runnable.dropFirst().first
+                let afterLine = after.map { "\n\nAfter that, the next step will be **\($0.title)**." } ?? ""
+                return ("""
+                Focus on one thing: **\(next.title)** \u{2014} that\u{2019}s a **\(dept)** move, and it\u{2019}s the \
+                highest-leverage next step on your roadmap right now.
+
+                Say **\u{201C}run it\u{201D}** and I\u{2019}ll draft it with you.\(afterLine)
+                """, ChatDoneAction())
+            }
+            return ("You\u{2019}re all caught up \u{2014} nothing I can run right now. Everything\u{2019}s either done or waiting on you.",
                     ChatDoneAction())
         }
 
@@ -105,6 +143,14 @@ enum MockChat {
 
         Want me to draft the positioning line or the outreach message to get those calls booked?
         """, ChatDoneAction())
+    }
+
+    /// Department display name for a runnable task id (mock roadmap lookup) — used
+    /// by the guided flow to name the department a suggested task belongs to.
+    private static func deptName(forRunnableId id: String) -> String {
+        guard let key = roadmap().first(where: { $0.id == id })?.dept,
+              let name = DepartmentCatalog.find(key)?.name else { return "your team" }
+        return name
     }
 
     /// Non-streaming counterpart of `stream`.

@@ -156,7 +156,9 @@ enum MockChat {
     /// Non-streaming counterpart of `stream`.
     static func reply(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         try? await Task.sleep(nanoseconds: 300_000_000)
-        let (text, action) = route(req)
+        let (raw, action) = route(req)
+        // Chat bubbles render plain text (not markdown), so drop bold markers.
+        let text = raw.replacingOccurrences(of: "**", with: "")
         return CompanyChatReply(text: text, runTaskId: action.runTaskId, nav: action.nav,
                                 setup: action.setup, remember: action.remember)
     }
@@ -165,7 +167,9 @@ enum MockChat {
     /// frame carrying the routed action — mirroring the real CF's SSE shape so
     /// the store's streaming path is exercised end-to-end.
     static func stream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
-        let (full, action) = route(req)
+        let (rawFull, action) = route(req)
+        // Chat bubbles render plain text (not markdown), so drop bold markers.
+        let full = rawFull.replacingOccurrences(of: "**", with: "")
         return AsyncThrowingStream { continuation in
             let task = Task.detached {
                 try? await Task.sleep(nanoseconds: 500_000_000)  // "Working on it…" beat

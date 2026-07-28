@@ -117,5 +117,6 @@ struct ChatEmptyState<Composer: View>: View {
     }
     .frame(width: 900, height: 700)
     .background(Color.black)
+    .environmentObject(CompanyStore())
 }
 #endif

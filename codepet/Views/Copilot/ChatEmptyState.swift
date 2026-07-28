@@ -12,6 +12,8 @@ struct ChatEmptyState<Composer: View>: View {
     let state: ChatLandingState
     let onOpenRoadmap: () -> Void
     let onStarter: (String) -> Void
+    /// Matches the active chat's column width so the composer doesn't jump on first send.
+    var columnWidth: CGFloat = 760
     @ViewBuilder var composer: Composer
 
     @Environment(\.uiLanguage) private var lang
@@ -24,7 +26,7 @@ struct ChatEmptyState<Composer: View>: View {
                 .padding(.horizontal, 24)
 
             composer
-                .frame(maxWidth: 600)
+                .frame(maxWidth: columnWidth)
 
             cards
         }
@@ -76,7 +78,7 @@ struct ChatEmptyState<Composer: View>: View {
                 }
             }
         }
-        .frame(maxWidth: 600)
+        .frame(maxWidth: columnWidth)
     }
 
     private var starters: [String] {

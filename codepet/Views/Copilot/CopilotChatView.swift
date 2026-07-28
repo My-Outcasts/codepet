@@ -150,7 +150,8 @@ struct CopilotChatView: View {
                     ChatEmptyState(
                         state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
                         onOpenRoadmap: { companyStore.selectedDeptKey = nil; companyStore.select(.roadmap) },
-                        onStarter: { companyStore.chatDraft = $0; inputFocused = true }
+                        onStarter: { companyStore.chatDraft = $0; inputFocused = true },
+                        columnWidth: chatColumnWidth
                     ) {
                         composerView
                     }

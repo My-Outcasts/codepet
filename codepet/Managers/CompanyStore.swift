@@ -41,6 +41,15 @@ final class CompanyStore: ObservableObject {
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
     @Published private(set) var runningTaskIds: Set<String> = []
+    /// Live parallel department-agent runs (the chat fan-out). Rendered as one
+    /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
+    /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
+    @Published var activeAgentRuns: [AgentRun] = []
+    /// True while a fan-out is in flight — serializes it against a normal chat turn
+    /// and disables the composer (same busy model as a single run).
+    @Published private(set) var isFanningOut: Bool = false
+    /// Max concurrent department agents per fan-out (bounds credit spend + latency).
+    static let maxFanOut = 3
     @Published private(set) var runError: String?
     @Published private(set) var isGeneratingRoadmap = false
     /// The Company view's open department, if any — PROMOTED from AppShellView's
@@ -773,6 +782,96 @@ final class CompanyStore: ObservableObject {
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
             return false
+        }
+    }
+
+    /// Fan out the next actionable task in up to `maxFanOut` departments as parallel
+    /// department-agent runs, shown live via `activeAgentRuns` (AgentsWorkingRow).
+    /// Each agent's draft lands in the transcript as it finishes. Account-guarded.
+    func fanOutNextMoves(language: AppLanguage) async {
+        guard !isFanningOut, !isCompanionTyping, !isStreaming else { return }
+        let plan = RoadmapEngine.nextMoves(company.tasks, limit: Self.maxFanOut)
+        guard !plan.isEmpty else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Bạn đang không có việc nào mình chạy được ngay — lộ trình đã gọn rồi."
+                : "You're all caught up — no open tasks I can run right now."))
+            flushActiveThread()
+            return
+        }
+        let cid = companyId
+        isFanningOut = true
+
+        let now = Date()
+        var seeded: [(run: AgentRun, task: RoadmapTask)] = []
+        for task in plan {
+            let deptName = DepartmentCatalog.find(task.dept)?.name ?? (task.dept ?? "")
+            let companionId = task.dept.flatMap { DepartmentCompanions.companionId(for: $0) }
+                ?? company.companionId
+            let specialist: (companionId: String, deptName: String)? =
+                deptName.isEmpty ? nil : (companionId, deptName)
+            let steps = Self.execSteps(task: task, specialist: specialist,
+                                       decisionCount: company.decisions.count, language: language)
+            let run = AgentRun(id: task.id, companionId: companionId, deptName: deptName,
+                               taskTitle: task.title, steps: steps, status: .working, startedAt: now)
+            seeded.append((run, task))
+        }
+        activeAgentRuns = seeded.map { $0.run }
+
+        await withTaskGroup(of: Void.self) { group in
+            for item in seeded {
+                group.addTask {
+                    await self.runFanOutAgent(runId: item.run.id, task: item.task,
+                                              cid: cid, language: language)
+                }
+            }
+        }
+
+        guard companyId == cid else { activeAgentRuns = []; isFanningOut = false; return }
+        try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)   // let final pills show
+        guard companyId == cid else { activeAgentRuns = []; isFanningOut = false; return }
+        activeAgentRuns = []
+        isFanningOut = false
+        flushActiveThread()
+    }
+
+    /// One agent's run inside a fan-out: reveal its steps client-side while its
+    /// `taskRunner` call runs, then flip its `AgentRun` to done/failed and append
+    /// its draft (or an honest failure bubble). Mutations are main-actor; the
+    /// `taskRunner` await is where parallelism happens. Account-guarded via `cid`.
+    private func runFanOutAgent(runId: String, task: RoadmapTask,
+                                cid: String?, language: AppLanguage) async {
+        let reveal = Task { [cid] in
+            let stepCount = activeAgentRuns.first(where: { $0.id == runId })?.steps.count ?? 0
+            for idx in 0..<max(0, stepCount - 1) {
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
+                guard companyId == cid,
+                      let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) else { return }
+                activeAgentRuns[ri].steps[idx].done = true
+            }
+        }
+        let result = await taskRunner(runRequest(for: task, language: language))
+        _ = await reveal.value
+        guard companyId == cid else { return }
+
+        if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+            for i in activeAgentRuns[ri].steps.indices { activeAgentRuns[ri].steps[i].done = true }
+        }
+        let companionId = activeAgentRuns.first(where: { $0.id == runId })?.companionId
+        let deptName = activeAgentRuns.first(where: { $0.id == runId })?.deptName
+        if let draft = buildDeliverable(from: result, task: task) {
+            if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+                activeAgentRuns[ri].status = .done
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
+                                               companionId: companionId, deptName: deptName))
+        } else {
+            if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+                activeAgentRuns[ri].status = .failed
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không hoàn thành được \u{201C}\(task.title)\u{201D}. Thử lại nhé."
+                : "Couldn't finish \u{201C}\(task.title)\u{201D} — try again.",
+                companionId: companionId, deptName: deptName))
         }
     }
 

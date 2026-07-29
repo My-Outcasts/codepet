@@ -592,10 +592,10 @@ final class CompanyStore: ObservableObject {
         let envSetup = Toolkit.catalog
             .filter { !company.enabledTools.contains($0.id) }
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
+        let companyContext = CompanyContext(company: company, query: text, focusDepartment: department)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text, focusDepartment: department),
+            context: companyContext.groundingString,
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
         // Department handoff: if a specialist leads this turn (chip focus or a

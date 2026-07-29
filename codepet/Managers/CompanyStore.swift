@@ -618,6 +618,7 @@ final class CompanyStore: ObservableObject {
         var streamedText = ""
         var streamThrew = false
         var receivedDone = false
+        var pendingWalkthrough: String?
         do {
             for try await event in chatStreamer(req) {
                 // Checked before touching state on every event: a switch mid-stream
@@ -637,7 +638,7 @@ final class CompanyStore: ObservableObject {
                     // place run_task_id ran, back when streaming usually
                     // failed pre-deploy).
                     receivedDone = true
-                    await handleDoneAction(action, cid: cid, language: language)
+                    pendingWalkthrough = await handleDoneAction(action, cid: cid, language: language)
                     guard companyId == cid else { return }
                 }
             }
@@ -665,8 +666,9 @@ final class CompanyStore: ObservableObject {
                 chatMessages[i].text = reply?.text ?? offline
             }
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
-                                         setup: reply?.setup, remember: reply?.remember ?? [])
-            await handleDoneAction(action, cid: cid, language: language)
+                                         setup: reply?.setup, remember: reply?.remember ?? [],
+                                         rePlan: reply?.rePlan ?? false, walkthrough: reply?.walkthrough)
+            pendingWalkthrough = await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
         } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // A `.done` was received but byte sent zero chat text (a
@@ -686,6 +688,15 @@ final class CompanyStore: ObservableObject {
         // where hydrate() already reset chatMessages/threads for the new account —
         // nothing stale to flush there.
         flushActiveThread()
+
+        // Deferred `walkthrough` verb: now that this send has finished
+        // (isStreaming == false), start the guided turn — its own send clears the
+        // busy guard that would have blocked it mid-stream. Resolved against
+        // current tasks; a no-op if the task is gone.
+        if let wtId = pendingWalkthrough,
+           let task = company.tasks.first(where: { $0.id == wtId }) {
+            await walkThroughTask(task, language: language)
+        }
     }
 
     /// If byte chose to run a runnable task, produce a draft deliverable inline —
@@ -890,14 +901,26 @@ final class CompanyStore: ObservableObject {
     /// anything; `remember` is orthogonal and always runs alongside. Each step
     /// re-checks `companyId == cid` (via its own handler) so an account switch
     /// mid-await stops the rest from landing in a different account's chat.
-    private func handleDoneAction(_ action: ChatDoneAction, cid: String?, language: AppLanguage) async {
+    /// Applies every reply verb inline EXCEPT `walkthrough`, and returns the
+    /// walkthrough task id (or nil) for the caller to run once this send finishes:
+    /// a guided turn starts a NEW chat send, which the in-flight send's
+    /// `isStreaming` guard would otherwise block. Returns nil on an account switch
+    /// or an unknown/stale walkthrough task id.
+    private func handleDoneAction(_ action: ChatDoneAction, cid: String?, language: AppLanguage) async -> String? {
         await handleRunTaskId(action.runTaskId, cid: cid, language: language)
-        guard companyId == cid else { return }
+        guard companyId == cid else { return nil }
         await handleNav(action.nav, cid: cid)
-        guard companyId == cid else { return }
+        guard companyId == cid else { return nil }
         await handleSetup(action.setup, cid: cid)
-        guard companyId == cid else { return }
+        guard companyId == cid else { return nil }
         await handleRemember(action.remember, cid: cid)
+        guard companyId == cid else { return nil }
+        await handleRePlan(action.rePlan, cid: cid, language: language)
+        guard companyId == cid else { return nil }
+        if let wt = action.walkthrough, company.tasks.contains(where: { $0.id == wt.taskId }) {
+            return wt.taskId
+        }
+        return nil
     }
 
     /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which
@@ -928,6 +951,13 @@ final class CompanyStore: ObservableObject {
         for fact in facts {
             chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
         }
+    }
+
+    /// `re_plan`: regenerate the roadmap for the current brief/stage — the same
+    /// effect as the manual "Re-plan for my stage" action. Guarded by cid.
+    private func handleRePlan(_ rePlan: Bool, cid: String?, language: AppLanguage) async {
+        guard rePlan, companyId == cid else { return }
+        await generateRoadmap(language: language)
     }
 
     /// Resolve + apply a tapped nav chip — mirrors `AppView.from(navDestination:)`.

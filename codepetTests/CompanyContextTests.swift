@@ -69,6 +69,15 @@ final class CompanyContextTests: XCTestCase {
                        "run-task grounding must stay lean — no library prior-work block")
     }
 
+    func test_projectSlice_fromLink_stillNeverLeaksIntoGroundingString() {
+        let company = fixtureCompany()
+        let slice = CompanyContext.ProjectSlice(
+            path: "/Users/mona/secret", isGitRepo: true, hasClaudeMd: true, recentChangeSummary: nil)
+        let ctx = CompanyContext(company: company, query: "x", project: slice)
+        XCTAssertFalse(ctx.groundingString.contains("/Users/mona/secret"))
+        XCTAssertEqual(ctx.projectSummary?.contains("/Users/mona/secret"), true)
+    }
+
     func test_project_neverLeaksIntoGroundingString() {
         let company = fixtureCompany()
         let secretPath = "/Users/mona/secret-repo"

@@ -41,6 +41,10 @@ final class CompanyStore: ObservableObject {
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
     @Published private(set) var runningTaskIds: Set<String> = []
+
+    /// The project folder the founder linked for the coding agent (Part 2). One
+    /// active at a time; client-only (its `slice` never enters the cloud grounding).
+    @Published private(set) var activeProjectLink: ProjectLink?
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
@@ -343,6 +347,27 @@ final class CompanyStore: ObservableObject {
     /// fetch discards. An empty result is "no change" (keeps existing tasks).
     /// Language defaults to `.en` (the onboarding scaffold path is English-only); the
     /// Overview board passes the live UI language.
+    /// Link a project folder for the coding agent: probe it, set it active, persist
+    /// a security-scoped bookmark (survives relaunch; app is non-sandboxed), and —
+    /// when `bootstrapClaudeMd` and the folder has no CLAUDE.md — write a seed from
+    /// the brief + decisions (never clobbers an existing CLAUDE.md), then re-probe.
+    @discardableResult
+    func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
+        var link = ProjectProbe.probe(path: path)
+        if bootstrapClaudeMd && !link.hasClaudeMd {
+            let seed = ClaudeMdBootstrap.compose(brief: company.brief, decisions: company.decisions)
+            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
+            link = ProjectProbe.probe(path: path)   // re-probe so hasClaudeMd reflects the write
+        }
+        // Persist a security-scoped bookmark so access survives relaunch (best-effort).
+        if let data = try? URL(fileURLWithPath: path)
+            .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+            UserDefaults.standard.set(data, forKey: "cp_active_project_bookmark")
+        }
+        activeProjectLink = link
+        return link
+    }
+
     func generateRoadmap(language: AppLanguage = .en) async {
         let token = hydrationToken
         isGeneratingRoadmap = true
@@ -592,7 +617,8 @@ final class CompanyStore: ObservableObject {
         let envSetup = Toolkit.catalog
             .filter { !company.enabledTools.contains($0.id) }
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
-        let companyContext = CompanyContext(company: company, query: text, focusDepartment: department)
+        let companyContext = CompanyContext(company: company, query: text, focusDepartment: department,
+                                            project: activeProjectLink?.slice)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: companyContext.groundingString,

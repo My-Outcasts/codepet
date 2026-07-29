@@ -30,6 +30,15 @@ final class CompanyContextTests: XCTestCase {
             brief: company.brief, tasks: company.tasks, decisions: company.decisions,
             library: company.library, query: "landing page copy", focusDepartment: nil)
         XCTAssertEqual(ctx.groundingString, expected)
+
+        // Content sanity: parity against compose would still hold if BOTH sides
+        // were empty, so pin that the enriched fixture actually renders real
+        // slices — roadmap facts and the prior-work (library) block.
+        XCTAssertFalse(ctx.groundingString.isEmpty)
+        XCTAssertTrue(ctx.groundingString.contains("Roadmap progress"),
+                      "roadmap slice should render into the grounding string")
+        XCTAssertTrue(ctx.groundingString.contains("Landing page draft"),
+                      "library/prior-work slice should render into the grounding string")
     }
 
     func test_groundingString_matchesCompose_whenNoQuery() {

@@ -173,11 +173,14 @@ final class ClaudeCodeRunner: ObservableObject {
                                          encoding: .utf8) ?? ""
                         self?.state = .failed(reason: Self.friendlyError(err, exitCode: code))
                     } else {
-                        self?.state = .finished(exitCode: code)
-                        // All touchedFiles appends are enqueued on main ahead of
-                        // this block (the serial parse queue feeds them), so the
-                        // list is complete now. Build diffs off-main, then publish.
-                        self?.computeDiffs()
+                        // Compute diffs FIRST, then publish `fileDiffs` and flip to
+                        // `.finished` together — so a consumer observing `.finished`
+                        // (e.g. the coding-agent adapter) sees the diffs already
+                        // present, not an empty list from a mid-computation read.
+                        // All touchedFiles appends are enqueued on main ahead of this
+                        // block (the serial parse queue feeds them), so the list is
+                        // complete now.
+                        self?.computeDiffs(exitCode: code)
                     }
                 }
             }
@@ -322,7 +325,7 @@ final class ClaudeCodeRunner: ObservableObject {
     /// Diff each touched file's pre-run snapshot against its current contents and
     /// publish the result. Reads `touchedFiles` on main (it owns that array),
     /// then does file IO + diffing off-main.
-    private func computeDiffs() {
+    private func computeDiffs(exitCode: Int32) {
         let touched = touchedFiles
         let snapshot = preRunSnapshot
         let dir = projectDirResolved
@@ -343,7 +346,10 @@ final class ClaudeCodeRunner: ObservableObject {
                 guard !lines.isEmpty else { continue }
                 diffs.append(FileDiff(path: key, isNewFile: before == nil, lines: lines))
             }
-            DispatchQueue.main.async { self?.fileDiffs = diffs }
+            DispatchQueue.main.async {
+                self?.fileDiffs = diffs
+                self?.state = .finished(exitCode: exitCode)   // finish AFTER diffs are published
+            }
         }
     }
 

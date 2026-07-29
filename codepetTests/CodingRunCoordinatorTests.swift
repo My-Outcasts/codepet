@@ -84,4 +84,37 @@ final class CodingRunCoordinatorTests: XCTestCase {
         // A failed run must leave no dangling codepet branch.
         XCTAssertFalse(GitRunner.run(["branch"], in: repo).stdout.contains("codepet/"))
     }
+
+    func test_secondPropose_tearsDownPriorUnresolvedSession() async {
+        let repo = gitRepo()
+        let link = ProjectLink(path: repo, isGitRepo: true, hasClaudeMd: true)
+        let c = CodingRunCoordinator(runner: FakeRunner(edits: ["app.txt": "v2"]))
+        c.propose(ask: "one", plannedFiles: 1, needsBash: false, link: link)
+        await c.execute()   // on branch codepet/one, .reviewing (unresolved)
+        XCTAssertTrue(GitRunner.run(["branch"], in: repo).stdout.contains("codepet/one"))
+        // A new proposal supersedes the un-resolved run → its branch is cleaned up.
+        c.propose(ask: "two", plannedFiles: 1, needsBash: false, link: link)
+        XCTAssertFalse(GitRunner.run(["branch"], in: repo).stdout.contains("codepet/one"),
+                       "the un-resolved prior run's branch must be torn down")
+    }
+
+    func test_approve_failedCommit_goesToFailedNotCommitted() async {
+        let repo = gitRepo()
+        let link = ProjectLink(path: repo, isGitRepo: true, hasClaudeMd: true)
+        let c = CodingRunCoordinator(runner: FakeRunner(edits: ["app.txt": "v2"]))
+        c.propose(ask: "edit", plannedFiles: 1, needsBash: false, link: link)
+        await c.execute()
+        // Approve a path that wasn't changed → nothing staged → git commit fails.
+        await c.approve(acceptedPaths: ["ghost.txt"])
+        XCTAssertEqual(c.run?.phase, .failed("Couldn't commit the changes."),
+                       "a failed commit must surface as .failed, not a false .committed")
+    }
+
+    func test_approve_beforeReviewing_isIgnored() async {
+        let link = ProjectLink(path: "/p", isGitRepo: true, hasClaudeMd: true)
+        let c = CodingRunCoordinator(runner: FakeRunner())
+        c.propose(ask: "x", plannedFiles: 1, needsBash: false, link: link)   // .readyToRun
+        await c.approve(acceptedPaths: [])                                    // wrong phase
+        XCTAssertEqual(c.run?.phase, .readyToRun, "approve before .reviewing must be a no-op")
+    }
 }

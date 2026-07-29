@@ -20,6 +20,11 @@ final class CodingRunCoordinator: ObservableObject {
     /// Stage a run: no linked project → `.noProject`; else pick the backend and
     /// decide whether the plan-preview is needed. Does not execute.
     func propose(ask: String, plannedFiles: Int, needsBash: Bool, link: ProjectLink?) {
+        // Don't clobber a run that's actively executing.
+        if run?.phase == .running { return }
+        // A new proposal supersedes any un-resolved prior run — tear down its live
+        // session so no branch/shadow is orphaned (no-op when there's none).
+        teardownSession()
         guard let link else {
             run = EditCodeRun(ask: ask, backend: .shadow, phase: .noProject)
             proposedLink = nil
@@ -36,7 +41,8 @@ final class CodingRunCoordinator: ObservableObject {
     /// `.reviewing` (diffs) or `.failed`. A failure tears the session down so no
     /// dangling branch / shadow remains.
     func execute() async {
-        guard var current = run, let link = proposedLink else { return }
+        guard var current = run, let link = proposedLink,
+              current.phase == .readyToRun || current.phase == .previewing else { return }
         current.phase = .running
         run = current
 
@@ -63,7 +69,7 @@ final class CodingRunCoordinator: ObservableObject {
         let outcome = await runner.run(prompt: current.ask, workingDir: workingDir)
         guard var after = run else { return }
         if let failure = outcome.failure {
-            teardownOnFailure()
+            teardownSession()
             after.phase = .failed(failure)
             run = after
             return
@@ -77,16 +83,29 @@ final class CodingRunCoordinator: ObservableObject {
     }
 
     func approve(acceptedPaths: Set<String>) async {
-        guard var current = run else { return }
+        guard var current = run, current.phase == .reviewing else { return }
         switch current.backend {
         case .git:
-            if let s = gitSession {
-                _ = CodeCommitService.commitGit(s, files: Array(acceptedPaths), message: "codepet: \(current.ask)")
+            guard let s = gitSession else {
+                current.phase = .failed("No active session to commit."); run = current; return
             }
+            let result = CodeCommitService.commitGit(s, files: Array(acceptedPaths),
+                                                     message: "codepet: \(current.ask)")
+            guard result.committed else {
+                CodeCommitService.abortGit(s)   // restore the founder's stash / clean up
+                current.phase = .failed("Couldn't commit the changes.")
+                run = current; clearSessions(); return
+            }
+            // NOTE: result.stashRestored == false → the founder's overlapping work is
+            // retained in `git stash` for recovery; 2C-2 surfaces that.
         case .shadow:
-            if let s = shadowSession {
-                _ = CodeCommitService.applyShadow(s, acceptedRelPaths: Array(acceptedPaths))
-                CodeCommitService.discardShadow(s)
+            guard let s = shadowSession else {
+                current.phase = .failed("No active session to apply."); run = current; return
+            }
+            let ok = CodeCommitService.applyShadow(s, acceptedRelPaths: Array(acceptedPaths))
+            CodeCommitService.discardShadow(s)
+            guard ok else {
+                current.phase = .failed("Couldn't apply all the changes."); run = current; clearSessions(); return
             }
         }
         current.phase = .committed
@@ -95,7 +114,7 @@ final class CodingRunCoordinator: ObservableObject {
     }
 
     func reject() async {
-        guard var current = run else { return }
+        guard var current = run, current.phase == .reviewing else { return }
         switch current.backend {
         case .git: if let s = gitSession { CodeCommitService.abortGit(s) }
         case .shadow: if let s = shadowSession { CodeCommitService.discardShadow(s) }
@@ -107,7 +126,9 @@ final class CodingRunCoordinator: ObservableObject {
 
     // MARK: - Helpers
 
-    private func teardownOnFailure() {
+    /// Abort/discard any live backend session (no-op when there's none). Used on a
+    /// run failure and when a new `propose` supersedes an un-resolved run.
+    private func teardownSession() {
         if let s = gitSession { CodeCommitService.abortGit(s) }
         if let s = shadowSession { CodeCommitService.discardShadow(s) }
         clearSessions()
@@ -122,7 +143,9 @@ final class CodingRunCoordinator: ObservableObject {
     /// Absolute diff path → path relative to the commit root (project root for git,
     /// shadow dir for shadow — both map to the same relative layout).
     private func relPath(_ abs: String, projectRoot: String, shadow: String?) -> String {
-        let root = shadow ?? projectRoot
+        // Standardize the root so a tilde/non-canonical link path still prefix-matches
+        // the runner's standardized absolute diff paths (else nested paths flatten).
+        let root = URL(fileURLWithPath: shadow ?? projectRoot).standardizedFileURL.path
         if abs.hasPrefix(root + "/") { return String(abs.dropFirst(root.count + 1)) }
         return (abs as NSString).lastPathComponent
     }

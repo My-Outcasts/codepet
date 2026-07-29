@@ -20,22 +20,31 @@ protocol CodeRunning {
 /// failure reason). Build-verified glue — not unit-tested (needs the CLI).
 @MainActor
 final class ClaudeCodeRunAdapter: CodeRunning {
-    private let runner = ClaudeCodeRunner()
-    private var cancellable: AnyCancellable?
 
     func run(prompt: String, workingDir: String) async -> CodeRunOutcome {
-        await withCheckedContinuation { (cont: CheckedContinuation<CodeRunOutcome, Never>) in
+        // A FRESH runner per call: reusing one instance would replay its last
+        // `.finished` on the new subscription (resuming instantly with stale diffs
+        // and orphaning the new subprocess). The local `runner` is retained by the
+        // sink closure (held by `cancellable`, captured by the continuation) until
+        // the run resolves, then released. A fresh runner starts `.idle`, so the
+        // replayed initial value is ignored by the switch below.
+        let runner = ClaudeCodeRunner()
+        var cancellable: AnyCancellable?
+        return await withCheckedContinuation { (cont: CheckedContinuation<CodeRunOutcome, Never>) in
             var resumed = false
-            let finish: (CodeRunOutcome) -> Void = { [weak self] outcome in
+            let finish: (CodeRunOutcome) -> Void = { outcome in
                 guard !resumed else { return }
                 resumed = true
-                self?.cancellable = nil
+                cancellable?.cancel()
+                cancellable = nil
                 cont.resume(returning: outcome)
             }
-            cancellable = runner.$state.sink { [weak runner] state in
+            cancellable = runner.$state.sink { state in
                 switch state {
                 case .finished:
-                    finish(CodeRunOutcome(diffs: runner?.fileDiffs ?? [], failure: nil))
+                    // Diffs are guaranteed published before `.finished` (see
+                    // ClaudeCodeRunner.computeDiffs), so this read is complete.
+                    finish(CodeRunOutcome(diffs: runner.fileDiffs, failure: nil))
                 case .failed(let reason):
                     finish(CodeRunOutcome(diffs: [], failure: reason))
                 default:

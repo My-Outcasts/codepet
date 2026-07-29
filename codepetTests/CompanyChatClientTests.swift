@@ -198,6 +198,26 @@ final class CompanyChatClientTests: XCTestCase {
         let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)
         XCTAssertNil(r.rePlan)
         XCTAssertNil(r.walkthrough)
+        XCTAssertNil(r.editCode)
+    }
+
+    func testResponseDecodesEditCode() throws {
+        let data = "{\"reply\":\"On it\",\"edit_code\":{\"ask\":\"fix signup\",\"planned_files\":2,\"needs_bash\":true}}".data(using: .utf8)!
+        let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)
+        XCTAssertEqual(r.editCode, EditCodeAction(ask: "fix signup", plannedFiles: 2, needsBash: true))
+    }
+
+    func testSendStreamDoneCarriesEditCode() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false,\"edit_code\":{\"ask\":\"x\",\"planned_files\":1,\"needs_bash\":false}}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(), session: mockedCompanyChatSession(), authTokenProvider: { "fake" }
+        ) { collected.append(ev) }
+        guard case let .done(_, _, action) = collected.last else { return XCTFail("expected .done") }
+        XCTAssertEqual(action.editCode, EditCodeAction(ask: "x", plannedFiles: 1, needsBash: false))
     }
 
     func testSendStreamDoneCarriesRePlanAndWalkthrough() async throws {

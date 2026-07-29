@@ -47,6 +47,20 @@ struct WalkthroughAction: Codable, Equatable {
     enum CodingKeys: String, CodingKey { case taskId = "task_id" }
 }
 
+/// A local coding-agent request from byte: the founder wants real code changed.
+/// Executed LOCALLY against the active linked project (never sent to the cloud);
+/// `plannedFiles`/`needsBash` are a scope estimate that drives the plan-preview gate.
+struct EditCodeAction: Codable, Equatable {
+    let ask: String
+    let plannedFiles: Int
+    let needsBash: Bool
+    enum CodingKeys: String, CodingKey {
+        case ask
+        case plannedFiles = "planned_files"
+        case needsBash = "needs_bash"
+    }
+}
+
 /// One durable fact byte decided to remember — auto-merged into
 /// `company.decisions` (no approval needed), then surfaced as a transient
 /// "Noted" chip.
@@ -105,6 +119,7 @@ struct CompanyChatResponse: Codable {
     let remember: [RememberedFact]?
     let rePlan: Bool?
     let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -114,6 +129,7 @@ struct CompanyChatResponse: Codable {
         case remember
         case rePlan = "re_plan"
         case walkthrough
+        case editCode = "edit_code"
     }
 }
 
@@ -128,10 +144,12 @@ struct CompanyChatReply: Equatable {
     let remember: [RememberedFact]
     let rePlan: Bool
     let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
          setup: SetupAction? = nil, remember: [RememberedFact] = [],
-         rePlan: Bool = false, walkthrough: WalkthroughAction? = nil) {
+         rePlan: Bool = false, walkthrough: WalkthroughAction? = nil,
+         editCode: EditCodeAction? = nil) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
@@ -139,6 +157,7 @@ struct CompanyChatReply: Equatable {
         self.remember = remember
         self.rePlan = rePlan
         self.walkthrough = walkthrough
+        self.editCode = editCode
     }
 }
 
@@ -154,15 +173,18 @@ struct ChatDoneAction: Equatable {
     let remember: [RememberedFact]
     let rePlan: Bool
     let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
-         remember: [RememberedFact] = [], rePlan: Bool = false, walkthrough: WalkthroughAction? = nil) {
+         remember: [RememberedFact] = [], rePlan: Bool = false, walkthrough: WalkthroughAction? = nil,
+         editCode: EditCodeAction? = nil) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
         self.rePlan = rePlan
         self.walkthrough = walkthrough
+        self.editCode = editCode
     }
 }
 
@@ -214,7 +236,8 @@ enum CompanyChatClient {
         guard !reply.isEmpty else { return nil }
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
                                  setup: decoded.setup, remember: decoded.remember ?? [],
-                                 rePlan: decoded.rePlan ?? false, walkthrough: decoded.walkthrough)
+                                 rePlan: decoded.rePlan ?? false, walkthrough: decoded.walkthrough,
+                                 editCode: decoded.editCode)
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -327,16 +350,18 @@ enum CompanyChatClient {
                 let remember: [RememberedFact]?
                 let rePlan: Bool?
                 let walkthrough: WalkthroughAction?
+                let editCode: EditCodeAction?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
-                    case rePlan = "re_plan"; case walkthrough
+                    case rePlan = "re_plan"; case walkthrough; case editCode = "edit_code"
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
                                              remember: d.remember ?? [],
-                                             rePlan: d.rePlan ?? false, walkthrough: d.walkthrough)
+                                             rePlan: d.rePlan ?? false, walkthrough: d.walkthrough,
+                                             editCode: d.editCode)
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             }
         case "error":

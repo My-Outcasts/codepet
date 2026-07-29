@@ -87,6 +87,18 @@ enum MockChat {
                     ChatDoneAction())
         }
 
+        // walkthrough → byte offers to guide the founder through a task (the
+        // deferred guided-turn verb). Trigger on the single token "walkthrough",
+        // NOT "walk me through": walkThroughTask's own composed message is
+        // "Walk me through how to do this myself: …", which contains "walk me
+        // through" but never "walkthrough" — so this branch can't match that
+        // nested send and loop.
+        if msg.contains("walkthrough") {
+            let taskId = req.runnable.first?.id ?? "t2"
+            return ("Happy to guide you through it step by step.",
+                    ChatDoneAction(walkthrough: WalkthroughAction(taskId: taskId)))
+        }
+
         // remember → auto-merged decision + "Noted" chip.
         if msg.contains("remember") || msg.contains("note that") {
             let fact = RememberedFact(topic: "Founder note",

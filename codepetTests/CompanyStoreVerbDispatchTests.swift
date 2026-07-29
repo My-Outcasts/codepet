@@ -65,4 +65,27 @@ final class CompanyStoreVerbDispatchTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.contains { $0.role == .me && $0.text.contains("Pick a name") },
                       "known walkthrough id should start the guided 'walk me through … Pick a name' turn")
     }
+
+    /// A reply carrying BOTH verbs: re_plan runs first (replaces tasks), then the
+    /// walkthrough id resolves against the POST-replan task set. Locks the deliberate
+    /// ordering in handleDoneAction (final-review item #3).
+    func testRePlanThenWalkthroughResolvesAgainstNewTasks() async {
+        var calls = 0
+        let fresh = [RoadmapTask(id: "n1", title: "Fresh task", detail: "", phase: .build, who: .you)]
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            calls += 1
+            if calls == 1 {
+                return self.doneStream(ChatDoneAction(rePlan: true, walkthrough: WalkthroughAction(taskId: "n1")))
+            }
+            return self.doneStream(ChatDoneAction())   // the guided turn's reply
+        }
+        let s = store(tasks: [RoadmapTask(id: "old", title: "Old task", detail: "", phase: .find, who: .you)],
+                      streamer: streamer,
+                      roadmapFetcher: { _, _ in fresh })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("re-plan then guide me", language: .en)
+        XCTAssertEqual(s.company.tasks.map(\.id), ["n1"], "re_plan runs first, replacing tasks")
+        XCTAssertTrue(s.chatMessages.contains { $0.role == .me && $0.text.contains("Fresh task") },
+                      "walkthrough resolves against the POST-replan task set and starts the guided turn")
+    }
 }

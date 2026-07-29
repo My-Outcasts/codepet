@@ -93,6 +93,11 @@ struct TasksView: View {
             else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
             else if st == .needsYou { Task { await companyStore.walkThroughTask(t, language: lang) } }
             else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }
+            // Same handoff rule as the roadmap: work-producing taps land in chat,
+            // where the run/walkthrough streams; approve + open stay in place.
+            if RoadmapDispatch.navigatesToChat(RoadmapDispatch.action(for: st)) {
+                companyStore.select(.chat)
+            }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {

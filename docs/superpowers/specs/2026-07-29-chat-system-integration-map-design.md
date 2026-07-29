@@ -360,10 +360,14 @@ of the node table: feeds a slice, exposes verbs, and obeys the one handoff rule.
    today. Promoting them into the companion's reply contract means the CF must be
    able to emit them — a CF change. In scope for the contract; sequencing is a plan
    question.
-3. **Where the `project` slice lives.** Project path + CLAUDE.md are local to the
-   user's machine; the cloud agents can't read the working tree. Does the `project`
-   slice stay client-only (only the local coding agent uses it), or does a redacted
-   summary travel to the cloud for the companion's awareness? (Ties into Part 2.)
+3. **Where the `project` slice lives. — RESOLVED (2026-07-29): client-only.** The
+   `project` slice (repo path, CLAUDE.md, working-tree diffs, branch state) stays on
+   the user's machine and is read **only by the local coding agent**. The user's
+   real code never travels to the cloud — not even a redacted summary. Implication:
+   the cloud companion is *not* code-aware; it can propose `edit_code` (and reason
+   from the `brief`/`decisions`/`library` slices), but only the local agent reads
+   and writes the actual source. This is a privacy/trust default, and it draws a
+   hard line for Part 2: everything code-touching is local.
 4. **One transcript or per-backend?** Cloud and local work share the chat transcript
    in this map. Confirm that's desired even when a long `edit_code` run streams
    dozens of tool-use lines (vs. collapsing into a single expandable exec-log card —

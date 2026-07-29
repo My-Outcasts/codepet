@@ -230,17 +230,19 @@ final class TeamChatModel: ObservableObject {
     private func run(_ ask: String) async {
         isRunning = true
         defer { isRunning = false }
-        let depts = TeamRoster.pick(for: ask)
+        let type = TeamRoster.detectType(ask)
+        let depts = TeamRoster.team(for: type)
 
         // 1) byte reads the ask + announces who it's pulling in
         await beat(typing: nil, 0.7)
         messages.append(TeamMsg(kind: .byte, text: TeamRoster.byteIntro(ask, depts, lang: lang)))
         await pause(0.35)
 
-        // 2) opening round — each department's first take (blind to each other)
+        // 2) opening round — each department's first take (blind to each other),
+        //    tailored to the detected project kind.
         for d in depts {
             await beat(typing: d, 0.9)
-            messages.append(TeamMsg(kind: .dept(d), text: TeamRoster.line(for: d.key, lang: lang)))
+            messages.append(TeamMsg(kind: .dept(d), text: TeamRoster.line(for: d.key, type: type, lang: lang)))
             await pause(0.3)
         }
 
@@ -274,26 +276,40 @@ final class TeamChatModel: ObservableObject {
 
 // MARK: - Routing + canned copy (the "simulation")
 
+/// Kinds of project the Team demo tailors its convened team + per-department briefs to.
+enum TeamProjectType { case web, app, content, launch, pricing, generic }
+
 enum TeamRoster {
     /// Keyword → department scoring. Picks the 2–4 most relevant of the 8 real
     /// departments; falls back to a sensible build trio when nothing matches.
-    static func pick(for ask: String) -> [Department] {
+    /// Infer the kind of project the founder is describing. Different kinds convene
+    /// different teams AND get different per-department briefs, so the demo reads as
+    /// tailored to the ask, not one canned script. Order matters — more specific first
+    /// (a "landing page for an app" is a web project, not an app project).
+    static func detectType(_ ask: String) -> TeamProjectType {
         let q = ask.lowercased()
-        var scored: [(String, Int)] = []
-        for (key, words) in keywords {
-            let score = words.reduce(0) { $0 + (q.contains($1) ? 1 : 0) }
-            if score > 0 { scored.append((key, score)) }
-        }
-        scored.sort { $0.1 > $1.1 }
-        var keys = scored.prefix(6).map { $0.0 }
-        // Always convene a broad-enough team: fill to at least 4 in a sensible order
-        // (product first, then go-to-market, then the supporting functions).
-        for k in ["eng", "design", "mkt", "sales", "ops", "fin", "support", "legal"] where !keys.contains(k) {
-            if keys.count >= 4 { break }
-            keys.append(k)
-        }
-        return keys.compactMap { DepartmentCatalog.find($0) }
+        func has(_ ws: [String]) -> Bool { ws.contains { q.contains($0) } }
+        if has(["landing", "website", "web", "site", "trang web", "trang đích", "homepage", "page", "trang"]) { return .web }
+        if has(["giá", "price", "pricing", "gói", "subscription", "monetiz", "doanh thu", "paywall", "pro"]) { return .pricing }
+        if has(["ra mắt", "launch", "product hunt", "go-to-market", "gtm", "công bố", "announce"]) { return .launch }
+        if has(["nội dung", "content", "bài viết", "post", "social", "blog", "chiến dịch", "email marketing"]) { return .content }
+        if has(["app", "mobile", "tính năng", "feature", "mvp", "prototype", "ứng dụng", "sản phẩm"]) { return .app }
+        return .generic
     }
+
+    /// The departments convened for a given project kind (ordered by who leads).
+    static func team(for type: TeamProjectType) -> [Department] {
+        (teams[type] ?? teams[.generic] ?? []).compactMap { DepartmentCatalog.find($0) }
+    }
+
+    private static let teams: [TeamProjectType: [String]] = [
+        .web:     ["design", "eng", "mkt", "sales", "legal"],
+        .app:     ["eng", "design", "ops", "support", "mkt"],
+        .content: ["mkt", "design", "sales", "ops"],
+        .launch:  ["mkt", "ops", "sales", "support", "eng"],
+        .pricing: ["fin", "mkt", "sales", "ops"],
+        .generic: ["eng", "design", "mkt", "sales", "ops", "fin"],
+    ]
 
     static func byteIntro(_ ask: String, _ depts: [Department], lang: AppLanguage) -> String {
         let names = joinNames(depts.map { $0.name }, lang: lang)
@@ -312,8 +328,11 @@ enum TeamRoster {
             : "After they talked it through, here’s the order I’d suggest for “\(ask)”:\n\(steps)\nStart with step 1 — want me to take it?"
     }
 
-    static func line(for key: String, lang: AppLanguage) -> String {
-        (lang == .vi ? linesVI[key] : linesEN[key]) ?? (lang == .vi ? "Mình sẽ lo phần này." : "I’ll take this part.")
+    /// A department's opening take. A type-specific variant wins when present; otherwise
+    /// the generic deep brief is the floor (so every dept still says something substantive).
+    static func line(for key: String, type: TeamProjectType, lang: AppLanguage) -> String {
+        if let v = (lang == .vi ? variantsVI : variantsEN)[type]?[key] { return v }
+        return (lang == .vi ? linesVI[key] : linesEN[key]) ?? (lang == .vi ? "Mình sẽ lo phần này." : "I’ll take this part.")
     }
 
     /// A department reacting to another department's point — the cross-talk that
@@ -335,18 +354,6 @@ enum TeamRoster {
         return "\(head) \(lang == .vi ? "và" : "and") \(names.last!)"
     }
 
-    // Keyword table (VI + EN), lowercased substring match.
-    private static let keywords: [String: [String]] = [
-        "eng":     ["app", "tính năng", "feature", "build", "xây", "làm", "code", "backend", "api", "kỹ thuật", "technical", "mvp", "prototype", "sản phẩm", "product"],
-        "design":  ["landing", "web", "trang", "site", "page", "ui", "ux", "thiết kế", "design", "giao diện", "onboard", "first-run", "màn hình", "screen", "logo", "brand"],
-        "mkt":     ["ra mắt", "launch", "product hunt", "marketing", "nội dung", "content", "post", "bài", "quảng cáo", "ads", "email", "social", "waitlist", "positioning", "story", "announce"],
-        "sales":   ["user", "khách", "customer", "bán", "sale", "tester", "mời", "invite", "dm", "outreach", "đầu tiên", "first user"],
-        "fin":     ["giá", "price", "pricing", "pro", "tiền", "money", "revenue", "doanh thu", "subscription", "gói", "cost", "chi phí", "runway", "budget"],
-        "ops":     ["beta", "quy trình", "process", "ops", "vận hành", "checklist", "pipeline", "tự động", "automation", "machinery"],
-        "support": ["support", "hỗ trợ", "help", "docs", "faq", "triage", "phản hồi", "feedback", "bug"],
-        "legal":   ["legal", "pháp lý", "privacy", "terms", "gdpr", "compliance", "chính sách", "policy", "license", "giấy phép"],
-    ]
-
     private static let linesVI: [String: String] = [
         "eng":     "Về kỹ thuật, mình chia thành 3 lát dựng dần thay vì làm hết một lượt:\n• Lát 1 — bản khung chạy được để trong tuần đã có cái bấm thử.\n• Lát 2 — nối dữ liệu thật + gắn đo lường xem người dùng có ở lại không.\n• Lát 3 — polish & tối ưu sau khi thấy tín hiệu.\nMình soạn code-change plan rõ (mục tiêu, cách làm, chỗ đụng tới) để bạn duyệt rồi đưa coding agent ship.\nSản phẩm: kế hoạch code-change + skeleton chạy được.",
         "design":  "Mình lo phần nhìn & cảm giác — mục tiêu là người mới “à, hiểu rồi” trong 10 giây:\n• Một thông điệp chính rõ phía trên, không để user phải đoán.\n• Bỏ hết bước thừa trước khi họ chạm được giá trị thật.\n• Một lời kêu gọi hành động (CTA) duy nhất, nổi bật.\nMình dựng flow bằng màn hình thật (wireframe có chú thích) để bạn quyết cái nào giữ.\nSản phẩm: bộ wireframe first-run + spec copy từng màn.",
@@ -367,6 +374,72 @@ enum TeamRoster {
         "support": "Every user question is a signal about what to fix — that’s mine:\n• A lean Help Center answering ~80% of the common questions up front.\n• A triage flow so nothing drops + it rolls up into a to-fix list.\n• A “feedback → prioritize → fix” loop so the product improves steadily.\nDeliverable: a first Help Center + a feedback triage flow.",
         "legal":   "I cover the legal minimum so shipping doesn’t become a liability:\n• A Privacy Policy + Terms tuned to your local-first posture.\n• A pass on public claims before launch, so nothing has to be pulled.\n• A check on data/cookie collection if there’s a form.\nI draft from templates; have a lawyer glance before launch.\nDeliverable: draft Privacy + Terms + a compliance checklist.",
     ]
+
+    // Type-specific briefs — the characteristic departments for each project kind speak
+    // to THAT kind; departments without a variant fall back to the generic brief above.
+    private static let variantsVI: [TeamProjectType: [String: String]] = [
+        .web: [
+            "design": "Với landing page, mình lo phần trên màn đầu tiên (above-the-fold):\n• Hero: 1 headline + 1 subhead nói rõ “cho ai, giải quyết gì” trong 5 giây.\n• Một CTA duy nhất, lặp lại ở cuối trang.\n• Responsive tốt trên điện thoại — phần lớn click đến từ mobile.\nSản phẩm: wireframe landing (hero → lợi ích → social proof → CTA) + copy từng khối.",
+            "eng": "Về kỹ thuật cho landing, ưu tiên nhẹ & nhanh:\n• Trang tĩnh tải <1s, SEO cơ bản, deploy một lệnh.\n• Nối form thu email vào nơi lưu thật + email xác nhận.\n• Gắn analytics đo scroll depth & tỉ lệ điền form.\nSản phẩm: landing deploy được + form + analytics.",
+            "mkt": "Mình lo chữ trên trang — thứ quyết định ở lại hay thoát:\n• Headline bám nỗi đau, không kể tính năng.\n• Social proof (waitlist/con số/testimonial) ngay dưới hero.\n• Copy CTA rõ giá trị (“Nhận sớm” hơn “Đăng ký”).\nSản phẩm: bộ copy landing + 2 biến thể headline để A/B.",
+            "sales": "Landing chỉ đáng giá nếu chuyển được khách:\n• Một hành động chính: lấy email, không phân tán.\n• Chuỗi email tự động chào + nuôi người vừa đăng ký.\n• Theo dõi ai click để follow-up tay nhóm “nóng”.\nSản phẩm: luồng thu email + chuỗi welcome 3 bước.",
+            "legal": "Trang public có form → cần phủ pháp lý cơ bản:\n• Link Privacy Policy + Terms ở footer.\n• Thông báo cookie/thu thập email đúng chuẩn.\n• Rà claim trên trang kẻo hứa quá.\nSản phẩm: nháp Privacy/Terms + dòng consent cho form.",
+        ],
+        .app: [
+            "eng": "Với app, mình dựng lõi trước, phụ sau:\n• Xác định 1 core loop (việc user lặp lại) và chỉ build đúng nó.\n• Mô hình dữ liệu + auth tối thiểu để chạy thật.\n• Gắn đo retention D1/D7 ngay từ đầu.\nSản phẩm: MVP core loop + bảng đo retention.",
+            "design": "Với app, ăn thua ở first-run:\n• Onboarding ngắn, cho user chạm giá trị trước khi bắt đăng ký.\n• Core loop rõ để lần 2 họ tự biết làm gì.\n• Empty state có hướng dẫn, không để màn trắng.\nSản phẩm: flow onboarding + spec các màn lõi.",
+            "ops": "Để app chạy đều, cần đường ống phát hành:\n• Quy trình build → test → release lặp lại được.\n• Kênh thu bug/feedback từ tester gọn.\n• Nhịp review hằng tuần: học gì, sửa gì.\nSản phẩm: release checklist + bảng theo dõi feedback.",
+            "support": "App có người dùng là có câu hỏi:\n• FAQ cho ~80% thắc mắc hay gặp, ngay trong app.\n• Kênh báo lỗi một chạm, gắn thẳng vào backlog.\n• Phân loại phản hồi “sửa ngay / để sau”.\nSản phẩm: in-app help + luồng triage.",
+        ],
+        .content: [
+            "mkt": "Với nội dung, mình lo hệ thống sản xuất đều:\n• Chọn 2–3 định dạng hợp bạn, không ôm hết kênh.\n• Kho hook/chủ đề để không bí ý mỗi tuần.\n• Lịch 2 tuần + nhịp đăng thực tế.\nSản phẩm: content calendar 2 tuần + kho 20 hook.",
+            "design": "Nội dung cần bộ nhận diện nhất quán:\n• Template post/thumbnail để làm nhanh, nhìn “một nhà”.\n• Quy tắc màu/chữ đơn giản ai cũng theo được.\nSản phẩm: bộ template + style guide 1 trang.",
+            "sales": "Nội dung phải dẫn tới hành động:\n• Mỗi bài một CTA rõ (đăng ký/DM/dùng thử).\n• Phễu: nội dung → waitlist → mời dùng.\nSản phẩm: bản đồ phễu nội dung → chuyển đổi.",
+        ],
+        .launch: [
+            "mkt": "Với launch, mình lo bộ đạn & thứ tự bắn:\n• Asset: post thông báo, ảnh/video, PH kit nếu lên Product Hunt.\n• Lịch teaser → launch day → nhắc lại.\n• Nhóm ủng hộ sẵn sàng vote/chia sẻ đúng giờ.\nSản phẩm: launch kit + lịch bắn theo giờ.",
+            "ops": "Launch day cần runbook, không ứng biến:\n• Checklist từng việc theo giờ, ai làm gì.\n• Phương án dự phòng nếu web sập/hết quota.\nSản phẩm: runbook launch-day + checklist.",
+            "support": "Launch = lượng hỏi tăng vọt:\n• Chuẩn sẵn câu trả lời cho câu hỏi dự đoán.\n• Trực triage trong ngày để không ai bị bỏ.\nSản phẩm: canned responses + lịch trực launch.",
+            "eng": "Kỹ thuật lo cho nó không sập lúc đông:\n• Kiểm tải, cache, giới hạn để chịu spike.\n• Sẵn nút tắt nhanh tính năng lỗi.\nSản phẩm: checklist chịu tải + phương án rollback.",
+        ],
+        .pricing: [
+            "fin": "Với giá, mình dựng con số làm nền:\n• 2–3 tier kèm giả định chi phí/margin để so.\n• Đo WTP bằng nút trả tiền thật, không chỉ hỏi.\n• Canh điểm hòa vốn theo từng mức.\nSản phẩm: model giá 3 kịch bản + test WTP.",
+            "mkt": "Giá cần được kể đúng cách:\n• Đóng gói theo giá trị, không theo tính năng.\n• Neo giá (so sánh) để mức mong muốn thành “hời”.\nSản phẩm: cách trình bày pricing + copy từng tier.",
+            "sales": "Chốt giá là chuyện thời điểm:\n• Hỏi tiền sau khi user đã thấy giá trị (dùng 3–5 ngày).\n• Ưu đãi “founding member” cho nhóm đầu.\nSản phẩm: kịch bản hỏi mua + gói founding.",
+        ],
+    ]
+    private static let variantsEN: [TeamProjectType: [String: String]] = [
+        .web: [
+            "design": "For a landing page I own the above-the-fold:\n• Hero: one headline + one subhead saying “who it’s for, what it solves” in 5 seconds.\n• A single CTA, repeated at the bottom.\n• Solid on mobile — most clicks come from phones.\nDeliverable: a landing wireframe (hero → benefits → social proof → CTA) + block copy.",
+            "eng": "On the build for a landing, light and fast wins:\n• A static page that loads <1s, basic SEO, one-command deploy.\n• Wire the email form to real storage + a confirmation.\n• Add analytics for scroll depth & form-fill rate.\nDeliverable: a deployable landing + form + analytics.",
+            "mkt": "I own the words on the page — what decides stay vs. bounce:\n• A headline on the pain, not the features.\n• Social proof (waitlist/number/testimonial) right under the hero.\n• CTA copy that states value (“Get early access” over “Sign up”).\nDeliverable: full landing copy + 2 headline variants to A/B.",
+            "sales": "A landing only earns its keep if it converts:\n• One primary action: capture the email, no distractions.\n• An automated welcome + nurture sequence for new signups.\n• Track who clicks so we can follow up the warm ones by hand.\nDeliverable: an email-capture flow + a 3-step welcome sequence.",
+            "legal": "A public page with a form needs the legal basics:\n• Privacy Policy + Terms linked in the footer.\n• A proper cookie/email-collection notice.\n• A pass on page claims so we don’t overpromise.\nDeliverable: draft Privacy/Terms + a consent line for the form.",
+        ],
+        .app: [
+            "eng": "For an app I build the core first, extras later:\n• Pin one core loop (what the user repeats) and build only that.\n• A minimal data model + auth to run for real.\n• Instrument D1/D7 retention from day one.\nDeliverable: an MVP core loop + a retention dashboard.",
+            "design": "For an app it’s won or lost at first-run:\n• A short onboarding that lets users touch value before signup.\n• A clear core loop so the second visit is obvious.\n• Guiding empty states — never a blank screen.\nDeliverable: an onboarding flow + core-screen specs.",
+            "ops": "For an app to run steadily, it needs a release pipeline:\n• A repeatable build → test → release process.\n• A tidy channel to collect bugs/feedback from testers.\n• A weekly review rhythm: what we learned, what we fix.\nDeliverable: a release checklist + a feedback tracker.",
+            "support": "An app with users means questions:\n• An in-app FAQ for ~80% of the common ones.\n• One-tap bug reporting wired straight to the backlog.\n• Triage feedback into “fix now / later”.\nDeliverable: in-app help + a triage flow.",
+        ],
+        .content: [
+            "mkt": "For content I own a system that ships consistently:\n• Pick 2–3 formats that fit you, not every channel.\n• A hook/topic bank so you’re never stuck each week.\n• A 2-week calendar + a realistic posting cadence.\nDeliverable: a 2-week content calendar + a 20-hook bank.",
+            "design": "Content needs one consistent identity:\n• Post/thumbnail templates to move fast and look “one house”.\n• Simple color/type rules anyone can follow.\nDeliverable: a template set + a one-page style guide.",
+            "sales": "Content has to lead somewhere:\n• One clear CTA per piece (sign up / DM / try).\n• A funnel: content → waitlist → invite to use.\nDeliverable: a content-to-conversion funnel map.",
+        ],
+        .launch: [
+            "mkt": "For a launch I own the ammo and the firing order:\n• Assets: announcement post, image/video, a PH kit if it’s Product Hunt.\n• Sequence: teaser → launch day → follow-up.\n• A support crew ready to vote/share on cue.\nDeliverable: a launch kit + an hour-by-hour schedule.",
+            "ops": "Launch day needs a runbook, not improvisation:\n• An hour-by-hour checklist, who does what.\n• A fallback if the site goes down / quota runs out.\nDeliverable: a launch-day runbook + checklist.",
+            "support": "A launch means a spike in questions:\n• Prepared answers for the predictable ones.\n• A triage shift on the day so no one is dropped.\nDeliverable: canned responses + a launch-day support rota.",
+            "eng": "Engineering keeps it from falling over under load:\n• Load-check, caching, and limits to survive the spike.\n• A quick kill-switch for a broken feature.\nDeliverable: a load-readiness checklist + a rollback plan.",
+        ],
+        .pricing: [
+            "fin": "For pricing I lay the numbers as the foundation:\n• 2–3 tiers with cost/margin assumptions to compare.\n• Test willingness-to-pay with a real pay button, not just asking.\n• Track the break-even per tier.\nDeliverable: a 3-scenario price model + a WTP test.",
+            "mkt": "Price has to be told the right way:\n• Package by value, not by feature list.\n• Anchor the price so the target tier reads as a deal.\nDeliverable: a pricing presentation + per-tier copy.",
+            "sales": "Closing on price is about timing:\n• Ask for money after the user has seen value (3–5 days in).\n• A “founding member” offer for the first cohort.\nDeliverable: a sell-in script + a founding tier.",
+        ],
+    ]
+
     // Reactions — each references {other} (the department it's responding to), in that
     // department's own voice/stance, so the round reads as a real back-and-forth.
     private static let reactVI: [String: String] = [

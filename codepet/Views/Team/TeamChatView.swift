@@ -246,7 +246,7 @@ final class TeamChatModel: ObservableObject {
 
         // 3) discussion round — each department reacts to the one before it, so the
         //    team visibly hashes it out (cross-talk) instead of just stacking takes.
-        let reactors = Array(depts.dropFirst().prefix(3))
+        let reactors = Array(depts.dropFirst().prefix(4))
         for (idx, d) in reactors.enumerated() {
             let other = depts[idx]   // the department right before this one
             await beat(typing: d, 1.0)
@@ -285,11 +285,12 @@ enum TeamRoster {
             if score > 0 { scored.append((key, score)) }
         }
         scored.sort { $0.1 > $1.1 }
-        var keys = scored.prefix(4).map { $0.0 }
-        if keys.count < 2 {
-            for k in ["eng", "design", "mkt"] where !keys.contains(k) {
-                keys.append(k); if keys.count >= 3 { break }
-            }
+        var keys = scored.prefix(6).map { $0.0 }
+        // Always convene a broad-enough team: fill to at least 4 in a sensible order
+        // (product first, then go-to-market, then the supporting functions).
+        for k in ["eng", "design", "mkt", "sales", "ops", "fin", "support", "legal"] where !keys.contains(k) {
+            if keys.count >= 4 { break }
+            keys.append(k)
         }
         return keys.compactMap { DepartmentCatalog.find($0) }
     }
@@ -302,12 +303,13 @@ enum TeamRoster {
     }
 
     static func byteSynth(_ ask: String, _ depts: [Department], lang: AppLanguage) -> String {
-        let parts = depts.map { "\($0.name) \(angle(for: $0.key, lang: lang))" }
-        let list = parts.joined(separator: ", ")
-        guard let first = depts.first else { return "" }
+        guard !depts.isEmpty else { return "" }
+        let steps = depts.enumerated()
+            .map { (i, d) in "\(i + 1). \(d.name) — \(angle(for: d.key, lang: lang))" }
+            .joined(separator: "\n")
         return lang == .vi
-            ? "Sau khi các bên trao đổi, điểm chung mình thấy cho “\(ask)”: \(list). Mình đề xuất bắt đầu từ \(first.name), rồi cuốn dần. Làm bước đầu luôn nhé?"
-            : "After they talked it through, the common ground for “\(ask)”: \(list). I’d start with \(first.name) and build from there. Want me to take the first step?"
+            ? "Sau khi các bên trao đổi, đây là thứ tự mình đề xuất cho “\(ask)”:\n\(steps)\nBắt đầu từ bước 1 — mình chạy luôn nhé?"
+            : "After they talked it through, here’s the order I’d suggest for “\(ask)”:\n\(steps)\nStart with step 1 — want me to take it?"
     }
 
     static func line(for key: String, lang: AppLanguage) -> String {
@@ -346,24 +348,24 @@ enum TeamRoster {
     ]
 
     private static let linesVI: [String: String] = [
-        "eng":     "Về kỹ thuật, mình chia nhỏ dựng dần: bản khung chạy được trước, polish sau. Mình sẽ soạn code-change plan rõ ràng để bạn duyệt rồi đưa coding agent ship.",
-        "design":  "Mình lo phần nhìn & cảm giác: first-run cần đủ rõ để người mới hiểu trong 10 giây. Mình dựng flow bằng màn hình thật để bạn quyết cái nào giữ.",
-        "mkt":     "Có sản phẩm rồi vẫn cần người nghe tới. Mình viết positioning + vài mẫu nội dung bám đúng giọng của bạn, giao bản nháp để duyệt.",
-        "sales":   "Giai đoạn đầu bạn kiếm user từng người, không broadcast. Mình lên danh sách + mẫu tin nhắn ấm để mời đúng người.",
-        "fin":     "Trước khi đẩy mạnh, mình dựng model giá/chi phí và một cách test nhanh mức sẵn lòng trả — quyết định vẫn của bạn.",
-        "ops":     "Mình dựng phần “đường ống” để mọi thứ chạy trơn: quy trình + checklist, bạn chỉ việc cắm tài khoản vào.",
-        "support": "Mỗi câu hỏi của user là tín hiệu để sửa. Mình dựng Help Center gọn + luồng triage để bạn học từ phản hồi.",
-        "legal":   "Mình phủ phần pháp lý tối thiểu — draft từ template hợp với thế của bạn, nhờ luật sư liếc qua trước khi ship.",
+        "eng":     "Về kỹ thuật, mình chia thành 3 lát dựng dần thay vì làm hết một lượt:\n• Lát 1 — bản khung chạy được để trong tuần đã có cái bấm thử.\n• Lát 2 — nối dữ liệu thật + gắn đo lường xem người dùng có ở lại không.\n• Lát 3 — polish & tối ưu sau khi thấy tín hiệu.\nMình soạn code-change plan rõ (mục tiêu, cách làm, chỗ đụng tới) để bạn duyệt rồi đưa coding agent ship.\nSản phẩm: kế hoạch code-change + skeleton chạy được.",
+        "design":  "Mình lo phần nhìn & cảm giác — mục tiêu là người mới “à, hiểu rồi” trong 10 giây:\n• Một thông điệp chính rõ phía trên, không để user phải đoán.\n• Bỏ hết bước thừa trước khi họ chạm được giá trị thật.\n• Một lời kêu gọi hành động (CTA) duy nhất, nổi bật.\nMình dựng flow bằng màn hình thật (wireframe có chú thích) để bạn quyết cái nào giữ.\nSản phẩm: bộ wireframe first-run + spec copy từng màn.",
+        "mkt":     "Có sản phẩm rồi vẫn cần đúng người nghe tới — mình lo phần câu chuyện:\n• Chốt một positioning một câu, bám đúng nỗi đau của tệp mục tiêu.\n• 3–5 mẫu nội dung (post/email) để mồi, theo giọng của bạn.\n• Một chuỗi kích hoạt cho ai đã quan tâm (waitlist/follow).\nMình giao bản nháp để bạn duyệt, không tự đăng.\nSản phẩm: positioning + lịch nội dung 2 tuần + mẫu email kích hoạt.",
+        "sales":   "Giai đoạn đầu user tới từng người, không tự nhiên đổ về:\n• Lọc 20 người “ấm” nhất (đã phản hồi, email công ty, đến từ giới thiệu).\n• DM tay từng người: nhắc lý do họ quan tâm + mời như một đặc quyền.\n• Chưa nhắc giá — xin dùng thử đổi lấy feedback.\nMình lên danh sách + mẫu tin nhắn theo từng phân khúc.\nSản phẩm: checklist lọc 20 người + bộ mẫu DM cá nhân hóa.",
+        "fin":     "Trước khi đổ tiền, mình lo phần con số:\n• Dựng 2–3 mức giá kèm giả định chi phí/margin để so.\n• Test sẵn lòng trả bằng hành vi thật (nút trả tiền), không chỉ khảo sát.\n• Canh runway: rẻ trước, đo, rồi mới đầu tư thêm.\nQuyết định cuối vẫn là của bạn — mình đưa dữ liệu để chốt.\nSản phẩm: model giá 3 kịch bản + một cách đo willingness-to-pay.",
+        "ops":     "Mình lo “đường ống” để mọi thứ chạy mà không phải mình bạn ôm hết:\n• Quy trình rõ từ đầu vào tới đầu ra, ai làm bước nào.\n• Checklist + công cụ để lặp lại được, không phụ thuộc trí nhớ.\n• Nhịp thu thập dữ liệu để học nhanh mỗi tuần.\nBạn chỉ việc cắm tài khoản vào là chạy.\nSản phẩm: bảng quy trình + checklist vận hành.",
+        "support": "Mỗi câu hỏi của user là tín hiệu để sửa — mình lo phần đó:\n• Help Center gọn trả lời trước ~80% câu hỏi hay gặp.\n• Luồng triage để phản hồi không rơi + gom thành việc cần làm.\n• Vòng lặp “phản hồi → ưu tiên → sửa” để sản phẩm tốt dần.\nSản phẩm: Help Center bản đầu + luồng triage feedback.",
+        "legal":   "Mình phủ phần pháp lý tối thiểu để ship không thành rủi ro:\n• Privacy Policy + Terms hợp với thế local-first của bạn.\n• Rà các tuyên bố (claim) trước khi công bố kẻo phải gỡ.\n• Kiểm phần thu thập dữ liệu/cookie nếu có form.\nMình draft từ template, nhờ luật sư liếc qua trước khi launch.\nSản phẩm: nháp Privacy + Terms + checklist tuân thủ.",
     ]
     private static let linesEN: [String: String] = [
-        "eng":     "On the build side, I’d ship this in stages — a working skeleton first, polish after. I’ll draft a clear code-change plan for you to approve, then hand to your coding agent.",
-        "design":  "I’ve got the look and feel — the first run needs to land in ten seconds. I’ll propose it as real screens so you make the taste calls.",
-        "mkt":     "Even a great product needs someone to hear about it. I’ll write the positioning plus a few content drafts in your voice for you to approve.",
-        "sales":   "Early on you land users one by one, not by broadcasting. I’ll build the list plus warm DM templates to invite the right people.",
-        "fin":     "Before you scale, I’ll build the price/cost model and a quick willingness-to-pay test — the call stays yours.",
-        "ops":     "I’ll stand up the plumbing so it runs smoothly — the process and checklist; you just plug in your accounts.",
-        "support": "Every user question is a signal about what to fix. I’ll build a lean Help Center plus a triage flow so you learn fast.",
-        "legal":   "I’ll cover the legal minimum — drafted from templates tuned to your posture; have a lawyer glance before launch.",
+        "eng":     "On the build, I’d slice it into three stages instead of one big push:\n• Stage 1 — a working skeleton so there’s something clickable this week.\n• Stage 2 — wire real data + instrument whether users stick.\n• Stage 3 — polish & optimize once there’s signal.\nI’ll draft a clear code-change plan (goal, approach, what it touches) for you to approve, then hand to your coding agent.\nDeliverable: a code-change plan + a working skeleton.",
+        "design":  "I own look and feel — the goal is a newcomer thinking “ah, I get it” within ten seconds:\n• One clear headline up top, nothing left to guess.\n• Strip every step before they touch real value.\n• A single, prominent call to action.\nI’ll propose it as real screens (annotated wireframes) so you make the taste calls.\nDeliverable: a first-run wireframe set + per-screen copy spec.",
+        "mkt":     "Even a great product needs the right people to hear about it — I own the story:\n• Nail a one-line positioning tied to the target’s real pain.\n• 3–5 content drafts (posts/emails) in your voice to prime interest.\n• An activation sequence for anyone already warm (waitlist/follows).\nI hand you drafts to approve — I don’t post on my own.\nDeliverable: positioning + a 2-week content calendar + activation emails.",
+        "sales":   "Early on, users come one at a time, not on their own:\n• Filter the 20 warmest (replied before, work email, came via referral).\n• DM each by hand: recall why they cared + invite them as an insider.\n• No pricing yet — trade a trial for feedback.\nI’ll build the list + per-segment message templates.\nDeliverable: a 20-person shortlist checklist + a personalized DM kit.",
+        "fin":     "Before spending, I own the numbers:\n• Build 2–3 price points with cost/margin assumptions to compare.\n• Test willingness-to-pay by real behavior (a pay button), not just surveys.\n• Watch runway: cheap first, measure, then invest.\nThe final call stays yours — I bring the data.\nDeliverable: a 3-scenario price model + a willingness-to-pay test.",
+        "ops":     "I own the plumbing so it runs without everything landing on you:\n• A clear process from input to output, who does which step.\n• A checklist + tooling that’s repeatable, not memory-dependent.\n• A weekly data-collection rhythm to learn fast.\nYou just plug in your accounts and it runs.\nDeliverable: a process board + an operations checklist.",
+        "support": "Every user question is a signal about what to fix — that’s mine:\n• A lean Help Center answering ~80% of the common questions up front.\n• A triage flow so nothing drops + it rolls up into a to-fix list.\n• A “feedback → prioritize → fix” loop so the product improves steadily.\nDeliverable: a first Help Center + a feedback triage flow.",
+        "legal":   "I cover the legal minimum so shipping doesn’t become a liability:\n• A Privacy Policy + Terms tuned to your local-first posture.\n• A pass on public claims before launch, so nothing has to be pulled.\n• A check on data/cookie collection if there’s a form.\nI draft from templates; have a lawyer glance before launch.\nDeliverable: draft Privacy + Terms + a compliance checklist.",
     ]
     // Reactions — each references {other} (the department it's responding to), in that
     // department's own voice/stance, so the round reads as a real back-and-forth.

@@ -29,7 +29,9 @@ enum ProjectProbe {
         var isDir: ObjCBool = false
         let gitPath = (path as NSString).appendingPathComponent(".git")
         let isGit = fm.fileExists(atPath: gitPath, isDirectory: &isDir) && isDir.boolValue
-        let hasClaude = fm.fileExists(atPath: claudeMdURL(forProjectAt: path).path)
+        var claudeIsDir: ObjCBool = false
+        let hasClaude = fm.fileExists(atPath: claudeMdURL(forProjectAt: path).path, isDirectory: &claudeIsDir)
+            && !claudeIsDir.boolValue   // a real file, not a dir named CLAUDE.md
         return ProjectLink(path: path, isGitRepo: isGit, hasClaudeMd: hasClaude)
     }
 }

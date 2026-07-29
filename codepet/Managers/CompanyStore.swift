@@ -44,7 +44,9 @@ final class CompanyStore: ObservableObject {
 
     /// The project folder the founder linked for the coding agent (Part 2). One
     /// active at a time; client-only (its `slice` never enters the cloud grounding).
+    /// Reset on account switch alongside the other per-account @Published state.
     @Published private(set) var activeProjectLink: ProjectLink?
+    private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
@@ -185,6 +187,8 @@ final class CompanyStore: ObservableObject {
             activeAgentRuns = []
             isFanningOut = false
             runError = nil
+            activeProjectLink = nil
+            UserDefaults.standard.removeObject(forKey: Self.activeProjectBookmarkKey)
         }
         self.companyId = companyId
         isHydrating = true
@@ -359,10 +363,14 @@ final class CompanyStore: ObservableObject {
             try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
             link = ProjectProbe.probe(path: path)   // re-probe so hasClaudeMd reflects the write
         }
-        // Persist a security-scoped bookmark so access survives relaunch (best-effort).
+        // Best-effort bookmark so access can survive relaunch. UNTESTED in 2A —
+        // nothing resolves it yet, and `.withSecurityScope` is really a sandbox
+        // affordance (this app is non-sandboxed), so on failure `try?` just drops
+        // it. 2B must revisit (plain bookmark or plain path) when it actually needs
+        // relaunch-resolution. Cleared on account switch (key below).
         if let data = try? URL(fileURLWithPath: path)
             .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
-            UserDefaults.standard.set(data, forKey: "cp_active_project_bookmark")
+            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
         }
         activeProjectLink = link
         return link
@@ -1226,6 +1234,8 @@ final class CompanyStore: ObservableObject {
         activeAgentRuns = []
         isFanningOut = false
         runError = nil
+        activeProjectLink = nil
+        UserDefaults.standard.removeObject(forKey: Self.activeProjectBookmarkKey)
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).

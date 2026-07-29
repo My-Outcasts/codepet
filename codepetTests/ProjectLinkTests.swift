@@ -85,4 +85,25 @@ final class ProjectLinkTests: XCTestCase {
         let written = try? String(contentsOfFile: base + "/CLAUDE.md", encoding: .utf8)
         XCTAssertEqual(written?.contains("Acme"), true)
     }
+
+    @MainActor
+    func test_activeProjectLink_clearsOnAccountSwitch() async {
+        let seed = CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [])
+        let store = CompanyStore(loader: { _ in seed },
+                                 tasksSaver: { _, _ in true },
+                                 librarySaver: { _, _ in true },
+                                 threadSaver: { _, _ in true },
+                                 threadsLoader: { _ in [] })
+        await store.hydrate(companyId: "u1")
+        let base = NSTemporaryDirectory() + "codepet-2a-switch-" + UUID().uuidString
+        try? FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
+        store.linkProject(path: base, bootstrapClaudeMd: false)
+        XCTAssertNotNil(store.activeProjectLink)
+
+        // Switching to a different account must clear per-account local state,
+        // so account 2 can't see account 1's linked project.
+        await store.hydrate(companyId: "u2")
+        XCTAssertNil(store.activeProjectLink, "activeProjectLink must clear on account switch")
+    }
 }

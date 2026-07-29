@@ -9,6 +9,7 @@ import SwiftUI
 /// machine — the copy says so.
 struct CodeRunCardView: View {
     @ObservedObject var coordinator: CodingRunCoordinator
+    @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
     /// Per-file accept selection — relative paths, the same domain as
@@ -98,12 +99,24 @@ struct CodeRunCardView: View {
 
     // MARK: - Bodies
 
-    private var noProjectBody: some View {
-        // The full link UI is 2C-3; here the card just states the requirement.
+    @ViewBuilder private var noProjectBody: some View {
         Text(lang == .vi ? "Liên kết một dự án để mình có thể sửa code thật."
                          : "Link a project so I can make real changes to your code.")
             .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
             .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 8) {
+            // Same picker + CLAUDE.md-consent flow as Environment (shared ProjectLinker).
+            // On link, re-propose THIS run's ask so the founder doesn't retype it.
+            actionButton(lang == .vi ? "Liên kết dự án" : "Link a project", filled: true) {
+                let ask = coordinator.run?.ask ?? ""
+                if let link = ProjectLinker.pickAndLink(into: companyStore, language: lang) {
+                    coordinator.propose(ask: ask, plannedFiles: 1, needsBash: false, link: link)
+                }
+            }
+            actionButton(lang == .vi ? "Bỏ" : "Dismiss", filled: false, subtle: true) {
+                coordinator.cancel()
+            }
+        }
     }
 
     @ViewBuilder private func previewBody(_ run: EditCodeRun) -> some View {

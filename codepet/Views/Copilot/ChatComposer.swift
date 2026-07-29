@@ -21,6 +21,7 @@ struct ChatComposer: View {
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
 
+    @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -77,6 +78,25 @@ struct ChatComposer: View {
                     .overlay(Capsule().stroke(CodepetTheme.hairline))
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+
+            // Active coding-agent project (2C-3): a quiet, always-visible reminder of
+            // which folder the agent will touch. Tap → the Environment link surface.
+            if let link = companyStore.activeProjectLink {
+                Spacer(minLength: 8)
+                Button { companyStore.select(.environment) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: link.isGitRepo ? "arrow.triangle.branch" : "folder")
+                            .font(.system(size: 9))
+                        Text(Project.nameFromPath(link.path))
+                            .font(CodepetTheme.inter(11, weight: .medium)).lineLimit(1)
+                    }
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .overlay(Capsule().stroke(CodepetTheme.hairline))
+                }
+                .buttonStyle(.plain).fixedSize()
+                .help(link.path)
+            }
         }
     }
 
@@ -189,6 +209,7 @@ private struct ChatComposerPreviewHost: View {
         )
         .frame(width: 640)
         .padding()
+        .environmentObject(CompanyStore())
     }
 }
 

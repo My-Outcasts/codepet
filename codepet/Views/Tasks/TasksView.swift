@@ -89,15 +89,23 @@ struct TasksView: View {
     private func card(_ t: RoadmapTask) -> some View {
         Button {
             let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
-            if st == .needsApproval { previewTask = t }
-            else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
-            else if st == .needsYou { Task { await companyStore.walkThroughTask(t, language: lang) } }
-            else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }
-            // Same handoff rule as the roadmap: work-producing taps land in chat,
-            // where the run/walkthrough streams; approve + open stay in place.
-            if RoadmapDispatch.navigatesToChat(RoadmapDispatch.action(for: st)) {
-                companyStore.select(.chat)
+            let action = RoadmapDispatch.action(for: st,
+                                                isEngineering: t.dept == "eng",
+                                                projectLinked: companyStore.activeProjectLink != nil)
+            switch action {
+            case .approve:         previewTask = t   // the board reviews via a preview sheet
+            case .run:             Task { await companyStore.runTask(t, language: lang) }
+            case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
+            case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
+            case .editCode:
+                let ask = t.detail.isEmpty ? t.title : "\(t.title): \(t.detail)"
+                companyStore.codingRun.propose(ask: ask, plannedFiles: 2, needsBash: false,
+                                               link: companyStore.activeProjectLink)
+            case .none:            break
             }
+            // Same handoff rule as the roadmap: work-producing taps land in chat;
+            // approve + open stay in place.
+            if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {

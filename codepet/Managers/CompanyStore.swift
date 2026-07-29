@@ -443,6 +443,14 @@ final class CompanyStore: ObservableObject {
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // Engineering pill + a linked project → route the ask to the LOCAL coding
+        // agent instead of a cloud chat turn (2D). The coordinator stages the run;
+        // the chat card (2C-2) shows it. Otherwise, a normal grounded chat turn.
+        if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
+            codingRun.propose(ask: text, plannedFiles: 2, needsBash: false, link: activeProjectLink)
+            select(.chat)
+            return
+        }
         await sendMessage(text, language: language, department: department)
     }
 

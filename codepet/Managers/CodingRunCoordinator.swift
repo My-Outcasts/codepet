@@ -128,6 +128,18 @@ final class CodingRunCoordinator: ObservableObject {
         clearSessions()
     }
 
+    /// Dismiss a run that hasn't started executing — the founder tapped Cancel on
+    /// the plan-preview, or dismissed a `.noProject`/`.failed`/`.committed` card.
+    /// Tears down any live backend session so no branch/shadow is orphaned, then
+    /// clears the card. No-op WHILE running: an in-flight subprocess must resolve
+    /// (or fail) on its own before the card can be cleared.
+    func cancel() {
+        guard let phase = run?.phase, phase != .running else { return }
+        teardownSession()
+        steps = []
+        run = nil
+    }
+
     // MARK: - Helpers
 
     /// Abort/discard any live backend session (no-op when there's none). Used on a
@@ -154,3 +166,22 @@ final class CodingRunCoordinator: ObservableObject {
         return (abs as NSString).lastPathComponent
     }
 }
+
+#if DEBUG
+/// Preview/fixture support so `CodeRunCardView`'s `#Preview` can render each phase
+/// without spawning a real `claude` subprocess. DEBUG-only — never shipped.
+extension CodingRunCoordinator {
+    static func preview(_ run: EditCodeRun, steps: [ExecStep] = []) -> CodingRunCoordinator {
+        let c = CodingRunCoordinator(runner: _NoopCodeRunner())
+        c.run = run
+        c.steps = steps
+        return c
+    }
+}
+
+private final class _NoopCodeRunner: CodeRunning {
+    func run(prompt: String, workingDir: String, onStep: @escaping (ExecStep) -> Void) async -> CodeRunOutcome {
+        CodeRunOutcome(diffs: [], failure: nil)
+    }
+}
+#endif

@@ -121,6 +121,15 @@ enum MockChat {
                     ChatDoneAction(nav: NavAction(destination: "roadmap", target: nil)))
         }
 
+        // edit_code → stage a local coding-agent run so the CodeRunCardView is
+        // exercisable offline (`-CODEPET_MOCK_CHAT YES`). Distinct trigger phrases
+        // (like the walkthrough token) so it can't collide with the "run"/nav routes.
+        if msg.contains("edit code") || msg.contains("change the code") || msg.contains("code:") {
+            let ask = req.userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            return ("On it — I'll make that change on your machine and show you the diff.",
+                    ChatDoneAction(editCode: EditCodeAction(ask: ask, plannedFiles: 1, needsBash: false)))
+        }
+
         // long → multi-paragraph rendering / scroll.
         if msg.contains("long") {
             return ("""

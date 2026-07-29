@@ -180,6 +180,12 @@ struct CopilotChatView: View {
                     if !companyStore.activeAgentRuns.isEmpty {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
+                    // The local coding-agent run (Part 2C-2). One active run at the
+                    // transcript level, mirroring AgentsWorkingRow — "work lands in
+                    // chat" (Part 1 Layer 4): the edit_code verb was dispatched here.
+                    if companyStore.codingRun.run != nil {
+                        CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                    }
                 }
                 .padding(.top, 40)
                 .padding(.bottom, 24)
@@ -202,6 +208,9 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
+            }
+            .onChange(of: companyStore.codingRun.run != nil) { _, active in
+                if active { withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) } }
             }
         }
     }

@@ -50,6 +50,25 @@ final class CompanyContextTests: XCTestCase {
         XCTAssertEqual(ctx.groundingString, expected)
     }
 
+    func test_runTaskGroundingString_matchesLeanCompose() {
+        let company = fixtureCompany()
+        let ctx = CompanyContext(company: company)
+        // Byte-identical to the run-task site's pre-migration inline call:
+        // brief + tasks + decisions only — no library/query/focus.
+        let expected = ChatContext.compose(
+            brief: company.brief, tasks: company.tasks, decisions: company.decisions)
+        XCTAssertEqual(ctx.runTaskGroundingString, expected)
+    }
+
+    func test_runTaskGroundingString_excludesLibraryPriorWork() {
+        // Even with a rich fixture (non-empty library), the run-task projection must
+        // NOT include the prior-work/library block that the chat groundingString has.
+        let company = fixtureCompany()
+        let ctx = CompanyContext(company: company)
+        XCTAssertFalse(ctx.runTaskGroundingString.contains("Landing page draft"),
+                       "run-task grounding must stay lean — no library prior-work block")
+    }
+
     func test_project_neverLeaksIntoGroundingString() {
         let company = fixtureCompany()
         let secretPath = "/Users/mona/secret-repo"

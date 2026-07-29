@@ -56,6 +56,15 @@ struct CompanyContext {
                             library: library, query: query, focusDepartment: focusDepartment)
     }
 
+    /// The leaner grounding string the run-task backend uses: brief + roadmap +
+    /// decisions, WITHOUT the library/prior-work block that `groundingString`
+    /// carries for chat. Byte-identical to the run-task site's previous inline
+    /// `ChatContext.compose(brief:tasks:decisions:)` call — a structural migration
+    /// with no payload change. Never references `project` (client-only).
+    var runTaskGroundingString: String {
+        ChatContext.compose(brief: brief, tasks: tasks, decisions: decisions)
+    }
+
     /// Client-only rendering of the linked project for the LOCAL coding agent.
     /// nil when nothing is linked. This string must never be sent to the cloud.
     var projectSummary: String? {

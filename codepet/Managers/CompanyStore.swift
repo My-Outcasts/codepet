@@ -1059,7 +1059,7 @@ final class CompanyStore: ObservableObject {
                              reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
+            context: CompanyContext(company: company).runTaskGroundingString,
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
             reviseNote: reviseNote, current: current)
     }

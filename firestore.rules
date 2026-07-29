@@ -40,6 +40,16 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    // --- Virtual Company runs ---
+    // Written only by Cloud Functions (the admin SDK bypasses these rules), so
+    // clients are denied write outright. The owning founder may read their own
+    // run back — that is what makes a completed run replayable without the
+    // client having to cache the whole event stream itself.
+    match /company_runs/{runId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
     // --- Default deny ---
     // Anything not matched above is closed. New collections must opt in here.
     match /{document=**} {

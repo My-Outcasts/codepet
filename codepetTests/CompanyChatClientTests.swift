@@ -186,6 +186,34 @@ final class CompanyChatClientTests: XCTestCase {
         }
     }
 
+    func testResponseDecodesRePlanAndWalkthrough() throws {
+        let data = "{\"reply\":\"Let's re-plan\",\"re_plan\":true,\"walkthrough\":{\"task_id\":\"t7\"}}".data(using: .utf8)!
+        let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)
+        XCTAssertEqual(r.rePlan, true)
+        XCTAssertEqual(r.walkthrough, WalkthroughAction(taskId: "t7"))
+    }
+
+    func testResponseDefaultsWhenVerbsAbsent() throws {
+        let data = "{\"reply\":\"hi\"}".data(using: .utf8)!
+        let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)
+        XCTAssertNil(r.rePlan)
+        XCTAssertNil(r.walkthrough)
+    }
+
+    func testSendStreamDoneCarriesRePlanAndWalkthrough() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false,\"re_plan\":true,\"walkthrough\":{\"task_id\":\"t7\"}}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(), session: mockedCompanyChatSession(), authTokenProvider: { "fake" }
+        ) { collected.append(ev) }
+        guard case let .done(_, _, action) = collected.last else { return XCTFail("expected .done") }
+        XCTAssertTrue(action.rePlan)
+        XCTAssertEqual(action.walkthrough, WalkthroughAction(taskId: "t7"))
+    }
+
     private func makeMinimalRequest() -> CompanyChatRequest {
         CompanyChatRequest(
             companyId: "u1",

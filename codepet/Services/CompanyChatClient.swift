@@ -40,6 +40,13 @@ struct SetupAction: Codable, Equatable {
     let name: String
 }
 
+/// A "walk me through this myself" request from byte — the roadmap task id the
+/// founder should be guided through. Resolved to a `RoadmapTask` by CompanyStore.
+struct WalkthroughAction: Codable, Equatable {
+    let taskId: String
+    enum CodingKeys: String, CodingKey { case taskId = "task_id" }
+}
+
 /// One durable fact byte decided to remember — auto-merged into
 /// `company.decisions` (no approval needed), then surfaced as a transient
 /// "Noted" chip.
@@ -96,6 +103,8 @@ struct CompanyChatResponse: Codable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]?
+    let rePlan: Bool?
+    let walkthrough: WalkthroughAction?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -103,6 +112,8 @@ struct CompanyChatResponse: Codable {
         case nav
         case setup
         case remember
+        case rePlan = "re_plan"
+        case walkthrough
     }
 }
 
@@ -115,14 +126,19 @@ struct CompanyChatReply: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    let rePlan: Bool
+    let walkthrough: WalkthroughAction?
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
-         setup: SetupAction? = nil, remember: [RememberedFact] = []) {
+         setup: SetupAction? = nil, remember: [RememberedFact] = [],
+         rePlan: Bool = false, walkthrough: WalkthroughAction? = nil) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.rePlan = rePlan
+        self.walkthrough = walkthrough
     }
 }
 
@@ -136,13 +152,17 @@ struct ChatDoneAction: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    let rePlan: Bool
+    let walkthrough: WalkthroughAction?
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
-         remember: [RememberedFact] = []) {
+         remember: [RememberedFact] = [], rePlan: Bool = false, walkthrough: WalkthroughAction? = nil) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.rePlan = rePlan
+        self.walkthrough = walkthrough
     }
 }
 
@@ -193,7 +213,8 @@ enum CompanyChatClient {
         let reply = decoded.reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return nil }
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
-                                 setup: decoded.setup, remember: decoded.remember ?? [])
+                                 setup: decoded.setup, remember: decoded.remember ?? [],
+                                 rePlan: decoded.rePlan ?? false, walkthrough: decoded.walkthrough)
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -304,14 +325,18 @@ enum CompanyChatClient {
                 let nav: NavAction?
                 let setup: SetupAction?
                 let remember: [RememberedFact]?
+                let rePlan: Bool?
+                let walkthrough: WalkthroughAction?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
+                    case rePlan = "re_plan"; case walkthrough
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
-                                             remember: d.remember ?? [])
+                                             remember: d.remember ?? [],
+                                             rePlan: d.rePlan ?? false, walkthrough: d.walkthrough)
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             }
         case "error":

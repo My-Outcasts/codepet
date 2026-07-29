@@ -209,8 +209,8 @@ struct RoadmapMapView: View {
             case .approve:         Task { await companyStore.approveTask(id: task.id) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
             case .editCode:
-                let ask = task.detail.isEmpty ? task.title : "\(task.title): \(task.detail)"
-                companyStore.codingRun.propose(ask: ask, plannedFiles: 2, needsBash: false,
+                companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
+                                               plannedFiles: 2, needsBash: false,
                                                link: companyStore.activeProjectLink)
             case .none:            break
             }

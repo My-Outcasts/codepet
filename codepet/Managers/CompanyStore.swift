@@ -447,6 +447,10 @@ final class CompanyStore: ObservableObject {
         // agent instead of a cloud chat turn (2D). The coordinator stages the run;
         // the chat card (2C-2) shows it. Otherwise, a normal grounded chat turn.
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
+            // Echo the founder's ask into the transcript (this path doesn't run the
+            // normal sendMessage, which is what usually appends it) so it's visible
+            // even before the run card renders, then stage the local run.
+            chatMessages.append(CopilotMessage(role: .me, text: text))
             codingRun.propose(ask: text, plannedFiles: 2, needsBash: false, link: activeProjectLink)
             select(.chat)
             return

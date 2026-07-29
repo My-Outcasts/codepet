@@ -98,8 +98,8 @@ struct TasksView: View {
             case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
             case .editCode:
-                let ask = t.detail.isEmpty ? t.title : "\(t.title): \(t.detail)"
-                companyStore.codingRun.propose(ask: ask, plannedFiles: 2, needsBash: false,
+                companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: t),
+                                               plannedFiles: 2, needsBash: false,
                                                link: companyStore.activeProjectLink)
             case .none:            break
             }

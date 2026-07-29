@@ -33,4 +33,10 @@ enum RoadmapDispatch {
     static func navigatesToChat(_ action: RoadmapAction) -> Bool {
         action == .run || action == .walkThrough || action == .editCode
     }
+
+    /// The `edit_code` ask for a roadmap task — title, plus its detail when present.
+    /// Shared by the roadmap/board dispatch sites so the phrasing can't drift.
+    static func editCodeAsk(for task: RoadmapTask) -> String {
+        task.detail.isEmpty ? task.title : "\(task.title): \(task.detail)"
+    }
 }

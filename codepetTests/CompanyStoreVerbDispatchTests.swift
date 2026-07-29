@@ -88,4 +88,43 @@ final class CompanyStoreVerbDispatchTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.contains { $0.role == .me && $0.text.contains("Fresh task") },
                       "walkthrough resolves against the POST-replan task set and starts the guided turn")
     }
+
+    // MARK: - Engineering composer-pill routing (2D)
+
+    private func storeCapturingStream(_ onStream: @escaping () -> Void) -> CompanyStore {
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [])
+        return CompanyStore(loader: { _ in seed },
+                            tasksSaver: { _, _ in true },
+                            chatSender: { _ in nil },
+                            chatStreamer: { _ in onStream(); return AsyncThrowingStream { c in c.yield(.delta("hi")); c.finish() } },
+                            librarySaver: { _, _ in true },
+                            threadSaver: { _, _ in true },
+                            threadsLoader: { _ in [] })
+    }
+
+    func test_engineeringPill_withLink_stagesRun_echoesAsk_noCloudTurn() async {
+        var streamed = false
+        let s = storeCapturingStream { streamed = true }
+        await s.hydrate(companyId: "u")
+        let base = NSTemporaryDirectory() + "codepet-2d-" + UUID().uuidString
+        try? FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
+        s.linkProject(path: base, bootstrapClaudeMd: false)
+
+        await s.sendChat("fix the bug", language: .en, department: DepartmentCatalog.find("eng"))
+
+        XCTAssertFalse(streamed, "engineering pill + linked project → no cloud chat turn")
+        XCTAssertNotNil(s.codingRun.run, "a local coding run is staged")
+        XCTAssertTrue(s.chatMessages.contains { $0.role == .me && $0.text == "fix the bug" },
+                      "the founder's ask is echoed into the transcript")
+    }
+
+    func test_engineeringPill_noLink_fallsThroughToCloud() async {
+        var streamed = false
+        let s = storeCapturingStream { streamed = true }
+        await s.hydrate(companyId: "u")
+        await s.sendChat("fix the bug", language: .en, department: DepartmentCatalog.find("eng"))
+        XCTAssertTrue(streamed, "no linked project → the guard must not fire; normal cloud turn runs")
+        XCTAssertNil(s.codingRun.run, "no coding run staged without a linked project")
+    }
 }

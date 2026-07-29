@@ -47,6 +47,11 @@ final class CompanyStore: ObservableObject {
     /// Reset on account switch alongside the other per-account @Published state.
     @Published private(set) var activeProjectLink: ProjectLink?
     private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
+
+    /// Drives local coding-agent (`edit_code`) runs (Part 2). The chat UI (2C-2)
+    /// observes it; `handleDoneAction` stages a run via `propose` when byte emits
+    /// the verb. Lazy so the adapter is built only once a coding run is proposed.
+    lazy var codingRun = CodingRunCoordinator(runner: ClaudeCodeRunAdapter())
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
@@ -950,6 +955,14 @@ final class CompanyStore: ObservableObject {
         await handleRemember(action.remember, cid: cid)
         guard companyId == cid else { return nil }
         await handleRePlan(action.rePlan, cid: cid, language: language)
+        guard companyId == cid else { return nil }
+        // `edit_code` is orthogonal + LOCAL: stage a coding run for the chat UI (2C-2)
+        // to drive against the active linked project (nil link → the coordinator lands
+        // in .noProject and the UI offers to link). Never sent to the cloud.
+        if let ec = action.editCode {
+            codingRun.propose(ask: ec.ask, plannedFiles: ec.plannedFiles, needsBash: ec.needsBash,
+                              link: activeProjectLink)
+        }
         guard companyId == cid else { return nil }
         if let wt = action.walkthrough, company.tasks.contains(where: { $0.id == wt.taskId }) {
             return wt.taskId

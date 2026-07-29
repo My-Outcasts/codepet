@@ -6,6 +6,8 @@ import Combine
 @MainActor
 final class CodingRunCoordinator: ObservableObject {
     @Published private(set) var run: EditCodeRun?
+    /// Live tool-use steps for the run card (appended as the runner streams).
+    @Published private(set) var steps: [ExecStep] = []
 
     private let runner: CodeRunning
     // Live backend session handles, set during `execute`.
@@ -25,6 +27,7 @@ final class CodingRunCoordinator: ObservableObject {
         // A new proposal supersedes any un-resolved prior run — tear down its live
         // session so no branch/shadow is orphaned (no-op when there's none).
         teardownSession()
+        steps = []
         guard let link else {
             run = EditCodeRun(ask: ask, backend: .shadow, phase: .noProject)
             proposedLink = nil
@@ -66,7 +69,8 @@ final class CodingRunCoordinator: ObservableObject {
             workingDir = s.shadowDir
         }
 
-        let outcome = await runner.run(prompt: current.ask, workingDir: workingDir)
+        let outcome = await runner.run(prompt: current.ask, workingDir: workingDir,
+                                       onStep: { [weak self] step in self?.steps.append(step) })
         guard var after = run else { return }
         if let failure = outcome.failure {
             teardownSession()

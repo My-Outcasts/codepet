@@ -6,8 +6,12 @@ import XCTest
 private final class FakeRunner: CodeRunning {
     let edits: [String: String]
     let failure: String?
-    init(edits: [String: String] = [:], failure: String? = nil) { self.edits = edits; self.failure = failure }
-    func run(prompt: String, workingDir: String) async -> CodeRunOutcome {
+    let stepLabels: [String]
+    init(edits: [String: String] = [:], failure: String? = nil, stepLabels: [String] = []) {
+        self.edits = edits; self.failure = failure; self.stepLabels = stepLabels
+    }
+    func run(prompt: String, workingDir: String, onStep: @escaping (ExecStep) -> Void) async -> CodeRunOutcome {
+        for label in stepLabels { onStep(ExecStep(label: label, done: true)) }
         if let failure { return CodeRunOutcome(diffs: [], failure: failure) }
         var diffs: [ClaudeCodeRunner.FileDiff] = []
         for (rel, contents) in edits {
@@ -116,5 +120,14 @@ final class CodingRunCoordinatorTests: XCTestCase {
         c.propose(ask: "x", plannedFiles: 1, needsBash: false, link: link)   // .readyToRun
         await c.approve(acceptedPaths: [])                                    // wrong phase
         XCTAssertEqual(c.run?.phase, .readyToRun, "approve before .reviewing must be a no-op")
+    }
+
+    func test_execute_collectsLiveSteps() async {
+        let repo = gitRepo()
+        let link = ProjectLink(path: repo, isGitRepo: true, hasClaudeMd: true)
+        let c = CodingRunCoordinator(runner: FakeRunner(edits: ["app.txt": "v2"], stepLabels: ["Edited app.txt", "Ran swift build"]))
+        c.propose(ask: "edit", plannedFiles: 1, needsBash: false, link: link)
+        await c.execute()
+        XCTAssertEqual(c.steps.map(\.label), ["Edited app.txt", "Ran swift build"])
     }
 }

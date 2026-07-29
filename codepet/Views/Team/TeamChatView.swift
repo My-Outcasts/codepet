@@ -237,14 +237,24 @@ final class TeamChatModel: ObservableObject {
         messages.append(TeamMsg(kind: .byte, text: TeamRoster.byteIntro(ask, depts, lang: lang)))
         await pause(0.35)
 
-        // 2) each department "joins" and contributes
+        // 2) opening round — each department's first take (blind to each other)
         for d in depts {
             await beat(typing: d, 0.9)
             messages.append(TeamMsg(kind: .dept(d), text: TeamRoster.line(for: d.key, lang: lang)))
             await pause(0.3)
         }
 
-        // 3) byte weaves it into one reply
+        // 3) discussion round — each department reacts to the one before it, so the
+        //    team visibly hashes it out (cross-talk) instead of just stacking takes.
+        let reactors = Array(depts.dropFirst().prefix(3))
+        for (idx, d) in reactors.enumerated() {
+            let other = depts[idx]   // the department right before this one
+            await beat(typing: d, 1.0)
+            messages.append(TeamMsg(kind: .dept(d), text: TeamRoster.react(for: d.key, other: other.name, lang: lang)))
+            await pause(0.3)
+        }
+
+        // 4) byte moderates the discussion into one converged reply
         await beat(typing: nil, 0.9)
         messages.append(TeamMsg(kind: .byte, text: TeamRoster.byteSynth(ask, depts, lang: lang)))
     }
@@ -287,8 +297,8 @@ enum TeamRoster {
     static func byteIntro(_ ask: String, _ depts: [Department], lang: AppLanguage) -> String {
         let names = joinNames(depts.map { $0.name }, lang: lang)
         return lang == .vi
-            ? "Được — “\(ask)”. Để làm cho tới, mình kéo \(names) vào cùng nhé:"
-            : "Got it — “\(ask)”. To do this right, I’ll pull in \(names):"
+            ? "Được — “\(ask)”. Để làm cho tới, mình mời \(names) vào bàn với nhau nhé:"
+            : "Got it — “\(ask)”. To do this right, I’ll get \(names) to talk it through:"
     }
 
     static func byteSynth(_ ask: String, _ depts: [Department], lang: AppLanguage) -> String {
@@ -296,12 +306,21 @@ enum TeamRoster {
         let list = parts.joined(separator: ", ")
         guard let first = depts.first else { return "" }
         return lang == .vi
-            ? "Tóm lại cho “\(ask)”: \(list). Mình đề xuất bắt đầu từ \(first.name), rồi cuốn dần. Làm bước đầu luôn nhé?"
-            : "So for “\(ask)”: \(list). I’d start with \(first.name) and build from there. Want me to take the first step?"
+            ? "Sau khi các bên trao đổi, điểm chung mình thấy cho “\(ask)”: \(list). Mình đề xuất bắt đầu từ \(first.name), rồi cuốn dần. Làm bước đầu luôn nhé?"
+            : "After they talked it through, the common ground for “\(ask)”: \(list). I’d start with \(first.name) and build from there. Want me to take the first step?"
     }
 
     static func line(for key: String, lang: AppLanguage) -> String {
         (lang == .vi ? linesVI[key] : linesEN[key]) ?? (lang == .vi ? "Mình sẽ lo phần này." : "I’ll take this part.")
+    }
+
+    /// A department reacting to another department's point — the cross-talk that
+    /// makes it a discussion, not a stack of independent takes. `{other}` is filled
+    /// with the name of the department being reacted to.
+    static func react(for key: String, other: String, lang: AppLanguage) -> String {
+        let t = (lang == .vi ? reactVI[key] : reactEN[key])
+            ?? (lang == .vi ? "Về ý {other}, mình thấy hợp lý — bổ sung một góc nữa thôi." : "On {other}’s point, that works — just one more angle.")
+        return t.replacingOccurrences(of: "{other}", with: other)
     }
 
     private static func angle(for key: String, lang: AppLanguage) -> String {
@@ -345,6 +364,28 @@ enum TeamRoster {
         "ops":     "I’ll stand up the plumbing so it runs smoothly — the process and checklist; you just plug in your accounts.",
         "support": "Every user question is a signal about what to fix. I’ll build a lean Help Center plus a triage flow so you learn fast.",
         "legal":   "I’ll cover the legal minimum — drafted from templates tuned to your posture; have a lawyer glance before launch.",
+    ]
+    // Reactions — each references {other} (the department it's responding to), in that
+    // department's own voice/stance, so the round reads as a real back-and-forth.
+    private static let reactVI: [String: String] = [
+        "eng":     "Nghe {other} xong mình lo về scope — làm hết một lượt sẽ chậm. Mình cắt còn bản chạy được trước, phần còn lại làm sau.",
+        "design":  "Bổ sung ý {other}: làm gì thì làm, buổi đầu user phải “à, hiểu rồi” trong 10 giây — không thì phần phía trên đổ sông.",
+        "mkt":     "Đồng ý với {other} phần lõi, nhưng nếu không kể được thành một câu thì khó bán. Mình cần nó đơn giản đủ để nói trong 1 dòng.",
+        "sales":   "Góc của {other} ổn, nhưng 20 người đầu mình vẫn phải đi mời tay — đừng trông vào việc tự nhiên có người tới.",
+        "fin":     "Ý {other} hay, nhưng để mình soi con số đã — đừng đốt tiền trước khi có tín hiệu trả phí. Làm bản rẻ, đo, rồi mới đổ thêm.",
+        "ops":     "Để cái {other} nói chạy được thật thì cần quy trình, không thì mình bạn ôm hết. Mình dựng checklist cho nó tự chạy.",
+        "support": "Nghe {other} xong, nhớ chừa đường cho phản hồi — thứ user kêu ca chính là thứ cần sửa kế tiếp.",
+        "legal":   "Một lưu ý cho ý {other}: soi phần pháp lý trước khi công bố, kẻo phải gỡ xuống giữa chừng.",
+    ]
+    private static let reactEN: [String: String] = [
+        "eng":     "Hearing {other}, I worry about scope — doing it all at once is slow. I’d cut to a working version first and add the rest later.",
+        "design":  "Building on {other}: whatever we do, the first run has to click in ten seconds — otherwise the rest is wasted.",
+        "mkt":     "I’m with {other} on the core, but if we can’t say it in one line it won’t sell. I need it simple enough to pitch in a sentence.",
+        "sales":   "{other}’s angle works, but the first 20 users I still invite by hand — let’s not count on people just showing up.",
+        "fin":     "{other} makes a good point, but let me check the numbers first — no burning cash before we see willingness to pay. Cheap version, measure, then invest.",
+        "ops":     "For what {other} said to actually run, we need process — otherwise it all lands on you. I’ll build a checklist so it runs itself.",
+        "support": "After {other}, let’s leave a channel for feedback — what users complain about is exactly what to fix next.",
+        "legal":   "One flag on {other}’s idea: check the legal side before we announce, or we may have to pull it.",
     ]
     private static let anglesVI: [String: String] = [
         "eng": "dựng bản chạy được", "design": "làm first-run rõ ràng", "mkt": "kể câu chuyện đúng người",

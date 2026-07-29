@@ -27,8 +27,18 @@ enum GitRunner {
         do { try proc.run() } catch {
             return GitResult(stdout: "", stderr: String(describing: error), exitCode: -1)
         }
+        // Drain stderr concurrently with stdout: a command whose stderr fills its
+        // ~64KB pipe (e.g. a verbose commit hook) would otherwise block on the
+        // stderr write while we're still reading stdout — a deadlock.
+        var errData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async {
+            errData = err.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
         let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
         proc.waitUntilExit()
         return GitResult(
             stdout: String(data: outData, encoding: .utf8) ?? "",

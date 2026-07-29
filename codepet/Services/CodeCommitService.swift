@@ -10,6 +10,15 @@ struct GitSession: Equatable {
     let stashed: Bool
 }
 
+/// Outcome of `commitGit`. `committed` is whether the commit landed; `stashRestored`
+/// is whether the founder's pre-existing stashed work was popped back cleanly — false
+/// when it conflicted with the agent's commit and was left safely in `git stash` for
+/// manual recovery (2C surfaces this to the founder).
+struct GitCommitResult: Equatable {
+    let committed: Bool
+    let stashRestored: Bool
+}
+
 /// Isolates an edit_code run so any change is instantly revertible. Git repos use
 /// a throwaway branch; non-git projects use a shadow copy (see the shadow path
 /// below). Never merges, pushes, or deploys — only commits to `codepet/<slug>`.
@@ -27,31 +36,56 @@ enum CodeCommitService {
 
         let dirty = !GitRunner.run(["status", "--porcelain"], in: projectPath)
             .stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if dirty { _ = GitRunner.run(["stash", "push", "-u"], in: projectPath) }
+        // `stashed` reflects whether a stash was ACTUALLY created — not merely that the
+        // tree looked dirty — so a failed push can't make abort/commit later pop an
+        // unrelated stash off the stack.
+        var stashed = false
+        if dirty {
+            let push = GitRunner.run(["stash", "push", "-u"], in: projectPath)
+            stashed = push.ok && !push.stdout.contains("No local changes")
+        }
 
         let branch = "codepet/" + CommitSlug.make(from: taskTitle)
         let checkout = GitRunner.run(["checkout", "-b", branch], in: projectPath)
         guard checkout.ok else {
-            if dirty { _ = GitRunner.run(["stash", "pop"], in: projectPath) }
+            if stashed { _ = GitRunner.run(["stash", "pop"], in: projectPath) }
             return nil
         }
-        return GitSession(projectPath: projectPath, branch: branch, originalRef: ref, stashed: dirty)
+        return GitSession(projectPath: projectPath, branch: branch, originalRef: ref, stashed: stashed)
     }
 
     @discardableResult
-    static func commitGit(_ s: GitSession, files: [String], message: String) -> Bool {
-        guard !files.isEmpty else { return false }
+    static func commitGit(_ s: GitSession, files: [String], message: String) -> GitCommitResult {
+        guard !files.isEmpty else { return GitCommitResult(committed: false, stashRestored: false) }
         _ = GitRunner.run(["add"] + files, in: s.projectPath)
         let commit = GitRunner.run(["commit", "-m", message], in: s.projectPath)
-        if s.stashed { _ = GitRunner.run(["stash", "pop"], in: s.projectPath) }
-        return commit.ok
+        guard commit.ok else {
+            // Commit failed → leave the session intact and do NOT pop here; a
+            // follow-up abortGit restores the stash (avoids a double-pop).
+            return GitCommitResult(committed: false, stashRestored: false)
+        }
+        var stashRestored = true
+        if s.stashed {
+            let pop = GitRunner.run(["stash", "pop"], in: s.projectPath)
+            if !pop.ok {
+                // The founder's stashed edits overlap the agent's commit → pop
+                // conflicts. Reset the tree back to the clean commit and LEAVE the
+                // stash in place (recoverable) rather than leaving conflict markers.
+                _ = GitRunner.run(["reset", "--hard", "HEAD"], in: s.projectPath)
+                stashRestored = false
+            }
+        }
+        return GitCommitResult(committed: true, stashRestored: stashRestored)
     }
 
     static func abortGit(_ s: GitSession) {
-        _ = GitRunner.run(["checkout", "--", "."], in: s.projectPath)   // drop uncommitted run edits
-        _ = GitRunner.run(["checkout", s.originalRef], in: s.projectPath)
-        _ = GitRunner.run(["branch", "-D", s.branch], in: s.projectPath)
-        if s.stashed { _ = GitRunner.run(["stash", "pop"], in: s.projectPath) }
+        _ = GitRunner.run(["checkout", "--", "."], in: s.projectPath)   // revert tracked run edits
+        _ = GitRunner.run(["clean", "-fd"], in: s.projectPath)          // remove run-created untracked files (respects .gitignore)
+        let switched = GitRunner.run(["checkout", s.originalRef], in: s.projectPath).ok
+        if switched { _ = GitRunner.run(["branch", "-D", s.branch], in: s.projectPath) }
+        // Only restore the stash once safely back on the original ref — never pop
+        // onto the codepet branch if the switch failed.
+        if s.stashed && switched { _ = GitRunner.run(["stash", "pop"], in: s.projectPath) }
     }
 
     // MARK: Shadow path (non-git)
@@ -73,12 +107,16 @@ enum CodeCommitService {
             try fm.createDirectory(atPath: shadowDir, withIntermediateDirectories: true)
             try fm.createDirectory(atPath: backupDir, withIntermediateDirectories: true)
             let base = URL(fileURLWithPath: projectPath)
-            guard let items = try? fm.contentsOfDirectory(atPath: projectPath) else { return nil }
+            guard let items = try? fm.contentsOfDirectory(atPath: projectPath) else {
+                try? fm.removeItem(atPath: root); return nil
+            }
+            // NOTE: top-level exclusions only — a nested `sub/node_modules` is still
+            // copied. Fine for a v1 non-git project; revisit if monorepos get slow.
             for name in items where !shadowSkip.contains(name) {
                 try fm.copyItem(at: base.appendingPathComponent(name),
                                 to: URL(fileURLWithPath: shadowDir).appendingPathComponent(name))
             }
-        } catch { return nil }
+        } catch { try? fm.removeItem(atPath: root); return nil }
         return ShadowSession(projectPath: projectPath, shadowDir: shadowDir, backupDir: backupDir)
     }
 
@@ -93,8 +131,11 @@ enum CodeCommitService {
             let shadowURL = URL(fileURLWithPath: s.shadowDir).appendingPathComponent(rel)
             let backupURL = URL(fileURLWithPath: s.backupDir).appendingPathComponent(rel)
             try? fm.createDirectory(at: backupURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Back up the original BEFORE touching the real file. If the backup can't
+            // be made, NEVER overwrite it — otherwise undo couldn't restore it (data loss).
             if fm.fileExists(atPath: realURL.path) {
-                try? fm.copyItem(at: realURL, to: backupURL)                 // back up the original
+                do { try fm.copyItem(at: realURL, to: backupURL) }
+                catch { allOK = false; continue }                            // skip apply: original stays intact
             } else {
                 fm.createFile(atPath: backupURL.path + ".tombstone", contents: Data())  // mark as new
             }

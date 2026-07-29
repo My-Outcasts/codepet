@@ -32,7 +32,7 @@ final class CodeCommitServiceTests: XCTestCase {
         let original = currentBranch(repo)
         let s = CodeCommitService.beginGit(projectPath: repo, taskTitle: "edit")!
         try? "v2".write(toFile: repo + "/file.txt", atomically: true, encoding: .utf8)
-        XCTAssertTrue(CodeCommitService.commitGit(s, files: ["file.txt"], message: "codepet: edit"))
+        XCTAssertTrue(CodeCommitService.commitGit(s, files: ["file.txt"], message: "codepet: edit").committed)
         // The commit is on the codepet branch; the original ref's file is still v1.
         _ = GitRunner.run(["checkout", original], in: repo)
         XCTAssertEqual(try? String(contentsOfFile: repo + "/file.txt", encoding: .utf8), "v1")
@@ -64,6 +64,32 @@ final class CodeCommitServiceTests: XCTestCase {
         let dir = NSTemporaryDirectory() + "codepet-2b-nonrepo-" + UUID().uuidString
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         XCTAssertNil(CodeCommitService.beginGit(projectPath: dir, taskTitle: "x"))
+    }
+
+    func test_abortGit_removesRunCreatedUntrackedFiles() {
+        let repo = tempGitRepo()
+        let s = CodeCommitService.beginGit(projectPath: repo, taskTitle: "edit")!
+        // The run creates a NEW (untracked) file — checkout -- . wouldn't remove it.
+        try? "new".write(toFile: repo + "/newfile.txt", atomically: true, encoding: .utf8)
+        CodeCommitService.abortGit(s)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repo + "/newfile.txt"),
+                       "run-created untracked files must be cleaned on abort")
+    }
+
+    func test_commitGit_overlappingStashConflict_preservesWorkAndSignals() {
+        let repo = tempGitRepo()   // file.txt == "v1" committed
+        // Founder has a dirty edit to the SAME file the agent will change.
+        try? "founder-edit".write(toFile: repo + "/file.txt", atomically: true, encoding: .utf8)
+        let s = CodeCommitService.beginGit(projectPath: repo, taskTitle: "edit")!
+        XCTAssertTrue(s.stashed)
+        try? "agent-edit".write(toFile: repo + "/file.txt", atomically: true, encoding: .utf8)
+        let r = CodeCommitService.commitGit(s, files: ["file.txt"], message: "codepet: edit")
+        XCTAssertTrue(r.committed)
+        XCTAssertFalse(r.stashRestored, "overlapping stash pop conflicts → not auto-restored")
+        // The commit is clean (no conflict markers) and the founder's work is retained.
+        XCTAssertEqual(try? String(contentsOfFile: repo + "/file.txt", encoding: .utf8), "agent-edit")
+        XCTAssertFalse(GitRunner.run(["stash", "list"], in: repo).stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       "founder's overlapping work retained in the stash for recovery")
     }
 
     // MARK: shadow path

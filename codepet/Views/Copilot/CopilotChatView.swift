@@ -590,22 +590,37 @@ struct CopilotBubble: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
-                HStack(alignment: .top, spacing: 10) {
-                    CompanionAvatar(companionId: message.companionId, size: 28)
+                // Web-parity "teammate card": an avatar + bold name header row, then
+                // the reply inside a neutral rounded surface card (not flat text).
+                let persona = (message.companionId ?? companyStore.company.companionId)
+                    .flatMap { PetCharacter.all[$0] }
+                HStack {
                     VStack(alignment: .leading, spacing: 8) {
-                        // A department specialist labels itself "Name · Dept" so the
-                        // handoff reads as a real teammate stepping in.
-                        if let dept = message.deptName,
-                           let persona = message.companionId.flatMap({ PetCharacter.all[$0] }) {
-                            Text("\(persona.name) · \(dept)")
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(persona.color)
+                        HStack(alignment: .center, spacing: 8) {
+                            CompanionAvatar(companionId: message.companionId, size: 22)
+                            // Specialist → "Name · Dept" in the department accent (kept);
+                            // guiding companion → just its name in primary.
+                            if let dept = message.deptName, let persona {
+                                Text("\(persona.name) · \(dept)")
+                                    .font(CodepetTheme.inter(13, weight: .semibold))
+                                    .foregroundColor(persona.color)
+                            } else {
+                                Text(persona?.name ?? companionName)
+                                    .font(CodepetTheme.inter(13, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.primaryText)
+                            }
                         }
                         Text(message.text)
                             .font(CodepetTheme.inter(15))
                             .lineSpacing(4)
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(CodepetTheme.surface))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(CodepetTheme.hairline, lineWidth: 1))
                         // Hide copy/regenerate/thumbs until the reply has text — an
                         // empty streaming placeholder shouldn't show an action bar.
                         if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

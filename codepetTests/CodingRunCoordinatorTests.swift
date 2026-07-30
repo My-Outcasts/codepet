@@ -83,6 +83,27 @@ final class CodingRunCoordinatorTests: XCTestCase {
         XCTAssertTrue(r.nothingToCommit, "a clean-tree commit must be flagged nothingToCommit, not a hard failure")
     }
 
+    // The coordinator's SHADOW path (non-git project): execute → approve →
+    // applyShadow must write the edit in-place to the real project. This is the
+    // end-to-end wiring the primitive-level applyShadow test doesn't cover.
+    func test_execute_thenApprove_appliesInPlace_shadow() async {
+        let repo = NSTemporaryDirectory() + "codepet-shadow-coord-" + UUID().uuidString
+        try? FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        try? "v1".write(toFile: repo + "/app.txt", atomically: true, encoding: .utf8)
+        let link = ProjectLink(path: repo, isGitRepo: false, hasClaudeMd: false)
+        let c = CodingRunCoordinator(runner: FakeRunner(edits: ["app.txt": "v2"]))
+        c.propose(ask: "edit", plannedFiles: 1, needsBash: false, link: link)
+        if case .shadow = c.run?.backend {} else { XCTFail("non-git must pick shadow backend"); return }
+        await c.execute()
+        XCTAssertEqual(c.run?.phase, .reviewing)
+        XCTAssertEqual(c.run?.diffs.count, 1)
+        await c.approve(acceptedPaths: c.run?.acceptedPaths ?? [])
+        XCTAssertEqual(c.run?.phase, .committed)
+        // The accepted change is applied in-place to the real (non-git) project.
+        XCTAssertEqual(try? String(contentsOfFile: repo + "/app.txt", encoding: .utf8), "v2",
+                       "shadow Approve must write the edit into the real project")
+    }
+
     func test_propose_noProject_whenLinkNil() {
         let c = CodingRunCoordinator(runner: FakeRunner())
         c.propose(ask: "x", plannedFiles: 1, needsBash: false, link: nil)

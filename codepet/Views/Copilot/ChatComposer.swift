@@ -59,9 +59,18 @@ struct ChatComposer: View {
     }
 
     private var deptChips: some View {
-        HStack(spacing: 6) {
-            ForEach(DepartmentCatalog.all.prefix(3)) { dep in
+        let firstThree = Array(DepartmentCatalog.all.prefix(3))
+        // A department chosen from the ••• overflow menu isn't one of the three
+        // visible chips, so its selection was invisible. Surface it as its own chip.
+        let overflowSelected: Department? = selectedDept.flatMap { sel in
+            firstThree.contains(where: { $0.key == sel.key }) ? nil : sel
+        }
+        return HStack(spacing: 6) {
+            ForEach(firstThree) { dep in
                 chip(dep)
+            }
+            if let sel = overflowSelected {
+                chip(sel)
             }
             Menu {
                 ForEach(DepartmentCatalog.all.dropFirst(3)) { dep in

@@ -407,6 +407,12 @@ struct CopilotBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let gap = message.interview, !message.interviewAnswered {
             interviewMessage(gap)
+        } else if message.role == .companion
+                    && message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // An empty companion message — a streaming placeholder before text
+            // arrives, or a staged coding run whose ack was dropped — must not render
+            // as a lone orb next to the "Working on it…" row.
+            EmptyView()
         } else {
             textBubble
         }
@@ -457,6 +463,10 @@ struct CopilotBubble: View {
         let name = item?.name ?? setup.name
         let why = item?.why
         let verb = item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable")
+        // Reflect the live enabled state so the tap has visible feedback: once the
+        // item is on (company.enabledTools is a directly-observed @Published), the
+        // button flips to an "On ✓" confirmation instead of silently staying "Turn on".
+        let isOn = item.map { companyStore.company.enabledTools.contains($0.id) } ?? false
         return HStack {
             MessageCard(hue: MessageCardStyle.hue(for: .setupSuggestion, companionAccent: companionAccent)) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -469,13 +479,25 @@ struct CopilotBubble: View {
                             .foregroundColor(CodepetTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Button { Task { await companyStore.activateSetup(setup) } } label: {
-                        Text(verb)
-                            .font(CodepetTheme.inter(12, weight: .semibold))
-                            .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(CodepetTheme.accentPurple))
-                    }.buttonStyle(.plain)
+                    if isOn {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12)).foregroundColor(CodepetTheme.accentTeal)
+                            Text(lang == .vi ? "Đã bật" : "On")
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.accentTeal)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(CodepetTheme.accentTeal.opacity(0.14)))
+                    } else {
+                        Button { Task { await companyStore.activateSetup(setup) } } label: {
+                            Text(verb)
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(Capsule().fill(CodepetTheme.accentPurple))
+                        }.buttonStyle(.plain)
+                    }
                 }
             }
             Spacer(minLength: 24)

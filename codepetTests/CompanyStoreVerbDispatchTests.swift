@@ -119,6 +119,31 @@ final class CompanyStoreVerbDispatchTests: XCTestCase {
                       "the founder's ask is echoed into the transcript")
     }
 
+    // The chat "Turn on" (setup verb) must enable an OFF toolkit item, and be
+    // idempotent — a duplicate tap must never flip an already-on item back off.
+    func test_activateSetup_enablesOffItem_andIsIdempotent() async {
+        var savedTools: [[String]] = []
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: { _ in AsyncThrowingStream { c in c.finish() } },
+                             librarySaver: { _, _ in true },
+                             toolsSaver: { _, tools in savedTools.append(tools); return true },
+                             threadSaver: { _, _ in true },
+                             threadsLoader: { _ in [] })
+        await s.hydrate(companyId: "u")
+        let item = Toolkit.catalog.first { !s.company.enabledTools.contains($0.id) }!
+        let setup = SetupAction(category: item.category.rawValue, name: item.name)
+
+        await s.activateSetup(setup)
+        XCTAssertTrue(s.company.enabledTools.contains(item.id), "Turn on must enable the off item")
+        await s.activateSetup(setup)   // duplicate tap
+        XCTAssertTrue(s.company.enabledTools.contains(item.id), "duplicate Turn on must NOT toggle it back off")
+        XCTAssertFalse(savedTools.isEmpty, "enabling must persist via toolsSaver")
+    }
+
     func test_engineeringPill_noLink_fallsThroughToCloud() async {
         var streamed = false
         let s = storeCapturingStream { streamed = true }

@@ -8,7 +8,7 @@ struct MarkdownView: View {
     private var blocks: [MarkdownBlock] { MarkdownBlocks.parse(markdown) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
                     .fixedSize(horizontal: false, vertical: true)
@@ -18,22 +18,42 @@ struct MarkdownView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var accent: Color { CodepetTheme.accentPurple }
+
     @ViewBuilder
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
         case let .heading(level, text):
             inline(text)
-                .font(.pixelSystem(size: level == 1 ? 16 : level == 2 ? 14 : 13, weight: .bold))
+                .font(CodepetTheme.inter(level == 1 ? 20 : level == 2 ? 17 : 15,
+                                         weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
-        case let .bullet(text):
-            HStack(alignment: .top, spacing: 8) {
-                Text("•").foregroundColor(CodepetTheme.mutedText)
-                inline(text).foregroundColor(CodepetTheme.bodyText)
+                .padding(.top, level <= 2 ? 4 : 0)
+        case let .numbered(index, text):
+            HStack(alignment: .top, spacing: 12) {
+                Text("\(index)")
+                    .font(CodepetTheme.inter(12, weight: .bold))
+                    .foregroundColor(CodepetTheme.onAccent(accent))
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(accent))
+                inline(text)
+                    .font(CodepetTheme.inter(15))
+                    .lineSpacing(4)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .padding(.top, 1)
             }
-            .font(.pixelSystem(size: 12))
+        case let .bullet(text):
+            HStack(alignment: .top, spacing: 12) {
+                Circle().fill(accent).frame(width: 6, height: 6).padding(.top, 8).padding(.leading, 8)
+                inline(text)
+                    .font(CodepetTheme.inter(15))
+                    .lineSpacing(4)
+                    .foregroundColor(CodepetTheme.bodyText)
+            }
         case let .paragraph(text):
             inline(text)
-                .font(.pixelSystem(size: 12))
+                .font(CodepetTheme.inter(15))
+                .lineSpacing(4)
                 .foregroundColor(CodepetTheme.bodyText)
         }
     }

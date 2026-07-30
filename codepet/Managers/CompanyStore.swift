@@ -673,16 +673,10 @@ final class CompanyStore: ObservableObject {
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
         // Department handoff: if a specialist leads this turn (chip focus or a
-        // department named in the text), the host posts a one-line handoff and the
-        // reply is spoken by that specialist (orb re-tint + "Name · Dept" label).
+        // department named in the text), the reply is spoken by that specialist
+        // directly — its "Name · Dept" header conveys the handoff, so there's no
+        // separate "Bringing in X" line (matches the web).
         let specialist = actingSpecialist(text: text, department: department)
-        if let s = specialist {
-            let name = PetCharacter.all[s.companionId]?.name ?? (language == .vi ? "chuyên gia" : "your specialist")
-            let handoff = language == .vi
-                ? "Mời \(name) — phụ trách \(s.deptName) — vào cùng nhé."
-                : "Bringing in \(name), your \(s.deptName) lead —"
-            chatMessages.append(CopilotMessage(role: .companion, text: handoff))
-        }
 
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",

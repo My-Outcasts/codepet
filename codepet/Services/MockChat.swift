@@ -47,6 +47,15 @@ enum MockChat {
         }
 
         // run → produce → approve (one task at a time). Pick the runnable whose TITLE
+        // re_plan → regenerate the roadmap for the founder's current stage (the CF's
+        // re_plan verb). Placed before the "run" branch so a "replan"/"re-plan" ask
+        // isn't swallowed by a broader route or the default. handleRePlan → generateRoadmap.
+        if msg.contains("replan") || msg.contains("re-plan") || msg.contains("re plan")
+            || msg.contains("regenerate") {
+            return ("On it — re-planning your roadmap for where you are now.",
+                    ChatDoneAction(rePlan: true))
+        }
+
         // shares a 4+ char word with the message (so "run privacy"/"run faq" hit that
         // department's task); a bare "run it" falls back to the first (the next move).
         // The reply previews the NEXT step so the guided flow keeps moving.

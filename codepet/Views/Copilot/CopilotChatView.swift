@@ -578,8 +578,8 @@ struct CopilotBubble: View {
                 HStack {
                     Spacer(minLength: 24)
                     Text(message.text)
-                        .font(CodepetTheme.inter(15))
-                        .lineSpacing(4)
+                        .font(CodepetTheme.inter(16))
+                        .lineSpacing(5)
                         .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                         .padding(.horizontal, 14).padding(.vertical, 9)
                         .background(UnevenRoundedRectangle(
@@ -602,17 +602,17 @@ struct CopilotBubble: View {
                             // guiding companion → just its name in primary.
                             if let dept = message.deptName, let persona {
                                 Text("\(persona.name) · \(dept)")
-                                    .font(CodepetTheme.inter(13, weight: .semibold))
+                                    .font(CodepetTheme.inter(14, weight: .semibold))
                                     .foregroundColor(persona.color)
                             } else {
                                 Text(persona?.name ?? companionName)
-                                    .font(CodepetTheme.inter(13, weight: .semibold))
+                                    .font(CodepetTheme.inter(14, weight: .semibold))
                                     .foregroundColor(CodepetTheme.primaryText)
                             }
                         }
                         Text(message.text)
-                            .font(CodepetTheme.inter(15))
-                            .lineSpacing(4)
+                            .font(CodepetTheme.inter(16))
+                            .lineSpacing(5)
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -621,11 +621,8 @@ struct CopilotBubble: View {
                                 .fill(CodepetTheme.surface))
                             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .stroke(CodepetTheme.hairline, lineWidth: 1))
-                        // Hide copy/regenerate/thumbs until the reply has text — an
-                        // empty streaming placeholder shouldn't show an action bar.
-                        if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            companionActions
-                        }
+                        // No per-message action bar — matches the web (the card is the
+                        // whole reply; copy/regenerate/thumbs are intentionally omitted).
                     }
                     Spacer(minLength: 24)
                 }
@@ -678,6 +675,25 @@ struct CopilotBubble: View {
     /// A clean one-glance preview of a deliverable body for the card: drop leading
     /// markdown heading lines (the card already shows the title), then strip inline
     /// markdown markers so raw `##`/`**`/`` ` `` never leak into the preview.
+    /// A structured preview of a generated deliverable: keeps the markdown structure
+    /// (bold section labels, line breaks, em-dashes) and turns leading "- "/"* " list
+    /// markers into real "•" bullets — so a bullet reads as a bullet, not a stray
+    /// hyphen, while mid-word hyphens ("re-explaining") stay intact.
+    static func deliverablePreview(_ body: String) -> AttributedString {
+        let cleaned = body
+            .components(separatedBy: "\n")
+            .map { line -> String in
+                let leading = line.prefix { $0 == " " }
+                let rest = line.dropFirst(leading.count)
+                if rest.hasPrefix("- ") || rest.hasPrefix("* ") {
+                    return leading + "•  " + rest.dropFirst(2)
+                }
+                return line
+            }
+            .joined(separator: "\n")
+        return CodepetMarkdown.attributedString(from: cleaned)
+    }
+
     static func previewText(_ body: String) -> String {
         var lines = body.components(separatedBy: "\n")
         // Drop leading blank + heading lines.
@@ -702,13 +718,14 @@ struct CopilotBubble: View {
                         HStack(spacing: 6) {
                             Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
                             Text(d.title)
-                                .font(CodepetTheme.inter(15, weight: .semibold))
+                                .font(CodepetTheme.inter(16.5, weight: .semibold))
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
-                        Text(Self.previewText(d.body))
-                            .font(CodepetTheme.inter(13))
+                        Text(Self.deliverablePreview(d.body))
+                            .font(CodepetTheme.inter(15))
                             .foregroundColor(CodepetTheme.bodyText)
-                            .lineLimit(3)
+                            .lineSpacing(4)
+                            .lineLimit(7)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .contentShape(Rectangle())

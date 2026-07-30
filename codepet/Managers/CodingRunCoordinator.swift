@@ -22,8 +22,15 @@ final class CodingRunCoordinator: ObservableObject {
     /// Stage a run: no linked project → `.noProject`; else pick the backend and
     /// decide whether the plan-preview is needed. Does not execute.
     func propose(ask: String, plannedFiles: Int, needsBash: Bool, link: ProjectLink?) {
-        // Don't clobber a run that's actively executing.
-        if run?.phase == .running { return }
+        // Don't clobber an in-flight run. `.running` is obvious; `.readyToRun` matters
+        // too — a readyToRun job auto-executes a beat later, so a rapid duplicate
+        // proposal (e.g. the founder pressing send twice) landing in that window
+        // would otherwise supersede it mid-launch and race the two executes, stranding
+        // the run at `.running`. A `.previewing`/`.reviewing`/finished run is NOT
+        // in-flight and remains supersedable (the founder changed their mind).
+        if let p = run?.phase, p == .running || p == .readyToRun {
+            return
+        }
         // A new proposal supersedes any un-resolved prior run — tear down its live
         // session so no branch/shadow is orphaned (no-op when there's none).
         teardownSession()
@@ -87,7 +94,9 @@ final class CodingRunCoordinator: ObservableObject {
     }
 
     func approve(acceptedPaths: Set<String>) async {
-        guard var current = run, current.phase == .reviewing else { return }
+        guard var current = run, current.phase == .reviewing else {
+            return
+        }
         switch current.backend {
         case .git:
             guard let s = gitSession else {
@@ -95,8 +104,18 @@ final class CodingRunCoordinator: ObservableObject {
             }
             let result = CodeCommitService.commitGit(s, files: Array(acceptedPaths),
                                                      message: "codepet: \(current.ask)")
-            guard result.committed else {
-                CodeCommitService.abortGit(s)   // restore the founder's stash / clean up
+            // Landed = a fresh commit OR the change was already on the branch (a true
+            // duplicate Approve). Only then is the run committed.
+            let landed = result.committed || result.alreadyOnBranch
+            if !landed {
+                if result.nothingToCommit {
+                    // Nothing staged AND nothing on the branch → the edit never reached
+                    // the commit. Report honestly; do NOT abort (nothing to undo, and
+                    // aborting an empty branch would just churn) — keep the card truthful.
+                    current.phase = .failed("No changes were committed.")
+                    run = current; clearSessions(); return
+                }
+                CodeCommitService.abortGit(s)   // real failure: restore the stash / clean up
                 current.phase = .failed("Couldn't commit the changes.")
                 run = current; clearSessions(); return
             }

@@ -17,6 +17,13 @@ struct GitSession: Equatable {
 struct GitCommitResult: Equatable {
     let committed: Bool
     let stashRestored: Bool
+    /// True when `git commit` found nothing to stage.
+    var nothingToCommit: Bool = false
+    /// True when nothing was staged BUT the branch already carries the change (a real
+    /// duplicate Approve). Distinguishes "already done" (→ committed) from "the edit
+    /// never reached the branch" (→ honest failure), so the card can't claim a commit
+    /// that isn't there.
+    var alreadyOnBranch: Bool = false
 }
 
 /// Isolates an edit_code run so any change is instantly revertible. Git repos use
@@ -60,9 +67,23 @@ enum CodeCommitService {
         _ = GitRunner.run(["add"] + files, in: s.projectPath)
         let commit = GitRunner.run(["commit", "-m", message], in: s.projectPath)
         guard commit.ok else {
+            // "nothing to commit" is NOT a failure — the change is already on the
+            // branch (e.g. a duplicate Approve). Flag it so the caller keeps the
+            // branch instead of aborting/deleting it.
+            let nothing = (commit.stdout + commit.stderr).contains("nothing to commit")
+                || (commit.stdout + commit.stderr).contains("nothing added to commit")
+            // If nothing was staged, is the change ALREADY on the branch (true
+            // duplicate) or did the edit never land (real problem)? Decide honestly.
+            var already = false
+            if nothing {
+                let ahead = GitRunner.run(["rev-list", "--count", "\(s.originalRef)..\(s.branch)"], in: s.projectPath)
+                    .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                already = (ahead != "0" && ahead != "")
+            }
             // Commit failed → leave the session intact and do NOT pop here; a
             // follow-up abortGit restores the stash (avoids a double-pop).
-            return GitCommitResult(committed: false, stashRestored: false)
+            return GitCommitResult(committed: false, stashRestored: false,
+                                   nothingToCommit: nothing, alreadyOnBranch: already)
         }
         var stashRestored = true
         if s.stashed {
@@ -82,7 +103,18 @@ enum CodeCommitService {
         _ = GitRunner.run(["checkout", "--", "."], in: s.projectPath)   // revert tracked run edits
         _ = GitRunner.run(["clean", "-fd"], in: s.projectPath)          // remove run-created untracked files (respects .gitignore)
         let switched = GitRunner.run(["checkout", s.originalRef], in: s.projectPath).ok
-        if switched { _ = GitRunner.run(["branch", "-D", s.branch], in: s.projectPath) }
+        // Only delete the throwaway branch if it carries NO commits beyond where it
+        // started. A branch with commits holds real, approved work — never destroy it
+        // (that was the source of "the commit vanished"): reject/supersede on an
+        // already-committed run would otherwise `branch -D` the founder's change.
+        if switched {
+            let ahead = GitRunner.run(["rev-list", "--count", "\(s.originalRef)..\(s.branch)"], in: s.projectPath)
+                .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Only delete when the branch carries no commits — never destroy work.
+            if ahead == "0" {
+                _ = GitRunner.run(["branch", "-D", s.branch], in: s.projectPath)
+            }
+        }
         // Only restore the stash once safely back on the original ref — never pop
         // onto the codepet branch if the switch failed.
         if s.stashed && switched { _ = GitRunner.run(["stash", "pop"], in: s.projectPath) }

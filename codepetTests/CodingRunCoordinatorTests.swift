@@ -39,11 +39,48 @@ final class CodingRunCoordinatorTests: XCTestCase {
 
     func test_propose_previewsMultiFile_readyForSmall() {
         let link = ProjectLink(path: "/p", isGitRepo: true, hasClaudeMd: true)
+        // Separate coordinators: a readyToRun run is now in-flight and blocks a
+        // second propose on the same instance (see test_propose_ignoresDuplicate…).
+        let small = CodingRunCoordinator(runner: FakeRunner())
+        small.propose(ask: "x", plannedFiles: 1, needsBash: false, link: link)
+        XCTAssertEqual(small.run?.phase, .readyToRun)
+        let multi = CodingRunCoordinator(runner: FakeRunner())
+        multi.propose(ask: "x", plannedFiles: 3, needsBash: false, link: link)
+        XCTAssertEqual(multi.run?.phase, .previewing)
+    }
+
+    func test_propose_ignoresDuplicateWhileInFlight() {
+        let link = ProjectLink(path: "/p", isGitRepo: true, hasClaudeMd: true)
         let c = CodingRunCoordinator(runner: FakeRunner())
-        c.propose(ask: "x", plannedFiles: 1, needsBash: false, link: link)
+        c.propose(ask: "first", plannedFiles: 1, needsBash: false, link: link)   // → readyToRun (in-flight)
+        c.propose(ask: "second", plannedFiles: 1, needsBash: false, link: link)  // rapid duplicate
+        // The in-flight run is NOT clobbered; the duplicate is ignored.
+        XCTAssertEqual(c.run?.ask, "first")
         XCTAssertEqual(c.run?.phase, .readyToRun)
-        c.propose(ask: "x", plannedFiles: 3, needsBash: false, link: link)
-        XCTAssertEqual(c.run?.phase, .previewing)
+    }
+
+    // abortGit must NEVER delete a branch that carries commits — reject/supersede on
+    // an already-committed run would otherwise destroy the founder's approved work
+    // (the "commit vanished" orphaning).
+    func test_abortGit_keepsBranchThatHasCommits() {
+        let repo = gitRepo()
+        guard let s = CodeCommitService.beginGit(projectPath: repo, taskTitle: "friendlier greeting") else {
+            return XCTFail("beginGit failed")
+        }
+        try? "v2".write(toFile: repo + "/app.txt", atomically: true, encoding: .utf8)
+        XCTAssertTrue(CodeCommitService.commitGit(s, files: ["app.txt"], message: "codepet: x").committed)
+        CodeCommitService.abortGit(s)   // has a commit → must be kept
+        let branches = GitRunner.run(["branch", "--list", "codepet/*"], in: repo).stdout
+        XCTAssertTrue(branches.contains(s.branch), "a codepet branch with commits must survive abortGit\n\(branches)")
+    }
+
+    // A duplicate commit (clean tree) is flagged nothingToCommit, NOT a failure.
+    func test_commitGit_flagsNothingToCommit() {
+        let repo = gitRepo()
+        guard let s = CodeCommitService.beginGit(projectPath: repo, taskTitle: "x") else { return XCTFail() }
+        let r = CodeCommitService.commitGit(s, files: ["app.txt"], message: "codepet: x")  // app.txt unchanged
+        XCTAssertFalse(r.committed)
+        XCTAssertTrue(r.nothingToCommit, "a clean-tree commit must be flagged nothingToCommit, not a hard failure")
     }
 
     func test_propose_noProject_whenLinkNil() {

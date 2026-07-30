@@ -90,6 +90,7 @@ struct RoadmapView: View {
         case .approve:          Task { await companyStore.approveTask(id: task.id) }
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
         case .editCode:
+            companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
             companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
                                            plannedFiles: 2, needsBash: false,
                                            link: companyStore.activeProjectLink)

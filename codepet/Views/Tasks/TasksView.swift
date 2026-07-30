@@ -98,6 +98,7 @@ struct TasksView: View {
             case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
             case .editCode:
+                companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
                 companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: t),
                                                plannedFiles: 2, needsBash: false,
                                                link: companyStore.activeProjectLink)

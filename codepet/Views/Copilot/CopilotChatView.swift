@@ -13,6 +13,10 @@ struct CopilotChatView: View {
     @State private var mode: ChatMode = .ask
     @State private var selectedDept: Department?
     @FocusState private var inputFocused: Bool
+    /// Bumped from the coding-coordinator publishers below so a nested-object change
+    /// (run phase / steps) reliably re-renders this view live — the run card was
+    /// otherwise only refreshing on a tab switch.
+    @State private var codingRunTick = 0
 
     /// Max width of the conversation column + composer — matches Claude Code's
     /// comfortable centered reading width (both stay in sync via this one value).
@@ -175,20 +179,28 @@ struct CopilotChatView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
+                        // A chat-triggered coding run renders INLINE right after its
+                        // ask, so later messages sit below it instead of shoving the
+                        // card to the bottom of the transcript. (Part 2C-2 inline)
+                        if companyStore.codingRun.run != nil,
+                           companyStore.codingRunAnchorId == m.id {
+                            CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                        }
                     }
                     if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
                     if !companyStore.activeAgentRuns.isEmpty {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
-                    // The local coding-agent run (Part 2C-2). One active run at the
-                    // transcript level, mirroring AgentsWorkingRow — "work lands in
-                    // chat" (Part 1 Layer 4): the edit_code verb was dispatched here.
-                    if companyStore.codingRun.run != nil {
+                    // A coding run with no chat anchor (triggered from roadmap/tasks,
+                    // where there's no ask message) falls back to the transcript
+                    // bottom, mirroring AgentsWorkingRow.
+                    if companyStore.codingRun.run != nil,
+                       !companyStore.chatMessages.contains(where: { $0.id == companyStore.codingRunAnchorId }) {
                         CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
                 }
                 .padding(.top, 40)
-                .padding(.bottom, 24)
+                .padding(.bottom, 32)
                 .frame(maxWidth: chatColumnWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, chatGutter)
@@ -209,8 +221,31 @@ struct CopilotChatView: View {
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
-            .onChange(of: companyStore.codingRun.run != nil) { _, active in
-                if active { withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) } }
+            // A coding run renders inline (or at the bottom); CopilotChatView doesn't
+            // observe the nested coordinator, so watch its publishers directly and
+            // jump to the card when a run starts and as it grows (steps → diff →
+            // Approve/Reject), so the founder sees it and its controls stay reachable.
+            // (Part 2C-2)
+            // `@Published` emits in willSet — BEFORE `run`/`steps` are actually
+            // assigned — so bumping state synchronously here re-renders while the
+            // coordinator still holds the OLD value (the card stuck on "running" until
+            // a tab switch). Defer one runloop turn so the re-render reads the
+            // committed value. (Root cause of the run card not updating live.)
+            .onReceive(companyStore.codingRun.$run) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
+            }
+            .onReceive(companyStore.codingRun.$steps) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
             }
         }
     }

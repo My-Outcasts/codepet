@@ -16,6 +16,8 @@ struct CodeRunCardView: View {
     /// `run.acceptedPaths`. Seeded when diffs arrive; the founder can deselect a
     /// file before approving, and Approve commits only the still-selected subset.
     @State private var accepted: Set<String> = []
+    /// Presents the uncapped full-diff sheet ("Open full diff").
+    @State private var showingFullDiff = false
 
     private var hue: Color { CodepetTheme.accentPurple }
     private let maxLinesPerFile = 40
@@ -33,7 +35,22 @@ struct CodeRunCardView: View {
         // Seed / re-seed the accept selection whenever the coordinator republishes
         // the run's accepted set (i.e. when diffs land and it enters `.reviewing`).
         .onChange(of: coordinator.run?.acceptedPaths) { _, new in accepted = new ?? [] }
-        .onAppear { accepted = coordinator.run?.acceptedPaths ?? [] }
+        .onAppear {
+            accepted = coordinator.run?.acceptedPaths ?? []
+            autoRunIfReady()
+        }
+        // `.readyToRun` = "small/safe → run immediately" (no plan-preview to confirm;
+        // the diff review is the gate). The card is what triggers it — kick the run
+        // off as soon as we're in that phase, whether the card appears already ready
+        // or transitions into it. `.previewing` instead waits for the Run button.
+        .onChange(of: coordinator.run?.phase) { _, _ in autoRunIfReady() }
+        .sheet(isPresented: $showingFullDiff) { fullDiffSheet }
+    }
+
+    private func autoRunIfReady() {
+        if coordinator.run?.phase == .readyToRun {
+            Task { await coordinator.execute() }
+        }
     }
 
     // MARK: - Phase router
@@ -163,7 +180,7 @@ struct CodeRunCardView: View {
             ForEach(run.diffs) { diff in diffCard(diff, run: run) }
         }
         actionButton(lang == .vi ? "Xem toàn bộ khác biệt" : "Open full diff", filled: false, subtle: true) {
-            // Stub: a full-diff viewer is a follow-on. The inline diffs are the gate.
+            showingFullDiff = true
         }
         HStack(spacing: 8) {
             actionButton(approveLabel, filled: true) {
@@ -277,26 +294,90 @@ struct CodeRunCardView: View {
         let shown = Array(diff.lines.prefix(maxLinesPerFile))
         let overflow = diff.lines.count - shown.count
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(shown) { line in
-                HStack(alignment: .top, spacing: 6) {
-                    Text(marker(line.kind)).frame(width: 8, alignment: .leading)
-                    Text(line.text.isEmpty ? " " : line.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(lineFg(line.kind))
-                .padding(.horizontal, 8).padding(.vertical, 1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(lineBg(line.kind))
-            }
+            ForEach(shown) { line in diffLineRow(line) }
             if overflow > 0 {
-                Text(lang == .vi ? "+\(overflow) dòng nữa" : "+\(overflow) more lines")
-                    .font(CodepetTheme.inter(10)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                Button { showingFullDiff = true } label: {
+                    Text(lang == .vi ? "+\(overflow) dòng nữa — xem toàn bộ" : "+\(overflow) more lines — open full diff")
+                        .font(CodepetTheme.inter(10, weight: .medium)).foregroundColor(hue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                }.buttonStyle(.plain)
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// One diff line — shared by the inline (capped) card and the full-diff sheet.
+    private func diffLineRow(_ line: ClaudeCodeRunner.FileDiff.Line) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(marker(line.kind)).frame(width: 8, alignment: .leading)
+            Text(line.text.isEmpty ? " " : line.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .foregroundColor(lineFg(line.kind))
+        .padding(.horizontal, 8).padding(.vertical, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(lineBg(line.kind))
+    }
+
+    // MARK: - Full-diff sheet
+
+    /// The complete, uncapped diff for every changed file — opened from "Open full
+    /// diff" (and the "+N more lines" affordance). A focused, scrollable surface so
+    /// long diffs are readable without inflating the in-chat card.
+    private var fullDiffSheet: some View {
+        let diffs = coordinator.run?.diffs ?? []
+        return VStack(spacing: 0) {
+            HStack {
+                Text(lang == .vi ? "Toàn bộ thay đổi" : "Full diff")
+                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                Text(filesChangedLabel(diffs.count))
+                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                Spacer()
+                Button(lang == .vi ? "Xong" : "Done") { showingFullDiff = false }
+                    .buttonStyle(.plain).foregroundColor(hue)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+            }
+            .padding(14)
+            Divider().overlay(CodepetTheme.hairline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(diffs) { diff in
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                Text(diff.fileName)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundColor(CodepetTheme.primaryText)
+                                if diff.isNewFile {
+                                    Text(lang == .vi ? "mới" : "new")
+                                        .font(CodepetTheme.inter(9, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.accentTeal)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Capsule().fill(CodepetTheme.accentTeal.opacity(0.16)))
+                                }
+                                Spacer(minLength: 4)
+                            }
+                            .padding(.horizontal, 8).padding(.vertical, 6)
+                            Divider().overlay(CodepetTheme.hairline)
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(diff.lines) { line in diffLineRow(line) }   // uncapped
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(CodepetTheme.pageBackground.opacity(0.6)))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(CodepetTheme.hairline, lineWidth: 1))
+                    }
+                }
+                .padding(14)
+            }
+        }
+        .frame(minWidth: 520, minHeight: 420)
+        .background(CodepetTheme.surface)
     }
 
     // MARK: - Small pieces

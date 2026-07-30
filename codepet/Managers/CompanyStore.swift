@@ -51,7 +51,29 @@ final class CompanyStore: ObservableObject {
     /// Drives local coding-agent (`edit_code`) runs (Part 2). The chat UI (2C-2)
     /// observes it; `handleDoneAction` stages a run via `propose` when byte emits
     /// the verb. Lazy so the adapter is built only once a coding run is proposed.
-    lazy var codingRun = CodingRunCoordinator(runner: ClaudeCodeRunAdapter())
+    /// Under the offline flag (`CODEPET_MOCK_CHAT`) the runner is a `MockCodeRunner`
+    /// that fakes the AI (no `claude`, no subscription cost) but keeps the real diff
+    /// review + git-commit engine, so the whole flow is exercisable for free.
+    /// Forwards the coding coordinator's change notifications into the store (below).
+    private var codingRunBag: AnyCancellable?
+    lazy var codingRun: CodingRunCoordinator = {
+        let runner: CodeRunning = MockChat.enabled ? MockCodeRunner() : ClaudeCodeRunAdapter()
+        let c = CodingRunCoordinator(runner: runner)
+        // Re-publish the coordinator's changes through the store. `codingRun` is a
+        // nested ObservableObject; a view that only observes CompanyStore (e.g.
+        // CopilotChatView) otherwise won't re-render as the run progresses — the card
+        // appeared to "stick" on running until a tab switch rebuilt the view. Bridging
+        // objectWillChange makes the run update live. Same pattern as TipsPersistence.
+        self.codingRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return c
+    }()
+    /// The chat message a chat-triggered coding run is anchored to, so its run card
+    /// renders INLINE right after that ask — new messages then appear below it,
+    /// instead of the card being pinned to the transcript bottom and shoved down by
+    /// every later message. `nil` for runs triggered outside chat (roadmap/tasks):
+    /// those have no ask message, so the card falls back to the bottom. Views must
+    /// set this (`nil` at non-chat trigger sites) around `codingRun.propose`.
+    @Published var codingRunAnchorId: String?
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
@@ -451,6 +473,7 @@ final class CompanyStore: ObservableObject {
             // normal sendMessage, which is what usually appends it) so it's visible
             // even before the run card renders, then stage the local run.
             chatMessages.append(CopilotMessage(role: .me, text: text))
+            codingRunAnchorId = chatMessages.last?.id   // render the card inline after this ask
             codingRun.propose(ask: text, plannedFiles: 2, needsBash: false, link: activeProjectLink)
             select(.chat)
             return
@@ -972,6 +995,17 @@ final class CompanyStore: ObservableObject {
         // to drive against the active linked project (nil link → the coordinator lands
         // in .noProject and the UI offers to link). Never sent to the cloud.
         if let ec = action.editCode {
+            // The run card IS the response, so drop the plain companion ack that was
+            // just streamed for this turn — otherwise it lingers (and orphans if a
+            // later run supersedes this one). Only a text-only companion line is
+            // removed; a deliverable draft is never touched. (2C-2 fix B)
+            if let last = chatMessages.indices.last, chatMessages[last].role == .companion,
+               chatMessages[last].draft == nil {
+                chatMessages.remove(at: last)
+            }
+            // Anchor the card to the founder's ask (now the last message) so it
+            // renders inline there, not at the transcript bottom. (2C-2 inline)
+            codingRunAnchorId = chatMessages.last?.id
             codingRun.propose(ask: ec.ask, plannedFiles: ec.plannedFiles, needsBash: ec.needsBash,
                               link: activeProjectLink)
         }

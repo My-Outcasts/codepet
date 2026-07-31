@@ -205,4 +205,98 @@ final class RoadmapLayoutTests: XCTestCase {
         XCTAssertEqual(l.columns.count, RoadmapPhase.allCases.count)
         XCTAssertEqual(l.size.height, 120)
     }
+
+    // MARK: spill search direction (takeRow)
+
+    // eng/design/mkt all clash in column 0 (find) → lanes 0/1/2, laneCount 3. Column 2
+    // (build) only has eng tasks, so lane 1 is free there. A 2nd eng task in column 2
+    // must search DOWN from its lane and land on the first free lane below it.
+    func testSpillSearchesDownIntoAFreeLane() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("d1", .find, dept: "design"),
+            t("m1", .find, dept: "mkt"),
+            t("a1", .build, dept: "eng"), t("a2", .build, dept: "eng"),
+        ])
+        XCTAssertEqual(node(l, "a1").row, 0)
+        XCTAssertEqual(node(l, "a2").row, 1)   // DOWN search; would be 3 if both loops were gone
+    }
+
+    // Same lane setup, but this time column 2 (build) is occupied by mkt at its own lane
+    // (2), the bottom lane, with nothing free below it. The spill must search UP instead.
+    func testSpillSearchesUpWhenNothingIsFreeBelow() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("d1", .find, dept: "design"),
+            t("m0", .find, dept: "mkt"),
+            t("m1", .build, dept: "mkt"), t("m2", .build, dept: "mkt"),
+        ])
+        XCTAssertEqual(node(l, "m1").row, 2)
+        XCTAssertEqual(node(l, "m2").row, 1)   // UP search; would be 3 if the UP loop were gone
+    }
+
+    // MARK: cross-column elbow
+
+    // e1 (find/eng) → m1 (build/mkt) spans TWO columns with an intervening column
+    // (foundation) in between. m0 forces eng and mkt onto different lanes so the edge is a
+    // real elbow, not a straight line. The target-gutter and source-gutter formulas give
+    // different x's here, so this actually distinguishes them (unlike the adjacent-column
+    // case already covered by testOffsetRowsGiveAnElbowInTheTargetGutter).
+    func testCrossColumnElbowClearsTheInterveningColumn() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("m0", .find, dept: "mkt"),
+            t("m1", .build, dept: "mkt", deps: ["e1"]),
+        ])
+        let e = l.edges.first { $0.from == "e1" && $0.to == "m1" }!
+        XCTAssertEqual(e.points.count, 4)
+        XCTAssertEqual(e.points[0].x, 440)   // leaves e1's RIGHT edge (232 + 208)
+        XCTAssertEqual(e.points[0].y, 72)
+        XCTAssertEqual(e.points[3].y, 168)
+        XCTAssertEqual(e.points[1].x, 738)   // gutter left of the TARGET column (768 - 30)
+        XCTAssertEqual(e.points[2].x, 738)
+        // Column 1 (foundation)'s right edge is 500 + 208 = 708. A source-gutter
+        // implementation would put the vertical at 470 — straight through column 1's
+        // cards. 738 > 708 proves the vertical actually clears the intervening column.
+        XCTAssertGreaterThan(e.points[1].x, 708)
+    }
+
+    // MARK: unlisted departments
+
+    // Pins `+ deptSeen.filter { !deptLaneOrder.contains($0) }`: canonical depts always lane
+    // before unlisted ones, regardless of array order.
+    func testUnlistedDeptGetsItsOwnLaneBelowCanonicalOnes() {
+        // The unlisted dept (nil → "") appears FIRST in the task array — this ordering is
+        // what makes the test discriminating. If the unlisted-dept term were dropped,
+        // laneOf[""] would never be set and `laneOf[task.dept ?? ""] ?? 0` would default u1
+        // to lane 0, taking row 0, while e1 (now unable to claim lane 0) spilled to row 1 —
+        // i.e. these two assertions would reverse.
+        let l = RoadmapLayoutEngine.layout([
+            t("u1", .find, dept: nil), t("e1", .find, dept: "eng"),
+        ])
+        XCTAssertEqual(node(l, "e1").row, 0)
+        XCTAssertEqual(node(l, "u1").row, 1)
+
+        // Second layout: two unlisted depts, neither canonical — proves the order among
+        // them is first-appearance, not alphabetical (z-custom appears first here but
+        // would sort after a-custom alphabetically).
+        let l2 = RoadmapLayoutEngine.layout([
+            t("z1", .find, dept: "z-custom"), t("a1", .find, dept: "a-custom"),
+        ])
+        XCTAssertEqual(node(l2, "z1").row, 0)
+        XCTAssertEqual(node(l2, "a1").row, 1)
+    }
+
+    // MARK: multi-row canvas height
+
+    // testRootBoxIsVerticallyCentered recomputes the engine's own formula from its own
+    // output (`((l.size.height - 118) / 2).rounded()`), so it can never fail. Pin absolute
+    // numbers instead: two depts (eng, mkt) that never share a column but both sit in
+    // column 0 (find) force 2 lanes.
+    func testMultiRowCanvasHeightAndRootCentring() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
+        ])
+        // top 40 + 1 * rowPitch 96 + cardH 64 + bottomPad 16
+        XCTAssertEqual(l.size.height, 216)
+        // round((216 - 118) / 2)
+        XCTAssertEqual(l.root!.origin.y, 49)
+    }
 }

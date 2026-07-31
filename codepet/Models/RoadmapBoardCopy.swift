@@ -1,0 +1,38 @@
+// codepet/Models/RoadmapBoardCopy.swift
+import Foundation
+
+/// Pure copy + presentation rules for a roadmap board card, ported from the web
+/// `RoadmapView.tsx` (VERB, STATUS, the locked tray marker, herePhrase). Kept out of the
+/// views so the wording is unit-tested and can't drift from web.
+enum RoadmapBoardCopy {
+    /// Actionable states earn a verb the founder can act on; done/locked stay quiet labels.
+    static func verb(for status: TaskStatus, _ lang: AppLanguage) -> String? {
+        switch status {
+        case .codepetCanDo:  return lang == .vi ? "Bắt đầu" : "Start"
+        case .needsApproval: return lang == .vi ? "Duyệt" : "Review"
+        case .needsYou:      return lang == .vi ? "Cần bạn" : "Add your input"
+        case .done, .blocked: return nil
+        }
+    }
+
+    /// The plain-language status line shown INSTEAD of a chip — web renders done/locked as
+    /// text, not a pill. Returns nil for any state that has a verb chip.
+    static func quietLabel(for status: TaskStatus, lang: AppLanguage) -> String? {
+        switch status {
+        case .done:    return lang == .vi ? "Xong" : "Done"
+        case .blocked: return lang == .vi ? "Cần bước trước" : "Needs earlier steps"
+        case .codepetCanDo, .needsYou, .needsApproval: return nil
+        }
+    }
+
+    /// The small deliverable/output marker in a card's top-right — locked cards only.
+    static func showsTrayMarker(_ status: TaskStatus) -> Bool { status == .blocked }
+
+    /// The beacon marks where the FOUNDER stands — named when we have it, second person
+    /// otherwise. Composed (not "{label} is here") so the fallback reads "You are here".
+    static func herePhrase(founderName: String?, lang: AppLanguage) -> String {
+        let n = (founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty { return lang == .vi ? "Bạn đang ở đây" : "You are here" }
+        return lang == .vi ? "\(n) đang ở đây" : "\(n) is here"
+    }
+}

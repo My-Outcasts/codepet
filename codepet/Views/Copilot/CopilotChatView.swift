@@ -12,6 +12,8 @@ struct CopilotChatView: View {
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
+    /// Composer mode: normal chat vs. an engineering code-edit ask.
+    @State private var engineeringMode = false
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
@@ -181,6 +183,18 @@ struct CopilotChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
+            Button { engineeringMode.toggle() } label: {
+                Text(engineeringMode ? (lang == .vi ? "Kỹ thuật" : "Engineering")
+                                     : (lang == .vi ? "Trò chuyện" : "Chat"))
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .foregroundColor(engineeringMode ? .white : CodepetTheme.mutedText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(engineeringMode ? CodepetTheme.accentBlue
+                                                               : CodepetTheme.accentBlue.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Bật để yêu cầu sửa code trên dự án đã liên kết"
+                              : "On to ask for a code edit on the linked project")
             TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
                       text: $companyStore.chatDraft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -204,7 +218,11 @@ struct CopilotChatView: View {
         let text = companyStore.chatDraft
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
-        Task { await companyStore.sendChat(text, language: lang) }
+        if engineeringMode {
+            companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
+        } else {
+            Task { await companyStore.sendChat(text, language: lang) }
+        }
     }
 }
 

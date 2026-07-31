@@ -21,6 +21,16 @@ struct RoadmapBoardView: View {
     /// Task ids mid-pulse (a step just became current, or just unlocked).
     @State private var pulseIds: Set<String> = []
     @State private var prevStates: [String: TaskStatus] = [:]
+    /// The previous current-move id, so a become-current transition can be detected even
+    /// when the new current task was never `.blocked` (see `detectAdvances`).
+    @State private var prevCurrentId: String?
+    /// Guards the one-shot open-framing scroll so it fires exactly once, whichever happens
+    /// first: `onAppear` (already-loaded case) or `currentId` first resolving (first-visit,
+    /// async-generated case).
+    @State private var didFrame = false
+    /// Scroll-edge fade state, written only by `onScrollGeometryChange`.
+    @State private var canScrollLeft = false
+    @State private var canScrollRight = false
 
     private var layout: RoadmapLayout { RoadmapLayoutEngine.layout(tasks) }
     private var currentId: String? { RoadmapEngine.nextStep(tasks)?.id }
@@ -28,51 +38,127 @@ struct RoadmapBoardView: View {
         RoadmapBoardCopy.herePhrase(founderName: founderName, lang: lang)
     }
 
-    private let headerBlock: CGFloat = 34    // phase-header row (28) + its 6pt bottom margin
+    private static let headerRow: CGFloat = 28
+    private static let headerGap: CGFloat = 6
+    private static let headerBlock: CGFloat = headerRow + headerGap
+    /// Generous fixed trailing allowance for the LAST phase header's label + `done/total`
+    /// count, so it never clips. English ("RUN & GROW") needs ~224pt; Vietnamese
+    /// ("VẬN HÀNH & PHÁT TRIỂN" + count) runs to ~230–235pt. 240pt covers both with margin
+    /// without measuring text.
+    private static let headerTrailingAllowance: CGFloat = 240
 
     /// Scale the diagram up to fill the available height, capped at 1.0 (never upscale past
     /// natural size), and center any leftover height — so a short roadmap leaves no dead space.
     private func scale(for l: RoadmapLayout) -> CGFloat {
-        let natural = l.size.height + headerBlock
+        let natural = l.size.height + Self.headerBlock
         guard avail > 0, natural > 0 else { return 1 }
-        return max(1, min(1.0, avail / natural))
+        return min(1, avail / natural)   // shrink to fit; never upscale past natural size
+    }
+
+    /// The scrollable content width: at least the diagram's width, but widened when the
+    /// last phase header's label + count would otherwise run past it.
+    private func boardWidth(_ l: RoadmapLayout) -> CGFloat {
+        let lastHeaderX = l.columns.last?.x ?? 0
+        return max(l.size.width, lastHeaderX + Self.headerTrailingAllowance)
     }
 
     var body: some View {
         let l = layout
         let s = scale(for: l)
-        let scaledH = (l.size.height + headerBlock) * s
+        let w = boardWidth(l)
+        let scaledH = (l.size.height + Self.headerBlock) * s
         let padTop = avail > scaledH ? ((avail - scaledH) / 2).rounded() : 0
 
         return ScrollViewReader { proxy in
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 6) {
-                    phaseHeaders(l)
+                VStack(alignment: .leading, spacing: Self.headerGap) {
+                    phaseHeaders(l, width: w)
                     diagram(l)
                 }
-                .frame(width: l.size.width, alignment: .topLeading)
+                .frame(width: w, alignment: .topLeading)
                 .scaleEffect(s, anchor: .topLeading)
-                .frame(width: l.size.width * s, height: scaledH, alignment: .topLeading)
+                .frame(width: w * s, height: scaledH, alignment: .topLeading)
                 .padding(.top, padTop)
             }
             .background(GeometryReader { g in
                 Color.clear.onAppear { avail = g.size.height }
                     .onChange(of: g.size.height) { _, h in avail = h }
             })
+            .onScrollGeometryChange(for: ScrollEdgeState.self) { geo in
+                ScrollEdgeState(
+                    left: geo.contentOffset.x > 0.5,
+                    right: geo.contentOffset.x < geo.contentSize.width - geo.containerSize.width - 0.5)
+            } action: { _, new in
+                canScrollLeft = new.left
+                canScrollRight = new.right
+            }
+            .overlay(alignment: .leading) { edgeFade(leading: true, visible: canScrollLeft) }
+            .overlay(alignment: .trailing) { edgeFade(leading: false, visible: canScrollRight) }
             .onAppear {
                 // Open framed on the current move — the founder shouldn't hunt for it.
-                if let id = currentId { proxy.scrollTo(id, anchor: .center) }
+                if let id = currentId {
+                    proxy.scrollTo(id, anchor: .center)
+                    didFrame = true
+                }
                 prevStates = statusMap(tasks)
+                prevCurrentId = currentId
+            }
+            .onChange(of: currentId) { _, new in
+                // First visit: `tasks` generates asynchronously, so `currentId` is nil at
+                // `onAppear` and the board never got framed above. Catch it the moment the
+                // current move first resolves — but only once.
+                guard !didFrame, let id = new else { return }
+                proxy.scrollTo(id, anchor: .center)
+                didFrame = true
             }
             .onChange(of: tasks) { _, new in detectAdvances(new) }
         }
+    }
+
+    /// A non-interactive scroll-edge fade (web parity): a hint that more board scrolls off
+    /// beyond the visible edge. Written entirely from `onScrollGeometryChange` above — no
+    /// polling, no `GeometryReader` sentinel.
+    @ViewBuilder
+    private func edgeFade(leading: Bool, visible: Bool) -> some View {
+        if visible {
+            Group {
+                if leading {
+                    LinearGradient(colors: [CodepetTheme.pageBackground, .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 48)
+                } else {
+                    ZStack {
+                        LinearGradient(colors: [.clear, CodepetTheme.pageBackground],
+                                       startPoint: .leading, endPoint: .trailing)
+                        Circle()
+                            .fill(CodepetTheme.surface)
+                            .overlay(Circle().stroke(CodepetTheme.hairline, lineWidth: 1))
+                            .frame(width: 22, height: 22)
+                            .overlay(
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.mutedText))
+                    }
+                    .frame(width: 56)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .transition(.opacity.animation(.easeInOut(duration: 0.18)))
+        }
+    }
+
+    /// Transform result for `onScrollGeometryChange` — whether more content lies past each edge.
+    private struct ScrollEdgeState: Equatable {
+        let left: Bool
+        let right: Bool
     }
 
     // MARK: phase headers
 
     // Left-aligned to each column's card edge (web places them at `c.x`), in their own
     // 28pt row above the diagram.
-    private func phaseHeaders(_ l: RoadmapLayout) -> some View {
+    private func phaseHeaders(_ l: RoadmapLayout, width: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(l.columns) { c in
                 HStack(spacing: 10) {
@@ -92,7 +178,7 @@ struct RoadmapBoardView: View {
                 .offset(x: c.x, y: 0)
             }
         }
-        .frame(width: l.size.width, height: 28, alignment: .topLeading)
+        .frame(width: width, height: Self.headerRow, alignment: .topLeading)
     }
 
     // MARK: diagram
@@ -108,12 +194,17 @@ struct RoadmapBoardView: View {
                                 herePhrase: herePhrase,
                                 pulsing: pulseIds.contains(n.task.id),
                                 onTap: { onTaskTap(n.task) })
+                    // `.help`/`.id` must be attached BEFORE `.position` — `.position` returns
+                    // a view that consumes all offered space, so anything chained after it
+                    // sees the whole diagram rect rather than the 208×64 card. Attaching
+                    // these first keeps the tooltip and the ScrollViewReader anchor scoped
+                    // to the card's real frame.
+                    .id(n.task.id)
+                    .help(peekText(n.task, status: status))
                     // engine coords are TOP-LEFT; SwiftUI .position is center-based
                     .position(x: n.x + RoadmapGeometry.cardW / 2,
                               y: n.y + RoadmapGeometry.cardH / 2)
                     .zIndex(isCurrent ? 1 : 0)   // keep the floating marker above neighbours
-                    .id(n.task.id)
-                    .help(peekText(n.task, status: status))
             }
         }
         .frame(width: l.size.width, height: l.size.height, alignment: .topLeading)
@@ -156,12 +247,29 @@ struct RoadmapBoardView: View {
 
     // 172×118, accent gradient, the Codepet mark, and a blurred aura behind it so the origin
     // reads as the luminous root the whole tree grows from — not just another card.
+    //
+    // The aura's natural bleed is 26pt each side / 20pt top+bottom. But the root rect sits
+    // against the diagram's own left/top edge (and can again when the layout has a single
+    // lane), so a symmetric bleed would push part of the aura into space the diagram doesn't
+    // have — clipped by the outer frame, reading brighter on the far side than the near one.
+    // Clamp each near-edge's bleed to the room actually available; the far edges (and the
+    // card itself, which stays centered on `r` exactly as the engine placed it) are untouched.
     private func rootNode(_ r: CGRect) -> some View {
-        ZStack {
+        let leftBleed = min(26, r.minX)
+        let topBleed = min(20, r.minY)
+        let rightBleed: CGFloat = 26
+        let bottomBleed: CGFloat = 20
+        let auraW = r.width + leftBleed + rightBleed
+        let auraH = r.height + topBleed + bottomBleed
+        let auraOffsetX = (rightBleed - leftBleed) / 2
+        let auraOffsetY = (bottomBleed - topBleed) / 2
+
+        return ZStack {
             RoundedRectangle(cornerRadius: 44)
                 .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.42), .clear],
                                      center: .center, startRadius: 0, endRadius: r.width * 0.6))
-                .frame(width: r.width + 52, height: r.height + 40)
+                .frame(width: auraW, height: auraH)
+                .offset(x: auraOffsetX, y: auraOffsetY)
                 .blur(radius: 22)
                 .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 11) {
@@ -195,12 +303,6 @@ struct RoadmapBoardView: View {
         .position(x: r.midX, y: r.midY)
     }
 
-    // NOTE: the web original fades the board's left/right scroll edges. SwiftUI's `ScrollView`
-    // has no scroll-offset callback to drive that state faithfully, and a `GeometryReader`
-    // sentinel hack proved fragile (fires on layout/scale changes, not just scroll, and drifts
-    // under the `scaleEffect` used above). Per the brief's Step 3 fallback, the fade is omitted
-    // rather than shipped broken — see the task report for detail.
-
     // MARK: advance pulse
 
     private func statusMap(_ ts: [RoadmapTask]) -> [String: TaskStatus] {
@@ -209,28 +311,44 @@ struct RoadmapBoardView: View {
 
     /// The "advance" moment (web `.rm-pulse`): a task became the current move, or a locked
     /// task unlocked because its prerequisites just completed → pulse it once, so finishing
-    /// one step visibly lights up the next.
+    /// one step visibly lights up the next. The commonest case is the former — you finish the
+    /// current move and an already-unlocked sibling becomes the new beacon, without ever
+    /// having been `.blocked` — so that transition is tracked via `prevCurrentId`, separately
+    /// from the blocked → actionable unlock detection.
     private func detectAdvances(_ new: [RoadmapTask]) {
         let now = statusMap(new)
-        guard !prevStates.isEmpty else { prevStates = now; return }
         let newCurrent = RoadmapEngine.nextStep(new)?.id
+        guard !prevStates.isEmpty else {
+            prevStates = now
+            prevCurrentId = newCurrent
+            return
+        }
         var fresh = Set<String>()
         for (id, st) in now {
             guard let was = prevStates[id] else { continue }
             if was == .blocked && (st == .codepetCanDo || st == .needsYou) { fresh.insert(id) }
         }
-        if let c = newCurrent, prevStates[c] == .blocked { fresh.insert(c) }
+        if let c = newCurrent, c != prevCurrentId { fresh.insert(c) }
         prevStates = now
+        prevCurrentId = newCurrent
         guard !fresh.isEmpty else { return }
-        pulseIds = fresh
+        // `.formUnion`/subtract-only-what-this-batch-added, so two advances inside the 1.5s
+        // window don't truncate each other's pulse — a plain `pulseIds = fresh` replace would
+        // wipe out an in-flight pulse the instant a second one starts.
+        pulseIds.formUnion(fresh)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { pulseIds.subtract(fresh) }
     }
 
     /// The hover peek's plain-language line — the founder learns a card without opening chat.
     private func peekText(_ task: RoadmapTask, status: TaskStatus) -> String {
         var parts: [String] = []
+        // Phase is always shown — the layout engine explicitly tolerates legacy tasks with
+        // `dept == nil`, and dropping the phase for them loses the peek's whole first line.
+        // Prefix with the department name only when one resolves.
         if let d = DepartmentCatalog.find(task.dept)?.name {
             parts.append("\(d) · \(task.phase.label(lang))")
+        } else {
+            parts.append(task.phase.label(lang))
         }
         if !task.detail.isEmpty { parts.append(task.detail) }
         let deps = task.dependsOn.compactMap { id in tasks.first { $0.id == id }?.title }

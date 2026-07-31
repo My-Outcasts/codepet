@@ -48,7 +48,11 @@ struct RoadmapView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
             chromeRow.padding(.horizontal, 24).padding(.top, 14)
-            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
+            RoadmapBoardView(tasks: tasks, companionName: companionName, founderName: nil,
+                             projectName: (companyStore.company.brief.projectName ?? "Codepet"),
+                             tagline: companyStore.company.brief.oneLiner,
+                             onTaskTap: { dispatch($0) })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

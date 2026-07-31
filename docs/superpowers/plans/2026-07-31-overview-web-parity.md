@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 5 / SwiftUI (macOS 13+), XCTest, `xcodebuild` scheme `codepet` (lowercase), Firebase Firestore (`companies/{uid}`).
 
-**Execution order: 0 → 1 → 2 → 3 → 4 → 5 → 7 → 6 → 8 → 9.** Tasks 6 (chrome strip) and 7 (first-run briefing) build the components Task 8 (unify the page) composes, so they run before it — that way no task ever creates a placeholder, a stub, or commented-out code to keep the branch compiling. Every task on this branch builds and passes tests on its own, with nothing disabled left behind. Task numbers below are stable; only the dispatch order differs.
+**Execution order: 0 → 1 → 2 → 3 → 4 → 5 → 7 → 8 → 6 → 9** (section numbers below, which are NOT build order). Task 7 (the chrome strip) and Task 8 (the first-run briefing) build the components Task 6 (unify the page) composes, so they run before it — that way no task ever creates a placeholder, a stub, or commented-out code to keep the branch compiling. Every task on this branch builds and passes tests on its own, with nothing disabled left behind. Task numbers below are stable; only the dispatch order differs.
 
 ## Global Constraints
 
@@ -1406,10 +1406,10 @@ git commit -m "feat(overview): web-exact roadmap board (lanes, orthogonal edges,
 - Test: build-verified + a nav-routing test
 
 **Interfaces:**
-- Consumes: `RoadmapBoardView` (Task 5), `OverviewChromeRow` (Task 6), `OverviewIntroSheet` + `CompanyStore.markIntroSeen()` + `CompanyState.introSeenAt` (Task 7), `SecondBrainPanel` (existing)
+- Consumes: `RoadmapBoardView` (Task 5), `OverviewChromeRow` (Task 7), `OverviewIntroSheet` + `CompanyStore.markIntroSeen()` + `CompanyState.introSeenAt` (Task 8), `SecondBrainPanel` (existing)
 - Produces: `AppView.overview`, `OverviewSectionView()`
 
-**Execution order note:** this task runs AFTER Tasks 6 and 7, so every component it composes already exists. Do not create placeholder or stub versions of anything.
+**Execution order note:** this task is dispatched LAST of the three (after Tasks 7 and 8), so every component it composes already exists. Do not create placeholder or stub versions of anything.
 
 - [ ] **Step 1: Write the failing nav test**
 
@@ -1687,7 +1687,7 @@ struct OverviewSectionView: View {
 }
 ```
 
-`OverviewChromeRow`, `OverviewIntroSheet`, `company.introSeenAt` and `markIntroSeen()` all already exist — they were built in Tasks 6 and 7, which run before this one. Use them directly.
+`OverviewChromeRow`, `OverviewIntroSheet`, `company.introSeenAt` and `markIntroSeen()` all already exist — they were built in Tasks 7 and 8, which are dispatched before this one. Use them directly.
 
 - [ ] **Step 7: Delete the old page and build**
 
@@ -1723,7 +1723,7 @@ git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain tog
 - Create: `codepet/Views/Overview/OverviewChromeRow.swift`
 - Test: build-verified
 
-**Execution order note:** this task runs BEFORE the page that composes it (Task 8), so the file does not exist yet — create it. Nothing routes to it until Task 8; a build is the gate here.
+**Execution order note:** this task runs BEFORE the page that composes it (Task 6), so the file does not exist yet — create it. Nothing routes to it until Task 8; a build is the gate here.
 
 **Interfaces:**
 - Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `RoadmapPalette.tint(for:)`, `CodepetTokens.well`/`accentTint`/`accentLine`/`accentDeep`
@@ -1959,7 +1959,7 @@ git commit -m "feat(overview): chrome strip — progress card, beacon card, stat
 - Modify: `codepet/Models/CompanyState.swift`, `codepet/Services/CompanyData.swift`, `codepet/Managers/CompanyStore.swift`
 - Test: `codepetTests/CompanyDataIntroSeenTests.swift`
 
-**Execution order note:** this task runs BEFORE the page that presents the sheet (Task 8), so the sheet file does not exist yet — create it. Nothing presents it until Task 8.
+**Execution order note:** this task runs BEFORE the page that presents the sheet (Task 6), so the sheet file does not exist yet — create it. Nothing presents it until Task 6.
 
 **Interfaces:**
 - Produces: `CompanyState.introSeenAt: Date?`, `CompanyDoc.introSeenAt: Double?`, `CompanyData.introSeenPayload(_:) -> [String: Any]`, `CompanyData.saveIntroSeen(_:_:) async -> Bool`, `CompanyStore.markIntroSeen() async`, `OverviewIntroSheet(companionName:projectName:summary:tasks:onDismiss:)`

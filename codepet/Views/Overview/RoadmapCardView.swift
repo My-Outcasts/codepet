@@ -30,7 +30,7 @@ struct RoadmapCardView: View {
                     .font(CodepetTheme.inter(12.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                     .lineLimit(2)
-                    .lineSpacing(0)          // web line-height 1.2
+                    .lineSpacing(0)   // cancel SwiftUI's extra leading; web sets line-height 1.2
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 150, alignment: .leading)
                 if let verb = RoadmapBoardCopy.verb(for: status, lang) {
@@ -81,7 +81,6 @@ struct RoadmapCardView: View {
             }
             .frame(width: 10, height: 10)
         }
-        .frame(width: 26, height: 26)
     }
 
     // Only the current move is a FILLED chip; every other actionable card is an outline, so
@@ -146,28 +145,5 @@ struct RoadmapCardView: View {
         .background(Capsule().fill(CodepetTheme.surface))
         .overlay(Capsule().stroke(CodepetTheme.accentPurple.opacity(0.5), lineWidth: 1))
         .shadow(color: CodepetTheme.accentPurple.opacity(0.6), radius: 10, x: 0, y: 6)
-    }
-}
-
-// MARK: - CodepetTheme.onAccent
-
-// The brief for this view calls `CodepetTheme.onAccent(_:)` as though it already existed
-// from an earlier task, mirroring the web's `--on-accent` (luminance-picked contrast ink,
-// per project memory on companion accent theming). It does not exist anywhere in the
-// codebase (verified: `grep -rn onAccent codepet/` before writing this file matches nothing
-// but this declaration). Rather than invent a differently-named local helper — which the
-// task brief explicitly warns against — this adds the exact named API the brief specifies,
-// scoped to this new file so it ships as part of Task 4 without touching CodepetTheme.swift
-// (a shared file other tasks in this plan may also be touching).
-extension CodepetTheme {
-    /// Web `--on-accent`: the filled-chip ink color, luminance-picked against the accent
-    /// fill behind it so text stays legible whether the state tint is light (gold, teal) or
-    /// dark (violet, blue) — mirrors the web's relative-luminance based contrast pick.
-    static func onAccent(_ color: Color) -> Color {
-        let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
-        let luminance = 0.2126 * Double(ns.redComponent)
-            + 0.7152 * Double(ns.greenComponent)
-            + 0.0722 * Double(ns.blueComponent)
-        return luminance > 0.6 ? CodepetTheme.primaryText : .white
     }
 }

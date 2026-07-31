@@ -5,6 +5,7 @@ import SwiftUI
 /// items) over category sections of skills/connectors/agents with per-item toggles.
 struct EnvironmentView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    @EnvironmentObject var projectStore: ProjectStore
     @Environment(\.uiLanguage) private var lang
 
     private var enabled: Set<String> { companyStore.company.enabledTools }
@@ -22,6 +23,7 @@ struct EnvironmentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 companionLine
+                linkedProject
                 if !recs.isEmpty { recommendations }
                 ForEach(ToolCategory.allCases) { cat in
                     categorySection(cat)
@@ -115,6 +117,111 @@ struct EnvironmentView: View {
         }
     }
 
+    // MARK: - Linked project (coding agent, 2C-3)
+
+    /// The coding agent's project surface: when a project is linked, a status row
+    /// (path + git / CLAUDE.md badges + Change…); otherwise a link button plus
+    /// one-tap chips for auto-detected roots. All linking goes through ProjectLinker
+    /// so the CLAUDE.md-bootstrap consent is asked once, in one place.
+    @ViewBuilder private var linkedProject: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(lang == .vi ? "DỰ ÁN ĐÃ LIÊN KẾT" : "LINKED PROJECT")
+                .font(.pixelSystem(size: 11, weight: .bold))
+                .foregroundColor(CodepetTheme.bodyText)
+            if let link = companyStore.activeProjectLink {
+                linkedRow(link)
+            } else {
+                unlinkedRow
+            }
+        }
+    }
+
+    private func linkedRow(_ link: ProjectLink) -> some View {
+        CodepetCard {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(Project.nameFromPath(link.path))
+                        .font(.pixelSystem(size: 12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    Text(link.path)
+                        .font(.pixelSystem(size: 10))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        badge(link.isGitRepo ? "⑂ git" : (lang == .vi ? "không phải git" : "no git"),
+                              on: link.isGitRepo)
+                        badge(link.hasClaudeMd ? "CLAUDE.md ✓" : "CLAUDE.md –", on: link.hasClaudeMd)
+                    }
+                }
+                Spacer()
+                Button {
+                    _ = ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                } label: {
+                    Text(lang == .vi ? "Đổi…" : "Change…")
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.14)))
+                }.buttonStyle(.plain)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var unlinkedRow: some View {
+        let suggestions = ProjectLinkSuggestions.suggest(
+            from: projectStore.sortedProjects, excluding: companyStore.activeProjectLink?.path)
+        return CodepetCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(lang == .vi
+                     ? "Liên kết một dự án và mình có thể sửa code thật trong đó — trên máy bạn, để bạn duyệt, trên gói Claude của bạn."
+                     : "Link a project and I can make real code changes in it — on your machine, for your review, on your Claude subscription.")
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    _ = ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                } label: {
+                    Text(lang == .vi ? "Liên kết thư mục dự án" : "Link a project folder")
+                        .font(.pixelSystem(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                }.buttonStyle(.plain)
+                if !suggestions.isEmpty {
+                    Text(lang == .vi ? "Dự án gần đây" : "Recent projects")
+                        .font(.pixelSystem(size: 10, weight: .bold))
+                        .foregroundColor(CodepetTheme.mutedText)
+                    FlowLayout(spacing: 6) {
+                        ForEach(suggestions) { proj in
+                            Button {
+                                ProjectLinker.link(path: proj.id, into: companyStore, language: lang)
+                            } label: {
+                                Text(proj.displayName)
+                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.accentPurple)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.12)))
+                                    .overlay(Capsule().stroke(CodepetTheme.accentPurple.opacity(0.4), lineWidth: 1))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func badge(_ text: String, on: Bool) -> some View {
+        Text(text)
+            .font(.pixelSystem(size: 9, weight: .bold))
+            .foregroundColor(on ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill((on ? CodepetTheme.accentTeal : CodepetTheme.mutedText).opacity(0.14)))
+    }
+
     private func categorySection(_ cat: ToolCategory) -> some View {
         let items = Toolkit.items(in: cat)
         let onCount = items.filter { enabled.contains($0.id) }.count
@@ -182,3 +289,14 @@ struct ToolRowView: View {
         }
     }
 }
+
+#if DEBUG
+// Unlinked state (the common first-run). The linked row is verified live / in the
+// composer + card previews — seeding a link here would write a real bookmark.
+#Preview("Environment") {
+    EnvironmentView()
+        .environmentObject(CompanyStore())
+        .environmentObject(ProjectStore())
+        .frame(width: 560, height: 700)
+}
+#endif

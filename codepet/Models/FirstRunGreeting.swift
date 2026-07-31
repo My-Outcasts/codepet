@@ -2,7 +2,7 @@
 import Foundation
 
 /// The one-tap "Do it with me: {task}" action carried by the first-run greeting.
-struct FirstRunAction: Equatable {
+struct FirstRunAction: Equatable, Codable {
     let taskId: String
     let taskTitle: String
 }

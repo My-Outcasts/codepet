@@ -2,11 +2,22 @@
 import Foundation
 
 /// Who authored a Copilot chat message.
-enum CopilotRole { case me, companion }
+enum CopilotRole: String, Codable { case me, companion }
+
+/// One line in a run's execute-log — the "how the agent is working" transparency
+/// shown while a task is being produced. `done` flips as the step completes.
+struct ExecStep: Identifiable, Equatable, Codable {
+    let id: String
+    let label: String
+    var done: Bool
+    init(id: String = UUID().uuidString, label: String, done: Bool = false) {
+        self.id = id; self.label = label; self.done = done
+    }
+}
 
 /// One Copilot chat message (session-only; not persisted this phase). Named to
 /// avoid the reflection `ChatMessage`.
-struct CopilotMessage: Identifiable, Equatable {
+struct CopilotMessage: Identifiable, Equatable, Codable {
     let id: String
     let role: CopilotRole
     /// `var` (not `let`): a streaming companion reply is filled in place, chunk
@@ -35,13 +46,25 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `CompanyStore.handleRunTaskId` while a chat-initiated `run_task` is in
     /// flight — removed (never persisted) once the run resolves, win or lose.
     var producing: Bool
+    /// The specialist companion speaking THIS message (a department handoff);
+    /// nil = the host/global companion. Drives the orb tint + sender name so a
+    /// department pet can appear per message. See `deptName`.
+    var companionId: String?
+    /// The department this message's specialist leads (e.g. "Marketing"), shown
+    /// as a "Name · Dept" sender label. nil when spoken by the host.
+    var deptName: String?
+    /// The run's execute-log steps (transparency), on the transient `producing`
+    /// placeholder only. Revealed/completed as the run proceeds; nil = no log.
+    var execSteps: [ExecStep]?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
-         noted: [RememberedFact]? = nil, producing: Bool = false) {
+         noted: [RememberedFact]? = nil, producing: Bool = false,
+         companionId: String? = nil, deptName: String? = nil,
+         execSteps: [ExecStep]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -55,5 +78,8 @@ struct CopilotMessage: Identifiable, Equatable {
         self.setupSuggestion = setupSuggestion
         self.noted = noted
         self.producing = producing
+        self.companionId = companionId
+        self.deptName = deptName
+        self.execSteps = execSteps
     }
 }

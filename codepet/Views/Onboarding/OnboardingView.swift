@@ -1,9 +1,40 @@
 // codepet/Views/Onboarding/OnboardingView.swift
 import SwiftUI
 
-/// First-run cinematic onboarding — faithful English-only port of the web
-/// `Onboarding` (8 steps 0–7). Replaces the 6-field CompanyOnboardingView at
-/// first run; the reveal/scaffold is fail-open (scaffoldRoadmap CF undeployed).
+/// Pure layout maths for the onboarding chrome. The web sizes these fluidly (a
+/// percentage or a CSS `clamp()`); the first native port froze them at the values
+/// they happen to take at the ~860pt design width, which is why the flow degraded
+/// as the window grew. Extracted for unit testing, like `StageSliderMath`.
+enum OnboardingLayout {
+    /// Web: `.ob-art { width: 42% }` — a straight percentage with no ceiling, so the
+    /// art keeps its share of the window at any size. Only a lower bound is applied,
+    /// to keep the panel legible (and the form solvent) at the 560pt minimum window.
+    ///
+    /// An upper clamp was tried and removed: capping at 620 put the panel at 24% of a
+    /// 2560pt display, which is the same collapsed composition the fixed 360pt width
+    /// caused — just less severe. Verified against a render, not arithmetic.
+    static func artWidth(container: CGFloat) -> CGFloat {
+        max(320, container * 0.42)
+    }
+    /// Web: `.ob-cold-in h1 { font-size: clamp(34px, 4vw, 52px) }`.
+    static func coldHeadline(container: CGFloat) -> CGFloat {
+        min(52, max(34, container * 0.04))
+    }
+    /// Web: `.ob-cold-in { margin-left: clamp(40px, 9vw, 150px) }`.
+    static func coldLeading(container: CGFloat) -> CGFloat {
+        min(150, max(40, container * 0.09))
+    }
+}
+
+/// First-run cinematic onboarding — English-only port of the web `Onboarding`,
+/// 8 steps 0–7: cold open → name → role → tech → project → stage → analysis → reveal.
+/// Replaces the 6-field CompanyOnboardingView at first run; the reveal/scaffold is
+/// fail-open (scaffoldRoadmap CF undeployed).
+///
+/// Deliberate divergence from the web: the web's 9th step, the companion picker, is
+/// cut. Choosing a pet before meeting any of them is a decision without information,
+/// and it sat between the reveal and getting to work. The company keeps its default
+/// companion and the picker lives in Settings.
 struct OnboardingView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
@@ -13,7 +44,6 @@ struct OnboardingView: View {
         var projName = "", oneLiner = "", audience = "", link = "", notes = ""
         var categories: [String] = []
         var stageIndex = OnboardingContent.defaultStageIndex
-        var pick = ""
     }
 
     @State private var step = 0
@@ -52,58 +82,91 @@ struct OnboardingView: View {
             }
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
-        .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
         .onChange(of: step) { newStep in
             // Autofocus the name field when entering step 1 (deferred so the field is mounted).
             if newStep == 1 { DispatchQueue.main.async { nameFocused = true } }
         }
     }
 
-    // Two-panel card: art left (42%), form right.
+    /// Web `.ob-body.tall` — the project step top-aligns instead of centring.
+    private var isTallStep: Bool { step == 4 }
+
+    // Two-panel card, mirroring the web `.obcard`:
+    //   `.ob-art  { flex: none; width: 42% }`      — proportional, not a fixed width
+    //   `.ob-main { flex: 1; overflow: auto }`     — every step scrolls
+    //   `.ob-top / .ob-body / .ob-foot { max-width: 600px }`
+    // Skip is deliberately NOT in the top row: on the web it's `.skip-pre`, absolutely
+    // positioned against the whole screen, so Back never gets pushed away from it.
     private var card: some View {
-        HStack(spacing: 0) {
-            Image(OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)])
-                .resizable().interpolation(.high).scaledToFill()
-                .frame(width: 360)
-                .frame(maxHeight: .infinity)
-                .clipped()
-                .overlay(
-                    OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
-                        .blendMode(.softLight)
-                )
-                .compositingGroup()   // isolate the soft-light blend to the art panel
-                .id(step) // re-fade on step change
-            Divider()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    if step != 6 {
-                        Button(action: { step = max(0, step - 1) }) {
-                            Text("← Back").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                        }.buttonStyle(.plain)
-                    }
-                    Spacer()
-                    Button(action: skip) {
-                        Text("Skip onboarding →").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                    }.buttonStyle(.plain)
+        GeometryReader { card in
+            HStack(spacing: 0) {
+                // `.ob-art span` — layers crossfade over 1.1s while the incoming one
+                // settles from scale(1.07) to 1 over 7s. The web also drifts these with
+                // the pointer; not ported (distracting in use).
+                // The .id drives the ZStack transition, so only two layers are ever live.
+                ZStack {
+                    OnboardingArtLayer(
+                        name: OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)],
+                        width: OnboardingLayout.artWidth(container: card.size.width),
+                        grade: OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
+                    )
+                    .id(step)
+                    .transition(.opacity)
                 }
-                .padding(.bottom, 8)
-
-                Group {
-                    if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
-                        ScrollView { stepBody.frame(maxWidth: 600, alignment: .leading) }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    } else {                       // vertically centered (.leading = leading + center-vertical)
-                        stepBody.frame(maxWidth: 600, alignment: .leading)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .animation(.easeInOut(duration: OnboardingMotion.artCrossfade), value: step)
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    // `.ob-top` — Back only, held to the same 600pt measure as the body
+                    // and footer so the controls stay with the content on a wide window.
+                    HStack {
+                        if step != 6 {
+                            Button(action: { step = max(0, step - 1) }) {
+                                Text("← Back").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
+                            }.buttonStyle(.plain)
+                        }
+                        Spacer(minLength: 0)
                     }
-                }
+                    .frame(maxWidth: 600)
+                    .padding(.bottom, 8)
 
-                footer.frame(maxWidth: 600)
+                    // `.ob-main { overflow: auto }` + `.ob-body { justify-content: center }`:
+                    // the step column is centred while it fits and scrolls once it doesn't,
+                    // so a long reveal (server-driven task count) can always reach the footer.
+                    GeometryReader { area in
+                        ScrollView {
+                            // .id(step) gives each step fresh views so the `riseIn`
+                            // stagger replays on advance, as new DOM nodes do on the web.
+                            VStack(alignment: .leading, spacing: 0) { stepBody }
+                                .id(step)
+                                .frame(maxWidth: 600, alignment: .leading)
+                                .frame(minHeight: area.size.height,
+                                       alignment: isTallStep ? .top : .center)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    footer.frame(maxWidth: 600)
+                }
+                .padding(.horizontal, 64).padding(.vertical, 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 64).padding(.vertical, 40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .overlay(alignment: .topTrailing) { skipPill }
         }
         .background(CodepetTheme.surface)
+    }
+
+    /// Web `.ob .skip-pre` — a pill pinned to the card's top-trailing corner.
+    private var skipPill: some View {
+        Button(action: skip) {
+            Text("Skip onboarding →")
+                .font(CodepetTheme.body(12)).fontWeight(.semibold)
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.surface))
+                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 20).padding(.trailing, 24)
     }
 
     @ViewBuilder private var stepBody: some View {
@@ -119,9 +182,11 @@ struct OnboardingView: View {
             OnboardingOptionList(options: OnboardingContent.roles, selectedKey: Binding(
                 get: { d.role },
                 set: { k in d.role = k; d.roleLabel = OnboardingContent.roles.first(where: { $0.key == k })?.label ?? "" }))
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 3:
             heading("How hands-on are you with the code?", "So I know how deep to go on the technical side.")
             OnboardingOptionList(options: OnboardingContent.tech, selectedKey: $d.tech)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 4:
             heading("Now — what are you building?",
                     "A name and one clear sentence — that line is what I read to tailor your whole plan. Everything else is optional but sharpens it.")
@@ -132,6 +197,7 @@ struct OnboardingView: View {
             chips(OnboardingContent.categories, selected: d.categories) { c in
                 if d.categories.contains(c) { d.categories.removeAll { $0 == c } } else { d.categories.append(c) }
             }
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
             label("Who's it for? (optional)")
             textField("e.g. solo founders shipping their first product", text: $d.audience)
             label("Link (optional — website, repo, or Figma)")
@@ -142,15 +208,17 @@ struct OnboardingView: View {
                 .scrollContentBackground(.hidden)   // hide TextEditor's default backing (macOS 13+)
                 .padding(8).background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 5:
             heading("Where are you today?", "This sets your starting point on the roadmap.")
             OnboardingStageSlider(stageIndex: $d.stageIndex)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
-        case 7:
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
+        default:   // 7 — the reveal is the last screen; "Start building" finishes here.
             OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
-        default:
-            OnboardingCompanionStep(pickedId: $d.pick)
+                .riseIn(delay: OnboardingMotion.stepRestDelay)
         }
     }
 
@@ -185,8 +253,7 @@ struct OnboardingView: View {
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
-        case 7: bigButton("Choose your companion", enabled: true) { step = 8 }
-        default: bigButton("Start building", enabled: true) { finishWithCompanion() }
+        default: bigButton("Start building", enabled: true) { finish() }
         }
     }
 
@@ -223,17 +290,18 @@ struct OnboardingView: View {
         }
     }
 
-    private func finishWithCompanion() {
+    private func finish() {
         streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         let token = companyStore.onboardingToken
-        let id = d.pick.isEmpty ? companyStore.company.companionId : d.pick
         Task {
-            await companyStore.setCompanion(id: id)
-            appState.activeChar = id
+            // No companion picker in the flow any more, so nothing to persist here —
+            // the company keeps its default companion. Still mirror it onto appState so
+            // the app opens with the same character the store holds (Settings changes it).
+            appState.activeChar = companyStore.company.companionId
             // Pass the store's current (already-enriched, by scaffoldFromOnboarding)
             // brief — NOT the local raw `brief()` draft — so finishOnboarding doesn't
             // clobber the enriched summary/audience/categories with unenriched values.
-            // Steps 6-8 never edit brief fields, so company.brief is authoritative here;
+            // Steps 6-7 never edit brief fields, so company.brief is authoritative here;
             // if enrichment failed (fail-open) it already equals the raw brief, so this
             // is safe in all cases. EXCEPT: if "Start building" was reached while the
             // scaffold Task was still in-flight, the `scaffoldTask?.cancel()` above can
@@ -254,16 +322,20 @@ struct OnboardingView: View {
 
     // MARK: small view helpers
 
+    // `.ob-body > *` staggering: h2 at 40ms, p at .12s, everything after at .2s.
     private func heading(_ h: String, _ sub: String) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(h).font(CodepetTheme.body(20, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
+                .riseIn(delay: OnboardingMotion.stepHeadingDelay)
             Text(sub).font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
+                .riseIn(delay: OnboardingMotion.stepSubDelay)
         }.padding(.bottom, 4)
     }
     private func label(_ t: String) -> some View {
         Text(t).font(CodepetTheme.body(12)).fontWeight(.semibold)
             .foregroundColor(CodepetTheme.primaryText).padding(.top, 18).padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
     }
     private func textField(_ ph: String, text: Binding<String>) -> some View {
         TextField(ph, text: text)
@@ -271,6 +343,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 14).padding(.vertical, 13)
             .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+            .riseIn(delay: OnboardingMotion.stepRestDelay)
     }
     private func chips(_ items: [String], selected: [String], toggle: @escaping (String) -> Void) -> some View {
         ChipFlowLayout(spacing: 8) {

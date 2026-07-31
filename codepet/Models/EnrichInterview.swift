@@ -3,7 +3,7 @@ import Foundation
 
 /// One of the three plan-shaping brief fields the first-run interview fills,
 /// in priority order. Verbatim-logic port of the web `Gap` (lib/ai/enrichInterview.ts).
-enum InterviewGap: String, CaseIterable, Equatable {
+enum InterviewGap: String, CaseIterable, Equatable, Codable {
     case goal, traction, problem
 }
 
@@ -43,6 +43,19 @@ enum EnrichInterview {
     static func detectGaps(_ brief: CompanyBrief?) -> [InterviewGap] {
         guard let brief else { return Array(gapOrder.prefix(maxQuestions)) }
         return Array(gapOrder.filter { !filled(value(brief, $0)) }.prefix(maxQuestions))
+    }
+
+    /// The gaps still worth asking when the in-memory interview cursor is gone —
+    /// the founder quit mid-interview and relaunched into a resumed thread, where
+    /// the questions live in the transcript but `interviewState` does not.
+    ///
+    /// `answered` is what the transcript already shows asked-and-answered, which
+    /// is NOT the same as what the brief has filled: a SKIPPED question saves
+    /// nothing, so it stays a gap by `detectGaps` and would be asked again on
+    /// every relaunch. Subtracting the transcript's answers is what makes a skip
+    /// stick.
+    static func remainingGaps(_ brief: CompanyBrief?, answered: [InterviewGap]) -> [InterviewGap] {
+        detectGaps(brief).filter { !answered.contains($0) }
     }
 
     /// Static question + why-line per gap, localized. EN ported from the web

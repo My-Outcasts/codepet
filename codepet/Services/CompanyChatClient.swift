@@ -40,6 +40,27 @@ struct SetupAction: Codable, Equatable {
     let name: String
 }
 
+/// A "walk me through this myself" request from byte — the roadmap task id the
+/// founder should be guided through. Resolved to a `RoadmapTask` by CompanyStore.
+struct WalkthroughAction: Codable, Equatable {
+    let taskId: String
+    enum CodingKeys: String, CodingKey { case taskId = "task_id" }
+}
+
+/// A local coding-agent request from byte: the founder wants real code changed.
+/// Executed LOCALLY against the active linked project (never sent to the cloud);
+/// `plannedFiles`/`needsBash` are a scope estimate that drives the plan-preview gate.
+struct EditCodeAction: Codable, Equatable {
+    let ask: String
+    let plannedFiles: Int
+    let needsBash: Bool
+    enum CodingKeys: String, CodingKey {
+        case ask
+        case plannedFiles = "planned_files"
+        case needsBash = "needs_bash"
+    }
+}
+
 /// One durable fact byte decided to remember — auto-merged into
 /// `company.decisions` (no approval needed), then surfaced as a transient
 /// "Noted" chip.
@@ -96,6 +117,9 @@ struct CompanyChatResponse: Codable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]?
+    let rePlan: Bool?
+    let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -103,6 +127,9 @@ struct CompanyChatResponse: Codable {
         case nav
         case setup
         case remember
+        case rePlan = "re_plan"
+        case walkthrough
+        case editCode = "edit_code"
     }
 }
 
@@ -115,14 +142,22 @@ struct CompanyChatReply: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    let rePlan: Bool
+    let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
-         setup: SetupAction? = nil, remember: [RememberedFact] = []) {
+         setup: SetupAction? = nil, remember: [RememberedFact] = [],
+         rePlan: Bool = false, walkthrough: WalkthroughAction? = nil,
+         editCode: EditCodeAction? = nil) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.rePlan = rePlan
+        self.walkthrough = walkthrough
+        self.editCode = editCode
     }
 }
 
@@ -136,13 +171,20 @@ struct ChatDoneAction: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    let rePlan: Bool
+    let walkthrough: WalkthroughAction?
+    let editCode: EditCodeAction?
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
-         remember: [RememberedFact] = []) {
+         remember: [RememberedFact] = [], rePlan: Bool = false, walkthrough: WalkthroughAction? = nil,
+         editCode: EditCodeAction? = nil) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.rePlan = rePlan
+        self.walkthrough = walkthrough
+        self.editCode = editCode
     }
 }
 
@@ -176,6 +218,9 @@ enum CompanyChatClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/companyChat")!
 
     static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
+        #if DEBUG
+        if MockChat.enabled { return await MockChat.reply(req) }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
@@ -190,7 +235,9 @@ enum CompanyChatClient {
         let reply = decoded.reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return nil }
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
-                                 setup: decoded.setup, remember: decoded.remember ?? [])
+                                 setup: decoded.setup, remember: decoded.remember ?? [],
+                                 rePlan: decoded.rePlan ?? false, walkthrough: decoded.walkthrough,
+                                 editCode: decoded.editCode)
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -210,6 +257,9 @@ enum CompanyChatClient {
         session: URLSession = .shared,
         authTokenProvider: (() async throws -> String)? = nil
     ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.stream(req) }
+        #endif
         let capturedSession = session
         let capturedAuthTokenProvider = authTokenProvider ?? {
             guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
@@ -298,14 +348,20 @@ enum CompanyChatClient {
                 let nav: NavAction?
                 let setup: SetupAction?
                 let remember: [RememberedFact]?
+                let rePlan: Bool?
+                let walkthrough: WalkthroughAction?
+                let editCode: EditCodeAction?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
+                    case rePlan = "re_plan"; case walkthrough; case editCode = "edit_code"
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
-                                             remember: d.remember ?? [])
+                                             remember: d.remember ?? [],
+                                             rePlan: d.rePlan ?? false, walkthrough: d.walkthrough,
+                                             editCode: d.editCode)
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             }
         case "error":

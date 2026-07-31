@@ -518,8 +518,9 @@ struct DeliverableDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: deliverable.kind.icon).foregroundColor(CodepetTheme.accentPurple)
+                    .font(.system(size: 17))
                 Text(deliverable.title)
-                    .font(.pixelSystem(size: 15, weight: .bold))
+                    .font(CodepetTheme.inter(18, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill") }

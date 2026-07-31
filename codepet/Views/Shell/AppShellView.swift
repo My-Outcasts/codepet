@@ -1,34 +1,39 @@
 // codepet/Views/Shell/AppShellView.swift
 import SwiftUI
 
-/// The app's top-level shell — a left navigation rail (`AppRailView`), a slim top
-/// bar carrying the current destination's name plus the wake pill and Upgrade
-/// button, and a content area switching on the store's view. Chat is the default
-/// destination and occupies the full content area; it is no longer a docked panel.
-/// Styled in CodepetTheme; the rail's selected item and accents follow the active
-/// companion's color.
+/// The app's top-level shell — a native port of the web AppRoot: the left
+/// `SidebarView` (brand, New chat, Recent, Workspace nav, Upgrade/account) and a
+/// full-width content area switching on the store's view (chat is the default).
+/// Styled in CodepetTheme.
 struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
-    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
 
-    private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+    @State private var sidebarCollapsed = false
 
     var body: some View {
         HStack(spacing: 0) {
-            AppRailView(accent: accent)
-            VStack(spacing: 0) {
-                topBar
+            if !sidebarCollapsed {
+                SidebarView(collapsed: $sidebarCollapsed)
                 Divider()
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topLeading) {
+                    if sidebarCollapsed {
+                        Button { sidebarCollapsed = false } label: {
+                            Image(systemName: "sidebar.left").font(.system(size: 15))
+                                .foregroundColor(CodepetTheme.bodyText).padding(10)
+                        }.buttonStyle(.plain).padding(8)
+                    }
+                }
         }
         .background(CodepetTheme.pageBackground)
     }
 
     @ViewBuilder private var content: some View {
         if companyStore.view == .chat {
-            CopilotChatView()
+            CopilotChatView(sidebarCollapsed: sidebarCollapsed)
         } else if companyStore.view == .roadmap {
             RoadmapView()
         } else if companyStore.view == .secondBrain {
@@ -54,42 +59,6 @@ struct AppShellView: View {
         } else {
             ShellPlaceholderView(view: companyStore.view)
         }
-    }
-
-    /// Slim top bar: the destination title on the left, wake pill and Upgrade on
-    /// the right. Navigation itself lives in the rail.
-    private var topBar: some View {
-        HStack(spacing: 14) {
-            Text(companyStore.view.title(uiLanguage))
-                .font(CodepetTheme.inter(15, weight: .semibold))
-                .foregroundColor(CodepetTheme.primaryText)
-            Spacer(minLength: 20)
-            HStack(spacing: 10) {
-                wakePill
-                Button { companyStore.selectedDeptKey = nil; companyStore.select(.billing) } label: {
-                    Text(uiLanguage == .vi ? "Nâng cấp" : "Upgrade")
-                        .font(CodepetTheme.inter(13.5, weight: .semibold)).foregroundColor(.white)
-                        .padding(.horizontal, 13).padding(.vertical, 7)
-                        .background(Capsule().fill(CodepetTheme.primaryText))
-                }.buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-    }
-
-    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
-
-    private var wakePill: some View {
-        Button { companyStore.selectedDeptKey = nil; companyStore.select(.environment) } label: {
-            HStack(spacing: 5) {
-                Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
-                Text("⚡ " + (uiLanguage == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
-                    .font(CodepetTheme.inter(13.5, weight: .medium))
-            }
-            .foregroundColor(CodepetTheme.bodyText)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(accent.opacity(0.1)))
-        }.buttonStyle(.plain)
     }
 }
 

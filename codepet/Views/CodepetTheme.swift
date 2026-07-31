@@ -52,6 +52,9 @@ enum CodepetTheme {
     static let accentOrange = Color.dyn("#ff8c42", "#ff9b5e")
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
 
+    static let chatCanvas  = Color.dyn("#f8f7f3", "#16130f")   // matches pageBackground
+    static let chatOrbCore = Color.dyn("#0E0A16", "#040208")   // the orb's luminous core
+
     // MARK: Geometry
 
     /// Default card corner radius — gentle ~14pt curve on stat cards and
@@ -432,5 +435,29 @@ extension Color {
     /// a dark appearance — driven by `preferredColorScheme` / the macOS appearance.
     static func dyn(_ light: String, _ dark: String) -> Color {
         Color(nsColor: CodepetTheme.dynamicNSColor(light: light, dark: dark))
+    }
+}
+
+extension CodepetTheme {
+    /// Readable text color for content sitting ON an accent/companion fill — the
+    /// native port of the web's `--on-accent`: dark ink on LIGHT fills (gold, teal,
+    /// bright companion hues), white on DARK fills (purple, blue). Resolves the
+    /// fill's luminance PER drawing appearance, so a `Color.dyn` accent that differs
+    /// light↔dark still gets the right ink in each theme. Fixes low-contrast
+    /// white-on-gold / white-on-bright-green.
+    static func onAccent(_ fill: Color) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            var lum = 0.0
+            appearance.performAsCurrentDrawingAppearance {
+                if let c = NSColor(fill).usingColorSpace(.sRGB) {
+                    // Relative luminance (sRGB coefficients).
+                    lum = 0.2126 * Double(c.redComponent)
+                        + 0.7152 * Double(c.greenComponent)
+                        + 0.0722 * Double(c.blueComponent)
+                }
+            }
+            // Threshold ~0.6: light fills → near-black ink, dark fills → white.
+            return lum > 0.6 ? NSColor(hex: "#1f1b15") : NSColor(hex: "#ffffff")
+        })
     }
 }

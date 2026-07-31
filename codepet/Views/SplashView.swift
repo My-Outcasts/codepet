@@ -7,22 +7,30 @@ import SwiftUI
 struct SplashView: View {
     var onContinue: (() -> Void)? = nil
 
-    @State private var appear = false
     @State private var kenBurns = false
+    @State private var glow = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// `.splash-sub` is per-word on the web (`.w` spans) so each word can rise on its
+    /// own delay; split here so the stagger has something to stagger.
+    private static let subtitleWords = "Let's learn how to run your company with AI."
+        .split(separator: " ").map(String.init)
 
     var body: some View {
         ZStack {
             OnboardingContent.Palette.coldBg.ignoresSafeArea()
 
-            // Slow Ken-Burns image layer.
+            // Slow Ken-Burns image layer — scale AND drift (`.splash:before`, 30s).
             GeometryReader { geo in
+                let drift = OnboardingMotion.kenBurnsDrift(width: geo.size.width,
+                                                           height: geo.size.height)
                 Image("splash")
                     .resizable()
                     .interpolation(.high)
                     .scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .scaleEffect(kenBurns ? 1.08 : 1.0)
+                    .scaleEffect(kenBurns ? OnboardingMotion.kenBurnsScale : 1.0)
+                    .offset(x: kenBurns ? drift.width : 0, y: kenBurns ? drift.height : 0)
                     .clipped()
             }
             .ignoresSafeArea()
@@ -36,17 +44,8 @@ struct SplashView: View {
 
             VStack(spacing: 0) {
                 Spacer()
-                Text("Codepet")
-                    .font(CodepetTheme.pixel(80))
-                    .tracking(2)
-                    .foregroundColor(.white)
-                    .shadow(color: Color(hex: "#a078ff").opacity(0.55), radius: 17)
-                    .shadow(color: Color(hex: "#220e40").opacity(0.7), radius: 0, x: 0, y: 3)
-                Text("Let's learn how to run your company with AI.")
-                    .font(CodepetTheme.body(20))
-                    .foregroundColor(.white)
-                    .padding(.top, 20)
-                    .shadow(color: Color(hex: "#0a041e").opacity(0.7), radius: 9)
+                title
+                subtitle
                 if onContinue != nil {
                     Button { onContinue?() } label: {
                         Text("Let's go")
@@ -61,6 +60,7 @@ struct SplashView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 32)
+                    .riseIn(OnboardingMotion.riseSplash, delay: OnboardingMotion.splashButtonDelay)
                 } else {
                     // Auth / cloud still resolving — passive loading affordance, NOT the
                     // interactive CTA (there's no onContinue to fire, so a "Let's go"
@@ -73,20 +73,54 @@ struct SplashView: View {
                 Spacer()
                 Text(onContinue != nil ? "click anywhere to continue" : "Loading…")
                     .font(CodepetTheme.body(11))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.white)
+                    .hintPulse()
                     .padding(.bottom, 22)
+                    .riseIn(OnboardingMotion.riseSplash, delay: OnboardingMotion.splashHintDelay)
             }
-            .opacity(appear ? 1 : 0)
-            .offset(y: appear ? 0 : 12)
         }
         .contentShape(Rectangle())
         .onTapGesture { onContinue?() }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.85)) { appear = true }
-            if !reduceMotion {
-                withAnimation(.easeInOut(duration: 30).repeatForever(autoreverses: true)) { kenBurns = true }
+            guard !reduceMotion else { return }
+            let ken = Animation.easeInOut(duration: OnboardingMotion.kenBurnsSplash)
+                .repeatForever(autoreverses: true)
+            withAnimation(ken) { kenBurns = true }
+            let g = Animation.easeInOut(duration: OnboardingMotion.glowPeriod / 2)
+                .repeatForever(autoreverses: true)
+                .delay(OnboardingMotion.glowDelay)
+            withAnimation(g) { glow = true }
+        }
+    }
+
+    /// `.splash-title` — riseIn, then an infinite glow pulse, with `titleSweep` over it.
+    private var title: some View {
+        let glowOpacity = glow ? OnboardingMotion.glowOpacityHigh : OnboardingMotion.glowOpacityLow
+        let glowRadius = glow ? OnboardingMotion.glowRadiusHigh : OnboardingMotion.glowRadiusLow
+        let text = Text("Codepet")
+            .font(CodepetTheme.pixel(80))
+            .tracking(2)
+            .foregroundColor(.white)
+        return text
+            .shadow(color: Color(hex: "#a078ff").opacity(glowOpacity), radius: glowRadius)
+            .shadow(color: Color(hex: "#220e40").opacity(0.7), radius: 0, x: 0, y: 3)
+            .overlay(TitleSweep(mask: text))
+            .riseIn(OnboardingMotion.riseSplash, delay: OnboardingMotion.splashTitleDelay)
+    }
+
+    /// `.splash-sub` — each word rises on its own delay (`.32s + i × 60ms`).
+    private var subtitle: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(Self.subtitleWords.enumerated()), id: \.offset) { i, word in
+                Text(word)
+                    .font(CodepetTheme.body(20))
+                    .foregroundColor(.white)
+                    .fixedSize()
+                    .riseIn(OnboardingMotion.riseWord, delay: OnboardingMotion.wordDelay(i))
             }
         }
+        .padding(.top, 20)
+        .shadow(color: Color(hex: "#0a041e").opacity(0.7), radius: 9)
     }
 }
 

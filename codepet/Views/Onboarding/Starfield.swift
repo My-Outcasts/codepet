@@ -52,9 +52,11 @@ struct Starfield: View {
         let dot: Dot
         @State private var bright = false
         var body: some View {
+            // Web `@keyframes twinkle`: opacity .1 ↔ .8 AND translateY(0) ↔ -6px.
             Circle()
-                .fill(Color.white.opacity(bright ? 0.9 : 0.25))
+                .fill(Color.white.opacity(bright ? 0.8 : 0.1))
                 .frame(width: dot.size, height: dot.size)
+                .offset(y: bright ? -6 : 0)
                 .onAppear {
                     withAnimation(.easeInOut(duration: dot.dur)
                         .repeatForever(autoreverses: true).delay(dot.delay)) {

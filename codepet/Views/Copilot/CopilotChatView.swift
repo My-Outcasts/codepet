@@ -1,300 +1,373 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
+import AppKit
 
 /// The Copilot column: a company-grounded chat with the founder's companion.
 struct CopilotChatView: View {
+    /// Whether the shell's sidebar is collapsed — the header insets to clear the
+    /// floating collapse toggle only then; flush-left when the sidebar is open.
+    var sidebarCollapsed: Bool = false
+
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @State private var mode: ChatMode = .ask
+    @State private var selectedDept: Department?
     @FocusState private var inputFocused: Bool
-    /// Toggles the "History" thread switcher over the message list. Session-only
-    /// UI state — the History stub (see the header) now activates this.
-    @State private var showHistory = false
+    /// Bumped from the coding-coordinator publishers below so a nested-object change
+    /// (run phase / steps) reliably re-renders this view live — the run card was
+    /// otherwise only refreshing on a tab switch.
+    @State private var codingRunTick = 0
+
+    /// Max width of the conversation column + composer — matches Claude Code's
+    /// comfortable centered reading width (both stay in sync via this one value).
+    private let chatColumnWidth: CGFloat = 760
+    /// Minimum side gutter kept at ALL window sizes so the column shrinks to fit a
+    /// narrow window (never edge-to-edge) and the message list + composer share the
+    /// exact same left/right edges — the Claude-style responsive behavior.
+    private let chatGutter: CGFloat = 24
+
+    // Thread header (name dropdown + Share).
+    @State private var renamingThread = false
+    @State private var threadRenameDraft = ""
+    @State private var shareCopied = false
+
+    private var activeThreadTitle: String {
+        companyStore.threads.first { $0.id == companyStore.activeThreadId }?.title
+            ?? (lang == .vi ? "Đoạn chat mới" : "New chat")
+    }
+    /// Recent threads for the header switcher, newest-first (active one excluded — it's the label).
+    private var recentThreads: [ChatThread] {
+        sortThreadsByRecent(companyStore.threads)
+            .filter { $0.id != companyStore.activeThreadId }
+            .prefix(8).map { $0 }
+    }
+    private var isChatBusy: Bool { companyStore.isCompanionTyping || companyStore.isStreaming || companyStore.isFanningOut }
+
+    /// A slim top bar: the active thread's name as a dropdown switcher (New chat +
+    /// recent threads + Rename), plus Share (copies the transcript). Leading inset
+    /// clears the shell's sidebar-collapse toggle when the sidebar is hidden.
+    private var chatHeader: some View {
+        HStack(spacing: 8) {
+            threadMenu
+            Spacer(minLength: 8)
+            shareButton
+        }
+        .padding(.leading, sidebarCollapsed ? 44 : 16)
+        .padding(.trailing, 16)
+        .padding(.vertical, 8)
+        .alert(lang == .vi ? "Đổi tên đoạn chat" : "Rename chat", isPresented: $renamingThread) {
+            TextField(lang == .vi ? "Tên" : "Name", text: $threadRenameDraft)
+            Button(lang == .vi ? "Lưu" : "Save") {
+                if let id = companyStore.activeThreadId { companyStore.renameThread(id, title: threadRenameDraft) }
+            }
+            Button(lang == .vi ? "Hủy" : "Cancel", role: .cancel) {}
+        }
+    }
+
+    private var threadMenu: some View {
+        Menu {
+            Button { companyStore.newChat() } label: {
+                Label(lang == .vi ? "Đoạn chat mới" : "New chat", systemImage: "square.and.pencil")
+            }.disabled(isChatBusy)
+            if !recentThreads.isEmpty {
+                Section(lang == .vi ? "Gần đây" : "Recent") {
+                    ForEach(recentThreads) { t in
+                        Button {
+                            companyStore.switchThread(t.id)
+                        } label: {
+                            Text(t.title ?? (lang == .vi ? "Đoạn chat mới" : "New chat"))
+                        }.disabled(isChatBusy)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                threadRenameDraft = activeThreadTitle
+                renamingThread = true
+            } label: {
+                Label(lang == .vi ? "Đổi tên đoạn này" : "Rename this chat", systemImage: "pencil")
+            }.disabled(companyStore.activeThreadId == nil)
+        } label: {
+            HStack(spacing: 5) {
+                Text(activeThreadTitle)
+                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var shareButton: some View {
+        Button { copyTranscript() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: shareCopied ? "checkmark" : "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+                Text(shareCopied ? (lang == .vi ? "Đã sao chép" : "Copied")
+                                 : (lang == .vi ? "Chia sẻ" : "Share"))
+                    .font(CodepetTheme.inter(12, weight: .medium))
+            }
+            .foregroundColor(shareCopied ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Copy the active thread's transcript (plain text) to the clipboard. No
+    /// share-link backend yet — an honest local copy the founder can paste anywhere.
+    private func copyTranscript() {
+        let text = companyStore.chatMessages.compactMap { m -> String? in
+            let body = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else { return nil }
+            let who = m.role == .me ? (lang == .vi ? "Bạn" : "You") : companionName
+            return "\(who): \(body)"
+        }.joined(separator: "\n\n")
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        shareCopied = true
+        Task { try? await Task.sleep(nanoseconds: 1_600_000_000); shareCopied = false }
+    }
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
-    private var companyName: String {
-        let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? "Codepet" : n
+    private var companionAccent: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
-    private var founderName: String {
-        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
+    private var companionAccent2: Color {
+        PetCharacter.all[companyStore.company.companionId]?.secondColor ?? CodepetTheme.accentPink
     }
     private var canSend: Bool {
         !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !companyStore.isCompanionTyping && !companyStore.isStreaming
-    }
-    /// True while a chat turn is in flight — gates the History toggle here and
-    /// (via `ThreadListView`'s own copy of this) the "New chat"/switch/delete
-    /// row controls, so the UI can't trigger a mid-stream thread repoint even
-    /// though `CompanyStore` also guards it at the source. Mirrors `canSend`'s
-    /// existing streaming gate.
-    private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if showHistory {
-                ThreadListView(showHistory: $showHistory)
-            } else {
-                messageList
-                letsBuild
+        ZStack {
+            ChatBackdrop()
+            VStack(spacing: 0) {
+                if companyStore.chatMessages.isEmpty {
+                    ChatEmptyState(
+                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        onOpenRoadmap: { companyStore.selectedDeptKey = nil; companyStore.select(.roadmap) },
+                        onStarter: { companyStore.chatDraft = $0; inputFocused = true },
+                        columnWidth: chatColumnWidth
+                    ) {
+                        composerView
+                    }
+                } else {
+                    chatHeader
+                    messageList
+                    composerView
+                        .frame(maxWidth: chatColumnWidth)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, chatGutter)
+                        .padding(.vertical, 10)
+                }
             }
-            Divider()
-            inputBar
+            .frame(maxHeight: .infinity)
         }
-        .frame(maxHeight: .infinity)
-    }
-
-    // Web Copilot header: "Your team" + "guiding · {company}" + History toggle
-    // (was an inert stub — now opens/closes the thread switcher below).
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(lang == .vi ? "Đội của bạn" : "Your team")
-                    .font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
-                Text((lang == .vi ? "đang hỗ trợ · " : "guiding · ") + companyName)
-                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
-            }
-            Spacer()
-            Button { showHistory.toggle() } label: {
-                Text(lang == .vi ? "Lịch sử" : "History")
-                    .font(CodepetTheme.inter(11, weight: .medium))
-                    .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
-                                     : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-            }
-            .buttonStyle(.plain)
-            .disabled(isChatBusy)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-    }
-
-    // "Let's build" CTA — stub (the live build session is a later effort).
-    private var letsBuild: some View {
-        Button { } label: {
-            Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
-                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                .background(CodepetTheme.accentPurple.opacity(0.08))
-        }.buttonStyle(.plain)
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if companyStore.chatMessages.isEmpty { greeting }
+                VStack(alignment: .leading, spacing: 24) {
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
+                        // A chat-triggered coding run renders INLINE right after its
+                        // ask, so later messages sit below it instead of shoving the
+                        // card to the bottom of the transcript. (Part 2C-2 inline)
+                        if companyStore.codingRun.run != nil,
+                           companyStore.codingRunAnchorId == m.id {
+                            CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                        }
                     }
-                    if companyStore.isCompanionTyping { typingRow.id("typing") }
+                    if companyStore.isCompanionTyping { ChatThinkingRow(taskTitle: nil).id("typing") }
+                    if !companyStore.activeAgentRuns.isEmpty {
+                        AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
+                    }
+                    // A coding run with no chat anchor (triggered from roadmap/tasks,
+                    // where there's no ask message) falls back to the transcript
+                    // bottom, mirroring AgentsWorkingRow.
+                    if companyStore.codingRun.run != nil,
+                       !companyStore.chatMessages.contains(where: { $0.id == companyStore.codingRunAnchorId }) {
+                        CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                    }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 40)
+                .padding(.bottom, 32)
+                .frame(maxWidth: chatColumnWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, chatGutter)
             }
+            // A transcript that arrives already-populated — a resumed thread on
+            // launch, or a switch into an existing one — never fires the count
+            // change below, so it would open scrolled to its OLDEST message.
+            // Jump to the newest without animation (no scroll-through-history
+            // on launch); deferred one runloop turn so the list has laid out.
+            .onAppear { scrollToLatest(proxy) }
+            .onChange(of: companyStore.activeThreadId) { _, _ in scrollToLatest(proxy) }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
-        }
-    }
-
-    private var greeting: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(lang == .vi
-                 ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
-                 : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
-                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(quickStarts, id: \.self) { chip in
-                    Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
-                        Text(chip).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
-                    }.buttonStyle(.plain)
+            .onChange(of: companyStore.activeAgentRuns.count) { _, count in
+                if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
+            }
+            // A coding run renders inline (or at the bottom); CopilotChatView doesn't
+            // observe the nested coordinator, so watch its publishers directly and
+            // jump to the card when a run starts and as it grows (steps → diff →
+            // Approve/Reject), so the founder sees it and its controls stay reachable.
+            // (Part 2C-2)
+            // `@Published` emits in willSet — BEFORE `run`/`steps` are actually
+            // assigned — so bumping state synchronously here re-renders while the
+            // coordinator still holds the OLD value (the card stuck on "running" until
+            // a tab switch). Defer one runloop turn so the re-render reads the
+            // committed value. (Root cause of the run card not updating live.)
+            .onReceive(companyStore.codingRun.$run) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
+            }
+            .onReceive(companyStore.codingRun.$steps) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
                 }
             }
         }
     }
 
-    private var quickStarts: [String] {
-        lang == .vi
-            ? ["Nên tập trung vào đâu trước?", "Tóm tắt tình hình công ty", "Điều gì đang cản trở ra mắt?"]
-            : ["What should I focus on first?", "Summarize where my company is", "What\u{2019}s blocking my launch?"]
-    }
-
-    private var typingRow: some View {
-        Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is typing…")
-            .font(.pixelSystem(size: 11))
-            .foregroundColor(CodepetTheme.mutedText)
-    }
-
-    private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
-                      text: $companyStore.chatDraft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(CodepetTheme.inter(12))
-                .lineLimit(1...4)
-                .focused($inputFocused)
-                .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
+    /// Pin the list to its last message with no animation. Deferred to the next
+    /// runloop turn because `onAppear` fires before the rows have laid out, and
+    /// `scrollTo` against an unlaid-out list is a no-op.
+    /// The target is read INSIDE the deferred block, not captured before it: a
+    /// thread switch sets `activeThreadId` and repoints `chatMessages` as two
+    /// mutations, so reading eagerly can capture the outgoing thread's last id
+    /// and scroll to a row that no longer exists (a silent no-op).
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            guard let last = companyStore.chatMessages.last?.id else { return }
+            proxy.scrollTo(last, anchor: .bottom)
         }
-        .padding(10)
+    }
+
+    /// The one composer instance, reused in the empty hero and docked in an
+    /// active conversation. State (draft/mode/focus) stays here so both
+    /// placements share the same value.
+    private var composerView: some View {
+        ChatComposer(
+            draft: $companyStore.chatDraft,
+            mode: $mode,
+            canSend: canSend,
+            focus: $inputFocused,
+            placeholder: placeholder,
+            quickActions: quickActions,
+            accent: companionAccent,
+            accent2: companionAccent2,
+            isBusy: companyStore.isCompanionTyping || companyStore.isStreaming || companyStore.isFanningOut,
+            selectedDept: $selectedDept,
+            onSend: send,
+            onQuickAction: runQuickAction
+        )
+    }
+
+    private var placeholder: String {
+        lang == .vi
+            ? "Hỏi \(companionName) bất cứ điều gì về công ty…"
+            : "Ask \(companionName) anything about your company…"
+    }
+
+    /// The stable label for the parallel fan-out chip — compared in runQuickAction to
+    /// route the tap to fanOutNextMoves instead of the normal chat-send path.
+    private var fanOutTitle: String { lang == .vi ? "Chạy các bước tiếp theo" : "Run my next moves" }
+
+    /// Capability quick-actions — the titles are complete intents, so they are
+    /// sent as-is (NOT mode-shaped). Replaces the old `quickStarts`. Each also
+    /// carries a short localized "why" detail shown as helper text on its card.
+    private var quickActions: [QuickAction] {
+        let en = ["Run a task", "Review the roadmap", "Set up a department", "Summarize where we are"]
+        let vi = ["Chạy một tác vụ", "Xem lộ trình", "Thiết lập một phòng ban", "Tóm tắt tình hình công ty"]
+        let detailsEn = [
+            "Ship a real deliverable from your roadmap.",
+            "See what's next and what's blocking launch.",
+            "Bring Marketing, Legal, or Finance online.",
+            "A quick read on the whole company.",
+        ]
+        let detailsVi = [
+            "Tạo một sản phẩm thực từ lộ trình.",
+            "Xem việc tiếp theo và điều đang cản trở.",
+            "Kích hoạt Marketing, Pháp lý hoặc Tài chính.",
+            "Tóm tắt nhanh toàn công ty.",
+        ]
+        let icons = ["checklist", "map", "square.grid.2x2", "doc.text"]
+        let titles = lang == .vi ? vi : en
+        let details = lang == .vi ? detailsVi : detailsEn
+        let base = (0..<titles.count).map { i in
+            QuickAction(title: titles[i], systemImage: icons[i], detail: details[i])
+        }
+        return [QuickAction(title: fanOutTitle, systemImage: "bolt.horizontal.circle",
+                            detail: lang == .vi
+                                ? "Chạy song song các việc tiếp theo trên nhiều phòng ban."
+                                : "Run your next tasks across departments in parallel.")] + base
+    }
+
+    /// Send a canned capability prompt through the normal chat path. Bypasses
+    /// mode-shaping (the string already expresses the intent). Guarded like send.
+    /// True if `text` is the fan-out command — the chip title OR the same phrase
+    /// typed into the composer (en or vi) — so typing it works like tapping the chip.
+    private func isFanOutPhrase(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t == "run my next moves" || t == "chạy các bước tiếp theo"
+    }
+
+    private func runQuickAction(_ text: String) {
+        guard !companyStore.isCompanionTyping, !companyStore.isStreaming, !companyStore.isFanningOut else { return }
+        if isFanOutPhrase(text) {
+            Task { await companyStore.fanOutNextMoves(language: lang) }
+            return
+        }
+        Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
     }
 
     private func send() {
         guard canSend else { return }
-        let text = companyStore.chatDraft
+        // A pending enrichment question answers conversationally: the composer text
+        // IS the answer (raw, no mode-shaping), routed to answerInterview.
+        if let pending = companyStore.pendingInterview {
+            let answer = companyStore.chatDraft
+            companyStore.chatDraft = ""
+            Task { await companyStore.answerInterview(messageId: pending.id, gap: pending.gap,
+                                                      answer: answer, language: lang) }
+            inputFocused = true
+            return
+        }
+        // Typing the fan-out phrase works like tapping the "Run my next moves" chip.
+        if isFanOutPhrase(companyStore.chatDraft) {
+            companyStore.chatDraft = ""
+            Task { await companyStore.fanOutNextMoves(language: lang) }
+            inputFocused = true
+            return
+        }
+        let text = mode.shape(companyStore.chatDraft, language: lang)
         companyStore.chatDraft = ""
-        showHistory = false   // sending always returns to the live conversation
-        Task { await companyStore.sendChat(text, language: lang) }
-    }
-}
-
-/// The "History" panel: session-only multi-thread switcher — "+ New chat", one
-/// row per thread (title/relative time, active row highlighted), rename + delete
-/// per row. Tapping a row switches threads and closes the panel. Level 1: pure
-/// `CompanyStore` state, no persistence. Native port of the web `ThreadList()`.
-struct ThreadListView: View {
-    @EnvironmentObject var companyStore: CompanyStore
-    @Environment(\.uiLanguage) private var lang
-    @Binding var showHistory: Bool
-    @State private var renamingId: String?
-    @State private var renameDraft = ""
-    // Stamped once at appear (not read live in the body) so relative times don't
-    // recompute on every re-render — the panel remounts each time History opens,
-    // which is when the times should refresh. Mirrors the web's lazy `useState`.
-    @State private var now = Date()
-
-    private var rows: [ChatThread] { sortThreadsByRecent(companyStore.threads) }
-    /// Gates "New chat" + per-row switch/delete while a turn is in flight —
-    /// mirrors `CopilotChatView.isChatBusy` (also gates the History toggle
-    /// that opens this panel). Rename is left enabled: it only edits a title
-    /// in `threads`, it never repoints `chatMessages`, so it can't corrupt an
-    /// in-flight stream. `CompanyStore.newChat()`/`switchThread(_:)`/
-    /// `deleteThread(_:)` guard the same condition independently — this is UI
-    /// affordance on top of that store-level guard, not a substitute for it.
-    private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                companyStore.newChat()
-                showHistory = false
-            } label: {
-                Text("+ " + (lang == .vi ? "Đoạn chat mới" : "New chat"))
-                    .font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isChatBusy ? CodepetTheme.accentPurple.opacity(0.5) : CodepetTheme.accentPurple))
-            }
-            .buttonStyle(.plain)
-            .disabled(isChatBusy)
-            .padding(12)
-
-            if rows.isEmpty {
-                Text(lang == .vi ? "Chưa có đoạn chat nào." : "No chats yet.")
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 12)
-                Spacer()
-            } else {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(rows) { thread in
-                            threadRow(thread)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.bottom, 12)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear { now = Date() }
-    }
-
-    private func threadRow(_ thread: ChatThread) -> some View {
-        let isActive = thread.id == companyStore.activeThreadId
-        return Group {
-            if renamingId == thread.id {
-                HStack(spacing: 6) {
-                    TextField(lang == .vi ? "Đổi tên đoạn chat" : "Rename chat", text: $renameDraft)
-                        .textFieldStyle(.plain)
-                        .font(CodepetTheme.inter(12))
-                        .onSubmit { commitRename(thread.id) }
-                    Button(lang == .vi ? "Lưu" : "Save") { commitRename(thread.id) }
-                        .buttonStyle(.plain)
-                        .font(CodepetTheme.inter(11, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentPurple)
-                }
-                .padding(10)
-            } else {
-                HStack(spacing: 6) {
-                    Button {
-                        companyStore.switchThread(thread.id)
-                        showHistory = false
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(thread.title ?? (lang == .vi ? "Đoạn chat mới" : "New chat"))
-                                .font(CodepetTheme.inter(12, weight: isActive ? .semibold : .regular))
-                                .foregroundColor(CodepetTheme.primaryText)
-                                .lineLimit(1)
-                            Text(relativeTime(thread.updatedAt, now: now))
-                                .font(CodepetTheme.inter(10))
-                                .foregroundColor(CodepetTheme.mutedText)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isChatBusy)
-
-                    Menu {
-                        Button {
-                            renameDraft = thread.title ?? ""
-                            renamingId = thread.id
-                        } label: {
-                            Label(lang == .vi ? "Đổi tên" : "Rename", systemImage: "pencil")
-                        }
-                        Button(role: .destructive) {
-                            companyStore.deleteThread(thread.id)
-                        } label: {
-                            Label(lang == .vi ? "Xóa" : "Delete", systemImage: "trash")
-                        }
-                        .disabled(isChatBusy)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .frame(width: 22)
-                }
-                .padding(10)
-            }
-        }
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isActive ? CodepetTheme.accentPurple.opacity(0.08) : CodepetTheme.surface))
-    }
-
-    private func commitRename(_ id: String) {
-        companyStore.renameThread(id, title: renameDraft)
-        renamingId = nil
+        Task { await companyStore.sendChat(text, language: lang, department: selectedDept) }
+        // Re-assert focus: the composer moves between the empty-state and docked
+        // `if/else` branches once `chatMessages` goes empty→non-empty, so SwiftUI
+        // rebuilds the TextField and drops focus after the first send.
+        inputFocused = true
     }
 }
 
@@ -305,11 +378,14 @@ struct CopilotBubble: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
-    @State private var interviewDraft = ""
+    @State private var reaction: Bool?   // nil = none, true = up, false = down
     private var isMe: Bool { message.role == .me }
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
+    private var companionAccent: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
 
     var body: some View {
@@ -330,23 +406,31 @@ struct CopilotBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let gap = message.interview, !message.interviewAnswered {
-            interviewCard(gap)
+            interviewMessage(gap)
+        } else if message.role == .companion
+                    && message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // An empty companion message — a streaming placeholder before text
+            // arrives, or a staged coding run whose ack was dropped — must not render
+            // as a lone orb next to the "Working on it…" row.
+            EmptyView()
         } else {
             textBubble
         }
     }
 
     private func actionButton(_ action: FirstRunAction) -> some View {
-        Button {
-            Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
-        } label: {
-            Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
-                .font(.pixelSystem(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(CodepetTheme.accentPurple))
+        MessageCard(hue: MessageCardStyle.hue(for: .firstRunAction, companionAccent: companionAccent)) {
+            Button {
+                Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
+            } label: {
+                Text((lang == .vi ? "Làm cùng mình: " : "Do it with me: ") + action.taskTitle)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(CodepetTheme.accentPurple))
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     /// A tappable "go here" chip from byte's `nav` action — NOT auto-navigated
@@ -356,14 +440,16 @@ struct CopilotBubble: View {
     private func navChip(_ nav: NavAction) -> some View {
         let label = AppView.from(navDestination: nav.destination)?.title(lang) ?? nav.destination
         return HStack {
-            Button { companyStore.activateNav(nav) } label: {
-                Text((lang == .vi ? "Đi tới " : "Go to ") + label)
-                    .font(.pixelSystem(size: 11, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(Capsule().fill(CodepetTheme.accentPurple))
+            MessageCard(hue: MessageCardStyle.hue(for: .navChip, companionAccent: companionAccent)) {
+                Button { companyStore.activateNav(nav) } label: {
+                    Text((lang == .vi ? "Đi tới " : "Go to ") + label)
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             Spacer(minLength: 24)
         }
     }
@@ -377,28 +463,42 @@ struct CopilotBubble: View {
         let name = item?.name ?? setup.name
         let why = item?.why
         let verb = item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable")
+        // Reflect the live enabled state so the tap has visible feedback: once the
+        // item is on (company.enabledTools is a directly-observed @Published), the
+        // button flips to an "On ✓" confirmation instead of silently staying "Turn on".
+        let isOn = item.map { companyStore.company.enabledTools.contains($0.id) } ?? false
         return HStack {
-            CodepetCard {
+            MessageCard(hue: MessageCardStyle.hue(for: .setupSuggestion, companionAccent: companionAccent)) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(name)
-                        .font(.pixelSystem(size: 12, weight: .semibold))
+                        .font(CodepetTheme.inter(14, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                     if let why, !why.isEmpty {
                         Text(why)
-                            .font(.pixelSystem(size: 11))
+                            .font(CodepetTheme.inter(13))
                             .foregroundColor(CodepetTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Button { Task { await companyStore.activateSetup(setup) } } label: {
-                        Text(verb)
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(CodepetTheme.accentPurple))
-                    }.buttonStyle(.plain)
+                    if isOn {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12)).foregroundColor(CodepetTheme.accentTeal)
+                            Text(lang == .vi ? "Đã bật" : "On")
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.accentTeal)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(CodepetTheme.accentTeal.opacity(0.14)))
+                    } else {
+                        Button { Task { await companyStore.activateSetup(setup) } } label: {
+                            Text(verb)
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(Capsule().fill(CodepetTheme.accentPurple))
+                        }.buttonStyle(.plain)
+                    }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 24)
         }
@@ -409,118 +509,223 @@ struct CopilotBubble: View {
     /// there is no tap/approval affordance here, just an acknowledgement.
     private func notedChip(_ facts: [RememberedFact]) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(facts, id: \.topic) { fact in
-                    Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
-                        .font(.pixelSystem(size: 10))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(CodepetTheme.surface))
+            MessageCard(hue: MessageCardStyle.hue(for: .noted, companionAccent: companionAccent)) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(facts, id: \.topic) { fact in
+                        Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
+                            .font(CodepetTheme.inter(13))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
                 }
             }
             Spacer(minLength: 24)
         }
     }
 
-    /// First-run enrichment interview: question + why-line + free-text answer,
-    /// Send (saves raw text to the brief) or Skip (advances without saving).
-    private func interviewCard(_ gap: InterviewGap) -> some View {
+    /// First-run enrichment question, rendered conversationally: byte asks it as a
+    /// normal companion message (orb + question + why-line), and the founder answers
+    /// in the MAIN composer (send() routes to answerInterview while this is pending).
+    /// A subtle Skip link advances without saving. No embedded form/box.
+    private func interviewMessage(_ gap: InterviewGap) -> some View {
         let q = EnrichInterview.question(for: gap, language: lang)
-        let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack {
-            VStack(alignment: .leading, spacing: 8) {
+        return HStack(alignment: .top, spacing: 10) {
+            CompanionOrb(size: 28, glow: false)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(q.ask)
-                    .font(.pixelSystem(size: 12, weight: .semibold))
+                    .font(CodepetTheme.inter(15))
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(q.why)
-                    .font(.pixelSystem(size: 11))
+                    .font(CodepetTheme.inter(13))
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
-                          text: $interviewDraft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.pixelSystem(size: 12))
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
-                HStack(spacing: 8) {
-                    Button {
-                        let answer = interviewDraft
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Gửi" : "Send")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-                    }
-                    .buttonStyle(.plain).disabled(!canSend)
-                    Button {
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Bỏ qua" : "Skip")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().stroke(CodepetTheme.hairline))
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    Task { await companyStore.answerInterview(messageId: message.id, gap: gap,
+                                                              answer: nil, language: lang) }
+                } label: {
+                    Text(lang == .vi ? "Bỏ qua" : "Skip")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.mutedText)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CodepetTheme.surface))
-            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 24)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The chat-run step-transparency indicator (web: a "producing" beat before the
-    /// draft card lands). Mirrors `CopilotChatView.typingRow`'s plain, no-bubble
-    /// style — not a filled chat bubble — so it reads as ambient status, not a
-    /// message. `CompanyStore.handleRunTaskId` removes this row (win or lose)
-    /// before appending the real reply, so it's always transient.
-    private var producingRow: some View {
-        HStack {
-            Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 24)
+    /// draft card lands). Mirrors `ChatThinkingRow`'s plain, no-bubble style — not
+    /// a filled chat bubble — so it reads as ambient status, not a message.
+    /// `CompanyStore.handleRunTaskId` removes this row (win or lose) before
+    /// appending the real reply, so it's always transient.
+    @ViewBuilder private var producingRow: some View {
+        // With an execute-log, show the live step checklist (how the agent works);
+        // otherwise fall back to the plain thinking row. `text` carries the task
+        // title, `companionId` the acting specialist.
+        if let steps = message.execSteps, !steps.isEmpty {
+            ExecLogRow(taskTitle: message.text, deptName: message.deptName,
+                       steps: steps, companionId: message.companionId)
+        } else {
+            ChatThinkingRow(taskTitle: message.text.isEmpty ? nil : message.text,
+                            companionId: message.companionId)
         }
     }
 
     private var textBubble: some View {
-        HStack {
-            if isMe { Spacer(minLength: 24) }
-            Text(message.text)
-                .font(.pixelSystem(size: 12))
-                .foregroundColor(isMe ? .white : CodepetTheme.primaryText)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isMe ? CodepetTheme.accentPurple : CodepetTheme.surface))
-                .fixedSize(horizontal: false, vertical: true)
-            if !isMe { Spacer(minLength: 24) }
+        Group {
+            if isMe {
+                HStack {
+                    Spacer(minLength: 24)
+                    Text(message.text)
+                        .font(CodepetTheme.inter(16))
+                        .lineSpacing(5)
+                        .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(UnevenRoundedRectangle(
+                            cornerRadii: .init(topLeading: 14, bottomLeading: 14,
+                                               bottomTrailing: 4, topTrailing: 14),
+                            style: .continuous).fill(CodepetTheme.accentPurple))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                // Web-parity "teammate card": an avatar + bold name header row, then
+                // the reply inside a neutral rounded surface card (not flat text).
+                let persona = (message.companionId ?? companyStore.company.companionId)
+                    .flatMap { PetCharacter.all[$0] }
+                HStack {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .center, spacing: 8) {
+                            CompanionAvatar(companionId: message.companionId, size: 22)
+                            // Specialist → "Name · Dept" in the department accent (kept);
+                            // guiding companion → just its name in primary.
+                            if let dept = message.deptName, let persona {
+                                Text("\(persona.name) · \(dept)")
+                                    .font(CodepetTheme.inter(14, weight: .semibold))
+                                    .foregroundColor(persona.color)
+                            } else {
+                                Text(persona?.name ?? companionName)
+                                    .font(CodepetTheme.inter(14, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.primaryText)
+                            }
+                        }
+                        Text(message.text)
+                            .font(CodepetTheme.inter(16))
+                            .lineSpacing(5)
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(CodepetTheme.surface))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(CodepetTheme.hairline, lineWidth: 1))
+                        // No per-message action bar — matches the web (the card is the
+                        // whole reply; copy/regenerate/thumbs are intentionally omitted).
+                    }
+                    Spacer(minLength: 24)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+    }
+
+    /// Copy + Regenerate on a companion text bubble. Regenerate is a pure
+    /// client-side resend of the last `me` message through the normal chat
+    /// path — no backend "regenerate" endpoint exists.
+    private var companionActions: some View {
+        HStack(spacing: 14) {
+            Button { copyText() } label: {
+                Image(systemName: "doc.on.doc").font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            Button { regenerate() } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            Button { react(true) } label: {
+                Image(systemName: reaction == true ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .font(.system(size: 13))
+                    .foregroundColor(reaction == true ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+            Button { react(false) } label: {
+                Image(systemName: reaction == false ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .font(.system(size: 13))
+                    .foregroundColor(reaction == false ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private func copyText() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text, forType: .string)
+    }
+
+    private func regenerate() {
+        guard !companyStore.isCompanionTyping, !companyStore.isStreaming else { return }
+        guard let lastUser = companyStore.chatMessages.last(where: { $0.role == .me })?.text else { return }
+        Task { await companyStore.sendChat(lastUser, language: lang) }
+    }
+
+    private func react(_ helpful: Bool) {
+        reaction = helpful
+        companyStore.reactToMessage(messageId: message.id, helpful: helpful)
+    }
+
+    /// A clean one-glance preview of a deliverable body for the card: drop leading
+    /// markdown heading lines (the card already shows the title), then strip inline
+    /// markdown markers so raw `##`/`**`/`` ` `` never leak into the preview.
+    /// A structured preview of a generated deliverable: keeps the markdown structure
+    /// (bold section labels, line breaks, em-dashes) and turns leading "- "/"* " list
+    /// markers into real "•" bullets — so a bullet reads as a bullet, not a stray
+    /// hyphen, while mid-word hyphens ("re-explaining") stay intact.
+    static func deliverablePreview(_ body: String) -> AttributedString {
+        let cleaned = body
+            .components(separatedBy: "\n")
+            .map { line -> String in
+                let leading = line.prefix { $0 == " " }
+                let rest = line.dropFirst(leading.count)
+                if rest.hasPrefix("- ") || rest.hasPrefix("* ") {
+                    return leading + "•  " + rest.dropFirst(2)
+                }
+                return line
+            }
+            .joined(separator: "\n")
+        return CodepetMarkdown.attributedString(from: cleaned)
+    }
+
+    static func previewText(_ body: String) -> String {
+        var lines = body.components(separatedBy: "\n")
+        // Drop leading blank + heading lines.
+        while let first = lines.first,
+              first.trimmingCharacters(in: .whitespaces).isEmpty
+                || first.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            lines.removeFirst()
+        }
+        let cleaned = lines.joined(separator: " ")
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "#", with: "")
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func draftCard(_ d: Deliverable) -> some View {
         HStack {
-            CodepetCard {
+            MessageCard(hue: message.draftApproved ? CodepetTheme.accentTeal : CodepetTheme.accentGold) {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
                             Text(d.title)
-                                .font(.pixelSystem(size: 12, weight: .semibold))
+                                .font(CodepetTheme.inter(16.5, weight: .semibold))
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
-                        Text(d.body)
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .lineLimit(3)
+                        Text(Self.deliverablePreview(d.body))
+                            .font(CodepetTheme.inter(15))
+                            .foregroundColor(CodepetTheme.bodyText)
+                            .lineSpacing(4)
+                            .lineLimit(7)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .contentShape(Rectangle())
@@ -531,20 +736,20 @@ struct CopilotBubble: View {
                             Image(systemName: "checkmark.circle.fill")
                             Text(lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library")
                         }
-                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .font(CodepetTheme.inter(12, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentTeal)
                     } else {
                         HStack(spacing: 8) {
                             Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
                                 Text(lang == .vi ? "Duyệt" : "Approve")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .font(CodepetTheme.inter(12, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().fill(CodepetTheme.accentPurple))
                             }.buttonStyle(.plain)
                             Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
                                 Text(lang == .vi ? "Làm lại" : "Redo")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .font(CodepetTheme.inter(12, weight: .semibold))
                                     .foregroundColor(CodepetTheme.bodyText)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().stroke(CodepetTheme.hairline))
@@ -560,7 +765,7 @@ struct CopilotBubble: View {
                                                                          reviseNote: kind.note(lang)) }
                                 } label: {
                                     Text(kind.label(lang))
-                                        .font(.pixelSystem(size: 9, weight: .semibold))
+                                        .font(CodepetTheme.inter(11, weight: .semibold))
                                         .foregroundColor(CodepetTheme.mutedText)
                                         .padding(.horizontal, 8).padding(.vertical, 3)
                                         .background(Capsule().stroke(CodepetTheme.hairline))
@@ -569,8 +774,6 @@ struct CopilotBubble: View {
                         }
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 24)
         }

@@ -167,6 +167,9 @@ enum CompanyData {
     /// non-200 / unreachable — `generateRoadmap` treats `[]` as "no change", so the board
     /// is never clobbered.
     static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.roadmap() }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
         var req = URLRequest(url: roadmapEndpoint)
         req.httpMethod = "POST"
@@ -191,6 +194,9 @@ enum CompanyData {
     /// fail-soft to `.empty` — convert such fields to a JSON-safe
     /// representation (e.g. epoch seconds) before adding them to the doc.
     static func load(companyId: String) async -> CompanyState {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.company() }
+        #endif
         let db = Firestore.firestore()
         do {
             let snap = try await db.collection("companies").document(companyId).getDocument()

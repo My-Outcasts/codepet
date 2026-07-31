@@ -43,6 +43,30 @@ enum RoadmapEngine {
             })?.element
     }
 
+    /// Up to `limit` parallelizable "next moves" for the chat fan-out: the first
+    /// `codepetCanDo` task in each DISTINCT department that maps to a specialist
+    /// companion, in roadmap order (phase order, then array position). Pure.
+    static func nextMoves(_ tasks: [RoadmapTask], limit: Int) -> [RoadmapTask] {
+        guard limit > 0 else { return [] }
+        let ordered = tasks.enumerated().sorted { a, b in
+            a.element.phase.order != b.element.phase.order
+                ? a.element.phase.order < b.element.phase.order
+                : a.offset < b.offset
+        }.map { $0.element }
+        var seenDepts = Set<String>()
+        var out: [RoadmapTask] = []
+        for task in ordered {
+            guard let dept = task.dept,
+                  DepartmentCompanions.companionId(for: dept) != nil,
+                  !seenDepts.contains(dept),
+                  status(for: task, in: tasks) == .codepetCanDo else { continue }
+            seenDepts.insert(dept)
+            out.append(task)
+            if out.count == limit { break }
+        }
+        return out
+    }
+
     static func progressPercent(_ tasks: [RoadmapTask]) -> Int {
         guard !tasks.isEmpty else { return 0 }
         let done = tasks.filter { $0.done }.count

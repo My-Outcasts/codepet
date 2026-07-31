@@ -5,6 +5,7 @@ import Foundation
 enum MarkdownBlock: Equatable {
     case heading(level: Int, text: String)
     case bullet(String)
+    case numbered(index: Int, text: String)
     case paragraph(String)
 }
 
@@ -35,11 +36,23 @@ enum MarkdownBlocks {
                 flush(); blocks.append(.heading(level: 1, text: content(line.dropFirst(2))))
             } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
                 flush(); blocks.append(.bullet(content(line.dropFirst(2))))
+            } else if let ordered = orderedPrefix(line) {
+                flush(); blocks.append(.numbered(index: ordered.0, text: content(ordered.1)))
             } else {
                 para.append(line)
             }
         }
         flush()
         return blocks
+    }
+
+    /// "12. text" → (12, "text"); nil if the line isn't an ordered-list item.
+    private static func orderedPrefix(_ line: String) -> (Int, Substring)? {
+        guard let dot = line.firstIndex(of: ".") else { return nil }
+        let numPart = line[line.startIndex..<dot]
+        guard !numPart.isEmpty, numPart.allSatisfy(\.isNumber), let n = Int(numPart) else { return nil }
+        let after = line.index(after: dot)
+        guard after < line.endIndex, line[after] == " " else { return nil }
+        return (n, line[line.index(after: after)...])
     }
 }

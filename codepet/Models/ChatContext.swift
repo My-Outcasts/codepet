@@ -99,9 +99,14 @@ enum ChatContext {
     }
 
     static func compose(brief: CompanyBrief, tasks: [RoadmapTask], decisions: [DecisionEntry] = [],
-                         library: [Deliverable] = [], query: String? = nil) -> String {
+                         library: [Deliverable] = [], query: String? = nil,
+                         focusDepartment: Department? = nil) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
+        if let dep = focusDepartment {
+            parts.append("The founder is focused on the \(dep.name) department right now — "
+                + "prioritize \(dep.name) in your answer: \(dep.focus)")
+        }
         let d = Decisions.composeDecisions(decisions)
         if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")

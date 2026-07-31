@@ -4,6 +4,12 @@ import XCTest
 
 @MainActor
 final class CompanyStoreChatRunTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Keep the execute-log reveal instant under test (no real-time pacing).
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+    }
     private func seeded() -> CompanyState {
         CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
                      companionId: "byte", onboardedAt: Date(),

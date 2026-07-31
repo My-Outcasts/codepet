@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import FirebaseCore
 import GoogleSignIn
 
@@ -42,9 +43,28 @@ struct CodePetApp: App {
         _chatController = StateObject(wrappedValue: chatController)
     }
 
+    /// Force the app's effective appearance so the CodepetTheme dyn NSColor tokens
+    /// re-resolve on a Light/Dark pick. `.system` → nil (follow macOS).
+    private static func applyAppearance(_ theme: AppTheme) {
+        switch theme {
+        case .system: NSApplication.shared.appearance = nil
+        case .light:  NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case .dark:   NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+#if DEBUG
+                // Dev-only: `-CODEPET_MOCK_GALLERY YES` swaps the root for the
+                // chat-mocks gallery so the scenario mockups are viewable in a
+                // running build (see ChatMocksGalleryView).
+                if MockGallery.enabled { ChatMocksGalleryView() } else { ContentView() }
+#else
+                ContentView()
+#endif
+            }
                 .environment(\.font, CodepetTheme.body(13))
                 .environment(\.uiLanguage, appState.uiLanguage)
                 .environmentObject(appState)
@@ -73,9 +93,20 @@ struct CodePetApp: App {
                 .environmentObject(learnProgress)
                 .environmentObject(challengeProgress)
                 .environmentObject(feedbackManager)
-                .frame(minWidth: 400, minHeight: 700)
+                // 560 = the onboarding card's real floor: a 320pt clamped art panel
+                // (OnboardingLayout.artWidth) + the form's 64pt horizontal padding either
+                // side + room for the 600pt measure to compress into. At 400 the form
+                // panel was driven to a negative width and the layout clipped.
+                .frame(minWidth: 560, minHeight: 700)
                 .themed(isDark: appState.appTheme == .dark)
                 .preferredColorScheme(appState.appTheme.colorScheme)
+                // preferredColorScheme drives SwiftUI-native colors, but the
+                // CodepetTheme.dyn tokens resolve via dynamic NSColor keyed on the
+                // app's EFFECTIVE appearance — which preferredColorScheme does NOT
+                // force. So a Light/Dark pick would leave the tokens on the system
+                // appearance. Force NSApp.appearance to make every dyn token flip.
+                .onChange(of: appState.appTheme) { _, theme in Self.applyAppearance(theme) }
+                .onAppear { Self.applyAppearance(appState.appTheme) }
                 .task {
                     projectStore.load()
                     TipsPersistence.shared.load(into: tipsState)

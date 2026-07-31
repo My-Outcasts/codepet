@@ -26,7 +26,7 @@ struct OnboardingView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
     @State private var timeoutTask: Task<Void, Never>?
-    @FocusState private var nameFocused: Bool
+    @State private var skipHover = false
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -53,57 +53,70 @@ struct OnboardingView: View {
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
         .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
-        .onChange(of: step) { newStep in
-            // Autofocus the name field when entering step 1 (deferred so the field is mounted).
-            if newStep == 1 { DispatchQueue.main.async { nameFocused = true } }
-        }
     }
 
-    // Two-panel card: art left (42%), form right.
+    // Two-panel card: art left (42% of the card, as on the web), form right.
     private var card: some View {
-        HStack(spacing: 0) {
-            Image(OnboardingContent.stepArt[min(step, OnboardingContent.stepArt.count - 1)])
-                .resizable().interpolation(.high).scaledToFill()
-                .frame(width: 360)
-                .frame(maxHeight: .infinity)
-                .clipped()
-                .overlay(
-                    OnboardingContent.stepGrade[min(step, OnboardingContent.stepGrade.count - 1)]
-                        .blendMode(.softLight)
-                )
-                .compositingGroup()   // isolate the soft-light blend to the art panel
-                .id(step) // re-fade on step change
-            Divider()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    if step != 6 {
-                        Button(action: { step = max(0, step - 1) }) {
-                            Text("← Back").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                        }.buttonStyle(.plain)
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                OnboardingArtPanel(step: step)
+                    .frame(width: max(0, geo.size.width * 0.42))
+                    .frame(maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 0) {
+                    // web `.ob-top` — Back only; Skip is pinned to the card's corner.
+                    HStack {
+                        if step != 6 {
+                            Button(action: { step = max(0, step - 1) }) {
+                                Text("← Back")
+                                    .font(CodepetTheme.body(12.5))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .padding(.horizontal, 2).padding(.vertical, 6)
+                            }.buttonStyle(.plain)
+                        }
+                        Spacer()
                     }
-                    Spacer()
-                    Button(action: skip) {
-                        Text("Skip onboarding →").font(CodepetTheme.body(12)).foregroundColor(CodepetTheme.mutedText)
-                    }.buttonStyle(.plain)
-                }
-                .padding(.bottom, 8)
+                    .frame(maxWidth: 600, minHeight: 22, alignment: .leading)
 
-                Group {
-                    if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
-                        ScrollView { stepBody.frame(maxWidth: 600, alignment: .leading) }
+                    Group {
+                        if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
+                            ScrollView {
+                                stepBody.frame(maxWidth: 600, alignment: .leading)
+                                    .padding(.top, 8).padding(.bottom, 24)
+                            }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    } else {                       // vertically centered (.leading = leading + center-vertical)
-                        stepBody.frame(maxWidth: 600, alignment: .leading)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        } else {                       // vertically centered (.leading = leading + center-vertical)
+                            stepBody.frame(maxWidth: 600, alignment: .leading)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        }
                     }
-                }
 
-                footer.frame(maxWidth: 600)
+                    footer.frame(maxWidth: 600)
+                }
+                .padding(.horizontal, 64).padding(.vertical, 46)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 64).padding(.vertical, 40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(width: geo.size.width, height: geo.size.height)
+            .overlay(alignment: .topTrailing) {
+                skipPill.padding(.top, 20).padding(.trailing, 24)
+            }
         }
         .background(CodepetTheme.surface)
+    }
+
+    /// web `.ob .skip-pre` — a surface pill pinned to the top-right of the overlay.
+    private var skipPill: some View {
+        Button(action: skip) {
+            Text("Skip onboarding →")
+                .font(CodepetTheme.body(12, weight: .semibold))
+                .foregroundColor(skipHover ? OnboardingContent.Palette.accentDeep : CodepetTheme.mutedText)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.surface))
+                .overlay(Capsule().stroke(
+                    skipHover ? OnboardingContent.Palette.accentLine : CodepetTheme.hairline,
+                    lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { skipHover = h } }
     }
 
     @ViewBuilder private var stepBody: some View {
@@ -111,9 +124,8 @@ struct OnboardingView: View {
         case 1:
             heading("First — what should I call you?", "I'll use it when I walk you through your company.")
             label("Your name")
-            textField("e.g. Mona", text: $d.name)
-                .focused($nameFocused)
-                .onSubmit { if !d.name.trimmed.isEmpty { step = 2 } }
+            ObTextField(placeholder: "e.g. Mona", text: $d.name, autofocus: true,
+                        onSubmit: { if !d.name.trimmed.isEmpty { step = 2 } })
         case 2:
             heading("Which best describes you?", "This shapes how I explain each department to you.")
             OnboardingOptionList(options: OnboardingContent.roles, selectedKey: Binding(
@@ -125,23 +137,21 @@ struct OnboardingView: View {
         case 4:
             heading("Now — what are you building?",
                     "A name and one clear sentence — that line is what I read to tailor your whole plan. Everything else is optional but sharpens it.")
-            label("Project name"); textField("e.g. Codepet", text: $d.projName)
+            label("Project name")
+            ObTextField(placeholder: "e.g. Codepet", text: $d.projName)
             label("In one sentence, what is it?")
-            textField("A macOS companion that helps founders run their company with AI", text: $d.oneLiner)
-            label("What kind of product is it? (optional)")
+            ObTextField(placeholder: "A macOS companion that helps founders run their company with AI",
+                        text: $d.oneLiner)
+            label("What kind of product is it?", opt: "optional")
             chips(OnboardingContent.categories, selected: d.categories) { c in
                 if d.categories.contains(c) { d.categories.removeAll { $0 == c } } else { d.categories.append(c) }
             }
-            label("Who's it for? (optional)")
-            textField("e.g. solo founders shipping their first product", text: $d.audience)
-            label("Link (optional — website, repo, or Figma)")
-            textField("https://", text: $d.link)
-            label("Anything else to read? (optional — paste a pitch, README, or notes)")
-            TextEditor(text: $d.notes)
-                .font(CodepetTheme.body(14)).frame(minHeight: 74)
-                .scrollContentBackground(.hidden)   // hide TextEditor's default backing (macOS 13+)
-                .padding(8).background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+            label("Who's it for?", opt: "optional")
+            ObTextField(placeholder: "e.g. solo founders shipping their first product", text: $d.audience)
+            label("Link", opt: "optional — website, repo, or Figma")
+            ObTextField(placeholder: "https://", text: $d.link)
+            label("Anything else to read?", opt: "optional — paste a pitch, README, or notes")
+            ObTextEditor(placeholder: "Paste anything that helps me understand the product…", text: $d.notes)
         case 5:
             heading("Where are you today?", "This sets your starting point on the roadmap.")
             OnboardingStageSlider(stageIndex: $d.stageIndex)
@@ -159,14 +169,23 @@ struct OnboardingView: View {
         let pct = CGFloat(step + 1) / CGFloat(OnboardingContent.total)
         HStack(spacing: 14) {
             if step != 6 || (anDone && reveal != nil) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(OnboardingContent.Palette.well).frame(height: 5)
-                        Capsule().fill(CodepetTheme.accentPurple).frame(width: geo.size.width * pct, height: 5)
+                // web `.ob-prog` — 228px row: bar flexes, "Step n of m" keeps its width.
+                HStack(spacing: 11) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(OnboardingContent.Palette.well).frame(height: 5)
+                            Capsule().fill(CodepetTheme.accentPurple)
+                                .frame(width: geo.size.width * pct, height: 5)
+                                .animation(.easeOut(duration: 0.45), value: pct)
+                        }
+                        .frame(height: 5)
                     }
-                }.frame(width: 150, height: 5)
-                Text("Step \(step + 1) of \(OnboardingContent.total)")
-                    .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
+                    .frame(height: 5)
+                    Text("Step \(step + 1) of \(OnboardingContent.total)")
+                        .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
+                        .fixedSize()
+                }
+                .frame(width: 228)
             } else if anDone {   // step 6, animation done but scaffold still resolving
                 Text("Still building your company…")
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
@@ -260,17 +279,18 @@ struct OnboardingView: View {
             Text(sub).font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
         }.padding(.bottom, 4)
     }
-    private func label(_ t: String) -> some View {
-        Text(t).font(CodepetTheme.body(12)).fontWeight(.semibold)
-            .foregroundColor(CodepetTheme.primaryText).padding(.top, 18).padding(.bottom, 8)
+    /// web `.ob label` (+ the lighter `.opt` run for "optional" hints).
+    private func label(_ t: String, opt: String? = nil) -> some View {
+        (Text(t)
+            .font(CodepetTheme.body(12.5, weight: .semibold))
+            .foregroundColor(CodepetTheme.primaryText)
+         + (opt.map {
+             Text(" \($0)")
+                 .font(CodepetTheme.body(11.5, weight: .medium))
+                 .foregroundColor(OnboardingContent.Palette.faint)
+         } ?? Text(verbatim: "")))
+            .padding(.top, 18).padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    private func textField(_ ph: String, text: Binding<String>) -> some View {
-        TextField(ph, text: text)
-            .textFieldStyle(.plain).font(CodepetTheme.body(14))
-            .padding(.horizontal, 14).padding(.vertical, 13)
-            .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
     private func chips(_ items: [String], selected: [String], toggle: @escaping (String) -> Void) -> some View {
         ChipFlowLayout(spacing: 8) {
@@ -289,7 +309,7 @@ struct OnboardingView: View {
     }
     private func bigButton(_ title: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: { if enabled { action() } }) {
-            Text(title).font(CodepetTheme.body(13)).fontWeight(.semibold).foregroundColor(.white)
+            Text(title).font(CodepetTheme.body(13.5, weight: .semibold)).foregroundColor(.white)
                 .padding(.horizontal, 22).padding(.vertical, 11)
                 .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.accentPurple))
                 .opacity(enabled ? 1 : 0.38)
@@ -299,4 +319,74 @@ struct OnboardingView: View {
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+/// Onboarding chrome shared by the text inputs — web `.ob input.t` / `.ob textarea`:
+/// surface-2 fill, hairline border, 12pt radius; on focus the border turns
+/// accent-line with a 3px accent halo.
+private struct ObFieldChrome: ViewModifier {
+    let focused: Bool
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingContent.Palette.surface2))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(
+                focused ? OnboardingContent.Palette.accentLine : CodepetTheme.hairline, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 13.5).stroke(
+                CodepetTheme.accentPurple.opacity(focused ? 0.12 : 0), lineWidth: 3)
+                .padding(-1.5))
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
+/// Single-line onboarding input (web `.ob input.t`).
+struct ObTextField: View {
+    let placeholder: String
+    @Binding var text: String
+    var autofocus = false
+    var onSubmit: (() -> Void)?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(CodepetTheme.body(14))
+            .foregroundColor(CodepetTheme.bodyText)
+            .focused($focused)
+            .onSubmit { onSubmit?() }
+            .padding(.horizontal, 14).padding(.vertical, 13)
+            .modifier(ObFieldChrome(focused: focused))
+            .onAppear {
+                // Deferred so the field is mounted before focus moves to it.
+                if autofocus { DispatchQueue.main.async { focused = true } }
+            }
+    }
+}
+
+/// Multi-line onboarding input (web `.ob textarea`) — same chrome, 74pt minimum,
+/// with the web's placeholder (TextEditor has none of its own).
+struct ObTextEditor: View {
+    let placeholder: String
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextEditor(text: $text)
+            .textEditorStyle(.plain)
+            .font(CodepetTheme.body(14))
+            .foregroundColor(CodepetTheme.bodyText)
+            .focused($focused)
+            .scrollContentBackground(.hidden)   // hide TextEditor's default backing
+            .frame(minHeight: 74)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .font(CodepetTheme.body(14))
+                        .foregroundColor(OnboardingContent.Palette.faint)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .modifier(ObFieldChrome(focused: focused))
+    }
 }

@@ -37,7 +37,7 @@ struct OnboardingAnalysisView: View {
                             }
                         }
                         Text(OnboardingContent.analysisLines[i])
-                            .font(CodepetTheme.body(13)).foregroundColor(CodepetTheme.mutedText)
+                            .font(CodepetTheme.body(13.5)).foregroundColor(CodepetTheme.mutedText)
                     }
                     .padding(.vertical, 6)
                 }

@@ -24,16 +24,21 @@ struct OnboardingStageSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geo in
-                let w = geo.size.width
+                // web `.sb-track` is inset 15px each side so the 26px thumb never clips.
+                let inset: CGFloat = 15
+                let w = max(0, geo.size.width - inset * 2)
                 let frac = n > 1 ? CGFloat(stageIndex) / CGFloat(n - 1) : 0
                 ZStack(alignment: .leading) {
                     // base track
-                    Capsule().fill(OnboardingContent.Palette.well).frame(height: 3)
+                    Capsule().fill(OnboardingContent.Palette.well)
+                        .frame(width: w, height: 3)
+                        .position(x: inset + w / 2, y: 24)
                     // progress
                     Capsule()
                         .fill(LinearGradient(colors: [CodepetTheme.accentPurple, OnboardingContent.Palette.accentDeep],
                                              startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(0, w * frac), height: 3)
+                        .position(x: inset + (w * frac) / 2, y: 24)
                     // ticks
                     ForEach(0...((n - 1) * step), id: \.self) { t in
                         let tf = CGFloat(t) / CGFloat((n - 1) * step)
@@ -43,7 +48,7 @@ struct OnboardingStageSlider: View {
                             .fill(filled ? (isMajor ? OnboardingContent.Palette.accentDeep : CodepetTheme.accentPurple)
                                          : Color(hex: isMajor ? "#cbc3b2" : "#dad3c5"))
                             .frame(width: isMajor ? 2.5 : 2, height: isMajor ? 18 : 9)
-                            .position(x: w * tf, y: 24)
+                            .position(x: inset + w * tf, y: 24)
                     }
                     // thumb
                     Circle()
@@ -52,14 +57,14 @@ struct OnboardingStageSlider: View {
                         .overlay(Circle().fill(CodepetTheme.accentPurple).padding(6))
                         .frame(width: 26, height: 26)
                         .shadow(color: CodepetTheme.accentPurple.opacity(0.4), radius: 6, y: 4)
-                        .position(x: w * frac, y: 24)
+                        .position(x: inset + w * frac, y: 24)
                 }
-                .frame(height: 48)
+                .frame(width: geo.size.width, height: 48)
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { v in
                         dragging = true
-                        stageIndex = StageSliderMath.stageIndex(atX: v.location.x, width: w, count: n)
+                        stageIndex = StageSliderMath.stageIndex(atX: v.location.x - inset, width: w, count: n)
                     }
                     .onEnded { _ in dragging = false })
             }
@@ -74,7 +79,7 @@ struct OnboardingStageSlider: View {
             HStack {
                 ForEach(Array(stages.enumerated()), id: \.offset) { i, s in
                     Text(s)
-                        .font(CodepetTheme.body(10))
+                        .font(CodepetTheme.body(10.5))
                         .foregroundColor(i == stageIndex ? OnboardingContent.Palette.accentDeep : OnboardingContent.Palette.faint)
                         .fontWeight(i == stageIndex ? .bold : .regular)
                         .frame(maxWidth: .infinity, alignment: i == 0 ? .leading : (i == n - 1 ? .trailing : .center))

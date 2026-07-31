@@ -49,7 +49,7 @@ struct OnboardingRevealView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(OnboardingContent.Palette.accentTint))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(OnboardingContent.Palette.accentLine, lineWidth: 1))
             (Text(head).bold().foregroundColor(CodepetTheme.primaryText) + Text(suffix).foregroundColor(CodepetTheme.bodyText))
-                .font(CodepetTheme.body(13))
+                .font(CodepetTheme.body(13.5))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

@@ -154,24 +154,29 @@ struct CopilotChatView: View {
     }
 
     private var greeting: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 8) {
-                CompanionOrb(size: 26, glow: false)
-                Text(companionName)
-                    .font(CodepetTheme.inter(13, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-            }
+        // Match the web copilot's empty state exactly: the welcome line inside a
+        // rounded bordered surface card, then the starter questions as full-width,
+        // left-aligned, outlined purple buttons.
+        VStack(alignment: .leading, spacing: 14) {
             Text(lang == .vi
                  ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
                  : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
-                .font(CodepetTheme.inter(13.5)).lineSpacing(3).foregroundColor(CodepetTheme.bodyText)
+                .font(CodepetTheme.inter(15.5)).lineSpacing(4).foregroundColor(CodepetTheme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 6) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CodepetTheme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CodepetTheme.hairline, lineWidth: 1))
+            VStack(spacing: 10) {
                 ForEach(quickStarts, id: \.self) { chip in
                     Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
-                        Text(chip).font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                        Text(chip).font(CodepetTheme.inter(14.5, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.vertical, 14)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(CodepetTheme.accentPurple.opacity(0.08)))
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1))
                     }.buttonStyle(.plain)
                 }
             }
@@ -504,54 +509,65 @@ struct CopilotBubble: View {
     private func interviewCard(_ gap: InterviewGap) -> some View {
         let q = EnrichInterview.question(for: gap, language: lang)
         let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(q.ask)
-                    .font(.pixelSystem(size: 12, weight: .semibold))
+        // Rendered as a teammate card (orb + name + surface) so the first-run
+        // question reads like a companion message in the web chat language.
+        return HStack(alignment: .top, spacing: 8) {
+            CompanionOrb(size: 22, glow: false)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(companionName)
+                    .font(CodepetTheme.inter(12.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(q.why)
-                    .font(.pixelSystem(size: 11))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
-                          text: $interviewDraft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.pixelSystem(size: 12))
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
-                HStack(spacing: 8) {
-                    Button {
-                        let answer = interviewDraft
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Gửi" : "Send")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-                    }
-                    .buttonStyle(.plain).disabled(!canSend)
-                    Button {
-                        interviewDraft = ""
-                        Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
-                    } label: {
-                        Text(lang == .vi ? "Bỏ qua" : "Skip")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
+                MessageCard(hue: companionAccent) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(q.ask)
+                            .font(CodepetTheme.inter(14.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(q.why)
+                            .font(CodepetTheme.inter(13))
                             .foregroundColor(CodepetTheme.mutedText)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().stroke(CodepetTheme.hairline))
+                            .fixedSize(horizontal: false, vertical: true)
+                        TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
+                                  text: $interviewDraft, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(CodepetTheme.inter(13.5))
+                            .lineLimit(1...4)
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(CodepetTheme.pageBackground))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(CodepetTheme.hairline, lineWidth: 1))
+                        HStack(spacing: 8) {
+                            Button {
+                                let answer = interviewDraft
+                                interviewDraft = ""
+                                Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
+                            } label: {
+                                Text(lang == .vi ? "Gửi" : "Send")
+                                    .font(CodepetTheme.inter(13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
+                            }
+                            .buttonStyle(.plain).disabled(!canSend)
+                            Button {
+                                interviewDraft = ""
+                                Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
+                            } label: {
+                                Text(lang == .vi ? "Bỏ qua" : "Skip")
+                                    .font(CodepetTheme.inter(13, weight: .medium))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CodepetTheme.surface))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 24)
+            Spacer(minLength: 8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The chat-run step-transparency indicator (web: a "producing" beat before the

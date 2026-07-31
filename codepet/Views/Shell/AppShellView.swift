@@ -26,14 +26,21 @@ struct AppShellView: View {
                     if collapsed {
                         dockHandle
                     } else {
-                        ZStack(alignment: .topTrailing) {
+                        VStack(spacing: 0) {
+                            HStack {
+                                Spacer()
+                                Button { companyStore.dockCollapsed = true } label: {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.mutedText)
+                                        .padding(6)
+                                }
+                                .buttonStyle(.plain)
+                                .help(uiLanguage == .vi ? "Thu gọn trợ lý" : "Collapse copilot")
+                            }
+                            .padding(.horizontal, 8).padding(.top, 6)
+                            .background(CodepetTheme.surface)
                             CopilotChatView()
-                            Button { companyStore.dockCollapsed = true } label: {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(CodepetTheme.mutedText)
-                                    .padding(6)
-                            }.buttonStyle(.plain).padding(6)
                         }
                         .frame(width: dockWidth)
                     }

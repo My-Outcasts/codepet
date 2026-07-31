@@ -13,6 +13,7 @@ struct RoadmapCardView: View {
     let isCurrent: Bool
     let herePhrase: String
     let pulsing: Bool
+    let accent: Color
     let onTap: () -> Void
 
     @Environment(\.uiLanguage) private var lang
@@ -57,7 +58,7 @@ struct RoadmapCardView: View {
         .opacity(isLocked ? RoadmapTokens.lockedOpacity(dark: scheme == .dark) : 1)
         .background(cardFill)
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(cardBorder, lineWidth: 1))
-        .shadow(color: isCurrent ? CodepetTheme.accentPurple.opacity(0.6) : .clear,
+        .shadow(color: isCurrent ? accent.opacity(0.6) : .clear,
                 radius: 15, x: 0, y: 10)
         .overlay(alignment: .topLeading) {
             if isCurrent { hereMarker.offset(x: -1, y: -32) }
@@ -106,7 +107,7 @@ struct RoadmapCardView: View {
     // replacing it, so a dependency line running behind a card can never bleed through.
     private var cardFill: some View {
         let tintOverlay: Color? = isCurrent
-            ? CodepetTheme.accentPurple.opacity(0.10)
+            ? accent.opacity(0.10)
             : isDone ? RoadmapPalette.done.opacity(0.06) : nil
         return RoundedRectangle(cornerRadius: 11).fill(RoadmapTokens.cardBG)
             .overlay {
@@ -117,7 +118,7 @@ struct RoadmapCardView: View {
     }
 
     private var cardBorder: Color {
-        if isCurrent { return CodepetTheme.accentPurple.opacity(0.6) }
+        if isCurrent { return accent.opacity(0.6) }
         if isDone { return RoadmapPalette.done.opacity(0.22) }
         return CodepetTokens.cardEdge
     }
@@ -140,17 +141,17 @@ struct RoadmapCardView: View {
     private var hereMarker: some View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: 5)
-                .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
+                .fill(LinearGradient(colors: [CodepetTokens.accentDeep, accent],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 17, height: 17)
             Text(herePhrase.uppercased())
                 .font(CodepetTheme.inter(9.5)).tracking(0.57)   // web .06em at 9.5px
-                .foregroundColor(CodepetTheme.accentPurple)
+                .foregroundColor(accent)
                 .fixedSize()
         }
         .padding(.leading, 4).padding(.trailing, 9).padding(.vertical, 3)
         .background(Capsule().fill(CodepetTheme.surface))
-        .overlay(Capsule().stroke(CodepetTheme.accentPurple.opacity(0.5), lineWidth: 1))
-        .shadow(color: CodepetTheme.accentPurple.opacity(0.6), radius: 10, x: 0, y: 6)
+        .overlay(Capsule().stroke(accent.opacity(0.5), lineWidth: 1))
+        .shadow(color: accent.opacity(0.6), radius: 10, x: 0, y: 6)
     }
 }

@@ -6,6 +6,7 @@ import SwiftUI
 /// `OverviewChromeRow`; the first-run briefing lives in `OverviewIntroSheet`.
 struct RoadmapView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var lang
     @State private var showMapIntro = false
     @State private var introShown = false
@@ -13,17 +14,23 @@ struct RoadmapView: View {
     @State private var overviewTab: OverviewTab = .roadmap
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
+    /// The board re-tints with the chosen companion, exactly like the surrounding chrome
+    /// (`AppShellView.accent`) — web threads one `--accent` custom property through both.
+    private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
+    /// Placeholder-junk filtered, mirroring web's `cleanCompanyName` — onboarding lets people
+    /// type anything, so a company name that's really "12" or an email must not reach the UI.
     private var projectName: String? {
-        let p = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return p.isEmpty ? nil : p
+        MeaningfulText.clean(companyStore.company.brief.projectName)
     }
+    /// Placeholder-junk filtered, mirroring web's `meaningfulText` — a one-liner of "12" must
+    /// not reach the briefing subtitle or the root node's tagline.
     private var oneLiner: String? {
-        let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return o.isEmpty ? nil : o
+        MeaningfulText.clean(companyStore.company.brief.oneLiner)
     }
     /// The ONE display name for the company, used by the briefing headline AND the board's root
     /// node. Web derives both from a single `cleanCompanyName(brief.projectName) ?? 'Your company'`
@@ -43,8 +50,12 @@ struct RoadmapView: View {
     /// Codepet's read of the company for the briefing — web's fallback chain minus the AI
     /// `projectAnalysis` layer, which native doesn't have yet.
     private var briefSummary: String? {
-        let s = (companyStore.company.brief.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? oneLiner : s
+        MeaningfulText.clean(companyStore.company.brief.summary) ?? oneLiner
+    }
+    /// Placeholder-junk filtered, mirroring web's `meaningfulText` — the founder's name feeds
+    /// the "MONA IS HERE"-style marker, so a junk value there must fall back the same way.
+    private var founderName: String? {
+        MeaningfulText.clean(companyStore.company.brief.founderName)
     }
 
     var body: some View {
@@ -63,6 +74,7 @@ struct RoadmapView: View {
             OverviewIntroSheet(companionName: companionName,
                                projectName: displayProjectName,
                                summary: briefSummary, tasks: tasks,
+                               accent: accent,
                                onDismiss: {
                                    showMapIntro = false
                                    Task { await companyStore.markIntroSeen() }
@@ -84,13 +96,14 @@ struct RoadmapView: View {
     private var roadmapBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
-            OverviewChromeRow(tasks: tasks, companionName: companionName,
+            OverviewChromeRow(tasks: tasks, companionName: companionName, accent: accent,
                               onStart: { dispatch($0) }, onOpenTask: { dispatch($0) })
                 .padding(.horizontal, 24).padding(.top, 16)
             RoadmapBoardView(tasks: tasks, companionName: companionName,
-                             founderName: companyStore.company.brief.founderName,
+                             founderName: founderName,
                              projectName: displayProjectName,
                              tagline: oneLiner,
+                             accent: accent,
                              onTaskTap: { dispatch($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -111,7 +124,7 @@ struct RoadmapView: View {
         return Button { overviewTab = t } label: {
             Text(label)
                 .font(CodepetTheme.inter(12.5, weight: .semibold))
-                .foregroundColor(on ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                .foregroundColor(on ? accent : CodepetTheme.mutedText)
                 .padding(.horizontal, 14).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8)
                     .fill(on ? CodepetTokens.accentTint : .clear))
@@ -134,10 +147,10 @@ struct RoadmapView: View {
                 Button { showMapIntro = true } label: {
                     HStack(spacing: 8) {
                         Text("?").font(CodepetTheme.inter(11, weight: .bold))
-                            .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                            .frame(width: 15, height: 15).background(Circle().fill(CodepetTheme.accentPurple))
+                            .foregroundColor(CodepetTheme.onAccent(accent))
+                            .frame(width: 15, height: 15).background(Circle().fill(accent))
                         Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                            .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
+                            .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(accent)
                     }
                     .padding(.horizontal, 13).padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))

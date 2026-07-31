@@ -7,6 +7,7 @@ import SwiftUI
 struct OverviewChromeRow: View {
     let tasks: [RoadmapTask]
     let companionName: String
+    let accent: Color
     let onStart: (RoadmapTask) -> Void
     let onOpenTask: (RoadmapTask) -> Void
 
@@ -48,6 +49,7 @@ struct OverviewChromeRow: View {
                 if let b = beacon { beaconCard(b) }
             }
             .frame(maxWidth: panelW, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             key
         }
@@ -62,7 +64,7 @@ struct OverviewChromeRow: View {
                 if let p = currentPhase {
                     Text(p.label(lang))
                         .font(CodepetTheme.inter(10, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentPurple)
+                        .foregroundColor(accent)
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Capsule().fill(CodepetTokens.accentTint))
                         .overlay(Capsule().stroke(CodepetTokens.accentLine, lineWidth: 1))
@@ -97,16 +99,16 @@ struct OverviewChromeRow: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(CodepetTokens.well)
                 Capsule()
-                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
+                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, accent],
                                          startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(pct > 0 ? 14 : 0, g.size.width * CGFloat(pct) / 100))
-                    .shadow(color: CodepetTheme.accentPurple.opacity(0.5), radius: 5.5)
+                    .shadow(color: accent.opacity(0.5), radius: 5.5)
                 if let next = nextMilestone {
                     HStack {
                         Spacer()
                         Text((lang == .vi ? "Tiếp: " : "Next: ") + next)
                             .font(CodepetTheme.inter(10.5, weight: .semibold))
-                            .foregroundColor(CodepetTheme.accentPurple)
+                            .foregroundColor(accent)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Capsule().fill(CodepetTokens.accentTint))
                             .padding(.trailing, 5)
@@ -124,7 +126,7 @@ struct OverviewChromeRow: View {
                 pingDot
                 Text("\(companionName) · " + (lang == .vi ? "LÀM ĐIỀU NÀY TIẾP" : "DO THIS NEXT"))
                     .font(CodepetTheme.inter(10)).tracking(1.3)      // web .13em at 10px
-                    .foregroundColor(CodepetTheme.accentPurple)
+                    .foregroundColor(accent)
                     .textCase(.uppercase)
             }
             Text(b.title).font(CodepetTheme.inter(13, weight: .semibold))
@@ -133,10 +135,10 @@ struct OverviewChromeRow: View {
             Button { onStart(b) } label: {
                 Text(lang == .vi ? "Bắt đầu" : "Start")
                     .font(CodepetTheme.inter(12.5, weight: .bold))
-                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                    .foregroundColor(CodepetTheme.onAccent(accent))
                     .padding(.horizontal, 18).padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 9).fill(CodepetTheme.accentPurple))
-                    .shadow(color: CodepetTheme.accentPurple.opacity(0.6), radius: 7, x: 0, y: 4)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(accent))
+                    .shadow(color: accent.opacity(0.6), radius: 7, x: 0, y: 4)
             }
             .buttonStyle(.plain)
             .padding(.top, 3)
@@ -163,10 +165,10 @@ struct OverviewChromeRow: View {
     // Web `@keyframes beaconPing`: a ring scaling 1→2.9 while fading .5→0, looping.
     private var pingDot: some View {
         ZStack {
-            Circle().fill(CodepetTheme.accentPurple).frame(width: 13, height: 13)
+            Circle().fill(accent).frame(width: 13, height: 13)
                 .scaleEffect(pinging ? 2.9 : 1).opacity(pinging ? 0 : 0.5)
-            Circle().fill(CodepetTheme.accentPurple).frame(width: 13, height: 13)
-                .shadow(color: CodepetTheme.accentPurple.opacity(0.6), radius: 6)
+            Circle().fill(accent).frame(width: 13, height: 13)
+                .shadow(color: accent.opacity(0.6), radius: 6)
         }
         .frame(width: 13, height: 13)
         .onAppear {

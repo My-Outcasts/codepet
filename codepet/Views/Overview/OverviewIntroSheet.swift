@@ -12,6 +12,7 @@ struct OverviewIntroSheet: View {
     /// `brief.summary ?? brief.oneLiner` and the paragraph is simply omitted when both are empty.
     let summary: String?
     let tasks: [RoadmapTask]
+    let accent: Color
     let onDismiss: () -> Void
 
     @Environment(\.uiLanguage) private var lang
@@ -29,14 +30,14 @@ struct OverviewIntroSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
+                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, accent],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 40, height: 40)
-                    .shadow(color: CodepetTheme.accentPurple.opacity(0.7), radius: 11, x: 0, y: 8)
+                    .shadow(color: accent.opacity(0.7), radius: 11, x: 0, y: 8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(companionName.uppercased())
                         .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1.26)
-                        .foregroundColor(CodepetTheme.accentPurple)
+                        .foregroundColor(accent)
                     Text(lang == .vi ? "\(projectName), trên bản đồ" : "\(projectName), mapped")
                         .font(CodepetTheme.inter(19, weight: .bold)).tracking(-0.19)
                         .foregroundColor(CodepetTheme.primaryText)
@@ -85,11 +86,11 @@ struct OverviewIntroSheet: View {
             Button(action: onDismiss) {
                 Text(lang == .vi ? "Đã hiểu — xem ngay" : "Got it — show me")
                     .font(CodepetTheme.inter(14, weight: .bold))
-                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                    .foregroundColor(CodepetTheme.onAccent(accent))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentPurple))
-                    .shadow(color: CodepetTheme.accentPurple.opacity(0.7), radius: 11, x: 0, y: 8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(accent))
+                    .shadow(color: accent.opacity(0.7), radius: 11, x: 0, y: 8)
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.defaultAction)
@@ -118,7 +119,7 @@ struct OverviewIntroSheet: View {
             (RoadmapPalette.done,
              lang == .vi ? "Xanh là đã xong" : "Green is done",
              lang == .vi ? "bạn đã đi được bao xa." : "how far you’ve already come."),
-            (CodepetTheme.accentPurple,
+            (accent,
              lang == .vi ? "Thẻ đang sáng là nước đi tiếp theo" : "The glowing card is your next move",
              lang == .vi ? "nhấn Bắt đầu và tôi sẽ làm." : "hit Start and I’ll get to work."),
             (CodepetTheme.mutedText,

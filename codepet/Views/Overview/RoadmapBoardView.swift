@@ -12,6 +12,7 @@ struct RoadmapBoardView: View {
     let founderName: String?
     let projectName: String
     let tagline: String?
+    let accent: Color
     let onTaskTap: (RoadmapTask) -> Void
 
     @Environment(\.uiLanguage) private var lang
@@ -172,7 +173,7 @@ struct RoadmapBoardView: View {
                 HStack(spacing: 10) {
                     Text(c.phase.label(lang).uppercased())
                         .font(CodepetTheme.inter(10.5)).tracking(1.47)     // web .14em at 10.5px
-                        .foregroundColor(c.current ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                        .foregroundColor(c.current ? accent : CodepetTheme.mutedText)
                         .padding(.horizontal, 9).padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 7)
                             .fill(c.current ? CodepetTokens.accentTint : CodepetTokens.well))
@@ -201,6 +202,7 @@ struct RoadmapBoardView: View {
                 RoadmapCardView(task: n.task, status: status, isCurrent: isCurrent,
                                 herePhrase: herePhrase,
                                 pulsing: pulseIds.contains(n.task.id),
+                                accent: accent,
                                 onTap: { onTaskTap(n.task) })
                     // `.help`/`.id` must be attached BEFORE `.position` — `.position` returns
                     // a view that consumes all offered space, so anything chained after it
@@ -229,7 +231,7 @@ struct RoadmapBoardView: View {
             }
             // Root fan-out: solid, accent-tinted, its own style — never dashed, never critical.
             for e in l.rootEdges {
-                ctx.stroke(path(e.points), with: .color(CodepetTheme.accentPurple.opacity(0.4)),
+                ctx.stroke(path(e.points), with: .color(accent.opacity(0.4)),
                            style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
             }
             // Faint dotted dependencies.
@@ -239,11 +241,11 @@ struct RoadmapBoardView: View {
             }
             // Critical path: a wide soft halo under a solid line.
             for e in l.edges where e.critical {
-                ctx.stroke(path(e.points), with: .color(CodepetTheme.accentPurple.opacity(0.16)),
+                ctx.stroke(path(e.points), with: .color(accent.opacity(0.16)),
                            style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
             }
             for e in l.edges where e.critical {
-                ctx.stroke(path(e.points), with: .color(CodepetTheme.accentPurple),
+                ctx.stroke(path(e.points), with: .color(accent),
                            style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
             }
         }
@@ -266,7 +268,7 @@ struct RoadmapBoardView: View {
 
         return ZStack {
             RoundedRectangle(cornerRadius: 44)
-                .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.42), .clear],
+                .fill(RadialGradient(colors: [accent.opacity(0.42), .clear],
                                      center: .center, startRadius: 0, endRadius: r.width * 0.6))
                 .frame(width: auraW, height: auraH)
                 .blur(radius: 22)
@@ -292,12 +294,12 @@ struct RoadmapBoardView: View {
             .padding(15)
             .frame(width: r.width, height: r.height, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 16)
-                .fill(LinearGradient(colors: [CodepetTheme.accentPurple.opacity(0.16),
-                                              CodepetTheme.accentPurple.opacity(0.06)],
+                .fill(LinearGradient(colors: [accent.opacity(0.16),
+                                              accent.opacity(0.06)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing)))
             .overlay(RoundedRectangle(cornerRadius: 16)
-                .stroke(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1))
-            .shadow(color: CodepetTheme.accentPurple.opacity(0.55), radius: 22, x: 0, y: 16)
+                .stroke(accent.opacity(0.45), lineWidth: 1))
+            .shadow(color: accent.opacity(0.55), radius: 22, x: 0, y: 16)
         }
         .position(x: r.midX, y: r.midY)
     }

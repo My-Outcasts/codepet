@@ -9,6 +9,9 @@ struct CopilotChatView: View {
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
     @State private var showHistory = false
+    /// Bumped from the coordinator's publishers so a nested-object change reliably
+    /// re-renders the run card live (see the onReceive bridges below).
+    @State private var codingRunTick = 0
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
@@ -90,6 +93,15 @@ struct CopilotChatView: View {
                     if companyStore.chatMessages.isEmpty { greeting }
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
+                        if companyStore.codingRun.run != nil,
+                           companyStore.codingRunAnchorId == m.id {
+                            CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                        }
+                    }
+                    // A run with no chat anchor (triggered from tasks/roadmap) falls to the bottom.
+                    if companyStore.codingRun.run != nil,
+                       !companyStore.chatMessages.contains(where: { $0.id == companyStore.codingRunAnchorId }) {
+                        CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
                     if companyStore.isCompanionTyping { typingRow.id("typing") }
                 }
@@ -101,6 +113,25 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            // Nested-ObservableObject publishers emit in willSet (before the new value
+            // is assigned), so defer one runloop turn to re-render on the committed value —
+            // otherwise the card sticks on "running" until a tab switch.
+            .onReceive(companyStore.codingRun.$run) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
+            }
+            .onReceive(companyStore.codingRun.$steps) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
             }
         }
     }

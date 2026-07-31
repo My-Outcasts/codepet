@@ -6,15 +6,15 @@ import SwiftUI
 /// - every scene is a stacked layer and only the active one is visible, so a step
 ///   change is a 1.1s opacity crossfade (never a hard cut),
 /// - the active layer slow-zooms from 1.07 → 1 over 7s,
-/// - all layers track the pointer for a few px of counter-parallax,
 /// - a per-step colour grade sits over the bottom 70% in soft-light.
+///
+/// The web also drifts these layers with the pointer; that is deliberately left
+/// out — mouse-tracking movement on the step images read as distracting in use
+/// (same call as PR #39). Only the cold-open's starfield/glow follows the pointer.
 ///
 /// Width is owned by the caller (the web panel is `width: 42%` of the card).
 struct OnboardingArtPanel: View {
     let step: Int
-    /// Pointer position, -1…1 on both axes (0,0 = centred / no pointer).
-    var px: CGFloat = 0
-    var py: CGFloat = 0
 
     @State private var zoomedIn = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,7 +34,6 @@ struct OnboardingArtPanel: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         // Slow zoom: the incoming layer starts at 1.07 and settles to 1.
                         .scaleEffect(on && zoomedIn ? 1.0 : 1.07)
-                        .offset(x: px * -8, y: py * -8)
                         .opacity(on ? 1 : 0)
                         // Opacity crossfade — the inner scale keeps its own (slower) animation.
                         .animation(.easeInOut(duration: 1.1), value: step)

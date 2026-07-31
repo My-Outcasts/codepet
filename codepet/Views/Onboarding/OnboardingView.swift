@@ -26,11 +26,7 @@ struct OnboardingView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var scaffoldTask: Task<Void, Never>?
     @State private var timeoutTask: Task<Void, Never>?
-    /// Pointer position over the card, -1…1 — drives the art panel's counter-parallax.
-    @State private var px: CGFloat = 0
-    @State private var py: CGFloat = 0
     @State private var skipHover = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func brief() -> CompanyBrief {
         CompanyBrief(
@@ -63,7 +59,7 @@ struct OnboardingView: View {
     private var card: some View {
         GeometryReader { geo in
             HStack(spacing: 0) {
-                OnboardingArtPanel(step: step, px: px, py: py)
+                OnboardingArtPanel(step: step)
                     .frame(width: max(0, geo.size.width * 0.42))
                     .frame(maxHeight: .infinity)
                 VStack(alignment: .leading, spacing: 0) {
@@ -102,18 +98,6 @@ struct OnboardingView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .overlay(alignment: .topTrailing) {
                 skipPill.padding(.top, 20).padding(.trailing, 24)
-            }
-            .onContinuousHover { phase in
-                guard !reduceMotion else { return }
-                switch phase {
-                case .active(let p):
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        px = clampNorm(p.x, 0, geo.size.width)
-                        py = clampNorm(p.y, 0, geo.size.height)
-                    }
-                case .ended:
-                    withAnimation(.easeOut(duration: 0.4)) { px = 0; py = 0 }
-                }
             }
         }
         .background(CodepetTheme.surface)

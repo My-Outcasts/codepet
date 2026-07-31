@@ -62,7 +62,7 @@
 | `codepet/Views/SecondBrain/SecondBrainView.swift` | Strip the page header (it becomes a mode inside Overview). |
 | `codepet/Models/CompanyState.swift` | Add `introSeenAt: Date?`. |
 | `codepet/Services/CompanyData.swift` | `CompanyDoc.introSeenAt` (millis), read mapping, `introSeenPayload`, `saveIntroSeen`. |
-| `codepet/Managers/CompanyStore.swift` | `markIntroSeen()`. |
+| `codepet/Managers/CompanyStore.swift` | `introSeenSaver` (injected, defaulted) + `markIntroSeen() async`. |
 
 **Deleted:** `codepet/Models/RoadmapMapLayout.swift`, `codepet/Views/Roadmap/RoadmapMapView.swift`, `codepet/Views/Roadmap/RoadmapView.swift`, `codepetTests/RoadmapMapLayoutTests.swift`.
 
@@ -1599,7 +1599,7 @@ struct OverviewSectionView: View {
             OverviewIntroSheet(companionName: companionName, projectName: projectName,
                                summary: briefSummary, tasks: tasks, onDismiss: {
                                    showIntro = false
-                                   companyStore.markIntroSeen()
+                                   Task { await companyStore.markIntroSeen() }
                                })
         }
         .onAppear {
@@ -1962,7 +1962,7 @@ git commit -m "feat(overview): chrome strip — progress card, beacon card, stat
 **Execution order note:** this task runs BEFORE the page that presents the sheet (Task 8), so the sheet file does not exist yet — create it. Nothing presents it until Task 8.
 
 **Interfaces:**
-- Produces: `CompanyState.introSeenAt: Date?`, `CompanyDoc.introSeenAt: Double?`, `CompanyData.introSeenPayload(_:) -> [String: Any]`, `CompanyData.saveIntroSeen(companyId:at:) async -> Bool`, `CompanyStore.markIntroSeen()`, `OverviewIntroSheet(companionName:projectName:summary:tasks:onDismiss:)`
+- Produces: `CompanyState.introSeenAt: Date?`, `CompanyDoc.introSeenAt: Double?`, `CompanyData.introSeenPayload(_:) -> [String: Any]`, `CompanyData.saveIntroSeen(_:_:) async -> Bool`, `CompanyStore.markIntroSeen() async`, `OverviewIntroSheet(companionName:projectName:summary:tasks:onDismiss:)`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2039,7 +2039,7 @@ Add after `saveBrief`:
 
     /// Write companies/{uid}.introSeenAt, merge. Fail-soft: false on error — a lost write
     /// only means the briefing shows once more, never a broken page.
-    static func saveIntroSeen(companyId: String, at: Date = Date()) async -> Bool {
+    static func saveIntroSeen(_ companyId: String, _ at: Date) async -> Bool {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(introSeenPayload(at), merge: true)
@@ -2050,21 +2050,39 @@ Add after `saveBrief`:
     }
 ```
 
-In `codepet/Managers/CompanyStore.swift`, add:
+In `codepet/Managers/CompanyStore.swift`, follow the store's established **injected-saver** convention rather than calling `CompanyData` directly — every other persist path here takes its writer through the initializer so the store stays testable.
+
+Add the stored property alongside the existing savers (near `private let companionSaver: (String, String) async -> Bool`):
 
 ```swift
-    /// Remember that this account has seen the Overview briefing — locally at once (so the
-    /// sheet closes for good this session) and persisted fail-soft.
-    func markIntroSeen() {
+    private let introSeenSaver: (String, Date) async -> Bool
+```
+
+Add the matching defaulted init parameter alongside `companionSaver:` (so no existing call site changes):
+
+```swift
+         introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
+```
+
+and assign it in the init body: `self.introSeenSaver = introSeenSaver`.
+
+Then add the method, shaped exactly like the neighbouring `setCompanion(id:)` / `toggleTool(id:)`:
+
+```swift
+    /// Remember that this account has seen the Overview briefing, so the first-run modal shows
+    /// once per account rather than once per device. Fail-soft: a lost write only means the
+    /// briefing appears one more time, never a broken page.
+    func markIntroSeen() async {
         guard company.introSeenAt == nil else { return }
         let now = Date()
         company.introSeenAt = now
-        guard let id = companyId else { return }
-        Task { _ = await CompanyData.saveIntroSeen(companyId: id, at: now) }
+        if let cid = companyId { _ = await introSeenSaver(cid, now) }
     }
 ```
 
-Check the actual name of the store's company-id property (`companyId` / `uid` / `authUid`) with `grep -n "companyId\|saveTasks(companyId" codepet/Managers/CompanyStore.swift` and use that.
+`CompanyData.saveIntroSeen` must therefore have the signature `(String, Date) async -> Bool` to be usable as the default — declare it as `static func saveIntroSeen(_ companyId: String, _ at: Date) async -> Bool` (positional, matching `saveTasks`/`saveCompanionId`), not with the labelled `companyId:at:` form.
+
+`companyId` is `private(set) var companyId: String?` on the store, so reading it inside the store is fine.
 
 - [ ] **Step 5: Run test to verify it passes**
 

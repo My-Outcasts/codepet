@@ -18,6 +18,32 @@ final class CompanyStore: ObservableObject {
     /// turn, flushes so the thread list's title/`updatedAt` stay current. Session-only
     /// (mirrors `chatMessages`'s own non-Codable, in-memory contract) — see `ChatThreads.swift`.
     @Published private(set) var chatMessages: [CopilotMessage] = []
+
+    // MARK: - Coding agent (local edit_code)
+
+    /// The project folder linked for the coding agent. Client-only; reset on account switch.
+    @Published private(set) var activeProjectLink: ProjectLink?
+    private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
+
+    /// The chat message a chat-triggered coding run anchors to, so its card renders
+    /// inline right after that ask. `nil` for runs triggered outside chat (tasks/roadmap):
+    /// those fall back to the transcript bottom.
+    @Published var codingRunAnchorId: String?
+
+    /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
+    /// The `-CODEPET_MOCK_CHAT` launch arg swaps in `MockCodeRunner` (no `claude`, no cost)
+    /// while keeping the real diff-review + git-commit engine, so the flow is free to test.
+    private var codingRunBag: AnyCancellable?
+    lazy var codingRun: CodingRunCoordinator = {
+        let mock = ProcessInfo.processInfo.arguments.contains("-CODEPET_MOCK_CHAT")
+        let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter()
+        let c = CodingRunCoordinator(runner: runner)
+        // Re-publish the nested coordinator's changes so views observing only
+        // CompanyStore re-render as the run progresses (otherwise the card "sticks").
+        self.codingRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return c
+    }()
+
     /// The composer's in-progress text. Lives on the store, not the view, because the
     /// shell tears `CopilotChatView` down on every navigation and a roadmap dispatch
     /// now navigates to chat programmatically.
@@ -294,6 +320,36 @@ final class CompanyStore: ObservableObject {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         await sendMessage(text, language: language)
+    }
+
+    /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
+    /// from the brief/decisions (never clobbers an existing one), then probes.
+    @discardableResult
+    func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
+        var link = ProjectProbe.probe(path: path)
+        if bootstrapClaudeMd && !link.hasClaudeMd {
+            let seed = ClaudeMdBootstrap.compose(brief: company.brief, decisions: company.decisions)
+            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
+            link = ProjectProbe.probe(path: path)
+        }
+        if let data = try? URL(fileURLWithPath: path)
+            .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
+        }
+        activeProjectLink = link
+        return link
+    }
+
+    /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
+    /// run card to it, and stage the run. With no linked project the coordinator lands
+    /// in `.noProject` and the card offers "Link a project".
+    func startCodeRun(ask: String) {
+        let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let msg = CopilotMessage(role: .me, text: trimmed)
+        chatMessages.append(msg)
+        codingRunAnchorId = msg.id
+        codingRun.propose(ask: trimmed, plannedFiles: 2, needsBash: false, link: activeProjectLink)
     }
 
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
@@ -859,5 +915,7 @@ final class CompanyStore: ObservableObject {
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
         selectedDeptKey = nil
+        activeProjectLink = nil
+        codingRunAnchorId = nil
     }
 }

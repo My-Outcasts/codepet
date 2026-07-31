@@ -76,14 +76,26 @@ struct CopilotChatView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    // "Let's build" CTA — stub (the live build session is a later effort).
+    // "Let's build" — runs the composer text as a local engineering ask.
+    private var canBuild: Bool {
+        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming
+    }
     private var letsBuild: some View {
-        Button { } label: {
+        Button {
+            let ask = companyStore.chatDraft
+            companyStore.chatDraft = ""
+            showHistory = false
+            companyStore.startCodeRun(ask: ask)
+        } label: {
             Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
-                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
+                .font(CodepetTheme.inter(12, weight: .semibold))
+                .foregroundColor(canBuild ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
                 .frame(maxWidth: .infinity).padding(.vertical, 8)
                 .background(CodepetTheme.accentPurple.opacity(0.08))
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canBuild)
     }
 
     private var messageList: some View {

@@ -112,12 +112,19 @@ struct RoadmapView: View {
     /// streaming actions (run, walk-through) to chat, where their output appears.
     /// Approve and open-deliverable resolve in place and do not navigate.
     private func dispatch(_ task: RoadmapTask) {
-        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks))
+        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks),
+                                            isEngineering: task.dept == "eng",
+                                            projectLinked: companyStore.activeProjectLink != nil)
         switch action {
         case .run:              Task { await companyStore.runTask(task, language: lang) }
         case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
         case .approve:          Task { await companyStore.approveTask(id: task.id) }
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+        case .editCode:
+            companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
+            companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
+                                           plannedFiles: 2, needsBash: false,
+                                           link: companyStore.activeProjectLink)
         case .none:             break
         }
         if RoadmapDispatch.navigatesToChat(action) { companyStore.dockCollapsed = false }

@@ -9,6 +9,11 @@ struct CopilotChatView: View {
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
     @State private var showHistory = false
+    /// Bumped from the coordinator's publishers so a nested-object change reliably
+    /// re-renders the run card live (see the onReceive bridges below).
+    @State private var codingRunTick = 0
+    /// Composer mode: normal chat vs. an engineering code-edit ask.
+    @State private var engineeringMode = false
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
@@ -73,14 +78,26 @@ struct CopilotChatView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    // "Let's build" CTA — stub (the live build session is a later effort).
+    // "Let's build" — runs the composer text as a local engineering ask.
+    private var canBuild: Bool {
+        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming
+    }
     private var letsBuild: some View {
-        Button { } label: {
+        Button {
+            let ask = companyStore.chatDraft
+            companyStore.chatDraft = ""
+            showHistory = false
+            companyStore.startCodeRun(ask: ask)
+        } label: {
             Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
-                .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(CodepetTheme.accentPurple)
+                .font(CodepetTheme.inter(12, weight: .semibold))
+                .foregroundColor(canBuild ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
                 .frame(maxWidth: .infinity).padding(.vertical, 8)
                 .background(CodepetTheme.accentPurple.opacity(0.08))
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canBuild)
     }
 
     private var messageList: some View {
@@ -90,6 +107,18 @@ struct CopilotChatView: View {
                     if companyStore.chatMessages.isEmpty { greeting }
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
+                        if companyStore.codingRun.run != nil,
+                           companyStore.codingRunAnchorId == m.id {
+                            CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
+                        }
+                    }
+                    // A run with no chat anchor (triggered from tasks/roadmap) falls to the bottom.
+                    // Anchored runs render ONLY inline (above, next to their anchor message) —
+                    // if the anchor isn't in this thread's buffer (a switch/leak), nothing
+                    // renders here for it.
+                    if companyStore.codingRun.run != nil,
+                       companyStore.codingRunAnchorId == nil {
+                        CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
                     if companyStore.isCompanionTyping { typingRow.id("typing") }
                 }
@@ -101,6 +130,25 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            // Nested-ObservableObject publishers emit in willSet (before the new value
+            // is assigned), so defer one runloop turn to re-render on the committed value —
+            // otherwise the card sticks on "running" until a tab switch.
+            .onReceive(companyStore.codingRun.$run) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
+            }
+            .onReceive(companyStore.codingRun.$steps) { _ in
+                DispatchQueue.main.async {
+                    codingRunTick &+= 1
+                    if companyStore.codingRun.run != nil {
+                        withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
+                    }
+                }
             }
         }
     }
@@ -138,6 +186,18 @@ struct CopilotChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
+            Button { engineeringMode.toggle() } label: {
+                Text(engineeringMode ? (lang == .vi ? "Kỹ thuật" : "Engineering")
+                                     : (lang == .vi ? "Trò chuyện" : "Chat"))
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .foregroundColor(engineeringMode ? .white : CodepetTheme.mutedText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(engineeringMode ? CodepetTheme.accentBlue
+                                                               : CodepetTheme.accentBlue.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Bật để yêu cầu sửa code trên dự án đã liên kết"
+                              : "On to ask for a code edit on the linked project")
             TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
                       text: $companyStore.chatDraft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -161,7 +221,11 @@ struct CopilotChatView: View {
         let text = companyStore.chatDraft
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
-        Task { await companyStore.sendChat(text, language: lang) }
+        if engineeringMode {
+            companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
+        } else {
+            Task { await companyStore.sendChat(text, language: lang) }
+        }
     }
 }
 

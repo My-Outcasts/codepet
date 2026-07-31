@@ -22,6 +22,7 @@ struct EnvironmentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 companionLine
+                linkedProjectSection
                 if !recs.isEmpty { recommendations }
                 ForEach(ToolCategory.allCases) { cat in
                     categorySection(cat)
@@ -71,6 +72,44 @@ struct EnvironmentView: View {
         return needsYouCount > 0
             ? base + " — you just need to connect \(needsYouCount) account\(needsYouCount > 1 ? "s" : "")."
             : base + "."
+    }
+
+    // "Linked project" — the repo the coding agent edits. Link / change / unlink
+    // via `ProjectLinker` (shared with the chat card's `.noProject` offer).
+    // `ProjectLink` has no `displayName` of its own (Task 3 PORT NOTE) — derive
+    // one from the path the same way `Project.nameFromPath` does elsewhere.
+    private var linkedProjectSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text((lang == .vi ? "Dự án đã liên kết" : "Linked project").uppercased())
+                .font(CodepetTheme.inter(11, weight: .semibold))
+                .foregroundColor(CodepetTheme.mutedText)
+            if let link = companyStore.activeProjectLink {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Project.nameFromPath(link.path))
+                            .font(CodepetTheme.inter(13, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                        Text(link.path)
+                            .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                    Button(lang == .vi ? "Đổi" : "Change") {
+                        ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                    }.buttonStyle(.plain).foregroundColor(CodepetTheme.accentPurple)
+                }
+            } else {
+                Button {
+                    ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                } label: {
+                    Text(lang == .vi ? "Liên kết một dự án…" : "Link a project…")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                }.buttonStyle(.plain)
+            }
+        }
     }
 
     private var recommendations: some View {

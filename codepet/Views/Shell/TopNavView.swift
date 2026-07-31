@@ -2,8 +2,12 @@
 import SwiftUI
 
 /// The top navigation bar (web parity): account dropdown on the left, the five
-/// destination tabs centered, wake pill + Upgrade on the right. Replaces the old
-/// left rail and the old slim top bar.
+/// destination tabs packed immediately after it, wake pill + Upgrade pushed right.
+/// Replaces the old left rail and the old slim top bar.
+///
+/// The tabs are deliberately NOT centred: the web packs them straight after the account
+/// block (its "Overview" starts ~45px after the chevron), so a leading `Spacer` here left a
+/// ~365pt gap that read as a different layout.
 struct TopNavView: View {
     let accent: Color
 
@@ -16,7 +20,6 @@ struct TopNavView: View {
         HStack(spacing: 16) {
             Text("Codepet").font(CodepetTheme.pixel(18)).foregroundColor(CodepetTheme.primaryText)
             AccountMenuView()   // compact:false → avatar + name + chevron + dropdown (Settings/Billing/Support)
-            Spacer(minLength: 12)
             HStack(spacing: 4) { ForEach(AppView.topTabs) { tab($0) } }
             Spacer(minLength: 12)
             wakePill
@@ -68,9 +71,13 @@ struct TopNavView: View {
                 Text("⚡ " + (lang == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
                     .font(CodepetTheme.inter(13.5, weight: .medium))
             }
-            .foregroundColor(CodepetTheme.bodyText)
+            // Web parity: an accent-TINTED pill, not a surface-filled one. On the dark ground
+            // `surface` is almost the same value as the bar behind it, so the old fill made the
+            // pill vanish and the control read as bare text. The dot keeps its own orange fill.
+            .foregroundColor(accent)
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(CodepetTheme.surface).overlay(Capsule().stroke(CodepetTheme.hairline)))
+            .background(Capsule().fill(CodepetTokens.accentTint)
+                .overlay(Capsule().stroke(CodepetTokens.accentLine, lineWidth: 1)))
         }.buttonStyle(.plain)
     }
 

@@ -23,12 +23,32 @@ enum TaskColumn: CaseIterable {
         case .done:     return lang == .vi ? "Xong" : "Done"
         }
     }
+    /// web `.kb-dot` — Up next is a FIXED violet (byte's hue), not the companion
+    /// accent, so the four lanes stay four distinct colours for every companion.
     var dot: Color {
         switch self {
-        case .upNext:   return CodepetTheme.accentPurple
-        case .awaiting: return CodepetTheme.accentGold
-        case .yourMove: return CodepetTheme.accentBlue
+        case .upNext:   return CodepetTokens.violet
+        case .awaiting: return CodepetTokens.gold
+        case .yourMove: return CodepetTokens.blue
         case .done:     return Color(hex: "#10B981")   // web's exact Done green
+        }
+    }
+    /// web `.kb-col--<key>` lane fill.
+    var laneTint: Color {
+        switch self {
+        case .upNext:   return CodepetTokens.violetTint
+        case .awaiting: return CodepetTokens.goldTint
+        case .yourMove: return CodepetTokens.blueTint
+        case .done:     return CodepetTokens.tealTint
+        }
+    }
+    /// web `.kb-col--<key>` lane border.
+    var laneLine: Color {
+        switch self {
+        case .upNext:   return CodepetTokens.violetLine
+        case .awaiting: return CodepetTokens.goldLine
+        case .yourMove: return CodepetTokens.blueLine
+        case .done:     return CodepetTokens.tealLine
         }
     }
 }
@@ -36,6 +56,7 @@ enum TaskColumn: CaseIterable {
 struct TasksView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @Environment(\.colorScheme) private var scheme
     @State private var openDeliverable: Deliverable?
     /// The awaiting-approval task whose draft is open in the preview sheet. Set by a
     /// tap on an Awaiting card; the sheet shows the draft + Revise/Approve controls.
@@ -44,19 +65,28 @@ struct TasksView: View {
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
+            // web `.vhead { padding: 22px 26px 0 }` — 28px/650 title, 15px sub
             VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Nhiệm vụ" : "Tasks").font(CodepetTheme.title())
+                Text(lang == .vi ? "Nhiệm vụ" : "Tasks")
+                    .font(CodepetTheme.inter(28, weight: .semibold))
+                    .tracking(-0.5)
                     .foregroundColor(CodepetTheme.primaryText)
                 Text(lang == .vi ? "Việc \(companionName) đang làm, đang soạn, hoặc đang chờ bạn."
                                  : "What \(companionName) is doing, drafting, or waiting on you for.")
-                    .font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.mutedText)
             }
-            HStack(alignment: .top, spacing: 12) {
+            .viewHeadPadding()
+
+            // web `.kb-board { gap: 14px; padding: 14px 26px 18px }` — lanes are equal
+            // columns that fill the height; each scrolls its own list.
+            HStack(alignment: .top, spacing: 14) {
                 ForEach(TaskColumn.allCases, id: \.self) { col in column(col) }
             }
+            .padding(.top, 14).padding(.horizontal, 26).padding(.bottom, 18)
+            .frame(maxHeight: .infinity)
         }
-        .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
         .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
     }
@@ -65,25 +95,48 @@ struct TasksView: View {
         companyStore.company.tasks.filter { TaskColumn.column(for: $0, in: companyStore.company.tasks) == col }
     }
 
+    /// One swimlane — web `.kb-col`: a tinted, hairlined 14pt-radius column with a
+    /// fixed head (dot + uppercase label + count badge) over its own scrolling list.
     private func column(_ col: TaskColumn) -> some View {
         let items = tasks(in: col)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Circle().fill(col.dot).frame(width: 7, height: 7)
-                Text(col.label(lang)).font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(CodepetTheme.bodyText)
-                Text("\(items.count)").font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+        return VStack(alignment: .leading, spacing: 0) {
+            // web `.kb-colhead { padding: 13px 14px 11px; gap: 8px }`
+            HStack(spacing: 8) {
+                Circle().fill(col.dot).frame(width: 8, height: 8)
+                Text(col.label(lang).uppercased())
+                    .font(CodepetTheme.inter(11.5, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .lineLimit(1)
+                // web `.kb-count` — white on a --t-4 pill, not plain grey text
+                Text("\(items.count)")
+                    .font(CodepetTheme.inter(10.5, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 1.5)
+                    .background(Capsule().fill(CodepetTokens.faint))
+                    .fixedSize()
             }
-            if items.isEmpty {
-                Text(lang == .vi ? "Trống" : "Nothing here")
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                    .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
-            } else {
-                ForEach(items) { t in card(t) }
+            .padding(.top, 13).padding(.horizontal, 14).padding(.bottom, 11)
+
+            // web `.kb-list { gap: 10px; padding: 2px 12px 14px; overflow-y: auto }`
+            ScrollView {
+                VStack(spacing: 10) {
+                    if items.isEmpty {
+                        Text(lang == .vi ? "Trống" : "Nothing here")
+                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTokens.faint)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 20)
+                    } else {
+                        ForEach(items) { t in card(t) }
+                    }
+                }
+                .padding(.top, 2).padding(.horizontal, 12).padding(.bottom, 14)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(col.dot.opacity(0.06)))
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(col.laneTint))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(col.laneLine, lineWidth: 1))
     }
 
     private func card(_ t: RoadmapTask) -> some View {
@@ -110,16 +163,24 @@ struct TasksView: View {
             case .none:            break
             }
         } label: {
+            // web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT
+            // leads in full ink (.kb-dept, 700) and the task is the supporting line
+            // (.kb-title, 500, --t-3); native had the two reversed.
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {
-                    Text(d).font(CodepetTheme.inter(12.5, weight: .bold)).foregroundColor(CodepetTheme.mutedText)
+                    Text(d)
+                        .font(CodepetTheme.inter(12.5, weight: .bold))
+                        .foregroundColor(CodepetTheme.primaryText)
                 }
-                Text(t.title).font(CodepetTheme.inter(12.5, weight: .medium)).foregroundColor(CodepetTheme.primaryText)
+                Text(t.title)
+                    .font(CodepetTheme.inter(12.5, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .lineSpacing(12.5 * 0.34)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.surface))
+            .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)
+            .cardChrome(radius: 12, dark: scheme == .dark)
         }
         .buttonStyle(.plain)
     }

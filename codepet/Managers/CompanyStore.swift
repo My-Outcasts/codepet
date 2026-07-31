@@ -189,10 +189,9 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
-        // Web parity: the copilot opens on the empty-state welcome greeting
-        // (welcome line + the same starter questions as the website) rather than
-        // seeding a first-run enrichment interview or a "do it with me" action.
-        _ = language
+        if !startEnrichInterviewIfNeeded(language: language) {
+            seedFirstRunGreeting(language: language)
+        }
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)

@@ -32,4 +32,19 @@ final class RoadmapPaletteTests: XCTestCase {
     func testBoardCardSurfaceIsNotTheListCardSurface() {
         XCTAssertNotEqual(RoadmapTokens.cardBGHex.dark, "#26201a")
     }
+
+    func testBoardTintCoversEveryState() {
+        XCTAssertEqual(RoadmapPalette.tint(for: .done), RoadmapPalette.done)
+        XCTAssertEqual(RoadmapPalette.tint(for: .codepetCanDo), RoadmapPalette.canDo)
+        XCTAssertEqual(RoadmapPalette.tint(for: .needsApproval), RoadmapPalette.approve)
+        XCTAssertEqual(RoadmapPalette.tint(for: .needsYou), RoadmapPalette.needsYou)
+        XCTAssertEqual(RoadmapPalette.tint(for: .blocked), RoadmapPalette.blocked)
+    }
+
+    // The board palette and the department cards' palette are separate on web and must stay
+    // separate here: web styles department task states from globals.css `.st-*`, where "Done"
+    // is --accent-deep, NOT green. Merging them would recolor the Company page.
+    func testBoardPaletteIsNotTheDepartmentPalette() {
+        XCTAssertNotEqual(RoadmapPalette.tint(for: .done), taskStatusTint(.done))
+    }
 }

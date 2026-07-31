@@ -56,15 +56,15 @@ struct RoadmapTask: Codable, Hashable, Identifiable {
 /// Derived per-task status (the board legend) — computed by RoadmapEngine, not stored.
 enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
 
-/// Shared status→accent mapping — the web board's DOT map (RoadmapView.tsx) and the KEY
-/// legend (OverviewSection.tsx legendFor) read from the same five colors.
+/// Shared status→accent mapping (matches RoadmapMapView's board colors). Used by the
+/// department task cards; kept here so views don't each redefine it.
 func taskStatusTint(_ s: TaskStatus) -> Color {
     switch s {
-    case .done:          return RoadmapPalette.done
-    case .codepetCanDo:  return RoadmapPalette.canDo
-    case .needsApproval: return RoadmapPalette.approve
-    case .needsYou:      return RoadmapPalette.needsYou
-    case .blocked:       return RoadmapPalette.blocked
+    case .done:          return Color(hex: "#10B981")   // web KEY: "Done" = green (#10B981)
+    case .codepetCanDo:  return CodepetTheme.accentPurple
+    case .needsApproval: return CodepetTheme.accentGold
+    case .needsYou:      return CodepetTheme.accentBlue   // web KEY: "Needs your input" = blue (#3B82F6)
+    case .blocked:       return CodepetTheme.mutedText
     }
 }
 

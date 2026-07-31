@@ -140,4 +140,17 @@ enum RoadmapPalette {
     static let needsYou = Color(hex: needsYouHex)
     static var canDo: Color { CodepetTheme.accentPurple }
     static var blocked: Color { CodepetTheme.mutedText }
+
+    /// State → dot/chip color for the roadmap board only, mirroring `RoadmapView.tsx`'s `DOT`
+    /// map. Deliberately NOT `taskStatusTint`: that one serves the department cards, which web
+    /// styles from a different scale (`globals.css` `.st-*`), so the two must not be merged.
+    static func tint(for status: TaskStatus) -> Color {
+        switch status {
+        case .done:          return done
+        case .codepetCanDo:  return canDo
+        case .needsApproval: return approve
+        case .needsYou:      return needsYou
+        case .blocked:       return blocked
+        }
+    }
 }

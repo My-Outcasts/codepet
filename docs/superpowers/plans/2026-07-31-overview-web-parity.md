@@ -20,7 +20,7 @@
   - **Run all `xcodebuild` in the FOREGROUND.** Backgrounded `xcodebuild` stalls.
   - **SourceKit cross-file diagnostics are FALSE POSITIVES** ("Cannot find type X", "No such module XCTest/FirebaseFirestore"). `xcodebuild` output is authoritative.
 - **Test host lock:** a running `codepet.app` holds the Firestore LevelDB LOCK and aborts the test host in `FirestoreClient::Initialize`. **Quit the app before every `xcodebuild test`.** `** TEST FAILED **` with zero `Failing tests:` lines means whole suites never ran — quit the app and re-run, don't debug the code.
-- **New files must be added to the Xcode target.** There is no `xcodegen`; a new `.swift` file that isn't in `CodePet.xcodeproj` compiles nowhere. Add via Xcode or by editing the `PBXBuildFile`/`PBXFileReference`/`PBXSourcesBuildPhase` entries, then confirm with a build.
+- **Do NOT hand-edit the Xcode project.** `CodePet.xcodeproj` is `objectVersion = 77` and uses `PBXFileSystemSynchronizedRootGroup`, so any `.swift` file created under `codepet/` or `codepetTests/` is picked up automatically on the next build. Never add `PBXBuildFile`/`PBXFileReference` entries by hand and never `git add CodePet.xcodeproj` — if a new file seems missing from the target, you have a real compile error, not a membership problem.
 - **Parity rule:** where this plan quotes a number, it is copied from web source. Do not "improve" it. Web references are `origin/main` of `My-Outcasts/Codepet-ver-1.2` at `d384cc3`:
   - `components/views/OverviewSection.tsx` — page shell, header, toggle, chrome strip, first-run modal
   - `components/views/overview/RoadmapView.tsx` — board renderer, cards, connectors, root node
@@ -55,7 +55,7 @@
 
 | Path | Change |
 |---|---|
-| `codepet/Views/CodepetTheme.swift` | Add the roadmap token block (`well`, `t4`, `accentDeep`, `accentTint`, `accentLine`, `rmCard*`, `rmChip*`, `rmLockedOpacity`) + `RoadmapPalette`. |
+| `codepet/Views/CodepetTokens.swift` | Append `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity) + `RoadmapPalette`. Everything else the board needs is already in this file. |
 | `codepet/Models/RoadmapTask.swift:61-69` | Repoint `taskStatusTint` at `RoadmapPalette`. |
 | `codepet/Models/AppView.swift` | Add `.overview`; drop `.roadmap`/`.secondBrain` from `navTabs` and the enum; map `navDestination "roadmap"` → `.overview`. |
 | `codepet/Views/Shell/AppShellView.swift:37-40` | Route `.overview` → `OverviewSectionView()`; delete the `.roadmap`/`.secondBrain` branches. |
@@ -102,12 +102,26 @@ Expected: `** TEST SUCCEEDED **` and a non-zero executed-test count. Record the 
 Web's board leans on tokens that native doesn't have. Two matter functionally: `--rm-card-bg`/`--rm-card-border` are *lighter* than `surface`/`hairline` in dark mode specifically so cards keep a visible edge on the near-black page, and `--t-4` is the dependency-line color (native currently uses `hairline`, which is nearly invisible in dark).
 
 **Files:**
-- Modify: `codepet/Views/CodepetTheme.swift` (append a new `extension CodepetTheme` after the `onAccent` extension, line 463)
+- Modify: `codepet/Views/CodepetTokens.swift` (append two new sections at the end of the file)
 - Modify: `codepet/Models/RoadmapTask.swift:61-69`
 - Test: `codepetTests/RoadmapPaletteTests.swift`
 
+**REUSE, don't duplicate.** `CodepetTokens` (added by PR #45) is already the 1:1 port of the web's `globals.css` scale and ALREADY provides everything below — use these, do not redefine them:
+
+| Web token | Existing native token |
+| --- | --- |
+| `--well` | `CodepetTokens.well` |
+| `--t-4` | `CodepetTokens.faint` |
+| `--accent-deep` | `CodepetTokens.accentDeep` |
+| `--accent-tint` | `CodepetTokens.accentTint` |
+| `--accent-line` | `CodepetTokens.accentLine` |
+| `--rm-card-border` | `CodepetTokens.cardEdge` (already exactly `#ece9e2` / `#3c352b`) |
+
+Only the genuinely-missing roadmap tokens get added. Note `--rm-card-bg` is NOT `CodepetTokens.cardRaised`: web sets `.deptrow/.kb-card/.lib-tile` to `#26201a` in dark but `--rm-card-bg` to `#2a241c`, so the board card is a slightly lighter surface than the other list cards. Keep them separate.
+
 **Interfaces:**
-- Produces: `CodepetTheme.well`, `.t4`, `.accentDeep`, `.accentTint`, `.accentLine`, `.rmCardBG`, `.rmCardBorder`, `.rmChipBG`, `.rmChipBorder` (all `Color`); `CodepetTheme.rmLockedOpacity(dark:) -> Double`; `RoadmapPalette.doneHex/approveHex/needsYouHex` (`String`) and `.done/.approve/.needsYou/.canDo/.blocked` (`Color`).
+- Produces: `RoadmapTokens.cardBG`, `.chipBG`, `.chipBorder` (`Color`); `RoadmapTokens.lockedOpacity(dark:) -> Double`; `RoadmapTokens.cardBGHex/chipBGHex/chipBorderHex` (`(light: String, dark: String)`); `RoadmapPalette.doneHex/approveHex/needsYouHex` (`String`) and `.done/.approve/.needsYou/.canDo/.blocked` (`Color`).
+- Later tasks reference the board's card edge as `CodepetTokens.cardEdge` and its tints as `CodepetTokens.accentTint` / `.accentLine` — there is no `CodepetTokens.cardEdge`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -128,33 +142,25 @@ final class RoadmapPaletteTests: XCTestCase {
 
     // globals.css --rm-locked-op: 0.62 light / 0.9 dark.
     func testLockedOpacityMatchesWeb() {
-        XCTAssertEqual(CodepetTheme.rmLockedOpacity(dark: false), 0.62, accuracy: 0.0001)
-        XCTAssertEqual(CodepetTheme.rmLockedOpacity(dark: true), 0.9, accuracy: 0.0001)
+        XCTAssertEqual(RoadmapTokens.lockedOpacity(dark: false), 0.62, accuracy: 0.0001)
+        XCTAssertEqual(RoadmapTokens.lockedOpacity(dark: true), 0.9, accuracy: 0.0001)
     }
 
-    // The board's own surface tokens are LIGHTER than the app surface (#221d17) in dark mode —
-    // that's deliberate on web so cards keep an edge on the near-black page.
-    func testRoadmapCardTokensAreLighterThanAppSurfaceInDark() {
-        XCTAssertEqual(CodepetTheme.rmCardBGHex.dark, "#2a241c")
-        XCTAssertEqual(CodepetTheme.rmCardBorderHex.dark, "#3c352b")
-        XCTAssertEqual(CodepetTheme.rmChipBGHex.dark, "#342d23")
-        XCTAssertEqual(CodepetTheme.rmChipBorderHex.dark, "#473e31")
+    // The board's card surface is LIGHTER than the app surface (#221d17) in dark mode — that's
+    // deliberate on web so cards keep a visible edge on the near-black page.
+    func testBoardSurfaceTokensMatchWeb() {
+        XCTAssertEqual(RoadmapTokens.cardBGHex.light, "#ffffff")
+        XCTAssertEqual(RoadmapTokens.cardBGHex.dark, "#2a241c")
+        XCTAssertEqual(RoadmapTokens.chipBGHex.light, "#f1efe9")
+        XCTAssertEqual(RoadmapTokens.chipBGHex.dark, "#342d23")
+        XCTAssertEqual(RoadmapTokens.chipBorderHex.light, "#ece9e2")
+        XCTAssertEqual(RoadmapTokens.chipBorderHex.dark, "#473e31")
     }
 
-    func testWellAndT4MatchWeb() {
-        XCTAssertEqual(CodepetTheme.wellHex.light, "#f1efe9")
-        XCTAssertEqual(CodepetTheme.wellHex.dark, "#26211a")
-        XCTAssertEqual(CodepetTheme.t4Hex.light, "#a79e92")
-        XCTAssertEqual(CodepetTheme.t4Hex.dark, "#6f685c")
-    }
-
-    func testAccentTintAndLineMatchWeb() {
-        XCTAssertEqual(CodepetTheme.accentTintHex.light, "#eee6fd")
-        XCTAssertEqual(CodepetTheme.accentTintHex.dark, "#271f3a")
-        XCTAssertEqual(CodepetTheme.accentLineHex.light, "#d9c9f7")
-        XCTAssertEqual(CodepetTheme.accentLineHex.dark, "#43356b")
-        XCTAssertEqual(CodepetTheme.accentDeepHex.light, "#5b27b0")
-        XCTAssertEqual(CodepetTheme.accentDeepHex.dark, "#7c3aed")
+    // --rm-card-bg is a DIFFERENT dark surface from the list cards' (#26201a). If these ever
+    // become equal, one of them drifted from globals.css.
+    func testBoardCardSurfaceIsNotTheListCardSurface() {
+        XCTAssertNotEqual(RoadmapTokens.cardBGHex.dark, "#26201a")
     }
 }
 ```
@@ -164,57 +170,42 @@ final class RoadmapPaletteTests: XCTestCase {
 Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/RoadmapPaletteTests 2>&1 | tail -20`
 Expected: compile failure — `cannot find 'RoadmapPalette' in scope`.
 
-- [ ] **Step 3: Add the token block**
+- [ ] **Step 3: Add the two missing token sections**
 
-Append to `codepet/Views/CodepetTheme.swift`:
+Append to `codepet/Views/CodepetTokens.swift` (the existing 1:1 port of the web scale — everything else the board needs is already in this file, see the REUSE table above):
 
 ```swift
-// MARK: - Overview roadmap tokens
-//
-// A direct port of the roadmap-local custom properties in the web's app/globals.css.
-// Each token is exposed twice: as a `(light, dark)` hex pair (so parity is unit-testable
-// without resolving an NSAppearance) and as the `Color` the views use.
+// MARK: - Overview roadmap board
 
-extension CodepetTheme {
+/// The roadmap-local custom properties from `app/globals.css` that no other surface uses.
+/// `--rm-card-border` is deliberately absent: it is byte-for-byte `CodepetTokens.cardEdge`.
+/// Each token is exposed twice — as a `(light, dark)` hex pair, so parity is unit-testable
+/// without resolving an NSAppearance, and as the `Color` the views consume.
+enum RoadmapTokens {
     typealias HexPair = (light: String, dark: String)
 
-    static let wellHex: HexPair        = ("#f1efe9", "#26211a")
-    static let t4Hex: HexPair          = ("#a79e92", "#6f685c")
-    static let accentDeepHex: HexPair  = ("#5b27b0", "#7c3aed")
-    static let accentTintHex: HexPair  = ("#eee6fd", "#271f3a")
-    static let accentLineHex: HexPair  = ("#d9c9f7", "#43356b")
-    static let rmCardBGHex: HexPair    = ("#ffffff", "#2a241c")
-    static let rmCardBorderHex: HexPair = ("#ece9e2", "#3c352b")
-    static let rmChipBGHex: HexPair    = ("#f1efe9", "#342d23")
-    static let rmChipBorderHex: HexPair = ("#ece9e2", "#473e31")
+    static let cardBGHex: HexPair      = ("#ffffff", "#2a241c")   // --rm-card-bg
+    static let chipBGHex: HexPair      = ("#f1efe9", "#342d23")   // --rm-chip-bg
+    static let chipBorderHex: HexPair  = ("#ece9e2", "#473e31")   // --rm-chip-border
 
-    /// `--well` — the recessed track behind a progress bar and the inactive phase chip.
-    static let well = Color.dyn(wellHex.light, wellHex.dark)
-    /// `--t-4` — faintest text/line tier; the board's dotted dependency connectors.
-    static let t4 = Color.dyn(t4Hex.light, t4Hex.dark)
-    /// `--accent-deep` — the dark end of an accent gradient.
-    static let accentDeep = Color.dyn(accentDeepHex.light, accentDeepHex.dark)
-    /// `--accent-tint` — accent-washed fill for tinted cards/chips.
-    static let accentTint = Color.dyn(accentTintHex.light, accentTintHex.dark)
-    /// `--accent-line` — the border that pairs with `accentTint`.
-    static let accentLine = Color.dyn(accentLineHex.light, accentLineHex.dark)
-    /// `--rm-card-bg` — board card fill. Lighter than `surface` in dark on purpose.
-    static let rmCardBG = Color.dyn(rmCardBGHex.light, rmCardBGHex.dark)
-    /// `--rm-card-border` — board card edge. Lighter than `hairline` in dark on purpose.
-    static let rmCardBorder = Color.dyn(rmCardBorderHex.light, rmCardBorderHex.dark)
-    /// `--rm-chip-bg` — the status-icon box inside a card.
-    static let rmChipBG = Color.dyn(rmChipBGHex.light, rmChipBGHex.dark)
-    /// `--rm-chip-border` — the status-icon box's edge.
-    static let rmChipBorder = Color.dyn(rmChipBorderHex.light, rmChipBorderHex.dark)
+    /// Board card fill. In dark this is LIGHTER than both `--surface` (#221d17) and the list
+    /// cards' `cardRaised` (#26201a) — web gives the board its own slightly-raised surface so
+    /// cards keep a visible edge on the near-black page.
+    static let cardBG = Color.dyn(cardBGHex.light, cardBGHex.dark)
+    /// The status-icon box inside a card.
+    static let chipBG = Color.dyn(chipBGHex.light, chipBGHex.dark)
+    /// That box's edge.
+    static let chipBorder = Color.dyn(chipBorderHex.light, chipBorderHex.dark)
 
-    /// `--rm-locked-op` — how far a locked card's CONTENT fades (never the card itself,
-    /// so connectors can't show through).
-    static func rmLockedOpacity(dark: Bool) -> Double { dark ? 0.9 : 0.62 }
+    /// `--rm-locked-op` — how far a locked card's CONTENT fades. Never applied to the card
+    /// itself: a translucent card would let the connectors behind it show through.
+    static func lockedOpacity(dark: Bool) -> Double { dark ? 0.9 : 0.62 }
 }
 
-/// The board's state palette. `done`/`approve`/`needsYou` are literal on web (no dark
-/// variant), so they are literal here too; `canDo` and `blocked` follow the app accent
-/// and muted-text tokens exactly as web follows `--accent` and `--t-3`.
+/// The board's five states. `done`/`approve`/`needsYou` are literal hex on web with no dark
+/// variant (`RoadmapView.tsx` DOT, `OverviewSection.tsx` legendFor), so they are literal here
+/// too — do NOT wrap them in `Color.dyn`. `canDo` and `blocked` follow the app's accent and
+/// muted-text tokens, exactly as web follows `--accent` and `--t-3`.
 enum RoadmapPalette {
     static let doneHex = "#16a34a"
     static let approveHex = "#d97706"
@@ -228,7 +219,7 @@ enum RoadmapPalette {
 }
 ```
 
-`Color(hex:)` already exists — `codepet/Models/Character.swift`.
+`Color(hex:)` already exists — `codepet/Models/Character.swift`. `Color.dyn` is in `CodepetTheme.swift`.
 
 - [ ] **Step 4: Repoint `taskStatusTint`**
 
@@ -890,7 +881,7 @@ git commit -m "feat(overview): board card copy helpers (verb, quiet label, tray,
 - Test: build-verified (SwiftUI view; the logic it branches on is covered by Task 3)
 
 **Interfaces:**
-- Consumes: `RoadmapGeometry`, `RoadmapBoardCopy`, `RoadmapPalette`, `CodepetTheme.rmCard*`/`rmChip*`/`rmLockedOpacity`, `taskStatusTint(_:)`
+- Consumes: `RoadmapGeometry`, `RoadmapBoardCopy`, `RoadmapPalette`, `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity), `CodepetTokens.cardEdge`, `taskStatusTint(_:)`
 - Produces: `RoadmapCardView(task:status:isCurrent:herePhrase:pulsing:onTap:)`
 
 **Decision (founder, Jul 31) — this task INTENTIONALLY reverses a choice made in PR #46.** `main`'s `RoadmapMapView.statusChip` sets `filled = status == .codepetCanDo`, with a comment claiming "web fills every Start, not just the beacon". The live web contradicts that: only the `current` card's Start is filled; every other runnable card gets a tinted **outline** chip (verified by inspecting the rendered board). So `filled` here is `isCurrent && status == .codepetCanDo`, giving the board exactly one hero CTA. Do not "restore" #46's behavior.
@@ -950,7 +941,7 @@ struct RoadmapCardView: View {
         .frame(width: RoadmapGeometry.cardW, height: RoadmapGeometry.cardH, alignment: .leading)
         // The locked fade lives on the CONTENT, never the card — a faded card would let the
         // connectors behind it show through.
-        .opacity(isLocked ? CodepetTheme.rmLockedOpacity(dark: scheme == .dark) : 1)
+        .opacity(isLocked ? RoadmapTokens.lockedOpacity(dark: scheme == .dark) : 1)
         .overlay(alignment: .topTrailing) { if RoadmapBoardCopy.showsTrayMarker(status) { trayMarker } }
         .background(cardFill)
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(cardBorder, lineWidth: 1))
@@ -970,9 +961,9 @@ struct RoadmapCardView: View {
     private var statusBox: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 7)
-                .fill(isDone ? RoadmapPalette.done.opacity(0.14) : CodepetTheme.rmChipBG)
+                .fill(isDone ? RoadmapPalette.done.opacity(0.14) : RoadmapTokens.chipBG)
                 .overlay(RoundedRectangle(cornerRadius: 7)
-                    .stroke(isDone ? RoadmapPalette.done.opacity(0.3) : CodepetTheme.rmChipBorder,
+                    .stroke(isDone ? RoadmapPalette.done.opacity(0.3) : RoadmapTokens.chipBorder,
                             lineWidth: 1))
                 .frame(width: 26, height: 26)
             Group {
@@ -1002,7 +993,7 @@ struct RoadmapCardView: View {
         let tintOverlay: Color? = isCurrent
             ? CodepetTheme.accentPurple.opacity(0.10)
             : isDone ? RoadmapPalette.done.opacity(0.06) : nil
-        return RoundedRectangle(cornerRadius: 11).fill(CodepetTheme.rmCardBG)
+        return RoundedRectangle(cornerRadius: 11).fill(RoadmapTokens.cardBG)
             .overlay {
                 if let tintOverlay {
                     RoundedRectangle(cornerRadius: 11).fill(tintOverlay)
@@ -1013,7 +1004,7 @@ struct RoadmapCardView: View {
     private var cardBorder: Color {
         if isCurrent { return CodepetTheme.accentPurple.opacity(0.6) }
         if isDone { return RoadmapPalette.done.opacity(0.22) }
-        return CodepetTheme.rmCardBorder
+        return CodepetTokens.cardEdge
     }
 
     // Web: a 10×10 square with a thick bottom border — an out-tray glyph marking a step
@@ -1034,7 +1025,7 @@ struct RoadmapCardView: View {
     private var hereMarker: some View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: 5)
-                .fill(LinearGradient(colors: [CodepetTheme.accentDeep, CodepetTheme.accentPurple],
+                .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 17, height: 17)
             Text(herePhrase.uppercased())
@@ -1050,16 +1041,16 @@ struct RoadmapCardView: View {
 }
 ```
 
-- [ ] **Step 2: Add the file to the Xcode target and build**
+- [ ] **Step 2: Build**
 
 Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild build -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "BUILD (SUCCEEDED|FAILED)|error:" | tail -12`
-Expected: `** BUILD SUCCEEDED **`. If you see `error: cannot find 'RoadmapCardView'` from a later task's file, the new file isn't in the target — fix that first.
+Expected: `** BUILD SUCCEEDED **`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
-git add codepet/Views/Overview/RoadmapCardView.swift CodePet.xcodeproj
+git add codepet/Views/Overview/RoadmapCardView.swift
 git commit -m "feat(overview): web-exact roadmap card (208x64, floating here-marker, quiet states)"
 ```
 
@@ -1074,7 +1065,7 @@ git commit -m "feat(overview): web-exact roadmap card (208x64, floating here-mar
 - Test: build-verified + the full suite still green after the old engine's tests are removed
 
 **Interfaces:**
-- Consumes: `RoadmapLayoutEngine.layout(_:)`, `RoadmapCardView`, `RoadmapGeometry`, `CodepetTheme.t4`/`well`/`accentPurple`
+- Consumes: `RoadmapLayoutEngine.layout(_:)`, `RoadmapCardView`, `RoadmapGeometry`, `CodepetTokens.faint`/`well`/`accentPurple`
 - Produces: `RoadmapBoardView(tasks:companionName:founderName:projectName:tagline:onTaskTap:)`
 
 - [ ] **Step 1: Write the view**
@@ -1168,9 +1159,9 @@ struct RoadmapBoardView: View {
                         .foregroundColor(c.current ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
                         .padding(.horizontal, 9).padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(c.current ? CodepetTheme.accentTint : CodepetTheme.well))
+                            .fill(c.current ? CodepetTokens.accentTint : CodepetTokens.well))
                         .overlay(RoundedRectangle(cornerRadius: 7)
-                            .stroke(c.current ? CodepetTheme.accentLine : CodepetTheme.hairline,
+                            .stroke(c.current ? CodepetTokens.accentLine : CodepetTheme.hairline,
                                     lineWidth: 1))
                     Text("\(c.done)/\(c.total)")
                         .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
@@ -1222,7 +1213,7 @@ struct RoadmapBoardView: View {
             }
             // Faint dotted dependencies.
             for e in l.edges where !e.critical {
-                ctx.stroke(path(e.points), with: .color(CodepetTheme.t4),
+                ctx.stroke(path(e.points), with: .color(CodepetTokens.faint),
                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 4]))
             }
             // Critical path: a wide soft halo under a solid line.
@@ -1265,7 +1256,7 @@ struct RoadmapBoardView: View {
                     } else {
                         Text(lang == .vi ? "CÔNG TY CỦA BẠN" : "YOUR COMPANY")
                             .font(CodepetTheme.inter(9.5)).tracking(1.33)   // web .14em at 9.5px
-                            .foregroundColor(CodepetTheme.accentDeep)
+                            .foregroundColor(CodepetTokens.accentDeep)
                     }
                 }
             }
@@ -1367,7 +1358,7 @@ git rm codepet/Views/Roadmap/RoadmapMapView.swift \
        codepetTests/RoadmapMapLayoutTests.swift
 grep -rn "RoadmapMapLayout\|RoadmapMapView" codepet/ codepetTests/
 ```
-Expected from the grep: no hits. Remove the three files from the Xcode target too.
+Expected from the grep: no hits. Nothing to do in the project file — the synchronized group drops them automatically.
 
 Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild build -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "BUILD (SUCCEEDED|FAILED)|error:" | tail -12`
 Expected: `** BUILD SUCCEEDED **`
@@ -1384,7 +1375,7 @@ Expected: `** TEST SUCCEEDED **`
 
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
-git add -A codepet/Views CodePet.xcodeproj
+git add -A codepet/Views
 git commit -m "feat(overview): web-exact roadmap board (lanes, orthogonal edges, luminous root)"
 ```
 
@@ -1632,9 +1623,9 @@ struct OverviewSectionView: View {
                     .foregroundColor(CodepetTheme.accentPurple)
             }
             .padding(.horizontal, 13).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.accentTint))
+            .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))
             .overlay(RoundedRectangle(cornerRadius: 10)
-                .stroke(CodepetTheme.accentLine, lineWidth: 1))
+                .stroke(CodepetTokens.accentLine, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -1658,7 +1649,7 @@ struct OverviewSectionView: View {
                 .foregroundColor(on ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
                 .padding(.horizontal, 14).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8)
-                    .fill(on ? CodepetTheme.accentTint : .clear))
+                    .fill(on ? CodepetTokens.accentTint : .clear))
         }
         .buttonStyle(.plain)
     }
@@ -1704,7 +1695,7 @@ Expected: `** TEST SUCCEEDED **`
 
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
-git add -A codepet codepetTests CodePet.xcodeproj
+git add -A codepet codepetTests
 git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain toggle (web parity)"
 ```
 
@@ -1719,7 +1710,7 @@ git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain tog
 **Execution order note:** this task runs BEFORE the page that composes it (Task 8), so the file does not exist yet — create it. Nothing routes to it until Task 8; a build is the gate here.
 
 **Interfaces:**
-- Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `taskStatusTint(_:)`, `CodepetTheme.well`/`accentTint`/`accentLine`/`accentDeep`
+- Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `taskStatusTint(_:)`, `CodepetTokens.well`/`accentTint`/`accentLine`/`accentDeep`
 - Produces: `OverviewChromeRow(tasks:companionName:onStart:onOpenTask:)`
 
 - [ ] **Step 1: Write the view**
@@ -1788,8 +1779,8 @@ struct OverviewChromeRow: View {
                         .font(CodepetTheme.inter(10, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentPurple)
                         .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(CodepetTheme.accentTint))
-                        .overlay(Capsule().stroke(CodepetTheme.accentLine, lineWidth: 1))
+                        .background(Capsule().fill(CodepetTokens.accentTint))
+                        .overlay(Capsule().stroke(CodepetTokens.accentLine, lineWidth: 1))
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 9) {
@@ -1819,9 +1810,9 @@ struct OverviewChromeRow: View {
     private var progressBar: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Capsule().fill(CodepetTheme.well)
+                Capsule().fill(CodepetTokens.well)
                 Capsule()
-                    .fill(LinearGradient(colors: [CodepetTheme.accentDeep, CodepetTheme.accentPurple],
+                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
                                          startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(pct > 0 ? 14 : 0, g.size.width * CGFloat(pct) / 100))
                     .shadow(color: CodepetTheme.accentPurple.opacity(0.5), radius: 5.5)
@@ -1832,7 +1823,7 @@ struct OverviewChromeRow: View {
                             .font(CodepetTheme.inter(10.5, weight: .semibold))
                             .foregroundColor(CodepetTheme.accentPurple)
                             .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Capsule().fill(CodepetTheme.accentTint))
+                            .background(Capsule().fill(CodepetTokens.accentTint))
                             .padding(.trailing, 5)
                     }
                 }
@@ -1880,8 +1871,8 @@ struct OverviewChromeRow: View {
         }
         .padding(.horizontal, 13).padding(.top, 9).padding(.bottom, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentTint))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentLine, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTokens.accentTint))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTokens.accentLine, lineWidth: 1))
     }
 
     // Web `@keyframes beaconPing`: a ring scaling 1→2.9 while fading .5→0, looping.
@@ -2100,7 +2091,7 @@ struct OverviewIntroSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(LinearGradient(colors: [CodepetTheme.accentDeep, CodepetTheme.accentPurple],
+                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, CodepetTheme.accentPurple],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 40, height: 40)
                     .shadow(color: CodepetTheme.accentPurple.opacity(0.7), radius: 11, x: 0, y: 8)
@@ -2130,8 +2121,8 @@ struct OverviewIntroSheet: View {
             }
             .padding(.horizontal, 13).padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.accentTint))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.accentLine, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTokens.accentTint))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTokens.accentLine, lineWidth: 1))
             .padding(.bottom, 16)
 
             Text(lang == .vi ? "CÁCH ĐỌC BẢN ĐỒ" : "HOW TO READ THE MAP")

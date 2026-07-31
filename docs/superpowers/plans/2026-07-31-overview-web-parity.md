@@ -55,8 +55,7 @@
 
 | Path | Change |
 |---|---|
-| `codepet/Views/CodepetTokens.swift` | Append `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity) + `RoadmapPalette`. Everything else the board needs is already in this file. |
-| `codepet/Models/RoadmapTask.swift:61-69` | Repoint `taskStatusTint` at `RoadmapPalette`. |
+| `codepet/Views/CodepetTokens.swift` | Append `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity) + `RoadmapPalette` (incl. `tint(for:)`). Everything else the board needs is already in this file. |
 | `codepet/Models/AppView.swift` | Add `.overview`; drop `.roadmap`/`.secondBrain` from `navTabs` and the enum; map `navDestination "roadmap"` → `.overview`. |
 | `codepet/Views/Shell/AppShellView.swift:37-40` | Route `.overview` → `OverviewSectionView()`; delete the `.roadmap`/`.secondBrain` branches. |
 | `codepet/Views/Copilot/CopilotChatView.swift:152` | `select(.roadmap)` → `select(.overview)`. |
@@ -103,7 +102,7 @@ Web's board leans on tokens that native doesn't have. Two matter functionally: `
 
 **Files:**
 - Modify: `codepet/Views/CodepetTokens.swift` (append two new sections at the end of the file)
-- Modify: `codepet/Models/RoadmapTask.swift:61-69`
+- **Unchanged on purpose:** `codepet/Models/RoadmapTask.swift` — see Step 4
 - Test: `codepetTests/RoadmapPaletteTests.swift`
 
 **REUSE, don't duplicate.** `CodepetTokens` (added by PR #45) is already the 1:1 port of the web's `globals.css` scale and ALREADY provides everything below — use these, do not redefine them:
@@ -161,6 +160,21 @@ final class RoadmapPaletteTests: XCTestCase {
     // become equal, one of them drifted from globals.css.
     func testBoardCardSurfaceIsNotTheListCardSurface() {
         XCTAssertNotEqual(RoadmapTokens.cardBGHex.dark, "#26201a")
+    }
+
+    func testBoardTintCoversEveryState() {
+        XCTAssertEqual(RoadmapPalette.tint(for: .done), RoadmapPalette.done)
+        XCTAssertEqual(RoadmapPalette.tint(for: .codepetCanDo), RoadmapPalette.canDo)
+        XCTAssertEqual(RoadmapPalette.tint(for: .needsApproval), RoadmapPalette.approve)
+        XCTAssertEqual(RoadmapPalette.tint(for: .needsYou), RoadmapPalette.needsYou)
+        XCTAssertEqual(RoadmapPalette.tint(for: .blocked), RoadmapPalette.blocked)
+    }
+
+    // The board palette and the department cards' palette are separate on web and must stay
+    // separate here: web styles department task states from globals.css `.st-*`, where "Done"
+    // is --accent-deep, NOT green. Merging them would recolor the Company page.
+    func testBoardPaletteIsNotTheDepartmentPalette() {
+        XCTAssertNotEqual(RoadmapPalette.tint(for: .done), taskStatusTint(.done))
     }
 }
 ```
@@ -221,22 +235,25 @@ enum RoadmapPalette {
 
 `Color(hex:)` already exists — `codepet/Models/Character.swift`. `Color.dyn` is in `CodepetTheme.swift`.
 
-- [ ] **Step 4: Repoint `taskStatusTint`**
+- [ ] **Step 4: Add the board's own state→color lookup — and leave `taskStatusTint` ALONE**
 
-Replace `codepet/Models/RoadmapTask.swift:61-69` with:
+**Founder decision (Jul 31):** do NOT repoint the shared `taskStatusTint`. It is also read by `DepartmentDetailView`, and web's department cards use a *different* palette (`globals.css` `.st-done` → `--accent-deep`, `.st-draft` → `--gold-deep`, `.st-you` → `--blue`, `.st-locked` → `--t-4` — "Done" there is not green at all). Repointing it would silently recolor the Company/department page, which is outside this branch's scope. `codepet/Models/RoadmapTask.swift` must be left completely untouched by this task.
+
+Instead, give the board its own lookup. Add to `RoadmapPalette` (in `codepet/Views/CodepetTokens.swift`):
 
 ```swift
-/// Shared status→accent mapping — the web board's DOT map (RoadmapView.tsx) and the KEY
-/// legend (OverviewSection.tsx legendFor) read from the same five colors.
-func taskStatusTint(_ s: TaskStatus) -> Color {
-    switch s {
-    case .done:          return RoadmapPalette.done
-    case .codepetCanDo:  return RoadmapPalette.canDo
-    case .needsApproval: return RoadmapPalette.approve
-    case .needsYou:      return RoadmapPalette.needsYou
-    case .blocked:       return RoadmapPalette.blocked
+    /// State → dot/chip color for the roadmap board only, mirroring `RoadmapView.tsx`'s `DOT`
+    /// map. Deliberately NOT `taskStatusTint`: that one serves the department cards, which web
+    /// styles from a different scale (`globals.css` `.st-*`), so the two must not be merged.
+    static func tint(for status: TaskStatus) -> Color {
+        switch status {
+        case .done:          return done
+        case .codepetCanDo:  return canDo
+        case .needsApproval: return approve
+        case .needsYou:      return needsYou
+        case .blocked:       return blocked
+        }
     }
-}
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -244,11 +261,10 @@ func taskStatusTint(_ s: TaskStatus) -> Color {
 Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/RoadmapPaletteTests 2>&1 | tail -20`
 Expected: `** TEST SUCCEEDED **`
 
-- [ ] **Step 6: Check the blast radius**
+- [ ] **Step 6: Verify the two palettes stay separate**
 
-`taskStatusTint` is also read by the department task cards. Run:
-`cd ~/Desktop/codepet-wt-overview-parity && grep -rn "taskStatusTint" codepet/`
-For each call site outside the board, confirm the new colors are wanted there. What actually changes on `main`: `done` goes `#10B981` (emerald, set by PR #46) → **`#16a34a`** (the web's green); `needsApproval` goes `accentGold #fdb022/#fdc352` → **`#d97706`** (amber); `needsYou` stops lifting to `#6ea8ff` in dark and stays **`#2563eb`** as web does. Note any site you're unsure about in the PR description rather than silently reverting.
+Run: `cd ~/Desktop/codepet-wt-overview-parity && git diff --stat HEAD -- codepet/Models/RoadmapTask.swift && grep -rn "taskStatusTint" codepet/`
+Expected: `RoadmapTask.swift` shows **no changes**, and every `taskStatusTint` call site is unchanged. The board's own views (Tasks 4–6) will call `RoadmapPalette.tint(for:)`; nothing outside the Overview may change color as a result of this branch.
 
 - [ ] **Step 7: Commit**
 
@@ -881,7 +897,7 @@ git commit -m "feat(overview): board card copy helpers (verb, quiet label, tray,
 - Test: build-verified (SwiftUI view; the logic it branches on is covered by Task 3)
 
 **Interfaces:**
-- Consumes: `RoadmapGeometry`, `RoadmapBoardCopy`, `RoadmapPalette`, `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity), `CodepetTokens.cardEdge`, `taskStatusTint(_:)`
+- Consumes: `RoadmapGeometry`, `RoadmapBoardCopy`, `RoadmapPalette`, `RoadmapTokens` (cardBG/chipBG/chipBorder/lockedOpacity), `CodepetTokens.cardEdge`, `RoadmapPalette.tint(for:)`
 - Produces: `RoadmapCardView(task:status:isCurrent:herePhrase:pulsing:onTap:)`
 
 **Decision (founder, Jul 31) — this task INTENTIONALLY reverses a choice made in PR #46.** `main`'s `RoadmapMapView.statusChip` sets `filled = status == .codepetCanDo`, with a comment claiming "web fills every Start, not just the beacon". The live web contradicts that: only the `current` card's Start is filled; every other runnable card gets a tinted **outline** chip (verified by inspecting the rendered board). So `filled` here is `isCurrent && status == .codepetCanDo`, giving the board exactly one hero CTA. Do not "restore" #46's behavior.
@@ -911,7 +927,7 @@ struct RoadmapCardView: View {
     @Environment(\.uiLanguage) private var lang
     @Environment(\.colorScheme) private var scheme
 
-    private var tint: Color { taskStatusTint(status) }
+    private var tint: Color { RoadmapPalette.tint(for: status) }
     private var isDone: Bool { status == .done }
     private var isLocked: Bool { status == .blocked }
 
@@ -1710,7 +1726,7 @@ git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain tog
 **Execution order note:** this task runs BEFORE the page that composes it (Task 8), so the file does not exist yet — create it. Nothing routes to it until Task 8; a build is the gate here.
 
 **Interfaces:**
-- Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `taskStatusTint(_:)`, `CodepetTokens.well`/`accentTint`/`accentLine`/`accentDeep`
+- Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `RoadmapPalette.tint(for:)`, `CodepetTokens.well`/`accentTint`/`accentLine`/`accentDeep`
 - Produces: `OverviewChromeRow(tasks:companionName:onStart:onOpenTask:)`
 
 - [ ] **Step 1: Write the view**

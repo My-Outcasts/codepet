@@ -32,6 +32,7 @@ struct EnvironmentView: View {
                 // web `.envwrap { padding: 18px 26px 48px }`
                 VStack(alignment: .leading, spacing: 0) {
                     companionLine
+                    linkedProjectSection
                     sectionEyebrow(lang == .vi ? "Đề xuất cho dự án của bạn" : "Recommended for your project")
                     recommendationGrid
                     sectionEyebrow(lang == .vi ? "Xem tất cả" : "Browse all")
@@ -87,6 +88,44 @@ struct EnvironmentView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .stroke(CodepetTheme.accentPurple.opacity(0.20), lineWidth: 1))
         .padding(.top, 2).padding(.bottom, 24)
+    }
+
+    // "Linked project" — the repo the coding agent edits, linked via ProjectLinker
+    // (shared with the chat card's `.noProject` offer). ProjectLink has no displayName;
+    // derive one from the path the way Project.nameFromPath does elsewhere.
+    private var linkedProjectSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text((lang == .vi ? "Dự án đã liên kết" : "Linked project").uppercased())
+                .font(CodepetTheme.inter(11, weight: .semibold))
+                .foregroundColor(CodepetTheme.mutedText)
+            if let link = companyStore.activeProjectLink {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Project.nameFromPath(link.path))
+                            .font(CodepetTheme.inter(13, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                        Text(link.path)
+                            .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                    Button(lang == .vi ? "Đổi" : "Change") {
+                        ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                    }.buttonStyle(.plain).foregroundColor(CodepetTheme.accentPurple)
+                }
+            } else {
+                Button {
+                    ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                } label: {
+                    Text(lang == .vi ? "Liên kết một dự án…" : "Link a project…")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 24)
     }
 
     /// The web bolds the stage inside the sentence (`.env-byte .txt b`).

@@ -8,10 +8,6 @@ final class AppViewTests: XCTestCase {
                         "environment", "company", "settings", "billing", "support"])
     }
 
-    func testRailShowsSevenDestinationsInOrder() {
-        XCTAssertEqual(AppView.navTabs, [.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment])
-    }
-
     func testRoadmapNavDestinationResolvesToRoadmapNotOverview() {
         XCTAssertEqual(AppView.from(navDestination: "roadmap"), .roadmap)
         XCTAssertEqual(AppView.from(navDestination: "department"), .company)

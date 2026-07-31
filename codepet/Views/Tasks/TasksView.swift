@@ -142,10 +142,26 @@ struct TasksView: View {
     private func card(_ t: RoadmapTask) -> some View {
         Button {
             let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
-            if st == .needsApproval { previewTask = t }
-            else if st == .codepetCanDo { Task { await companyStore.runTask(t, language: lang) } }
-            else if st == .needsYou { Task { await companyStore.walkThroughTask(t, language: lang) } }
-            else if st == .done { openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library) }
+            let action = RoadmapDispatch.action(for: st,
+                                                isEngineering: t.dept == "eng",
+                                                projectLinked: companyStore.activeProjectLink != nil)
+            switch action {
+            case .approve:         previewTask = t   // the board reviews via a preview sheet
+            case .run:             Task { await companyStore.runTask(t, language: lang) }
+            case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
+            case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
+            case .editCode:
+                companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
+                companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: t),
+                                               plannedFiles: 2, needsBash: false,
+                                               link: companyStore.activeProjectLink)
+                // Only the new engineering + linked-project path reveals the copilot;
+                // ordinary run/walkThrough/approve/open taps keep their pre-existing
+                // in-place behaviour on the Tasks board. The copilot is the docked
+                // panel now (not a `.chat` destination), so expand the dock.
+                companyStore.dockCollapsed = false
+            case .none:            break
+            }
         } label: {
             // web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT
             // leads in full ink (.kb-dept, 700) and the task is the supporting line

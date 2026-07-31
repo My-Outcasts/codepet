@@ -1,38 +1,73 @@
 // codepet/Views/Shell/AppShellView.swift
 import SwiftUI
 
-/// The app's top-level shell — a left navigation rail (`AppRailView`), a slim top
-/// bar carrying the current destination's name plus the wake pill and Upgrade
-/// button, and a content area switching on the store's view. Chat is the default
-/// destination and occupies the full content area; it is no longer a docked panel.
-/// Styled in CodepetTheme; the rail's selected item and accents follow the active
-/// companion's color.
+/// The app's top-level shell — a top nav bar (`TopNavView`), a content area
+/// switching on the store's view, and a docked copilot (`CopilotChatView`) on the
+/// right. The dock collapses to a slim reopen handle per `ShellLayout` when the
+/// window is narrow or the user manually collapses it. Styled in CodepetTheme;
+/// accents follow the active companion's color.
 struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+    private let dockWidth: CGFloat = 380
 
     var body: some View {
-        HStack(spacing: 0) {
-            AppRailView(accent: accent)
+        GeometryReader { geo in
+            let collapsed = ShellLayout.dockCollapsed(forWidth: geo.size.width, manual: companyStore.dockCollapsed)
             VStack(spacing: 0) {
-                topBar
+                TopNavView(accent: accent)
                 Divider()
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Rectangle().fill(CodepetTheme.hairline).frame(width: 1)
+                    if collapsed {
+                        dockHandle
+                    } else {
+                        VStack(spacing: 0) {
+                            HStack {
+                                Spacer()
+                                Button { companyStore.dockCollapsed = true } label: {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.mutedText)
+                                        .padding(6)
+                                }
+                                .buttonStyle(.plain)
+                                .help(uiLanguage == .vi ? "Thu gọn trợ lý" : "Collapse copilot")
+                            }
+                            .padding(.horizontal, 8).padding(.top, 6)
+                            .background(CodepetTheme.surface)
+                            CopilotChatView()
+                        }
+                        .frame(width: dockWidth)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .background(CodepetTheme.pageBackground)
         }
-        .background(CodepetTheme.pageBackground)
+    }
+
+    /// Collapsed dock: a slim reopen strip.
+    private var dockHandle: some View {
+        Button { companyStore.dockCollapsed = false } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 15, weight: .medium)).foregroundColor(accent)
+                Spacer()
+            }
+            .padding(.top, 12).frame(width: 44).frame(maxHeight: .infinity)
+            .background(CodepetTheme.surface)
+        }.buttonStyle(.plain)
+        .help(uiLanguage == .vi ? "Mở trợ lý" : "Open copilot")
     }
 
     @ViewBuilder private var content: some View {
-        if companyStore.view == .chat {
-            CopilotChatView()
-        } else if companyStore.view == .roadmap {
+        if companyStore.view == .roadmap {
             RoadmapView()
-        } else if companyStore.view == .secondBrain {
-            SecondBrainView()
         } else if companyStore.view == .company {
             if let dept = companyStore.selectedDeptKey {
                 DepartmentDetailView(deptKey: dept, onBack: { companyStore.selectedDeptKey = nil })
@@ -52,57 +87,9 @@ struct AppShellView: View {
         } else if companyStore.view == .support {
             SupportView()
         } else {
-            ShellPlaceholderView(view: companyStore.view)
+            // .chat and .secondBrain are no longer full-content destinations
+            // (chat = docked copilot; second brain = Overview toggle).
+            RoadmapView()
         }
-    }
-
-    /// Slim top bar: the destination title on the left, wake pill and Upgrade on
-    /// the right. Navigation itself lives in the rail.
-    private var topBar: some View {
-        HStack(spacing: 14) {
-            Text(companyStore.view.title(uiLanguage))
-                .font(CodepetTheme.inter(15, weight: .semibold))
-                .foregroundColor(CodepetTheme.primaryText)
-            Spacer(minLength: 20)
-            HStack(spacing: 10) {
-                wakePill
-                Button { companyStore.selectedDeptKey = nil; companyStore.select(.billing) } label: {
-                    Text(uiLanguage == .vi ? "Nâng cấp" : "Upgrade")
-                        .font(CodepetTheme.inter(13.5, weight: .semibold)).foregroundColor(.white)
-                        .padding(.horizontal, 13).padding(.vertical, 7)
-                        .background(Capsule().fill(CodepetTheme.primaryText))
-                }.buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-    }
-
-    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
-
-    private var wakePill: some View {
-        Button { companyStore.selectedDeptKey = nil; companyStore.select(.environment) } label: {
-            HStack(spacing: 5) {
-                Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
-                Text("⚡ " + (uiLanguage == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
-                    .font(CodepetTheme.inter(13.5, weight: .medium))
-            }
-            .foregroundColor(CodepetTheme.bodyText)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(accent.opacity(0.1)))
-        }.buttonStyle(.plain)
-    }
-}
-
-/// Placeholder content per destination — the real views land in later phases.
-struct ShellPlaceholderView: View {
-    let view: AppView
-    @Environment(\.uiLanguage) private var uiLanguage
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: view.icon).font(.system(size: 32)).foregroundColor(CodepetTheme.mutedText)
-            Text(view.title(uiLanguage)).font(.pixelSystem(size: 18, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-            Text(uiLanguage == .vi ? "Sắp có" : "Coming soon").font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

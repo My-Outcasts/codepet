@@ -10,6 +10,8 @@ struct RoadmapView: View {
     @State private var showMapIntro = false
     @State private var beaconPinging = false
     @State private var openDeliverable: Deliverable?
+    @State private var overviewTab: OverviewTab = .roadmap
+    private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
@@ -21,27 +23,56 @@ struct RoadmapView: View {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
     private var subtitle: String {
-        let p = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if p.isEmpty && o.isEmpty { return lang == .vi ? "Lộ trình xây dựng công ty của bạn" : "Your company-building roadmap" }
-        return [p, o].filter { !$0.isEmpty }.joined(separator: " — ")
+        // Web parity: a fixed descriptive line (not the project name / one-liner).
+        lang == .vi
+            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, Codepet làm gì tiếp theo, và bạn đã đi được bao xa."
+            : "Your whole company as a roadmap — where you are, what Codepet does next, and how far you've come."
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header.padding(.horizontal, 24).padding(.top, 22)
-            chromeRow.padding(.horizontal, 24).padding(.top, 14)
-            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
+            overviewToggle.padding(.horizontal, 24).padding(.top, 16)
+            if overviewTab == .roadmap {
+                roadmapBody
+            } else {
+                SecondBrainView()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
     }
 
+    /// The former `body` contents (roadmap map + chrome), extracted so the toggle can swap it.
+    private var roadmapBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header.padding(.horizontal, 24).padding(.top, 22)
+            chromeRow.padding(.horizontal, 24).padding(.top, 14)
+            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var overviewToggle: some View {
+        HStack(spacing: 6) {
+            ForEach([OverviewTab.roadmap, .secondBrain], id: \.self) { t in
+                let on = overviewTab == t
+                Button { overviewTab = t } label: {
+                    Text(t == .roadmap ? (lang == .vi ? "Lộ trình" : "Roadmap")
+                                       : (lang == .vi ? "Bộ não" : "Second Brain"))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
+                        .foregroundColor(on ? .white : CodepetTheme.mutedText)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(Capsule().fill(on ? CodepetTheme.accentPurple : CodepetTheme.surface))
+                }.buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Lộ trình" : "Roadmap")
+                Text(lang == .vi ? "Tổng quan" : "Overview")
                     .font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
                 Text(subtitle).font(CodepetTheme.subtitle())
                     .foregroundColor(CodepetTheme.mutedText).lineLimit(1)
@@ -81,15 +112,22 @@ struct RoadmapView: View {
     /// streaming actions (run, walk-through) to chat, where their output appears.
     /// Approve and open-deliverable resolve in place and do not navigate.
     private func dispatch(_ task: RoadmapTask) {
-        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks))
+        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks),
+                                            isEngineering: task.dept == "eng",
+                                            projectLinked: companyStore.activeProjectLink != nil)
         switch action {
         case .run:              Task { await companyStore.runTask(task, language: lang) }
         case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
         case .approve:          Task { await companyStore.approveTask(id: task.id) }
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+        case .editCode:
+            companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
+            companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
+                                           plannedFiles: 2, needsBash: false,
+                                           link: companyStore.activeProjectLink)
         case .none:             break
         }
-        if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
+        if RoadmapDispatch.navigatesToChat(action) { companyStore.dockCollapsed = false }
     }
 
     private var currentPhase: RoadmapPhase { beacon?.phase ?? .find }

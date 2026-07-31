@@ -1127,7 +1127,7 @@ struct RoadmapBoardView: View {
     private func scale(for l: RoadmapLayout) -> CGFloat {
         let natural = l.size.height + headerBlock
         guard avail > 0, natural > 0 else { return 1 }
-        return max(1, min(1.0, avail / natural))
+        return min(1, avail / natural)   // shrink to fit; never upscale past natural size
     }
 
     var body: some View {

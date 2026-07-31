@@ -282,7 +282,7 @@ The crux. Native currently centers each phase column vertically and draws bezier
 
 **Files:**
 - Create: `codepet/Models/RoadmapLayout.swift`
-- Delete: `codepet/Models/RoadmapMapLayout.swift`, `codepetTests/RoadmapMapLayoutTests.swift`
+- **Delete nothing.** The old `RoadmapMapLayout.swift` / `RoadmapMapView.swift` / `RoadmapMapLayoutTests.swift` stay and keep passing; **Task 5** retires them together with the old board. See Step 4.
 - Test: `codepetTests/RoadmapLayoutTests.swift`
 
 **Interfaces:**

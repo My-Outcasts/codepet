@@ -2,13 +2,12 @@
 import SwiftUI
 
 /// The top navigation bar (web parity): account dropdown on the left, the five
-/// destination tabs centered, wake pill + Upgrade on the right. Replaces the left
-/// AppRailView and the old slim top bar.
+/// destination tabs centered, wake pill + Upgrade on the right. Replaces the old
+/// left rail and the old slim top bar.
 struct TopNavView: View {
     let accent: Color
 
     @EnvironmentObject var companyStore: CompanyStore
-    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var lang
 
     private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }

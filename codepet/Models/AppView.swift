@@ -7,12 +7,6 @@ enum AppView: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Destinations shown in the left rail, in order. Settings / billing / support are
-    /// reached from the account menu. Company is in the rail because Second Brain's
-    /// department rows always open a specific department, never the Departments index —
-    /// and that index holds the only manual "Re-plan for my stage" trigger.
-    static let navTabs: [AppView] = [.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment]
-
     /// Destinations shown as top-nav tabs, in order (web parity). Chat is the docked
     /// copilot (no tab); Second Brain is a toggle on the Overview; settings/billing/
     /// support live in the account dropdown.
@@ -54,7 +48,7 @@ enum AppView: String, CaseIterable, Identifiable {
         }
     }
 
-    /// SF Symbol shown in the rail.
+    /// SF Symbol shown for the destination (account menu, top nav).
     var icon: String {
         switch self {
         case .chat:        return "bubble.left"

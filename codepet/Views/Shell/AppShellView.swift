@@ -93,17 +93,3 @@ struct AppShellView: View {
         }
     }
 }
-
-/// Placeholder content per destination — the real views land in later phases.
-struct ShellPlaceholderView: View {
-    let view: AppView
-    @Environment(\.uiLanguage) private var uiLanguage
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: view.icon).font(.system(size: 32)).foregroundColor(CodepetTheme.mutedText)
-            Text(view.title(uiLanguage)).font(.pixelSystem(size: 18, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-            Text(uiLanguage == .vi ? "Sắp có" : "Coming soon").font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

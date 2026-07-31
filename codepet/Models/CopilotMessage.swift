@@ -35,13 +35,26 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `CompanyStore.handleRunTaskId` while a chat-initiated `run_task` is in
     /// flight — removed (never persisted) once the run resolves, win or lose.
     var producing: Bool
+    /// When a specialist companion (not the host) leads this turn, its
+    /// `PetCharacter` id — carried so the view can render "Name · Dept" instead
+    /// of the host's attribution. Nil for an ordinary host reply.
+    var companionId: String?
+    /// The department name paired with `companionId` for the "Name · Dept"
+    /// header. Nil whenever `companionId` is nil.
+    var deptName: String?
+    /// The live "how the agent is working" step checklist for a `producing`
+    /// message — revealed progressively as the run proceeds. Nil/empty for an
+    /// ordinary producing placeholder (renders the plain orb instead).
+    var execSteps: [ExecStep]?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
-         noted: [RememberedFact]? = nil, producing: Bool = false) {
+         noted: [RememberedFact]? = nil, producing: Bool = false,
+         companionId: String? = nil, deptName: String? = nil,
+         execSteps: [ExecStep]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -55,5 +68,8 @@ struct CopilotMessage: Identifiable, Equatable {
         self.setupSuggestion = setupSuggestion
         self.noted = noted
         self.producing = producing
+        self.companionId = companionId
+        self.deptName = deptName
+        self.execSteps = execSteps
     }
 }

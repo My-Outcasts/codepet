@@ -248,6 +248,107 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertFalse(names.contains("GitHub"))   // ON by default — must not be offered
     }
 
+    // MARK: - department focus + specialist handoff
+
+    /// A dept-chip send whose department maps to a NON-host specialist attributes
+    /// the companion placeholder to that specialist (companionId + deptName) —
+    /// the "Name · Dept" header conveys the handoff, no separate "Bringing in X" line.
+    func testDeptChipSendAttributesPlaceholderToSpecialist() async {
+        let dept = DepartmentCatalog.find("design")!
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Here"]))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("help me with the landing page", language: .en, department: dept)
+        XCTAssertEqual(s.chatMessages.last?.companionId, DepartmentCompanions.companionId(for: "design"))
+        XCTAssertEqual(s.chatMessages.last?.deptName, dept.name)
+    }
+
+    /// A plain send (no department chip, no department mention) stays on the
+    /// host — the placeholder's `companionId` is nil.
+    func testPlainSendStaysOnHostCompanion() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Hello"]))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi there", language: .en)
+        XCTAssertNil(s.chatMessages.last?.companionId)
+        XCTAssertNil(s.chatMessages.last?.deptName)
+    }
+
+    /// `sendChat(_, language:, department:)` with the Engineering department AND a
+    /// linked project routes to the local coding agent (`startCodeRun`) — the founder's
+    /// ask is echoed as a plain `.me` message and a run is staged, but NO companion
+    /// streaming turn is appended (neither `chatSender` nor `chatStreamer` is consulted).
+    func testSendChatWithEngDeptAndLinkedProjectRoutesToCodingAgent() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let s = CompanyStore(
+            loader: { _ in .empty }, saver: { _, _ in true },
+            chatSender: { _ in XCTFail("must not call chat client when routed to coding agent"); return nil },
+            chatStreamer: { _ in
+                XCTFail("must not call chat streamer when routed to coding agent")
+                return AsyncThrowingStream { $0.finish() }
+            })
+        await s.hydrate(companyId: "u")
+        s.linkProject(path: dir.path, bootstrapClaudeMd: false)
+        let eng = DepartmentCatalog.find("eng")!
+        await s.sendChat("add a health check endpoint", language: .en, department: eng)
+        XCTAssertNotNil(s.codingRun.run)                        // a run was staged
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me])       // no companion streaming turn
+    }
+
+    /// Without a linked project, the same Engineering-department ask does NOT route
+    /// to the coding agent (mirrors `EditCodeRouting.shouldRoute`'s `projectLinked`
+    /// gate) — it falls through to the ordinary grounded chat send.
+    func testEngDeptWithoutLinkedProjectDoesNotRouteToCodingAgent() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["On it"]))
+        await s.hydrate(companyId: "u")
+        let eng = DepartmentCatalog.find("eng")!
+        await s.sendChat("add a health check endpoint", language: .en, department: eng)
+        XCTAssertNil(s.codingRun.run)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
+    }
+
+    // MARK: - composer .build-mode routing (view onSend is a thin switch)
+
+    /// The composer's `.build` mode routes through `startCodeRun(ask:)` — NOT a
+    /// chat turn: the founder's ask is echoed as a `.me` message and a run is
+    /// staged (`codingRun.run != nil`), with neither `chatSender` nor
+    /// `chatStreamer` consulted. `CopilotChatView.send()` is a thin `switch mode`
+    /// over this store call for `.build`, so this asserts the store behavior the
+    /// view delegates to (the view's onSend isn't independently unit-testable).
+    func testBuildModeAskStagesCodeRunAndEchoesMessage() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("build mode must not call chat client"); return nil },
+                             chatStreamer: { _ in
+                                 XCTFail("build mode must not call chat streamer")
+                                 return AsyncThrowingStream { $0.finish() }
+                             })
+        await s.hydrate(companyId: "u")
+        s.startCodeRun(ask: "add a health check endpoint")
+        XCTAssertNotNil(s.codingRun.run)                   // a run was staged (.build → startCodeRun)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me])  // echoed ask, no companion turn
+        XCTAssertEqual(s.chatMessages.last?.text, "add a health check endpoint")
+    }
+
+    /// The `.ask`/`.plan` branch routes through the ordinary grounded chat path
+    /// (streamed companion reply) — no run is staged. Mirrors `send()`'s `.ask`
+    /// case, which calls `sendChat(_, language:, department:)`.
+    func testAskModeRoutesToChatNotCodeRun() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["On it"]))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("what should I focus on?", language: .en, department: nil)
+        XCTAssertNil(s.codingRun.run)                            // no run staged
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
+    }
+
     // MARK: - walkThroughTask
 
     private static func task(who: TaskWho = .you) -> RoadmapTask {

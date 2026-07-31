@@ -176,6 +176,9 @@ enum CompanyChatClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/companyChat")!
 
     static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
+        #if DEBUG
+        if MockChat.enabled { return await MockChat.reply(req) }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
@@ -210,6 +213,9 @@ enum CompanyChatClient {
         session: URLSession = .shared,
         authTokenProvider: (() async throws -> String)? = nil
     ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        #if DEBUG
+        if MockChat.enabled { return MockChat.stream(req) }
+        #endif
         let capturedSession = session
         let capturedAuthTokenProvider = authTokenProvider ?? {
             guard let token = try? await Auth.auth().currentUser?.getIDToken() else {

@@ -1,7 +1,12 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
 
-/// The Copilot column: a company-grounded chat with the founder's companion.
+/// The Copilot column: a company-grounded chat with the founder's companion —
+/// the PR#39 redesign composed into `main`'s 380pt dock. Empty state renders the
+/// landing hero (`ChatEmptyState`); a shared `ChatComposer` (Ask/Plan/Build mode)
+/// drives both the empty hero and the active conversation; the coding-agent
+/// wiring (anchored `CodeRunCardView` + the `codingRun` scroll bridges) and the
+/// `ThreadListView` history switcher are preserved from `main`.
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -12,31 +17,36 @@ struct CopilotChatView: View {
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
-    /// Composer mode: normal chat vs. an engineering code-edit ask.
-    @State private var engineeringMode = false
+    /// Composer mode (Ask/Plan/Build) — pure client-side message shaping; `.build`
+    /// is the streamlined replacement for the old full-width "Let's build" button.
+    @State private var mode: ChatMode = .ask
+    /// The department chip selected in the composer (nil = no focus). Threads into
+    /// `sendChat(department:)` for the specialist handoff.
+    @State private var selectedDept: Department?
 
     private var companionName: String {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
+    /// The active companion's accent hue — the composer's primary gradient stop
+    /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
+    private var companionColor: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
     private var companyName: String {
         let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return n.isEmpty ? "Codepet" : n
     }
-    private var founderName: String {
-        let n = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? (lang == .vi ? "bạn" : "there") : n
-    }
     private var canSend: Bool {
         !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !companyStore.isCompanionTyping && !companyStore.isStreaming
+            && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
     }
-    /// True while a chat turn is in flight — gates the History toggle here and
-    /// (via `ThreadListView`'s own copy of this) the "New chat"/switch/delete
-    /// row controls, so the UI can't trigger a mid-stream thread repoint even
-    /// though `CompanyStore` also guards it at the source. Mirrors `canSend`'s
-    /// existing streaming gate.
+    /// True while a chat turn OR a parallel fan-out is in flight — gates the
+    /// History toggle here and (via `ThreadListView`'s own copy of this) the
+    /// "New chat"/switch/delete row controls, so the UI can't trigger a
+    /// mid-stream thread repoint even though `CompanyStore` also guards it at
+    /// the source. Also dims/disables the composer during a fan-out.
     private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
+        companyStore.isCompanionTyping || companyStore.isStreaming || companyStore.isFanningOut
     }
 
     var body: some View {
@@ -45,14 +55,24 @@ struct CopilotChatView: View {
             Divider()
             if showHistory {
                 ThreadListView(showHistory: $showHistory)
+            } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
+                ChatEmptyState(
+                    state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                    onOpenRoadmap: { companyStore.select(.roadmap) },
+                    onStarter: { starter in
+                        companyStore.chatDraft = starter
+                        mode = .ask
+                        send()
+                    }
+                ) { composer }
             } else {
                 messageList
-                letsBuild
+                Divider()
+                composer.padding(12)
             }
-            Divider()
-            inputBar
         }
         .frame(maxHeight: .infinity)
+        .background(ChatBackdrop())
     }
 
     // Web Copilot header: "Your team" + "guiding · {company}" + History toggle
@@ -78,33 +98,63 @@ struct CopilotChatView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    // "Let's build" — runs the composer text as a local engineering ask.
-    private var canBuild: Bool {
-        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !companyStore.isCompanionTyping && !companyStore.isStreaming
+    /// The shared composer — one `ChatComposer` instance used in BOTH the empty
+    /// hero (injected via `ChatEmptyState`'s trailing closure) and the active
+    /// conversation (at the bottom). Owns no state: draft/mode/selectedDept live
+    /// here so the same values drive both placements.
+    private var composer: some View {
+        ChatComposer(
+            draft: $companyStore.chatDraft,
+            mode: $mode,
+            canSend: canSend,
+            focus: $inputFocused,
+            placeholder: lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…"
+                                     : "Ask \(companionName) anything about your company…",
+            quickActions: quickActions,
+            accent: companionColor,
+            accent2: CodepetTheme.accentPink,
+            isBusy: isChatBusy,
+            selectedDept: $selectedDept,
+            onSend: send,
+            onQuickAction: handleQuickAction
+        )
     }
-    private var letsBuild: some View {
-        Button {
-            let ask = companyStore.chatDraft
-            companyStore.chatDraft = ""
-            showHistory = false
-            companyStore.startCodeRun(ask: ask)
-        } label: {
-            Text("🔨 " + (lang == .vi ? "Cùng xây" : "Let's build"))
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(canBuild ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                .background(CodepetTheme.accentPurple.opacity(0.08))
+
+    /// The `+` menu quick-actions. "Run my next moves" fans out parallel
+    /// department agents (→ `AgentsWorkingRow`); the rest fill the composer with
+    /// a starter question and send it (mirrors `main`'s prior quick-start pills).
+    private var runMovesTitle: String { lang == .vi ? "Chạy các bước tiếp theo" : "Run my next moves" }
+    private var quickActions: [QuickAction] {
+        lang == .vi
+            ? [QuickAction(title: runMovesTitle, systemImage: "bolt.fill",
+                           detail: "Cho đội chạy song song các việc tiếp theo."),
+               QuickAction(title: "Nên tập trung vào đâu trước?", systemImage: "target",
+                           detail: "Ưu tiên tiếp theo là gì."),
+               QuickAction(title: "Tóm tắt tình hình công ty", systemImage: "doc.text",
+                           detail: "Bức tranh tổng thể hiện tại.")]
+            : [QuickAction(title: runMovesTitle, systemImage: "bolt.fill",
+                           detail: "Let the team run your next moves in parallel."),
+               QuickAction(title: "What should I focus on first?", systemImage: "target",
+                           detail: "The next priority to pursue."),
+               QuickAction(title: "Summarize where my company is", systemImage: "doc.text",
+                           detail: "The big-picture status right now.")]
+    }
+
+    private func handleQuickAction(_ title: String) {
+        showHistory = false
+        if title == runMovesTitle {
+            Task { await companyStore.fanOutNextMoves(language: lang) }
+        } else {
+            companyStore.chatDraft = title
+            mode = .ask
+            send()
         }
-        .buttonStyle(.plain)
-        .disabled(!canBuild)
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if companyStore.chatMessages.isEmpty { greeting }
                     ForEach(companyStore.chatMessages) { m in
                         CopilotBubble(message: m).id(m.id)
                         if companyStore.codingRun.run != nil,
@@ -120,7 +170,13 @@ struct CopilotChatView: View {
                        companyStore.codingRunAnchorId == nil {
                         CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
-                    if companyStore.isCompanionTyping { typingRow.id("typing") }
+                    // Parallel department agents (a "Run my next moves" fan-out).
+                    if !companyStore.activeAgentRuns.isEmpty {
+                        AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
+                    }
+                    // The streaming/typing affordance (Task 11) — replaces main's
+                    // static typingRow. Generic label (no single-run step source here).
+                    if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,6 +186,9 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            .onChange(of: companyStore.activeAgentRuns.count) { _, count in
+                if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
             // Nested-ObservableObject publishers emit in willSet (before the new value
             // is assigned), so defer one runloop turn to re-render on the committed value —
@@ -153,92 +212,21 @@ struct CopilotChatView: View {
         }
     }
 
-    private var greeting: some View {
-        // Match the web copilot's empty state exactly: the welcome line inside a
-        // rounded bordered surface card, then the starter questions as full-width,
-        // left-aligned, outlined purple buttons.
-        VStack(alignment: .leading, spacing: 14) {
-            Text(lang == .vi
-                 ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
-                 : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
-                .font(CodepetTheme.inter(15.5)).lineSpacing(4).foregroundColor(CodepetTheme.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CodepetTheme.surface))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CodepetTheme.hairline, lineWidth: 1))
-            VStack(spacing: 10) {
-                ForEach(quickStarts, id: \.self) { chip in
-                    Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
-                        Text(chip).font(CodepetTheme.inter(14.5, weight: .medium)).foregroundColor(CodepetTheme.accentPurple)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16).padding(.vertical, 14)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(CodepetTheme.accentPurple.opacity(0.08)))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1))
-                    }.buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var quickStarts: [String] {
-        lang == .vi
-            ? ["Nên tập trung vào đâu trước?", "Tóm tắt tình hình công ty", "Điều gì đang cản trở ra mắt?"]
-            : ["What should I focus on first?", "Summarize where my company is", "What\u{2019}s blocking my launch?"]
-    }
-
-    private var typingRow: some View {
-        HStack(spacing: 8) {
-            CompanionOrb(size: 20, glow: false, isWorking: true)
-            Text(lang == .vi ? "\(companionName) đang suy nghĩ…" : "\(companionName) is thinking…")
-                .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 8)
-        }
-    }
-
-    private var inputBar: some View {
-        HStack(spacing: 8) {
-            Button { engineeringMode.toggle() } label: {
-                Text(engineeringMode ? (lang == .vi ? "Kỹ thuật" : "Engineering")
-                                     : (lang == .vi ? "Trò chuyện" : "Chat"))
-                    .font(CodepetTheme.inter(10, weight: .semibold))
-                    .foregroundColor(engineeringMode ? .white : CodepetTheme.mutedText)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(engineeringMode ? CodepetTheme.accentBlue
-                                                               : CodepetTheme.accentBlue.opacity(0.12)))
-            }
-            .buttonStyle(.plain)
-            .help(lang == .vi ? "Bật để yêu cầu sửa code trên dự án đã liên kết"
-                              : "On to ask for a code edit on the linked project")
-            TextField(lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…" : "Ask \(companionName) anything about your company…",
-                      text: $companyStore.chatDraft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(CodepetTheme.inter(12))
-                .lineLimit(1...4)
-                .focused($inputFocused)
-                .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-        }
-        .padding(10)
-    }
-
+    /// The `onSend` routing — the core "streamline Let's build in" change.
+    /// `.ask`/`.plan` shape the text and stream a grounded chat reply (with any
+    /// selected department focus); `.build` stages a local coding run instead of
+    /// a chat turn. Callable directly by `onStarter`/quick-actions too, so it
+    /// guards empty input itself rather than relying on the composer's `canSend`.
     private func send() {
-        guard canSend else { return }
         let text = companyStore.chatDraft
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
-        if engineeringMode {
+        switch mode {
+        case .ask, .plan:
+            Task { await companyStore.sendChat(mode.shape(text, language: lang), language: lang, department: selectedDept) }
+        case .build:
             companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
-        } else {
-            Task { await companyStore.sendChat(text, language: lang) }
         }
     }
 }
@@ -394,9 +382,29 @@ struct CopilotBubble: View {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
 
+    /// Specialist handoff attribution (Task 7): when a message carries a
+    /// `companionId` (a department specialist led the turn), the header reads
+    /// "Name · Dept" and the avatar/hue switch to that specialist. A nil
+    /// `companionId` keeps the host companion's name, orb, and accent.
+    private var headerName: String {
+        guard let id = message.companionId else { return companionName }
+        let name = PetCharacter.all[id]?.name ?? companionName
+        if let dept = message.deptName, !dept.isEmpty { return "\(name) · \(dept)" }
+        return name
+    }
+    private var headerAccent: Color {
+        guard let id = message.companionId else { return companionAccent }
+        return PetCharacter.all[id]?.color ?? companionAccent
+    }
+
     var body: some View {
         if message.producing {
-            producingRow
+            if let steps = message.execSteps, !steps.isEmpty {
+                ExecLogRow(taskTitle: message.text, deptName: message.deptName, steps: steps,
+                           companionId: message.companionId)
+            } else {
+                producingRow
+            }
         } else if let draft = message.draft {
             draftCard(draft)
         } else if let nav = message.navChip {
@@ -599,14 +607,16 @@ struct CopilotBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            // Teammate card: companion orb + name header + reply in a tinted surface.
+            // Teammate card: companion (or specialist) avatar + "Name · Dept"
+            // header + reply in a tinted surface. `CompanionAvatar` shows the
+            // specialist's sprite for a handoff, the host orb otherwise.
             HStack(alignment: .top, spacing: 8) {
-                CompanionOrb(size: 22, glow: false)
+                CompanionAvatar(companionId: message.companionId, size: 22)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(companionName)
+                    Text(headerName)
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    MessageCard(hue: companionAccent) {
+                    MessageCard(hue: headerAccent) {
                         Text(message.text)
                             .font(CodepetTheme.inter(13.5))
                             .lineSpacing(3)

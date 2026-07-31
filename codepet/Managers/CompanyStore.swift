@@ -34,11 +34,17 @@ final class CompanyStore: ObservableObject {
     @Published var codingRunAnchorId: String?
 
     /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
-    /// The `-CODEPET_MOCK_CHAT` launch arg swaps in `MockCodeRunner` (no `claude`, no cost)
-    /// while keeping the real diff-review + git-commit engine, so the flow is free to test.
+    /// The `-CODEPET_MOCK_CHAT` launch arg (via `MockChat.enabled`, same flag chat/task
+    /// runs key off) swaps in `MockCodeRunner` (no `claude`, no cost) while keeping the
+    /// real diff-review + git-commit engine, so the flow is free to test. `MockChat` is
+    /// `#if DEBUG`-only, so the flag read is guarded and always `false` in Release.
     private var codingRunBag: AnyCancellable?
     lazy var codingRun: CodingRunCoordinator = {
-        let mock = ProcessInfo.processInfo.arguments.contains("-CODEPET_MOCK_CHAT")
+        #if DEBUG
+        let mock = MockChat.enabled
+        #else
+        let mock = false
+        #endif
         let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter()
         let c = CodingRunCoordinator(runner: runner)
         // Re-publish the nested coordinator's changes so views observing only
@@ -68,6 +74,15 @@ final class CompanyStore: ObservableObject {
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
     @Published private(set) var runningTaskIds: Set<String> = []
+    /// Live parallel department-agent runs (the chat fan-out). Rendered as one
+    /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
+    /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
+    @Published var activeAgentRuns: [AgentRun] = []
+    /// True while a fan-out is in flight — serializes it against a normal chat turn
+    /// and disables the composer (same busy model as a single run).
+    @Published private(set) var isFanningOut: Bool = false
+    /// Max concurrent department agents per fan-out (bounds credit spend + latency).
+    static let maxFanOut = 3
     @Published private(set) var runError: String?
     @Published private(set) var isGeneratingRoadmap = false
     /// The Company view's open department, if any — PROMOTED from AppShellView's
@@ -167,6 +182,8 @@ final class CompanyStore: ObservableObject {
             isCompanionTyping = false
             isStreaming = false
             runningTaskIds = []
+            activeAgentRuns = []
+            isFanningOut = false
             runError = nil
         }
         self.companyId = companyId
@@ -192,9 +209,6 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
-        if !startEnrichInterviewIfNeeded(language: language) {
-            seedFirstRunGreeting(language: language)
-        }
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)
@@ -320,12 +334,20 @@ final class CompanyStore: ObservableObject {
     }
 
     /// Send a founder-typed message to the company companion. Trims + validates,
-    /// then hands off to `sendMessage` (the shared streamed-send core — see its
-    /// doc comment for the full flow, fallback, and token-guard semantics).
-    func sendChat(_ raw: String, language: AppLanguage) async {
+    /// then either routes to the local coding agent (Engineering department chip +
+    /// a linked project — see `EditCodeRouting`) or hands off to `sendMessage` (the
+    /// shared streamed-send core — see its doc comment for the full flow, fallback,
+    /// and token-guard semantics). `department` defaults to nil so existing callers
+    /// (`sendChat(x, language: y)`) keep compiling unchanged.
+    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        await sendMessage(text, language: language)
+        if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
+            startCodeRun(ask: text)   // echoes the ask, anchors, and proposes the run
+            dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
+            return
+        }
+        await sendMessage(text, language: language, department: department)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -344,6 +366,18 @@ final class CompanyStore: ObservableObject {
         }
         activeProjectLink = link
         return link
+    }
+
+    /// The specialist companion to bring in for this turn, if a department is in
+    /// focus — from the explicit chip, else a department named in the text. Returns
+    /// nil when no department applies, it has no mapped companion, or it maps to the
+    /// current host companion (no visible handoff needed).
+    private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
+        let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
+        guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
     }
 
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
@@ -514,7 +548,7 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    private func sendMessage(_ text: String, language: AppLanguage) async {
+    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
@@ -537,11 +571,17 @@ final class CompanyStore: ObservableObject {
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text),
+                                          library: company.library, query: text, focusDepartment: department),
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
+        // Department handoff: if a specialist leads this turn (chip focus or a
+        // department named in the text), the reply is spoken by that specialist
+        // directly — its "Name · Dept" header conveys the handoff.
+        let specialist = actingSpecialist(text: text, department: department)
+
         let placeholderId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
+        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
+                                            companionId: specialist?.companionId, deptName: specialist?.deptName))
         isStreaming = true
 
         var streamedText = ""
@@ -617,6 +657,15 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    /// The specialist for a task's owning department, if it maps to a companion
+    /// other than the host — used to attribute the run's producing row + draft.
+    private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
+        guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
+    }
+
     /// If byte chose to run a runnable task, produce a draft deliverable inline —
     /// shared by both the streaming `.done` case and the non-streaming fallback,
     /// so a `run_task_id` fires on whichever path yielded it (never both: a
@@ -629,22 +678,61 @@ final class CompanyStore: ObservableObject {
         guard let runId,
               let task = company.tasks.first(where: { $0.id == runId }),
               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
-        // Transparency step: a transient "producing…" placeholder shows while the
-        // draft is generated (this run isn't tracked in `runningTaskIds` — that set
-        // only covers taps on the map/beacon card — so a chat message is the
-        // simplest robust signal). Always removed below before the real reply
-        // lands, on BOTH the success and failure branch, so it can never get stuck.
+        _ = await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// The single inline-run path shared by EVERY chat run (typed "run" command
+    /// AND the greeting's "Do it with me"), so "how the agent works" shows the same
+    /// everywhere: a transient producing placeholder drives the execute-log — a
+    /// step checklist revealed progressively (transparency, not a snap-to-done) —
+    /// attributed to the task's department specialist (pet sprite + "Name · Dept").
+    /// The last step stays "working" until BOTH the reveal and the real result
+    /// finish, then it collapses into the draft card. Returns true if a draft was
+    /// appended (false → an honest "couldn't generate" bubble). Account-guarded
+    /// via `cid` so a mid-run account switch can't land in another account's chat.
+    @discardableResult
+    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage) async -> Bool {
+        let specialist = taskSpecialist(for: task)
+        let steps = Self.execSteps(task: task, specialist: specialist,
+                                   decisionCount: company.decisions.count, language: language)
         let producingId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: "", producing: true))
+        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
+                                           companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                           execSteps: steps))
+        let reveal = Task { [cid] in
+            for idx in 0..<max(0, steps.count - 1) {
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
+                guard companyId == cid,
+                      let mi = chatMessages.firstIndex(where: { $0.id == producingId }) else { return }
+                chatMessages[mi].execSteps?[idx].done = true
+            }
+        }
         let result = await taskRunner(runRequest(for: task, language: language))
-        guard companyId == cid else { return }  // account switch already cleared chatMessages
+        _ = await reveal.value   // let every revealed step land before finishing
+        guard companyId == cid else { return false }
+        if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
+           let count = chatMessages[mi].execSteps?.count {
+            for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
+        }
+        try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
+        guard companyId == cid else { return false }
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
+                                               companionId: specialist?.companionId, deptName: specialist?.deptName))
+            // Reflect the run on the roadmap so the task leaves the "next moves" set
+            // and can't be re-run into a duplicate draft (mirrors the board runTask).
+            if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
+                company.tasks[ti].draft = draft
+                company.tasks[ti].drafted = true
+                if let cid { _ = await tasksSaver(cid, company.tasks) }
+            }
+            return true
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
+            return false
         }
     }
 
@@ -802,6 +890,123 @@ final class CompanyStore: ObservableObject {
             createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload)
     }
 
+    /// Execute-log pacing (tunable; tests set to 0 to stay instant). `execStepNanos`
+    /// is the delay between revealing each step; `execDoneBeatNanos` is the hold after
+    /// the result lands so the completed log reads before collapsing to the draft.
+    static var execStepNanos: UInt64 = 420_000_000
+    static var execDoneBeatNanos: UInt64 = 260_000_000
+
+    /// The execute-log steps for a run — a truthful description of the pipeline the
+    /// deliverable goes through (the request genuinely carries the brief, decisions,
+    /// and department context). Revealed progressively as the run proceeds.
+    static func execSteps(task: RoadmapTask, specialist: (companionId: String, deptName: String)?,
+                          decisionCount: Int, language: AppLanguage) -> [ExecStep] {
+        let vi = language == .vi
+        var out: [ExecStep] = []
+        let ctx = decisionCount > 0
+            ? (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu (và \(decisionCount) quyết định)"
+                  : "Reading your brief — mission, audience, your voice (+ \(decisionCount) decisions)")
+            : (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu của bạn"
+                  : "Reading your brief — mission, audience, your voice")
+        out.append(ExecStep(label: ctx))
+        if let s = specialist {
+            out.append(ExecStep(label: vi ? "Vận dụng cẩm nang \(s.deptName)" : "Pulling in the \(s.deptName) playbook"))
+        }
+        out.append(ExecStep(label: vi ? "Soạn \(task.title)" : "Drafting \(task.title)"))
+        out.append(ExecStep(label: vi ? "Khớp giọng điệu và quyết định của bạn" : "Matching your tone and past decisions"))
+        return out
+    }
+
+    /// Fan out the next actionable task in up to `maxFanOut` departments as parallel
+    /// department-agent runs, shown live via `activeAgentRuns` (AgentsWorkingRow).
+    /// Each agent's draft lands in the transcript as it finishes. Account-guarded.
+    func fanOutNextMoves(language: AppLanguage) async {
+        guard !isFanningOut, !isCompanionTyping, !isStreaming else { return }
+        let plan = RoadmapEngine.nextMoves(company.tasks, limit: Self.maxFanOut)
+        guard !plan.isEmpty else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Bạn đang không có việc nào mình chạy được ngay — lộ trình đã gọn rồi."
+                : "You're all caught up — no open tasks I can run right now."))
+            flushActiveThread()
+            return
+        }
+        let cid = companyId
+        isFanningOut = true
+
+        let now = Date()
+        var seeded: [(run: AgentRun, task: RoadmapTask)] = []
+        for task in plan {
+            let deptName = DepartmentCatalog.find(task.dept)?.name ?? (task.dept ?? "")
+            let companionId = task.dept.flatMap { DepartmentCompanions.companionId(for: $0) }
+                ?? company.companionId
+            let specialist: (companionId: String, deptName: String)? =
+                deptName.isEmpty ? nil : (companionId, deptName)
+            let steps = Self.execSteps(task: task, specialist: specialist,
+                                       decisionCount: company.decisions.count, language: language)
+            let run = AgentRun(id: task.id, companionId: companionId, deptName: deptName,
+                               taskTitle: task.title, steps: steps, status: .working, startedAt: now)
+            seeded.append((run, task))
+        }
+        activeAgentRuns = seeded.map { $0.run }
+
+        await withTaskGroup(of: Void.self) { group in
+            for item in seeded {
+                group.addTask {
+                    await self.runFanOutAgent(runId: item.run.id, task: item.task,
+                                              cid: cid, language: language)
+                }
+            }
+        }
+
+        guard companyId == cid else { activeAgentRuns = []; isFanningOut = false; return }
+        try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)   // let final pills show
+        guard companyId == cid else { activeAgentRuns = []; isFanningOut = false; return }
+        activeAgentRuns = []
+        isFanningOut = false
+        flushActiveThread()
+    }
+
+    /// One agent's run inside a fan-out: reveal its steps client-side while its
+    /// `taskRunner` call runs, then flip its `AgentRun` to done/failed and append
+    /// its draft (or an honest failure bubble). Mutations are main-actor; the
+    /// `taskRunner` await is where parallelism happens. Account-guarded via `cid`.
+    private func runFanOutAgent(runId: String, task: RoadmapTask,
+                                cid: String?, language: AppLanguage) async {
+        let reveal = Task { [cid] in
+            let stepCount = activeAgentRuns.first(where: { $0.id == runId })?.steps.count ?? 0
+            for idx in 0..<max(0, stepCount - 1) {
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
+                guard companyId == cid,
+                      let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) else { return }
+                activeAgentRuns[ri].steps[idx].done = true
+            }
+        }
+        let result = await taskRunner(runRequest(for: task, language: language))
+        _ = await reveal.value
+        guard companyId == cid else { return }
+
+        if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+            for i in activeAgentRuns[ri].steps.indices { activeAgentRuns[ri].steps[i].done = true }
+        }
+        let companionId = activeAgentRuns.first(where: { $0.id == runId })?.companionId
+        let deptName = activeAgentRuns.first(where: { $0.id == runId })?.deptName
+        if let draft = buildDeliverable(from: result, task: task) {
+            if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+                activeAgentRuns[ri].status = .done
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
+                                               companionId: companionId, deptName: deptName))
+        } else {
+            if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
+                activeAgentRuns[ri].status = .failed
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không hoàn thành được \u{201C}\(task.title)\u{201D}. Thử lại nhé."
+                : "Couldn't finish \u{201C}\(task.title)\u{201D} — try again.",
+                companionId: companionId, deptName: deptName))
+        }
+    }
+
     /// Run a codepetCanDo task → produce a Deliverable → stash it as the task's `draft`
     /// and mark the task `drafted` (moves it to "Awaiting approval"). Does NOT write the
     /// library — the deliverable is copied there only on approve. Dedupe: a task already
@@ -937,6 +1142,8 @@ final class CompanyStore: ObservableObject {
         isCompanionTyping = false
         isStreaming = false
         runningTaskIds = []
+        activeAgentRuns = []
+        isFanningOut = false
         runError = nil
         isGeneratingRoadmap = false   // clear here too: reset() bumps hydrationToken, so an
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the

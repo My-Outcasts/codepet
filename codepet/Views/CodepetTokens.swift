@@ -98,3 +98,59 @@ extension View {
             .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
     }
 }
+
+// MARK: - Overview roadmap board
+
+/// The roadmap-local custom properties from `app/globals.css` that no other surface uses.
+/// `--rm-card-border` is deliberately absent: it is byte-for-byte `CodepetTokens.cardEdge`.
+/// Each token is exposed twice — as a `(light, dark)` hex pair, so parity is unit-testable
+/// without resolving an NSAppearance, and as the `Color` the views consume.
+enum RoadmapTokens {
+    typealias HexPair = (light: String, dark: String)
+
+    static let cardBGHex: HexPair      = ("#ffffff", "#2a241c")   // --rm-card-bg
+    static let chipBGHex: HexPair      = ("#f1efe9", "#342d23")   // --rm-chip-bg
+    static let chipBorderHex: HexPair  = ("#ece9e2", "#473e31")   // --rm-chip-border
+
+    /// Board card fill. In dark this is LIGHTER than both `--surface` (#221d17) and the list
+    /// cards' `cardRaised` (#26201a) — web gives the board its own slightly-raised surface so
+    /// cards keep a visible edge on the near-black page.
+    static let cardBG = Color.dyn(cardBGHex.light, cardBGHex.dark)
+    /// The status-icon box inside a card.
+    static let chipBG = Color.dyn(chipBGHex.light, chipBGHex.dark)
+    /// That box's edge.
+    static let chipBorder = Color.dyn(chipBorderHex.light, chipBorderHex.dark)
+
+    /// `--rm-locked-op` — how far a locked card's CONTENT fades. Never applied to the card
+    /// itself: a translucent card would let the connectors behind it show through.
+    static func lockedOpacity(dark: Bool) -> Double { dark ? 0.9 : 0.62 }
+}
+
+/// The board's five states. `done`/`approve`/`needsYou` are literal hex on web with no dark
+/// variant (`RoadmapView.tsx` DOT, `OverviewSection.tsx` legendFor), so they are literal here
+/// too — do NOT wrap them in `Color.dyn`. `canDo` and `blocked` follow the app's accent and
+/// muted-text tokens, exactly as web follows `--accent` and `--t-3`.
+enum RoadmapPalette {
+    static let doneHex = "#16a34a"
+    static let approveHex = "#d97706"
+    static let needsYouHex = "#2563eb"
+
+    static let done = Color(hex: doneHex)
+    static let approve = Color(hex: approveHex)
+    static let needsYou = Color(hex: needsYouHex)
+    static var canDo: Color { CodepetTheme.accentPurple }
+    static var blocked: Color { CodepetTheme.mutedText }
+
+    /// State → dot/chip color for the roadmap board only, mirroring `RoadmapView.tsx`'s `DOT`
+    /// map. Deliberately NOT `taskStatusTint`: that one serves the department cards, which web
+    /// styles from a different scale (`globals.css` `.st-*`), so the two must not be merged.
+    static func tint(for status: TaskStatus) -> Color {
+        switch status {
+        case .done:          return done
+        case .codepetCanDo:  return canDo
+        case .needsApproval: return approve
+        case .needsYou:      return needsYou
+        case .blocked:       return blocked
+        }
+    }
+}

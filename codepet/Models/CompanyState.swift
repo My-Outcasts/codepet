@@ -21,6 +21,10 @@ struct CompanyState: Codable, Hashable {
     var stage: ProjectStage
     var companionId: String
     var onboardedAt: Date?
+    /// When this account first saw the Overview briefing. Account-scoped (not per-device) so
+    /// the one-time intro doesn't reappear on another machine. Mirrors the web's
+    /// `companies/{uid}.introSeenAt`.
+    var introSeenAt: Date?
     var tasks: [RoadmapTask]
     var enabledTools: Set<String>
     var decisions: [DecisionEntry]
@@ -29,6 +33,7 @@ struct CompanyState: Codable, Hashable {
     /// sites that predate the roadmap/environment phases omit them and keep compiling.
     init(brief: CompanyBrief, departments: [DeptRef], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
+         introSeenAt: Date? = nil,
          tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds,
          decisions: [DecisionEntry] = []) {
         self.brief = brief
@@ -37,6 +42,7 @@ struct CompanyState: Codable, Hashable {
         self.stage = stage
         self.companionId = companionId
         self.onboardedAt = onboardedAt
+        self.introSeenAt = introSeenAt
         self.tasks = tasks
         self.enabledTools = enabledTools
         self.decisions = decisions

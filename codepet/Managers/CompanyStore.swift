@@ -93,6 +93,7 @@ final class CompanyStore: ObservableObject {
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
+    private let introSeenSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
@@ -124,6 +125,7 @@ final class CompanyStore: ObservableObject {
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
+         introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
          decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
@@ -137,6 +139,7 @@ final class CompanyStore: ObservableObject {
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
+        self.introSeenSaver = introSeenSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
@@ -897,6 +900,16 @@ final class CompanyStore: ObservableObject {
     func setCompanion(id: String) async {
         company.companionId = id
         if let cid = companyId { _ = await companionSaver(cid, id) }
+    }
+
+    /// Remember that this account has seen the Overview briefing, so the first-run modal shows
+    /// once per account rather than once per device. Fail-soft: a lost write only means the
+    /// briefing appears one more time, never a broken page.
+    func markIntroSeen() async {
+        guard company.introSeenAt == nil else { return }
+        let now = Date()
+        company.introSeenAt = now
+        if let cid = companyId { _ = await introSeenSaver(cid, now) }
     }
 
     /// Enable/disable a toolkit item and persist (fail-soft).

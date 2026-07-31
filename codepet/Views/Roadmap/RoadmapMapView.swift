@@ -165,12 +165,10 @@ struct RoadmapMapView: View {
         let isBeacon = beacon?.id == task.id
         return VStack(alignment: .leading, spacing: 6) {
             if isBeacon {
-                // Web shows the FOUNDER's name for a their-task beacon, the companion otherwise
-                // (e.g. "MONA IS HERE" / "BYTE IS HERE").
-                let who = task.who == .you ? founderName : companionName
+                // web `.you-are-here` pill — the founder's viewport marker.
                 HStack(spacing: 5) {
                     beaconNodePingDot
-                    Text(lang == .vi ? "\(who.uppercased()) Ở ĐÂY" : "\(who.uppercased()) IS HERE")
+                    Text(lang == .vi ? "BẠN Ở ĐÂY" : "YOU ARE HERE")
                         .font(CodepetTheme.inter(9, weight: .bold)).foregroundColor(.white)
                 }
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -260,7 +258,7 @@ struct RoadmapMapView: View {
             case .blocked:       return lang == .vi ? "Cần bước trước" : "Needs earlier steps"
             }
         }()
-        let filled = isBeacon && status == .codepetCanDo
+        let filled = status == .codepetCanDo   // web fills every "Start", not just the beacon
         Text(label).font(CodepetTheme.inter(10, weight: .semibold))
             .foregroundColor(filled ? .white : taskStatusTint(status))
             .padding(.horizontal, 8).padding(.vertical, 3)
@@ -270,7 +268,7 @@ struct RoadmapMapView: View {
     private func cardBackground(_ status: TaskStatus, isBeacon: Bool) -> some View {
         let fill: Color
         if isBeacon { fill = CodepetTheme.accentPurple.opacity(0.14) }
-        else if status == .done { fill = CodepetTheme.accentTeal.opacity(0.1) }
+        else if status == .done { fill = taskStatusTint(.done).opacity(0.1) }   // web Done green tint
         else { fill = CodepetTheme.surface }
         return RoundedRectangle(cornerRadius: 12).fill(fill)
     }

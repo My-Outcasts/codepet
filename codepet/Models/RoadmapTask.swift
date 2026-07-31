@@ -60,7 +60,7 @@ enum TaskStatus { case done, needsApproval, blocked, needsYou, codepetCanDo }
 /// department task cards; kept here so views don't each redefine it.
 func taskStatusTint(_ s: TaskStatus) -> Color {
     switch s {
-    case .done:          return CodepetTheme.accentTeal
+    case .done:          return Color(hex: "#10B981")   // web KEY: "Done" = green (#10B981)
     case .codepetCanDo:  return CodepetTheme.accentPurple
     case .needsApproval: return CodepetTheme.accentGold
     case .needsYou:      return CodepetTheme.accentBlue   // web KEY: "Needs your input" = blue (#3B82F6)

@@ -165,7 +165,7 @@ final class CompanyStoreChatTests: XCTestCase {
         await s.sendChat("where should I look?", language: .en)
         XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
         XCTAssertEqual(s.chatMessages.last?.navChip, nav)
-        XCTAssertEqual(s.view, .chat)   // unchanged until the chip is tapped
+        XCTAssertEqual(s.view, .roadmap)   // still the default landing; unchanged until the chip is tapped
         s.activateNav(nav)
         XCTAssertEqual(s.view, .tasks)
     }

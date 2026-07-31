@@ -200,12 +200,19 @@ struct RoadmapMapView: View {
         .opacity(status == .blocked ? 0.72 : 1)
         .unlockPulse(justUnlockedIds.contains(task.id))
         .onTapGesture {
-            let action = RoadmapDispatch.action(for: status)
+            let action = RoadmapDispatch.action(for: status,
+                                                isEngineering: task.dept == "eng",
+                                                projectLinked: companyStore.activeProjectLink != nil)
             switch action {
             case .run:             Task { await companyStore.runTask(task, language: lang) }
             case .walkThrough:     Task { await companyStore.walkThroughTask(task, language: lang) }
             case .approve:         Task { await companyStore.approveTask(id: task.id) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+            case .editCode:
+                companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
+                companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
+                                               plannedFiles: 2, needsBash: false,
+                                               link: companyStore.activeProjectLink)
             case .none:            break
             }
             if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }

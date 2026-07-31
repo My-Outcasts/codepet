@@ -200,9 +200,6 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
-        if !startEnrichInterviewIfNeeded(language: language) {
-            seedFirstRunGreeting(language: language)
-        }
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)

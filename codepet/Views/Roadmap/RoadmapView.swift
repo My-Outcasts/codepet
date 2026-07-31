@@ -23,10 +23,10 @@ struct RoadmapView: View {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
     private var subtitle: String {
-        let p = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if p.isEmpty && o.isEmpty { return lang == .vi ? "Lộ trình xây dựng công ty của bạn" : "Your company-building roadmap" }
-        return [p, o].filter { !$0.isEmpty }.joined(separator: " — ")
+        // Web parity: a fixed descriptive line (not the project name / one-liner).
+        lang == .vi
+            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, Codepet làm gì tiếp theo, và bạn đã đi được bao xa."
+            : "Your whole company as a roadmap — where you are, what Codepet does next, and how far you've come."
     }
 
     var body: some View {
@@ -72,7 +72,7 @@ struct RoadmapView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Lộ trình" : "Roadmap")
+                Text(lang == .vi ? "Tổng quan" : "Overview")
                     .font(CodepetTheme.title()).foregroundColor(CodepetTheme.primaryText)
                 Text(subtitle).font(CodepetTheme.subtitle())
                     .foregroundColor(CodepetTheme.mutedText).lineLimit(1)

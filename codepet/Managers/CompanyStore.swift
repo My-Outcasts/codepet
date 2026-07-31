@@ -317,12 +317,20 @@ final class CompanyStore: ObservableObject {
     }
 
     /// Send a founder-typed message to the company companion. Trims + validates,
-    /// then hands off to `sendMessage` (the shared streamed-send core — see its
-    /// doc comment for the full flow, fallback, and token-guard semantics).
-    func sendChat(_ raw: String, language: AppLanguage) async {
+    /// then either routes to the local coding agent (Engineering department chip +
+    /// a linked project — see `EditCodeRouting`) or hands off to `sendMessage` (the
+    /// shared streamed-send core — see its doc comment for the full flow, fallback,
+    /// and token-guard semantics). `department` defaults to nil so existing callers
+    /// (`sendChat(x, language: y)`) keep compiling unchanged.
+    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        await sendMessage(text, language: language)
+        if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
+            startCodeRun(ask: text)   // echoes the ask, anchors, and proposes the run
+            dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
+            return
+        }
+        await sendMessage(text, language: language, department: department)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -341,6 +349,18 @@ final class CompanyStore: ObservableObject {
         }
         activeProjectLink = link
         return link
+    }
+
+    /// The specialist companion to bring in for this turn, if a department is in
+    /// focus — from the explicit chip, else a department named in the text. Returns
+    /// nil when no department applies, it has no mapped companion, or it maps to the
+    /// current host companion (no visible handoff needed).
+    private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
+        let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
+        guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
     }
 
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
@@ -511,7 +531,7 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    private func sendMessage(_ text: String, language: AppLanguage) async {
+    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
@@ -534,11 +554,17 @@ final class CompanyStore: ObservableObject {
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text),
+                                          library: company.library, query: text, focusDepartment: department),
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
 
+        // Department handoff: if a specialist leads this turn (chip focus or a
+        // department named in the text), the reply is spoken by that specialist
+        // directly — its "Name · Dept" header conveys the handoff.
+        let specialist = actingSpecialist(text: text, department: department)
+
         let placeholderId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: ""))
+        chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
+                                            companionId: specialist?.companionId, deptName: specialist?.deptName))
         isStreaming = true
 
         var streamedText = ""

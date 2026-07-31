@@ -11,6 +11,7 @@ struct CompanyDoc: Codable {
     var stage: String?
     var companionId: String?
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
+    var introSeenAt: Double?   // epoch MILLIS (matches the web schema's `Millis`)
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
@@ -30,6 +31,7 @@ enum CompanyData {
             stage: doc.stage.flatMap { ProjectStage(rawValue: $0) } ?? .idea,
             companionId: doc.companionId ?? "byte",
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            introSeenAt: doc.introSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
             decisions: Decisions.normalizeDecisions(doc.decisions ?? [])
@@ -53,6 +55,24 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(briefPayload(brief, onboardedAt: iso), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for the intro-seen write — testable without Firestore.
+    /// Millis, not ISO: the web reads this same field as a number.
+    static func introSeenPayload(_ at: Date) -> [String: Any] {
+        ["introSeenAt": at.timeIntervalSince1970 * 1000]
+    }
+
+    /// Write companies/{uid}.introSeenAt, merge. Fail-soft: false on error — a lost write
+    /// only means the briefing shows once more, never a broken page.
+    static func saveIntroSeen(_ companyId: String, _ at: Date) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(introSeenPayload(at), merge: true)
             return true
         } catch {
             return false

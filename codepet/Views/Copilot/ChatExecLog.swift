@@ -25,6 +25,8 @@ struct ExecLogRow: View {
     private var resolvedId: String { companionId ?? companyStore.company.companionId }
     private var persona: PetCharacter? { PetCharacter.all[resolvedId] }
     private var name: String { persona?.name ?? "Codepet" }
+    // Same rule as AgentRun.currentStepIndex: the first not-yet-done step.
+    private var currentStepIndex: Int? { steps.firstIndex { !$0.done } }
     // The web's producing card uses the brand violet throughout (kicker, checks,
     // spinner, border) regardless of the specialist's department color.
     private var accent: Color { CodepetTheme.accentPurple }
@@ -72,12 +74,14 @@ struct ExecLogRow: View {
             // Step checklist: violet check (done), amber dot (a "Checkpoint" step),
             // dim ring (pending).
             VStack(alignment: .leading, spacing: 7) {
-                ForEach(steps) { step in stepRow(step) }
+                ForEach(Array(steps.enumerated()), id: \.element.id) { idx, step in
+                    stepRow(step, isCurrent: idx == currentStepIndex)
+                }
             }
         }
     }
 
-    @ViewBuilder private func stepRow(_ step: ExecStep) -> some View {
+    @ViewBuilder private func stepRow(_ step: ExecStep, isCurrent: Bool) -> some View {
         let isCheckpoint = step.label.lowercased().hasPrefix("checkpoint")
         HStack(alignment: .top, spacing: 8) {
             Group {
@@ -86,6 +90,9 @@ struct ExecLogRow: View {
                 } else if step.done {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14)).foregroundColor(accent)
+                } else if isCurrent {
+                    // Mirrors AgentsWorkingRow.stepIcon's current-step spinner.
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
                 } else {
                     Image(systemName: "circle")
                         .font(.system(size: 13)).foregroundColor(CodepetTheme.mutedText.opacity(0.45))

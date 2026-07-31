@@ -108,6 +108,29 @@ final class CompanyStoreFanOutTests: XCTestCase {
         XCTAssertEqual(draftCount(s), 2)
     }
 
+    /// Motivates `CopilotChatView`'s empty-state gate: the instant a fan-out's
+    /// agent runner is invoked, `activeAgentRuns` has already been seeded
+    /// (non-empty) while `chatMessages` is still empty — no draft has landed
+    /// yet. A gate keyed on `chatMessages.isEmpty` alone would stay on the
+    /// empty hero and hide `AgentsWorkingRow` for this whole window.
+    func testActiveRunsSeededBeforeAnyChatMessageLands() async {
+        var ref: CompanyStore?
+        var runsNonEmptyDuringRun = false
+        var messagesEmptyDuringRun = false
+        let s = store(tasks: [task("e1", dept: "eng")],
+                      runner: { _ in
+                          runsNonEmptyDuringRun = !(ref?.activeAgentRuns.isEmpty ?? true)
+                          messagesEmptyDuringRun = ref?.chatMessages.isEmpty ?? false
+                          return RunTaskResponse(kind: "doc", title: "x", body: "# b")
+                      })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.fanOutNextMoves(language: .en)
+
+        XCTAssertTrue(runsNonEmptyDuringRun)                   // activeAgentRuns seeded before any draft lands
+        XCTAssertTrue(messagesEmptyDuringRun)                  // chatMessages still empty at that moment
+    }
+
     // MARK: - Honest paths
 
     func testEmptyPlanShowsHonestBubbleAndNoBusyState() async {

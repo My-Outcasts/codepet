@@ -55,7 +55,7 @@ struct CopilotChatView: View {
             Divider()
             if showHistory {
                 ThreadListView(showHistory: $showHistory)
-            } else if companyStore.chatMessages.isEmpty {
+            } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
                 ChatEmptyState(
                     state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
                     onOpenRoadmap: { companyStore.select(.roadmap) },

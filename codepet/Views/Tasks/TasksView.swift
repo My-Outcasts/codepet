@@ -102,11 +102,12 @@ struct TasksView: View {
                 companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: t),
                                                plannedFiles: 2, needsBash: false,
                                                link: companyStore.activeProjectLink)
+                // Only the new engineering + linked-project path hands off to chat;
+                // ordinary run/walkThrough/approve/open taps keep their pre-existing
+                // in-place behaviour on the Tasks board.
+                companyStore.select(.chat)
             case .none:            break
             }
-            // Same handoff rule as the roadmap: work-producing taps land in chat;
-            // approve + open stay in place.
-            if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if let d = DepartmentCatalog.find(t.dept)?.name {

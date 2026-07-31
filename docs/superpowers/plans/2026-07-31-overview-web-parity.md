@@ -1397,269 +1397,72 @@ git commit -m "feat(overview): web-exact roadmap board (lanes, orthogonal edges,
 
 ---
 
-## Task 6: Unify into one Overview page
+## Task 6: Wire the new components into the existing Overview page
+
+> **CORRECTED Jul 31.** This section originally said "unify into one Overview page" — retire the split
+> `.roadmap`/`.secondBrain` rail tabs, add `AppView.overview`, create `OverviewSectionView`, delete
+> `RoadmapView.swift`. **That was based on a stale branch read and is wrong for `main`.** The unification is
+> already done: `AppView.topTabs` is `[.roadmap, .company, .tasks, .library, .environment]` (five tabs, like
+> web), `AppView.navLabel(_:)` already returns "Overview" for `.roadmap`, `RoadmapView` already titles itself
+> "Overview" with web's exact subtitle and already carries a Roadmap ⁄ Second Brain toggle, and `.secondBrain`
+> is no longer a full-content destination. **Do NOT touch `AppView`, `AppShellView` or `CompanyStore.view`,
+> and do NOT delete `RoadmapView.swift`.** This task is now purely about wiring the components Tasks 4–8 built
+> into that existing page and closing the remaining styling gaps.
 
 **Files:**
-- Create: `codepet/Views/Overview/OverviewSectionView.swift`
-- Modify: `codepet/Models/AppView.swift`, `codepet/Views/Shell/AppShellView.swift:37-40`, `codepet/Views/Copilot/CopilotChatView.swift:152`, `codepet/Views/SecondBrain/SecondBrainView.swift`
-- Delete: `codepet/Views/Roadmap/RoadmapView.swift`
-- Test: build-verified + a nav-routing test
+- Modify: `codepet/Views/Roadmap/RoadmapView.swift` (the existing Overview page)
+- Test: build-verified; the suite must stay at **537, 0 failures**
 
 **Interfaces:**
-- Consumes: `RoadmapBoardView` (Task 5), `OverviewChromeRow` (Task 7), `OverviewIntroSheet` + `CompanyStore.markIntroSeen()` + `CompanyState.introSeenAt` (Task 8), `SecondBrainPanel` (existing)
-- Produces: `AppView.overview`, `OverviewSectionView()`
+- Consumes: `OverviewChromeRow(tasks:companionName:onStart:onOpenTask:)` (Task 7), `OverviewIntroSheet(companionName:projectName:summary:tasks:onDismiss:)` + `CompanyStore.markIntroSeen() async` + `CompanyState.introSeenAt` (Task 8), `RoadmapBoardView(...)` (Task 5), `CodepetTokens.accentTint/.accentLine`.
 
-**Execution order note:** this task is dispatched LAST of the three (after Tasks 7 and 8), so every component it composes already exists. Do not create placeholder or stub versions of anything.
+**PRESERVE EXACTLY — do not simplify or "restore" from the old plan text:**
+- `dispatch(_:)` in its current form, including `RoadmapDispatch.action(for:isEngineering:projectLinked:)`, the `.editCode` branch that drives `companyStore.codingRun.propose(...)`, and `companyStore.dockCollapsed = false` for the chat-bound actions. An earlier draft of this plan used a two-argument `action(for:)` and `select(.chat)`; both are obsolete and would break the coding-agent path.
+- The `.task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }` and the `.sheet(item: $openDeliverable)`.
+- `SecondBrainView()` as the toggle's second pane.
 
-- [ ] **Step 1: Write the failing nav test**
+- [ ] **Step 1: Replace the inline chrome with `OverviewChromeRow`**
 
-Create `codepetTests/OverviewNavTests.swift`:
+In `roadmapBody`, replace `chromeRow.padding(.horizontal, 24).padding(.top, 14)` with:
 
 ```swift
-import XCTest
-@testable import codepet
-
-final class OverviewNavTests: XCTestCase {
-    // Web has ONE Overview tab; the Roadmap ⁄ Second Brain split lives inside it.
-    func testNavTabsHasOverviewAndNoSplitTabs() {
-        XCTAssertTrue(AppView.navTabs.contains(.overview))
-        XCTAssertFalse(AppView.navTabs.map(\.rawValue).contains("roadmap"))
-        XCTAssertFalse(AppView.navTabs.map(\.rawValue).contains("secondBrain"))
-    }
-
-    // A chat nav chip saying "roadmap" must still land somewhere real.
-    func testRoadmapNavDestinationResolvesToOverview() {
-        XCTAssertEqual(AppView.from(navDestination: "roadmap"), .overview)
-        XCTAssertEqual(AppView.from(navDestination: "overview"), .overview)
-    }
-
-    func testOverviewTitleLocalised() {
-        XCTAssertEqual(AppView.overview.title(.en), "Overview")
-        XCTAssertEqual(AppView.overview.title(.vi), "Tổng quan")
-    }
-}
+            OverviewChromeRow(tasks: tasks, companionName: companionName,
+                              onStart: { dispatch($0) }, onOpenTask: { dispatch($0) })
+                .padding(.horizontal, 24).padding(.top, 16)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+Then **delete** the now-dead members: `chromeRow`, `progressCard`, `beaconCard(_:)`, `beaconPingDot`, `legend`, `alsoNeedsYou`, `needsYouCount`, `pct`, and `@State private var beaconPinging`. Keep `beacon`, `currentPhase` and `nextPhaseLabel` only if something still reads them after Step 4 — otherwise delete those too. Leave no unused member behind; the build must be warning-clean for unused state.
 
-Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/OverviewNavTests 2>&1 | tail -20`
-Expected: compile failure — `type 'AppView' has no member 'overview'`.
+- [ ] **Step 2: Wire the founder's name into the board**
 
-- [ ] **Step 3: Update `AppView`**
-
-In `codepet/Models/AppView.swift`: replace `case chat, roadmap, secondBrain, tasks, …` with
+The board currently gets `founderName: nil`, so its marker always reads "You are here" instead of web's named form. Change that argument to:
 
 ```swift
-enum AppView: String, CaseIterable, Identifiable {
-    case chat, overview, tasks, library, environment, company, settings, billing, support
+                             founderName: companyStore.company.brief.founderName,
 ```
 
-then:
+`RoadmapBoardCopy.herePhrase(founderName:lang:)` already trims and falls back, so a nil or whitespace name still yields "You are here".
+
+- [ ] **Step 3: Move the toggle top-right and restyle it to web's segmented control**
+
+Web puts the toggle in the header row, right-aligned, next to "How to read this map" — not on its own line above the title. Remove the standalone `overviewToggle.padding(.horizontal, 24).padding(.top, 16)` line from `body`, and place `overviewToggle` inside `header`'s trailing `HStack` after the "How to read this map" button, with `spacing: 10` between them.
+
+Replace `overviewToggle` with web's look — a bordered container holding two segments, the active one accent-tinted with accent text (NOT white on a filled purple capsule):
 
 ```swift
-    /// Destinations shown in the rail, in order. Overview carries the Roadmap ⁄ Second Brain
-    /// toggle internally (matching the web), so it occupies one slot, not two.
-    static let navTabs: [AppView] = [.chat, .overview, .company, .tasks, .library, .environment]
-```
-
-In `title(_:)` replace the `.roadmap` and `.secondBrain` cases with:
-
-```swift
-        case .overview:    return lang == .vi ? "Tổng quan" : "Overview"
-```
-
-In `from(navDestination:)` replace `case "roadmap": return .roadmap` with:
-
-```swift
-        case "roadmap", "overview": return .overview
-```
-
-In `icon` replace the `.roadmap`/`.secondBrain` cases with:
-
-```swift
-        case .overview:    return "map"
-```
-
-- [ ] **Step 4: Update the shell and the chat entry point**
-
-In `codepet/Views/Shell/AppShellView.swift`, replace the two branches at lines 37-40:
-
-```swift
-        } else if companyStore.view == .overview {
-            OverviewSectionView()
-```
-
-In `codepet/Views/Copilot/CopilotChatView.swift:152`, `select(.roadmap)` → `select(.overview)`.
-
-- [ ] **Step 5: Demote `SecondBrainView` to a panel**
-
-Replace the body of `codepet/Views/SecondBrain/SecondBrainView.swift` — the header moves to the Overview page, so this is now just the panel:
-
-```swift
-// codepet/Views/SecondBrain/SecondBrainView.swift
-import SwiftUI
-
-/// The Second Brain surface — the right half of the Overview toggle (web: the `map` tab).
-/// The page header lives in `OverviewSectionView`; this is the panel only. Department rows
-/// still route to `.company`, which is how Company stays reachable without a rail slot.
-struct SecondBrainView: View {
-    @EnvironmentObject var companyStore: CompanyStore
-    @Environment(\.uiLanguage) private var lang
-
-    var body: some View {
-        SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang,
-                         onOpenDept: { key in
-                             companyStore.selectedDeptKey = key
-                             companyStore.select(.company)
-                         })
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-```
-
-- [ ] **Step 6: Write the Overview page**
-
-Create `codepet/Views/Overview/OverviewSectionView.swift`:
-
-```swift
-// codepet/Views/Overview/OverviewSectionView.swift
-import SwiftUI
-
-/// The Overview page — a native port of the web `OverviewSection.tsx`. One page, one header,
-/// and a Roadmap ⁄ Second Brain toggle; the roadmap board is the hero and gets the space.
-struct OverviewSectionView: View {
-    @EnvironmentObject var companyStore: CompanyStore
-    @Environment(\.uiLanguage) private var lang
-
-    enum Mode: String { case roadmap, map }
-    @State private var mode: Mode = .roadmap
-    @State private var showIntro = false
-    @State private var openDeliverable: Deliverable?
-
-    private var tasks: [RoadmapTask] { companyStore.company.tasks }
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
-    private var projectName: String {
-        let p = (companyStore.company.brief.projectName ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return p.isEmpty ? (lang == .vi ? "Công ty của bạn" : "Your company") : p
-    }
-    private var founderName: String? {
-        let n = (companyStore.company.brief.founderName ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? nil : n
-    }
-    private var oneLiner: String? {
-        let o = (companyStore.company.brief.oneLiner ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return o.isEmpty ? nil : o
-    }
-    /// Codepet's read of the company for the briefing — web's fallback chain minus the AI
-    /// `projectAnalysis` layer, which native doesn't have yet.
-    private var briefSummary: String? {
-        let s = (companyStore.company.brief.summary ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? oneLiner : s
-    }
-    /// Once we know the company, say whose it is and what it is; otherwise the generic framing.
-    private var headerLine: String {
-        if projectName != (lang == .vi ? "Công ty của bạn" : "Your company"), let o = oneLiner {
-            return "\(projectName) — \(o)"
-        }
-        return lang == .vi
-            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, \(companionName) làm gì tiếp, và bạn đã đi được bao xa."
-            : "Your whole company as a roadmap — where you are, what \(companionName) does next, and how far you’ve come."
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if mode == .roadmap {
-                header.padding(.horizontal, 24).padding(.top, 14)
-                OverviewChromeRow(tasks: tasks, companionName: companionName,
-                                  onStart: { dispatch($0) }, onOpenTask: { dispatch($0) })
-                    .padding(.horizontal, 24).padding(.top, 16)
-                RoadmapBoardView(tasks: tasks, companionName: companionName,
-                                 founderName: founderName, projectName: projectName,
-                                 tagline: oneLiner, onTaskTap: { dispatch($0) })
-                    .padding(.horizontal, 24).padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // The map fills the whole tab (its own surface); the toggle floats on top so
-                // there's no strip seam between the toggle and the panel.
-                SecondBrainView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .topLeading) { toggle.padding(.top, 16).padding(.leading, 24) }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
-        .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
-        .sheet(isPresented: $showIntro) {
-            OverviewIntroSheet(companionName: companionName, projectName: projectName,
-                               summary: briefSummary, tasks: tasks, onDismiss: {
-                                   showIntro = false
-                                   Task { await companyStore.markIntroSeen() }
-                               })
-        }
-        .onAppear {
-            // First run per account: the briefing shows once, then "How to read this map" reopens it.
-            if companyStore.company.introSeenAt == nil { showIntro = true }
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(lang == .vi ? "Tổng quan" : "Overview")
-                    .font(CodepetTheme.inter(28, weight: .semibold)).tracking(-0.5)
-                    .foregroundColor(CodepetTheme.primaryText)
-                Text(headerLine)
-                    .font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 760, alignment: .leading)
-            }
-            Spacer(minLength: 10)
-            HStack(spacing: 10) {
-                howToReadButton
-                toggle
-            }
-        }
-    }
-
-    private var howToReadButton: some View {
-        Button { showIntro = true } label: {
-            HStack(spacing: 7) {
-                Text("?").font(CodepetTheme.inter(10, weight: .bold))
-                    .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                    .frame(width: 15, height: 15)
-                    .background(Circle().fill(CodepetTheme.accentPurple))
-                Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                    .font(CodepetTheme.inter(12.5, weight: .semibold))
-                    .foregroundColor(CodepetTheme.accentPurple)
-            }
-            .padding(.horizontal, 13).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))
-            .overlay(RoundedRectangle(cornerRadius: 10)
-                .stroke(CodepetTokens.accentLine, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // The toggle adapts to its surface: light on Roadmap, dark-glass on the Second Brain panel.
-    private var toggle: some View {
+    private var overviewToggle: some View {
         HStack(spacing: 3) {
             segment(.roadmap, lang == .vi ? "Lộ trình" : "Roadmap")
-            segment(.map, lang == .vi ? "Bộ não" : "Second Brain")
+            segment(.secondBrain, lang == .vi ? "Bộ não" : "Second Brain")
         }
         .padding(4)
         .background(RoundedRectangle(cornerRadius: 11).fill(CodepetTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
 
-    private func segment(_ m: Mode, _ label: String) -> some View {
-        let on = mode == m
-        return Button { mode = m } label: {
+    private func segment(_ t: OverviewTab, _ label: String) -> some View {
+        let on = overviewTab == t
+        return Button { overviewTab = t } label: {
             Text(label)
                 .font(CodepetTheme.inter(12.5, weight: .semibold))
                 .foregroundColor(on ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
@@ -1669,53 +1472,89 @@ struct OverviewSectionView: View {
         }
         .buttonStyle(.plain)
     }
+```
 
-    /// Route a task tap through the pure `RoadmapDispatch` rule, then follow the two
-    /// streaming actions to chat, where their output appears.
-    private func dispatch(_ task: RoadmapTask) {
-        let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks))
-        switch action {
-        case .run:             Task { await companyStore.runTask(task, language: lang) }
-        case .walkThrough:     Task { await companyStore.walkThroughTask(task, language: lang) }
-        case .approve:         Task { await companyStore.approveTask(id: task.id) }
-        case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(
-                                    for: task, in: companyStore.company.library)
-        case .none:            break
-        }
-        if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
+Because the toggle now lives in `header`, which only renders in the roadmap pane, also render it above `SecondBrainView()` in the else-branch so the founder can switch back — web floats it over the dark panel there. Keep it reachable in both panes.
+
+- [ ] **Step 4: Restyle "How to read this map" and polish the header**
+
+Web's chip is smaller and uses the tint/line tokens: a **15pt** accent circle holding "?" in `CodepetTheme.onAccent(CodepetTheme.accentPurple)`, label at **12.5 semibold**, padding 13/7, corner radius **10**, `CodepetTokens.accentTint` fill with a `CodepetTokens.accentLine` border. Update the existing button's styling to those values (currently 18pt circle, 13 medium, radius 12, raw accent opacities).
+
+Header text: add `.tracking(-0.5)` to the "Overview" title, and change the subtitle from `lineLimit(1)` to `lineLimit(2)` with `.fixedSize(horizontal: false, vertical: true)` and `.frame(maxWidth: 760, alignment: .leading)`.
+
+Web's subtitle is *dynamic*: when the company has a real name and one-liner it reads `"{projectName} — {oneLiner}"`, and only falls back to the generic sentence otherwise. Replace the fixed `subtitle` with:
+
+```swift
+    private var projectName: String? {
+        let p = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return p.isEmpty ? nil : p
     }
-}
+    private var oneLiner: String? {
+        let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return o.isEmpty ? nil : o
+    }
+    /// Web parity: once we know the company, say whose it is and what it is; otherwise the generic framing.
+    private var subtitle: String {
+        if let p = projectName, let o = oneLiner { return "\(p) — \(o)" }
+        return lang == .vi
+            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, \(companionName) làm gì tiếp theo, và bạn đã đi được bao xa."
+            : "Your whole company as a roadmap — where you are, what \(companionName) does next, and how far you've come."
+    }
 ```
 
-`OverviewChromeRow`, `OverviewIntroSheet`, `company.introSeenAt` and `markIntroSeen()` all already exist — they were built in Tasks 7 and 8, which are dispatched before this one. Use them directly.
+Note the generic line now interpolates `companionName` (web does too — picking a different companion renames it).
 
-- [ ] **Step 7: Delete the old page and build**
+- [ ] **Step 5: Replace the popover briefing with the first-run modal**
+
+Delete `mapIntroBriefing` and the `.popover(isPresented: $showMapIntro)` attached to the button. Instead present the real sheet, and auto-show it once per account:
+
+```swift
+        .sheet(isPresented: $showMapIntro) {
+            OverviewIntroSheet(companionName: companionName,
+                               projectName: projectName ?? (lang == .vi ? "Công ty của bạn" : "Your company"),
+                               summary: briefSummary, tasks: tasks,
+                               onDismiss: {
+                                   showMapIntro = false
+                                   Task { await companyStore.markIntroSeen() }
+                               })
+        }
+        .onAppear { if companyStore.company.introSeenAt == nil { showMapIntro = true } }
+```
+
+with the summary resolved web-style (its AI analysis layer is deferred — see Deferred):
+
+```swift
+    /// Codepet's read of the company for the briefing — web's fallback chain minus the AI
+    /// `projectAnalysis` layer, which native doesn't have yet.
+    private var briefSummary: String? {
+        let s = (companyStore.company.brief.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? oneLiner : s
+    }
+```
+
+The button keeps working as the reopen path (`showMapIntro = true`), which is exactly web's behaviour — dismissing marks it seen, and the header chip can reopen it any time.
+
+- [ ] **Step 6: Build and run the full suite**
+
+Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild build -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "BUILD (SUCCEEDED|FAILED)|error:|warning:" | tail -20`
+Expected: `** BUILD SUCCEEDED **` with no new warnings.
+
+Quit `codepet.app`, then run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "TEST (SUCCEEDED|FAILED)|Executed [0-9]+ test" | tail -5`
+Expected: **537 tests, 0 failures** — unchanged. `ShellNavTests` and `AppViewTests` still assert `.roadmap` and `topTabs`; since this task does not touch `AppView`, they must keep passing untouched. If either fails, you changed something you were told to preserve.
+
+- [ ] **Step 7: Confirm nothing dead remains, then commit**
 
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
-git rm codepet/Views/Roadmap/RoadmapView.swift
-rmdir codepet/Views/Roadmap 2>/dev/null || true
-grep -rn "\.roadmap\b\|\.secondBrain\b" codepet/ | grep -v RoadmapPhase
+grep -n "progressCard\|beaconCard\|beaconPingDot\|mapIntroBriefing\|chromeRow\|legend" codepet/Views/Roadmap/RoadmapView.swift
 ```
-Expected from the grep: no hits (other than `RoadmapPhase` cases).
-
-Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild build -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "BUILD (SUCCEEDED|FAILED)|error:" | tail -12`
-Expected: `** BUILD SUCCEEDED **`
-
-- [ ] **Step 8: Run the nav test**
-
-Run: `cd ~/Desktop/codepet-wt-overview-parity && xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/OverviewNavTests 2>&1 | tail -20`
-Expected: `** TEST SUCCEEDED **`
-
-- [ ] **Step 9: Commit**
+Expected: no hits.
 
 ```bash
-cd ~/Desktop/codepet-wt-overview-parity
-git add -A codepet codepetTests
-git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain toggle (web parity)"
+git add -A codepet
+git commit -m "feat(overview): wire the web-parity chrome, briefing and named beacon into the Overview page"
 ```
 
----
 
 ## Task 7: The chrome strip
 
@@ -2271,7 +2110,7 @@ If another instance is running, it belongs to a concurrent session — **build o
 
 Open `https://codepet-v1-2.vercel.app/` next to the app, both on the Overview tab, both in the same appearance (light, then dark). Walk this checklist:
 
-- [ ] One Overview tab; the toggle switches Roadmap ⁄ Second Brain without a layout jump
+- [ ] The toggle sits top-right beside "How to read this map" and switches Roadmap ⁄ Second Brain without a layout jump (the single-Overview-tab structure already shipped on `main` before this branch — not this branch's work)
 - [ ] Title "Overview" + a two-line subtitle; "How to read this map" and the toggle sit top-right
 - [ ] Progress card: phase chip, `NN%`, "needs you N", the "Next: …" chip riding inside the bar
 - [ ] Beacon card: pinging dot, "codepet · do this next", Start (rounded rect, not a pill), "Also needs you"
@@ -2284,6 +2123,10 @@ Open `https://codepet-v1-2.vercel.app/` next to the app, both on the Overview ta
 - [ ] The board opens with the current move roughly centered
 - [ ] The company root reads as a luminous node with the Codepet mark, the name, and the tagline / "YOUR COMPANY"
 - [ ] Dark mode: cards keep a visible edge against the page; dependency lines are visible
+- [ ] **The root aura glow reads symmetric left-to-right** (its clamp was verified by algebra, never rendered)
+- [ ] **In Vietnamese, the last phase header "VẬN HÀNH & PHÁT TRIỂN" and its done/total count are not clipped** at the right edge (allowance verified by algebra, never rendered)
+- [ ] The beacon marker reads the founder's name ("Mona is here"), not "You are here", when a name is set
+- [ ] Reword the stale doc comment at `codepet/Models/RoadmapTask.swift:59` — it names the deleted `RoadmapMapView` AND claims a parity relationship the codebase forbids (board done is `#16a34a`; that mapping's is `#10B981`). Note the deliberate byte-identity break in the PR body.
 
 For each miss, note the web value and fix it — the numbers in Tasks 1–8 are the reference.
 

@@ -25,6 +25,14 @@ struct RoadmapView: View {
         let o = (companyStore.company.brief.oneLiner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return o.isEmpty ? nil : o
     }
+    /// The ONE display name for the company, used by the briefing headline AND the board's root
+    /// node. Web derives both from a single `cleanCompanyName(brief.projectName) ?? 'Your company'`
+    /// (`OverviewSection.tsx:103`); passing the raw optional to one surface and the trimmed one to
+    /// another gave a blank root-node title for a whitespace-only name, and two different
+    /// fallbacks ("Codepet" vs "Your company") for the same account in the same session.
+    private var displayProjectName: String {
+        projectName ?? (lang == .vi ? "Công ty của bạn" : "Your company")
+    }
     /// Web parity: once we know the company, say whose it is and what it is; otherwise the generic framing.
     private var subtitle: String {
         if let p = projectName, let o = oneLiner { return "\(p) — \(o)" }
@@ -53,7 +61,7 @@ struct RoadmapView: View {
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
         .sheet(isPresented: $showMapIntro) {
             OverviewIntroSheet(companionName: companionName,
-                               projectName: projectName ?? (lang == .vi ? "Công ty của bạn" : "Your company"),
+                               projectName: displayProjectName,
                                summary: briefSummary, tasks: tasks,
                                onDismiss: {
                                    showMapIntro = false
@@ -81,8 +89,8 @@ struct RoadmapView: View {
                 .padding(.horizontal, 24).padding(.top, 16)
             RoadmapBoardView(tasks: tasks, companionName: companionName,
                              founderName: companyStore.company.brief.founderName,
-                             projectName: (companyStore.company.brief.projectName ?? "Codepet"),
-                             tagline: companyStore.company.brief.oneLiner,
+                             projectName: displayProjectName,
+                             tagline: oneLiner,
                              onTaskTap: { dispatch($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

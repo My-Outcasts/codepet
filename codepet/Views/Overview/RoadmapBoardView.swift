@@ -24,10 +24,10 @@ struct RoadmapBoardView: View {
     /// The previous current-move id, so a become-current transition can be detected even
     /// when the new current task was never `.blocked` (see `detectAdvances`).
     @State private var prevCurrentId: String?
-    /// Guards the one-shot open-framing scroll so it fires exactly once, whichever happens
-    /// first: `onAppear` (already-loaded case) or `currentId` first resolving (first-visit,
-    /// async-generated case).
-    @State private var didFrame = false
+    /// The task id the open-framing scroll last centered on. Web re-runs its framing effect on
+    /// `[currentX, scale]` rather than once-ever; `scale` is a constant here (see `scale(for:)`),
+    /// so that reduces to "re-frame when the current move changes" — which this id records.
+    @State private var framedForId: String?
     /// Scroll-edge fade state, written only by `onScrollGeometryChange`.
     @State private var canScrollLeft = false
     @State private var canScrollRight = false
@@ -47,12 +47,14 @@ struct RoadmapBoardView: View {
     /// without measuring text.
     private static let headerTrailingAllowance: CGFloat = 240
 
-    /// Scale the diagram up to fill the available height, capped at 1.0 (never upscale past
-    /// natural size), and center any leftover height — so a short roadmap leaves no dead space.
+    /// Web parity — deliberately always 1.0, NOT dead code. RoadmapView.tsx pairs
+    /// `MAX_SCALE = 1.0` with "never upscale — keep cards at natural size and center any
+    /// leftover height", so this is a FLOOR against downscaling: the board never shrinks,
+    /// extra height is centred by `padTop`, and a too-tall board scrolls. Do not "simplify".
     private func scale(for l: RoadmapLayout) -> CGFloat {
         let natural = l.size.height + Self.headerBlock
         guard avail > 0, natural > 0 else { return 1 }
-        return min(1, avail / natural)   // shrink to fit; never upscale past natural size
+        return max(1, min(1.0, avail / natural))
     }
 
     /// The scrollable content width: at least the diagram's width, but widened when the
@@ -96,23 +98,26 @@ struct RoadmapBoardView: View {
             .overlay(alignment: .trailing) { edgeFade(leading: false, visible: canScrollRight) }
             .onAppear {
                 // Open framed on the current move — the founder shouldn't hunt for it.
-                if let id = currentId {
-                    proxy.scrollTo(id, anchor: .center)
-                    didFrame = true
-                }
+                if let id = currentId { frame(proxy, id: id) }
                 prevStates = statusMap(tasks)
                 prevCurrentId = currentId
             }
             .onChange(of: currentId) { _, new in
                 // First visit: `tasks` generates asynchronously, so `currentId` is nil at
                 // `onAppear` and the board never got framed above. Catch it the moment the
-                // current move first resolves — but only once.
-                guard !didFrame, let id = new else { return }
-                proxy.scrollTo(id, anchor: .center)
-                didFrame = true
+                // current move first resolves — and again on each advance, as web does.
+                guard let id = new, framedForId != id else { return }
+                frame(proxy, id: id)
             }
             .onChange(of: tasks) { _, new in detectAdvances(new) }
         }
+    }
+
+    /// Center the scroll on `id`, recording which id it framed so the `currentId` observer can
+    /// tell a fresh advance from a re-render it has already handled.
+    private func frame(_ proxy: ScrollViewProxy, id: String) {
+        proxy.scrollTo(id, anchor: .center)
+        framedForId = id
     }
 
     /// A non-interactive scroll-edge fade (web parity): a hint that more board scrolls off
@@ -127,9 +132,11 @@ struct RoadmapBoardView: View {
                                    startPoint: .leading, endPoint: .trailing)
                         .frame(width: 48)
                 } else {
-                    ZStack {
+                    ZStack(alignment: .trailing) {
                         LinearGradient(colors: [.clear, CodepetTheme.pageBackground],
                                        startPoint: .leading, endPoint: .trailing)
+                        // Web: `justify-content: flex-end; padding-right: 6` — pinned to the
+                        // trailing edge of the strip, not centered within it.
                         Circle()
                             .fill(CodepetTheme.surface)
                             .overlay(Circle().stroke(CodepetTheme.hairline, lineWidth: 1))
@@ -138,6 +145,7 @@ struct RoadmapBoardView: View {
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 9, weight: .semibold))
                                     .foregroundColor(CodepetTheme.mutedText))
+                            .padding(.trailing, 6)
                     }
                     .frame(width: 56)
                 }
@@ -200,7 +208,7 @@ struct RoadmapBoardView: View {
                     // these first keeps the tooltip and the ScrollViewReader anchor scoped
                     // to the card's real frame.
                     .id(n.task.id)
-                    .help(peekText(n.task, status: status))
+                    .help(peekText(n.task, status: status, isCurrent: isCurrent))
                     // engine coords are TOP-LEFT; SwiftUI .position is center-based
                     .position(x: n.x + RoadmapGeometry.cardW / 2,
                               y: n.y + RoadmapGeometry.cardH / 2)
@@ -248,28 +256,19 @@ struct RoadmapBoardView: View {
     // 172×118, accent gradient, the Codepet mark, and a blurred aura behind it so the origin
     // reads as the luminous root the whole tree grows from — not just another card.
     //
-    // The aura's natural bleed is 26pt each side / 20pt top+bottom. But the root rect sits
-    // against the diagram's own left/top edge (and can again when the layout has a single
-    // lane), so a symmetric bleed would push part of the aura into space the diagram doesn't
-    // have — clipped by the outer frame, reading brighter on the far side than the near one.
-    // Clamp each near-edge's bleed to the room actually available; the far edges (and the
-    // card itself, which stays centered on `r` exactly as the engine placed it) are untouched.
+    // Web parity: the aura bleeds a fixed 26pt/20pt on every side with no clamping — web lets
+    // the scroll container clip it when the root sits against an edge, rather than shifting
+    // the radial gradient's center off the card. Do not re-add a clamp here: it reads as
+    // correct in isolation but throws the glow off-center relative to the card.
     private func rootNode(_ r: CGRect) -> some View {
-        let leftBleed = min(26, r.minX)
-        let topBleed = min(20, r.minY)
-        let rightBleed: CGFloat = 26
-        let bottomBleed: CGFloat = 20
-        let auraW = r.width + leftBleed + rightBleed
-        let auraH = r.height + topBleed + bottomBleed
-        let auraOffsetX = (rightBleed - leftBleed) / 2
-        let auraOffsetY = (bottomBleed - topBleed) / 2
+        let auraW = r.width + 52
+        let auraH = r.height + 40
 
         return ZStack {
             RoundedRectangle(cornerRadius: 44)
                 .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.42), .clear],
                                      center: .center, startRadius: 0, endRadius: r.width * 0.6))
                 .frame(width: auraW, height: auraH)
-                .offset(x: auraOffsetX, y: auraOffsetY)
                 .blur(radius: 22)
                 .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 11) {
@@ -340,7 +339,10 @@ struct RoadmapBoardView: View {
     }
 
     /// The hover peek's plain-language line — the founder learns a card without opening chat.
-    private func peekText(_ task: RoadmapTask, status: TaskStatus) -> String {
+    /// Web's `peekSentence` distinguishes the single `current` card ("…'s next move") from a
+    /// merely-`available` one ("… can run this now") — both are `.codepetCanDo`, so without
+    /// `isCurrent` every runnable card on the board would claim to be THE next move.
+    private func peekText(_ task: RoadmapTask, status: TaskStatus, isCurrent: Bool) -> String {
         var parts: [String] = []
         // Phase is always shown — the layout engine explicitly tolerates legacy tasks with
         // `dept == nil`, and dropping the phase for them loses the peek's whole first line.
@@ -362,8 +364,13 @@ struct RoadmapBoardView: View {
         }
         switch status {
         case .codepetCanDo:
-            parts.append(lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để bắt đầu."
-                                     : "\(companionName)'s next move. Click to start.")
+            if isCurrent {
+                parts.append(lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để bắt đầu."
+                                         : "\(companionName)'s next move. Click to start.")
+            } else {
+                parts.append(lang == .vi ? "\(companionName) có thể làm ngay bây giờ. Nhấn để bắt đầu."
+                                         : "\(companionName) can run this now. Click to start.")
+            }
         case .needsYou:      parts.append(lang == .vi ? "Cần bạn nhập. Nhấn để thêm." : "Your input needed. Click to add it.")
         case .needsApproval: parts.append(lang == .vi ? "Bản nháp đã sẵn sàng. Nhấn để xem lại." : "Ready for your review.")
         case .done:          parts.append(lang == .vi ? "Xong. Nhấn để mở." : "Finished — click to open the result.")

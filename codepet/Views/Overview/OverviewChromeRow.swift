@@ -37,6 +37,11 @@ struct OverviewChromeRow: View {
     }
 
     var body: some View {
+        // Outer row stays top-aligned (the KEY column shouldn't stretch to match the cards'
+        // height); web's `alignItems: 'stretch'` applies only to the inner progress+beacon
+        // pair. SwiftUI's `HStack` has no `.stretch` vertical alignment, so the equivalent is
+        // each card taking `maxHeight: .infinity` (see `progressCard`/`beaconCard`) inside a
+        // plain top-aligned HStack — the stack sizes to the taller card and both fill it.
         HStack(alignment: .top, spacing: 24) {
             HStack(alignment: .top, spacing: 14) {
                 progressCard
@@ -80,7 +85,7 @@ struct OverviewChromeRow: View {
             progressBar
         }
         .padding(.horizontal, 13).padding(.top, 9).padding(.bottom, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 14).fill(CodepetTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(CodepetTheme.hairline, lineWidth: 1))
     }
@@ -150,7 +155,7 @@ struct OverviewChromeRow: View {
             }
         }
         .padding(.horizontal, 13).padding(.top, 9).padding(.bottom, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTokens.accentTint))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTokens.accentLine, lineWidth: 1))
     }

@@ -47,11 +47,14 @@ struct RoadmapCardView: View {
         .padding(.horizontal, 12)
         .frame(width: RoadmapGeometry.cardW, height: RoadmapGeometry.cardH, alignment: .leading)
         // The locked fade lives on the CONTENT, never the card — a faded card would let the
-        // connectors behind it show through.
-        .opacity(isLocked ? RoadmapTokens.lockedOpacity(dark: scheme == .dark) : 1)
+        // connectors behind it show through. Web puts the tray marker INSIDE this same
+        // content layer (its `inset:0` div carries both the marker and `opacity: LOCKED_OP`),
+        // so the marker fades with the rest of a locked card rather than sitting on top of it
+        // at full strength — keep the marker in this overlay, not a later one.
         .overlay(alignment: .topTrailing) {
             if RoadmapBoardCopy.showsTrayMarker(status) { trayMarker }
         }
+        .opacity(isLocked ? RoadmapTokens.lockedOpacity(dark: scheme == .dark) : 1)
         .background(cardFill)
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(cardBorder, lineWidth: 1))
         .shadow(color: isCurrent ? CodepetTheme.accentPurple.opacity(0.6) : .clear,
@@ -87,12 +90,16 @@ struct RoadmapCardView: View {
     // the board has exactly one unmistakable hero.
     @ViewBuilder private func chip(_ label: String) -> some View {
         let filled = isCurrent && status == .codepetCanDo
+        // Web's `chipStyle` gives the merely-`available` outline (codepetCanDo, not current)
+        // the `--accent-tint` / `--accent-line` tokens specifically — `approve`/`needsYou`
+        // keep their own literal-hex rgba blends, so only this one state switches source.
+        let isAvailable = !filled && status == .codepetCanDo
         Text(label)
             .font(CodepetTheme.inter(10, weight: .bold))
             .foregroundColor(filled ? CodepetTheme.onAccent(tint) : tint)
             .padding(.horizontal, 9).padding(.vertical, 2)
-            .background(Capsule().fill(filled ? tint : tint.opacity(0.10)))
-            .overlay(Capsule().stroke(filled ? tint : tint.opacity(0.35), lineWidth: 1))
+            .background(Capsule().fill(filled ? tint : isAvailable ? CodepetTokens.accentTint : tint.opacity(0.10)))
+            .overlay(Capsule().stroke(filled ? tint : isAvailable ? CodepetTokens.accentLine : tint.opacity(0.35), lineWidth: 1))
     }
 
     // The card is always OPAQUE — the state tint is layered over the base surface rather than

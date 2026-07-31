@@ -1074,6 +1074,14 @@ git commit -m "feat(overview): web-exact roadmap card (208x64, floating here-mar
 
 ## Task 5: The board renderer
 
+> **The code listing in this section is the PRE-REVIEW draft.** The shipped `RoadmapBoardView.swift`
+> differs in roughly eight respects, all added by the review fix pass: `prevCurrentId` (pulse on
+> become-current), `didFrame` + `onChange(of: currentId)` (framing after the async roadmap load),
+> derived `headerRow`/`headerGap`/`headerBlock`, a widened header row for long Vietnamese labels, a
+> clamped root aura, `pulseIds.formUnion`, `.help`/`.id` placed BEFORE `.position`, and the real
+> `onScrollGeometryChange`-driven edge fades (`ScrollEdgeState`). Read the shipped file, not this listing.
+
+
 **Files:**
 - Create: `codepet/Views/Overview/RoadmapBoardView.swift`
 - Modify: `codepet/Views/Roadmap/RoadmapView.swift:34` (repoint the old page at the new board so it keeps compiling until Task 8 replaces it)
@@ -1127,7 +1135,14 @@ struct RoadmapBoardView: View {
     private func scale(for l: RoadmapLayout) -> CGFloat {
         let natural = l.size.height + headerBlock
         guard avail > 0, natural > 0 else { return 1 }
-        return min(1, avail / natural)   // shrink to fit; never upscale past natural size
+        // Web parity — this is deliberately always 1.0, NOT a bug. RoadmapView.tsx:428-429 pairs
+        // `MAX_SCALE = 1.0` with the comment "never upscale — keep cards at natural size and center
+        // any leftover height", so `max(1, min(1, …))` is a FLOOR against downscaling. The board
+        // never shrinks: extra height is centred via padTop, and a too-tall board scrolls.
+        // An earlier draft of this plan wrongly called this dead code and changed it to
+        // `min(1, avail / natural)`, which shrank 12.5pt titles to ~9pt AND disabled the vertical
+        // scroll that was the founder's only recourse. Do not "simplify" it again.
+        return max(1, min(1.0, avail / natural))
     }
 
     var body: some View {
@@ -1385,7 +1400,7 @@ Expected: `** TEST SUCCEEDED **`
 
 - [ ] **Step 3: Verify the scroll-edge state actually toggles**
 
-`scrollEdge` is declared but nothing sets it — SwiftUI's `ScrollView` has no `onScroll`. Wire it with a `GeometryReader` sentinel inside the scroll content that reports its frame in the `.named("board")` coordinate space, and set `scrollEdge.left = offset < -4`, `scrollEdge.right = contentWidth - offset - viewportWidth > 4`. If the sentinel approach proves flaky, delete the two `.overlay` fade modifiers and `scrollEdge` entirely and note the omission in the PR — a broken fade is worse than no fade. Do not leave dead state in the file.
+`scrollEdge` is declared but nothing sets it — `onScrollGeometryChange` (macOS 15+, and this project targets 26.2) reports scroll geometry. Wire it with a `GeometryReader` sentinel inside the scroll content that reports its frame in the `.named("board")` coordinate space, and set `scrollEdge.left = offset < -4`, `scrollEdge.right = contentWidth - offset - viewportWidth > 4`. If the sentinel approach proves flaky, delete the two `.overlay` fade modifiers and `scrollEdge` entirely and note the omission in the PR — a broken fade is worse than no fade. Do not leave dead state in the file.
 
 - [ ] **Step 4: Commit**
 
@@ -1398,6 +1413,11 @@ git commit -m "feat(overview): web-exact roadmap board (lanes, orthogonal edges,
 ---
 
 ## Task 6: Wire the new components into the existing Overview page
+
+> **The code listing in this section is the PRE-REVIEW draft.** The shipped `RoadmapView.swift` also
+> carries `introShown` + `.onChange(of: tasks.isEmpty, initial: true)` so the first-run briefing waits
+> for the roadmap to resolve and can name the founder's first move. Read the shipped file.
+
 
 > **CORRECTED Jul 31.** This section originally said "unify into one Overview page" — retire the split
 > `.roadmap`/`.secondBrain` rail tabs, add `AppView.overview`, create `OverviewSectionView`, delete
@@ -2139,25 +2159,11 @@ Save a light and a dark screenshot of the native Overview for the PR body.
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
 git push -u origin feat/overview-web-parity
-gh pr create --base main --title "Overview → web parity: one page, dept lanes, orthogonal board" --body-file <(cat <<'BODY'
-Brings the native Overview in line with the shipped web Overview.
-
-- One Overview page with a Roadmap ⁄ Second Brain toggle (retires the two split rail tabs)
-- Layout engine ported from `lib/overview/roadmapLayout.ts`: department lanes, orthogonal
-  elbow connectors, current-task-only critical path, 208×64 cards
-- Web-exact cards: floating "is here" marker, quiet states as text, circle dot for done,
-  tray glyph on locked only
-- Chrome strip: progress bar with the inner "Next:" chip, beacon card, states KEY
-- First-run briefing modal + account-scoped `introSeenAt` (millis, shared with web)
-- Ported the web's roadmap design tokens; `done` is now green (#16a34a) and approval amber
-  (#d97706), matching web — this also recolors the department task cards
-
-Verified side by side against https://codepet-v1-2.vercel.app/ in light and dark.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-BODY
-)
+gh pr create --base main --title "Overview → web parity: ported layout engine, web-exact cards and chrome" \
+  --body-file .superpowers/sdd/pr-body.md
 ```
+
+**The PR body lives at `.superpowers/sdd/pr-body.md`** — do not hand-write it here. An earlier embedded draft claimed three things that are false: that this branch unifies the split Roadmap/Second Brain tabs (that shipped on `main` before this branch), that it recolours the department task cards (the founder decided the opposite, and a test pins the palettes apart), and that the side-by-side verification was done. Whatever the body says about verification must match what was actually run.
 
 - [ ] **Step 6: Merge and verify prod**
 

@@ -127,22 +127,29 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        Group {
-            if items.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header
-                        filterBar
-                        ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
-                            groupSection(g.dept, g.items)
-                        }
+        // web: the masthead always shows; the filter bar only once there's something to
+        // filter, and an empty library is one honest paragraph where the grid would be.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header.viewHeadPadding()
+                if items.isEmpty {
+                    Text(lang == .vi
+                         ? "Chưa có gì ở đây. Khi Codepet hoàn thành một nhiệm vụ và bạn duyệt, sản phẩm sẽ xuất hiện ở đây — bản nháp, thay đổi đã xuất bản và danh sách kiểm, tất cả ở một nơi."
+                         : "Nothing here yet. When Codepet finishes a task and you approve it, the deliverable lands here — drafts, shipped changes, and checklists in one place.")
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTokens.faint)
+                        .lineSpacing(13 * 0.6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 44)
+                } else {
+                    filterBar
+                    ForEach(Array(groups.enumerated()), id: \.offset) { i, g in
+                        groupSection(g.dept, g.items)
+                            .padding(.bottom, i == groups.count - 1 ? 44 : 0)
                     }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: $selected) { DeliverableDetailView(deliverable: $0) }
@@ -156,91 +163,116 @@ struct LibraryView: View {
         var idx = pad2(n) + " " + (lang == .vi ? "mục" : (n == 1 ? "item" : "items"))
         if liveN > 0 { idx += " · " + pad2(liveN) + " " + (lang == .vi ? "trực tiếp" : "live") }
         if draftN > 0 { idx += " · " + pad2(draftN) + " " + (lang == .vi ? "nháp" : "draft") }
-        return VStack(alignment: .leading, spacing: 4) {
+        // web `.lib-mast` — 28px/650 title, 15px description 6px under it, then the
+        // uppercase specimen index 12px below that.
+        return VStack(alignment: .leading, spacing: 0) {
             Text(lang == .vi ? "Thư viện" : "Library")
-                .font(.pixelSystem(size: 22, weight: .bold))
+                .font(CodepetTheme.inter(28, weight: .semibold))
+                .tracking(-0.5)
                 .foregroundColor(CodepetTheme.primaryText)
             Text(lang == .vi ? "Mọi thứ Codepet đã tạo hoặc phác thảo — bạn duyệt, gom về một nơi."
                              : "Everything Codepet has shipped or drafted — approved by you, kept in one place.")
-                .font(.pixelSystem(size: 12))
+                .font(CodepetTheme.inter(15))
                 .foregroundColor(CodepetTheme.mutedText)
-            Text(idx)
-                .font(.pixelSystem(size: 11, weight: .medium))
-                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.top, 6)
+            if !items.isEmpty {
+                Text(idx.uppercased())
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundColor(CodepetTokens.faint)
+                    .padding(.top, 12)
+            }
         }
     }
 
     // MARK: Filter chips
 
+    /// web `.lib-bar { padding: 18px 26px 2px }` + `.lib-filters { gap: 4px }`
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip(lang == .vi ? "Tất cả" : "All", count: items.count, key: "all")
-                ForEach(buckets, id: \.self) { b in
-                    chip(b, count: counts[b] ?? 0, key: b)
-                }
+        ChipFlowLayout(spacing: 4) {
+            chip(lang == .vi ? "Tất cả" : "All", count: items.count, key: "all")
+            ForEach(buckets, id: \.self) { b in
+                chip(b, count: counts[b] ?? 0, key: b)
             }
-            .padding(.vertical, 1)
         }
+        .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 2)
     }
 
+    /// web `.lib-chip` — a quiet uppercase catalog tab that inverts to an ink pill
+    /// when active (page-coloured text on `--t-1`, so it flips with the theme).
     private func chip(_ label: String, count: Int, key: String) -> some View {
         let on = activeFilter == key
-        return Button { filter = key } label: {
-            HStack(spacing: 5) {
-                Text(label).font(.pixelSystem(size: 11, weight: .semibold))
-                Text("\(count)")
-                    .font(.pixelSystem(size: 10, weight: .bold))
-                    .foregroundColor(on ? Color.white.opacity(0.85) : CodepetTheme.mutedText)
-            }
-            .foregroundColor(on ? .white : CodepetTheme.bodyText)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(on ? CodepetTheme.accentPurple : CodepetTheme.surface))
-            .overlay(Capsule().stroke(on ? Color.clear : CodepetTheme.hairline, lineWidth: 1))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
+        return LibChip(label: label, count: count, on: on) { filter = key }
     }
 
     // MARK: Department group
 
     private func groupSection(_ dept: Department?, _ list: [Deliverable]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            // web `.lib-ghead { padding: 20px 26px 14px; gap: 9px }` — uppercase,
+            // 11px/600, with the 20pt department avatar chip leading it.
+            HStack(spacing: 9) {
                 Text(dept?.ab ?? "—")
-                    .font(.pixelSystem(size: 10, weight: .bold))
+                    .font(CodepetTheme.inter(8.5, weight: .bold))
                     .foregroundColor(.white)
-                    .frame(width: 26, height: 20)
+                    .frame(width: 20, height: 20)
                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(dept?.accent ?? CodepetTheme.mutedText))
-                Text(dept?.name ?? (lang == .vi ? "Khác" : "Other"))
-                    .font(.pixelSystem(size: 13, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-                Text("— \(list.count)")
-                    .font(.pixelSystem(size: 11, weight: .medium))
+                Text((dept?.name ?? (lang == .vi ? "Khác" : "Other")).uppercased())
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .tracking(0.8)
                     .foregroundColor(CodepetTheme.mutedText)
+                Text("— \(list.count)")
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundColor(CodepetTokens.faint)
                 Spacer()
             }
-            ForEach(list) { d in
-                Button { selected = d } label: { LibraryRowView(deliverable: d) }
-                    .buttonStyle(.plain)
+            .padding(.top, 20).padding(.horizontal, 26).padding(.bottom, 14)
+
+            // web `.lib-grid { gap: 10px; padding: 0 26px }`
+            VStack(spacing: 10) {
+                ForEach(list) { d in
+                    Button { selected = d } label: { LibraryRowView(deliverable: d) }
+                        .buttonStyle(.plain)
+                }
             }
+            .padding(.horizontal, 26)
         }
     }
+}
 
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tray")
-                .font(.system(size: 30)).foregroundColor(CodepetTheme.mutedText)
-            Text(lang == .vi ? "Sản phẩm sẽ xuất hiện ở đây" : "Delivered work will appear here")
-                .font(.pixelSystem(size: 15, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
-            Text(lang == .vi ? "Khi Codepet tạo ra sản phẩm, chúng sẽ tập hợp ở đây."
-                             : "Once Codepet produces work, it collects here.")
-                .font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
-                .multilineTextAlignment(.center)
+/// web `.lib-chip` — hover and active states need per-chip state, so it's its own view.
+private struct LibChip: View {
+    let label: String
+    let count: Int
+    let on: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Text(label.uppercased())
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .tracking(0.5)
+                Text("\(count)")
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .opacity(0.5)
+            }
+            .fixedSize()
+            .foregroundColor(on ? CodepetTokens.page
+                                : (hovered ? CodepetTheme.primaryText : CodepetTheme.mutedText))
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(on ? CodepetTheme.primaryText : (hovered ? CodepetTheme.surface : Color.clear)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(on ? CodepetTheme.primaryText : (hovered ? CodepetTheme.hairline : Color.clear),
+                        lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .padding(24).frame(maxWidth: 360)
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: 0.14)) { hovered = h } }
     }
 }
 
@@ -248,6 +280,8 @@ struct LibraryView: View {
 struct LibraryRowView: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @Environment(\.colorScheme) private var scheme
+    @State private var hovered = false
 
     /// First 2 non-empty lines of the markdown body.
     private var desc: String {
@@ -262,46 +296,74 @@ struct LibraryRowView: View {
     var body: some View {
         let k = deliverable.kind
         let live = Lib.isLive(k)
-        return CodepetCard {
-            HStack(alignment: .top, spacing: 12) {
-                OutcomePreview(deliverable: deliverable)
-                    .frame(width: 78, height: 60)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(Lib.tag(k, lang).uppercased())
-                        .font(.pixelSystem(size: 9, weight: .bold))
-                        .tracking(0.4)
-                        .foregroundColor(Lib.accent(k))
-                    Text(deliverable.title)
-                        .font(.pixelSystem(size: 13, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .lineLimit(2)
-                    if !desc.isEmpty {
-                        Text(desc)
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.bodyText)
-                            .lineLimit(2)
-                    }
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(live ? CodepetTheme.accentTeal : Color.clear)
-                            .overlay(Circle().stroke(live ? Color.clear : CodepetTheme.mutedText, lineWidth: 1))
-                            .frame(width: 7, height: 7)
-                        Text(live ? (lang == .vi ? "Trực tiếp" : "Live")
-                                  : (lang == .vi ? "Bản nháp" : "Draft"))
-                            .font(.pixelSystem(size: 10, weight: .medium))
-                            .foregroundColor(live ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
-                        Spacer()
-                        Text(lang == .vi ? "mở →" : "open →")
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    .padding(.top, 1)
+        return HStack(spacing: 0) {
+            // web `.lt-prev { width: 300px; flex: none; padding: 16px }` with a hairline
+            // separating it from the copy — a full-height panel, not a thumbnail.
+            OutcomePreview(deliverable: deliverable, panel: true)
+                .frame(width: 300)
+                .frame(maxHeight: .infinity)
+                .overlay(alignment: .trailing) {
+                    Rectangle().fill(CodepetTokens.cardEdge).frame(width: 1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // web `.lt-info { padding: 15px 18px }`
+            VStack(alignment: .leading, spacing: 0) {
+                Text(Lib.tag(k, lang).uppercased())
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundColor(Lib.accent(k))
+                    .padding(.bottom, 5)
+                Text(deliverable.title)
+                    .font(CodepetTheme.inter(16, weight: .bold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .lineSpacing(16 * 0.28)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !desc.isEmpty {
+                    Text(desc)
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .lineSpacing(13 * 0.5)
+                        .lineLimit(2)
+                        .padding(.top, 6)
+                }
+                Spacer(minLength: 0)   // `.lt-metarow { margin-top: auto }`
+                HStack(spacing: 9) {
+                    HStack(spacing: 7) {
+                        // web `.lib-pip` — filled teal with a soft tint ring when live,
+                        // a hollow --t-4 ring when it's still a draft.
+                        Circle()
+                            .fill(live ? CodepetTokens.teal : Color.clear)
+                            .overlay(Circle().stroke(live ? Color.clear : CodepetTokens.faint, lineWidth: 1.5))
+                            .frame(width: 6, height: 6)
+                            .background(live ? Circle().fill(CodepetTokens.tealTint).padding(-2.5) : nil)
+                        Text((live ? (lang == .vi ? "Trực tiếp" : "Live")
+                                   : (lang == .vi ? "Bản nháp" : "Draft")).uppercased())
+                            .font(CodepetTheme.inter(10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundColor(live ? CodepetTokens.liveGreen : CodepetTokens.faint)
+                    }
+                    Spacer()
+                    Text((lang == .vi ? "mở →" : "open →").uppercased())
+                        .font(CodepetTheme.inter(10, weight: .semibold))
+                        .tracking(0.4)
+                        .foregroundColor(CodepetTheme.accentPurple)
+                        .opacity(hovered ? 1 : 0)   // web `.lt-open { opacity: 0 }`
+                }
+                .padding(.top, 12)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18).padding(.vertical, 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .frame(minHeight: 150)   // web `.lib-tile { min-height: 150px }`
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(CodepetTokens.cardRaised))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(CodepetTokens.cardEdge, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: (hovered ? CodepetTokens.shadowM(scheme == .dark) : CodepetTokens.shadowS(scheme == .dark)).color,
+                radius: hovered ? 26 : 2, y: hovered ? 10 : 1)
+        .offset(y: hovered ? -2 : 0)   // `.lib-tile:hover { translateY(-2px) }`
+        .onHover { h in withAnimation(.easeOut(duration: 0.14)) { hovered = h } }
     }
 }
 
@@ -311,6 +373,9 @@ struct LibraryRowView: View {
 /// line when a kind has no native payload field). Ports the web OutcomePreview shapes.
 struct OutcomePreview: View {
     let deliverable: Deliverable
+    /// true = the web `.lt-prev` full panel (square corners, 16pt padding, no border
+    /// of its own — the tile clips it); false = the small rounded thumbnail.
+    var panel = false
 
     private var accent: Color { Lib.accent(deliverable.kind) }
 
@@ -322,12 +387,18 @@ struct OutcomePreview: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(accent.opacity(0.12))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(accent.opacity(0.25), lineWidth: 1))
-            .overlay(inner.padding(7))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        if panel {
+            Rectangle()
+                .fill(accent.opacity(0.12))
+                .overlay(inner.padding(16))
+        } else {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(accent.opacity(0.12))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(accent.opacity(0.25), lineWidth: 1))
+                .overlay(inner.padding(7))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
     }
 
     @ViewBuilder private var inner: some View {

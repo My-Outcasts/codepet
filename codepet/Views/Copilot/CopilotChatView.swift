@@ -154,17 +154,23 @@ struct CopilotChatView: View {
     }
 
     private var greeting: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                CompanionOrb(size: 26, glow: false)
+                Text(companionName)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+            }
             Text(lang == .vi
                  ? "Chào \(founderName). Hỏi mình bất cứ điều gì về \(companyName) — nên tập trung vào đâu, điều gì đang cản trở, hay xây gì tiếp theo."
                  : "Welcome, \(founderName). Ask me anything about \(companyName) — where to focus, what's blocking you, or what to build next.")
-                .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                .font(CodepetTheme.inter(13.5)).lineSpacing(3).foregroundColor(CodepetTheme.bodyText)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(quickStarts, id: \.self) { chip in
                     Button { Task { await companyStore.sendChat(chip, language: lang) } } label: {
-                        Text(chip).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
+                        Text(chip).font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTheme.accentPurple)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
                             .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
                     }.buttonStyle(.plain)
                 }
@@ -179,9 +185,12 @@ struct CopilotChatView: View {
     }
 
     private var typingRow: some View {
-        Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is typing…")
-            .font(.pixelSystem(size: 11))
-            .foregroundColor(CodepetTheme.mutedText)
+        HStack(spacing: 8) {
+            CompanionOrb(size: 20, glow: false, isWorking: true)
+            Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is thinking…")
+                .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+            Spacer(minLength: 8)
+        }
     }
 
     private var inputBar: some View {

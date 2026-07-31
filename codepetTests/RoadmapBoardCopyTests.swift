@@ -46,4 +46,19 @@ final class RoadmapBoardCopyTests: XCTestCase {
         XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: "Mona", lang: .vi), "Mona đang ở đây")
         XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: nil, lang: .vi), "Bạn đang ở đây")
     }
+
+    // The nil branches must hold in BOTH languages: a state that renders a verb chip must never
+    // also produce a quiet status line. Asserting only in English left a Vietnamese-only
+    // regression invisible.
+    func testQuietLabelsAreNilInVietnameseToo() {
+        for status in [TaskStatus.codepetCanDo, .needsYou, .needsApproval] {
+            XCTAssertNil(RoadmapBoardCopy.quietLabel(for: status, lang: .vi))
+        }
+    }
+
+    // The whitespace-trim fallback is language-independent; pin it in Vietnamese so it stays that way.
+    func testHerePhraseWhitespaceFallbackInVietnamese() {
+        XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: "   ", lang: .vi), "Bạn đang ở đây")
+        XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: "\n", lang: .vi), "Bạn đang ở đây")
+    }
 }

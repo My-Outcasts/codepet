@@ -8,6 +8,7 @@ struct RoadmapView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showMapIntro = false
+    @State private var introShown = false
     @State private var openDeliverable: Deliverable?
     @State private var overviewTab: OverviewTab = .roadmap
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
@@ -59,7 +60,16 @@ struct RoadmapView: View {
                                    Task { await companyStore.markIntroSeen() }
                                })
         }
-        .onAppear { if companyStore.company.introSeenAt == nil { showMapIntro = true } }
+        .onChange(of: tasks.isEmpty, initial: true) { _, isEmpty in
+            // First-run briefing: wait until the roadmap has resolved so the sheet can name the
+            // founder's first move. On a fresh account `generateRoadmap` is still in flight when
+            // this view appears, and a briefing without "First up: …" loses the one line it exists
+            // to deliver. `introSeenAt` keeps it once-per-account; `introShown` keeps it once per
+            // appearance so dismissing it mid-session can't immediately re-trigger it.
+            guard !isEmpty, !introShown, companyStore.company.introSeenAt == nil else { return }
+            introShown = true
+            showMapIntro = true
+        }
     }
 
     /// The former `body` contents (roadmap map + chrome), extracted so the toggle can swap it.

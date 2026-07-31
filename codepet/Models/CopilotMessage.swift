@@ -42,6 +42,10 @@ struct CopilotMessage: Identifiable, Equatable {
     /// The department name paired with `companionId` for the "Name · Dept"
     /// header. Nil whenever `companionId` is nil.
     var deptName: String?
+    /// The live "how the agent is working" step checklist for a `producing`
+    /// message — revealed progressively as the run proceeds. Nil/empty for an
+    /// ordinary producing placeholder (renders the plain orb instead).
+    var execSteps: [ExecStep]?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
@@ -49,7 +53,8 @@ struct CopilotMessage: Identifiable, Equatable {
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
-         companionId: String? = nil, deptName: String? = nil) {
+         companionId: String? = nil, deptName: String? = nil,
+         execSteps: [ExecStep]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -65,5 +70,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.producing = producing
         self.companionId = companionId
         self.deptName = deptName
+        self.execSteps = execSteps
     }
 }

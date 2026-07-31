@@ -23,7 +23,11 @@ final class CompanyStoreChatRunTests: XCTestCase {
         // decisionExtractor stubbed: approveDraft now fires a fire-and-forget
         // rememberFromApproval, and its default hits DecisionsClient.extract (live
         // Firebase Auth) — would crash with an unconfigured FirebaseApp in the test bundle.
+        // tasksSaver stubbed too: produceDraftInline now reflects a successful run onto
+        // company.tasks (draft/drafted) and persists via tasksSaver — its default hits
+        // the live Firestore.firestore(), which crashes with an unconfigured FirebaseApp.
         CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                     tasksSaver: { _, _ in true },
                      chatSender: { _ in reply }, chatStreamer: Self.failingStreamer,
                      taskRunner: runner, librarySaver: saver,
                      decisionExtractor: { _, _ in [] })
@@ -83,6 +87,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
         var mid = ""
         var n = 0
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in CompanyChatReply(text: "On it", runTaskId: "t1") },
                              chatStreamer: Self.failingStreamer,
                              taskRunner: { _ in
@@ -175,6 +180,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
 
     func testStreamingDoneWithRunTaskIdProducesDraftNoFallback() async {
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.runTaskStreamer(leadIn: "On it", runTaskId: "t1"),
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") },
@@ -193,6 +199,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
 
     func testStreamingDoneWithUnknownRunTaskIdNoDraft() async {
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.runTaskStreamer(leadIn: "hm", runTaskId: "nope"),
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# y") },
@@ -205,6 +212,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
 
     func testStreamingDoneWithNilRunTaskIdIsNoOp() async {
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.runTaskStreamer(leadIn: "hi", runTaskId: nil),
                              taskRunner: { _ in XCTFail("taskRunner must not run without a runTaskId"); return nil },
@@ -233,6 +241,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
             }
         }
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a run-task-only .done"); return nil },
                              chatStreamer: streamer,
                              taskRunner: { _ in
@@ -266,6 +275,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
             }
         }
         let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
                              chatSender: { _ in nil }, chatStreamer: streamer,
                              taskRunner: { _ in nil }, decisionExtractor: { _, _ in [] })
         await s.hydrate(companyId: "u")

@@ -654,6 +654,15 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    /// The specialist for a task's owning department, if it maps to a companion
+    /// other than the host — used to attribute the run's producing row + draft.
+    private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
+        guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
+              let companionId = DepartmentCompanions.companionId(for: deptKey),
+              companionId != company.companionId else { return nil }
+        return (companionId, dept.name)
+    }
+
     /// If byte chose to run a runnable task, produce a draft deliverable inline —
     /// shared by both the streaming `.done` case and the non-streaming fallback,
     /// so a `run_task_id` fires on whichever path yielded it (never both: a
@@ -666,22 +675,61 @@ final class CompanyStore: ObservableObject {
         guard let runId,
               let task = company.tasks.first(where: { $0.id == runId }),
               RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
-        // Transparency step: a transient "producing…" placeholder shows while the
-        // draft is generated (this run isn't tracked in `runningTaskIds` — that set
-        // only covers taps on the map/beacon card — so a chat message is the
-        // simplest robust signal). Always removed below before the real reply
-        // lands, on BOTH the success and failure branch, so it can never get stuck.
+        _ = await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// The single inline-run path shared by EVERY chat run (typed "run" command
+    /// AND the greeting's "Do it with me"), so "how the agent works" shows the same
+    /// everywhere: a transient producing placeholder drives the execute-log — a
+    /// step checklist revealed progressively (transparency, not a snap-to-done) —
+    /// attributed to the task's department specialist (pet sprite + "Name · Dept").
+    /// The last step stays "working" until BOTH the reveal and the real result
+    /// finish, then it collapses into the draft card. Returns true if a draft was
+    /// appended (false → an honest "couldn't generate" bubble). Account-guarded
+    /// via `cid` so a mid-run account switch can't land in another account's chat.
+    @discardableResult
+    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage) async -> Bool {
+        let specialist = taskSpecialist(for: task)
+        let steps = Self.execSteps(task: task, specialist: specialist,
+                                   decisionCount: company.decisions.count, language: language)
         let producingId = UUID().uuidString
-        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: "", producing: true))
+        chatMessages.append(CopilotMessage(id: producingId, role: .companion, text: task.title, producing: true,
+                                           companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                           execSteps: steps))
+        let reveal = Task { [cid] in
+            for idx in 0..<max(0, steps.count - 1) {
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
+                guard companyId == cid,
+                      let mi = chatMessages.firstIndex(where: { $0.id == producingId }) else { return }
+                chatMessages[mi].execSteps?[idx].done = true
+            }
+        }
         let result = await taskRunner(runRequest(for: task, language: language))
-        guard companyId == cid else { return }  // account switch already cleared chatMessages
+        _ = await reveal.value   // let every revealed step land before finishing
+        guard companyId == cid else { return false }
+        if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
+           let count = chatMessages[mi].execSteps?.count {
+            for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
+        }
+        try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
+        guard companyId == cid else { return false }
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
+            chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
+                                               companionId: specialist?.companionId, deptName: specialist?.deptName))
+            // Reflect the run on the roadmap so the task leaves the "next moves" set
+            // and can't be re-run into a duplicate draft (mirrors the board runTask).
+            if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
+                company.tasks[ti].draft = draft
+                company.tasks[ti].drafted = true
+                if let cid { _ = await tasksSaver(cid, company.tasks) }
+            }
+            return true
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
+            return false
         }
     }
 

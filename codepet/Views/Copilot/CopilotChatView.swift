@@ -399,7 +399,12 @@ struct CopilotBubble: View {
 
     var body: some View {
         if message.producing {
-            producingRow
+            if let steps = message.execSteps, !steps.isEmpty {
+                ExecLogRow(taskTitle: message.text, deptName: message.deptName, steps: steps,
+                           companionId: message.companionId)
+            } else {
+                producingRow
+            }
         } else if let draft = message.draft {
             draftCard(draft)
         } else if let nav = message.navChip {

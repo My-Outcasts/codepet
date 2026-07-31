@@ -80,12 +80,11 @@ struct OnboardingView: View {
                     Group {
                         if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
                             ScrollView {
-                                stepBody.frame(maxWidth: 600, alignment: .leading)
-                                    .padding(.top, 8).padding(.bottom, 24)
+                                bodyColumn.padding(.top, 8).padding(.bottom, 24)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         } else {                       // vertically centered (.leading = leading + center-vertical)
-                            stepBody.frame(maxWidth: 600, alignment: .leading)
+                            bodyColumn
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         }
                     }
@@ -119,6 +118,18 @@ struct OnboardingView: View {
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { skipHover = h } }
     }
 
+    /// The web `.ob-body`: ONE flex column, capped at 600pt, whose children sit in
+    /// natural flow. `stepBody` is a multi-view ViewBuilder, so it must be collected
+    /// into a single VStack before any sizing modifier is applied — otherwise the
+    /// modifier lands on every child and `maxHeight: .infinity` distributes the
+    /// heading, label and field down the column instead of stacking them.
+    private var bodyColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            stepBody
+        }
+        .frame(maxWidth: 600, alignment: .leading)
+    }
+
     @ViewBuilder private var stepBody: some View {
         switch step {
         case 1:
@@ -131,9 +142,11 @@ struct OnboardingView: View {
             OnboardingOptionList(options: OnboardingContent.roles, selectedKey: Binding(
                 get: { d.role },
                 set: { k in d.role = k; d.roleLabel = OnboardingContent.roles.first(where: { $0.key == k })?.label ?? "" }))
+                .padding(.top, 8)   // web `.obopts { margin-top: 8px }`
         case 3:
             heading("How hands-on are you with the code?", "So I know how deep to go on the technical side.")
             OnboardingOptionList(options: OnboardingContent.tech, selectedKey: $d.tech)
+                .padding(.top, 8)
         case 4:
             heading("Now — what are you building?",
                     "A name and one clear sentence — that line is what I read to tailor your whole plan. Everything else is optional but sharpens it.")
@@ -155,6 +168,7 @@ struct OnboardingView: View {
         case 5:
             heading("Where are you today?", "This sets your starting point on the roadmap.")
             OnboardingStageSlider(stageIndex: $d.stageIndex)
+                .padding(.top, 28)   // web `.stagebar { margin-top: 28px }`
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
         case 7:
@@ -277,7 +291,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 9) {
             Text(h).font(CodepetTheme.body(20, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
             Text(sub).font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
-        }.padding(.bottom, 4)
+        }
     }
     /// web `.ob label` (+ the lighter `.opt` run for "optional" hints).
     private func label(_ t: String, opt: String? = nil) -> some View {

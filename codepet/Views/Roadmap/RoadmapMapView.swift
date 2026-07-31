@@ -208,7 +208,7 @@ struct RoadmapMapView: View {
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
             case .none:            break
             }
-            if RoadmapDispatch.navigatesToChat(action) { companyStore.select(.chat) }
+            if RoadmapDispatch.navigatesToChat(action) { companyStore.dockCollapsed = false }
         }
         .help(peekText(task, status: status))
     }

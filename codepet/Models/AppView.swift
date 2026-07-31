@@ -13,6 +13,16 @@ enum AppView: String, CaseIterable, Identifiable {
     /// and that index holds the only manual "Re-plan for my stage" trigger.
     static let navTabs: [AppView] = [.chat, .roadmap, .secondBrain, .company, .tasks, .library, .environment]
 
+    /// Destinations shown as top-nav tabs, in order (web parity). Chat is the docked
+    /// copilot (no tab); Second Brain is a toggle on the Overview; settings/billing/
+    /// support live in the account dropdown.
+    static let topTabs: [AppView] = [.roadmap, .company, .tasks, .library, .environment]
+
+    /// Nav label — the Roadmap destination is titled "Overview" in the top nav (web parity).
+    func navLabel(_ lang: AppLanguage) -> String {
+        self == .roadmap ? (lang == .vi ? "Tổng quan" : "Overview") : title(lang)
+    }
+
     func title(_ lang: AppLanguage) -> String {
         switch self {
         case .chat:        return lang == .vi ? "Trò chuyện" : "Chat"

@@ -1259,7 +1259,7 @@ struct RoadmapBoardView: View {
                 .blur(radius: 22)
                 .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 11) {
-                Image("codepet-official-logo")
+                Image("codepet-logo")
                     .resizable().interpolation(.none).scaledToFill()
                     .frame(width: 36, height: 36).clipShape(Circle())
                 VStack(alignment: .leading, spacing: 6) {

@@ -173,6 +173,8 @@ final class CompanyStore: ObservableObject {
             isCompanionTyping = false
             isStreaming = false
             runningTaskIds = []
+            activeAgentRuns = []
+            isFanningOut = false
             runError = nil
         }
         self.companyId = companyId

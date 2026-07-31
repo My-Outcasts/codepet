@@ -153,14 +153,60 @@ final class CompanyStoreFanOutTests: XCTestCase {
         XCTAssertTrue(s.activeAgentRuns.isEmpty)
     }
 
+    /// `reset()` must clear fan-out state even when it is genuinely non-empty —
+    /// so `reset()` is called WHILE the fan-out is still in flight (inside the
+    /// runner, before it returns), when `activeAgentRuns`/`isFanningOut` are
+    /// still populated. (Calling `fanOutNextMoves` to completion first would
+    /// leave nothing for `reset()` to clear, since the flow empties its own
+    /// state on the way out — see `testFanOutSeedsRunsAppendsDraftPerAgentAndClears`.)
     func testResetClearsFanOutState() async {
+        var ref: CompanyStore?
+        var runsNonEmptyBeforeReset = false
+        var fanningOutBeforeReset = false
         let s = store(tasks: [task("e1", dept: "eng")],
-                      runner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# b") })
+                      runner: { _ in
+                          runsNonEmptyBeforeReset = !(ref?.activeAgentRuns.isEmpty ?? true)
+                          fanningOutBeforeReset = ref?.isFanningOut ?? false
+                          ref?.reset()                        // reset mid-run, on non-empty state
+                          return RunTaskResponse(kind: "doc", title: "x", body: "# b")
+                      })
+        ref = s
         await s.hydrate(companyId: "u")
         await s.fanOutNextMoves(language: .en)
-        s.reset()
 
-        XCTAssertTrue(s.activeAgentRuns.isEmpty)
-        XCTAssertFalse(s.isFanningOut)
+        XCTAssertTrue(runsNonEmptyBeforeReset)                 // sanity: fan-out was truly in-flight
+        XCTAssertTrue(fanningOutBeforeReset)                   // sanity: isFanningOut was truly true
+        XCTAssertTrue(s.activeAgentRuns.isEmpty)               // reset() cleared it
+        XCTAssertFalse(s.isFanningOut)                         // reset() cleared it
+    }
+
+    /// Guards the account-switch branch in `hydrate(companyId:)`: switching to a
+    /// different account WHILE a fan-out is in flight must clear `activeAgentRuns`
+    /// and `isFanningOut` immediately — as part of `hydrate()` itself, not only
+    /// later via `fanOutNextMoves`'s own post-completion account guard. The
+    /// assertions run INSIDE the runner, right after the mid-run `hydrate(B)`
+    /// call returns and BEFORE `fanOutNextMoves`'s task group has finished, so
+    /// they can only pass if `hydrate()`'s own account-switch branch did the
+    /// clearing (reverting that clearing makes this test fail).
+    func testHydrateAccountSwitchClearsFanOutState() async {
+        var ref: CompanyStore?
+        var runsNonEmptyBeforeSwitch = false
+        var runsClearedRightAfterSwitch = false
+        var fanningOutClearedRightAfterSwitch = false
+        let s = store(tasks: [task("e1", dept: "eng")],
+                      runner: { _ in
+                          runsNonEmptyBeforeSwitch = !(ref?.activeAgentRuns.isEmpty ?? true)
+                          await ref?.hydrate(companyId: "B")   // switch account mid-run
+                          runsClearedRightAfterSwitch = ref?.activeAgentRuns.isEmpty ?? false
+                          fanningOutClearedRightAfterSwitch = !(ref?.isFanningOut ?? true)
+                          return RunTaskResponse(kind: "doc", title: "x", body: "# b")
+                      })
+        ref = s
+        await s.hydrate(companyId: "A")
+        await s.fanOutNextMoves(language: .en)
+
+        XCTAssertTrue(runsNonEmptyBeforeSwitch)                // sanity: fan-out was truly in-flight
+        XCTAssertTrue(runsClearedRightAfterSwitch)             // hydrate()'s account-switch branch cleared it
+        XCTAssertTrue(fanningOutClearedRightAfterSwitch)       // hydrate()'s account-switch branch cleared it
     }
 }

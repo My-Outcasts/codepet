@@ -376,6 +376,10 @@ struct CopilotBubble: View {
         PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
 
+    private var companionAccent: Color {
+        PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
+    }
+
     var body: some View {
         if message.producing {
             producingRow
@@ -555,19 +559,40 @@ struct CopilotBubble: View {
         }
     }
 
-    private var textBubble: some View {
-        HStack {
-            if isMe { Spacer(minLength: 24) }
-            Text(message.text)
-                .font(.pixelSystem(size: 12))
-                .foregroundColor(isMe ? .white : CodepetTheme.primaryText)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isMe ? CodepetTheme.accentPurple : CodepetTheme.surface))
-                .fixedSize(horizontal: false, vertical: true)
-            if !isMe { Spacer(minLength: 24) }
+    @ViewBuilder private var textBubble: some View {
+        if isMe {
+            HStack {
+                Spacer(minLength: 24)
+                Text(message.text)
+                    .font(CodepetTheme.inter(13.5))
+                    .lineSpacing(3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(CodepetTheme.accentPurple))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            // Teammate card: companion orb + name header + reply in a tinted surface.
+            HStack(alignment: .top, spacing: 8) {
+                CompanionOrb(size: 22, glow: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(companionName)
+                        .font(CodepetTheme.inter(12.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    MessageCard(hue: companionAccent) {
+                        Text(message.text)
+                            .font(CodepetTheme.inter(13.5))
+                            .lineSpacing(3)
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
     }
 
     private func draftCard(_ d: Deliverable) -> some View {

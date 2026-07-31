@@ -20,7 +20,7 @@ struct CopilotChatView: View {
 
     /// Max width of the conversation column + composer — matches Claude Code's
     /// comfortable centered reading width (both stay in sync via this one value).
-    private let chatColumnWidth: CGFloat = 760
+    private let chatColumnWidth: CGFloat = 900
     /// Minimum side gutter kept at ALL window sizes so the column shrinks to fit a
     /// narrow window (never edge-to-edge) and the message list + composer share the
     /// exact same left/right edges — the Claude-style responsive behavior.
@@ -578,8 +578,8 @@ struct CopilotBubble: View {
                 HStack {
                     Spacer(minLength: 24)
                     Text(message.text)
-                        .font(CodepetTheme.inter(16))
-                        .lineSpacing(5)
+                        .font(CodepetTheme.inter(18))
+                        .lineSpacing(6)
                         .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                         .padding(.horizontal, 14).padding(.vertical, 9)
                         .background(UnevenRoundedRectangle(
@@ -602,17 +602,17 @@ struct CopilotBubble: View {
                             // guiding companion → just its name in primary.
                             if let dept = message.deptName, let persona {
                                 Text("\(persona.name) · \(dept)")
-                                    .font(CodepetTheme.inter(14, weight: .semibold))
+                                    .font(CodepetTheme.inter(15, weight: .semibold))
                                     .foregroundColor(persona.color)
                             } else {
                                 Text(persona?.name ?? companionName)
-                                    .font(CodepetTheme.inter(14, weight: .semibold))
+                                    .font(CodepetTheme.inter(15, weight: .semibold))
                                     .foregroundColor(CodepetTheme.primaryText)
                             }
                         }
                         Text(message.text)
-                            .font(CodepetTheme.inter(16))
-                            .lineSpacing(5)
+                            .font(CodepetTheme.inter(18))
+                            .lineSpacing(6)
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -722,9 +722,9 @@ struct CopilotBubble: View {
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
                         Text(Self.deliverablePreview(d.body))
-                            .font(CodepetTheme.inter(15))
+                            .font(CodepetTheme.inter(16))
                             .foregroundColor(CodepetTheme.bodyText)
-                            .lineSpacing(4)
+                            .lineSpacing(5)
                             .lineLimit(7)
                             .fixedSize(horizontal: false, vertical: true)
                     }

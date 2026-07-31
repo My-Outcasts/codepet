@@ -267,6 +267,9 @@ struct CodePetApp: App {
                 }
         }
         .windowStyle(.hiddenTitleBar)
+        // Open roomier by default so the chat surface has breathing room; the 560×700
+        // minimum (onboarding floor) still governs how far it can be shrunk.
+        .defaultSize(width: 1180, height: 860)
         .commands {
             CommandMenu("Navigation") {
                 Button("Home") { appState.selectedTab = .home }

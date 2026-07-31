@@ -34,11 +34,17 @@ final class CompanyStore: ObservableObject {
     @Published var codingRunAnchorId: String?
 
     /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
-    /// The `-CODEPET_MOCK_CHAT` launch arg swaps in `MockCodeRunner` (no `claude`, no cost)
-    /// while keeping the real diff-review + git-commit engine, so the flow is free to test.
+    /// The `-CODEPET_MOCK_CHAT` launch arg (via `MockChat.enabled`, same flag chat/task
+    /// runs key off) swaps in `MockCodeRunner` (no `claude`, no cost) while keeping the
+    /// real diff-review + git-commit engine, so the flow is free to test. `MockChat` is
+    /// `#if DEBUG`-only, so the flag read is guarded and always `false` in Release.
     private var codingRunBag: AnyCancellable?
     lazy var codingRun: CodingRunCoordinator = {
-        let mock = ProcessInfo.processInfo.arguments.contains("-CODEPET_MOCK_CHAT")
+        #if DEBUG
+        let mock = MockChat.enabled
+        #else
+        let mock = false
+        #endif
         let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter()
         let c = CodingRunCoordinator(runner: runner)
         // Re-publish the nested coordinator's changes so views observing only

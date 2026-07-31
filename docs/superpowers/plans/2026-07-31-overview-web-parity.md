@@ -1723,7 +1723,7 @@ git commit -m "feat(overview): one Overview page with a Roadmap/Second Brain tog
 - Create: `codepet/Views/Overview/OverviewChromeRow.swift`
 - Test: build-verified
 
-**Execution order note:** this task runs BEFORE the page that composes it (Task 6), so the file does not exist yet — create it. Nothing routes to it until Task 8; a build is the gate here.
+**Execution order note:** this task runs BEFORE the page that composes it (Task 6), so the file does not exist yet — create it. Nothing routes to it until Task 6; a build is the gate here.
 
 **Interfaces:**
 - Consumes: `RoadmapEngine.progressPercent(_:)`, `RoadmapEngine.nextStep(_:)`, `RoadmapEngine.status(for:in:)`, `RoadmapPalette.tint(for:)`, `CodepetTokens.well`/`accentTint`/`accentLine`/`accentDeep`

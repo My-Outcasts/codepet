@@ -254,7 +254,7 @@ For each call site outside the board, confirm the new colors are wanted there. W
 
 ```bash
 cd ~/Desktop/codepet-wt-overview-parity
-git add codepet/Views/CodepetTheme.swift codepet/Models/RoadmapTask.swift codepetTests/RoadmapPaletteTests.swift
+git add codepet/Views/CodepetTokens.swift codepet/Models/RoadmapTask.swift codepetTests/RoadmapPaletteTests.swift
 git commit -m "feat(overview): port the web's roadmap design tokens + state palette"
 ```
 

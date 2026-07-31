@@ -187,7 +187,7 @@ struct CopilotChatView: View {
     private var typingRow: some View {
         HStack(spacing: 8) {
             CompanionOrb(size: 20, glow: false, isWorking: true)
-            Text(lang == .vi ? "\(companionName) đang trả lời…" : "\(companionName) is thinking…")
+            Text(lang == .vi ? "\(companionName) đang suy nghĩ…" : "\(companionName) is thinking…")
                 .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
             Spacer(minLength: 8)
         }
@@ -555,16 +555,16 @@ struct CopilotBubble: View {
     }
 
     /// The chat-run step-transparency indicator (web: a "producing" beat before the
-    /// draft card lands). Mirrors `CopilotChatView.typingRow`'s plain, no-bubble
-    /// style — not a filled chat bubble — so it reads as ambient status, not a
-    /// message. `CompanyStore.handleRunTaskId` removes this row (win or lose)
-    /// before appending the real reply, so it's always transient.
+    /// draft card lands). Matches `CopilotChatView.typingRow`'s orb + Inter style —
+    /// not a filled chat bubble — so it reads as ambient status, not a message.
+    /// `CompanyStore.handleRunTaskId` removes this row (win or lose) before
+    /// appending the real reply, so it's always transient.
     private var producingRow: some View {
-        HStack {
+        HStack(spacing: 8) {
+            CompanionOrb(size: 20, glow: false, isWorking: true)
             Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 24)
+                .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+            Spacer(minLength: 8)
         }
     }
 

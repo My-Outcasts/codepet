@@ -212,9 +212,9 @@ struct CodeRunCardView: View {
                 Text(lang == .vi ? "Đã áp dụng vào dự án" : "Applied to your project")
                     .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.bodyText)
                 Spacer(minLength: 8)
-                actionButton(lang == .vi ? "Hoàn tác" : "Undo", filled: false, subtle: true) {
-                    // Stub: undo-from-backup is wired in a follow-on.
-                }
+                // No Undo here: the shadow backup is already destroyed by the time
+                // this commits (discardShadow runs on approve), so there is nothing
+                // an Undo button could ever restore. Git is the primary, undoable path.
             }
         }
     }

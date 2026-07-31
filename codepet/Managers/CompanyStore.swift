@@ -393,6 +393,10 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = UUID().uuidString
         chatMessages = []
+        // A run anchored in (or floating at the bottom of) the outgoing thread must
+        // not leak into this fresh, empty one — clear it (no-op while running).
+        codingRunAnchorId = nil
+        codingRun.cancel()
     }
 
     /// Switch the working buffer to a different thread: flush the outgoing one,
@@ -407,6 +411,10 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = id
         chatMessages = threads.first(where: { $0.id == id })?.messages ?? []
+        // A run anchored in the outgoing thread must not float to the bottom of
+        // the incoming one — clear it (no-op while running).
+        codingRunAnchorId = nil
+        codingRun.cancel()
     }
 
     /// Rename a thread. A blank/whitespace-only title clears back to nil — the
@@ -436,9 +444,13 @@ final class CompanyStore: ObservableObject {
         if let fallback = pickFallbackThreadId(after: id, in: threads) {
             activeThreadId = fallback
             chatMessages = threads.first(where: { $0.id == fallback })?.messages ?? []
+            // A run anchored in the just-deleted active thread must not float to
+            // the bottom of the fallback one — clear it (no-op while running).
+            codingRunAnchorId = nil
+            codingRun.cancel()
         } else {
             chatMessages = []
-            newChat()
+            newChat()   // newChat() already clears codingRunAnchorId/codingRun
         }
     }
 
@@ -917,5 +929,6 @@ final class CompanyStore: ObservableObject {
         selectedDeptKey = nil
         activeProjectLink = nil
         codingRunAnchorId = nil
+        codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
     }
 }

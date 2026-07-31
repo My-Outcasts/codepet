@@ -113,8 +113,11 @@ struct CopilotChatView: View {
                         }
                     }
                     // A run with no chat anchor (triggered from tasks/roadmap) falls to the bottom.
+                    // Anchored runs render ONLY inline (above, next to their anchor message) —
+                    // if the anchor isn't in this thread's buffer (a switch/leak), nothing
+                    // renders here for it.
                     if companyStore.codingRun.run != nil,
-                       !companyStore.chatMessages.contains(where: { $0.id == companyStore.codingRunAnchorId }) {
+                       companyStore.codingRunAnchorId == nil {
                         CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
                     if companyStore.isCompanionTyping { typingRow.id("typing") }

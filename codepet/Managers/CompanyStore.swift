@@ -846,7 +846,7 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         company = .empty
-        view = .chat
+        view = .roadmap
         isHydrating = false
         isOnboarding = false
         chatMessages = []

@@ -22,7 +22,7 @@ final class CompanyStoreTests: XCTestCase {
         let store = CompanyStore(loader: { _ in CompanyState(brief: CompanyBrief(projectName: "X"), departments: [], library: [], stage: .growth, companionId: "luna") })
         store.select(.tasks)
         store.reset()
-        XCTAssertEqual(store.view, .chat)
+        XCTAssertEqual(store.view, .roadmap)
         XCTAssertEqual(store.company, CompanyState.empty)
     }
 
@@ -50,7 +50,7 @@ final class CompanyStoreTests: XCTestCase {
         await hydrateTask.value
 
         XCTAssertEqual(store.company, CompanyState.empty)
-        XCTAssertEqual(store.view, .chat)
+        XCTAssertEqual(store.view, .roadmap)
         XCTAssertFalse(store.isHydrating)
     }
 }

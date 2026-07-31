@@ -10,6 +10,8 @@ struct RoadmapView: View {
     @State private var showMapIntro = false
     @State private var beaconPinging = false
     @State private var openDeliverable: Deliverable?
+    @State private var overviewTab: OverviewTab = .roadmap
+    private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
@@ -29,13 +31,42 @@ struct RoadmapView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header.padding(.horizontal, 24).padding(.top, 22)
-            chromeRow.padding(.horizontal, 24).padding(.top, 14)
-            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
+            overviewToggle.padding(.horizontal, 24).padding(.top, 16)
+            if overviewTab == .roadmap {
+                roadmapBody
+            } else {
+                SecondBrainView()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+    }
+
+    /// The former `body` contents (roadmap map + chrome), extracted so the toggle can swap it.
+    private var roadmapBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header.padding(.horizontal, 24).padding(.top, 22)
+            chromeRow.padding(.horizontal, 24).padding(.top, 14)
+            RoadmapMapView(tasks: tasks).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var overviewToggle: some View {
+        HStack(spacing: 6) {
+            ForEach([OverviewTab.roadmap, .secondBrain], id: \.self) { t in
+                let on = overviewTab == t
+                Button { overviewTab = t } label: {
+                    Text(t == .roadmap ? (lang == .vi ? "Lộ trình" : "Roadmap")
+                                       : (lang == .vi ? "Bộ não" : "Second Brain"))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
+                        .foregroundColor(on ? .white : CodepetTheme.mutedText)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(Capsule().fill(on ? CodepetTheme.accentPurple : CodepetTheme.surface))
+                }.buttonStyle(.plain)
+            }
+            Spacer()
+        }
     }
 
     private var header: some View {

@@ -47,7 +47,6 @@ struct RoadmapBoardView: View {
 
     private static let headerRow: CGFloat = 28
     private static let headerGap: CGFloat = 6
-    private static let headerBlock: CGFloat = headerRow + headerGap
 
     var body: some View {
         // The board's own allotment, read directly instead of stored: `@State` + `onAppear`
@@ -227,38 +226,76 @@ struct RoadmapBoardView: View {
 
     /// A collapsed phase: a slim rail carrying its name vertically plus its done/total, click
     /// to expand. An unplanned phase says so rather than showing a bare 0/0, which reads like
-    /// a bug instead of an absence.
+    /// a bug instead of an absence — and, since it has nothing a click could ever expand
+    /// (Finding 3: `RoadmapFocus.expanded` only honours `userExpanded` for phases that already
+    /// hold tasks), it renders as plain, non-interactive content rather than a dead button.
     private func rail(_ r: PhaseRail, height: CGFloat) -> some View {
         let empty = r.total == 0
-        return Button { toggleExpanded(r.phase) } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.well)
-                RoundedRectangle(cornerRadius: 10).stroke(CodepetTheme.hairline, lineWidth: 1)
-                VStack(spacing: 12) {
-                    if !empty {
-                        Text("\(r.done)/\(r.total)")
-                            .font(CodepetTheme.inter(10)).monospacedDigit()
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    // `rotationEffect` doesn't change layout, so the label claims its
-                    // horizontal size inside the 44pt frame and draws rotated — which is
-                    // exactly what we want; `fixedSize` stops it wrapping first.
-                    Text(r.phase.label(lang).uppercased())
-                        .font(CodepetTheme.inter(10.5)).tracking(1.47)
-                        .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
-                        .lineLimit(1).fixedSize()
-                        .rotationEffect(.degrees(-90))
-                }
+        let help = empty ? "\(r.phase.label(lang)) · \(RoadmapBoardCopy.notPlannedYet(lang))"
+                         : "\(r.phase.label(lang)) · \(r.done)/\(r.total)"
+        return Group {
+            if empty {
+                railBody(r, height: height, empty: true)
+            } else {
+                Button { expand(r.phase) } label: { railBody(r, height: height, empty: false) }
+                    .buttonStyle(.plain)
             }
-            .frame(width: RoadmapGeometry.railW, height: height)
         }
-        .buttonStyle(.plain)
-        .help(empty ? "\(r.phase.label(lang)) · \(RoadmapBoardCopy.notPlannedYet(lang))"
-                    : "\(r.phase.label(lang)) · \(r.done)/\(r.total)")
+        .help(help)
     }
 
-    private func toggleExpanded(_ phase: RoadmapPhase) {
-        if userExpanded.contains(phase) { userExpanded.remove(phase) } else { userExpanded.insert(phase) }
+    /// The rail's visuals, shared by the interactive and the inert (empty-phase) rendering.
+    ///
+    /// The count and the vertical phase label are placed with `.overlay(alignment:)` rather
+    /// than stacked in a `VStack`, because `rotationEffect` is purely visual — it never
+    /// changes the reported layout size, so a `VStack` would only ever reserve the label's
+    /// ~13pt UNROTATED height no matter how wide the text actually is once rotated. That was
+    /// the bug: at 10.5pt/1.47pt-tracking, "FOUNDATION"/"RUN & GROW" already rotate out to
+    /// ≈80pt tall, and the longest label of either language, Vietnamese
+    /// "VẬN HÀNH & PHÁT TRIỂN" (21 characters incl. spaces/`&`), rotates out to roughly
+    /// 150–175pt — several multiples of the ~25pt a `VStack` reserved, so it drew straight
+    /// through the count for every phase but FIND/BUILD/SHIP.
+    ///
+    /// Fix: pin the count to the top with `.overlay(alignment: .top)` (10pt of top padding),
+    /// and give the label an explicit post-rotation `.frame(width:height:)` of the rail's
+    /// height minus 44, placed with `.overlay(alignment: .bottom)`. Anchoring that box to the
+    /// rail's BOTTOM (not centering it across the full rail) reserves the top 44pt
+    /// exclusively for the count: the label's box occupies only `[44, height]`, so as long as
+    /// its rendered footprint fits inside that box — true for every real board (a board tall
+    /// enough to hold 2+ task rows already clears 216pt, well past the ~175pt worst case) —
+    /// it can never reach into the count's region, regardless of which phase name is longest.
+    private func railBody(_ r: PhaseRail, height: CGFloat, empty: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.well)
+            RoundedRectangle(cornerRadius: 10).stroke(CodepetTheme.hairline, lineWidth: 1)
+        }
+        .frame(width: RoadmapGeometry.railW, height: height)
+        .overlay(alignment: .top) {
+            if !empty {
+                Text("\(r.done)/\(r.total)")
+                    .font(CodepetTheme.inter(10)).monospacedDigit()
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.top, 10)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Text(r.phase.label(lang).uppercased())
+                .font(CodepetTheme.inter(10.5)).tracking(1.47)
+                .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
+                .lineLimit(1).fixedSize()
+                .rotationEffect(.degrees(-90))
+                .frame(width: RoadmapGeometry.railW, height: height - 44)
+        }
+    }
+
+    /// Expand a phase by hand. Insert-only: a rail exists only for a COLLAPSED phase, and the
+    /// instant a phase enters `userExpanded` it becomes a column and its rail disappears — so
+    /// nothing can ever call a `remove` branch. Expansion is one-way for the session. A phase
+    /// the width rule (`RoadmapFocus`) expanded on its own was never inserted into
+    /// `userExpanded`, so a general "collapse" affordance would need a separate
+    /// `userCollapsed` set; that's deliberately out of scope here.
+    private func expand(_ phase: RoadmapPhase) {
+        userExpanded.insert(phase)
     }
 
     private func edgeCanvas(_ l: RoadmapLayout) -> some View {

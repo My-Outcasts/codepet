@@ -1,0 +1,99 @@
+import { Request } from "firebase-functions/v2/https";
+import { Response } from "express";
+import Anthropic from "@anthropic-ai/sdk";
+import * as logger from "firebase-functions/logger";
+import { verifyAuth } from "./auth";
+import { checkAndIncrement } from "./rateLimit";
+import { buildRoadmapPrompt, coerceRoadmap, RoadmapBrief } from "./generateRoadmapCore";
+
+// Quality surface / credit driver — same tier as runTask (see spec).
+const ROADMAP_MODEL = "claude-opus-4-8";
+
+const RECORD_TOOL = {
+  name: "record_roadmap",
+  description: "Record the generated phase/task/dependency roadmap.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            phase: { type: "string", description: "One of: find, foundation, build, ship, launch, grow." },
+            title: { type: "string" },
+            detail: { type: "string" },
+            who: { type: "string", description: "'you' | 'does' | 'draft'" },
+            dept: {
+              type: "string",
+              description: "The single owning department: one of eng, design, mkt, sales, support, fin, ops, legal.",
+            },
+            deps: {
+              type: "array",
+              items: { type: "string" },
+              description: "Exact titles of prerequisite tasks from this same list, empty if none.",
+            },
+          },
+          required: ["phase", "title", "who", "detail", "dept"],
+        },
+      },
+    },
+    required: ["tasks"],
+  },
+} as const;
+
+const SYSTEM = "You plan a solo founder's whole-company roadmap. You never invent details the founder did not give you.";
+
+let _client: Anthropic | null = null;
+function client(): Anthropic {
+  if (!_client) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+    _client = new Anthropic({ apiKey });
+  }
+  return _client;
+}
+
+interface GenerateRoadmapRequestBody {
+  company_id?: string | null;
+  language?: string;
+  companion_id?: string;
+  brief?: RoadmapBrief;
+}
+
+export async function handleGenerateRoadmap(req: Request, res: Response): Promise<void> {
+  if (req.method !== "POST") { res.status(405).json({ error: "method_not_allowed" }); return; }
+  const auth = await verifyAuth(req.headers.authorization);
+  if (!auth) { res.status(401).json({ error: "invalid_token" }); return; }
+
+  const body = (req.body ?? {}) as GenerateRoadmapRequestBody;
+  const brief = body.brief;
+  if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
+    res.status(400).json({ error: "invalid_payload", detail: "brief required" });
+    return;
+  }
+
+  const limit = await checkAndIncrement(auth.uid);
+  if (!limit.allowed) {
+    res.status(429).json({ error: "daily_limit_reached", reset_at: limit.resetAt.toISOString(), limit: limit.limit });
+    return;
+  }
+
+  const language = body.language === "vi" ? "vi" : "en";
+
+  try {
+    const response = await client().messages.create({
+      model: ROADMAP_MODEL,
+      max_tokens: 3000,
+      system: SYSTEM,
+      tools: [RECORD_TOOL as any],
+      tool_choice: { type: "tool", name: "record_roadmap" },
+      messages: [{ role: "user", content: buildRoadmapPrompt({ language, brief }) }],
+    });
+    const block = response.content.find((b) => b.type === "tool_use") as any;
+    res.status(200).json(coerceRoadmap(block?.input, { language }));
+  } catch (err) {
+    logger.error("generateRoadmap failed", { uid: auth.uid, err: String(err) });
+    res.status(200).json({ tasks: [] }); // fail-open — native treats [] as no-change
+  }
+}

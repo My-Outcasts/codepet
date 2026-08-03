@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// The top navigation bar (web parity): account dropdown on the left, the five
-/// destination tabs packed immediately after it, wake pill + Upgrade pushed right.
+/// destination tabs packed immediately after it, Upgrade pushed right.
 /// Replaces the old left rail and the old slim top bar.
 ///
 /// The tabs are deliberately NOT centred: the web packs them straight after the account
@@ -14,15 +14,12 @@ struct TopNavView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
-    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
-
     var body: some View {
         HStack(spacing: 16) {
             Text("Codepet").font(CodepetTheme.pixel(18)).foregroundColor(CodepetTheme.primaryText)
             AccountMenuView()   // compact:false → avatar + name + chevron + dropdown (Settings/Billing/Support)
             HStack(spacing: 4) { ForEach(AppView.topTabs) { tab($0) } }
             Spacer(minLength: 12)
-            wakePill
             upgradeButton
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -64,29 +61,28 @@ struct TopNavView: View {
         }
     }
 
-    private var wakePill: some View {
-        Button { companyStore.selectedDeptKey = nil; companyStore.select(.environment) } label: {
-            HStack(spacing: 5) {
-                Circle().fill(CodepetTheme.accentOrange).frame(width: 6, height: 6)
-                Text("⚡ " + (lang == .vi ? "Đánh thức \(companionName)" : "Wake \(companionName) up"))
-                    .font(CodepetTheme.inter(13.5, weight: .medium))
-            }
-            // Web parity: an accent-TINTED pill, not a surface-filled one. On the dark ground
-            // `surface` is almost the same value as the bar behind it, so the old fill made the
-            // pill vanish and the control read as bare text. The dot keeps its own orange fill.
-            .foregroundColor(accent)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(CodepetTokens.accentTint)
-                .overlay(Capsule().stroke(CodepetTokens.accentLine, lineWidth: 1)))
-        }.buttonStyle(.plain)
-    }
-
     private var upgradeButton: some View {
         Button { companyStore.selectedDeptKey = nil; companyStore.select(.billing) } label: {
-            Text(lang == .vi ? "Nâng cấp" : "Upgrade")
-                .font(CodepetTheme.inter(13.5, weight: .semibold)).foregroundColor(.white)
-                .padding(.horizontal, 13).padding(.vertical, 7)
-                .background(Capsule().fill(CodepetTheme.primaryText))
+            UpgradePillLabel(title: lang == .vi ? "Nâng cấp" : "Upgrade")
         }.buttonStyle(.plain)
+    }
+}
+
+/// The Upgrade CTA's visuals, split out from the button so the light/dark contrast
+/// can be pixel-tested without standing up the whole nav bar (which needs Firebase).
+///
+/// This is an INVERTED "ink" pill: it fills with the primary TEXT color, so the pill
+/// itself flips near-black (light) → near-cream (dark). A hardcoded white label
+/// therefore vanished in dark mode. `onAccent` picks the ink from the fill's luminance
+/// per drawing appearance — white-on-black in light, black-on-cream in dark.
+struct UpgradePillLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(CodepetTheme.inter(13.5, weight: .semibold))
+            .foregroundColor(CodepetTheme.onAccent(CodepetTheme.primaryText))
+            .padding(.horizontal, 13).padding(.vertical, 7)
+            .background(Capsule().fill(CodepetTheme.primaryText))
     }
 }

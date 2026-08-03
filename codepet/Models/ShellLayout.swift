@@ -13,11 +13,19 @@ enum ShellLayout {
         manual || width < dockExpandMinWidth
     }
 
-    /// Expanded copilot width: half the window, so chat and the main content split
-    /// the shell 50/50. Floored at 360pt so the dock-adapted chat stays usable even
-    /// at the `dockExpandMinWidth` boundary; the content area takes the remainder.
+    /// Widest the dock grows on its own. Chat is a single column of text, so past this
+    /// it gains nothing from more width while the content pane — a roadmap whose header
+    /// and board both want room — keeps paying for it. Without the cap a fullscreen
+    /// 1470pt window handed the dock 735pt; it now stops at 560pt and the map takes the
+    /// surplus. Dragging the resize handle still overrides this up to `clampDockWidth`.
+    static let dockIdealMaxWidth: CGFloat = 560
+
+    /// Expanded copilot width: half the window up to `dockIdealMaxWidth`, so a narrow
+    /// window keeps the even 50/50 split while a wide one spends the extra space on
+    /// content. Floored at 360pt so the dock-adapted chat stays usable even at the
+    /// `dockExpandMinWidth` boundary; the content area takes the remainder.
     static func dockWidth(forWidth width: CGFloat) -> CGFloat {
-        clampDockWidth((width * 0.5).rounded(), windowWidth: width)
+        clampDockWidth(min((width * 0.5).rounded(), dockIdealMaxWidth), windowWidth: width)
     }
 
     /// Minimum width the main content pane keeps when the dock is dragged wider.
@@ -30,5 +38,17 @@ enum ShellLayout {
     static func clampDockWidth(_ desired: CGFloat, windowWidth: CGFloat) -> CGFloat {
         let maxDock = max(dockMinWidth, windowWidth - contentFloor)
         return min(max(dockMinWidth, desired), maxDock)
+    }
+
+    /// Content-pane width below which a page header must abbreviate its controls —
+    /// the "How to read this map" button drops to its bare "?" — so the title and the
+    /// controls still share ONE row. Above it everything shows its full label.
+    static let compactHeaderMaxWidth: CGFloat = 620
+
+    /// Whether a page header at `width` must run its controls in compact form.
+    /// `width == 0` means "not measured yet"; report roomy so the header doesn't
+    /// flash abbreviated on first layout.
+    static func compactPageHeader(forWidth width: CGFloat) -> Bool {
+        width > 0 && width < compactHeaderMaxWidth
     }
 }

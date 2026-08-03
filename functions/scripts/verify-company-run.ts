@@ -5,8 +5,13 @@
  *   cd functions && ANTHROPIC_API_KEY=sk-... npm run verify:company
  *
  * Proves the three things unit tests with fakes cannot:
- *   1. The shared prefix is actually cached (cache_read_input_tokens > 0 on the
- *      second and later agent calls in the same run).
+ *   1. The shared prefix is REUSABLE — two sequential calls with the same tool
+ *      read the same cache entry. Measured with an explicit probe rather than
+ *      asserted over the run: within a run there is no reuse to observe, because
+ *      the tool definition precedes system in the cache prefix (so each phase
+ *      writes its own entry) and phases 2 and 4 dispatch their agents
+ *      concurrently (so no agent can read what its siblings are still writing).
+ *      Asserting cache_read > 0 across the run could never pass.
  *   2. A real model reliably calls the forced tool and returns a position that
  *      parses against the schema.
  *   3. The end-to-end phase chain produces a usable brief, and prints the real
@@ -44,7 +49,6 @@ const rawRequest =
   "should I first put a price on the single-player product I already have?";
 
 let totalCost = 0;
-let sawCacheRead = false;
 const callLog: Array<{ agent: string; model: string; usage: TokenUsage }> = [];
 
 function fail(message: string): never {
@@ -52,13 +56,18 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function priceOf(model: string, usage: TokenUsage): number {
+/**
+ * Cache writes are billed at 1.25x the input rate, and this run writes one on
+ * nearly every call, so leaving them out understated the real per-run cost.
+ */
+function priceOf(model: string, usage: TokenUsage, cacheWrite = 0): number {
   const p = MODEL_PRICING[model];
   if (!p) return 0;
   return (
     (usage.input * p.inputPerMTok +
       usage.output * p.outputPerMTok +
-      usage.cache_read * p.inputPerMTok * 0.1) /
+      usage.cache_read * p.inputPerMTok * 0.1 +
+      cacheWrite * p.inputPerMTok * 1.25) /
     1_000_000
   );
 }
@@ -80,8 +89,7 @@ function makeCaller(client: Anthropic): AgentCaller {
       cache_read: (response.usage as any)?.cache_read_input_tokens ?? 0
     };
     const cacheWrite = (response.usage as any)?.cache_creation_input_tokens ?? 0;
-    if (usage.cache_read > 0) sawCacheRead = true;
-    totalCost += priceOf(args.model, usage);
+    totalCost += priceOf(args.model, usage, cacheWrite);
     callLog.push({ agent: args.agent, model: args.model, usage });
 
     console.log(
@@ -117,6 +125,30 @@ async function main(): Promise<void> {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const call = makeCaller(client);
+
+  // ── 1b. Is the shared prefix actually reusable? ──
+  // Two sequential calls, same tool, different agents. The second must read what
+  // the first wrote; if it does not, block 0 is not byte-identical across agents
+  // (usually a role prompt leaking into it) and caching would silently no-op
+  // everywhere. Runs before the phase chain so a broken prefix fails cheaply.
+  console.log(`\nCACHE REUSE PROBE (${AGENT_MODEL})`);
+  await runIndependentPass({ founder, rawRequest, realQuestion: rawRequest, agents: ["product"], call });
+  const probe = await runIndependentPass({
+    founder,
+    rawRequest,
+    realQuestion: rawRequest,
+    agents: ["finance"],
+    call
+  });
+  const probeRead = probe.results[0]?.usage.cache_read ?? 0;
+  if (probeRead === 0) {
+    fail(
+      "the second sequential call read nothing from cache — the shared prefix is " +
+        "not byte-identical across agents, or it fell below the model's cache " +
+        "minimum. Check that no role prompt leaked into block 0 of composeAgentSystem."
+    );
+  }
+  console.log(`  reused ${probeRead} cached input tokens on the second call`);
 
   // ── 2. Phase 1: intake ──
   console.log(`\nPHASE 1 — intake (${ROUTER_MODEL})`);
@@ -230,17 +262,13 @@ async function main(): Promise<void> {
   console.log(`model calls: ${callLog.length}`);
   console.log(`measured cost: $${totalCost.toFixed(4)}`);
 
-  if (!sawCacheRead) {
-    fail(
-      "no cache read on any call — the shared prefix is not byte-identical across " +
-        "agents, or it fell below the model's cache minimum. Check that no role " +
-        "prompt leaked into block 0 of composeAgentSystem."
-    );
-  }
-
+  // Informational, not a gate. Whatever appears here is an artefact of the probe
+  // above having warmed the position-tool prefix — phase 2 then reads it. Without
+  // the probe this is 0, so a low number is not a regression; the probe is the
+  // health check.
   const cacheReadTotal = callLog.reduce((s, c) => s + c.usage.cache_read, 0);
-  console.log(`total cache-read tokens: ${cacheReadTotal}`);
-  console.log(`\nPASS: caching engaged, every agent called its tool, brief is usable.`);
+  console.log(`cache-read tokens inside the phase chain: ${cacheReadTotal} (probe-warmed)`);
+  console.log(`\nPASS: prefix is reusable, every agent called its tool, brief is usable.`);
 }
 
 main().catch((err) => {

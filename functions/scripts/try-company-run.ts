@@ -87,11 +87,16 @@ let cost = 0;
 let calls = 0;
 let cacheRead = 0;
 
-function priceOf(model: string, u: TokenUsage): number {
+// Cache writes bill at 1.25x input and happen on nearly every call, so they are
+// counted here — leaving them out understated what a run actually cost.
+function priceOf(model: string, u: TokenUsage, cacheWrite = 0): number {
   const p = MODEL_PRICING[model];
   if (!p) return 0;
   return (
-    (u.input * p.inputPerMTok + u.output * p.outputPerMTok + u.cache_read * p.inputPerMTok * 0.1) /
+    (u.input * p.inputPerMTok +
+      u.output * p.outputPerMTok +
+      u.cache_read * p.inputPerMTok * 0.1 +
+      cacheWrite * p.inputPerMTok * 1.25) /
     1_000_000
   );
 }
@@ -115,7 +120,7 @@ function makeCaller(client: Anthropic): AgentCaller {
       cache_read: (response.usage as any)?.cache_read_input_tokens ?? 0
     };
     calls++;
-    cost += priceOf(args.model, usage);
+    cost += priceOf(args.model, usage, (response.usage as any)?.cache_creation_input_tokens ?? 0);
     cacheRead += usage.cache_read;
     for (const b of response.content) {
       if (b.type === "tool_use" && b.name === args.toolName) return { input: b.input, usage };

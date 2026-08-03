@@ -18,7 +18,10 @@ struct OverviewChromeRow: View {
     private let panelW: CGFloat = 430
 
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
-    private var beacon: RoadmapTask? { RoadmapEngine.nextStep(tasks) }
+    /// The beacon plus up to two more moves, one per department. `suggestedNext` guarantees
+    /// `nextStep` first, so the hero card and the list below it can never disagree.
+    private var suggestions: [RoadmapTask] { RoadmapEngine.suggestedNext(tasks, limit: 3) }
+    private var beacon: RoadmapTask? { suggestions.first }
     private var currentPhase: RoadmapPhase? { beacon?.phase }
     private var nextMilestone: String? {
         guard let p = currentPhase else { return nil }
@@ -29,12 +32,6 @@ struct OverviewChromeRow: View {
     /// The one actionable nudge kept on the compact card: tasks that need the founder.
     private var needsYou: Int {
         tasks.filter { !$0.done && !$0.drafted && $0.who == .you }.count
-    }
-    /// The founder often ALSO has a step waiting on them — surface the top one as a distinct
-    /// secondary line under Start, never the same task as the move.
-    private var alsoNeedsYou: RoadmapTask? {
-        tasks.first { !$0.done && RoadmapEngine.status(for: $0, in: tasks) == .needsYou
-                      && $0.id != beacon?.id }
     }
 
     var body: some View {
@@ -142,18 +139,25 @@ struct OverviewChromeRow: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 3)
-            if let also = alsoNeedsYou {
-                Button { onOpenTask(also) } label: {
-                    HStack(spacing: 5) {
-                        Text(lang == .vi ? "Cũng cần bạn:" : "Also needs you:")
-                            .foregroundColor(RoadmapPalette.needsYou.opacity(0.75))
-                        Text(also.title).underline().lineLimit(1)
-                            .foregroundColor(RoadmapPalette.needsYou)
+            ForEach(suggestions.dropFirst(), id: \.id) { s in
+                Button { onOpenTask(s) } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(s.title)
+                            .font(CodepetTheme.inter(11.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .lineLimit(1)
+                        Text(RoadmapBoardCopy.suggestionReason(
+                                dept: DepartmentCatalog.find(s.dept)?.name,
+                                unlockCount: tasks.filter { $0.dependsOn.contains(s.id) }.count,
+                                lang: lang))
+                            .font(CodepetTheme.inter(10))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1)
                     }
-                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .help((lang == .vi ? "Cũng cần bạn: " : "Also needs you: ") + also.title)
+                .help(s.title)
             }
         }
         .padding(.horizontal, 13).padding(.top, 9).padding(.bottom, 11)

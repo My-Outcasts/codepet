@@ -15,8 +15,14 @@ enum RoadmapFocus {
         guard let first = populated.first else { return [] }
 
         let open = RoadmapGating.openPhases(tasks)
-        // The working edge: the last OPEN phase with tasks — where the beacon lives.
-        let working = populated.last { open.contains($0) } ?? first
+        // The board exists to show ONE clear next move, so the phase that must never collapse is
+        // the beacon's — `RoadmapEngine.nextStep` minimises on `phase.order`, i.e. the EARLIEST
+        // actionable task. Anchoring on the last open phase (the open set is a prefix, so `.last`
+        // is its far end) hid the beacon's card behind a rail the moment the prefix widened past
+        // one populated phase.
+        let working = RoadmapEngine.nextStep(tasks)?.phase
+            ?? populated.first { open.contains($0) }
+            ?? first
         let states = RoadmapGating.states(tasks)
         let preview = populated.first { states[$0] == .preview }
 

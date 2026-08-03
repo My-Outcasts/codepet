@@ -123,4 +123,17 @@ final class RoadmapGatingTests: XCTestCase {
         let a = t("a", .find, deps: ["ghost"])     // dangling dep → fail-open, nothing blocks
         XCTAssertNil(RoadmapGating.blocker(for: a, in: [a]))
     }
+
+    func testBlockerChainResolvesToAnActionableTaskNotABlockedOne() {
+        // y is founder-owned (so it's the naive "earliest founder step" answer) but y itself
+        // is blocked on z, its own unmet dependency — handing the founder y would be a second
+        // dead end. The chain must walk past y to z, which is actually actionable.
+        let z = t("z", .find)
+        let y = t("y", .find, who: .you, deps: ["z"])
+        let later = t("b", .build)
+        let all = [z, y, later]
+        let blocker = RoadmapGating.blocker(for: later, in: all)
+        XCTAssertEqual(blocker?.id, "z")
+        XCTAssertNotEqual(RoadmapEngine.status(for: blocker!, in: all), .blocked)
+    }
 }

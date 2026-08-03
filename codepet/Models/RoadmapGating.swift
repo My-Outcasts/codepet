@@ -57,20 +57,52 @@ enum RoadmapGating {
         return out
     }
 
+    /// The earliest founder-owned task in the earliest unsettled phase — the step holding the
+    /// rolling window shut. nil once every phase is settled (nothing blocks).
+    static func founderStep(in tasks: [RoadmapTask]) -> RoadmapTask? {
+        for phase in RoadmapPhase.allCases where !settled(phase, in: tasks) {
+            return tasks.first { $0.phase == phase && needsFounder($0) }
+        }
+        return nil
+    }
+
     /// The one task standing between the founder and `task`, so a locked card can explain
     /// itself and hand the founder something to actually do.
     ///
-    /// Phase-gated → the earliest founder-owned step in the earliest unsettled phase, which is
-    /// the same task the beacon points at (the two surfaces can't disagree). Dependency-gated →
-    /// the first unfinished dependency. nil when nothing resolves (a dangling dep, a cycle).
+    /// Phase-gated → `founderStep`. This is NOT always the beacon: `nextStep` minimises over
+    /// the whole open window, so once the prefix spans more than one populated phase the beacon
+    /// can sit in an EARLIER phase than this blocker (the earliest unsettled one). Dependency-
+    /// gated → the first unfinished dependency.
+    ///
+    /// Either way, the candidate is then walked forward to something the founder can actually
+    /// act on today (see `actionable`) — a founder-owned step can itself be blocked on its own
+    /// unmet dependency, and handing the founder a second dead end defeats the point of the
+    /// escape hatch. A genuine dependency cycle can't walk forever (each hop must be an
+    /// unvisited task) and falls back to `RoadmapEngine.nextStep`, which is nil only when
+    /// nothing in the whole roadmap is currently actionable.
     static func blocker(for task: RoadmapTask, in tasks: [RoadmapTask]) -> RoadmapTask? {
-        if !openPhases(tasks).contains(task.phase) {
-            for phase in RoadmapPhase.allCases where !settled(phase, in: tasks) {
-                if let found = tasks.first(where: { $0.phase == phase && needsFounder($0) }) {
-                    return found
-                }
-            }
+        let candidate = openPhases(tasks).contains(task.phase)
+            ? task.dependsOn.compactMap { id in tasks.first { $0.id == id && !$0.done } }.first
+            : founderStep(in: tasks)
+        guard let candidate else { return nil }
+        return actionable(candidate, in: tasks, avoiding: [task.id])
+    }
+
+    /// Walk from `start` toward a task whose status isn't `.blocked`, following unmet
+    /// dependencies one hop at a time. `avoiding` guards a dependency cycle: each hop must land
+    /// on a task not already visited, so the walk always terminates — either on an actionable
+    /// task or by falling through to the beacon.
+    private static func actionable(_ start: RoadmapTask, in tasks: [RoadmapTask],
+                                    avoiding visited: Set<String>) -> RoadmapTask? {
+        var current = start
+        var seen = visited
+        while !seen.contains(current.id) {
+            seen.insert(current.id)
+            if RoadmapEngine.status(for: current, in: tasks) != .blocked { return current }
+            guard let next = current.dependsOn.compactMap({ id in tasks.first { $0.id == id && !$0.done } }).first
+            else { break }
+            current = next
         }
-        return task.dependsOn.compactMap { id in tasks.first { $0.id == id && !$0.done } }.first
+        return RoadmapEngine.nextStep(tasks)
     }
 }

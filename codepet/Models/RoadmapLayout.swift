@@ -238,7 +238,7 @@ enum RoadmapLayoutEngine {
         let width = RoadmapGeometry.boardWidth(expanded: expandedSet, hasRoot: hasRoot)
 
         // The current phase is read from the WHOLE task set, not just the shown ones: the
-        // beacon's phase may be collapsed, and its rail should still flag as current.
+        // beacon's phase may be collapsed into a rail, so `shown`/`expandedSet` can't be used here.
         let currentPhase = currentId.flatMap { id in tasks.first { $0.id == id }?.phase }
         var columns: [PhaseColumn] = []
         var rails: [PhaseRail] = []

@@ -2,8 +2,9 @@ import XCTest
 @testable import codepet
 
 final class RoadmapFocusTests: XCTestCase {
-    private func t(_ id: String, _ phase: RoadmapPhase, who: TaskWho = .does) -> RoadmapTask {
-        RoadmapTask(id: id, title: id, detail: "", phase: phase, who: who, dept: "eng")
+    private func t(_ id: String, _ phase: RoadmapPhase, who: TaskWho = .does,
+                   done: Bool = false) -> RoadmapTask {
+        RoadmapTask(id: id, title: id, detail: "", phase: phase, who: who, done: done, dept: "eng")
     }
     /// Tasks in all six phases, with a founder-owned step holding FIND shut so the working
     /// phase is FIND and the preview is FOUNDATION.
@@ -70,12 +71,27 @@ final class RoadmapFocusTests: XCTestCase {
         XCTAssertFalse(e.contains(.grow))      // nothing there to expand
     }
 
-    func testWorkingPhaseIsTheLastOpenPopulatedPhase() {
-        // No founder-owned work anywhere → every phase is open; the working edge is the LAST
-        // populated one, so the tail of the journey is what gets the room.
+    func testWorkingPhaseIsTheBeaconsPhase() {
+        // No founder-owned work anywhere → every phase is open, so the prefix spans BOTH
+        // populated phases (find, grow) — more than one. The beacon (`RoadmapEngine.nextStep`)
+        // is the EARLIEST actionable task by phase order — find — not the tail of the journey.
         let tasks = [t("f", .find), t("g", .grow)]
-        let one = RoadmapGeometry.boardWidth(expanded: [.grow])
-        XCTAssertEqual(RoadmapFocus.expanded(tasks: tasks, availableWidth: one), [.grow])
+        XCTAssertEqual(RoadmapEngine.nextStep(tasks)?.phase, .find)
+        let oneColumn = RoadmapGeometry.boardWidth(expanded: [.find])
+        XCTAssertEqual(RoadmapFocus.expanded(tasks: tasks, availableWidth: oneColumn), [.find])
+    }
+
+    /// Regression for the bug this fix removes: an open prefix spanning MORE than one
+    /// populated phase must still keep the BEACON's card expanded, not the last open phase's.
+    /// FIND is settled (a Codepet-owned leftover, no founder step) but FOUNDATION holds a
+    /// founder step, so the prefix widens to {find, foundation} — exactly the shape that let
+    /// the beacon's card vanish behind a rail under the old anchor.
+    func testBeaconsCardSurvivesWhenTheOpenPrefixSpansTwoPopulatedPhases() {
+        let tasks = [t("f", .find), t("d", .foundation, who: .you)]
+        XCTAssertEqual(RoadmapGating.openPhases(tasks), [.find, .foundation])
+        XCTAssertEqual(RoadmapEngine.nextStep(tasks)?.phase, .find)
+        let oneColumn = RoadmapGeometry.boardWidth(expanded: [.find])
+        XCTAssertEqual(RoadmapFocus.expanded(tasks: tasks, availableWidth: oneColumn), [.find])
     }
 
     /// Regression for the "nearest-first measured in compressed populated-rank" bug:
@@ -85,15 +101,18 @@ final class RoadmapFocusTests: XCTestCase {
     /// (find=0, build=1, ship=2) makes them a false tie, which earlier-wins resolves to find —
     /// the farther phase.
     func testNearestFirstUsesTruePhaseDistanceNotPopulatedRank() {
-        // populated = [find, ship, launch, grow] (foundation, build empty). A founder-owned
-        // task in SHIP holds ship open and forces the working phase to ship (middle), with
-        // launch as the preview (correctly picked regardless of the bug). That leaves find and
-        // grow as the two remaining candidates: true order distance from ship (order 3) is
-        // find=3, grow=2 — grow is truly nearer. But populated-rank compresses across the
-        // find→ship gap (foundation, build both empty) to distance 1, while grow's distance
-        // (no empty phases between ship and grow other than the populated preview) stays 2 —
-        // an inversion that makes the old code prefer find over grow.
-        let tasks = [t("f", .find), t("s", .ship, who: .you), t("l", .launch), t("g", .grow)]
+        // populated = [find, ship, launch, grow] (foundation, build empty). FIND's task is
+        // DONE — populated still counts it (a phase with any task, done or not, is populated),
+        // but the beacon (`RoadmapEngine.nextStep`) only ever points at a NOT-done task, so a
+        // done find can't outrank ship for the working phase. A founder-owned task in SHIP
+        // holds ship open and makes it the beacon (middle phase), with launch as the preview
+        // (correctly picked regardless of the bug). That leaves find and grow as the two
+        // remaining candidates: true order distance from ship (order 3) is find=3, grow=2 —
+        // grow is truly nearer. But populated-rank compresses across the find→ship gap
+        // (foundation, build both empty) to distance 1, while grow's distance (no empty phases
+        // between ship and grow other than the populated preview) stays 2 — an inversion that
+        // makes the old code prefer find over grow.
+        let tasks = [t("f", .find, done: true), t("s", .ship, who: .you), t("l", .launch), t("g", .grow)]
         let threeColumns: CGFloat = RoadmapGeometry.boardWidth(expanded: [.find, .foundation, .build])
         let e = RoadmapFocus.expanded(tasks: tasks, availableWidth: threeColumns)
         XCTAssertEqual(e, [.ship, .launch, .grow])

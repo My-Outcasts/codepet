@@ -314,8 +314,8 @@ describe("runIndependentPass — graceful degradation", () => {
     expect(results[0].error).toMatch(/stance/);
   });
 
-  test("usage is still reported for an agent whose position failed to parse", async () => {
-    // The call was billed even though the output was unusable.
+  test("usage covers both attempts when a position failed to parse twice", async () => {
+    // Both calls were billed even though neither output was usable.
     const { results } = await runIndependentPass({
       founder,
       rawRequest,
@@ -326,7 +326,66 @@ describe("runIndependentPass — graceful degradation", () => {
         usage: { input: 900, output: 40, cache_read: 0 }
       })
     });
-    expect(results[0].usage.input).toBe(900);
+    expect(results[0].usage.input).toBe(1800);
+    expect(results[0].usage.output).toBe(80);
+  });
+
+  test("asks again once when a required field is missing, and keeps the retry", async () => {
+    // Measured on real runs: the model omits stance in ~1 call in 3 with
+    // stop_reason=tool_use. Dropping the department on that would leave a single
+    // opinion, which is the failure this feature exists to prevent.
+    let calls = 0;
+    const { results } = await runIndependentPass({
+      founder,
+      rawRequest,
+      realQuestion,
+      agents: ["product"],
+      call: async () => {
+        calls++;
+        const { stance, ...withoutStance } = positionInput();
+        return {
+          input: calls === 1 ? withoutStance : positionInput(),
+          usage: { input: 100, output: 10, cache_read: 0 }
+        };
+      }
+    });
+    expect(calls).toBe(2);
+    expect(results[0].error).toBeUndefined();
+    expect(results[0].position!.stance).toBe("proceed");
+    expect(results[0].usage.input).toBe(200);
+  });
+
+  test("does not retry when the first position parses", async () => {
+    let calls = 0;
+    await runIndependentPass({
+      founder,
+      rawRequest,
+      realQuestion,
+      agents: ["product", "finance"],
+      call: async () => {
+        calls++;
+        return { input: positionInput(), usage: zeroUsage };
+      }
+    });
+    expect(calls).toBe(2);
+  });
+
+  test("quotes the rejection reason back on the retry so the model can correct it", async () => {
+    const messages: string[] = [];
+    await runIndependentPass({
+      founder,
+      rawRequest,
+      realQuestion,
+      agents: ["product"],
+      call: async (args) => {
+        messages.push(args.userMessage);
+        return { input: { stance: "maybe" }, usage: zeroUsage };
+      }
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).not.toMatch(/rejected/);
+    expect(messages[1]).toMatch(/rejected/);
+    expect(messages[1]).toMatch(/stance/);
   });
 
   test("returns one result per requested agent, in request order", async () => {

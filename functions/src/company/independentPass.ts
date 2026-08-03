@@ -130,6 +130,14 @@ export interface PassResult {
   model: string;
 }
 
+function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cache_read: a.cache_read + b.cache_read
+  };
+}
+
 export async function runIndependentPass(args: {
   founder: FounderContext;
   rawRequest: string;
@@ -147,25 +155,44 @@ export async function runIndependentPass(args: {
   const settled = await Promise.allSettled(
     args.agents.map(async (agent): Promise<PassResult> => {
       const model = AGENT_DEFS[agent].model;
-      const { input, usage } = await args.call({
+      const system = composeAgentSystem({
         agent,
-        model,
-        system: composeAgentSystem({
-          agent,
-          founder: args.founder,
-          rawRequest: args.rawRequest
-        }),
-        userMessage,
-        tool: POSITION_TOOL,
-        toolName: POSITION_TOOL.name
+        founder: args.founder,
+        rawRequest: args.rawRequest
       });
+      const ask = (message: string) =>
+        args.call({
+          agent,
+          model,
+          system,
+          userMessage: message,
+          tool: POSITION_TOOL,
+          toolName: POSITION_TOOL.name
+        });
 
-      const parsed = parsePositionToolInput(input);
-      if ("error" in parsed) {
-        // The call was still billed, so usage is reported either way.
-        return { agent, error: parsed.error, usage, model };
+      const first = await ask(userMessage);
+      const parsed = parsePositionToolInput(first.input);
+      if (!("error" in parsed)) {
+        return { agent, position: parsed, usage: first.usage, model };
       }
-      return { agent, position: parsed, usage, model };
+
+      // Measured on real runs: the model drops a required field (usually stance)
+      // in roughly 1 call in 3, with stop_reason=tool_use — the schema is a hint,
+      // not a constraint. Losing a department to that silently degrades the run to
+      // a single opinion, which is the one outcome this feature exists to prevent,
+      // so a rejected position is asked again once with the reason quoted back.
+      const retry = await ask(
+        `${userMessage}\n\nYour previous submit_position call was rejected: ${parsed.error}. ` +
+          `Every required field must be present, including stance. Call submit_position again ` +
+          `with all of them.`
+      );
+      // Both calls were billed, so both are reported whichever way this ends.
+      const usage = addUsage(first.usage, retry.usage);
+      const reparsed = parsePositionToolInput(retry.input);
+      if ("error" in reparsed) {
+        return { agent, error: reparsed.error, usage, model };
+      }
+      return { agent, position: reparsed, usage, model };
     })
   );
 

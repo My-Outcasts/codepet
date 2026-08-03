@@ -20,6 +20,8 @@ struct RoadmapView: View {
     /// one click.
     @State private var previewTask: RoadmapTask?
     @State private var overviewTab: OverviewTab = .roadmap
+    /// Measured width of the header row — drives the compact/roomy control switch.
+    @State private var headerWidth: CGFloat = 0
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
     /// The board re-tints with the chosen companion, exactly like the surrounding chrome
@@ -147,9 +149,12 @@ struct RoadmapView: View {
     private func segment(_ t: OverviewTab, _ label: String) -> some View {
         let on = overviewTab == t
         return Button { overviewTab = t } label: {
+            // `fixedSize` is load-bearing: without it a squeezed row wraps this label
+            // one character per line ("Roa / dm / ap") instead of pushing back.
             Text(label)
                 .font(CodepetTheme.inter(12.5, weight: .semibold))
                 .foregroundColor(on ? accent : CodepetTheme.mutedText)
+                .lineLimit(1).fixedSize()
                 .padding(.horizontal, 14).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8)
                     .fill(on ? CodepetTokens.accentTint : .clear))
@@ -157,34 +162,54 @@ struct RoadmapView: View {
         .buttonStyle(.plain)
     }
 
+    private var howToReadLabel: String {
+        lang == .vi ? "Cách đọc bản đồ" : "How to read this map"
+    }
+
+    /// Windowed vs fullscreen: the content pane is half the shell, so leaving fullscreen
+    /// can halve this header's width. The controls must never be the thing that gives —
+    /// squeezed, their labels wrapped one character per line — so they hold their
+    /// intrinsic size (`layoutPriority`) and the title block yields instead. Past
+    /// `compactHeaderMaxWidth` even that isn't enough, and the How-to button sheds its
+    /// label to keep everything on one row.
     private var header: some View {
-        HStack(alignment: .top) {
+        let compact = ShellLayout.compactPageHeader(forWidth: headerWidth)
+        return HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(lang == .vi ? "Tổng quan" : "Overview")
                     .font(CodepetTheme.title()).tracking(-0.5).foregroundColor(CodepetTheme.primaryText)
+                    .lineLimit(1)
                 Text(subtitle).font(CodepetTheme.subtitle())
                     .foregroundColor(CodepetTheme.mutedText)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 760, alignment: .leading)
             }
-            Spacer()
+            .layoutPriority(0)
+            Spacer(minLength: 8)
             HStack(spacing: 10) {
                 Button { showMapIntro = true } label: {
                     HStack(spacing: 8) {
                         Text("?").font(CodepetTheme.inter(11, weight: .bold))
                             .foregroundColor(CodepetTheme.onAccent(accent))
                             .frame(width: 15, height: 15).background(Circle().fill(accent))
-                        Text(lang == .vi ? "Cách đọc bản đồ" : "How to read this map")
-                            .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(accent)
+                        if !compact {
+                            Text(howToReadLabel)
+                                .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(accent)
+                                .lineLimit(1).fixedSize()
+                        }
                     }
-                    .padding(.horizontal, 13).padding(.vertical, 7)
+                    .padding(.horizontal, compact ? 8 : 13).padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(CodepetTokens.accentLine, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
+                .help(howToReadLabel)
+                .accessibilityLabel(howToReadLabel)
                 overviewToggle
             }
+            .layoutPriority(1)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { headerWidth = $0 }
     }
 
     /// Route a task tap through the pure `RoadmapDispatch` rule, then follow the two

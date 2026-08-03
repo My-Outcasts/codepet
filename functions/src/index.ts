@@ -12,6 +12,17 @@ import { handleRevenueCatWebhook } from "./revenueCatWebhook";
 import { handleExtractKnowledge } from "./extractKnowledge";
 import { handleGenerateDictionary } from "./generateDictionary";
 import { handleVirtualCompanyRun } from "./company/virtualCompany";
+// Consolidated in from the Murror/CodePet-Clean checkout, which until now was a
+// second, competing source for this same Firebase codebase ("default" on
+// devpet-8f4b1). Two sources meant a deploy from either one offered to delete
+// the other's functions, so the Virtual Company backend could never ship. This
+// repo is now the only source.
+import { handleScaffoldRoadmap } from "./scaffoldRoadmap";
+import { handleEnrichBrief } from "./enrichBrief";
+import { handleCompanyChat } from "./companyChat";
+import { handleRunTask } from "./runTask";
+import { handleGenerateRoadmap } from "./generateRoadmap";
+import { handleExtractDecisions } from "./extractDecisions";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -44,6 +55,54 @@ export const chatSession = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleChatSession
+);
+
+export const scaffoldRoadmap = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleScaffoldRoadmap
+);
+
+export const enrichBrief = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleEnrichBrief
+);
+
+export const companyChat = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleCompanyChat
+);
+
+export const runTask = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleRunTask
+);
+
+export const generateRoadmap = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleGenerateRoadmap
+);
+
+export const extractDecisions = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleExtractDecisions
 );
 
 export const generateGuidance = onRequest(

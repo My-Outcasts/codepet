@@ -16,9 +16,32 @@ final class ShellLayoutTests: XCTestCase {
         XCTAssertFalse(ShellLayout.dockCollapsed(forWidth: 900, manual: false))
     }
 
-    func test_dockWidth_isHalfTheWindow() {
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1400), 700)
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1200), 600)
+    func test_dockWidth_isHalfTheWindow_whileHalfFitsUnderTheCap() {
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1000), 500)
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1100), 550)
+    }
+
+    /// Past the cap the dock stops growing and the CONTENT pane takes the surplus —
+    /// this is what stops a fullscreen window handing chat 735pt of blank column.
+    func test_dockWidth_capsSoContentTakesTheSurplus() {
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1200), 560)
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1470), 560)
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1920), 560)
+    }
+
+    func test_goingFullscreenGivesContentABiggerShare() {
+        let windowed = 918.0, fullscreen = 1470.0
+        let windowedShare = (windowed - ShellLayout.dockWidth(forWidth: windowed)) / windowed
+        let fullscreenShare = (fullscreen - ShellLayout.dockWidth(forWidth: fullscreen)) / fullscreen
+        // Windowed stays an even split; fullscreen tilts toward the map because the dock
+        // stops growing. Under the old 50/50 rule both shares were exactly 0.5.
+        XCTAssertEqual(windowedShare, 0.5, accuracy: 0.01)
+        XCTAssertGreaterThan(fullscreenShare, 0.6)
+    }
+
+    /// The cap is a default, not a ceiling — dragging the handle still widens the dock.
+    func test_dragStillOverridesTheCap() {
+        XCTAssertEqual(ShellLayout.clampDockWidth(800, windowWidth: 1470), 800)
     }
     func test_dockWidth_flooredAt360() {
         // At the 900 expand boundary, half is 450 (above the floor); a hypothetical
@@ -33,5 +56,33 @@ final class ShellLayoutTests: XCTestCase {
         XCTAssertEqual(ShellLayout.clampDockWidth(100, windowWidth: 1400), 360)
         // A sensible drag in range is returned unchanged.
         XCTAssertEqual(ShellLayout.clampDockWidth(620, windowWidth: 1400), 620)
+    }
+
+    // MARK: Page header compaction
+
+    func test_compactHeader_offWhenRoomy() {
+        XCTAssertFalse(ShellLayout.compactPageHeader(forWidth: 900))
+        XCTAssertFalse(ShellLayout.compactPageHeader(forWidth: 620))
+    }
+    func test_compactHeader_onWhenCramped() {
+        XCTAssertTrue(ShellLayout.compactPageHeader(forWidth: 619))
+        XCTAssertTrue(ShellLayout.compactPageHeader(forWidth: 460))
+    }
+    /// Unmeasured (first layout pass) must read roomy, so the header doesn't flash
+    /// abbreviated before its real width arrives.
+    func test_compactHeader_unmeasuredReadsRoomy() {
+        XCTAssertFalse(ShellLayout.compactPageHeader(forWidth: 0))
+    }
+
+    /// The two rules have to agree: at the window sizes the app actually runs at, the
+    /// content pane left over must NOT be narrow enough to force a compact header —
+    /// except in the windowed case the screenshot came from, where it must.
+    func test_fullscreenGetsTheRoomyHeader_windowedGetsCompact() {
+        let fullscreenContent = 1470 - ShellLayout.dockWidth(forWidth: 1470)
+        XCTAssertFalse(ShellLayout.compactPageHeader(forWidth: fullscreenContent),
+                       "fullscreen should show the full 'How to read this map' label")
+        let windowedContent = 918 - ShellLayout.dockWidth(forWidth: 918)
+        XCTAssertTrue(ShellLayout.compactPageHeader(forWidth: windowedContent),
+                      "the windowed state is what was wrapping — it must compact")
     }
 }

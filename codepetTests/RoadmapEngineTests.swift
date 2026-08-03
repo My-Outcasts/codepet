@@ -73,4 +73,31 @@ final class RoadmapEngineTests: XCTestCase {
         let other = [Deliverable(kind: .doc, title: "Other", body: "b", sourceTaskId: "z")]
         XCTAssertNil(RoadmapEngine.deliverable(for: done, in: other))
     }
+
+    // MARK: rolling window (RoadmapGating)
+
+    func testStatusIsBlockedOutsideTheOpenWindow() {
+        let gate = t("y", .find, who: .you)     // holds FIND shut
+        let later = t("b", .build)              // .does, no deps → would otherwise be codepetCanDo
+        let all = [gate, later]
+        XCTAssertEqual(RoadmapEngine.status(for: later, in: all), .blocked)
+        XCTAssertEqual(RoadmapEngine.status(for: gate, in: all), .needsYou)
+    }
+
+    /// A drafted task in a CLOSED phase still says "needs approval": the draft already exists,
+    /// and hiding it behind a lock would strand finished work.
+    func testDraftedBeatsThePhaseWindow() {
+        let gate = t("y", .find, who: .you)
+        let draft = t("d", .build, drafted: true)
+        XCTAssertEqual(RoadmapEngine.status(for: draft, in: [gate, draft]), .needsApproval)
+    }
+
+    func testNextStepDoesNotSkipAheadOfAClosedPhase() {
+        // FIND's two founder steps block each other, so FIND has no actionable task at all.
+        // Without the window the beacon would jump to BUILD; with it, there is no beacon.
+        let a = t("a", .find, who: .you, deps: ["b"])
+        let b = t("b", .find, who: .you, deps: ["a"])
+        let later = t("c", .build)
+        XCTAssertNil(RoadmapEngine.nextStep([a, b, later]))
+    }
 }

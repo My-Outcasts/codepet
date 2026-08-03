@@ -20,12 +20,14 @@ final class ChatLandingStateTests: XCTestCase {
     /// itself a .needsYou task so `needsYouCount`'s "exclude the beacon's id"
     /// clause is actually exercised: without it, needsYouCount would double
     /// count the beacon instead of reporting just the other needsYou task.
+    // ChatLandingStateTests.fixtureTasks() — t4 must stay a second `needsYou` task, so it
+    // belongs in the SAME phase as the beacon rather than a later, now-locked one.
     private func fixtureTasks() -> [RoadmapTask] {
         [
             RoadmapTask(id: "t1", title: "Set up repo", detail: "", phase: .find, who: .does, done: true),
             RoadmapTask(id: "t2", title: "Pick a name", detail: "", phase: .foundation, who: .you),
             RoadmapTask(id: "t3", title: "Draft brand brief", detail: "", phase: .foundation, who: .draft, drafted: true),
-            RoadmapTask(id: "t4", title: "Write landing copy", detail: "", phase: .build, who: .you),
+            RoadmapTask(id: "t4", title: "Write landing copy", detail: "", phase: .foundation, who: .you),
         ]
     }
 

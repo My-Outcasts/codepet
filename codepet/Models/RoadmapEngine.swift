@@ -16,9 +16,15 @@ enum RoadmapEngine {
     }
 
     /// Legend status. Precedence: done → needsApproval → blocked → needsYou → codepetCanDo.
+    ///
+    /// TWO things block: the rolling phase window (`RoadmapGating`) and unmet dependencies. The
+    /// window is checked first because it's the coarser truth — a task in a closed phase isn't
+    /// workable no matter how its own deps look. `needsApproval` stays ahead of both: a draft
+    /// that already exists must stay reviewable even in a closed phase.
     static func status(for task: RoadmapTask, in tasks: [RoadmapTask]) -> TaskStatus {
         if task.done { return .done }
         if task.drafted { return .needsApproval }
+        if !RoadmapGating.openPhases(tasks).contains(task.phase) { return .blocked }
         if !depsSatisfied(task, byId(tasks)) { return .blocked }
         return task.who == .you ? .needsYou : .codepetCanDo
     }
@@ -31,11 +37,16 @@ enum RoadmapEngine {
         library.first { $0.sourceTaskId == task.id }
     }
 
-    /// The beacon: the first not-done, dependency-satisfied task by phase order then position.
+    /// The beacon: the first not-done, dependency-satisfied task INSIDE the open phase window,
+    /// by phase order then position. The window clause matters when the open phase has no
+    /// actionable task of its own — without it the beacon would skip into a locked phase and
+    /// point at a card the board draws as locked.
     static func nextStep(_ tasks: [RoadmapTask]) -> RoadmapTask? {
         let index = byId(tasks)
+        let open = RoadmapGating.openPhases(tasks)
         return tasks.enumerated()
-            .filter { !$0.element.done && depsSatisfied($0.element, index) }
+            .filter { !$0.element.done && open.contains($0.element.phase)
+                      && depsSatisfied($0.element, index) }
             .min(by: { a, b in
                 a.element.phase.order != b.element.phase.order
                     ? a.element.phase.order < b.element.phase.order

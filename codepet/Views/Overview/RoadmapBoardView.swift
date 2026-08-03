@@ -332,10 +332,20 @@ struct RoadmapBoardView: View {
                 ctx.stroke(path(e.points), with: .color(accent.opacity(0.4)),
                            style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
             }
+            for e in l.rootEdges {
+                ctx.fill(Self.arrowhead(e.points, length: 5.5, halfWidth: 3.2),
+                         with: .color(accent.opacity(0.4)))
+            }
             // Faint dotted dependencies.
             for e in l.edges where !e.critical {
                 ctx.stroke(path(e.points), with: .color(CodepetTokens.faint),
                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 4]))
+            }
+            // The head is SOLID even though its line is dotted: a dashed triangle reads as
+            // debris at this size, and the head is the part carrying the direction.
+            for e in l.edges where !e.critical {
+                ctx.fill(Self.arrowhead(e.points, length: 5.5, halfWidth: 3.2),
+                         with: .color(CodepetTokens.faint))
             }
             // Critical path: a wide soft halo under a solid line.
             for e in l.edges where e.critical {
@@ -345,6 +355,11 @@ struct RoadmapBoardView: View {
             for e in l.edges where e.critical {
                 ctx.stroke(path(e.points), with: .color(accent),
                            style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+            }
+            // Heads last, so a critical head sits above every line it may cross.
+            for e in l.edges where e.critical {
+                ctx.fill(Self.arrowhead(e.points, length: 7, halfWidth: 4),
+                         with: .color(accent))
             }
             // A short stub into each rail, so a collapsed phase still reads as part of one
             // continuous journey rather than a detached sidebar.
@@ -358,6 +373,37 @@ struct RoadmapBoardView: View {
         }
         .frame(width: l.size.width, height: l.size.height)
         .allowsHitTesting(false)
+    }
+
+    /// A small filled triangle at a route's terminal point, marking which way the flow runs.
+    /// Without it the board relies on left-to-right convention alone, which says nothing about
+    /// an edge that reaches back to an earlier column.
+    ///
+    /// The direction is taken from the polyline's OWN last segment rather than assumed to be
+    /// rightward. Every route the engine currently produces does end in a rightward horizontal
+    /// run into the target's left edge — but that's an invariant of today's four routes, not of
+    /// the data: a dependency pointing at an EARLIER phase ends in a leftward run, and nothing
+    /// in `coerceRoadmap` forbids one. Deriving the angle costs two subtractions and can't go
+    /// stale when a route changes.
+    ///
+    /// Returns an empty path for a degenerate run (fewer than two points, or a final segment of
+    /// zero length) — there is no direction to draw, and normalising a zero vector would put
+    /// NaNs into the Canvas.
+    static func arrowhead(_ pts: [CGPoint], length: CGFloat, halfWidth: CGFloat) -> Path {
+        guard pts.count >= 2 else { return Path() }
+        let tip = pts[pts.count - 1], tail = pts[pts.count - 2]
+        let dx = tip.x - tail.x, dy = tip.y - tail.y
+        let run = (dx * dx + dy * dy).squareRoot()
+        guard run > 0.01 else { return Path() }
+        let ux = dx / run, uy = dy / run                       // along the run
+        let base = CGPoint(x: tip.x - ux * length, y: tip.y - uy * length)
+        let px = -uy * halfWidth, py = ux * halfWidth          // across it
+        var p = Path()
+        p.move(to: tip)
+        p.addLine(to: CGPoint(x: base.x + px, y: base.y + py))
+        p.addLine(to: CGPoint(x: base.x - px, y: base.y - py))
+        p.closeSubpath()
+        return p
     }
 
     // MARK: root node

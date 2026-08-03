@@ -11,7 +11,13 @@ struct AppShellView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var uiLanguage
 
-    private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+    /// Codepet's primary colour. Founder call (Aug 3): the PRODUCT chrome is purple
+    /// — nav, pills, CTAs, the board — and does not repaint itself per companion.
+    /// It used to read `PetCharacter.all[appState.activeChar]?.color`, so selecting
+    /// Crash (`#E04040`) turned the whole app red. The companion still owns its own
+    /// identity (name, sprite, voice, and its tint inside the chat); it no longer
+    /// owns the brand.
+    private var accent: Color { CodepetTheme.accentPurple }
     /// Named on the collapsed bar's placeholder ("Ask Crash anything…") so the
     /// closed copilot still says who you'd be talking to.
     private var companionName: String {
@@ -40,19 +46,20 @@ struct AppShellView: View {
                 TopNavView(accent: accent)
                 Divider()
                 HStack(spacing: 0) {
-                    // Collapsed, the copilot becomes a composer strip along the bottom
-                    // of the content (`safeAreaInset`, so scroll views clear it instead
-                    // of hiding under it) rather than a full-height reopen rail.
+                    // Collapsed, the copilot is a circular floating button in the
+                    // content's bottom-right corner (web parity), replacing the old
+                    // full-height reopen rail. An overlay, not a `safeAreaInset`: it
+                    // floats over the board the way the web button does rather than
+                    // reserving a strip of layout.
                     content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                        .overlay(alignment: .bottomTrailing) {
                             if collapsed {
-                                CollapsedChatBar(
-                                    accent: accent,
+                                CollapsedCopilotButton(
                                     companionName: companionName,
-                                    needsYou: CollapsedChatBarState.needsYouCount(
+                                    needsYou: CollapsedCopilotState.needsYouCount(
                                         tasks: companyStore.company.tasks),
-                                    unread: CollapsedChatBarState.showsUnreadDot(
+                                    unread: CollapsedCopilotState.showsUnreadDot(
                                         messageCount: companyStore.chatMessages.count,
                                         seen: seenMessageCount),
                                     onExpand: { companyStore.dockCollapsed = false }
@@ -61,23 +68,10 @@ struct AppShellView: View {
                         }
                     if !collapsed {
                         resizeHandle(windowWidth: geo.size.width, currentWidth: dockWidth)
-                        VStack(spacing: 0) {
-                            HStack {
-                                Spacer()
-                                Button { companyStore.dockCollapsed = true } label: {
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(CodepetTheme.mutedText)
-                                        .padding(6)
-                                }
-                                .buttonStyle(.plain)
-                                .help(uiLanguage == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
-                            }
-                            .padding(.horizontal, 8).padding(.top, 6)
-                            .background(CodepetTheme.surface)
-                            CopilotChatView()
-                        }
-                        .frame(width: dockWidth)
+                        // The collapse chevron lives in `CopilotChatView`'s single
+                        // header row (next to History) — no separate strip here.
+                        CopilotChatView()
+                            .frame(width: dockWidth)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

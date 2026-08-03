@@ -1,17 +1,9 @@
-// codepet/Models/CollapsedChatBarState.swift
+// codepet/Models/CollapsedCopilotState.swift
 import Foundation
 
-/// Pure state for the collapsed copilot bar — the bottom strip that replaces the
-/// old full-height reopen rail. Kept out of the view (like `ShellLayout` and
-/// `TopbarCounts`) so the send gate and the unread rule are unit-testable.
-enum CollapsedChatBarState {
-
-    /// Sendable only with real text and no turn already in flight. Mirrors
-    /// `CopilotChatView.canSend` so the bar and the dock composer can't disagree
-    /// about whether a message may leave.
-    static func canSend(draft: String, busy: Bool) -> Bool {
-        !busy && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+/// Pure state for the collapsed copilot button. Kept out of the view (like
+/// `ShellLayout` and `TopbarCounts`) so the signal rules are unit-testable.
+enum CollapsedCopilotState {
 
     /// What's waiting on the founder. Deliberately the SAME count the Tasks nav
     /// badge shows (`TopbarCounts.tasks` — not-done work that is either hers or a

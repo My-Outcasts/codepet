@@ -14,6 +14,11 @@ struct RoadmapView: View {
     /// The node whose panel is open. Tapping a card opens this rather than firing the action —
     /// a card should be readable before it starts an agent.
     @State private var panelTask: RoadmapTask?
+    /// The task whose draft is under review. Set by `dispatch`'s `.approve` case — a
+    /// drafted task's action opens this real review sheet (shared with the Tasks board
+    /// and the department page) instead of copying the unread draft into the library on
+    /// one click.
+    @State private var previewTask: RoadmapTask?
     @State private var overviewTab: OverviewTab = .roadmap
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
@@ -73,6 +78,7 @@ struct RoadmapView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
         .sheet(item: $panelTask) { node in
             TaskNodePanel(task: node, accent: accent,
                           onAction: { dispatch($0) },
@@ -110,10 +116,12 @@ struct RoadmapView: View {
             OverviewChromeRow(tasks: tasks, companionName: companionName, accent: accent,
                               // The beacon's filled Start dispatches directly — that one-click
                               // path is the mitigation for board cards now opening the panel.
-                              // The quieter suggestion rows below it open the panel instead: they
-                              // render as plain text with no button chrome, and a drafted
-                              // suggestion would otherwise approve an unread draft into the
-                              // library on a single click, which no other surface does.
+                              // `dispatch` itself is safe for a drafted beacon: its `.approve`
+                              // case opens the same `TaskDraftPreview` review sheet the panel
+                              // and the Tasks board use, rather than copying the unread draft
+                              // into the library. The quieter suggestion rows below the beacon
+                              // open the panel instead: they render as plain text with no
+                              // button chrome.
                               onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.horizontal, 24).padding(.top, 16)
             RoadmapBoardView(tasks: tasks, companionName: companionName,
@@ -193,7 +201,7 @@ struct RoadmapView: View {
         switch action {
         case .run:              Task { await companyStore.runTask(task, language: lang) }
         case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
-        case .approve:          Task { await companyStore.approveTask(id: task.id) }
+        case .approve:          previewTask = task   // review before approve — never blind (matches Tasks board)
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
         case .editCode:
             companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom

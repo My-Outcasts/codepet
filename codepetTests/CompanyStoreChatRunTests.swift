@@ -262,6 +262,35 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)
     }
 
+    /// The unrecoverable done+drafted race (final-review Important 1, chat path): `handleRunTaskId`'s
+    /// `status == .codepetCanDo` guard runs BEFORE the `taskRunner` await inside
+    /// `produceDraftInline`, so a mark-done that lands while the chat run is in flight must not be
+    /// clobbered by the `drafted = true` write that follows. Simulates that landing by toggling
+    /// `done` from inside the stubbed `taskRunner` itself — the chat card still carries the draft
+    /// (its own Approve doesn't check `done`), but the task record must not be stranded.
+    func testChatRunSkipsTaskDraftWriteWhenMarkedDoneMidRun() async {
+        var ref: CompanyStore?
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "On it", runTaskId: "t1") },
+                             chatStreamer: Self.failingStreamer,
+                             taskRunner: { _ in
+                                 // Mark-done lands mid-await, exactly like the race in the wild.
+                                 await ref?.toggleTaskDone(id: "t1")
+                                 return RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1")
+                             },
+                             decisionExtractor: { _, _ in [] })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertTrue(s.company.tasks[0].done)            // mark-done won the race
+        XCTAssertFalse(s.company.tasks[0].drafted)        // task-side draft write skipped
+        XCTAssertNil(s.company.tasks[0].draft)            // never stranded on the task
+        // The chat card is still the founder's escape hatch to reach the generated work.
+        let draftMsg = s.chatMessages.last
+        XCTAssertEqual(draftMsg?.draft?.sourceTaskId, "t1")
+    }
+
     /// `sendChat` must populate the request's `runnable` from the company's
     /// current codepetCanDo tasks (mirrors the web's openTasks filter).
     func testSendChatPopulatesRunnableFromCodepetCanDoTasks() async {

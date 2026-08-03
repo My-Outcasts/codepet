@@ -141,6 +141,7 @@ struct TaskNodePanel: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isRunning)
+                .opacity(isRunning ? 0.45 : 1)
             }
 
             // A drafted task's correct action is Approve; marking it done here would silently
@@ -164,6 +165,7 @@ struct TaskNodePanel: View {
                 // the generated deliverable with no way to reach it. Blocking the tap while
                 // `isRunning` closes that window.
                 .disabled(isRunning)
+                .opacity(isRunning ? 0.45 : 1)
             }
             Spacer()
         }

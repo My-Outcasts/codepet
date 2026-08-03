@@ -148,17 +148,23 @@ final class RoadmapBoardCopyTests: XCTestCase {
     /// card now opens `TaskNodePanel`.
     func testPeekActionCoversEveryStatusAndNeverPromisesTheOldBehaviour() {
         let banned = ["click to start", "click to add", "click to open the result", "nhấn để bắt đầu"]
-        for status in [TaskStatus.done, .needsApproval, .blocked, .needsYou, .codepetCanDo] {
-            let en = RoadmapBoardCopy.peekAction(for: status, isCurrent: false,
-                                                 companionName: "Byte", lang: .en)
-            let vi = RoadmapBoardCopy.peekAction(for: status, isCurrent: false,
-                                                 companionName: "Byte", lang: .vi)
-            XCTAssertFalse(en.isEmpty)
-            XCTAssertFalse(vi.isEmpty)
-            XCTAssertNotEqual(en, vi)
-            let enLower = en.lowercased()
-            for phrase in banned {
-                XCTAssertFalse(enLower.contains(phrase), "\(status) still promises the old tap behaviour: \(en)")
+        for isCurrent in [false, true] {
+            for status in [TaskStatus.done, .needsApproval, .blocked, .needsYou, .codepetCanDo] {
+                let en = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
+                                                     companionName: "Byte", lang: .en)
+                let vi = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
+                                                     companionName: "Byte", lang: .vi)
+                XCTAssertFalse(en.isEmpty)
+                XCTAssertFalse(vi.isEmpty)
+                XCTAssertNotEqual(en, vi)
+                let enLower = en.lowercased()
+                let viLower = vi.lowercased()
+                for phrase in banned {
+                    XCTAssertFalse(enLower.contains(phrase),
+                                    "\(status) (isCurrent: \(isCurrent)) still promises the old tap behaviour: \(en)")
+                    XCTAssertFalse(viLower.contains(phrase),
+                                    "\(status) (isCurrent: \(isCurrent)) still promises the old tap behaviour: \(vi)")
+                }
             }
         }
     }

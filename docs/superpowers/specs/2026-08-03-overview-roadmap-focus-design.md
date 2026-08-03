@@ -76,12 +76,19 @@ keep reading "Review" rather than disappearing behind a lock, because that work 
 
 Consequences, with no data change:
 
-| Phase      | Before                 | After                                            |
-|------------|------------------------|--------------------------------------------------|
-| find       | 1 × Start (beacon)     | open — one beacon, unchanged                      |
-| foundation | 2 × Review, 1 × Start  | preview — locked; the 2 drafts still say "Review" |
-| build      | 3 × Start              | later — locked                                    |
-| ship       | 2 × Start              | later — locked                                    |
+| Phase      | Before                      | After                                            |
+|------------|-----------------------------|--------------------------------------------------|
+| find       | 1 × Add your input (beacon) | open — one beacon, unchanged                      |
+| foundation | 2 × Review, 1 × Start       | preview — locked; the 2 drafts still say "Review" |
+| build      | 3 × Start                   | later — locked                                    |
+| ship       | 2 × Start                   | later — locked                                    |
+
+This table depends on FIND's one task being **founder-owned** (`who == .you` — it renders "Add your
+input", not "Start"), which is what keeps FIND unsettled and FOUNDATION merely a preview. Read the
+rule, not the table: were that task Codepet-owned instead, FIND would be *settled* and FOUNDATION
+would be **open** alongside it, because the open set is a prefix and Codepet-owned leftovers do not
+block. That case is not hypothetical — it is what the founder's board looks like the moment they
+finish their FIND step, and any consumer that assumes a single open phase will break there.
 
 `nextStep` needs no change: phase-gating flows through `status`. `nextMoves` is confined to the open
 prefix, so the chat's parallel-agent fan-out returns fewer tasks early on — one, on the current board.
@@ -90,8 +97,10 @@ That is the accepted cost of the rolling window; it recovers as soon as a multi-
 **Dead-end escape hatch.** Tapping a locked card must not no-op. `RoadmapDispatch` gains a
 `.showBlocker(RoadmapTask)` action for `.blocked` status: the board names the blocking task
 ("Waiting on: Talk to 5 potential users") and starts *that* task instead. The blocker is the earliest
-unsettled founder-owned task in the earliest unsettled phase — the same task the beacon points at, so
-the two surfaces can never disagree. No per-task skip: that is a separate product decision.
+founder-owned task in the earliest unsettled phase, walked forward to something actually actionable if
+that task is itself blocked. It coincides with the beacon when the open prefix holds exactly one
+populated phase; with a wider prefix the beacon may sit in an earlier phase than the blocker, and both
+are legitimate actions. No per-task skip: that is a separate product decision.
 
 ### 3. `RoadmapFocus` + rails — the board fits the window
 
@@ -173,7 +182,8 @@ earlier steps", so no legend change.
 
 - `RoadmapGatingTests` — open set is a prefix; Codepet leftovers do not block; a drafted task counts as
   a founder blocker; `needsApproval` beats `blocked`; empty phases are settled and never open; the
-  blocker resolves to the same task as the beacon.
+  blocker resolves to an actionable task, and coincides with the beacon when the open prefix holds
+  one populated phase.
 - `RoadmapFocusTests` — width budget expands greedily from the open phase; `userExpanded` is honoured
   and never dropped; empty phases are never expanded; deterministic for a fixed width.
 

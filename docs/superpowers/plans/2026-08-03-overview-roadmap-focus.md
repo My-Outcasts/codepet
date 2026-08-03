@@ -1467,7 +1467,17 @@ Compare against the reported defects:
 5. FIND's header is accent-tinted; FOUNDATION and later wear a lock glyph.
 6. Exactly **one** card offers `Start`/`Add your input` — the beacon. Build/Ship cards are dimmed with "Needs earlier steps"; the two Foundation drafts still say `Review`.
 7. Hovering a locked card shows a `Waiting on: …` line; clicking it starts that blocker instead of doing nothing.
-8. Clicking a rail expands it into a full column; clicking again collapses it.
+8. Clicking a rail with tasks expands it into a full column. Expansion is one-way for the
+   session — the rail is gone once expanded, so there is nothing left to click; a general
+   collapse affordance would need a separate `userCollapsed` set and is out of scope.
+   A "Not planned yet" rail is not clickable at all.
+9. **Regression watch (VI):** with `RUN & GROW` expanded and the language set to Vietnamese,
+   confirm the last phase header (`VẬN HÀNH & PHÁT TRIỂN` + its count) is not clipped at the
+   right edge. Deleting `headerTrailingAllowance` left the last column only `cardW + bottomPad`
+   = 224pt of content past its `x`, and that label measured ~230–235pt. If it clips, capture a
+   screenshot — the fix is not obvious, since widening the header row would desync the board's
+   real width from `RoadmapGeometry.boardWidth` and re-introduce column-count oscillation on
+   resize, and padding the width would break the pinned all-expanded 1796pt parity value.
 9. Open the copilot dock (⌘B): the board reflows to fewer columns and stays centred.
 
 - [ ] **Step 4: Report**

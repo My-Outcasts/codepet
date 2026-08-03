@@ -184,15 +184,24 @@ Ghi chú: kill switch **default = enabled** khi doc không tồn tại hoặc đ
 
 ### Chuẩn bị key một lần
 
-`.env` đã được gitignore trong `functions/`. Các script không tự đọc nó, nên source thủ công:
+Dùng `functions/local.env` (đã gitignore). Các script không tự đọc nó, nên source thủ công:
 
 ```bash
 cd functions
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env      # một lần
-set -a; . ./.env; set +a                        # mỗi shell mới
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > local.env   # một lần
+set -a; . ./local.env; set +a                     # mỗi shell mới
 ```
 
-Hoặc prefix từng lệnh: `ANTHROPIC_API_KEY=$(grep -h ANTHROPIC .env | cut -d= -f2) npm run ...`
+**Đừng đặt tên file là `.env`.** `firebase deploy` tự nạp mọi file `.env*` trong
+`functions/` thành env var **thường**, rồi đụng với khai báo `secrets:
+["ANTHROPIC_API_KEY"]` của `onRequest` và deploy chết ngay:
+
+```
+HTTP 400: Secret environment variable overlaps non secret
+          environment variable: ANTHROPIC_API_KEY
+```
+
+Đã dính đúng lỗi này một lần khi deploy `virtualCompanyRun` (2026-08-03).
 
 ### Chi phí thật cần biết trước
 
@@ -211,7 +220,7 @@ Ceiling cứng mỗi run: 200k token / $1.50 — vượt là `run_stopped`, khô
 
 ```bash
 cd functions
-set -a; . ./.env; set +a
+set -a; . ./local.env; set +a
 
 npx jest company                                          # 1. tầng 0, free
 npm run verify:company                                     # 2. tầng 1, pass/fail
@@ -223,16 +232,18 @@ Sửa `my-founder.json` trước khi chạy tầng 2 — file đang có mấy ch
 số beta user, constraint tài chính). Để nguyên `TODO` thì agent sẽ đoán, và bạn sẽ
 đánh giá sai chất lượng của nó.
 
-### Tầng 3 cần thêm 2 thứ
+### Tầng 3 — endpoint đã deploy (2026-08-03)
+
+`virtualCompanyRun` đã live tại `us-central1`, xác minh bằng curl: POST không token
+→ 401, GET → 405. Secret `ANTHROPIC_API_KEY` có sẵn trong project (v4 ENABLED).
+
+Deploy lại thì dùng **deploy có filter**, đừng deploy cả codebase trừ khi cố ý:
 
 ```bash
-npx firebase login --reauth      # credentials hiện tại đã hết hạn
-cd functions && npm run deploy   # deploy virtualCompanyRun
+npx firebase deploy --only functions:virtualCompanyRun --project devpet-8f4b1
 ```
 
-Rồi mint token và curl như mục 3 ở trên. Kiểm `ANTHROPIC_API_KEY` đã nằm trong
-Firebase secrets (endpoint khai `secrets: ["ANTHROPIC_API_KEY"]`) — chưa có thì
-`npx firebase functions:secrets:set ANTHROPIC_API_KEY`.
+Filter tránh việc ship kèm thay đổi prompt sang các function khác đang chạy.
 
 ---
 

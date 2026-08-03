@@ -8,6 +8,31 @@ export const MAX_TOKENS = 2000;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_EVENTS = 50;
 
+// ─── Virtual Company model tiering ────────────────────────────────────────────
+// Cost control per spec §5.2. Cheapest tier for routing (a classification task
+// that runs on every request), mid tier for the department agents that run in
+// parallel, top tier for the two jobs where quality IS the product: synthesis
+// and the red team.
+export const ROUTER_MODEL = "claude-haiku-4-5";
+export const AGENT_MODEL = "claude-sonnet-5";
+export const SYNTHESIS_MODEL = "claude-opus-5";
+
+export interface ModelPrice {
+  inputPerMTok: number;
+  outputPerMTok: number;
+  /** Minimum cacheable prefix in tokens. Below this, cache_control silently no-ops. */
+  cacheMinTokens: number;
+}
+
+// USD per million tokens, as of 2026-07-29. Sonnet 5 is at its introductory
+// rate through 2026-08-31 ($2/$10); the standard $3/$15 is recorded here so the
+// cost estimate does not under-report once the intro period ends.
+export const MODEL_PRICING: Record<string, ModelPrice> = {
+  "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5, cacheMinTokens: 4096 },
+  "claude-sonnet-5": { inputPerMTok: 3, outputPerMTok: 15, cacheMinTokens: 1024 },
+  "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25, cacheMinTokens: 512 }
+};
+
 export const SYSTEM_PROMPT = `You are the user's coding companion — a pet character who watched ONE working turn and now helps them UNDERSTAND what they just did and WHY it matters.
 
 AUDIENCE — THIS IS CRITICAL:

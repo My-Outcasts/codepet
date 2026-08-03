@@ -11,6 +11,7 @@ import { handleSynthesizeBrief } from "./synthesizeBrief";
 import { handleRevenueCatWebhook } from "./revenueCatWebhook";
 import { handleExtractKnowledge } from "./extractKnowledge";
 import { handleGenerateDictionary } from "./generateDictionary";
+import { handleVirtualCompanyRun } from "./company/virtualCompany";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -104,4 +105,22 @@ export const generateDictionary = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleGenerateDictionary
+);
+
+// Virtual Company: 4 agents analyse a founder's decision independently, surface
+// where they disagree, negotiate under a 2-round cap, then synthesise a brief.
+// Streams SSE — see docs/superpowers/specs/virtual-company-sse-contract.md for
+// the event contract the client consumes.
+//
+// timeoutSeconds is raised because a full multi_agent run makes up to 8 model
+// calls across five phases (intake, 2 positions in parallel, up to 4
+// negotiation turns, a red team pass, synthesis). The default 60s would cut a
+// legitimate run off mid-phase.
+export const virtualCompanyRun = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"],
+    timeoutSeconds: 540
+  },
+  handleVirtualCompanyRun
 );

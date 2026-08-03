@@ -184,7 +184,7 @@ struct RoadmapView: View {
                                            plannedFiles: 2, needsBash: false,
                                            link: companyStore.activeProjectLink)
         case .showBlocker:
-            guard depth == 0, let blocker = RoadmapGating.blocker(for: task, in: tasks) else { break }
+            guard depth == 0, let blocker = RoadmapGating.escapeHatch(for: task, in: tasks) else { break }
             dispatch(blocker, depth: 1)
         case .none:             break
         }

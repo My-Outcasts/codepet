@@ -149,16 +149,48 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertNil(RoadmapGating.blocker(for: a, in: [a]))
     }
 
-    func testBlockerChainResolvesToAnActionableTaskNotABlockedOne() {
+    func testEscapeHatchChainResolvesToAnActionableTaskNotABlockedOne() {
         // y is founder-owned (so it's the naive "earliest founder step" answer) but y itself
         // is blocked on z, its own unmet dependency — handing the founder y would be a second
-        // dead end. The chain must walk past y to z, which is actually actionable.
+        // dead end. The escape hatch must walk past y to z, which is actually actionable.
         let z = t("z", .find)
         let y = t("y", .find, who: .you, deps: ["z"])
         let later = t("b", .build)
         let all = [z, y, later]
-        let blocker = RoadmapGating.blocker(for: later, in: all)
-        XCTAssertEqual(blocker?.id, "z")
-        XCTAssertNotEqual(RoadmapEngine.status(for: blocker!, in: all), .blocked)
+        let escapeHatch = RoadmapGating.escapeHatch(for: later, in: all)
+        XCTAssertEqual(escapeHatch?.id, "z")
+        XCTAssertNotEqual(RoadmapEngine.status(for: escapeHatch!, in: all), .blocked)
+    }
+
+    // MARK: strict blocker (display) vs escapeHatch (dispatch)
+
+    /// The card face shows this string, so it must never name a task the tapped card has no
+    /// dependency relationship with. On a cycle the strict blocker reports nothing rather than
+    /// pointing somewhere misleading.
+    func testStrictBlockerReturnsNilOnACycleRatherThanAnUnrelatedTask() {
+        let a = t("a", .find, who: .you, deps: ["b"])
+        let b = t("b", .find, who: .you, deps: ["a"])
+        let elsewhere = t("z", .find)                     // actionable, unrelated to a/b
+        let all = [a, b, elsewhere]
+        // `a`'s only dependency is `b`, which is not done → strict blocker is `b`, full stop.
+        XCTAssertEqual(RoadmapGating.blocker(for: a, in: all)?.id, "b")
+        // The escape hatch may legitimately walk past the cycle to something actionable.
+        XCTAssertNotNil(RoadmapGating.escapeHatch(for: a, in: all))
+    }
+
+    func testStrictBlockerOfAPhaseGatedTaskIsTheFounderStepItself() {
+        // FIND's founder step is itself dependency-blocked, so the escape hatch walks past it
+        // while the strict blocker still names it — that IS what's holding the window shut.
+        let gate = t("y", .find, who: .you, deps: ["p"])
+        let pre = t("p", .find)
+        let later = t("b", .build)
+        let all = [gate, pre, later]
+        XCTAssertEqual(RoadmapGating.blocker(for: later, in: all)?.id, "y")
+        XCTAssertEqual(RoadmapGating.escapeHatch(for: later, in: all)?.id, "p")
+    }
+
+    func testStrictBlockerIsNilWhenNothingBlocks() {
+        let a = t("a", .find)
+        XCTAssertNil(RoadmapGating.blocker(for: a, in: [a]))
     }
 }

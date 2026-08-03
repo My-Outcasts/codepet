@@ -108,7 +108,13 @@ struct RoadmapView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
             OverviewChromeRow(tasks: tasks, companionName: companionName, accent: accent,
-                              onStart: { dispatch($0) }, onOpenTask: { dispatch($0) })
+                              // The beacon's filled Start dispatches directly — that one-click
+                              // path is the mitigation for board cards now opening the panel.
+                              // The quieter suggestion rows below it open the panel instead: they
+                              // render as plain text with no button chrome, and a drafted
+                              // suggestion would otherwise approve an unread draft into the
+                              // library on a single click, which no other surface does.
+                              onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.horizontal, 24).padding(.top, 16)
             RoadmapBoardView(tasks: tasks, companionName: companionName,
                              founderName: founderName,

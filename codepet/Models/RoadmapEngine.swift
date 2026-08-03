@@ -79,7 +79,15 @@ enum RoadmapEngine {
     }
 
     /// Up to `limit` suggestions for the founder's next moves: the beacon first, then one
-    /// actionable task per DISTINCT department, in roadmap order, all inside the open window.
+    /// actionable task per DISTINCT department, in roadmap order — actionable meaning a task
+    /// inside the open window, PLUS a drafted task anywhere, even one sitting in a closed phase.
+    ///
+    /// That second half is deliberate, not a leak: `status` ranks `needsApproval` above the
+    /// phase-window check (see its doc comment) precisely so a draft that's already done and
+    /// waiting on the founder's review never goes unreachable just because its phase closed
+    /// underneath it. This is the one way `suggestedNext` can disagree with `nextStep`, which
+    /// filters `open.contains(phase)` strictly and so never returns a task — drafted or not —
+    /// from a closed phase.
     ///
     /// Deliberately NOT `nextMoves`. That one is the chat fan-out: it keeps only `codepetCanDo`
     /// tasks whose department maps to a specialist companion, which excludes every `needsYou`

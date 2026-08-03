@@ -17,12 +17,43 @@ final class RoadmapEngineSuggestedNextTests: XCTestCase {
         XCTAssertTrue(RoadmapEngine.suggestedNext([t("a", .find, dept: "eng")], limit: 0).isEmpty)
     }
 
-    /// The beacon and the suggestion list must never disagree, so nextStep is always first.
+    /// The beacon and the suggestion list must never disagree, so nextStep is always first —
+    /// even when the loop's own roadmap-order winner is a DIFFERENT task than the beacon.
+    ///
+    /// "dr" is a drafted task with an unmet dependency ("dep") and sorts earliest (offset 0,
+    /// phase .find). Its status is `.needsApproval` (drafted outranks blocked), which the dedup
+    /// loop treats as actionable — so without the beacon forcing, the loop would emit "dr"
+    /// first. But `nextStep` excludes "dr": it requires `depsSatisfied`, and "dr" depends on
+    /// "dep", which isn't done. So `nextStep` instead picks "e" (.find, no deps, `.codepetCanDo`).
+    /// Forcing the beacon in must override the loop's natural pick of "dr" and put "e" first —
+    /// that's what this test is actually pinning.
+    ///
+    /// Hand trace: openPhases({dr, dep, e}) = {.find} only ("dr" is drafted+undone in .find, so
+    /// .find never settles and the window never advances to .build). status(dr) = .needsApproval
+    /// (drafted short-circuits before the window/deps checks). status(dep) = .blocked (.build is
+    /// closed). status(e) = .codepetCanDo (.find open, no deps, who = .does). nextStep's filter
+    /// (!done && open.contains(phase) && depsSatisfied) admits only "e" — "dr" fails
+    /// depsSatisfied, "dep" fails the open-phase check — so nextStep(tasks) == "e".
+    ///
+    /// If the `if let beacon = nextStep(tasks) { out.append(beacon); … }` forcing block were
+    /// deleted, the dedup loop would walk `ordered` = [dr, e, dep] and hit "dr" first (actionable,
+    /// unseen department), making it index 0 instead of "e" — this fixture would then fail both
+    /// assertions below, which is what makes it discriminating (confirmed by hand: commenting
+    /// out the forcing block flips `result.first` to "dr" and the "not at index 0" assertion
+    /// fails too).
     func testBeaconIsAlwaysFirst() {
-        let tasks = [t("d", .foundation, dept: "design"), t("f", .find, dept: "mkt")]
+        let dr = t("dr", .find, dept: "design", deps: ["dep"], drafted: true)
+        let dep = t("dep", .build, dept: "ops")               // undone dep, closed phase
+        let e = t("e", .find, dept: "eng")                    // nextStep's actual pick
+        let tasks = [dr, dep, e]
+
         let picked = RoadmapEngine.suggestedNext(tasks, limit: 3).map(\.id)
         XCTAssertEqual(picked.first, RoadmapEngine.nextStep(tasks)?.id)
-        XCTAssertEqual(picked.first, "f")     // find(0) precedes foundation(1)
+        XCTAssertEqual(picked.first, "e")
+        // Not merely "the roadmap-order-first task": "dr" sorts before "e" and IS suggestible,
+        // but the beacon forcing must keep it out of the lead slot.
+        XCTAssertTrue(picked.contains("dr"))
+        XCTAssertNotEqual(picked.first, "dr")
     }
 
     /// The gap that rules out nextMoves: a founder-owned task must be suggestible.
@@ -57,6 +88,24 @@ final class RoadmapEngineSuggestedNextTests: XCTestCase {
     func testDeptLessTasksEachTakeASlot() {
         let tasks = [t("a", .find, dept: nil), t("b", .find, dept: nil)]
         XCTAssertEqual(RoadmapEngine.suggestedNext(tasks, limit: 3).map(\.id), ["a", "b"])
+    }
+
+    /// Deliberate product decision, NOT a leak: a drafted task in a CLOSED phase is still
+    /// suggested. `status` ranks `needsApproval` above the phase-window check (drafted
+    /// short-circuits before `RoadmapGating.openPhases` is even consulted), so a finished draft
+    /// waiting on the founder's approval must never become unreachable just because its phase
+    /// closed underneath it. This is the one way `suggestedNext` differs from `nextStep`, which
+    /// filters `open.contains(phase)` strictly and would never surface "b" here.
+    ///
+    /// Hand trace: openPhases({y, b}) = {.find} only — "y" (who: .you, undone) sits in .find and
+    /// keeps that phase unsettled, so the window never advances to .build. "b" is drafted, in
+    /// .build (closed), status = .needsApproval regardless. nextStep(tasks) = "y" (only task
+    /// inside the open window with satisfied deps).
+    func testDraftedTaskInAClosedPhaseIsStillSuggested() {
+        let you = t("y", .find, dept: "mkt", who: .you)        // holds the window shut
+        let draft = t("b", .build, dept: "eng", drafted: true) // closed phase, but drafted
+        let picked = RoadmapEngine.suggestedNext([you, draft], limit: 3).map(\.id)
+        XCTAssertTrue(picked.contains("b"))
     }
 
     func testBlockedTasksAreNeverSuggested() {

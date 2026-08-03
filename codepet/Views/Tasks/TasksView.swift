@@ -186,6 +186,7 @@ struct TasksView: View {
                 if !t.done {
                     Text(status.label(lang)).font(CodepetTheme.inter(11, weight: .medium))
                         .foregroundColor(taskStatusTint(status))
+                        .lineLimit(1).fixedSize()
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
                 }

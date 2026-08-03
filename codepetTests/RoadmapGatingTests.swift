@@ -94,6 +94,27 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertEqual(s.count, RoadmapPhase.allCases.count)
     }
 
+    // MARK: founderStep
+
+    func testFounderStepReturnsTheEarliestUnsettledPhasesTask() {
+        // Both FIND and FOUNDATION hold founder work, but FIND is the earlier unsettled
+        // phase — founderStep must stop there, not walk on to FOUNDATION's task.
+        let a = t("a", .find, who: .you)
+        let b = t("b", .foundation, who: .you)
+        XCTAssertEqual(RoadmapGating.founderStep(in: [a, b])?.id, "a")
+    }
+
+    func testFounderStepCountsADraftAsFounderWork() {
+        // Not `who: .you` — a draft still needs the founder's approval to move.
+        let d = t("d", .find, drafted: true)
+        XCTAssertEqual(RoadmapGating.founderStep(in: [d])?.id, "d")
+    }
+
+    func testFounderStepIsNilWhenEveryPhaseIsSettled() {
+        let all = [t("a", .find), t("b", .foundation, done: true)]
+        XCTAssertNil(RoadmapGating.founderStep(in: all))
+    }
+
     // MARK: blocker
 
     func testBlockerOfAPhaseGatedTaskIsTheEarliestFounderStep() {
@@ -102,9 +123,13 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertEqual(RoadmapGating.blocker(for: later, in: [gate, later])?.id, "y")
     }
 
-    func testBlockerAgreesWithTheBeacon() {
-        // The founder step holding the window shut is also what nextStep points at, so the
-        // locked-card explanation and the beacon can never disagree.
+    func testBlockerAndBeaconCoincideWhenTheOpenPrefixIsOnePhase() {
+        // When the open prefix holds exactly one populated phase, the founder step holding
+        // the window shut is also what nextStep points at, so the locked-card explanation
+        // and the beacon coincide here. That's fixture-scoped, not a general invariant: once
+        // the prefix spans more than one populated phase, `nextStep` minimises over the whole
+        // window while `blocker` always names the earliest unsettled phase, so they can
+        // legitimately point at different (both valid) tasks — see `blocker`'s doc comment.
         let gate = t("y", .find, who: .you)
         let later = t("b", .build)
         let all = [gate, later]

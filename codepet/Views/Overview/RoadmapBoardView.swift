@@ -15,6 +15,7 @@ struct RoadmapBoardView: View {
     let accent: Color
     let onTaskTap: (RoadmapTask) -> Void
 
+    @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
     /// Task ids mid-pulse (a step just became current, or just unlocked).
@@ -207,6 +208,10 @@ struct RoadmapBoardView: View {
                                 herePhrase: herePhrase,
                                 pulsing: pulseIds.contains(n.task.id),
                                 accent: accent,
+                                blockerTitle: status == .blocked
+                                    ? RoadmapGating.blocker(for: n.task, in: tasks)?.title
+                                    : nil,
+                                isRunning: companyStore.runningTaskIds.contains(n.task.id),
                                 onTap: { onTaskTap(n.task) })
                     // `.help`/`.id` must be attached BEFORE `.position` — `.position` returns
                     // a view that consumes all offered space, so anything chained after it

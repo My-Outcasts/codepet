@@ -235,28 +235,60 @@ export async function runSynthesis(args: {
       : args.conflicts.map((c) => `${c.a} vs ${c.b}: ${c.kind} — ${c.reason}`).join("\n");
 
   const model = AGENT_DEFS.chief_of_staff.model;
-  const { input, usage } = await args.call({
+  const system = composeAgentSystem({
     agent: "chief_of_staff",
-    model,
-    system: composeAgentSystem({
-      agent: "chief_of_staff",
-      founder: args.founder,
-      rawRequest: args.rawRequest
-    }),
-    userMessage: SYNTHESIS_INSTRUCTION.replace("<real_question>", args.realQuestion.trim())
-      .replace("<positions>", renderPositions(args.positions))
-      .replace("<conflicts>", conflictBlock)
-      .replace("<negotiation>", negotiationBlock)
-      .replace("<red_team>", redTeamBlock),
-    tool: BRIEF_TOOL,
-    toolName: BRIEF_TOOL.name
+    founder: args.founder,
+    rawRequest: args.rawRequest
   });
+  const baseMessage = SYNTHESIS_INSTRUCTION.replace("<real_question>", args.realQuestion.trim())
+    .replace("<positions>", renderPositions(args.positions))
+    .replace("<conflicts>", conflictBlock)
+    .replace("<negotiation>", negotiationBlock)
+    .replace("<red_team>", redTeamBlock);
+  const ask = (message: string) =>
+    args.call({
+      agent: "chief_of_staff",
+      model,
+      system,
+      userMessage: message,
+      tool: BRIEF_TOOL,
+      toolName: BRIEF_TOOL.name
+    });
 
-  const parsed = parseBriefToolInput(input);
+  // Phase 5 is the last and most expensive call in the run, so a rejected brief
+  // used to throw away everything already paid for. Observed in production on a
+  // real run: the model omitted what_we_dont_know and an otherwise complete brief
+  // was discarded. Same failure mode as the positions in phase 2 — a required
+  // field simply missing — so it gets the same remedy: one more attempt with the
+  // reason quoted back. Both calls are billed, so both are counted.
+  const first = await ask(baseMessage);
+  let input = first.input;
+  let usage = first.usage;
+  let parsed = parseBriefToolInput(input);
+  let dissentBuried = "error" in parsed ? false : briefOmitsDissent(parsed, args.conflicts);
+
+  if ("error" in parsed || dissentBuried) {
+    const reason = "error" in parsed
+      ? parsed.error
+      : "the_real_disagreement does not report the conflict that actually existed";
+    const retry = await ask(
+      `${baseMessage}\n\nYour previous submit_brief call was rejected: ${reason}. ` +
+        `Every required field must be present and non-empty. Call the tool again with all of them.`
+    );
+    input = retry.input;
+    usage = {
+      input: first.usage.input + retry.usage.input,
+      output: first.usage.output + retry.usage.output,
+      cache_read: first.usage.cache_read + retry.usage.cache_read
+    };
+    parsed = parseBriefToolInput(input);
+    dissentBuried = "error" in parsed ? false : briefOmitsDissent(parsed, args.conflicts);
+  }
+
   if ("error" in parsed) {
     throw new Error(`unusable decision brief from chief_of_staff: ${parsed.error}`);
   }
-  if (briefOmitsDissent(parsed, args.conflicts)) {
+  if (dissentBuried) {
     throw new Error(
       "decision brief buried dissent: a CONFLICT or BLOCKER existed but the_real_disagreement does not report it"
     );

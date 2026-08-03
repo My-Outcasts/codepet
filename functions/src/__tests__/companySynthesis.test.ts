@@ -315,4 +315,88 @@ describe("runSynthesis", () => {
       })
     ).rejects.toThrow(/chief_of_staff/i);
   });
+
+  test("asks again once when the brief is rejected, and keeps the retry", async () => {
+    // Observed in production: the model omitted what_we_dont_know and a complete
+    // brief was discarded at the last and most expensive call in the run.
+    let calls = 0;
+    const { brief } = await runSynthesis({
+      ...baseArgs,
+      call: async () => {
+        calls++;
+        const { what_we_dont_know, ...missingField } = briefInput();
+        return {
+          input: calls === 1 ? missingField : briefInput(),
+          usage: { input: 200, output: 20, cache_read: 0 }
+        };
+      }
+    });
+    expect(calls).toBe(2);
+    expect(brief.recommendation).not.toBe("");
+  });
+
+  test("usage covers both attempts when the first brief was rejected", async () => {
+    let calls = 0;
+    const { usage } = await runSynthesis({
+      ...baseArgs,
+      call: async () => {
+        calls++;
+        const { kill_criteria, ...missingField } = briefInput();
+        return {
+          input: calls === 1 ? missingField : briefInput(),
+          usage: { input: 200, output: 20, cache_read: 5 }
+        };
+      }
+    });
+    expect(usage).toEqual({ input: 400, output: 40, cache_read: 10 });
+  });
+
+  test("does not retry when the first brief is usable", async () => {
+    let calls = 0;
+    await runSynthesis({
+      ...baseArgs,
+      call: async () => {
+        calls++;
+        return { input: briefInput(), usage: zeroUsage };
+      }
+    });
+    expect(calls).toBe(1);
+  });
+
+  test("retries a brief that buried dissent, then throws if it still does", async () => {
+    // The dissent guard is the whole point of the feature, so it gets a second
+    // chance rather than a silent pass — but never a pass.
+    let calls = 0;
+    await expect(
+      runSynthesis({
+        ...baseArgs,
+        call: async () => {
+          calls++;
+          return {
+            input: briefInput({ the_real_disagreement: "Everyone agreed." }),
+            usage: zeroUsage
+          };
+        }
+      })
+    ).rejects.toThrow(/dissent/i);
+    expect(calls).toBe(2);
+  });
+
+  test("quotes the rejection reason back on the retry", async () => {
+    const messages: string[] = [];
+    let calls = 0;
+    await runSynthesis({
+      ...baseArgs,
+      call: async (a) => {
+        messages.push(a.userMessage);
+        calls++;
+        const { what_we_dont_know, ...missingField } = briefInput();
+        return { input: calls === 1 ? missingField : briefInput(), usage: zeroUsage };
+      }
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).not.toMatch(/rejected/);
+    expect(messages[1]).toMatch(/rejected/);
+    expect(messages[1]).toMatch(/what_we_dont_know/);
+  });
 });

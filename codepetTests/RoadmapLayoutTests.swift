@@ -94,7 +94,8 @@ final class RoadmapLayoutTests: XCTestCase {
     }
 
     // Different rows → a 4-point elbow whose vertical sits in the gutter left of the TARGET
-    // column, so it never crosses an intermediate column's cards.
+    // column. The vertical is STAGGERED by the source's lane (lane 0 → the gutter's mid less
+    // 16), so two edges arriving from different lanes don't stack onto one line.
     func testOffsetRowsGiveAnElbowInTheTargetGutter() {
         let l = RoadmapLayoutEngine.layout([
             t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
@@ -102,22 +103,32 @@ final class RoadmapLayoutTests: XCTestCase {
         ])
         let e = l.edges.first { $0.from == "e1" && $0.to == "m2" }!
         XCTAssertEqual(e.points.count, 4)
-        let gutter = (node(l, "m2").x - 30).rounded()
-        XCTAssertEqual(e.points[1].x, gutter)
-        XCTAssertEqual(e.points[2].x, gutter)
+        let trunk = RoadmapLayoutEngine.trunkX(rightWall: node(l, "m2").x, gutter: 60, lane: 0)
+        XCTAssertEqual(trunk, 454)                                 // 500 - 30 (mid) - 16 (lane 0)
+        XCTAssertEqual(e.points[1].x, trunk)
+        XCTAssertEqual(e.points[2].x, trunk)
         XCTAssertEqual(e.points[1].y, e.points[0].y)
         XCTAssertEqual(e.points[2].y, e.points[3].y)
+        // Inside the gutter: clear of the source column's right edge and the target's left one.
+        XCTAssertGreaterThan(trunk, node(l, "e1").x + 208)
+        XCTAssertLessThan(trunk, node(l, "m2").x)
     }
 
-    // Same-column deps hook through the column's LEFT gutter instead of doubling back.
-    func testSameColumnEdgeHooksLeft() {
+    // Same-column deps hook down the column's own left margin instead of doubling back — and
+    // hug the card edge, INSIDE the inbound trunks' spread, so the two can't be superimposed.
+    func testSameColumnEdgeHooksLeftInsideTheTrunkSpread() {
         let l = RoadmapLayoutEngine.layout([
             t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt", deps: ["e1"]),
         ])
         let e = l.edges.first { $0.from == "e1" && $0.to == "m1" }!
         XCTAssertEqual(e.points.count, 4)
         XCTAssertEqual(e.points[0].x, node(l, "e1").x)             // starts at the LEFT edge
+        XCTAssertEqual(e.points[1].x, node(l, "e1").x - 8)         // sideHookInset
         XCTAssertLessThan(e.points[1].x, node(l, "e1").x)          // hooks further left
+        // The widest inbound trunk any lane can claim still sits left of this hook, so an
+        // in-phase hook and a cross-phase trunk can never be drawn on the same x.
+        let widest = RoadmapLayoutEngine.trunkX(rightWall: node(l, "e1").x, gutter: 60, lane: 4)
+        XCTAssertLessThan(widest, e.points[1].x)
     }
 
     func testDanglingDepIsDropped() {
@@ -145,7 +156,11 @@ final class RoadmapLayoutTests: XCTestCase {
 
     // MARK: root
 
-    func testRootBoxIsVerticallyCentered() {
+    // The root is seated on the rows it FEEDS, not on the canvas. With two entry tasks on
+    // lanes 0 and 1 that's the mean of their centres (72, 168) → 120, so origin.y = 120 - 59.
+    // Canvas-centring gave 49 — a few points off both lanes, which is what put a needless jog
+    // on every root edge and ran it parallel to the real edges on that lane.
+    func testRootBoxIsSeatedOnItsEntryRows() {
         let l = RoadmapLayoutEngine.layout([
             t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
         ])
@@ -153,7 +168,27 @@ final class RoadmapLayoutTests: XCTestCase {
         XCTAssertEqual(r.origin.x, 12)
         XCTAssertEqual(r.size.width, 172)
         XCTAssertEqual(r.size.height, 118)
-        XCTAssertEqual(r.origin.y, ((l.size.height - 118) / 2).rounded())
+        XCTAssertEqual(r.origin.y, 61)
+        XCTAssertNotEqual(r.origin.y, ((l.size.height - 118) / 2).rounded())   // was 49
+    }
+
+    /// A single entry task tall enough to reach → the root's first leg is DEAD STRAIGHT (2
+    /// points), no jog. Three lanes so the 118pt root box can actually sit that low without
+    /// being clamped by the canvas.
+    func testRootEdgeToASingleEntryIsStraight() {
+        let l = RoadmapLayoutEngine.layout([
+            t("m1", .find, dept: "mkt"),
+            t("e1", .find, dept: "eng", deps: ["m1"]),
+            t("f1", .find, dept: "fin", deps: ["m1"]),
+        ])
+        XCTAssertEqual(node(l, "m1").row, 1)                    // the middle lane
+        XCTAssertEqual(l.size.height, 312)                      // 40 + 2*96 + 64 + 16
+        XCTAssertEqual(l.root!.origin.y, 109)                   // centre 168 - 59, unclamped
+        XCTAssertEqual(l.rootEdges.count, 1)
+        let e = l.rootEdges[0]
+        XCTAssertEqual(e.points.count, 2)
+        XCTAssertEqual(e.points[0].y, 168)
+        XCTAssertEqual(e.points[1].y, 168)                      // same y → no jog at all
     }
 
     // Root fans out to ENTRY tasks only (no in-roadmap dependency), in any phase.
@@ -250,12 +285,110 @@ final class RoadmapLayoutTests: XCTestCase {
         XCTAssertEqual(e.points[0].x, 440)   // leaves e1's RIGHT edge (232 + 208)
         XCTAssertEqual(e.points[0].y, 72)
         XCTAssertEqual(e.points[3].y, 168)
-        XCTAssertEqual(e.points[1].x, 738)   // gutter left of the TARGET column (768 - 30)
-        XCTAssertEqual(e.points[2].x, 738)
+        XCTAssertEqual(e.points[1].x, 722)   // target gutter, staggered for lane 0 (768 - 30 - 16)
+        XCTAssertEqual(e.points[2].x, 722)
         // Column 1 (foundation)'s right edge is 500 + 208 = 708. A source-gutter
         // implementation would put the vertical at 470 — straight through column 1's
-        // cards. 738 > 708 proves the vertical actually clears the intervening column.
+        // cards. 722 > 708 proves the vertical actually clears the intervening column.
         XCTAssertGreaterThan(e.points[1].x, 708)
+        // Column 1 holds NO card here, so nothing obstructs the horizontal leg and the plain
+        // 4-point elbow is correct. That precision is the point: a detour is spent only when a
+        // card really is in the way (see testSkipLevelEdgeDetoursAroundTheCardInItsPath).
+        XCTAssertEqual(l.nodes.filter { $0.col == 1 }.count, 0)
+    }
+
+    // MARK: skip-level routing
+
+    /// THE routing fix. `e0 → x2` skips column 1, and `e1` sits in column 1 on the very same
+    /// department lane — so the old horizontal-at-the-source's-y ran straight through `e1`'s
+    /// opaque card and re-emerged, rendering `e0 → x2` as the chain `e0 → e1 → x2`. All three
+    /// share lane 0 here, so the old route was a 2-point STRAIGHT line right across `e1`.
+    func testSkipLevelEdgeDetoursAroundTheCardInItsPath() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e0", .find, dept: "eng"),
+            t("e1", .foundation, dept: "eng"),
+            t("x2", .build, dept: "eng", deps: ["e0"]),
+        ])
+        // All on lane 0 — this is what made the old straight line pass through e1.
+        XCTAssertEqual(node(l, "e0").row, 0)
+        XCTAssertEqual(node(l, "e1").row, 0)
+        XCTAssertEqual(node(l, "x2").row, 0)
+
+        let e = l.edges.first { $0.from == "e0" && $0.to == "x2" }!
+        XCTAssertEqual(e.points.count, 6)                       // was 2 (straight, through e1)
+        XCTAssertEqual(e.points[0], CGPoint(x: 440, y: 72))     // e0's right edge
+        XCTAssertEqual(e.points[5], CGPoint(x: 768, y: 72))     // x2's left edge
+
+        // The crossing happens in the corridor below row 0, not on row 0.
+        let corridor = RoadmapGeometry.corridorY(below: 0)
+        XCTAssertEqual(corridor, 120)                           // 40 + 64 + 16
+        XCTAssertEqual(e.points[2].y, corridor)
+        XCTAssertEqual(e.points[3].y, corridor)
+        // e1's card occupies y 40...104 and x 500...708. The corridor clears it vertically,
+        // and both verticals clear it horizontally.
+        XCTAssertGreaterThan(corridor, node(l, "e1").y + 64)
+        XCTAssertLessThan(e.points[1].x, node(l, "e1").x)       // exits before column 1
+        XCTAssertGreaterThan(e.points[4].x, node(l, "e1").x + 208)  // re-enters after it
+
+        // The canvas grows so the bottom-row corridor isn't stroked on the clipping edge:
+        // one row is normally 120 tall, and corridorY(below: 0) lands exactly on that.
+        XCTAssertEqual(l.size.height, 132)                      // 120 + corridorPad 12
+    }
+
+    /// Two edges arriving from DIFFERENT lanes get their own vertical; two leaving the SAME
+    /// source stay bundled. The old `b.x - colGap / 2` gave every inbound edge of a column the
+    /// same x, so one dependency and nine looked identical.
+    func testInboundTrunksStaggerByLaneButBundlePerSource() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
+            t("d1", .foundation, dept: "design"), t("s1", .foundation, dept: "sales"),
+            t("f1", .foundation, dept: "fin", deps: ["e1", "m1"]),
+        ])
+        XCTAssertEqual(node(l, "e1").row, 0)
+        XCTAssertEqual(node(l, "m1").row, 1)
+        XCTAssertEqual(node(l, "f1").row, 2)
+
+        let fromE = l.edges.first { $0.from == "e1" && $0.to == "f1" }!
+        let fromM = l.edges.first { $0.from == "m1" && $0.to == "f1" }!
+        XCTAssertEqual(fromE.points[1].x, 454)                  // lane 0 → mid - 16
+        XCTAssertEqual(fromM.points[1].x, 462)                  // lane 1 → mid - 8
+        XCTAssertNotEqual(fromE.points[1].x, fromM.points[1].x)
+        // Both still inside the gutter between column 0's right edge (440) and column 1 (500).
+        for x in [fromE.points[1].x, fromM.points[1].x] {
+            XCTAssertGreaterThan(x, 440)
+            XCTAssertLessThan(x, 500)
+        }
+
+        // Same source, two targets in the same column → deliberately ONE shared trunk: that
+        // really is a single fan-out, so bundling it is honest rather than lossy.
+        let l2 = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
+            t("d1", .foundation, dept: "design"), t("s1", .foundation, dept: "sales", deps: ["e1"]),
+            t("f1", .foundation, dept: "fin", deps: ["e1"]),
+        ])
+        let a = l2.edges.first { $0.from == "e1" && $0.to == "s1" }!
+        let b = l2.edges.first { $0.from == "e1" && $0.to == "f1" }!
+        XCTAssertEqual(a.points[1].x, b.points[1].x)
+    }
+
+    /// A column preceded by a RAIL has only `railGap` (20) in front of it, not `colGap` (60).
+    /// The old fixed `b.x - colGap / 2` put the vertical 10pt INSIDE that rail.
+    func testTrunkStaysOutOfAPrecedingRail() {
+        let l = RoadmapLayoutEngine.layout([
+            t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
+            t("m2", .build, dept: "mkt", deps: ["e1"]),
+        ], expanded: [.find, .build])
+        let railX = l.rails.first { $0.phase == .foundation }!.x
+        XCTAssertEqual(railX, 500)
+        XCTAssertEqual(node(l, "m2").x, 564)                    // 500 + railW 44 + railGap 20
+
+        let e = l.edges.first { $0.from == "e1" && $0.to == "m2" }!
+        XCTAssertEqual(e.points.count, 4)
+        XCTAssertEqual(e.points[1].x, 554)                      // 564 - 10, the narrow gutter's mid
+        XCTAssertGreaterThan(e.points[1].x, railX + 44)         // clear of the rail's right edge
+        XCTAssertLessThan(e.points[1].x, node(l, "m2").x)
+        // The old formula: 564 - 30 = 534, which is 34pt INSIDE the rail [500, 544].
+        XCTAssertGreaterThan(e.points[1].x, 534)
     }
 
     // MARK: unlisted departments
@@ -286,18 +419,17 @@ final class RoadmapLayoutTests: XCTestCase {
 
     // MARK: multi-row canvas height
 
-    // testRootBoxIsVerticallyCentered recomputes the engine's own formula from its own
-    // output (`((l.size.height - 118) / 2).rounded()`), so it can never fail. Pin absolute
-    // numbers instead: two depts (eng, mkt) that never share a column but both sit in
-    // column 0 (find) force 2 lanes.
-    func testMultiRowCanvasHeightAndRootCentring() {
+    // Pin absolute numbers: two depts (eng, mkt) that never share a column but both sit in
+    // column 0 (find) force 2 lanes. No edges here, so the canvas keeps its plain row height —
+    // only a routing corridor along the bottom row grows it (see the skip-level test).
+    func testMultiRowCanvasHeightAndRootSeating() {
         let l = RoadmapLayoutEngine.layout([
             t("e1", .find, dept: "eng"), t("m1", .find, dept: "mkt"),
         ])
         // top 40 + 1 * rowPitch 96 + cardH 64 + bottomPad 16
         XCTAssertEqual(l.size.height, 216)
-        // round((216 - 118) / 2)
-        XCTAssertEqual(l.root!.origin.y, 49)
+        // Both are entry tasks → mean of lane 0 and lane 1 centres (72, 168) = 120, less 59.
+        XCTAssertEqual(l.root!.origin.y, 61)
     }
 
     // MARK: rails (collapsed phases)
@@ -363,10 +495,27 @@ final class RoadmapLayoutTests: XCTestCase {
         // BUILD collapsed → its two department lanes leave the board entirely: one row.
         let expandedOnly = RoadmapLayoutEngine.layout(tasks, expanded: [.find])
         XCTAssertEqual(expandedOnly.size.height, 40 + 64 + 16)         // 120
+
         // BUILD expanded → eng and design share lane 0 (their columns don't clash), mkt takes
-        // lane 1, so the board grows by exactly one row pitch.
+        // lane 1, so the ROW contribution grows by exactly one row pitch. Isolated with
+        // `hasRoot: false`, because with a root these depless BUILD tasks are entry tasks whose
+        // root edges cross FIND — see the corridor case below.
+        let rootless = RoadmapLayoutEngine.layout(tasks, hasRoot: false, expanded: [.find, .build])
+        XCTAssertEqual(rootless.size.height, 40 + 96 + 64 + 16)        // 216
+
+        // With the root, `b` (bottom lane, column 2) is fed by a root edge that has to cross
+        // column 0's card, so it routes through the corridor below the bottom row — which lands
+        // exactly on 216. The canvas grows by `corridorPad` to keep that line inside it. The
+        // extra height is ROUTING, not a collapsed phase's lane: the claim above still holds.
         let withBuild = RoadmapLayoutEngine.layout(tasks, expanded: [.find, .build])
-        XCTAssertEqual(withBuild.size.height, 40 + 96 + 64 + 16)       // 216
+        XCTAssertEqual(withBuild.size.height, 228)                     // 216 + corridorPad 12
+        XCTAssertEqual(RoadmapGeometry.corridorY(below: 1), 216)
+        XCTAssertEqual(l6RootEdge(withBuild, to: "b")?.points.count, 6)
+    }
+
+    /// The root edge to `id`, for tests that care about its routing shape.
+    private func l6RootEdge(_ l: RoadmapLayout, to id: String) -> EdgePath? {
+        l.rootEdges.first { $0.to == id }
     }
 
     func testLayoutWidthMatchesBoardWidth() {

@@ -22,6 +22,27 @@ enum RoadmapGeometry {
     static let railW: CGFloat = 44
     static let railGap: CGFloat = 20
 
+    // ── Edge routing ─────────────────────────────────────────────────────────────────
+    /// How far a staggered vertical run keeps off BOTH walls of its gutter, so the spread can
+    /// never touch a card's edge or be drawn on top of a preceding rail.
+    static let trunkInset: CGFloat = 14
+    /// A same-column hook hugs its column's left edge, INSIDE every inbound trunk's spread —
+    /// so an in-phase dependency can't be drawn on top of a cross-phase one.
+    static let sideHookInset: CGFloat = 8
+    /// Clearance kept below the deepest routing corridor, so a corridor along the board's
+    /// bottom row isn't stroked exactly on the canvas edge (where it renders half-clipped).
+    static let corridorPad: CGFloat = 12
+
+    /// The card-free horizontal corridor just below `row` — where a skip-level edge travels.
+    ///
+    /// Cards are `cardH` (64) tall on a `rowPitch` (96) pitch, so exactly `rowPitch - cardH`
+    /// (32) is always free between one row's bottom and the next row's top; the corridor runs
+    /// down its middle. Taking the corridor below `max(sourceRow, targetRow)` therefore clears
+    /// every card on the board: it is below both endpoints' rows and above row `max + 1`.
+    static func corridorY(below row: Int) -> CGFloat {
+        top + CGFloat(row) * rowPitch + cardH + (rowPitch - cardH) / 2
+    }
+
     /// Total board width for a given column mix — THE one width formula, shared by the layout
     /// engine (which must agree with what it draws) and `RoadmapFocus` (which must predict it
     /// before laying anything out). Columns accumulate their trailing gap; the last one's is
@@ -116,24 +137,87 @@ enum RoadmapLayoutEngine {
         return out
     }
 
+    /// The usable gap immediately LEFT of each phase's slot — the band an inbound edge's
+    /// vertical run lives in. Deliberately derived, not assumed: `colGap` after a column,
+    /// `railGap` after a rail, `rootGap` in front of the first phase (0 when there is no root,
+    /// where column 0 starts flush at `rootLeft` and can only ever be entered by a
+    /// same-column edge).
+    private static func leadingGaps(expanded: Set<RoadmapPhase>, hasRoot: Bool) -> [RoadmapPhase: CGFloat] {
+        var out: [RoadmapPhase: CGFloat] = [:]
+        for (i, phase) in RoadmapPhase.allCases.enumerated() {
+            if i == 0 {
+                out[phase] = hasRoot ? RoadmapGeometry.rootGap : 0
+            } else {
+                out[phase] = expanded.contains(RoadmapPhase.allCases[i - 1])
+                    ? RoadmapGeometry.colGap : RoadmapGeometry.railGap
+            }
+        }
+        return out
+    }
+
     private static func rowTop(_ row: Int) -> CGFloat {
         RoadmapGeometry.top + CGFloat(row) * RoadmapGeometry.rowPitch
     }
 
-    /// Orthogonal connector from a right-edge point to a left-edge point. A straight
-    /// segment when the rows line up, otherwise an elbow whose vertical sits in the gutter
-    /// just left of the TARGET column — so it never crosses an intermediate column's cards.
-    static func elbow(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
-        if a.y == b.y { return [a, b] }
-        let mid = (b.x - RoadmapGeometry.colGap / 2).rounded()
-        return [a, CGPoint(x: mid, y: a.y), CGPoint(x: mid, y: b.y), b]
+    /// The x of an edge's vertical run, inside the gutter whose RIGHT wall is `rightWall`.
+    ///
+    /// Staggered by `lane` (the SOURCE's row) rather than fixed at the gutter's middle. The
+    /// old `b.x - colGap / 2` depended only on the TARGET's column, so every inbound edge of a
+    /// column stacked its vertical onto the same 1.5pt line: one dependency and nine were
+    /// indistinguishable, and the apparent weight of that shared trunk came from alpha
+    /// stacking rather than from meaning. Keying on the source's lane separates edges that
+    /// come from different places while still merging edges that leave the SAME place — which
+    /// is honest, because that really is one fan-out.
+    ///
+    /// `gutter` is passed in, never assumed: it is `colGap` between two columns but only
+    /// `railGap` when the preceding phase collapsed to a rail, and `rootGap` in front of the
+    /// first phase. Hard-coding `colGap / 2` put the vertical 10pt INSIDE a preceding rail.
+    /// `trunkInset` bounds the spread so it stays clear of both walls at any gutter width;
+    /// a gutter too narrow to stagger degrades to a single centred trunk rather than
+    /// overflowing onto a card or a rail.
+    static func trunkX(rightWall: CGFloat, gutter: CGFloat, lane: Int) -> CGFloat {
+        let half = max(0, gutter / 2 - RoadmapGeometry.trunkInset)
+        let step = half / 2
+        let offset = CGFloat(min(max(lane, 0), 4) - 2) * step
+        return (rightWall - gutter / 2 + offset).rounded()
     }
 
-    /// Connector between two cards in the SAME column: a hook that drops into the column's
-    /// LEFT gutter instead of doubling back through the cards. Both x's are the column's left edge.
-    static func sideElbow(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
-        let g = (a.x - RoadmapGeometry.colGap / 2).rounded()
-        return [a, CGPoint(x: g, y: a.y), CGPoint(x: g, y: b.y), b]
+    /// Orthogonal connector from a right-edge point to a left-edge point: a straight run when
+    /// the rows line up, otherwise a 4-point elbow turning on `trunk`. Correct only when no
+    /// card sits between the two columns on the source's row — otherwise use `detour`.
+    static func route(from a: CGPoint, to b: CGPoint, trunk: CGFloat) -> [CGPoint] {
+        if a.y == b.y { return [a, b] }
+        return [a, CGPoint(x: trunk, y: a.y), CGPoint(x: trunk, y: b.y), b]
+    }
+
+    /// A skip-level connector: out of the source into its OWN trailing gutter, down (or up) to
+    /// a card-free `corridor`, across every intervening column there, then into the target's
+    /// gutter and in. Six points.
+    ///
+    /// This is the fix for the flaw that made the board unreadable. `route`'s horizontal leg
+    /// runs at the SOURCE's y all the way to the target's gutter, so an edge that skips a
+    /// column passes straight through the intervening column at that y. Cards are deliberately
+    /// opaque (see `RoadmapCardView.cardFill` — a transparent card would let connectors bleed
+    /// through it), so the line vanished behind the intervening card and re-emerged on its far
+    /// side: A → C rendered as the chain A → B → C, inventing a dependency that was not in the
+    /// data. Travelling in the corridor between two rows means the run can never pass behind
+    /// a card at all.
+    static func detour(from a: CGPoint, to b: CGPoint,
+                       exit: CGFloat, corridor: CGFloat, trunk: CGFloat) -> [CGPoint] {
+        [a,
+         CGPoint(x: exit, y: a.y), CGPoint(x: exit, y: corridor),
+         CGPoint(x: trunk, y: corridor),
+         CGPoint(x: trunk, y: b.y), b]
+    }
+
+    /// Connector between two cards in the SAME column: a hook down the column's own left
+    /// margin instead of doubling back through the cards. Both x's are the column's left edge.
+    ///
+    /// The hook hugs the card edge (`sideHookInset`) rather than sitting at the gutter's
+    /// middle, where it used to be drawn on top of the inbound cross-phase trunks in the very
+    /// same gutter — two structurally different relationships, identical and superimposed.
+    static func sideHook(from a: CGPoint, to b: CGPoint, hook: CGFloat) -> [CGPoint] {
+        [a, CGPoint(x: hook, y: a.y), CGPoint(x: hook, y: b.y), b]
     }
 
     /// `expanded` = the phases rendering as full card columns; every other phase collapses to a
@@ -218,23 +302,77 @@ enum RoadmapLayoutEngine {
         let currentId = RoadmapEngine.nextStep(tasks)?.id
         let ids = Set(tasks.map { $0.id })
 
+        let gapOf = leadingGaps(expanded: expandedSet, hasRoot: hasRoot)
+        func gutter(_ phase: RoadmapPhase) -> CGFloat { gapOf[phase] ?? RoadmapGeometry.colGap }
+
+        // Would a horizontal run at `row` from column `cA` to column `cB` pass BEHIND a card?
+        // Only cards can be dodged: a rail spans the board's full height, so no corridor can
+        // route around one, and a rail holds no cards anyway.
+        func obstructed(from cA: Int, to cB: Int, row: Int) -> Bool {
+            guard cB - cA > 1 else { return false }
+            return ((cA + 1)..<cB).contains { occ[$0]?.contains(row) == true }
+        }
+
+        /// The deepest corridor any routed edge uses, so the canvas can grow to contain it.
+        var deepestCorridor: CGFloat = 0
+
         var edges: [EdgePath] = []
         for t in shown {
             for dep in t.dependsOn {
                 guard ids.contains(dep), let a = nodeById[dep], let b = nodeById[t.id] else { continue }
-                let points = a.col == b.col
-                    ? sideElbow(from: CGPoint(x: a.x, y: centerY(a)),
-                                to: CGPoint(x: b.x, y: centerY(b)))
-                    : elbow(from: CGPoint(x: rightX(a), y: centerY(a)),
-                            to: CGPoint(x: b.x, y: centerY(b)))
+                let points: [CGPoint]
+                if a.col == b.col {
+                    points = sideHook(from: CGPoint(x: a.x, y: centerY(a)),
+                                      to: CGPoint(x: b.x, y: centerY(b)),
+                                      hook: (b.x - RoadmapGeometry.sideHookInset).rounded())
+                } else {
+                    let aPt = CGPoint(x: rightX(a), y: centerY(a))
+                    let bPt = CGPoint(x: b.x, y: centerY(b))
+                    let trunk = trunkX(rightWall: b.x, gutter: gutter(b.task.phase), lane: a.row)
+                    // A skip-level edge detours through a card-free corridor. `a.col + 1` is
+                    // guaranteed in range: `obstructed` only returns true when b.col > a.col + 1.
+                    if obstructed(from: a.col, to: b.col, row: a.row) {
+                        let next = phases[a.col + 1]
+                        let corridor = RoadmapGeometry.corridorY(below: max(a.row, b.row))
+                        deepestCorridor = max(deepestCorridor, corridor)
+                        points = detour(from: aPt, to: bPt,
+                                        exit: trunkX(rightWall: xOf[next] ?? aPt.x,
+                                                     gutter: gutter(next), lane: a.row),
+                                        corridor: corridor, trunk: trunk)
+                    } else {
+                        points = route(from: aPt, to: bPt, trunk: trunk)
+                    }
+                }
                 edges.append(EdgePath(from: dep, to: t.id, points: points,
                                       critical: t.id == currentId || dep == currentId))
             }
         }
 
+        // Entry tasks — nothing inside the roadmap gates them, so the root is what feeds them.
+        let entries = nodes.filter { n in n.task.dependsOn.allSatisfy { !ids.contains($0) } }
+
+        // A root edge reaching past column 0 crosses whole columns, so it needs the same
+        // corridor treatment. Decided STRUCTURALLY (does any earlier column hold a card?)
+        // rather than from the root's own y, because that y depends on the height this very
+        // loop is about to determine. Over-detouring is safe: a corridor is always card-free.
+        var rootCorridor: [String: CGFloat] = [:]
+        if hasRoot {
+            for n in entries where n.col > 0 {
+                guard (0..<n.col).contains(where: { occ[$0]?.isEmpty == false }) else { continue }
+                let corridor = RoadmapGeometry.corridorY(below: n.row)
+                rootCorridor[n.task.id] = corridor
+                deepestCorridor = max(deepestCorridor, corridor)
+            }
+        }
+
         let maxRows = max(1, nodes.map { $0.row + 1 }.max() ?? 1)
-        let height = RoadmapGeometry.top + CGFloat(maxRows - 1) * RoadmapGeometry.rowPitch
+        let rowsHeight = RoadmapGeometry.top + CGFloat(maxRows - 1) * RoadmapGeometry.rowPitch
             + RoadmapGeometry.cardH + RoadmapGeometry.bottomPad
+        // `corridorY(below: maxRows - 1)` lands exactly ON `rowsHeight`, so a corridor along the
+        // bottom row would be stroked half-outside the canvas. Grow to keep it inside.
+        let height = deepestCorridor > 0
+            ? max(rowsHeight, deepestCorridor + RoadmapGeometry.corridorPad)
+            : rowsHeight
         let width = RoadmapGeometry.boardWidth(expanded: expandedSet, hasRoot: hasRoot)
 
         // The current phase is read from the WHOLE task set, not just the shown ones: the
@@ -256,14 +394,35 @@ enum RoadmapLayoutEngine {
         var root: CGRect?
         var rootEdges: [EdgePath] = []
         if hasRoot {
-            let ry = ((height - RoadmapGeometry.rootH) / 2).rounded()
+            // Seated on the rows it actually connects to, NOT on the canvas centre. Centring on
+            // the canvas put the root's edge y a few points off every lane it fed (12pt, with
+            // `top: 40` and one row) — so each root edge picked up a pointless little jog and
+            // then ran parallel to, and a hair above, the real edges on that lane. With a single
+            // entry task the first leg is now dead straight.
+            let anchorY = entries.isEmpty
+                ? height / 2
+                : entries.map { centerY($0) }.reduce(0, +) / CGFloat(entries.count)
+            let ry = min(max(0, (anchorY - RoadmapGeometry.rootH / 2).rounded()),
+                         max(0, height - RoadmapGeometry.rootH))
             root = CGRect(x: RoadmapGeometry.rootLeft, y: ry,
                           width: RoadmapGeometry.rootW, height: RoadmapGeometry.rootH)
             let start = CGPoint(x: RoadmapGeometry.rootRight, y: ry + RoadmapGeometry.rootH / 2)
-            for n in nodes where n.task.dependsOn.allSatisfy({ !ids.contains($0) }) {
-                rootEdges.append(EdgePath(from: rootId, to: n.task.id,
-                                          points: elbow(from: start,
-                                                        to: CGPoint(x: n.x, y: centerY(n))),
+            for n in entries {
+                let bPt = CGPoint(x: n.x, y: centerY(n))
+                // Each root edge gets its own trunk (keyed on the TARGET's row): unlike a
+                // dependency fan-out, these want to be countable, not bundled.
+                let trunk = trunkX(rightWall: n.x, gutter: gutter(n.task.phase), lane: n.row)
+                let points: [CGPoint]
+                if let corridor = rootCorridor[n.task.id] {
+                    let first = phases[0]
+                    points = detour(from: start, to: bPt,
+                                    exit: trunkX(rightWall: xOf[first] ?? start.x,
+                                                 gutter: gutter(first), lane: n.row),
+                                    corridor: corridor, trunk: trunk)
+                } else {
+                    points = route(from: start, to: bPt, trunk: trunk)
+                }
+                rootEdges.append(EdgePath(from: rootId, to: n.task.id, points: points,
                                           critical: false))
             }
         }

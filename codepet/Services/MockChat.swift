@@ -422,8 +422,30 @@ enum MockChat {
 
     /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the
     /// board, the chat's `runnable` list (Codepet-can-do tasks), and the
-    /// "needs you" landing card all have something to show offline. The three
-    /// `.draft`/`.does` tasks with no deps resolve to `codepetCanDo` → runnable.
+    /// "needs you" landing card all have something to show offline.
+    ///
+    /// The `dependsOn` graph is deliberate, not decorative: with it empty, EVERY task
+    /// qualified as an entry task, so `RoadmapLayoutEngine` drew zero dependency edges and
+    /// fanned the root out to all nine — the board could not exercise its own flow rendering
+    /// at all. This graph is shaped to cover each routing case exactly once:
+    ///
+    ///   - `interviews` is the only depless task → the root draws ONE edge, not nine.
+    ///   - `interviews → {brand, landing, pricing}` touches the beacon, so these are the
+    ///     `critical` edges (halo + solid) — previously unreachable in the mock.
+    ///   - `brand → landing` is an IN-COLUMN edge → `sideElbow`'s left-gutter hook.
+    ///   - `landing → outreach`, `pricing → faq`, `waitlist → deploy` share a dept lane →
+    ///     2-point straight runs.
+    ///   - `{landing, pricing} → outreach` is a fan-IN: two sources, one target.
+    ///   - `landing → privacy` SKIPS the BUILD column, and both sit on the mkt/legal lane
+    ///     (row 1) — so its horizontal leg passes behind `outreach`. Kept on purpose: it is
+    ///     the reproduction for the routing flaw where a skip-level edge reads as a chain.
+    ///
+    /// NOTE the phase window, not these deps, is what locks the downstream cards:
+    /// `interviews` is `who: .you`, so `RoadmapGating.openPhases` stops at `.find` and
+    /// `RoadmapEngine.status` blocks all eight later tasks regardless of `dependsOn`. That
+    /// also means the "three runnable departments → 3 parallel agents" fan-out this fixture
+    /// once served has NOT worked since phase gating landed — nothing here is `codepetCanDo`.
+    /// Restoring it needs runnable work inside `.find`, which is a separate call.
     static func roadmap() -> [RoadmapTask] {
         [
             // ONE Codepet-can-do task per department (all 8) so every department's
@@ -431,28 +453,41 @@ enum MockChat {
             // mock router matches to this task; each maps to a tailored deliverable.
             RoadmapTask(id: "mock-brand", title: "Design your brand look",
                         detail: "A simple visual direction — colors, type, and a logo mark.",
-                        phase: .foundation, who: .draft, dept: "design"),   // run brand
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mock-interviews"], dept: "design"),     // run brand
             RoadmapTask(id: "mock-landing", title: "Write your landing page copy",
                         detail: "Headline, subhead, and three benefit bullets.",
-                        phase: .foundation, who: .draft, dept: "mkt"),       // run landing
+                        phase: .foundation, who: .draft,
+                        // + brand: the copy follows the visual direction. Same column → sideElbow.
+                        dependsOn: ["mock-interviews", "mock-brand"], dept: "mkt"),  // run landing
             RoadmapTask(id: "mock-pricing", title: "Draft a simple pricing plan",
                         detail: "A starting price + model you can change later.",
-                        phase: .foundation, who: .draft, dept: "fin"),       // run pricing
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mock-interviews"], dept: "fin"),        // run pricing
             RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
                         detail: "A simple email capture so early interest isn't lost.",
-                        phase: .build, who: .does, dept: "eng"),             // run waitlist
+                        phase: .build, who: .does,
+                        // There has to be a page before there's a signup on it.
+                        dependsOn: ["mock-landing"], dept: "eng"),           // run waitlist
             RoadmapTask(id: "mock-outreach", title: "Write a cold outreach email",
                         detail: "A short first-touch email to a potential customer.",
-                        phase: .build, who: .draft, dept: "sales"),          // run outreach
+                        phase: .build, who: .draft,
+                        // Fan-IN: you can't pitch without both a page and a price.
+                        dependsOn: ["mock-landing", "mock-pricing"], dept: "sales"),  // run outreach
             RoadmapTask(id: "mock-faq", title: "Draft a support FAQ",
                         detail: "Answers to the first questions new users will ask.",
-                        phase: .build, who: .draft, dept: "support"),        // run faq
+                        phase: .build, who: .draft,
+                        dependsOn: ["mock-pricing"], dept: "support"),       // run faq
             RoadmapTask(id: "mock-deploy", title: "Set up a deploy checklist",
                         detail: "The steps to ship a release safely, every time.",
-                        phase: .ship, who: .does, dept: "ops"),              // run deploy
+                        phase: .ship, who: .does,
+                        dependsOn: ["mock-waitlist"], dept: "ops"),          // run deploy
             RoadmapTask(id: "mock-privacy", title: "Draft a privacy policy",
                         detail: "A plain-language policy covering what you collect and why.",
-                        phase: .ship, who: .draft, dept: "legal"),           // run privacy
+                        phase: .ship, who: .draft,
+                        // SKIPS BUILD on purpose — the reproduction for the skip-level
+                        // routing flaw (see the graph note above). Do not "tidy" this away.
+                        dependsOn: ["mock-landing"], dept: "legal"),         // run privacy
             // A "needs you" task so the landing card + roadmap show that state too.
             RoadmapTask(id: "mock-interviews", title: "Talk to 5 potential users",
                         detail: "Book and run five short discovery calls this week.",

@@ -25,17 +25,19 @@ enum RoadmapFocus {
         keep.formUnion(userExpanded.filter(populated.contains))
 
         // Then outward from the working phase — the preview first (the one look-ahead), then
-        // nearest-first, earlier phases winning ties.
-        let workingIndex = populated.firstIndex(of: working) ?? 0
+        // nearest-first, earlier phases winning ties. Distance is measured in TRUE phase order
+        // (`.order`, i.e. position in `RoadmapPhase.allCases`), never in rank within `populated`
+        // — when populated phases are non-contiguous, compressed ranks distort distance and can
+        // invert the intended order.
+        let workingOrder = working.order
         var order: [RoadmapPhase] = []
         if let preview, !keep.contains(preview) { order.append(preview) }
-        order += populated.enumerated()
-            .filter { !keep.contains($0.element) && $0.element != preview }
+        order += populated
+            .filter { !keep.contains($0) && $0 != preview }
             .sorted { a, b in
-                let da = abs(a.offset - workingIndex), db = abs(b.offset - workingIndex)
-                return da != db ? da < db : a.offset < b.offset
+                let da = abs(a.order - workingOrder), db = abs(b.order - workingOrder)
+                return da != db ? da < db : a.order < b.order
             }
-            .map(\.element)
 
         for phase in order {
             var trial = keep

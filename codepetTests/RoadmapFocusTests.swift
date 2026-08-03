@@ -48,11 +48,20 @@ final class RoadmapFocusTests: XCTestCase {
         XCTAssertEqual(e.count, 3)
     }
 
+    /// The guaranteed set must genuinely EXCEED the budget for this to prove anything — a set
+    /// that happens to still fit (e.g. {find, grow}, whose trailing-gap correction shrinks
+    /// `boardWidth` because grow is the LAST phase) doesn't exercise the "never dropped" rule at
+    /// all. `userExpanded: [.build]` is a MIDDLE phase, so no such shrink applies: {find, build}
+    /// costs `boardWidth([.find, .foundation])` (1020) against a budget of
+    /// `boardWidth([.find])` (816) — genuinely over budget.
     func testUserExpandedIsHonouredEvenPastTheBudget() {
-        let two = RoadmapGeometry.boardWidth(expanded: [.find, .foundation])
-        let e = RoadmapFocus.expanded(tasks: fullBoard(), availableWidth: two, userExpanded: [.grow])
-        XCTAssertTrue(e.contains(.grow))       // never dropped
+        let oneColumn: CGFloat = RoadmapGeometry.boardWidth(expanded: [.find])
+        let e = RoadmapFocus.expanded(tasks: fullBoard(), availableWidth: oneColumn,
+                                      userExpanded: [.build])
+        XCTAssertTrue(e.contains(.build))      // never dropped, even past the budget
         XCTAssertTrue(e.contains(.find))       // the working phase still survives
+        // Prove the budget really was exceeded, not merely satisfied.
+        XCTAssertGreaterThan(RoadmapGeometry.boardWidth(expanded: e), oneColumn)
     }
 
     func testUserExpandedIgnoresEmptyPhases() {
@@ -67,6 +76,27 @@ final class RoadmapFocusTests: XCTestCase {
         let tasks = [t("f", .find), t("g", .grow)]
         let one = RoadmapGeometry.boardWidth(expanded: [.grow])
         XCTAssertEqual(RoadmapFocus.expanded(tasks: tasks, availableWidth: one), [.grow])
+    }
+
+    /// Regression for the "nearest-first measured in compressed populated-rank" bug:
+    /// populated = [find, build, ship] (foundation/launch/grow empty), working = build (forced
+    /// by a founder-owned task there, which also closes SHIP). True phase distance: ship is 1
+    /// hop from build, find is 2 hops — ship must be offered before find. Compressed rank
+    /// (find=0, build=1, ship=2) makes them a false tie, which earlier-wins resolves to find —
+    /// the farther phase.
+    func testNearestFirstUsesTruePhaseDistanceNotPopulatedRank() {
+        // populated = [find, ship, launch, grow] (foundation, build empty). A founder-owned
+        // task in SHIP holds ship open and forces the working phase to ship (middle), with
+        // launch as the preview (correctly picked regardless of the bug). That leaves find and
+        // grow as the two remaining candidates: true order distance from ship (order 3) is
+        // find=3, grow=2 — grow is truly nearer. But populated-rank compresses across the
+        // find→ship gap (foundation, build both empty) to distance 1, while grow's distance
+        // (no empty phases between ship and grow other than the populated preview) stays 2 —
+        // an inversion that makes the old code prefer find over grow.
+        let tasks = [t("f", .find), t("s", .ship, who: .you), t("l", .launch), t("g", .grow)]
+        let threeColumns: CGFloat = RoadmapGeometry.boardWidth(expanded: [.find, .foundation, .build])
+        let e = RoadmapFocus.expanded(tasks: tasks, availableWidth: threeColumns)
+        XCTAssertEqual(e, [.ship, .launch, .grow])
     }
 
     func testDeterministicForAFixedWidth() {

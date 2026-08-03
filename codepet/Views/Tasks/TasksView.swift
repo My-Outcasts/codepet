@@ -160,6 +160,7 @@ struct TasksView: View {
                 // in-place behaviour on the Tasks board. The copilot is the docked
                 // panel now (not a `.chat` destination), so expand the dock.
                 companyStore.dockCollapsed = false
+            case .showBlocker:     break   // Tasks board has no redirect path; unchanged from prior no-op
             case .none:            break
             }
         } label: {

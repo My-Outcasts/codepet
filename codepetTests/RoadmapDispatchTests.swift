@@ -7,7 +7,13 @@ final class RoadmapDispatchTests: XCTestCase {
         XCTAssertEqual(RoadmapDispatch.action(for: .needsYou), .walkThrough)
         XCTAssertEqual(RoadmapDispatch.action(for: .needsApproval), .approve)
         XCTAssertEqual(RoadmapDispatch.action(for: .done), .openDeliverable)
-        XCTAssertEqual(RoadmapDispatch.action(for: .blocked), RoadmapAction.none)
+        XCTAssertEqual(RoadmapDispatch.action(for: .blocked), .showBlocker)
+    }
+
+    /// `.showBlocker` is a redirect, not a destination — the blocker's OWN action decides
+    /// whether the founder lands in chat.
+    func testShowBlockerDoesNotItselfNavigate() {
+        XCTAssertFalse(RoadmapDispatch.navigatesToChat(.showBlocker))
     }
 
     /// Only the two actions whose output streams into chat should move the founder there.

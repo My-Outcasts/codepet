@@ -61,4 +61,19 @@ final class RoadmapBoardCopyTests: XCTestCase {
         XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: "   ", lang: .vi), "Bạn đang ở đây")
         XCTAssertEqual(RoadmapBoardCopy.herePhrase(founderName: "\n", lang: .vi), "Bạn đang ở đây")
     }
+
+    func testWaitingOnNamesTheBlockerInBothLanguages() {
+        XCTAssertEqual(RoadmapBoardCopy.waitingOn("Talk to 5 users", lang: .en),
+                       "Waiting on: Talk to 5 users")
+        XCTAssertTrue(RoadmapBoardCopy.waitingOn("Talk to 5 users", lang: .vi)
+                        .contains("Talk to 5 users"))
+        XCTAssertNotEqual(RoadmapBoardCopy.waitingOn("x", lang: .en),
+                          RoadmapBoardCopy.waitingOn("x", lang: .vi))
+    }
+
+    func testNotPlannedYetIsNonEmptyAndDistinctPerLanguage() {
+        XCTAssertFalse(RoadmapBoardCopy.notPlannedYet(.en).isEmpty)
+        XCTAssertFalse(RoadmapBoardCopy.notPlannedYet(.vi).isEmpty)
+        XCTAssertNotEqual(RoadmapBoardCopy.notPlannedYet(.en), RoadmapBoardCopy.notPlannedYet(.vi))
+    }
 }

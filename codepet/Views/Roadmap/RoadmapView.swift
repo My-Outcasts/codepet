@@ -165,7 +165,11 @@ struct RoadmapView: View {
     /// Route a task tap through the pure `RoadmapDispatch` rule, then follow the two
     /// streaming actions (run, walk-through) to chat, where their output appears.
     /// Approve and open-deliverable resolve in place and do not navigate.
-    private func dispatch(_ task: RoadmapTask) {
+    ///
+    /// `depth` guards the one recursive case: tapping a LOCKED card redirects to the step
+    /// holding it up (`.showBlocker`). One hop only — a dangling or cyclic graph must not
+    /// bounce forever, and a blocker that is itself blocked has nothing useful to offer.
+    private func dispatch(_ task: RoadmapTask, depth: Int = 0) {
         let action = RoadmapDispatch.action(for: RoadmapEngine.status(for: task, in: tasks),
                                             isEngineering: task.dept == "eng",
                                             projectLinked: companyStore.activeProjectLink != nil)
@@ -179,6 +183,9 @@ struct RoadmapView: View {
             companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: task),
                                            plannedFiles: 2, needsBash: false,
                                            link: companyStore.activeProjectLink)
+        case .showBlocker:
+            guard depth == 0, let blocker = RoadmapGating.blocker(for: task, in: tasks) else { break }
+            dispatch(blocker, depth: 1)
         case .none:             break
         }
         if RoadmapDispatch.navigatesToChat(action) { companyStore.dockCollapsed = false }

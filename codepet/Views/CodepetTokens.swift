@@ -28,6 +28,25 @@ enum CodepetTokens {
     static let cardRaised = Color.dyn("#ffffff", "#26201a")
     static let cardEdge   = Color.dyn("#ece9e2", "#3c352b")
 
+    // MARK: Collapsed phase rails
+    //
+    // Rails used `well` + `hairline`, which measured 1.16:1 and 1.27:1 against the
+    // page in dark mode — the same near-identical-values defect as the wake pill
+    // (1.11:1). The bodies read as absent and only the labels registered, so the
+    // rails looked like floating text. Their own tokens rather than a change to
+    // `well`, which three other surfaces share.
+    //
+    // Measured against `page` — dark `#16130f`, light `#f8f7f3`:
+    //   railFill    light 1.29:1  dark 1.47:1   (was 1.07 / 1.16)
+    //   railBorder  light 1.90:1  dark 2.21:1   (was ~1.05 / 1.27)
+    // The border does the real work of drawing the shape; the fill stays quiet
+    // because a collapsed phase is meant to be de-emphasised, not loud.
+    static let railFill   = Color.dyn("#e0dbcf", "#3a3228")
+    static let railBorder = Color.dyn("#bdb5a2", "#574c3f")
+    /// Hover lift for an EXPANDABLE rail — the affordance the rails never had.
+    static let railFillHover   = Color.dyn("#d3ccbc", "#483f33")
+    static let railBorderHover = Color.dyn("#a89e88", "#6d604f")
+
     // MARK: Accent (violet brand)
 
     static let accentDeep = Color.dyn("#5b27b0", "#7c3aed")  // --accent-deep

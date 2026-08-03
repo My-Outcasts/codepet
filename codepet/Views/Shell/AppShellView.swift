@@ -12,6 +12,11 @@ struct AppShellView: View {
     @Environment(\.uiLanguage) private var uiLanguage
 
     private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+    /// Named on the collapsed bar's placeholder ("Ask Crash anything…") so the
+    /// closed copilot still says who you'd be talking to.
+    private var companionName: String {
+        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
+    }
 
     /// User-dragged copilot width (session-only). nil → the default half-window.
     @State private var manualDockWidth: CGFloat?
@@ -20,6 +25,9 @@ struct AppShellView: View {
     @State private var dragStartWidth: CGFloat?
     /// Hover state for the resize handle (brightens the divider on hover).
     @State private var handleHovered = false
+    /// Message count as of the last time the dock was open — the baseline for the
+    /// collapsed bar's unread dot, so reopening the dock always clears it.
+    @State private var seenMessageCount = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -32,11 +40,26 @@ struct AppShellView: View {
                 TopNavView(accent: accent)
                 Divider()
                 HStack(spacing: 0) {
-                    content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if collapsed {
-                        Rectangle().fill(CodepetTheme.hairline).frame(width: 1)
-                        dockHandle
-                    } else {
+                    // Collapsed, the copilot becomes a composer strip along the bottom
+                    // of the content (`safeAreaInset`, so scroll views clear it instead
+                    // of hiding under it) rather than a full-height reopen rail.
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if collapsed {
+                                CollapsedChatBar(
+                                    accent: accent,
+                                    companionName: companionName,
+                                    needsYou: CollapsedChatBarState.needsYouCount(
+                                        tasks: companyStore.company.tasks),
+                                    unread: CollapsedChatBarState.showsUnreadDot(
+                                        messageCount: companyStore.chatMessages.count,
+                                        seen: seenMessageCount),
+                                    onExpand: { companyStore.dockCollapsed = false }
+                                )
+                            }
+                        }
+                    if !collapsed {
                         resizeHandle(windowWidth: geo.size.width, currentWidth: dockWidth)
                         VStack(spacing: 0) {
                             HStack {
@@ -66,6 +89,15 @@ struct AppShellView: View {
                     .keyboardShortcut("b", modifiers: .command)
                     .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
             )
+            // Unread bookkeeping for the collapsed bar's dot: while the dock is
+            // OPEN every message counts as seen, so the dot only ever reflects what
+            // arrived after it closed — and reopening clears it.
+            .onChange(of: companyStore.chatMessages.count, initial: true) { _, count in
+                if !collapsed { seenMessageCount = count }
+            }
+            .onChange(of: collapsed) { _, isCollapsed in
+                if !isCollapsed { seenMessageCount = companyStore.chatMessages.count }
+            }
         }
     }
 
@@ -94,20 +126,6 @@ struct AppShellView: View {
                     .onEnded { _ in dragStartWidth = nil }
             )
             .onTapGesture { companyStore.dockCollapsed = true }
-    }
-
-    /// Collapsed dock: a slim reopen strip.
-    private var dockHandle: some View {
-        Button { companyStore.dockCollapsed = false } label: {
-            VStack(spacing: 8) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 15, weight: .medium)).foregroundColor(accent)
-                Spacer()
-            }
-            .padding(.top, 12).frame(width: 44).frame(maxHeight: .infinity)
-            .background(CodepetTheme.surface)
-        }.buttonStyle(.plain)
-        .help(uiLanguage == .vi ? "Mở trợ lý" : "Open copilot")
     }
 
     @ViewBuilder private var content: some View {

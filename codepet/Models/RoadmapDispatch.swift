@@ -7,7 +7,8 @@ enum RoadmapAction: Equatable {
     case approve          // needs approval — resolves in place
     case openDeliverable  // done — opens the deliverable sheet in place
     case editCode         // Engineering + a linked project — the local coding agent
-    case none             // blocked — nothing to do yet
+    case showBlocker      // locked — redirect to the step that's holding this one up
+    case none             // nothing to do (no blocker resolved — a dangling dep or a cycle)
 }
 
 /// Pure routing rule for a roadmap task tap. Kept out of the view so the
@@ -24,7 +25,7 @@ enum RoadmapDispatch {
         case .needsYou:      return .walkThrough
         case .needsApproval: return .approve
         case .done:          return .openDeliverable
-        case .blocked:       return .none
+        case .blocked:       return .showBlocker
         }
     }
 

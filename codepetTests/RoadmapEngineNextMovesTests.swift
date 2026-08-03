@@ -46,6 +46,23 @@ final class RoadmapEngineNextMovesTests: XCTestCase {
         XCTAssertEqual(RoadmapEngine.nextMoves(tasks, limit: 3).map(\.id), ["ok"])
     }
 
+    /// Regression for the one behaviour change this branch flagged as a risk: gating narrows
+    /// the fan-out to the open window. A founder-owned step holds FIND shut, so even though
+    /// BUILD/LAUNCH/GROW each hold an otherwise-eligible Codepet-runnable task in a distinct
+    /// department, none of them may reach the fan-out — every fixture in this file predates
+    /// gating and happens to have no founder-owned work in an earlier phase, so none of them
+    /// would have caught a regression here.
+    func testFanOutIsConfinedToTheOpenWindow() {
+        let tasks = [
+            task("gate", dept: "eng", phase: .find, who: .you),
+            task("e1", dept: "eng", phase: .build),
+            task("m1", dept: "mkt", phase: .launch),
+            task("f1", dept: "fin", phase: .grow),
+        ]
+        XCTAssertEqual(RoadmapGating.openPhases(tasks), [.find])
+        XCTAssertEqual(RoadmapEngine.nextMoves(tasks, limit: 3).map(\.id), [])
+    }
+
     func testEmptyWhenNothingActionableOrLimitZero() {
         let none = [task("you1", dept: "eng", phase: .build, who: .you)]
         XCTAssertEqual(RoadmapEngine.nextMoves(none, limit: 3).count, 0)

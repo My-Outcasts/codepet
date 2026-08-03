@@ -35,4 +35,16 @@ enum RoadmapBoardCopy {
         if n.isEmpty { return lang == .vi ? "Bạn đang ở đây" : "You are here" }
         return lang == .vi ? "\(n) đang ở đây" : "\(n) is here"
     }
+
+    /// Why a locked card is locked, naming the step that must land first — so a locked card
+    /// explains itself in the peek without the founder opening chat.
+    static func waitingOn(_ blockerTitle: String, lang: AppLanguage) -> String {
+        lang == .vi ? "Đang chờ: \(blockerTitle)" : "Waiting on: \(blockerTitle)"
+    }
+
+    /// A phase the plan never filled. Its rail says this instead of a bare 0/0, which reads
+    /// like a bug rather than an absence.
+    static func notPlannedYet(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Chưa lên kế hoạch" : "Not planned yet"
+    }
 }

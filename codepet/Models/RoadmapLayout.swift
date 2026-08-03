@@ -15,6 +15,27 @@ enum RoadmapGeometry {
     static let rootLeft: CGFloat = 12
     static let rootGap: CGFloat = 48     // gap between the root node and column 0
     static let rootRight: CGFloat = rootLeft + rootW
+
+    // ── Collapsed phases ─────────────────────────────────────────────────────────────
+    /// A collapsed phase's slim rail: wide enough for a vertical label, narrow enough that
+    /// three of them cost less than one card column.
+    static let railW: CGFloat = 44
+    static let railGap: CGFloat = 20
+
+    /// Total board width for a given column mix — THE one width formula, shared by the layout
+    /// engine (which must agree with what it draws) and `RoadmapFocus` (which must predict it
+    /// before laying anything out). Columns accumulate their trailing gap; the last one's is
+    /// replaced by `bottomPad`.
+    static func boardWidth(expanded: Set<RoadmapPhase>, hasRoot: Bool = true) -> CGFloat {
+        var cursor = hasRoot ? rootRight + rootGap : rootLeft
+        var lastGap: CGFloat = 0
+        for phase in RoadmapPhase.allCases {
+            let isColumn = expanded.contains(phase)
+            cursor += isColumn ? (cardW + colGap) : (railW + railGap)
+            lastGap = isColumn ? colGap : railGap
+        }
+        return cursor - lastGap + bottomPad
+    }
 }
 
 /// One positioned task card. `x`/`y` are the card's TOP-LEFT (web's coordinate scheme);
@@ -46,10 +67,22 @@ struct PhaseColumn: Identifiable {
     var id: String { phase.rawValue }
 }
 
+/// A collapsed phase — a slim clickable rail instead of a column of cards. `done`/`total` keep
+/// the counts visible so a collapsed phase never hides progress.
+struct PhaseRail: Identifiable {
+    let phase: RoadmapPhase
+    let x: CGFloat
+    let done: Int
+    let total: Int
+    var id: String { phase.rawValue }
+}
+
 struct RoadmapLayout {
     let nodes: [PositionedNode]
     let edges: [EdgePath]
     let columns: [PhaseColumn]
+    /// Collapsed phases, in phase order. Disjoint from `columns` — every phase is one or the other.
+    let rails: [PhaseRail]
     /// The company root box, or nil when `hasRoot: false`.
     let root: CGRect?
     /// Root → entry-task connectors. Styled separately from dependency edges, never critical.
@@ -68,9 +101,19 @@ enum RoadmapLayoutEngine {
     /// in first-appearance order.
     private static let deptLaneOrder = ["eng", "design", "mkt", "sales", "support", "ops", "fin", "legal"]
 
-    private static func colLeft(_ col: Int, hasRoot: Bool) -> CGFloat {
-        let start = hasRoot ? RoadmapGeometry.rootRight + RoadmapGeometry.rootGap : RoadmapGeometry.rootLeft
-        return start + CGFloat(col) * (RoadmapGeometry.cardW + RoadmapGeometry.colGap)
+    /// Left edge of every phase's slot, accumulated left to right: a full card column for an
+    /// expanded phase, a slim rail for a collapsed one. Replaces the old fixed-pitch
+    /// `col * (cardW + colGap)` — with rails the pitch is no longer uniform.
+    private static func slotX(expanded: Set<RoadmapPhase>, hasRoot: Bool) -> [RoadmapPhase: CGFloat] {
+        var cursor = hasRoot ? RoadmapGeometry.rootRight + RoadmapGeometry.rootGap
+                             : RoadmapGeometry.rootLeft
+        var out: [RoadmapPhase: CGFloat] = [:]
+        for phase in RoadmapPhase.allCases {
+            out[phase] = cursor
+            cursor += expanded.contains(phase) ? (RoadmapGeometry.cardW + RoadmapGeometry.colGap)
+                                               : (RoadmapGeometry.railW + RoadmapGeometry.railGap)
+        }
+        return out
     }
 
     private static func rowTop(_ row: Int) -> CGFloat {
@@ -93,8 +136,17 @@ enum RoadmapLayoutEngine {
         return [a, CGPoint(x: g, y: a.y), CGPoint(x: g, y: b.y), b]
     }
 
-    static func layout(_ tasks: [RoadmapTask], hasRoot: Bool = true) -> RoadmapLayout {
+    /// `expanded` = the phases rendering as full card columns; every other phase collapses to a
+    /// rail and its tasks are left out of `nodes` entirely (no cards, no lanes, no height).
+    /// `nil` means every phase is a column — the pre-rails behaviour, which the existing
+    /// geometry tests pin.
+    static func layout(_ tasks: [RoadmapTask], hasRoot: Bool = true,
+                       expanded: Set<RoadmapPhase>? = nil) -> RoadmapLayout {
+        let expandedSet = expanded ?? Set(RoadmapPhase.allCases)
         let phases = RoadmapPhase.allCases
+        let xOf = slotX(expanded: expandedSet, hasRoot: hasRoot)
+        // Only tasks in an expanded phase get cards; the rest are represented by their rail.
+        let shown = tasks.filter { expandedSet.contains($0.phase) }
         var colOf: [RoadmapPhase: Int] = [:]
         for (i, p) in phases.enumerated() { colOf[p] = i }
 
@@ -105,7 +157,7 @@ enum RoadmapLayoutEngine {
         // nearest free row in that column only.
         var deptCols: [String: Set<Int>] = [:]
         var deptSeen: [String] = []
-        for t in tasks {
+        for t in shown {
             guard let c = colOf[t.phase] else { continue }
             let d = t.dept ?? ""            // legacy tasks predate `dept`
             if deptCols[d] == nil { deptCols[d] = []; deptSeen.append(d) }
@@ -149,11 +201,11 @@ enum RoadmapLayoutEngine {
 
         var nodes: [PositionedNode] = []
         var nodeById: [String: PositionedNode] = [:]
-        for task in tasks {
+        for task in shown {
             guard let col = colOf[task.phase] else { continue }   // unknown phase → skip, don't crash
             let row = takeRow(col, laneOf[task.dept ?? ""] ?? 0)
             let n = PositionedNode(task: task, col: col, row: row,
-                                   x: colLeft(col, hasRoot: hasRoot), y: rowTop(row))
+                                   x: xOf[task.phase] ?? 0, y: rowTop(row))
             nodes.append(n)
             nodeById[task.id] = n
         }
@@ -167,7 +219,7 @@ enum RoadmapLayoutEngine {
         let ids = Set(tasks.map { $0.id })
 
         var edges: [EdgePath] = []
-        for t in tasks {
+        for t in shown {
             for dep in t.dependsOn {
                 guard ids.contains(dep), let a = nodeById[dep], let b = nodeById[t.id] else { continue }
                 let points = a.col == b.col
@@ -183,15 +235,22 @@ enum RoadmapLayoutEngine {
         let maxRows = max(1, nodes.map { $0.row + 1 }.max() ?? 1)
         let height = RoadmapGeometry.top + CGFloat(maxRows - 1) * RoadmapGeometry.rowPitch
             + RoadmapGeometry.cardH + RoadmapGeometry.bottomPad
-        let width = colLeft(phases.count - 1, hasRoot: hasRoot)
-            + RoadmapGeometry.cardW + RoadmapGeometry.bottomPad
+        let width = RoadmapGeometry.boardWidth(expanded: expandedSet, hasRoot: hasRoot)
 
-        let currentPhase = currentId.flatMap { nodeById[$0]?.task.phase }
-        let columns: [PhaseColumn] = phases.enumerated().map { i, p in
+        // The current phase is read from the WHOLE task set, not just the shown ones: the
+        // beacon's phase may be collapsed into a rail, so `shown`/`expandedSet` can't be used here.
+        let currentPhase = currentId.flatMap { id in tasks.first { $0.id == id }?.phase }
+        var columns: [PhaseColumn] = []
+        var rails: [PhaseRail] = []
+        for p in phases {
             let list = tasks.filter { $0.phase == p }
-            return PhaseColumn(phase: p, x: colLeft(i, hasRoot: hasRoot),
-                               done: list.filter { $0.done }.count, total: list.count,
-                               current: p == currentPhase)
+            let done = list.filter { $0.done }.count
+            if expandedSet.contains(p) {
+                columns.append(PhaseColumn(phase: p, x: xOf[p] ?? 0, done: done,
+                                           total: list.count, current: p == currentPhase))
+            } else {
+                rails.append(PhaseRail(phase: p, x: xOf[p] ?? 0, done: done, total: list.count))
+            }
         }
 
         var root: CGRect?
@@ -209,7 +268,8 @@ enum RoadmapLayoutEngine {
             }
         }
 
-        return RoadmapLayout(nodes: nodes, edges: edges, columns: columns, root: root,
-                             rootEdges: rootEdges, size: CGSize(width: width, height: height))
+        return RoadmapLayout(nodes: nodes, edges: edges, columns: columns, rails: rails,
+                             root: root, rootEdges: rootEdges,
+                             size: CGSize(width: width, height: height))
     }
 }

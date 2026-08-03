@@ -140,9 +140,9 @@ struct TasksView: View {
     }
 
     private func card(_ t: RoadmapTask) -> some View {
-        Button {
-            let st = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
-            let action = RoadmapDispatch.action(for: st,
+        let status = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
+        return Button {
+            let action = RoadmapDispatch.action(for: status,
                                                 isEngineering: t.dept == "eng",
                                                 projectLinked: companyStore.activeProjectLink != nil)
             switch action {
@@ -160,28 +160,44 @@ struct TasksView: View {
                 // in-place behaviour on the Tasks board. The copilot is the docked
                 // panel now (not a `.chat` destination), so expand the dock.
                 companyStore.dockCollapsed = false
+            case .showBlocker:     break   // Tasks board has no redirect path; unchanged from prior no-op
             case .none:            break
             }
         } label: {
             // web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT
             // leads in full ink (.kb-dept, 700) and the task is the supporting line
             // (.kb-title, 500, --t-3); native had the two reversed.
-            VStack(alignment: .leading, spacing: 3) {
-                if let d = DepartmentCatalog.find(t.dept)?.name {
-                    Text(d)
-                        .font(CodepetTheme.inter(12.5, weight: .bold))
-                        .foregroundColor(CodepetTheme.primaryText)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    if let d = DepartmentCatalog.find(t.dept)?.name {
+                        Text(d)
+                            .font(CodepetTheme.inter(12.5, weight: .bold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                    }
+                    Text(t.title)
+                        .font(CodepetTheme.inter(12.5, weight: .medium))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .lineSpacing(12.5 * 0.34)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(t.title)
-                    .font(CodepetTheme.inter(12.5, weight: .medium))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .lineSpacing(12.5 * 0.34)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                // Same pattern as DepartmentDetailView's task card — a locked (`.blocked`)
+                // card must read as locked here too, not look identical to a runnable one.
+                if !t.done {
+                    Text(status.label(lang)).font(CodepetTheme.inter(11, weight: .medium))
+                        .foregroundColor(taskStatusTint(status))
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)
             .cardChrome(radius: 12, dark: scheme == .dark)
         }
         .buttonStyle(.plain)
+        // A locked card's tap is a dead end (`.showBlocker` no-ops on this board — see
+        // above), so don't offer it as a tappable affordance in the first place.
+        .disabled(status == .blocked)
     }
 }

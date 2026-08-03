@@ -924,9 +924,26 @@ final class CompanyStore: ObservableObject {
         guard !isFanningOut, !isCompanionTyping, !isStreaming else { return }
         let plan = RoadmapEngine.nextMoves(company.tasks, limit: Self.maxFanOut)
         guard !plan.isEmpty else {
-            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
-                ? "Bạn đang không có việc nào mình chạy được ngay — lộ trình đã gọn rồi."
-                : "You're all caught up — no open tasks I can run right now."))
+            // Empty fan-out is confined to the open window (gating), so it no longer means
+            // "nothing left" — it can just as easily mean "nothing until you finish your own
+            // step." Say which one it actually is: genuinely done vs. waiting on the founder.
+            let text: String
+            if let blocker = RoadmapGating.founderStep(in: company.tasks) {
+                if blocker.drafted {
+                    text = language == .vi
+                        ? "Mình chưa chạy được gì tiếp — đang chờ bạn duyệt \"\(blocker.title)\" trước đã."
+                        : "Nothing I can pick up yet — I'm waiting on you to approve \"\(blocker.title)\" first."
+                } else {
+                    text = language == .vi
+                        ? "Mình chưa chạy được gì tiếp — đang chờ bạn xong \"\(blocker.title)\" trước đã."
+                        : "Nothing I can pick up yet — I'm waiting on you to finish \"\(blocker.title)\" first."
+                }
+            } else {
+                text = language == .vi
+                    ? "Bạn đang không có việc nào mình chạy được ngay — lộ trình đã gọn rồi."
+                    : "You're all caught up — no open tasks I can run right now."
+            }
+            chatMessages.append(CopilotMessage(role: .companion, text: text))
             flushActiveThread()
             return
         }

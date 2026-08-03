@@ -226,9 +226,10 @@ struct RoadmapBoardView: View {
 
     /// A collapsed phase: a slim rail carrying its name vertically plus its done/total, click
     /// to expand. An unplanned phase says so rather than showing a bare 0/0, which reads like
-    /// a bug instead of an absence — and, since it has nothing a click could ever expand
-    /// (Finding 3: `RoadmapFocus.expanded` only honours `userExpanded` for phases that already
-    /// hold tasks), it renders as plain, non-interactive content rather than a dead button.
+    /// a bug instead of an absence — and, since `RoadmapFocus.expanded` only honours
+    /// `userExpanded` for phases that already hold tasks, an empty phase can never be
+    /// expanded, so a button there would be a permanently inert click target; it renders as
+    /// plain, non-interactive content instead.
     private func rail(_ r: PhaseRail, height: CGFloat) -> some View {
         let empty = r.total == 0
         let help = empty ? "\(r.phase.label(lang)) · \(RoadmapBoardCopy.notPlannedYet(lang))"
@@ -253,19 +254,29 @@ struct RoadmapBoardView: View {
     /// the bug: at 10.5pt/1.47pt-tracking, "FOUNDATION"/"RUN & GROW" already rotate out to
     /// ≈80pt tall, and the longest label of either language, Vietnamese
     /// "VẬN HÀNH & PHÁT TRIỂN" (21 characters incl. spaces/`&`), rotates out to roughly
-    /// 150–175pt — several multiples of the ~25pt a `VStack` reserved, so it drew straight
-    /// through the count for every phase but FIND/BUILD/SHIP.
+    /// 150–175pt, so it drew straight through the count for every phase but FIND/BUILD/SHIP.
     ///
     /// Fix: pin the count to the top with `.overlay(alignment: .top)` (10pt of top padding),
-    /// and give the label an explicit post-rotation `.frame(width:height:)` of the rail's
-    /// height minus 44, placed with `.overlay(alignment: .bottom)`. Anchoring that box to the
-    /// rail's BOTTOM (not centering it across the full rail) reserves the top 44pt
-    /// exclusively for the count: the label's box occupies only `[44, height]`, so as long as
-    /// its rendered footprint fits inside that box — true for every real board (a board tall
-    /// enough to hold 2+ task rows already clears 216pt, well past the ~175pt worst case) —
-    /// it can never reach into the count's region, regardless of which phase name is longest.
+    /// and give the label region `[44, height]`, placed with `.overlay(alignment: .bottom)`.
+    /// That alone is not enough, though: `rotationEffect` doesn't participate in layout, so a
+    /// `.frame` applied only AFTER rotating still centers the text's unrotated bounding box
+    /// (labelWidth × ~13pt) in that region, and the rotated visual — ≈13pt wide × labelWidth
+    /// tall — overflows symmetrically above and below that centre point once labelWidth
+    /// exceeds the box. The actual constraint has to land before the rotation: bounding the
+    /// text's WIDTH pre-rotation bounds exactly the vertical run it paints post-rotation, so
+    /// `labelRun = height - 44` both sizes the pre-rotation `.frame(width:)` and sizes the
+    /// post-rotation box — the two are the same number by construction, not by comparison
+    /// against any label's length. That's why no "does the worst-case label fit" arithmetic
+    /// is needed at all: the label is bounded to `[44, height]` for every rail height, and
+    /// long names shrink (`minimumScaleFactor`) and then truncate rather than overrun the
+    /// count's `[0, 44)` region above.
     private func railBody(_ r: PhaseRail, height: CGFloat, empty: Bool) -> some View {
-        ZStack {
+        // The vertical run the label may paint: everything below the count's region.
+        // Bounding the text's WIDTH before rotating is what makes this exact — `rotationEffect`
+        // doesn't participate in layout, so a label constrained only afterwards overflows its
+        // box symmetrically (upward into the count) whenever the rail is short.
+        let labelRun = max(0, height - 44)
+        return ZStack {
             RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.well)
             RoundedRectangle(cornerRadius: 10).stroke(CodepetTheme.hairline, lineWidth: 1)
         }
@@ -280,11 +291,15 @@ struct RoadmapBoardView: View {
         }
         .overlay(alignment: .bottom) {
             Text(r.phase.label(lang).uppercased())
-                .font(CodepetTheme.inter(10.5)).tracking(1.47)
+                .font(CodepetTheme.inter(10.5))
+                .tracking(1.47)
                 .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
-                .lineLimit(1).fixedSize()
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.75)
+                .frame(width: labelRun)                                  // ← bounds the run it will paint
                 .rotationEffect(.degrees(-90))
-                .frame(width: RoadmapGeometry.railW, height: height - 44)
+                .frame(width: RoadmapGeometry.railW, height: labelRun)   // ← exact box, no overflow
         }
     }
 

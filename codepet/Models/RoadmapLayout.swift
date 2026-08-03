@@ -26,8 +26,8 @@ enum RoadmapGeometry {
     /// engine (which must agree with what it draws) and `RoadmapFocus` (which must predict it
     /// before laying anything out). Columns accumulate their trailing gap; the last one's is
     /// replaced by `bottomPad`.
-    static func boardWidth(expanded: Set<RoadmapPhase>) -> CGFloat {
-        var cursor = rootRight + rootGap
+    static func boardWidth(expanded: Set<RoadmapPhase>, hasRoot: Bool = true) -> CGFloat {
+        var cursor = hasRoot ? rootRight + rootGap : rootLeft
         var lastGap: CGFloat = 0
         for phase in RoadmapPhase.allCases {
             let isColumn = expanded.contains(phase)
@@ -235,7 +235,7 @@ enum RoadmapLayoutEngine {
         let maxRows = max(1, nodes.map { $0.row + 1 }.max() ?? 1)
         let height = RoadmapGeometry.top + CGFloat(maxRows - 1) * RoadmapGeometry.rowPitch
             + RoadmapGeometry.cardH + RoadmapGeometry.bottomPad
-        let width = RoadmapGeometry.boardWidth(expanded: expandedSet)
+        let width = RoadmapGeometry.boardWidth(expanded: expandedSet, hasRoot: hasRoot)
 
         // The current phase is read from the WHOLE task set, not just the shown ones: the
         // beacon's phase may be collapsed, and its rail should still flag as current.

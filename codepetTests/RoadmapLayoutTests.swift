@@ -331,12 +331,13 @@ final class RoadmapLayoutTests: XCTestCase {
     }
 
     func testCollapsedPhasesBecomeRailsAndDropTheirCards() {
-        let tasks = [t("a", .find), t("b", .build)]
+        let tasks = [t("a", .find), t("b", .build), t("c", .build, done: true)]
         let l = RoadmapLayoutEngine.layout(tasks, expanded: [.find])
-        XCTAssertEqual(l.nodes.map(\.id), ["a"])                       // b's phase collapsed
+        XCTAssertEqual(l.nodes.map(\.id), ["a"])                       // b/c's phase collapsed
         XCTAssertEqual(l.columns.map(\.phase), [.find])                // headers only for columns
         XCTAssertEqual(l.rails.map(\.phase), [.foundation, .build, .ship, .launch, .grow])
-        XCTAssertEqual(l.rails.first { $0.phase == .build }?.total, 1)  // the rail still counts
+        XCTAssertEqual(l.rails.first { $0.phase == .build }?.total, 2)  // the rail still counts
+        XCTAssertEqual(l.rails.first { $0.phase == .build }?.done, 1)   // and pins done, not swapped
         XCTAssertEqual(l.rails.first { $0.phase == .foundation }?.total, 0)
     }
 
@@ -388,5 +389,21 @@ final class RoadmapLayoutTests: XCTestCase {
         let l = RoadmapLayoutEngine.layout(tasks, expanded: [.build])
         XCTAssertTrue(l.edges.isEmpty)                                  // a has no node
         XCTAssertTrue(l.rootEdges.isEmpty)                              // b still depends on a
+    }
+
+    /// Without a root, `boardWidth`'s origin must be `rootLeft` — NOT `rootRight + rootGap`.
+    /// Pins the two disagreeing-origin bug: `layout(hasRoot: false)` places col 0 at
+    /// `rootLeft` (12) while `boardWidth` used to always start from `rootRight + rootGap`
+    /// (232), reporting a canvas 220pt wider than what was actually drawn.
+    func testRootlessWidthDropsTheRootOffset() {
+        let all = Set(RoadmapPhase.allCases)
+        // (Explicit CGFloat anchor, as in testBoardWidthShrinksWithEachCollapsedPhase: long
+        // inline literal arithmetic in this file has previously timed out the type checker.)
+        let expectedRootlessWidth: CGFloat = 12 + 6 * 268 - 60 + 16
+        XCTAssertEqual(expectedRootlessWidth, 1576)
+        XCTAssertEqual(RoadmapGeometry.boardWidth(expanded: all, hasRoot: false), expectedRootlessWidth)
+        // Pin the engine and the formula together so they can't drift apart again.
+        let l = RoadmapLayoutEngine.layout([t("a", .find)], hasRoot: false, expanded: all)
+        XCTAssertEqual(l.size.width, RoadmapGeometry.boardWidth(expanded: all, hasRoot: false))
     }
 }

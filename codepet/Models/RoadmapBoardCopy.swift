@@ -47,4 +47,108 @@ enum RoadmapBoardCopy {
     static func notPlannedYet(_ lang: AppLanguage) -> String {
         lang == .vi ? "Chưa lên kế hoạch" : "Not planned yet"
     }
+
+    // MARK: node panel
+
+    /// What finishing this node moves forward. Deliberately a PER-PHASE contract, not a
+    /// per-task one: without authored per-node fields we cannot honestly say what one task
+    /// makes true, and a truthful phase-level statement beats an invented task-level one. The
+    /// sentence always names its phase so the panel can't read as generic filler.
+    static func becomesTrue(_ phase: RoadmapPhase, _ lang: AppLanguage) -> String {
+        let s: String
+        switch phase {
+        case .find:
+            s = lang == .vi ? "bạn biết ai cần cái này và vì sao" : "you know who wants this and why"
+        case .foundation:
+            s = lang == .vi ? "những mảnh mà giai đoạn Xây dựng phụ thuộc vào đã có"
+                            : "the pieces Build depends on exist"
+        case .build:
+            s = lang == .vi ? "sản phẩm tồn tại và chạy được" : "the product exists and runs"
+        case .ship:
+            s = lang == .vi ? "nó triển khai được, có tài liệu và bảo vệ được"
+                            : "it's deployable, documented and defensible"
+        case .launch:
+            s = lang == .vi ? "nó đã công khai và tiếp cận được" : "it's public and reachable"
+        case .grow:
+            s = lang == .vi ? "nó lớn lên mà không cần bạn cầm tay từng bước"
+                            : "it keeps growing without you steering every step"
+        }
+        let p = phase.label(lang)
+        return lang == .vi ? "Hoàn thành việc này đẩy \(p) tiến lên: \(s)."
+                           : "Finishing this moves \(p) forward: \(s)."
+    }
+
+    /// What "done" means for this node, from who owns it.
+    static func toComplete(for who: TaskWho, _ lang: AppLanguage) -> String {
+        switch who {
+        case .does:  return lang == .vi ? "Codepet làm, bạn duyệt kết quả."
+                                        : "Codepet runs it; you approve the result."
+        case .draft: return lang == .vi ? "Codepet soạn bản nháp, bạn hoàn thiện."
+                                        : "Codepet drafts it; you finalise."
+        case .you:   return lang == .vi ? "Việc này bạn làm — Codepet sẽ hướng dẫn từng bước."
+                                        : "You do this one — Codepet will walk you through it."
+        }
+    }
+
+    /// Stand-in for "how to move this forward" when the generated task has no `detail`.
+    static func howToFallback(for status: TaskStatus, _ lang: AppLanguage) -> String {
+        switch status {
+        case .codepetCanDo:  return lang == .vi ? "Codepet chạy được ngay bây giờ."
+                                                : "Codepet can run this now."
+        case .needsYou:      return lang == .vi ? "Cần bạn quyết — mở chat để được hướng dẫn."
+                                                : "This needs your judgment — open chat to be walked through it."
+        case .needsApproval: return lang == .vi ? "Bản nháp đã sẵn sàng để bạn xem lại."
+                                                : "A draft is ready for your review."
+        case .done:          return lang == .vi ? "Đã xong." : "Already done."
+        case .blocked:       return lang == .vi ? "Xong các bước bên dưới trước."
+                                                : "Clear the steps below first."
+        }
+    }
+
+    /// The phase-window requirement's label — which phase has to settle before this node opens.
+    static func phaseMustSettle(_ phase: RoadmapPhase, _ lang: AppLanguage) -> String {
+        lang == .vi ? "\(phase.label(lang)) phải xong trước"
+                    : "\(phase.label(lang)) must be settled first"
+    }
+
+    /// The panel's primary button. Unlike `verb(for:)` this covers EVERY status: the card leaves
+    /// done and blocked chip-less on purpose, but the panel always offers a way forward.
+    static func panelActionLabel(for status: TaskStatus, _ lang: AppLanguage) -> String {
+        switch status {
+        case .codepetCanDo:  return lang == .vi ? "Bắt đầu" : "Start"
+        case .needsYou:      return lang == .vi ? "Thêm ý của bạn" : "Add your input"
+        case .needsApproval: return lang == .vi ? "Xem & duyệt" : "Review"
+        case .done:          return lang == .vi ? "Mở kết quả" : "Open the result"
+        case .blocked:       return lang == .vi ? "Làm bước đang chặn" : "Start what's blocking this"
+        }
+    }
+
+    static func markComplete(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Mình đã làm việc này rồi" : "I already did this"
+    }
+
+    /// The undo for `markComplete` — without it, marking a task done by mistake is a one-way
+    /// door, since the mark-complete button hides itself once the task is done.
+    static func markNotDone(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Chưa xong — mở lại" : "Not done after all"
+    }
+
+    static func inProgress(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đang chạy" : "In progress"
+    }
+
+    /// Why a suggestion is worth doing next. Derived, not authored: the unlock count is a
+    /// structural leverage signal, which is honest in a way invented prose wouldn't be.
+    static func suggestionReason(dept: String?, unlockCount: Int, lang: AppLanguage) -> String {
+        let d = dept ?? (lang == .vi ? "Chung" : "General")
+        if unlockCount == 0 {
+            return lang == .vi ? "\(d) · chưa có bước nào chờ nó"
+                               : "\(d) · nothing else waits on it yet"
+        }
+        if unlockCount == 1 {
+            return lang == .vi ? "\(d) · mở khoá 1 bước sau" : "\(d) · unlocks 1 later step"
+        }
+        return lang == .vi ? "\(d) · mở khoá \(unlockCount) bước sau"
+                           : "\(d) · unlocks \(unlockCount) later steps"
+    }
 }

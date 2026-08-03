@@ -39,7 +39,8 @@ export const BRIEF_TOOL = {
       kill_criteria: {
         type: "array",
         items: { type: "string" },
-        description: "Observable events that mean 'we were wrong, stop'. At least one."
+        description:
+          "Observable events that mean 'we were wrong, stop'. At least one. Always an array, even when there is only one criterion."
       },
       next_action: {
         type: "object",
@@ -93,10 +94,14 @@ export function parseBriefToolInput(input: unknown): DecisionBrief | { error: st
     if (str(required).length === 0) return { error: `${required} is required` };
   }
 
-  const killCriteria = Array.isArray(raw.kill_criteria)
-    ? raw.kill_criteria.filter(
-        (k): k is string => typeof k === "string" && k.trim().length > 0
-      )
+  // Opus collapses kill_criteria to a bare string whenever it settles on a single
+  // criterion — measured deterministically, 3/3 real runs. Treating that as
+  // "no kill criteria" threw away an otherwise usable brief at the most expensive
+  // step in the run, so a lone string is read as a one-element list.
+  const rawKillCriteria =
+    typeof raw.kill_criteria === "string" ? [raw.kill_criteria] : raw.kill_criteria;
+  const killCriteria = Array.isArray(rawKillCriteria)
+    ? rawKillCriteria.filter((k): k is string => typeof k === "string" && k.trim().length > 0)
     : [];
   if (killCriteria.length === 0) {
     return { error: "kill_criteria requires at least one observable event" };

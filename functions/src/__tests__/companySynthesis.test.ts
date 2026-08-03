@@ -115,6 +115,22 @@ describe("parseBriefToolInput", () => {
     });
   });
 
+  test("reads a bare kill_criteria string as one criterion", () => {
+    // Measured against the real model: Opus returns a string, not a one-element
+    // array, whenever it settles on a single criterion. Rejecting that discarded
+    // a usable brief after paying for every earlier phase.
+    const criterion = "Zero of 30 beta users purchase within 14 days at any price.";
+    const brief = parseBriefToolInput(briefInput({ kill_criteria: criterion }));
+    expect(brief).not.toHaveProperty("error");
+    expect((brief as DecisionBrief).kill_criteria).toEqual([criterion]);
+  });
+
+  test("still rejects a blank kill_criteria string", () => {
+    expect(parseBriefToolInput(briefInput({ kill_criteria: "   " }))).toEqual({
+      error: expect.stringMatching(/kill_criteria/)
+    });
+  });
+
   test("rejects a next_action with no owner", () => {
     expect(
       parseBriefToolInput(briefInput({ next_action: { action: "do it", owner: "" } }))

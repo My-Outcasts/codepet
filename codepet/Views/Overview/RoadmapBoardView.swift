@@ -17,8 +17,6 @@ struct RoadmapBoardView: View {
 
     @Environment(\.uiLanguage) private var lang
 
-    /// Measured height of the scroll area, for the fit-to-height scale.
-    @State private var avail: CGFloat = 0
     /// Task ids mid-pulse (a step just became current, or just unlocked).
     @State private var pulseIds: Set<String> = []
     @State private var prevStates: [String: TaskStatus] = [:]
@@ -26,14 +24,22 @@ struct RoadmapBoardView: View {
     /// when the new current task was never `.blocked` (see `detectAdvances`).
     @State private var prevCurrentId: String?
     /// The task id the open-framing scroll last centered on. Web re-runs its framing effect on
-    /// `[currentX, scale]` rather than once-ever; `scale` is a constant here (see `scale(for:)`),
-    /// so that reduces to "re-frame when the current move changes" — which this id records.
+    /// `[currentX, scale]`; there's no scale here — the board never rescales — so that reduces
+    /// to "re-frame when the current move changes", which this id records.
     @State private var framedForId: String?
     /// Scroll-edge fade state, written only by `onScrollGeometryChange`.
     @State private var canScrollLeft = false
     @State private var canScrollRight = false
 
-    private var layout: RoadmapLayout { RoadmapLayoutEngine.layout(tasks) }
+    /// Phases the founder expanded by hand from their rail. Session-only: the width rule
+    /// (`RoadmapFocus`) picks the default set on every layout pass.
+    @State private var userExpanded: Set<RoadmapPhase> = []
+
+    /// Page gutters for the board. Leading is wider than the page's 24pt because the root
+    /// node's aura bleeds 26pt past its own box — at 24pt the glow clips on the window edge.
+    private static let insetLeading: CGFloat = 26
+    private static let insetTrailing: CGFloat = 24
+
     private var currentId: String? { RoadmapEngine.nextStep(tasks)?.id }
     private var herePhrase: String {
         RoadmapBoardCopy.herePhrase(founderName: founderName, lang: lang)
@@ -42,75 +48,56 @@ struct RoadmapBoardView: View {
     private static let headerRow: CGFloat = 28
     private static let headerGap: CGFloat = 6
     private static let headerBlock: CGFloat = headerRow + headerGap
-    /// Generous fixed trailing allowance for the LAST phase header's label + `done/total`
-    /// count, so it never clips. English ("RUN & GROW") needs ~224pt; Vietnamese
-    /// ("VẬN HÀNH & PHÁT TRIỂN" + count) runs to ~230–235pt. 240pt covers both with margin
-    /// without measuring text.
-    private static let headerTrailingAllowance: CGFloat = 240
-
-    /// Web parity — deliberately always 1.0, NOT dead code. RoadmapView.tsx pairs
-    /// `MAX_SCALE = 1.0` with "never upscale — keep cards at natural size and center any
-    /// leftover height", so this is a FLOOR against downscaling: the board never shrinks,
-    /// extra height is centred by `padTop`, and a too-tall board scrolls. Do not "simplify".
-    private func scale(for l: RoadmapLayout) -> CGFloat {
-        let natural = l.size.height + Self.headerBlock
-        guard avail > 0, natural > 0 else { return 1 }
-        return max(1, min(1.0, avail / natural))
-    }
-
-    /// The scrollable content width: at least the diagram's width, but widened when the
-    /// last phase header's label + count would otherwise run past it.
-    private func boardWidth(_ l: RoadmapLayout) -> CGFloat {
-        let lastHeaderX = l.columns.last?.x ?? 0
-        return max(l.size.width, lastHeaderX + Self.headerTrailingAllowance)
-    }
 
     var body: some View {
-        let l = layout
-        let s = scale(for: l)
-        let w = boardWidth(l)
-        let scaledH = (l.size.height + Self.headerBlock) * s
-        let padTop = avail > scaledH ? ((avail - scaledH) / 2).rounded() : 0
+        // The board's own allotment, read directly instead of stored: `@State` + `onAppear`
+        // measurement is what produced the old bug — a stale viewport centred the map against
+        // a container ~200pt taller than the visible one, so it sat low and ran off the bottom.
+        GeometryReader { g in
+            let budget = max(0, g.size.width - Self.insetLeading - Self.insetTrailing)
+            let expandedPhases = RoadmapFocus.expanded(tasks: tasks, availableWidth: budget,
+                                                       userExpanded: userExpanded)
+            let l = RoadmapLayoutEngine.layout(tasks, expanded: expandedPhases)
+            let states = RoadmapGating.states(tasks)
 
-        return ScrollViewReader { proxy in
-            ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Self.headerGap) {
-                    phaseHeaders(l, width: w)
-                    diagram(l)
+            ScrollViewReader { proxy in
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: Self.headerGap) {
+                        phaseHeaders(l, states: states)
+                        diagram(l)
+                    }
+                    .padding(.leading, Self.insetLeading)
+                    .padding(.trailing, Self.insetTrailing)
+                    // Centring as LAYOUT, not arithmetic: the content grows to the viewport
+                    // when it's smaller (and centres inside it) and overflows into scroll when
+                    // it's bigger. Nothing to measure, nothing to go stale.
+                    .frame(minWidth: g.size.width, minHeight: g.size.height, alignment: .center)
                 }
-                .frame(width: w, alignment: .topLeading)
-                .scaleEffect(s, anchor: .topLeading)
-                .frame(width: w * s, height: scaledH, alignment: .topLeading)
-                .padding(.top, padTop)
+                .onScrollGeometryChange(for: ScrollEdgeState.self) { geo in
+                    ScrollEdgeState(
+                        left: geo.contentOffset.x > 0.5,
+                        right: geo.contentOffset.x < geo.contentSize.width - geo.containerSize.width - 0.5)
+                } action: { _, new in
+                    canScrollLeft = new.left
+                    canScrollRight = new.right
+                }
+                .overlay(alignment: .leading) { edgeFade(leading: true, visible: canScrollLeft) }
+                .overlay(alignment: .trailing) { edgeFade(leading: false, visible: canScrollRight) }
+                .onAppear {
+                    // Open framed on the current move — the founder shouldn't hunt for it.
+                    if let id = currentId { frame(proxy, id: id) }
+                    prevStates = statusMap(tasks)
+                    prevCurrentId = currentId
+                }
+                .onChange(of: currentId) { _, new in
+                    // First visit: `tasks` generates asynchronously, so `currentId` is nil at
+                    // `onAppear` and the board never got framed above. Catch it the moment the
+                    // current move first resolves — and again on each advance, as web does.
+                    guard let id = new, framedForId != id else { return }
+                    frame(proxy, id: id)
+                }
+                .onChange(of: tasks) { _, new in detectAdvances(new) }
             }
-            .background(GeometryReader { g in
-                Color.clear.onAppear { avail = g.size.height }
-                    .onChange(of: g.size.height) { _, h in avail = h }
-            })
-            .onScrollGeometryChange(for: ScrollEdgeState.self) { geo in
-                ScrollEdgeState(
-                    left: geo.contentOffset.x > 0.5,
-                    right: geo.contentOffset.x < geo.contentSize.width - geo.containerSize.width - 0.5)
-            } action: { _, new in
-                canScrollLeft = new.left
-                canScrollRight = new.right
-            }
-            .overlay(alignment: .leading) { edgeFade(leading: true, visible: canScrollLeft) }
-            .overlay(alignment: .trailing) { edgeFade(leading: false, visible: canScrollRight) }
-            .onAppear {
-                // Open framed on the current move — the founder shouldn't hunt for it.
-                if let id = currentId { frame(proxy, id: id) }
-                prevStates = statusMap(tasks)
-                prevCurrentId = currentId
-            }
-            .onChange(of: currentId) { _, new in
-                // First visit: `tasks` generates asynchronously, so `currentId` is nil at
-                // `onAppear` and the board never got framed above. Catch it the moment the
-                // current move first resolves — and again on each advance, as web does.
-                guard let id = new, framedForId != id else { return }
-                frame(proxy, id: id)
-            }
-            .onChange(of: tasks) { _, new in detectAdvances(new) }
         }
     }
 
@@ -166,20 +153,34 @@ struct RoadmapBoardView: View {
     // MARK: phase headers
 
     // Left-aligned to each column's card edge (web places them at `c.x`), in their own
-    // 28pt row above the diagram.
-    private func phaseHeaders(_ l: RoadmapLayout, width: CGFloat) -> some View {
+    // 28pt row above the diagram. A locked phase wears a lock and drops the accent, so the
+    // header row alone tells the founder how far the window reaches.
+    private func phaseHeaders(_ l: RoadmapLayout, states: [RoadmapPhase: PhaseState]) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(l.columns) { c in
+                let state = states[c.phase] ?? .later
+                let locked = state == .preview || state == .later
                 HStack(spacing: 10) {
-                    Text(c.phase.label(lang).uppercased())
-                        .font(CodepetTheme.inter(10.5)).tracking(1.47)     // web .14em at 10.5px
-                        .foregroundColor(c.current ? accent : CodepetTheme.mutedText)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(c.current ? CodepetTokens.accentTint : CodepetTokens.well))
-                        .overlay(RoundedRectangle(cornerRadius: 7)
-                            .stroke(c.current ? CodepetTokens.accentLine : CodepetTheme.hairline,
-                                    lineWidth: 1))
+                    HStack(spacing: 5) {
+                        if locked {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(CodepetTheme.mutedText)
+                        } else if state == .complete {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(RoadmapPalette.done)
+                        }
+                        Text(c.phase.label(lang).uppercased())
+                            .font(CodepetTheme.inter(10.5)).tracking(1.47)   // web .14em at 10.5px
+                            .foregroundColor(c.current ? accent : CodepetTheme.mutedText)
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(c.current ? CodepetTokens.accentTint : CodepetTokens.well))
+                    .overlay(RoundedRectangle(cornerRadius: 7)
+                        .stroke(c.current ? CodepetTokens.accentLine : CodepetTheme.hairline,
+                                lineWidth: 1))
                     Text("\(c.done)/\(c.total)")
                         .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
                 }
@@ -187,7 +188,7 @@ struct RoadmapBoardView: View {
                 .offset(x: c.x, y: 0)
             }
         }
-        .frame(width: width, height: Self.headerRow, alignment: .topLeading)
+        .frame(width: l.size.width, height: Self.headerRow, alignment: .topLeading)
     }
 
     // MARK: diagram
@@ -196,6 +197,10 @@ struct RoadmapBoardView: View {
         ZStack(alignment: .topLeading) {
             edgeCanvas(l)
             if let r = l.root { rootNode(r) }
+            ForEach(l.rails) { r in
+                rail(r, height: l.size.height)
+                    .position(x: r.x + RoadmapGeometry.railW / 2, y: l.size.height / 2)
+            }
             ForEach(l.nodes) { n in
                 let status = RoadmapEngine.status(for: n.task, in: tasks)
                 let isCurrent = n.task.id == currentId
@@ -218,6 +223,42 @@ struct RoadmapBoardView: View {
             }
         }
         .frame(width: l.size.width, height: l.size.height, alignment: .topLeading)
+    }
+
+    /// A collapsed phase: a slim rail carrying its name vertically plus its done/total, click
+    /// to expand. An unplanned phase says so rather than showing a bare 0/0, which reads like
+    /// a bug instead of an absence.
+    private func rail(_ r: PhaseRail, height: CGFloat) -> some View {
+        let empty = r.total == 0
+        return Button { toggleExpanded(r.phase) } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.well)
+                RoundedRectangle(cornerRadius: 10).stroke(CodepetTheme.hairline, lineWidth: 1)
+                VStack(spacing: 12) {
+                    if !empty {
+                        Text("\(r.done)/\(r.total)")
+                            .font(CodepetTheme.inter(10)).monospacedDigit()
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                    // `rotationEffect` doesn't change layout, so the label claims its
+                    // horizontal size inside the 44pt frame and draws rotated — which is
+                    // exactly what we want; `fixedSize` stops it wrapping first.
+                    Text(r.phase.label(lang).uppercased())
+                        .font(CodepetTheme.inter(10.5)).tracking(1.47)
+                        .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
+                        .lineLimit(1).fixedSize()
+                        .rotationEffect(.degrees(-90))
+                }
+            }
+            .frame(width: RoadmapGeometry.railW, height: height)
+        }
+        .buttonStyle(.plain)
+        .help(empty ? "\(r.phase.label(lang)) · \(RoadmapBoardCopy.notPlannedYet(lang))"
+                    : "\(r.phase.label(lang)) · \(r.done)/\(r.total)")
+    }
+
+    private func toggleExpanded(_ phase: RoadmapPhase) {
+        if userExpanded.contains(phase) { userExpanded.remove(phase) } else { userExpanded.insert(phase) }
     }
 
     private func edgeCanvas(_ l: RoadmapLayout) -> some View {
@@ -247,6 +288,15 @@ struct RoadmapBoardView: View {
             for e in l.edges where e.critical {
                 ctx.stroke(path(e.points), with: .color(accent),
                            style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+            }
+            // A short stub into each rail, so a collapsed phase still reads as part of one
+            // continuous journey rather than a detached sidebar.
+            let midY = (l.size.height / 2).rounded()
+            for r in l.rails {
+                ctx.stroke(path([CGPoint(x: r.x - RoadmapGeometry.railGap, y: midY),
+                                 CGPoint(x: r.x, y: midY)]),
+                           with: .color(accent.opacity(0.25)),
+                           style: StrokeStyle(lineWidth: 1.5))
             }
         }
         .frame(width: l.size.width, height: l.size.height)
@@ -363,6 +413,9 @@ struct RoadmapBoardView: View {
         if !unlocks.isEmpty {
             parts.append((lang == .vi ? "Dẫn tới: " : "Leads to: ")
                          + unlocks.prefix(3).joined(separator: ", "))
+        }
+        if status == .blocked, let b = RoadmapGating.blocker(for: task, in: tasks) {
+            parts.append(RoadmapBoardCopy.waitingOn(b.title, lang: lang))
         }
         switch status {
         case .codepetCanDo:

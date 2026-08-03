@@ -24,6 +24,14 @@ struct TaskNodePanel: View {
     /// panel is open (a run finishes, a draft lands).
     private var liveTask: RoadmapTask { tasks.first { $0.id == task.id } ?? task }
     private var isRunning: Bool { companyStore.runningTaskIds.contains(task.id) }
+    /// A hand-marked-done task (mark-complete, never a real run) has no library item —
+    /// `RoadmapEngine.deliverable` resolves nil for it. The primary button's label for `.done`
+    /// is "Open the result", so offering it here is a guaranteed dead end: it dismisses the
+    /// panel and opens nothing. Hidden rather than disabled so the footer doesn't carry a
+    /// button that can never do anything.
+    private var primaryActionIsDeadEnd: Bool {
+        liveTask.done && RoadmapEngine.deliverable(for: liveTask, in: companyStore.company.library) == nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -120,18 +128,20 @@ struct TaskNodePanel: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button {
-                dismiss()
-                onAction(liveTask)
-            } label: {
-                Text(RoadmapBoardCopy.panelActionLabel(for: detail.status, lang))
-                    .font(CodepetTheme.inter(12.5, weight: .bold))
-                    .foregroundColor(CodepetTheme.onAccent(accent))
-                    .padding(.horizontal, 18).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 9).fill(accent))
+            if !primaryActionIsDeadEnd {
+                Button {
+                    dismiss()
+                    onAction(liveTask)
+                } label: {
+                    Text(RoadmapBoardCopy.panelActionLabel(for: detail.status, lang))
+                        .font(CodepetTheme.inter(12.5, weight: .bold))
+                        .foregroundColor(CodepetTheme.onAccent(accent))
+                        .padding(.horizontal, 18).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 9).fill(accent))
+                }
+                .buttonStyle(.plain)
+                .disabled(isRunning)
             }
-            .buttonStyle(.plain)
-            .disabled(isRunning)
 
             // A drafted task's correct action is Approve; marking it done here would silently
             // discard generated work, so the affordance hides itself.
@@ -148,6 +158,12 @@ struct TaskNodePanel: View {
                             .stroke(CodepetTheme.hairline, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
+                // Guards the same failure the primary button guards: an in-flight run can land
+                // its draft (`drafted = true`) right after mark-done sets `done = true`, and
+                // `status` short-circuits on `done` before ever consulting `drafted` — stranding
+                // the generated deliverable with no way to reach it. Blocking the tap while
+                // `isRunning` closes that window.
+                .disabled(isRunning)
             }
             Spacer()
         }

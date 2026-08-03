@@ -28,6 +28,38 @@ enum RoadmapBoardCopy {
     /// The small deliverable/output marker in a card's top-right — locked cards only.
     static func showsTrayMarker(_ status: TaskStatus) -> Bool { status == .blocked }
 
+    /// The hover peek's status sentence — what the state means, plus what tapping the card now
+    /// does. Tapping opens `TaskNodePanel`; it no longer fires the task's action, so every
+    /// clause here reads "tap/click to see/open the panel", never "click to start/add/open the
+    /// result" — those promises describe the OLD one-tap-runs-it behaviour.
+    ///
+    /// `isCurrent` only matters for `.codepetCanDo` — it distinguishes the single beacon card
+    /// ("…'s next move") from a merely-runnable one ("… can run this now"); every other status
+    /// has one sentence regardless of `isCurrent`.
+    static func peekAction(for status: TaskStatus, isCurrent: Bool, companionName: String,
+                           lang: AppLanguage) -> String {
+        switch status {
+        case .codepetCanDo:
+            if isCurrent {
+                return lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để xem chi tiết."
+                                   : "\(companionName)'s next move. Click to see details."
+            }
+            return lang == .vi ? "\(companionName) có thể làm ngay bây giờ. Nhấn để xem chi tiết."
+                               : "\(companionName) can run this now. Click to see details."
+        case .needsYou:
+            return lang == .vi ? "Cần bạn nhập. Nhấn để xem cách làm."
+                               : "Your input needed. Click to see how."
+        case .needsApproval:
+            return lang == .vi ? "Bản nháp đã sẵn sàng. Nhấn để xem lại."
+                               : "Ready for your review. Click to open it."
+        case .done:
+            return lang == .vi ? "Xong. Nhấn để xem chi tiết." : "Finished. Click to see details."
+        case .blocked:
+            return lang == .vi ? "Cần hoàn thành các bước trước. Nhấn để xem lý do."
+                               : "Locked — finish the earlier steps first. Click to see why."
+        }
+    }
+
     /// The beacon marks where the FOUNDER stands — named when we have it, second person
     /// otherwise. Composed (not "{label} is here") so the fallback reads "You are here".
     static func herePhrase(founderName: String?, lang: AppLanguage) -> String {

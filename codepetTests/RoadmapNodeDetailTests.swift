@@ -113,6 +113,48 @@ final class RoadmapNodeDetailTests: XCTestCase {
         XCTAssertEqual(reqs[0].kind, .task("a"))
     }
 
+    /// `status` short-circuits on `done` BEFORE ever consulting the phase window (see
+    /// `RoadmapEngine.status`'s doc comment), so a task marked done — including by hand, via
+    /// mark-complete, while sitting in a phase that hasn't opened yet — must not show a
+    /// "REQUIRED FIRST" line next to its "Done" pill; the window isn't what's holding IT shut.
+    ///
+    /// Hand-trace: `gate` (FIND, `.you`, not done) keeps FIND unsettled, so
+    /// `openPhases([gate, target]) == [.find]` — BUILD is closed. `target` (BUILD, `done: true`)
+    /// still has `status == .done` because `RoadmapEngine.status` checks `task.done` first.
+    func testDoneTaskInAClosedPhaseGetsNoPhaseWindowRequirement() {
+        let gate = t("gate", .find, who: .you)
+        let target = t("target", .build, done: true)
+        let all = [gate, target]
+        XCTAssertEqual(RoadmapGating.openPhases(all), [.find])
+        let d = RoadmapNodeDetail.build(for: target, in: all, lang: .en)
+        XCTAssertEqual(d.status, .done)
+        XCTAssertTrue(d.requiredFirst.isEmpty)
+    }
+
+    /// A `.blocked` task can be blocked by BOTH an unmet dependency and the closed phase window
+    /// at once — the panel must show both requirements, dependency first (declared order) and
+    /// the phase window appended last, since nothing else pins that order.
+    ///
+    /// Hand-trace: `gate` (FIND, `.you`, not done) keeps FIND unsettled, so
+    /// `openPhases([gate, dep, target]) == [.find]` — BUILD is closed. `target` (BUILD, depends
+    /// on `dep` which is not done) is not done/drafted, and BUILD isn't open, so
+    /// `RoadmapEngine.status` returns `.blocked` on the window check (it runs before the deps
+    /// check) — `dep` being unmet is a second, independent reason it's blocked.
+    func testTaskWithBothAnUnmetDependencyAndAClosedPhaseListsBoth() {
+        let gate = t("gate", .find, who: .you)
+        let dep = t("dep", .find)
+        let target = t("target", .build, deps: ["dep"])
+        let all = [gate, dep, target]
+        XCTAssertEqual(RoadmapGating.openPhases(all), [.find])
+        XCTAssertEqual(RoadmapEngine.status(for: target, in: all), .blocked)
+        let reqs = RoadmapNodeDetail.build(for: target, in: all, lang: .en).requiredFirst
+        XCTAssertEqual(reqs.count, 2)
+        XCTAssertEqual(reqs[0].kind, .task("dep"))
+        XCTAssertFalse(reqs[0].satisfied)
+        XCTAssertEqual(reqs[1].kind, .phaseWindow(.find))
+        XCTAssertFalse(reqs[1].satisfied)
+    }
+
     // MARK: unlocks
 
     func testUnlocksReadsReverseEdgesAndCaps() {

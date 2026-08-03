@@ -141,6 +141,41 @@ final class RoadmapBoardCopyTests: XCTestCase {
         XCTAssertNotEqual(RoadmapBoardCopy.markComplete(.en), RoadmapBoardCopy.markNotDone(.en))
     }
 
+    // MARK: hover peek action (Fix 1 — tap opens the panel, it no longer runs the task)
+
+    /// Every status gets a non-empty sentence, distinct per language, and NONE of them may
+    /// promise the old one-tap-runs-it behaviour ("start"/"add"/"open the result") — tapping a
+    /// card now opens `TaskNodePanel`.
+    func testPeekActionCoversEveryStatusAndNeverPromisesTheOldBehaviour() {
+        let banned = ["click to start", "click to add", "click to open the result", "nhấn để bắt đầu"]
+        for status in [TaskStatus.done, .needsApproval, .blocked, .needsYou, .codepetCanDo] {
+            let en = RoadmapBoardCopy.peekAction(for: status, isCurrent: false,
+                                                 companionName: "Byte", lang: .en)
+            let vi = RoadmapBoardCopy.peekAction(for: status, isCurrent: false,
+                                                 companionName: "Byte", lang: .vi)
+            XCTAssertFalse(en.isEmpty)
+            XCTAssertFalse(vi.isEmpty)
+            XCTAssertNotEqual(en, vi)
+            let enLower = en.lowercased()
+            for phrase in banned {
+                XCTAssertFalse(enLower.contains(phrase), "\(status) still promises the old tap behaviour: \(en)")
+            }
+        }
+    }
+
+    /// `.codepetCanDo` is the one status where `isCurrent` changes the sentence — the beacon
+    /// reads "…'s next move", a merely-runnable sibling reads "… can run this now" — but both
+    /// still describe opening the panel, not running the task.
+    func testPeekActionDistinguishesCurrentFromRunnableForCodepetCanDo() {
+        let current = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: true,
+                                                   companionName: "Byte", lang: .en)
+        let runnable = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: false,
+                                                    companionName: "Byte", lang: .en)
+        XCTAssertNotEqual(current, runnable)
+        XCTAssertTrue(current.contains("next move"))
+        XCTAssertTrue(runnable.contains("can run this now"))
+    }
+
     /// The reason is a leverage signal, so the unlock count has to appear — and zero gets its
     /// own phrasing rather than "unlocks 0 later steps".
     func testSuggestionReasonCarriesDeptAndUnlockCount() {

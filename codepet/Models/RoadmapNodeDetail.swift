@@ -66,7 +66,15 @@ struct RoadmapNodeDetail: Equatable {
 
         // The window itself, when THAT is what's holding this node shut. The phase named is the
         // earliest unsettled one — not the task's own phase, which is merely downstream of it.
-        if !RoadmapGating.openPhases(tasks).contains(task.phase),
+        //
+        // Gated on `status == .blocked`, not just "phase closed": `status` short-circuits on
+        // `done`/`drafted` BEFORE ever consulting the window (see its doc comment), so a task
+        // that is done or drafted can sit in a closed phase without the window being what's
+        // holding IT shut — showing the requirement anyway would contradict the status pill
+        // right next to it. A `needsYou`/`codepetCanDo` task in a closed phase still reads
+        // `.blocked` (the window is exactly what blocks it), so it still gets this requirement.
+        if status == .blocked,
+           !RoadmapGating.openPhases(tasks).contains(task.phase),
            let blocking = RoadmapPhase.allCases.first(where: { !RoadmapGating.settled($0, in: tasks) }) {
             let step = RoadmapGating.founderStep(in: tasks)
             requirements.append(NodeRequirement(

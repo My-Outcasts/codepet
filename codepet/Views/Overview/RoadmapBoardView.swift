@@ -474,20 +474,8 @@ struct RoadmapBoardView: View {
         if status == .blocked, let b = RoadmapGating.blocker(for: task, in: tasks) {
             parts.append(RoadmapBoardCopy.waitingOn(b.title, lang: lang))
         }
-        switch status {
-        case .codepetCanDo:
-            if isCurrent {
-                parts.append(lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để bắt đầu."
-                                         : "\(companionName)'s next move. Click to start.")
-            } else {
-                parts.append(lang == .vi ? "\(companionName) có thể làm ngay bây giờ. Nhấn để bắt đầu."
-                                         : "\(companionName) can run this now. Click to start.")
-            }
-        case .needsYou:      parts.append(lang == .vi ? "Cần bạn nhập. Nhấn để thêm." : "Your input needed. Click to add it.")
-        case .needsApproval: parts.append(lang == .vi ? "Bản nháp đã sẵn sàng. Nhấn để xem lại." : "Ready for your review.")
-        case .done:          parts.append(lang == .vi ? "Xong. Nhấn để mở." : "Finished — click to open the result.")
-        case .blocked:       parts.append(lang == .vi ? "Cần hoàn thành các bước trước." : "Locked — finish the earlier steps first.")
-        }
+        parts.append(RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
+                                                 companionName: companionName, lang: lang))
         return parts.joined(separator: "\n")
     }
 }

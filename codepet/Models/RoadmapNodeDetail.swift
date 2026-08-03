@@ -47,10 +47,15 @@ struct RoadmapNodeDetail: Equatable {
                       lang: AppLanguage) -> RoadmapNodeDetail {
         let status = RoadmapEngine.status(for: task, in: tasks)
 
-        // Dependencies in their declared order. A dangling id is skipped rather than shown as a
-        // phantom requirement — `RoadmapEngine.depsSatisfied` treats it as satisfied (fail-open),
-        // so listing it would contradict the status.
+        // Dependencies in their declared order, deduped by id (first occurrence wins) — a
+        // repeated id in `dependsOn` would otherwise yield two `NodeRequirement`s sharing one
+        // `id`, and the panel feeds this straight into a SwiftUI `ForEach`, where duplicate ids
+        // are a real bug. A dangling id is skipped rather than shown as a phantom requirement —
+        // `RoadmapEngine.depsSatisfied` treats it as satisfied (fail-open), so listing it would
+        // contradict the status.
+        var seenDepIds = Set<String>()
         var requirements: [NodeRequirement] = task.dependsOn.compactMap { depId in
+            guard seenDepIds.insert(depId).inserted else { return nil }
             guard let dep = tasks.first(where: { $0.id == depId }) else { return nil }
             return NodeRequirement(
                 kind: .task(dep.id),

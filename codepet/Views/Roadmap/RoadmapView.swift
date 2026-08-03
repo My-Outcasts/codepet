@@ -11,6 +11,9 @@ struct RoadmapView: View {
     @State private var showMapIntro = false
     @State private var introShown = false
     @State private var openDeliverable: Deliverable?
+    /// The node whose panel is open. Tapping a card opens this rather than firing the action —
+    /// a card should be readable before it starts an agent.
+    @State private var panelTask: RoadmapTask?
     @State private var overviewTab: OverviewTab = .roadmap
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
@@ -70,6 +73,14 @@ struct RoadmapView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $panelTask) { node in
+            TaskNodePanel(task: node, accent: accent,
+                          onAction: { dispatch($0) },
+                          onMarkDoneToggle: { t in
+                              panelTask = nil
+                              Task { await companyStore.toggleTaskDone(id: t.id) }
+                          })
+        }
         .sheet(isPresented: $showMapIntro) {
             OverviewIntroSheet(companionName: companionName,
                                projectName: displayProjectName,
@@ -104,7 +115,7 @@ struct RoadmapView: View {
                              projectName: displayProjectName,
                              tagline: oneLiner,
                              accent: accent,
-                             onTaskTap: { dispatch($0) })
+                             onTaskTap: { panelTask = $0 })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

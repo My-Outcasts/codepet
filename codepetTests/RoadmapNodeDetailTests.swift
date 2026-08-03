@@ -71,6 +71,17 @@ final class RoadmapNodeDetailTests: XCTestCase {
         XCTAssertTrue(RoadmapNodeDetail.build(for: a, in: [a], lang: .en).requiredFirst.isEmpty)
     }
 
+    /// `dependsOn` can carry a repeated id; a `ForEach` over `requiredFirst` needs unique ids,
+    /// so a duplicate must collapse to a single requirement rather than producing two rows with
+    /// the same `NodeRequirement.id`.
+    func testRepeatedDependencyIdYieldsOneRequirement() {
+        let d1 = t("d1", .find)
+        let target = t("x", .find, deps: ["d1", "d1"])
+        let reqs = RoadmapNodeDetail.build(for: target, in: [d1, target], lang: .en).requiredFirst
+        XCTAssertEqual(reqs.count, 1)
+        XCTAssertEqual(reqs[0].kind, .task("d1"))
+    }
+
     /// The phase window is a requirement too — and it names the phase that has to settle plus
     /// the step holding it shut, which is the one thing Cofounder's panel can't show.
     func testPhaseGatedTaskGetsAPhaseWindowRequirement() {

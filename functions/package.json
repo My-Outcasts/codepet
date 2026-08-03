@@ -12,6 +12,7 @@
     "test": "jest",
     "verify:company": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/verify-company-run.ts",
     "try:company": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/try-company-run.ts",
+    "token": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/get-id-token.ts",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },

@@ -1,20 +1,6 @@
 // codepet/Views/Company/DepartmentDetailView.swift
 import SwiftUI
 
-/// `Department.coverAnchor` is `UnitPoint` (not `Alignment`) because `Department` conforms to
-/// `Hashable` and `UnitPoint` does, while `Alignment` doesn't — but `.frame(alignment:)` takes
-/// an `Alignment`, so this converts. Only `.center`/`.top`/`.bottom` are in play today (see
-/// `Department.swift`'s `coverAnchor` doc); this snaps each axis into one of three buckets
-/// (`< 0.5` → leading/top, `> 0.5` → trailing/bottom, else center), landing on one of the 9
-/// standard `Alignment` values rather than mapping the coordinate proportionally.
-private extension UnitPoint {
-    var frameAlignment: Alignment {
-        let h: HorizontalAlignment = x < 0.5 ? .leading : x > 0.5 ? .trailing : .center
-        let v: VerticalAlignment = y < 0.5 ? .top : y > 0.5 ? .bottom : .center
-        return Alignment(horizontal: h, vertical: v)
-    }
-}
-
 struct DepartmentDetailView: View {
     let deptKey: String
     let onBack: () -> Void
@@ -95,8 +81,11 @@ struct DepartmentDetailView: View {
     /// source aspect ÷ frame aspect, so a 16:9 cover keeps ≈42% of its height — up from the
     /// old 140pt strip's 6.9:1, which kept ≈26% (≈1.6×, not the 40%→76% this comment used to
     /// claim). That's a material reduction, not a fix: `dept-fin` (4:3) keeps ≈32%,
-    /// `dept-legal` (1:1) keeps ≈24%, which is why the fin/legal crop check is a real visual
-    /// gate rather than a formality. The scrim is NEUTRAL on purpose: the accent used to
+    /// `dept-legal` (1:1) keeps ≈24%, which is why the fin/legal crop check was a real visual
+    /// gate rather than a formality — it passed, so every cover centres and there is no
+    /// per-department anchor override. If a future cover puts its subject off-centre, the fix
+    /// is an `alignment:` on the frame below, not a reason to keep an unused knob now.
+    /// The scrim is NEUTRAL on purpose: the accent used to
     /// flood it at 0.55, which muddied art it clashes with (Engineering's accent is blue
     /// over hot-pink art) and dimmed the title sitting on it. Identity moves to the badge
     /// instead.
@@ -107,7 +96,7 @@ struct DepartmentDetailView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: geo.size.width, height: 190, alignment: d.coverAnchor.frameAlignment)
+                    .frame(width: geo.size.width, height: 190)
                     .clipped()
             }
             LinearGradient(stops: [

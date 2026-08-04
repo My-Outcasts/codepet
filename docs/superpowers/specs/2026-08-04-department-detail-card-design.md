@@ -107,10 +107,17 @@ something is done.
   (`CompanyView.swift:137-142`) — `#0b0a12` at 0.82 with the department accent at 0.34
   over it, white 0.25 hairline, radius 8, 11pt semibold — so the two surfaces agree.
 - Label row inset 16. Name at **30pt semibold**, tracking −0.5, white.
-- `Department` gains `coverAnchor: UnitPoint = .center`, used as the `scaledToFill`
-  alignment. Only `fin` (4:3) and `legal` (1:1) are candidates for a non-default value,
-  and only if the visual check after implementation shows a bad crop — the field exists
-  as a per-department escape hatch, not as a value to set speculatively.
+- Every cover centres; there is no per-department crop anchor.
+
+  > **CORRECTION (after the visual check).** This spec originally had `Department` gain
+  > `coverAnchor: UnitPoint = .center` as a per-department escape hatch, to be set only if
+  > the crop check showed `fin` (4:3) or `legal` (1:1) landing on a meaningless band. The
+  > check passed, so no department ever set a non-default value — leaving the field plus a
+  > `UnitPoint → Alignment` conversion (`UnitPoint` because `Department` is `Hashable` and
+  > `Alignment` isn't) as ~12 lines of scaffolding for a case that didn't materialise. Mona
+  > cut both. The hero's frame now takes SwiftUI's default `.center`, which is byte-identical
+  > to what all 8 departments rendered. A future off-centre cover gets an `alignment:` on
+  > that frame — cheaper to re-add than to carry unused.
 
 ### 3. Type scale
 

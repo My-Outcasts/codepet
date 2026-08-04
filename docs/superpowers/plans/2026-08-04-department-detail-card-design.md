@@ -499,6 +499,14 @@ Do not set a non-default value for any department yet. Task 6's visual check dec
 > conversion snaps any `UnitPoint` to the nearest of the 9 standard alignments, which covers
 > every anchor this feature can use.
 
+> **SUPERSEDED (commit after Task 6's visual check).** Both this Step 1 and the correction
+> above are now moot: the crop check passed on all 8 covers, so no department ever set a
+> non-default `coverAnchor`, and Mona cut the field together with the `frameAlignment`
+> conversion. The hero's frame is plain `.frame(width: geo.size.width, height: 190)` —
+> SwiftUI's default alignment is `.center`, identical to what every department rendered. Any
+> future off-centre cover gets an `alignment:` argument on that one frame call. Read Step 1
+> and the correction as history; do not re-add either.
+
 - [ ] **Step 2: Replace `hero` and add `badge`**
 
 In `codepet/Views/Company/DepartmentDetailView.swift`, replace the whole `private func hero(_ d: Department) -> some View { … }` function with:
@@ -796,14 +804,10 @@ pkill -x codepet; open "$APP/codepet.app"
 
 - [ ] **Step 4: Apply at most the `coverAnchor` answer, then commit**
 
-Only if Step 3.1 identified a bad crop:
-
-```bash
-cd /Users/monatruong/Developer/codepet-dept-detail
-# add `coverAnchor: .top` to the offending Department(...) entry in DepartmentCatalog.all
-git add codepet/Models/Department.swift
-git commit -m "fix(company): anchor the <dept> hero crop"
-```
+> **RESOLVED — the opposite way round.** Step 3.1 found no bad crop, so no department needed
+> an anchor. Mona's call was to cut `coverAnchor` and its `frameAlignment` conversion rather
+> than carry a knob nothing used (see the SUPERSEDED note in Task 3). The commit here is a
+> deletion, not the addition this step anticipated.
 
 Anything else Mona raises is reported back, not silently implemented — the design was agreed in the spec.
 

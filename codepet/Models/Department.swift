@@ -17,11 +17,6 @@ struct Department: Identifiable, Hashable {
     /// with no open tasks, the other unconditionally grounds the focus-department prompt.
     /// Keep this field: don't delete it as unused, and don't resurrect it as UI text.
     let focus: String        // web `d.byte` — a short companion-style focus line
-    /// Where the hero's wide crop anchors. Six covers are 16:9 and centre fine; `dept-fin`
-    /// (4:3) and `dept-legal` (1:1) lose more height, so they can pin the crop without
-    /// touching the other six. `var` with a default so the memberwise init keeps every
-    /// existing catalog entry compiling — declared LAST so it lands last in that init.
-    var coverAnchor: UnitPoint = .center
     var id: String { key }
     var coverAsset: String { "dept-\(key)" }
 }

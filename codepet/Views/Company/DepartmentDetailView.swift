@@ -29,8 +29,6 @@ struct DepartmentDetailView: View {
     /// live in this column too and need the room.
     private let column: CGFloat = 800
 
-    private var doneCount: Int { tasks.filter(\.done).count }
-
     var body: some View {
         guard let d = dept else { return AnyView(EmptyView()) }
         return AnyView(ScrollView {
@@ -84,22 +82,13 @@ struct DepartmentDetailView: View {
         }.buttonStyle(.plain)
     }
 
-    /// The count is appended only when it carries information — "1 of 1 left" says nothing until
-    /// something is done, so an untouched department just reads "WHAT NEEDS DOING". A
-    /// fully-done department DOES carry information ("8 of 8 done") — dropping it there left the
-    /// header contradicting the "All clear" pulse line above it and the delivered rows below it.
+    /// Copy lives in `departmentSectionHeader` (`Models/DepartmentSectionHeader.swift`), not
+    /// inline here, so the plural and the translation are assertable without a `View`.
     private var sectionHeader: some View {
-        Text(headerText)
+        Text(departmentSectionHeader(tasks: tasks, lang: lang))
             .font(CodepetTheme.inter(12, weight: .semibold))
             .tracking(0.4)
             .foregroundColor(CodepetTheme.mutedText)
-    }
-
-    private var headerText: String {
-        let base = (lang == .vi ? "Việc cần làm" : "What needs doing").uppercased()
-        guard doneCount > 0 else { return base }
-        return base + (lang == .vi ? " · \(doneCount)/\(tasks.count) đã xong"
-                                   : " · \(doneCount) of \(tasks.count) done")
     }
 
     /// 190pt in an 800pt column is 4.21:1. Under `contentMode: .fill`, retained height =

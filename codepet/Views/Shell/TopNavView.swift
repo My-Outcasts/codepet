@@ -48,6 +48,11 @@ struct TopNavView: View {
             .overlay(alignment: .bottom) {
                 Rectangle().fill(on ? accent : .clear).frame(height: 2).offset(y: 6)
             }
+            // The label carried no fill, so the tab hit-tested on its glyphs alone —
+            // the 10pt either side and 6pt above/below were dead on the app's most
+            // used control. `hoverAffordance` supplies the interior and the pointer
+            // response; the active underline still comes from the overlay above.
+            .hoverAffordance(RoundedRectangle(cornerRadius: 7, style: .continuous), accent: accent)
         }
         .buttonStyle(.plain)
     }

@@ -1551,10 +1551,20 @@ final class CompanyStore: ObservableObject {
     ///
     /// Persists through the EXISTING `decisionsSaver`, the same path `handleRemember` and
     /// `lockInVirtualCompanyDecision` write on, so decisions still reach the document
-    /// exactly one way. Matched on topic + statement rather than by index, because a
-    /// `remember_fact` merge landing between render and tap can re-order the array — and
-    /// `firstIndex` means a doc that somehow holds duplicates loses ONE row, not both.
-    /// A row that is already gone is a silent no-op, not a redundant write.
+    /// exactly one way. Matched on `Decisions.identityKey` — the trimmed, lowercased topic the
+    /// merge itself keys on — rather than by index or on topic + statement: a `remember_fact`
+    /// merge landing between render and tap can both re-order the array AND rewrite the
+    /// statement of the very row being deleted, and matching the statement would then make
+    /// that fact permanently undeletable (the ✕ a silent no-op). `firstIndex` is kept so a doc
+    /// that somehow holds duplicate topics loses ONE row per tap, not both. A topic that is
+    /// not on record is a silent no-op, not a redundant write.
+    ///
+    /// The surviving list is re-derived from `company.decisions` AFTER the write, never
+    /// assigned from a snapshot taken before it: a merge on this same account (same hydration
+    /// token, so the guard below cannot see it) can land inside that await, and assigning a
+    /// pre-computed array would erase the freshly-remembered fact from memory. When the
+    /// re-derived list differs from what was persisted, one corrective write — through the same
+    /// `decisionsSaver`, no new path — converges the document on it.
     ///
     /// Carries `setFounderPrefs`'s hydration guard, for exactly the same reason: the
     /// settings modal can stay open across a sign-out / account switch, and `hydrate` flips
@@ -1567,14 +1577,24 @@ final class CompanyStore: ObservableObject {
     func forgetDecision(_ entry: DecisionEntry) async {
         let token = hydrationToken
         guard !isHydrating, let cid = companyId else { return }
-        guard let i = company.decisions.firstIndex(where: {
-            $0.topic == entry.topic && $0.statement == entry.statement
-        }) else { return }
-        var remaining = company.decisions
-        remaining.remove(at: i)
-        _ = await decisionsSaver(cid, remaining)
+        let target = Decisions.identityKey(entry.topic)
+        guard let attempted = Self.dropping(target, from: company.decisions) else { return }
+        _ = await decisionsSaver(cid, attempted)
         guard token == hydrationToken, companyId == cid else { return }
+        // Re-derive off the CURRENT list, so a merge that landed during the write survives.
+        let remaining = Self.dropping(target, from: company.decisions) ?? company.decisions
         company.decisions = remaining
+        if remaining != attempted { _ = await decisionsSaver(cid, remaining) }
+    }
+
+    /// `decisions` minus the first entry whose identity is `target`, or nil when that topic is
+    /// not on record (the caller's no-op case, kept distinct from "removed nothing").
+    private static func dropping(_ target: String, from decisions: [DecisionEntry]) -> [DecisionEntry]? {
+        guard let i = decisions.firstIndex(where: { Decisions.identityKey($0.topic) == target })
+        else { return nil }
+        var remaining = decisions
+        remaining.remove(at: i)
+        return remaining
     }
 
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows

@@ -43,8 +43,28 @@ final class CompanyStoreForgetDecisionTests: XCTestCase {
         XCTAssertEqual(s.company.decisions.count, 1)
     }
 
-    /// A stale row (already superseded by a `remember_fact` merge between render and tap)
-    /// must be a no-op, not a write that re-uploads the same array.
+    /// A fact the merge has REWRITTEN (same topic, new statement — `remember_fact` landing
+    /// between render and tap) must still delete: identity is the topic, so the row the panel
+    /// is showing and the row now on record are the same fact. Matching the statement too made
+    /// the ✕ a silent no-op with no UI feedback — the panel's whole promise, broken.
+    func test_forgetMatchesTheTopicAfterTheStatementWasRewritten() async {
+        var writes: [[DecisionEntry]] = []
+        let rewritten = DecisionEntry(topic: "Pricing", statement: "$39/mo now", source: "chat", updatedAt: 2)
+        let s = CompanyStore(loader: { _ in Self.company([rewritten, Self.entry("b")]) },
+                             decisionsSaver: { _, d in writes.append(d); return true })
+        await s.hydrate(companyId: "u")
+
+        // The row the founder tapped: the topic as it was rendered, with the OLD statement.
+        await s.forgetDecision(DecisionEntry(topic: "pricing", statement: "pricing is settled",
+                                             source: "chat", updatedAt: 1))
+
+        XCTAssertEqual(s.company.decisions.map(\.topic), ["b"])
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(writes.first?.map(\.topic), ["b"])
+    }
+
+    /// A row for a topic that is not on record at all must be a no-op, not a write that
+    /// re-uploads the same array.
     func test_forgettingSomethingAlreadyGoneDoesNotWrite() async {
         var writes = 0
         let s = CompanyStore(loader: { _ in Self.company([Self.entry("a")]) },
@@ -55,6 +75,52 @@ final class CompanyStoreForgetDecisionTests: XCTestCase {
 
         XCTAssertEqual(writes, 0)
         XCTAssertEqual(s.company.decisions.map(\.topic), ["a"])
+    }
+
+    /// A `remember_fact` merge landing INSIDE the delete's own write is the one race the
+    /// hydration guard cannot catch: same account, same hydration token, so `companyId ==
+    /// cid` still holds. Assigning a surviving list computed BEFORE the write erased the
+    /// freshly-remembered fact from memory — and shipped that erasure to the document on the
+    /// next write. The surviving list has to be re-derived from the CURRENT decisions, and the
+    /// document converged on it.
+    func test_forgetKeepsAFactRememberedDuringItsOwnSave() async {
+        let saverEntered = OneShotGate()
+        let letSaverFinish = OneShotGate()
+        var writes: [[DecisionEntry]] = []
+        let remembered = RememberedFact(topic: "pricing", statement: "$29/mo, no free tier")
+
+        let s = CompanyStore(
+            loader: { _ in Self.company([Self.entry("a"), Self.entry("b")]) },
+            chatSender: { _ in nil },
+            chatStreamer: { _ in
+                AsyncThrowingStream { c in
+                    c.yield(.delta("Noted"))
+                    c.yield(.done(model: "m", cacheHit: false,
+                                  action: ChatDoneAction(remember: [remembered])))
+                    c.finish()
+                }
+            },
+            decisionsSaver: { _, d in
+                writes.append(d)
+                if writes.count == 1 {      // the forget's own write — hold it open
+                    saverEntered.open()
+                    await letSaverFinish.wait()
+                }
+                return true
+            })
+        await s.hydrate(companyId: "u")
+
+        let forget = Task { await s.forgetDecision(Self.entry("a")) }
+        await saverEntered.wait()
+        await s.sendChat("remember we charge $29/mo", language: .en)   // merge lands mid-write
+        XCTAssertTrue(s.company.decisions.contains { $0.topic == "pricing" })
+        letSaverFinish.open()
+        await forget.value
+
+        XCTAssertEqual(s.company.decisions.map(\.topic).sorted(), ["b", "pricing"],
+                       "the fact remembered during the save must survive the delete: \(s.company.decisions)")
+        XCTAssertEqual(writes.last?.map(\.topic).sorted(), ["b", "pricing"],
+                       "and the document must converge on it: \(writes)")
     }
 
     /// Regression, the same hazard `setFounderName`/`setFounderPrefs` carry: `hydrate`

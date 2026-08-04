@@ -104,6 +104,12 @@ final class CompanyStore: ObservableObject {
     /// supply a synthetic `AsyncThrowingStream`). `chatSender` stays wired in
     /// as `sendChat`'s fallback — see its doc comment.
     private let chatStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error>
+    /// The Virtual Company fan-out, injected exactly like `chatStreamer` so the
+    /// handoff/escape-hatch/failure orderings can be driven from a synthetic stream
+    /// with no network. Defaulted in the init BODY (not as a default argument) so the
+    /// closure is formed inside this `@MainActor` type instead of in the nonisolated
+    /// default-argument context, which is what makes `chatStreamer`'s default warn.
+    private let vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
@@ -130,12 +136,22 @@ final class CompanyStore: ObservableObject {
     /// no interview is active.
     private var interviewState: (gaps: [InterviewGap], idx: Int)?
 
+    /// Placeholder ids whose chat turn has already been CLOSED — flags cleared, thread
+    /// flushed, founder reading the answer. A fan-out that has not decided by then has
+    /// lost its claim on that message: `virtualCompanyRun` cold-starts in 5–10s while
+    /// byte's stream can finish in 4, so without this the first decision question of a
+    /// session would have byte's complete, already-read answer REPLACED by the handoff
+    /// line seconds later, while the founder is typing the next turn. Closing the turn
+    /// is the guard; racing it is not. Session-only and pruned by `reset()`/`newChat()`.
+    private var closedTurns: Set<String> = []
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { CompanyChatClient.sendStream($0) },
+         vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
@@ -150,6 +166,7 @@ final class CompanyStore: ObservableObject {
         self.tasksSaver = tasksSaver
         self.chatSender = chatSender
         self.chatStreamer = chatStreamer
+        self.vcRunner = vcRunner ?? { VirtualCompanyClient.run($0) }
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
@@ -437,6 +454,10 @@ final class CompanyStore: ObservableObject {
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
+        // Every closed turn it guards lives in the outgoing thread, and a fan-out that
+        // was still running when this fired was cancelled at its own turn's close, so
+        // the set has nothing left to protect — pruned so it cannot grow all session.
+        closedTurns = []
     }
 
     /// Switch the working buffer to a different thread: flush the outgoing one,
@@ -597,12 +618,13 @@ final class CompanyStore: ObservableObject {
         // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
         // `chatMessages` writes it makes through `publishRunProgress` — run on the
         // main actor with no hop and no `MainActor.run` wrapper. The network itself
-        // never blocks the actor: `VirtualCompanyClient.run` does its I/O in a
-        // `Task.detached` and this loop only suspends waiting on the stream.
+        // never blocks the actor: `vcRunner` does its I/O in a `Task.detached` and
+        // this loop only suspends waiting on the stream.
+        let vcRunner = self.vcRunner
         let vcTask = Task { [weak self] () -> VirtualCompanyRunState? in
             var state = VirtualCompanyRunState()
             do {
-                for try await event in VirtualCompanyClient.run(vcRequest) {
+                for try await event in vcRunner(vcRequest) {
                     state.apply(event)
                     // The escape hatch fired: discard the run and let chat be.
                     // The founder never learns a routing decision happened.
@@ -618,7 +640,17 @@ final class CompanyStore: ObservableObject {
                    status == 400 {
                     print("virtualCompanyRun rejected the payload: \(body?.detail ?? "no detail")")
                 }
-                return nil
+            }
+            // Seal a run that died with the room already on screen. A dropped stream,
+            // a TLS reset, a 60s idle timeout or a server that just stops without a
+            // `done` frame all arrive here having already replaced byte's answer with
+            // the handoff line, so returning silently would leave the agent columns
+            // spinning forever with no error and nothing to retry. `.failed` is
+            // excluded because a terminal `error` frame published its own code already.
+            if state.handsOffToRoom, state.phase != .finished, state.phase != .failed {
+                state.terminalError = "stream_lost"
+                state.phase = .failed
+                await self?.publishRunProgress(state, placeholderId: placeholderId, cid: cid, language: language)
             }
             return state.handsOffToRoom ? state : nil
         }
@@ -666,16 +698,20 @@ final class CompanyStore: ObservableObject {
         // means the stream succeeded, so no fallback. The pre-deploy safety
         // net still works: a plain-JSON (non-SSE) response parses to zero
         // frames, so `.done` never fires and `!receivedDone` is true.
-        // If the room answered, an unreachable companyChat is irrelevant — do not
-        // overwrite the room with byte's offline line. Re-checked (not cached)
-        // before every write below, because a handoff can land during the
-        // fallback's own `await`.
-        if (streamThrew || !receivedDone) && !roomTookOver(placeholderId) {
+        // The decision itself lives in `ChatTailAction` (a testable value type); this
+        // only carries it out. If the room answered, an unreachable companyChat is
+        // irrelevant — do not overwrite the room with byte's offline line.
+        switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
+                                     streamedText: streamedText,
+                                     roomTookOver: roomTookOver(placeholderId)) {
+        case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
+            // Re-decided, never cached: a handoff can land during `chatSender`'s own
+            // await, and this is the write that would clobber it.
             if !roomTookOver(placeholderId),
                let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = reply?.text ?? offline
@@ -684,19 +720,17 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [])
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
-        } else if !roomTookOver(placeholderId),
-                  streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        case .leadIn:
             // A `.done` was received but byte sent zero chat text (a
             // run-task-only reply) — don't leave the placeholder blank.
-            // Also skipped when the room took over BEFORE the first delta: the
-            // deltas were dropped on purpose, so `streamedText` is empty and this
-            // lead-in would otherwise clobber byte's handoff line.
             let leadIn = language == .vi
                 ? "Được rồi — mình chuẩn bị việc đó ngay đây."
                 : "On it — putting that together now."
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = leadIn
             }
+        case .none:
+            break
         }
         // Hold `isStreaming` for the run ONLY when the room actually took this
         // turn. Awaiting `vcTask` unconditionally would keep Send — and, via the
@@ -704,11 +738,18 @@ final class CompanyStore: ObservableObject {
         // the founder cannot see: every escape-hatch run, every 503/429/400, and
         // (worst) a hung endpoint, which would freeze the composer until
         // URLSession times out. Conditional means chat's tail here is byte-for-byte
-        // the no-feature tail whenever the room did not take over; the discarded
-        // run finishes on its own time and, having no handoff, never writes.
+        // the no-feature tail whenever the room did not take over.
         if roomTookOver(placeholderId) {
             _ = await vcTask.value
             guard companyId == cid else { return }
+        } else {
+            // The room did not decide before this turn closed, so it does not get to
+            // reopen it (see `closedTurns`). Cancelling propagates through the
+            // stream's `onTermination` into the client's detached task, which drops
+            // the connection and ends the server's work — and its spend — rather than
+            // paying for a verdict that is no longer allowed to land.
+            closedTurns.insert(placeholderId)
+            vcTask.cancel()
         }
         isCompanionTyping = false
         isStreaming = false
@@ -741,6 +782,7 @@ final class CompanyStore: ObservableObject {
                                     placeholderId: String,
                                     cid: String?,
                                     language: AppLanguage) async {
+        guard !closedTurns.contains(placeholderId) else { return }
         guard companyId == cid, state.handsOffToRoom else { return }
         guard let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) else { return }
         if chatMessages[i].vcRun == nil {
@@ -1243,6 +1285,7 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        closedTurns = []      // the messages they guarded are gone with `chatMessages`
         selectedDeptKey = nil
         activeProjectLink = nil
         codingRunAnchorId = nil

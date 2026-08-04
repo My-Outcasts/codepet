@@ -1,5 +1,6 @@
 // codepet/Services/VirtualCompanyClient.swift
 import Foundation
+import FirebaseCore
 import FirebaseAuth
 
 /// Non-SSE error body. The endpoint answers 400/401/405/429/503 as plain JSON
@@ -41,6 +42,13 @@ enum VirtualCompanyClient {
     ) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
         let capturedSession = session
         let capturedToken = authTokenProvider ?? {
+            // `Auth.auth()` TRAPS (not throws) when no FirebaseApp is configured, and
+            // since Task 6 every chat send reaches this closure — which crashed the
+            // XCTest host, where Firebase is never configured, in any suite that
+            // exercises `CompanyStore.sendMessage`. "No Firebase app" is
+            // indistinguishable from "no credentials" as far as this endpoint is
+            // concerned (it answers 401 either way), so report it as such.
+            guard FirebaseApp.app() != nil else { throw VirtualCompanyRunError.notSignedIn }
             guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
                 throw VirtualCompanyRunError.notSignedIn
             }

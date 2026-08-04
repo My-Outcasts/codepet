@@ -23,6 +23,7 @@ import { handleCompanyChat } from "./companyChat";
 import { handleRunTask } from "./runTask";
 import { handleGenerateRoadmap } from "./generateRoadmap";
 import { handleExtractDecisions } from "./extractDecisions";
+import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -73,12 +74,34 @@ export const enrichBrief = onRequest(
   handleEnrichBrief
 );
 
+// CONNECTOR_ENC_KEY opens the founder's stored connector tokens so Claude can
+// reach their MCP servers. Absent, chat still runs — just without connectors.
 export const companyChat = onRequest(
   {
     cors: false,
-    secrets: ["ANTHROPIC_API_KEY"]
+    secrets: ["ANTHROPIC_API_KEY", "CONNECTOR_ENC_KEY"]
   },
   handleCompanyChat
+);
+
+// The GitHub connector's consent round-trip. `githubOAuthCallback` is reached by
+// a browser redirect from GitHub, not by the app, so it is deliberately NOT
+// authenticated — the signed `state` minted by `githubOAuthStart` is what proves
+// which founder the callback belongs to.
+export const githubOAuthStart = onRequest(
+  {
+    cors: false,
+    secrets: ["GITHUB_OAUTH_CLIENT_ID", "CONNECTOR_ENC_KEY"]
+  },
+  handleGithubOAuthStart
+);
+
+export const githubOAuthCallback = onRequest(
+  {
+    cors: false,
+    secrets: ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "CONNECTOR_ENC_KEY"]
+  },
+  handleGithubOAuthCallback
 );
 
 export const runTask = onRequest(

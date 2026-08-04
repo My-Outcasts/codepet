@@ -40,6 +40,42 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    // --- The founder's company ---
+    // ⚠️ INFERRED, NOT VERIFIED AGAINST THE DEPLOYED RULES. `CompanyData.swift`
+    // reads and writes companies/{uid} straight from the client, so the live
+    // project must already allow this — but this file did not, which means the
+    // file and the deployment have drifted. Diff against the console before any
+    // `firebase deploy --only firestore:rules`: deploying a file that omits this
+    // rule locks the app out of its own company document.
+    //
+    // Note there is deliberately NO `{document=**}` here. A recursive allow would
+    // also grant the connector subcollections below, and in this language allows
+    // are additive — a nested `if false` does NOT claw back access a parent match
+    // already granted. Subcollections must opt in one at a time.
+    match /companies/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // --- Connector credentials (sealed OAuth tokens) ---
+      // Closed to every client, including the owner. Only the Cloud Functions
+      // touch these, and the admin SDK bypasses rules entirely. The token is
+      // encrypted at rest, but encryption is the second line: an exfiltrated
+      // blob is still offline material for whoever holds it, and the client has
+      // no reason to ever hold one. See functions/src/oauth/githubOAuth.ts.
+      match /connectors/{provider} {
+        allow read, write: if false;
+      }
+
+      // --- Connector status (no secrets) ---
+      // What the Environment surface renders: connected or not, which scopes,
+      // when. Split from the document above precisely so the UI can answer
+      // "is GitHub connected?" without the sealed token ever being readable.
+      // Written only by the callback function.
+      match /connectorStatus/{provider} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
     // --- Virtual Company runs ---
     // Written only by Cloud Functions (the admin SDK bypasses these rules), so
     // clients are denied write outright. The owning founder may read their own

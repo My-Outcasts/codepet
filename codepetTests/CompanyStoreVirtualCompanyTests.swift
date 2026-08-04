@@ -1,5 +1,6 @@
 // codepetTests/CompanyStoreVirtualCompanyTests.swift
 import XCTest
+import Combine
 @testable import codepet
 
 /// Drives the Virtual Company fan-out through the injected `vcRunner`, so the
@@ -337,11 +338,29 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
                 whatWeDontKnow: "u", unresolved: false)
     }
 
+    /// Waits for the room to land, driven by the store's own `@Published` buffer rather
+    /// than by a bounded sleep loop. A poll that expires and then force-unwraps traps,
+    /// which aborts the XCTest HOST mid-suite with no failing assertion — worse than a
+    /// missing test, because it discredits every other result in the run. A timeout here
+    /// fails this test and nothing else.
+    private func awaitRoom(in store: CompanyStore) async throws -> CopilotMessage {
+        if let room = store.chatMessages.last(where: { $0.vcRun != nil }) { return room }
+        let landed = expectation(description: "the room's message landed")
+        landed.assertForOverFulfill = false
+        let bag = store.$chatMessages.sink { messages in
+            if messages.contains(where: { $0.vcRun != nil }) { landed.fulfill() }
+        }
+        defer { bag.cancel() }
+        await fulfillment(of: [landed], timeout: 5)
+        return try XCTUnwrap(store.chatMessages.last(where: { $0.vcRun != nil }),
+                             "the room never landed")
+    }
+
     /// Runs a real fan-out that delivers a brief, then hands back the room's own message
     /// — the same object the card's button is wired to.
     private func roomWithABrief(_ recommendation: String,
                                 decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = { _, _ in true })
-    async -> (store: CompanyStore, messageId: String, run: VirtualCompanyRunState) {
+    async throws -> (store: CompanyStore, messageId: String, run: VirtualCompanyRunState) {
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
                              chatStreamer: Self.failingStreamer,
@@ -356,22 +375,19 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
                              },
                              decisionsSaver: decisionsSaver)
         await send(s)
-        // The run outlives the turn by design, so wait for the room rather than
-        // assuming it has landed by the time `sendChat` returns.
-        for _ in 0..<100 where !s.chatMessages.contains(where: { $0.vcRun != nil }) {
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
-        let room = s.chatMessages.last { $0.vcRun != nil }!
-        return (s, room.id, room.vcRun!)
+        // The run outlives the turn by design, so wait for the room rather than assuming
+        // it has landed by the time `sendChat` returns.
+        let room = try await awaitRoom(in: s)
+        return (s, room.id, try XCTUnwrap(room.vcRun))
     }
 
     /// The feature's only call to action used to persist in silence. It must confirm in
     /// chat, mark itself consumed, and be idempotent.
-    func testLockingInRecordsTheDecisionAndSaysSoOnce() async {
+    func testLockingInRecordsTheDecisionAndSaysSoOnce() async throws {
         final class SaveProbe { var saves = 0 }
         let probe = SaveProbe()
-        let (s, roomId, run) = await roomWithABrief("Price the single-player product first.",
-                                                    decisionsSaver: { _, _ in probe.saves += 1; return true })
+        let (s, roomId, run) = try await roomWithABrief("Price the single-player product first.",
+                                                       decisionsSaver: { _, _ in probe.saves += 1; return true })
         XCTAssertTrue(run.canLockIn)
         let before = s.chatMessages.count
 
@@ -393,13 +409,53 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
     /// A blank recommendation used to make the button a silent no-op. Now the card does
     /// not offer it at all (`canLockIn`), and the store refuses it too.
-    func testLockingInABlankRecommendationRecordsAndSaysNothing() async {
-        let (s, roomId, run) = await roomWithABrief("   ")
+    func testLockingInABlankRecommendationRecordsAndSaysNothing() async throws {
+        let (s, roomId, run) = try await roomWithABrief("   ")
         XCTAssertFalse(run.canLockIn)
         let before = s.chatMessages.count
         await s.lockInVirtualCompanyDecision(run, messageId: roomId)
         XCTAssertTrue(s.company.decisions.isEmpty)
         XCTAssertEqual(s.chatMessages.count, before, "no chip")
         XCTAssertEqual(s.chatMessages.first { $0.id == roomId }?.actionConsumed, false)
+    }
+
+    // MARK: - The room sits under its own question
+
+    /// NEW-1. Nothing holds the composer while a run is going, so the founder can finish
+    /// another turn or two before the room lands. Appended, "Actually — this one needs the
+    /// whole room" would drop under an unrelated answer and read as a reply to THAT. The
+    /// anchor check guards which conversation the room belongs to; this guards where.
+    func testTheRoomLandsUnderItsOwnQuestionNotAtTheBottom() async throws {
+        final class Runs { var continuations: [AsyncThrowingStream<VirtualCompanyEvent, Error>.Continuation] = [] }
+        let runs = Runs()
+        let s = CompanyStore(
+            loader: { _ in .empty }, saver: { _, _ in true },
+            chatSender: { req in CompanyChatReply(text: "answer to: \(req.userMessage)", runTaskId: nil) },
+            chatStreamer: Self.failingStreamer,
+            vcRunner: { _ in
+                AsyncThrowingStream { cont in
+                    runs.continuations.append(cont)
+                    // Decides nothing yet — the founder gets to move on first.
+                }
+            })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        let anchorId = try XCTUnwrap(s.chatMessages.last?.id)
+
+        // A second, unrelated turn completes while the first run is still thinking.
+        await s.sendChat("how's my runway looking?", language: .en)
+        XCTAssertEqual(s.chatMessages.count, 4)
+
+        // Now the first run decides.
+        runs.continuations.first?.yield(.routing(Self.routing("multi_agent")))
+        runs.continuations.first?.finish()
+        let room = try await awaitRoom(in: s)
+
+        let anchorIdx = try XCTUnwrap(s.chatMessages.firstIndex { $0.id == anchorId })
+        let roomIdx = try XCTUnwrap(s.chatMessages.firstIndex { $0.id == room.id })
+        XCTAssertEqual(roomIdx, anchorIdx + 1,
+                       "the room must sit directly under the question it answers")
+        XCTAssertEqual(s.chatMessages.last?.text, "answer to: how's my runway looking?",
+                       "the later turn must stay last — the room is not an answer to it")
     }
 }

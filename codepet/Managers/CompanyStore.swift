@@ -845,12 +845,18 @@ final class CompanyStore: ObservableObject {
         // conversation happens to be on screen now. Switching back restores the buffer,
         // and the state published is always the whole run, so nothing is lost by the
         // frames refused in between.
-        guard chatMessages.contains(where: { $0.id == anchorId }) else { return }
+        guard let anchor = chatMessages.firstIndex(where: { $0.id == anchorId }) else { return }
         if let i = chatMessages.firstIndex(where: { $0.id == roomMessageId }) {
             chatMessages[i].vcRun = state
         } else {
-            chatMessages.append(CopilotMessage(id: roomMessageId, role: .companion,
-                                               text: Self.handoffLine(language), vcRun: state))
+            // INSERTED under its own question, not appended. Nothing holds the composer
+            // any more, so the founder can complete two more turns while a run is still
+            // going: appending would drop "Actually — this one needs the whole room"
+            // beneath an unrelated answer, reading as a reply to that instead. Later
+            // frames resolve by id, so the position is decided once, here.
+            chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
+                                               text: Self.handoffLine(language), vcRun: state),
+                                at: anchor + 1)
         }
         // Behind every guard above, so a discarded run (escape hatch), a killed run
         // (503/429) or one that died before a brief can never trigger it.

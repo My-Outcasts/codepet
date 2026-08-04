@@ -453,10 +453,15 @@ final class RoadmapLayoutTests: XCTestCase {
         // 3 card columns + 3 rails, less the TRAILING gap (a rail's 20, not a column's 60),
         // plus bottomPad → 1224. Note it isn't `all - 3*268 + 3*64`: the trailing gap the
         // formula drops changes with the last slot's kind.
-        // (Explicit CGFloat anchor below: the plain literal-chain form makes the type
-        // checker time out inside this file's full @testable import surface, even though
-        // the same expression checks instantly in isolation. Value is unchanged: 1224.)
-        let expectedThreeWidth: CGFloat = 232 + 3 * 268 + 3 * 64 - 20 + 16
+        // The one-line literal chain times out the type checker inside this file's
+        // full @testable import surface, even though it checks instantly in isolation —
+        // and an explicit `: CGFloat` anchor on the whole chain stopped being enough as
+        // the module grew. Split into individually-trivial terms instead; each one the
+        // checker solves on sight. Value is unchanged: 1224.
+        let cardColumns: CGFloat = 3 * 268
+        let rails: CGFloat = 3 * 64
+        let trailingGapDelta: CGFloat = -20 + 16
+        let expectedThreeWidth: CGFloat = 232 + cardColumns + rails + trailingGapDelta
         XCTAssertEqual(RoadmapGeometry.boardWidth(expanded: three), expectedThreeWidth)
         XCTAssertLessThan(RoadmapGeometry.boardWidth(expanded: three),
                           RoadmapGeometry.boardWidth(expanded: all))

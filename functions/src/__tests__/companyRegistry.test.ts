@@ -98,6 +98,38 @@ describe("composeAgentSystem", () => {
     expect(a[1].text).toBe(AGENT_DEFS.product.role.trim());
   });
 
+  test("the router is TOLD about every department it is allowed to convene", () => {
+    // The bug this exists for: engineering, design, marketing, sales, support,
+    // operations and legal were added to AgentId, to AGENT_DEFS, to
+    // ROUTABLE_AGENTS and to the tool's enum — and the chief_of_staff prompt,
+    // which is what the router actually reads to decide, still said "No other
+    // departments exist yet" and named engineering as a discipline it did NOT
+    // have. Every mechanism test passed. The router refused engineering on a
+    // build-vs-buy question with "Not a department in this deployment", because
+    // that is what we told it.
+    //
+    // Capability in the code is not capability in the model's belief.
+    const role = AGENT_DEFS.chief_of_staff.role;
+    for (const dept of DEPARTMENT_AGENTS) {
+      expect(role).toMatch(new RegExp(`\\b${dept}\\b`));
+    }
+  });
+
+  test("the router is never told a department is unavailable", () => {
+    // A denial survives adding the department everywhere else, and it is the
+    // model, not the code, that acts on it.
+    const role = AGENT_DEFS.chief_of_staff.role.toLowerCase();
+    for (const denial of [
+      "no other departments",
+      "do not have",
+      "you do not have",
+      "not available in this deployment",
+      "does not exist"
+    ]) {
+      expect(role).not.toContain(denial);
+    }
+  });
+
   test("no role prompt tells an agent to push back on a department that does not exist", () => {
     // This replaces an MVP-era check that asserted the cut departments were
     // absent. The protection it gave is still worth having, inverted: every

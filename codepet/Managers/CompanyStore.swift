@@ -118,6 +118,7 @@ final class CompanyStore: ObservableObject {
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
+    private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
@@ -175,6 +176,7 @@ final class CompanyStore: ObservableObject {
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
+         founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
@@ -194,6 +196,7 @@ final class CompanyStore: ObservableObject {
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
+        self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
@@ -1475,6 +1478,25 @@ final class CompanyStore: ObservableObject {
         _ = await saver(cid, brief)
         guard token == hydrationToken, companyId == cid else { return }
         company.brief = brief
+    }
+
+    /// Persist the founder's settings-modal preferences onto the company doc, so they follow
+    /// the account across machines instead of living in UserDefaults. Fail-soft, like
+    /// `setCompanion`: a lost write only means the previous preferences come back on reload.
+    ///
+    /// Carries `setFounderName`'s guard, for the same reason: a settings panel can commit a
+    /// draft from inside a sign-out / account switch, and `hydrate` flips `companyId` to the
+    /// INCOMING account BEFORE `company` is loaded for it. A write issued in that window
+    /// would attach the OUTGOING founder's preferences to the INCOMING account's document.
+    /// `isHydrating` covers exactly that window, and the token captured up front is
+    /// re-checked after the save's await so a hydrate/reset landing DURING the write drops
+    /// the stale in-memory commit instead of clobbering the newly-hydrated company.
+    func setFounderPrefs(_ prefs: FounderPrefs) async {
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        _ = await founderPrefsSaver(cid, prefs)
+        guard token == hydrationToken, companyId == cid else { return }
+        company.founderPrefs = prefs
     }
 
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows

@@ -16,6 +16,7 @@ struct CompanyDoc: Codable {
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
     var decisions: [DecisionEntry]?  // JSON-safe; nil → empty
+    var founderPrefs: FounderPrefs?  // JSON-safe; nil → defaults (every older doc lacks it)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -34,7 +35,8 @@ enum CompanyData {
             introSeenAt: doc.introSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
-            decisions: Decisions.normalizeDecisions(doc.decisions ?? [])
+            decisions: Decisions.normalizeDecisions(doc.decisions ?? []),
+            founderPrefs: doc.founderPrefs ?? FounderPrefs()
         )
     }
 
@@ -129,6 +131,31 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(companionIdPayload(companionId), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a founder-prefs write — testable without Firestore.
+    /// Nested object (like `briefPayload`), so the whole prefs blob is one doc field.
+    /// The encode-failed branch is unreachable (every field is a JSON primitive) but drops
+    /// the key rather than emitting `["founderPrefs": [:]]`: a merge of an empty map would
+    /// erase preferences that are already stored, where a no-op leaves them intact.
+    static func founderPrefsPayload(_ prefs: FounderPrefs) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(prefs),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return ["founderPrefs": dict]
+        }
+        return [:]
+    }
+
+    /// Write companies/{uid}.founderPrefs, merge. Fail-soft: false on error — a lost write
+    /// only means the previous preferences come back on reload.
+    static func saveFounderPrefs(companyId: String, prefs: FounderPrefs) async -> Bool {
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(founderPrefsPayload(prefs), merge: true)
             return true
         } catch {
             return false

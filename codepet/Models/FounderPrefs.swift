@@ -7,7 +7,10 @@ enum NotificationChannel: String, Codable, CaseIterable {
 /// Everything the founder sets in the settings modal that the model or the notification
 /// layer needs to see. Persisted as one field on the company doc so it syncs across
 /// machines instead of living in UserDefaults.
-struct FounderPrefs: Codable, Equatable {
+/// `Hashable` (not just `Equatable`) because `CompanyState`, which now carries a
+/// `FounderPrefs`, is itself `Hashable` — a synthesised conformance needs every stored
+/// property to be hashable. `Hashable` refines `Equatable`, so Task 7's equality holds.
+struct FounderPrefs: Codable, Hashable {
     var style: AIStyle = .init()
     var memoryEnabled: Bool = true
     /// Category key -> channel. An absent key means that category's default.
@@ -33,7 +36,8 @@ struct FounderPrefs: Codable, Equatable {
 /// `promptFragment()` is the entire behavioural seam. It returns `nil` when nothing has
 /// been changed, so an untouched settings panel adds zero tokens to every request — the
 /// property that makes this safe to ship.
-struct AIStyle: Codable, Equatable {
+/// `Hashable` for the same reason as `FounderPrefs`.
+struct AIStyle: Codable, Hashable {
     enum Level: String, Codable, CaseIterable { case less, `default`, more }
     enum BaseTone: String, Codable, CaseIterable {
         case `default`, direct, encouraging, analytical

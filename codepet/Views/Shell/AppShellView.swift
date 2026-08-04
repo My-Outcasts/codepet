@@ -103,6 +103,15 @@ struct AppShellView: View {
                 if !isCollapsed { seenMessageCount = companyStore.chatMessages.count }
             }
         }
+        // Settings is an OVERLAY on whatever the founder was doing, not a destination —
+        // it sits outside the GeometryReader's content so it covers the top nav too, and
+        // measures the whole shell so the panel centres in the window.
+        .overlay {
+            if let section = companyStore.settingsSection {
+                SettingsModal(initial: section)
+                    .transition(.opacity)
+            }
+        }
     }
 
     /// The draggable divider between the content and the copilot: hover shows the
@@ -144,12 +153,6 @@ struct AppShellView: View {
             LibraryView()
         } else if companyStore.view == .environment {
             EnvironmentView()
-        } else if companyStore.view == .settings {
-            SettingsView()
-        } else if companyStore.view == .billing {
-            BillingView()
-        } else if companyStore.view == .support {
-            SupportView()
         } else {
             // .chat and .secondBrain are no longer full-content destinations
             // (chat = docked copilot; second brain = Overview toggle).

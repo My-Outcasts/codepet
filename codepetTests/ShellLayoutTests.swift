@@ -67,7 +67,7 @@ final class ShellLayoutTests: XCTestCase {
     }
 
     func test_copilotHiddenOnEveryOtherDestination() {
-        for v in [AppView.company, .tasks, .library, .environment, .settings, .billing, .support] {
+        for v in [AppView.company, .tasks, .library, .environment] {
             XCTAssertFalse(ShellLayout.showsCopilot(in: v),
                            "copilot should not appear on \(v.rawValue)")
         }

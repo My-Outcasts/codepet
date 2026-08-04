@@ -23,7 +23,12 @@ enum Decisions {
     static let MAX_DECISIONS = 30
 
     private static func t(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private static func key(_ topic: String) -> String { t(topic).lowercased() }
+
+    /// A decision's IDENTITY: its trimmed, lowercased `topic`. `mergeDecisions` keys on this,
+    /// so a newer statement on the same topic *is* the same fact — which makes this the only
+    /// correct thing for a delete to match on (`CompanyStore.forgetDecision`). Matching the
+    /// statement too would make a fact that has since been rewritten undeletable.
+    static func identityKey(_ topic: String) -> String { t(topic).lowercased() }
     private static func cleanSource(_ s: String?) -> String? {
         let v = t(s ?? "")
         return v.isEmpty ? nil : v
@@ -51,14 +56,14 @@ enum Decisions {
         for d in existing {
             let topic = t(d.topic), statement = t(d.statement)
             if topic.isEmpty || statement.isEmpty { continue }
-            let k = key(topic)
+            let k = identityKey(topic)
             if byTopic[k] == nil { order.append(k) }
             byTopic[k] = d
         }
         for e in extracted {
             let topic = t(e.topic), statement = t(e.statement)
             if topic.isEmpty || statement.isEmpty { continue }
-            let k = key(topic)
+            let k = identityKey(topic)
             if byTopic[k] == nil { order.append(k) }
             byTopic[k] = DecisionEntry(topic: topic, statement: statement, source: cleanSource(e.source), updatedAt: now)
         }

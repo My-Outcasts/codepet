@@ -1,0 +1,169 @@
+import Foundation
+
+enum NotificationChannel: String, Codable, CaseIterable {
+    case off, inApp
+}
+
+/// Everything the founder sets in the settings modal that the model or the notification
+/// layer needs to see. Persisted as one field on the company doc so it syncs across
+/// machines instead of living in UserDefaults.
+/// `Hashable` (not just `Equatable`) because `CompanyState`, which now carries a
+/// `FounderPrefs`, is itself `Hashable` — a synthesised conformance needs every stored
+/// property to be hashable. `Hashable` refines `Equatable`, so Task 7's equality holds.
+struct FounderPrefs: Codable, Hashable {
+    var style: AIStyle = .init()
+    var memoryEnabled: Bool = true
+    /// Category key -> channel. An absent key means that category's default.
+    var notifications: [String: NotificationChannel] = [:]
+
+    // Adding init(from:) below suppresses Swift's synthesized no-argument initializer,
+    // so it has to be restated explicitly to keep `FounderPrefs()` working.
+    init() {}
+
+    // Hand-written so a document written before a future property was added still decodes:
+    // Swift's synthesized Decodable calls decode(forKey:), which throws keyNotFound on a
+    // missing key instead of falling back to the property's declared default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        style = try container.decodeIfPresent(AIStyle.self, forKey: .style) ?? .init()
+        memoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .memoryEnabled) ?? true
+        notifications = try container.decodeIfPresent([String: NotificationChannel].self, forKey: .notifications) ?? [:]
+    }
+}
+
+/// How the founder's team talks to them.
+///
+/// `promptFragment()` is the entire behavioural seam. It returns `nil` when nothing has
+/// been changed, so an untouched settings panel adds zero tokens to every request — the
+/// property that makes this safe to ship.
+/// `Hashable` for the same reason as `FounderPrefs`.
+struct AIStyle: Codable, Hashable {
+    enum Level: String, Codable, CaseIterable { case less, `default`, more }
+    enum BaseTone: String, Codable, CaseIterable {
+        case `default`, direct, encouraging, analytical
+    }
+
+    var baseTone: BaseTone = .default
+    var warmth: Level = .default
+    var enthusiasm: Level = .default
+    var emoji: Level = .default
+    var customInstructions: String = ""
+    var role: String = ""
+    var moreAboutYou: String = ""
+
+    // Adding init(from:) below suppresses Swift's synthesized no-argument initializer,
+    // so it has to be restated explicitly to keep `AIStyle()` working.
+    init() {}
+
+    // Hand-written for the same reason as FounderPrefs.init(from:): the synthesized
+    // decoder throws keyNotFound on an absent key instead of falling back to the default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseTone = try container.decodeIfPresent(BaseTone.self, forKey: .baseTone) ?? .default
+        warmth = try container.decodeIfPresent(Level.self, forKey: .warmth) ?? .default
+        enthusiasm = try container.decodeIfPresent(Level.self, forKey: .enthusiasm) ?? .default
+        emoji = try container.decodeIfPresent(Level.self, forKey: .emoji) ?? .default
+        customInstructions = try container.decodeIfPresent(String.self, forKey: .customInstructions) ?? ""
+        role = try container.decodeIfPresent(String.self, forKey: .role) ?? ""
+        moreAboutYou = try container.decodeIfPresent(String.self, forKey: .moreAboutYou) ?? ""
+    }
+
+    /// nil when every knob is `.default` and every string is blank, and never longer than
+    /// `fragmentBudget` — see `roleLimit` for why that is a per-field bound, not a final clip.
+    func promptFragment() -> String? {
+        var lines: [String] = []
+
+        switch baseTone {
+        case .default: break
+        case .direct:
+            lines.append("Be blunt and economical. Lead with the answer, skip the preamble.")
+        case .encouraging:
+            lines.append("Be encouraging. Name what the founder got right before what to fix.")
+        case .analytical:
+            lines.append("Be analytical. Show the reasoning and the trade-offs behind advice.")
+        }
+
+        switch warmth {
+        case .default: break
+        case .more: lines.append("Warmer than usual: acknowledge how the work is going.")
+        case .less: lines.append("Cooler than usual: no pleasantries, no check-ins.")
+        }
+
+        switch enthusiasm {
+        case .default: break
+        case .more: lines.append("Show more enthusiasm when something is working.")
+        case .less: lines.append("Stay level. No exclamation marks, no celebration.")
+        }
+
+        switch emoji {
+        case .default: break
+        // Overrides the "No emoji" clause in the base system prompt.
+        case .more: lines.append("A single relevant emoji per reply is welcome.")
+        case .less: lines.append("Never use emoji.")
+        }
+
+        // Each free-text field is bounded on its OWN budget (see `roleLimit` and friends), so
+        // the joined fragment can never reach `fragmentBudget` and the server never has to
+        // clip it. Bounding the join instead would truncate from the end — and the end is
+        // `customInstructions`, deliberately placed there to win.
+        let r = Self.bounded(role, to: Self.roleLimit)
+        if !r.isEmpty { lines.append("The founder describes their role as: \(r).") }
+
+        let more = Self.bounded(moreAboutYou, to: Self.moreAboutYouLimit)
+        if !more.isEmpty { lines.append("Keep in mind about the founder: \(more).") }
+
+        // Last, so an explicit instruction wins over the knobs above it. A long
+        // `moreAboutYou` therefore costs `moreAboutYou` characters, never this line.
+        let custom = Self.bounded(customInstructions, to: Self.customInstructionsLimit)
+        if !custom.isEmpty { lines.append(custom) }
+
+        return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    // MARK: - Budget
+
+    /// What the server will actually forward. `styleBlock` in
+    /// `functions/src/companyChatCore.ts` clips the fragment it receives to 2000 characters
+    /// because it arrives from a client; this is the same number, named here so the client
+    /// can stay inside it deliberately instead of discovering the ceiling by truncation.
+    static let fragmentBudget = 2000
+
+    /// Per-field ceilings on the three free-text fields, sized so the JOINED fragment can
+    /// never reach `fragmentBudget` — proven for every knob combination by
+    /// `AIStyleTests.test_noStyleAtAllCanExceedTheServerBudget`.
+    ///
+    /// Bounding each FIELD rather than the join is the entire point. `customInstructions` is
+    /// appended LAST on purpose, so an explicit instruction wins over the knobs above it by
+    /// recency — which means a clip applied to the joined string removes exactly the
+    /// highest-priority part of it, and the part the founder most deliberately typed. A long
+    /// `moreAboutYou` has to cost `moreAboutYou` characters and nothing else. The generous
+    /// share goes to `customInstructions` for the same reason: it is the field that decides
+    /// behaviour, where `role` is a noun phrase.
+    ///
+    /// The server's 2000-char clip stays as the backstop for an older or non-native client;
+    /// nothing here relies on it, and a total cap here would have to drop from the middle to
+    /// keep the tail, which is worse than never overflowing in the first place.
+    static let roleLimit = 200
+    static let moreAboutYouLimit = 600
+    static let customInstructionsLimit = 800
+
+    /// `s` trimmed, and truncated to at most `limit` UTF-16 code units.
+    ///
+    /// UTF-16, not characters: `styleBlock`'s `String.prototype.slice` counts UTF-16 code
+    /// units, so an emoji costs 2 there and 1 to Swift's `count`. Truncation still happens on
+    /// whole `Character`s, so no grapheme is ever split in half, and the result is trimmed
+    /// again so a cut at a space never leaves " ." behind.
+    static func bounded(_ s: String, to limit: Int) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.utf16.count > limit else { return t }
+        var out = ""
+        var used = 0
+        for ch in t {
+            let w = ch.utf16.count
+            if used + w > limit { break }
+            out.append(ch)
+            used += w
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

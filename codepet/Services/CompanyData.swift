@@ -16,6 +16,7 @@ struct CompanyDoc: Codable {
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
     var decisions: [DecisionEntry]?  // JSON-safe; nil → empty
+    var founderPrefs: FounderPrefs?  // JSON-safe; nil → defaults (every older doc lacks it)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -34,7 +35,8 @@ enum CompanyData {
             introSeenAt: doc.introSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
-            decisions: Decisions.normalizeDecisions(doc.decisions ?? [])
+            decisions: Decisions.normalizeDecisions(doc.decisions ?? []),
+            founderPrefs: doc.founderPrefs ?? FounderPrefs()
         )
     }
 
@@ -129,6 +131,64 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(companionIdPayload(companionId), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a founder-prefs write — testable without Firestore.
+    /// Nested object (like `briefPayload`), so the whole prefs blob is one doc field.
+    /// The encode-failed branch is unreachable (every field is a JSON primitive) but drops
+    /// the key rather than emitting `["founderPrefs": [:]]`: see the guard in
+    /// `saveFounderPrefs`, which turns that empty payload into a skipped write rather than
+    /// a delete.
+    static func founderPrefsPayload(_ prefs: FounderPrefs) -> [String: Any] {
+        if let data = try? JSONEncoder().encode(prefs),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return ["founderPrefs": dict]
+        }
+        return [:]
+    }
+
+    /// The complete description of a founder-prefs write — payload plus the fields it
+    /// replaces — or nil when there is nothing safe to write. Pure, so a test can assert
+    /// what reaches Firestore: that the write is a whole-field replace of `founderPrefs`
+    /// (see `saveFounderPrefs`, which passes both halves of this straight through and holds
+    /// the reasoning) and not a deep `merge: true` that could never clear a key.
+    ///
+    /// nil is the skip case: encoding `FounderPrefs` can't actually fail (every field is a
+    /// JSON primitive), but if it ever did the payload would be `[:]`, and with
+    /// `mergeFields` — unlike `merge` — writing that DELETES `founderPrefs` rather than
+    /// no-opping. Better to skip the write than erase prefs that are already stored.
+    static func founderPrefsWrite(_ prefs: FounderPrefs)
+        -> (payload: [String: Any], mergeFields: [String])? {
+        let payload = founderPrefsPayload(prefs)
+        guard !payload.isEmpty else { return nil }
+        return (payload: payload, mergeFields: ["founderPrefs"])
+    }
+
+    /// Write companies/{uid}.founderPrefs. Fail-soft: false on error — a lost write
+    /// only means the previous preferences come back on reload.
+    ///
+    /// `mergeFields: ["founderPrefs"]`, NOT `merge: true`: `founderPrefs.notifications`
+    /// is a nested map (category key -> channel), and Firestore's `merge: true` deep-merges
+    /// nested maps — it can only ADD or CHANGE keys inside `notifications`, never remove
+    /// one. Writing `notifications: [:]` to turn a category back to its default would then
+    /// leave the old entry in the document forever, and `state(from:)` would read it back
+    /// on next launch. `mergeFields` replaces the whole `founderPrefs` field wholesale
+    /// instead of recursing into it, so a cleared category actually clears. Every other
+    /// field on the company doc is untouched either way, and the doc is still created if
+    /// absent. Do not "simplify" this back to `merge: true`.
+    ///
+    /// Both arguments come from `founderPrefsWrite` and nothing else, so the shape of this
+    /// write is decided somewhere a test can read it; nil from there is the skip case
+    /// (documented on it).
+    static func saveFounderPrefs(companyId: String, prefs: FounderPrefs) async -> Bool {
+        guard let write = founderPrefsWrite(prefs) else { return true }
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(write.payload, mergeFields: write.mergeFields)
             return true
         } catch {
             return false

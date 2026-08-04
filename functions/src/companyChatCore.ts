@@ -84,6 +84,39 @@ export function buildContextBlock(context: string): string {
   return `\n\nThe founder's company:\n${c}`;
 }
 
+// The founder's tone preferences (Settings → AI), rendered as its own section of the
+// VOLATILE system block — after the persona above, before the company context, so an
+// explicit knob (e.g. "A single relevant emoji per reply is welcome.") is read as an
+// override of the persona's "No emoji" clause rather than a contradiction of it.
+//
+// Deliberately NOT part of buildSystemPrompt's cached prefix: that prefix varies only
+// by companion + language (14 shapes shared by every founder, which is what makes the
+// cache hit), and folding a per-founder string into it would shatter that sharing for
+// the sake of caching ~40 tokens.
+//
+// Empty when the founder changed nothing, so an untouched settings panel costs zero
+// tokens on every request. The fragment itself is composed client-side by
+// `AIStyle.promptFragment()`, which returns nil at defaults; clipped here because it
+// arrives from the client.
+export function styleBlock(fragment?: string): string {
+  // Newlines are collapsed BEFORE clipping, and that is a boundary check, not tidying.
+  // `style_fragment` is client-supplied and lands verbatim in a system prompt, and `clip`
+  // only trims the ends and bounds the length — it leaves interior line breaks intact. A
+  // fragment carrying "\n\nThe founder's company:" would therefore print a second copy of
+  // `buildContextBlock`'s heading, at line start after a blank line, immediately above the
+  // real one: a forged section the model has no way to tell from the genuine grounding.
+  // Collapsing every whitespace run that contains a line break into a single space makes
+  // this block structurally ONE line under its own heading, so no text inside it can read
+  // as a heading of its own — the words survive, the forged structure does not. \u2028 and
+  // \u2029 are in the class because they are line breaks too, not just \r and \n.
+  const oneLine = typeof fragment === "string"
+    ? fragment.replace(/\s*[\n\r\u2028\u2029]\s*/g, " ")
+    : "";
+  const f = clip(oneLine, 2000);
+  if (!f) return "";
+  return `\n\nHow the founder wants you to write:\n${f}`;
+}
+
 // ─── run_task tool (optional, tool_choice auto) ────────────────────────────
 // Mirrors the web app's RUN_TASK_TOOL contract (app/api/chat/route.ts): byte may
 // call this when the founder clearly wants a specific roadmap task run, using an

@@ -98,16 +98,22 @@ enum ChatContext {
         return "Departments:\n" + lines.joined(separator: "\n")
     }
 
+    /// `memoryEnabled` mirrors `FounderPrefs.memoryEnabled` and gates ONE of the two memory
+    /// stores: the facts the founder's team was told (`decisions`). Off means the block is
+    /// never composed, so nothing the founder asked to be forgotten leaks back in through
+    /// grounding. The other store — derived coding activity — is gated in
+    /// `MemoryDigest.codingMemoryPrompt`. Defaults to `true` so callers with no founder in
+    /// hand keep their current grounding.
     static func compose(brief: CompanyBrief, tasks: [RoadmapTask], decisions: [DecisionEntry] = [],
                          library: [Deliverable] = [], query: String? = nil,
-                         focusDepartment: Department? = nil) -> String {
+                         focusDepartment: Department? = nil, memoryEnabled: Bool = true) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
                 + "prioritize \(dep.name) in your answer: \(dep.focus)")
         }
-        let d = Decisions.composeDecisions(decisions)
+        let d = memoryEnabled ? Decisions.composeDecisions(decisions) : ""
         if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")
         if let next = RoadmapEngine.nextStep(tasks) {

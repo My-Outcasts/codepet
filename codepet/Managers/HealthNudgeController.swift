@@ -20,6 +20,13 @@ final class HealthNudgeController: ObservableObject {
     private var sessionStartTime: Date?
     private let logger = Logger(subsystem: "app.murror.codepet", category: "HealthNudge")
 
+    /// Set once, at launch (`CodePetApp` wires it alongside the other cross-store
+    /// hookups) — not injected via `init` because `CompanyStore` and
+    /// `HealthNudgeController` are both `@StateObject`s constructed independently.
+    /// Optional so a nudge still fires (the pre-panel default) if this is ever left
+    /// unwired — a missing wire-up should never silently suppress every nudge.
+    weak var companyStore: CompanyStore?
+
     init(intervalMinutes: Int = 45) {
         self.interval = TimeInterval(intervalMinutes * 60)
     }
@@ -65,6 +72,12 @@ final class HealthNudgeController: ObservableObject {
     private func fireNudge() {
         guard activeNudge == nil else { return } // don't stack nudges
         guard let start = sessionStartTime else { return }
+        // The founder turned session nudges off in Settings → Notifications. `companyStore`
+        // is nil until `CodePetApp` wires it up; a missing wire-up must not read as "off".
+        if let companyStore,
+           NotificationCategory.sessionNudges.channel(in: companyStore.company.founderPrefs) == .off {
+            return
+        }
 
         let elapsed = Int(Date().timeIntervalSince(start) / 60)
         nudgeCount += 1

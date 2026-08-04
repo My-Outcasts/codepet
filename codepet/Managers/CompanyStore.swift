@@ -11,6 +11,10 @@ final class CompanyStore: ObservableObject {
     /// User's manual collapse of the docked copilot (session-only). The shell also
     /// auto-collapses on a narrow window via ShellLayout; this is the manual override.
     @Published var dockCollapsed: Bool = false
+    /// Which settings section is open, or `nil` when settings is closed. Settings is an
+    /// overlay rather than an `AppView`, so opening it never changes `view` and closing
+    /// it needs no route to restore.
+    @Published var settingsSection: SettingsSection?
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
@@ -114,6 +118,7 @@ final class CompanyStore: ObservableObject {
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let companionSaver: (String, String) async -> Bool
+    private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
@@ -122,6 +127,12 @@ final class CompanyStore: ObservableObject {
     /// id, so it neither nags across launches nor leaks across accounts — see
     /// `VirtualCompanyInterviewFlag`.
     private let vcInterviewFlag: VirtualCompanyInterviewFlag
+
+    /// Pushes `FounderPrefs.memoryEnabled` into `PetMemoryStore`, the DERIVED half of memory.
+    /// A push (rather than a read) because the summarize enrichers reach that store
+    /// statically through `.shared` and never see a company — and injectable because a test
+    /// must be able to prove the switch travels without mutating a process-wide singleton.
+    private let codingMemoryGate: (Bool) -> Void
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -134,6 +145,26 @@ final class CompanyStore: ObservableObject {
     /// account switch during the enrich/save await can't write one account's
     /// brief into another's doc or clobber the newly-hydrated account.
     private(set) var onboardingToken = 0
+
+    /// Bumped on every `updateFounderPrefs` that gets past its hydration guard; lets a
+    /// suspended prefs write detect that a NEWER write on the same account started while
+    /// it was awaiting Firestore, and discard its in-memory commit instead of clobbering
+    /// the newer choice. Separate from `hydrationToken`, which only moves on an account
+    /// switch and so cannot see two writes on one account.
+    private var founderPrefsWriteToken = 0
+
+    /// The founder's LATEST INTENDED preferences: `company.founderPrefs` plus every change
+    /// committed since, including ones whose Firestore write has not returned yet. Nil when
+    /// nothing is in flight.
+    ///
+    /// `company.founderPrefs` only catches up when a write completes, so a second panel
+    /// committing inside that window and reading the visible value would carry the in-flight
+    /// field's OLD value along with its own change — turn memory off, change a notification
+    /// before the first write lands, and `memoryEnabled` comes back as `true`. Every change is
+    /// therefore composed onto THIS value, so each commit contributes only its own field and
+    /// the two changes accumulate instead of racing. Cleared by `hydrate`/`reset` so one
+    /// account's in-flight intent can never be composed onto another's preferences.
+    private var pendingFounderPrefs: FounderPrefs?
 
     /// First-run enrichment interview progress: the empty gaps to ask + the index
     /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
@@ -171,6 +202,7 @@ final class CompanyStore: ObservableObject {
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
+         founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
@@ -178,7 +210,11 @@ final class CompanyStore: ObservableObject {
          // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
          // over `UserDefaults.standard`, and forming it in the nonisolated
          // default-argument context is what makes such defaults warn.
-         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil) {
+         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil,
+         // Defaulted in the init BODY for the same reason as `vcRunner`: the real one
+         // touches the `@MainActor` `PetMemoryStore.shared`, which a nonisolated
+         // default-argument context cannot reference.
+         codingMemoryGate: ((Bool) -> Void)? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -190,14 +226,25 @@ final class CompanyStore: ObservableObject {
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.companionSaver = companionSaver
+        self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
+        self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
     }
 
     func select(_ view: AppView) { self.view = view }
+
+    var isSettingsOpen: Bool { settingsSection != nil }
+
+    /// Open settings, optionally on a specific section (chat cards deep-link this way).
+    func openSettings(_ section: SettingsSection = .preferences) {
+        settingsSection = section
+    }
+
+    func closeSettings() { settingsSection = nil }
 
     /// Mirrors the web (`Boolean(onboardedAt) || Object.keys(brief).length > 0`):
     /// onboard only when there is no stamp AND the brief has no signal at all.
@@ -233,9 +280,17 @@ final class CompanyStore: ObservableObject {
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
         company = loaded
+        // An in-flight prefs write belongs to the OUTGOING account (its own post-await guard
+        // drops its commit); leaving its intent here would compose the previous founder's
+        // half-written preferences onto this one's next settings change.
+        pendingFounderPrefs = nil
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
+        // The incoming founder's memory switch has to reach `PetMemoryStore` here: it is
+        // read statically by the summarize enrichers, so without this push the previous
+        // account's answer would keep governing this account's payloads.
+        codingMemoryGate(loaded.founderPrefs.memoryEnabled)
     }
 
     /// Persist + stamp + leave onboarding. (Enrichment happens earlier, in
@@ -465,11 +520,18 @@ final class CompanyStore: ObservableObject {
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
     /// from the brief/decisions (never clobbers an existing one), then probes.
+    ///
+    /// The seed honours `memoryEnabled` too: CLAUDE.md is standing context the coding agent
+    /// reads on every run, so writing the facts on record into it is the most durable USE of
+    /// memory there is — and it leaves them sitting in a file on disk, where a founder who
+    /// turned memory off would be right to be surprised to find them. With memory off the
+    /// seed carries the brief only.
     @discardableResult
     func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
         var link = ProjectProbe.probe(path: path)
         if bootstrapClaudeMd && !link.hasClaudeMd {
-            let seed = ClaudeMdBootstrap.compose(brief: company.brief, decisions: company.decisions)
+            let seed = ClaudeMdBootstrap.compose(brief: company.brief,
+                                                 decisions: claudeMdSeedDecisions)
             try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
             link = ProjectProbe.probe(path: path)
         }
@@ -479,6 +541,13 @@ final class CompanyStore: ObservableObject {
         }
         activeProjectLink = link
         return link
+    }
+
+    /// What the CLAUDE.md seed is allowed to say about the facts on record — the gate above,
+    /// lifted out of `linkProject` so it is provable without a real folder, a real write, or a
+    /// security-scoped bookmark. Empty while the founder has memory off.
+    var claudeMdSeedDecisions: [DecisionEntry] {
+        company.founderPrefs.memoryEnabled ? company.decisions : []
     }
 
     /// The specialist companion to bring in for this turn, if a department is in
@@ -689,9 +758,15 @@ final class CompanyStore: ObservableObject {
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
+            // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text, focusDepartment: department),
-            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
+                                          library: company.library, query: text, focusDepartment: department,
+                                          memoryEnabled: company.founderPrefs.memoryEnabled),
+            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup,
+            // nil at defaults, so an untouched settings panel adds nothing to the wire
+            // and nothing to the prompt.
+            styleFragment: company.founderPrefs.style.promptFragment())
 
         // Department handoff: if a specialist leads this turn (chip focus or a
         // department named in the text), the reply is spoken by that specialist
@@ -1306,7 +1381,8 @@ final class CompanyStore: ObservableObject {
                              reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
             reviseNote: reviseNote, current: current)
     }
@@ -1514,12 +1590,21 @@ final class CompanyStore: ObservableObject {
     /// Fire-and-forget after an approval: extract durable decisions the deliverable locks
     /// in, merge into memory, persist. Account-guarded + fail-open — a failed extract leaves
     /// decisions unchanged; the approval already happened. `dept` comes from the source task.
+    ///
+    /// `memoryEnabled` off withholds the facts on record here for the same reason
+    /// `ChatContext.compose` drops them: `extractDecisions` renders every entry it is handed
+    /// into a real model prompt ("- topic: statement"), so approving a deliverable with memory
+    /// off would ship the whole store to the model — the exact thing the switch promises not to
+    /// do. The extract path takes an empty list fine (it just has nothing to dedupe against),
+    /// and RECORDING is untouched: what the deliverable itself locks in is still merged and
+    /// persisted, so the panel keeps showing it. Off stops USE, not recording.
     private func rememberFromApproval(_ deliverable: Deliverable) async {
         let cid = companyId
         let dept = company.tasks.first { $0.id == deliverable.sourceTaskId }?.dept ?? ""
         let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
                                          type: deliverable.kind.rawValue, out: deliverable.body)
-        let extracted = await decisionExtractor(dto, company.decisions)
+        let onRecord = company.founderPrefs.memoryEnabled ? company.decisions : []
+        let extracted = await decisionExtractor(dto, onRecord)
         guard companyId == cid, !extracted.isEmpty else { return }
         let now = Date().timeIntervalSince1970 * 1000
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
@@ -1564,6 +1649,141 @@ final class CompanyStore: ObservableObject {
     func setCompanion(id: String) async {
         company.companionId = id
         if let cid = companyId { _ = await companionSaver(cid, id) }
+    }
+
+    /// Persist the founder's preferred name onto the brief. Reuses the ONE brief writer
+    /// (`saver`, the injected `CompanyData.saveBrief` that `answerInterview` and
+    /// `finishOnboarding` already go through) rather than adding a second write path for a
+    /// field the brief document already owns. Fail-soft: a lost write only means the old
+    /// name comes back on reload, never a broken page.
+    ///
+    /// Guarded against a `hydrate`/`reset` landing mid-flight: `PreferencesPanel` commits
+    /// the draft on `.onDisappear`, which can fire from inside a sign-out/account switch —
+    /// and `hydrate` flips `companyId` to the INCOMING account before `company` is actually
+    /// loaded for it (see its doc comment). A write issued in that window would attach the
+    /// OUTGOING founder's draft, on the not-yet-loaded brief, to the INCOMING account's
+    /// document. `isHydrating` is true for exactly that window, so bail before touching
+    /// `company`/`saver` at all while it holds. The same token captured up front is
+    /// re-checked after the save's own await (mirroring `finishOnboarding`), so a
+    /// hydrate/reset that lands DURING the write also drops the stale in-memory commit
+    /// instead of clobbering the newly-hydrated company. Either path drops the write
+    /// rather than mis-attributing it.
+    func setFounderName(_ name: String) async {
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        var brief = company.brief
+        brief.founderName = name
+        _ = await saver(cid, brief)
+        guard token == hydrationToken, companyId == cid else { return }
+        company.brief = brief
+    }
+
+    /// Persist the founder's settings-modal preferences onto the company doc, so they follow
+    /// the account across machines instead of living in UserDefaults. Fail-soft, like
+    /// `setCompanion`: a lost write only means the previous preferences come back on reload.
+    ///
+    /// Carries `setFounderName`'s guard, for the same reason: a settings panel can commit a
+    /// draft from inside a sign-out / account switch, and `hydrate` flips `companyId` to the
+    /// INCOMING account BEFORE `company` is loaded for it. A write issued in that window
+    /// would attach the OUTGOING founder's preferences to the INCOMING account's document.
+    /// `isHydrating` covers exactly that window, and the token captured up front is
+    /// re-checked after the save's await so a hydrate/reset landing DURING the write drops
+    /// the stale in-memory commit instead of clobbering the newly-hydrated company.
+    ///
+    /// ALSO sequenced per write, a different hazard on the same account: every settings
+    /// panel commits from an untracked `Task` (a picker changed twice quickly fires two),
+    /// so two saves can be in flight at once and finish in either order. Without this the
+    /// OLDER write's `company.founderPrefs = next` would land last and clobber the newer
+    /// choice — and the panels seed their drafts off `company`, so the stale value would then
+    /// be re-persisted. `founderPrefsWriteToken` is bumped per call and re-checked after the
+    /// await (same idiom as `hydrationToken`), so a superseded write still persists but never
+    /// applies its result. Both guards are needed: the hydration token cannot see a second
+    /// write on the SAME account, and this one cannot see an account switch.
+    ///
+    /// AND field-scoped, which is what makes three panels sharing one blob safe. `change` is
+    /// applied to `pendingFounderPrefs ?? company.founderPrefs` — the latest INTENDED value —
+    /// not to a copy the caller captured earlier, so a commit contributes ONLY its own field.
+    /// Every panel used to capture the whole struct and write it back, so a commit issued
+    /// while another panel's write was in flight resurrected that panel's stale value: turn
+    /// memory off, switch to Notifications, change a picker before the first write returned,
+    /// and `memoryEnabled` silently reverted to `true`. `founderPrefsWriteToken` cannot help
+    /// there — both writes are legitimate and touch different fields of one struct — which is
+    /// why the composition, not the sequencing, is the fix. The token stays load-bearing for
+    /// the case it was written for (two commits of the SAME field), and composing makes it
+    /// strictly safe: the newest write's value now carries every older write's change too, so
+    /// dropping a superseded commit loses nothing.
+    func updateFounderPrefs(_ change: (inout FounderPrefs) -> Void) async {
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        let base = pendingFounderPrefs ?? company.founderPrefs
+        var next = base
+        change(&next)
+        guard next != base else { return }   // nothing actually changed → no write
+        pendingFounderPrefs = next
+        // Bumped only once past the guards, so a call dropped for hydration never
+        // supersedes a legitimate write already in flight.
+        founderPrefsWriteToken &+= 1
+        let writeToken = founderPrefsWriteToken
+        _ = await founderPrefsSaver(cid, next)
+        guard token == hydrationToken, companyId == cid else { return }
+        guard writeToken == founderPrefsWriteToken else { return }  // a newer write superseded us
+        company.founderPrefs = next
+        codingMemoryGate(next.memoryEnabled)
+        // Only the newest write reaches here, and it just made the visible value match the
+        // intent, so nothing is in flight any more.
+        pendingFounderPrefs = nil
+    }
+
+    /// Forget one fact the founder's team was told — the delete half of the Memory panel,
+    /// and the reason that panel can be trusted at all: today a fact recorded by
+    /// `remember_fact` can never be taken back.
+    ///
+    /// Persists through the EXISTING `decisionsSaver`, the same path `handleRemember` and
+    /// `lockInVirtualCompanyDecision` write on, so decisions still reach the document
+    /// exactly one way. Matched on `Decisions.identityKey` — the trimmed, lowercased topic the
+    /// merge itself keys on — rather than by index or on topic + statement: a `remember_fact`
+    /// merge landing between render and tap can both re-order the array AND rewrite the
+    /// statement of the very row being deleted, and matching the statement would then make
+    /// that fact permanently undeletable (the ✕ a silent no-op). `firstIndex` is kept so a doc
+    /// that somehow holds duplicate topics loses ONE row per tap, not both. A topic that is
+    /// not on record is a silent no-op, not a redundant write.
+    ///
+    /// The surviving list is re-derived from `company.decisions` AFTER the write, never
+    /// assigned from a snapshot taken before it: a merge on this same account (same hydration
+    /// token, so the guard below cannot see it) can land inside that await, and assigning a
+    /// pre-computed array would erase the freshly-remembered fact from memory. When the
+    /// re-derived list differs from what was persisted, one corrective write — through the same
+    /// `decisionsSaver`, no new path — converges the document on it.
+    ///
+    /// Carries `updateFounderPrefs`'s hydration guard, for exactly the same reason: the
+    /// settings modal can stay open across a sign-out / account switch, and `hydrate` flips
+    /// `companyId` to the INCOMING account BEFORE `company` is loaded for it. A delete
+    /// issued in that window would run against the OUTGOING founder's list and be written
+    /// to the INCOMING founder's document. `isHydrating` is true for exactly that window,
+    /// and the token captured up front is re-checked after the write's await so a
+    /// hydrate/reset landing DURING it drops the stale in-memory removal instead of
+    /// clobbering the newly-hydrated company.
+    func forgetDecision(_ entry: DecisionEntry) async {
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        let target = Decisions.identityKey(entry.topic)
+        guard let attempted = Self.dropping(target, from: company.decisions) else { return }
+        _ = await decisionsSaver(cid, attempted)
+        guard token == hydrationToken, companyId == cid else { return }
+        // Re-derive off the CURRENT list, so a merge that landed during the write survives.
+        let remaining = Self.dropping(target, from: company.decisions) ?? company.decisions
+        company.decisions = remaining
+        if remaining != attempted { _ = await decisionsSaver(cid, remaining) }
+    }
+
+    /// `decisions` minus the first entry whose identity is `target`, or nil when that topic is
+    /// not on record (the caller's no-op case, kept distinct from "removed nothing").
+    private static func dropping(_ target: String, from decisions: [DecisionEntry]) -> [DecisionEntry]? {
+        guard let i = decisions.firstIndex(where: { Decisions.identityKey($0.topic) == target })
+        else { return nil }
+        var remaining = decisions
+        remaining.remove(at: i)
+        return remaining
     }
 
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows
@@ -1622,6 +1842,13 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         company = .empty
+        // Read off the company we just reset to (so it can't drift from what `reset()`
+        // assigns), which means the default: memory ON. The NEXT account therefore never
+        // inherits the outgoing founder's switch — `hydrate` pushes theirs.
+        codingMemoryGate(company.founderPrefs.memoryEnabled)
+        // Same reason as in `hydrate`: the outgoing founder's in-flight settings change must
+        // not be composed onto the next account's preferences.
+        pendingFounderPrefs = nil
         view = .roadmap
         isHydrating = false
         isOnboarding = false
@@ -1652,6 +1879,10 @@ final class CompanyStore: ObservableObject {
         for task in vcTasks.values { task.cancel() }
         vcTasks = [:]
         selectedDeptKey = nil
+        // The settings overlay only renders inside `AppShellView`, so signing out with it
+        // open hides it without closing it — leaving this set would hand the NEXT account
+        // a settings panel over their first frame of the shell.
+        settingsSection = nil
         activeProjectLink = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)

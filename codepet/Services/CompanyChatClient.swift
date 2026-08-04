@@ -60,6 +60,14 @@ struct CompanyChatRequest: Codable {
     /// The founder's currently-OFF toolkit items — lets the CF decide whether
     /// to suggest enabling one (`setup` in the reply).
     let envSetup: [SetupItemDTO]
+    /// The founder's tone preferences from Settings → AI, already composed into
+    /// one prompt sentence by `AIStyle.promptFragment()`. `nil` when they've
+    /// changed nothing — and because this is an Optional on a synthesised
+    /// `encode(to:)` (which uses `encodeIfPresent`), nil omits `style_fragment`
+    /// from the JSON entirely rather than sending "". That keeps the wire clean
+    /// and makes the zero-cost default observable: no key, no prompt section,
+    /// no tokens.
+    let styleFragment: String?
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -70,14 +78,15 @@ struct CompanyChatRequest: Codable {
         case userMessage = "user_message"
         case runnable
         case envSetup = "env_setup"
+        case styleFragment = "style_fragment"
     }
 
-    /// `runnable`/`envSetup` default to empty so existing call sites (and
-    /// older tests built before these fields existed) keep compiling without
-    /// every caller having to name them explicitly.
+    /// `runnable`/`envSetup` default to empty and `styleFragment` to nil so
+    /// existing call sites (and older tests built before these fields existed)
+    /// keep compiling without every caller having to name them explicitly.
     init(companyId: String?, language: String, companionId: String, context: String,
          history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
-         envSetup: [SetupItemDTO] = []) {
+         envSetup: [SetupItemDTO] = [], styleFragment: String? = nil) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -86,6 +95,7 @@ struct CompanyChatRequest: Codable {
         self.userMessage = userMessage
         self.runnable = runnable
         self.envSetup = envSetup
+        self.styleFragment = styleFragment
     }
 }
 

@@ -43,15 +43,17 @@ enum ShellLayout {
     /// Whether the copilot belongs on this destination at all.
     ///
     /// Founder call (Aug 4): the copilot is an Overview surface. On Company, Tasks,
-    /// Library, Environment, Settings, Billing and Support it does not appear —
-    /// neither the dock nor its collapsed button — and the content takes the full
-    /// width. `.chat` and `.secondBrain` are not reachable destinations (both fall
-    /// through to the Overview surface in `AppShellView.content`), so they count as
-    /// Overview rather than as somewhere the copilot would vanish.
+    /// Library and Environment it does not appear — neither the dock nor its collapsed
+    /// button — and the content takes the full width. `.chat` and `.secondBrain` are not
+    /// reachable destinations (both fall through to the Overview surface in
+    /// `AppShellView.content`), so they count as Overview rather than as somewhere the
+    /// copilot would vanish. Settings/Billing/Usage/Support are no longer in this list at
+    /// all: they are modal sections over the current view, so whatever the copilot was
+    /// doing behind the scrim it keeps doing.
     static func showsCopilot(in view: AppView) -> Bool {
         switch view {
         case .roadmap, .chat, .secondBrain: return true
-        case .company, .tasks, .library, .environment, .settings, .billing, .support: return false
+        case .company, .tasks, .library, .environment: return false
         }
     }
 
@@ -65,5 +67,27 @@ enum ShellLayout {
     /// flash abbreviated on first layout.
     static func compactPageHeader(forWidth width: CGFloat) -> Bool {
         width > 0 && width < compactHeaderMaxWidth
+    }
+
+    // MARK: - Settings modal
+
+    /// Fixed width of the settings rail. It carries its own "Settings" title and never
+    /// scrolls, so the founder can always see where they are.
+    static let settingsRailWidth: CGFloat = 220
+
+    /// Below this shell width the rail collapses to a section dropdown above the panel —
+    /// the same responsive move the dock makes at `dockExpandMinWidth`.
+    static let settingsRailMinWidth: CGFloat = 820
+
+    static func settingsRailCollapsed(forWidth width: CGFloat) -> Bool {
+        width < settingsRailMinWidth
+    }
+
+    /// The centered panel's size: inset 96pt from each window edge, capped at the ideal
+    /// so a fullscreen window does not turn settings into a full-screen sheet, and
+    /// floored so a tiny window still shows a usable form.
+    static func settingsPanelSize(forWidth w: CGFloat, height h: CGFloat) -> CGSize {
+        CGSize(width:  min(920, max(480, w - 96)),
+               height: min(660, max(400, h - 96)))
     }
 }

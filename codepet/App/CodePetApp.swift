@@ -149,6 +149,10 @@ struct CodePetApp: App {
                     gameState.setAppState(appState)
                     gameState.processReturnFromIdle()
 
+                    // Wire HealthNudgeController → CompanyStore so a nudge can read the
+                    // founder's Settings → Notifications choice before firing (Task 12).
+                    healthNudge.companyStore = companyStore
+
                     // Sync real coding XP from MCP server
                     mcpBridge.refresh()
                     appState.syncFromMCP(mcpBridge)
@@ -237,6 +241,23 @@ struct CodePetApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            // ⌘, is the macOS convention and lands in the app menu for free. As a menu
+            // command it routes regardless of which field has focus, and typing an
+            // unmodified comma in the composer is unaffected.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    // Guarded so the panel does not pop open the instant onboarding ends.
+                    // `companyId` is only set once a company is hydrated, which is also the
+                    // only state where `AppShellView` — the sole mount point for the
+                    // overlay — is on screen. Without it, ⌘, on the splash or sign-in
+                    // screen would silently arm the flag and greet the founder with a
+                    // settings panel over their first frame of the shell.
+                    guard companyStore.companyId != nil, !companyStore.isOnboarding else { return }
+                    companyStore.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandMenu("Navigation") {
                 Button("Home") { appState.selectedTab = .home }
                     .keyboardShortcut("1", modifiers: .command)

@@ -28,14 +28,19 @@ struct CompanyState: Codable, Hashable {
     var tasks: [RoadmapTask]
     var enabledTools: Set<String>
     var decisions: [DecisionEntry]
+    /// Settings the founder chose in the settings modal. Defaulted, because every company
+    /// doc written before this field existed decodes without it.
+    var founderPrefs: FounderPrefs
 
-    /// Explicit memberwise init so `tasks`/`enabledTools`/`decisions` can default — existing call
-    /// sites that predate the roadmap/environment phases omit them and keep compiling.
+    /// Explicit memberwise init so `tasks`/`enabledTools`/`decisions`/`founderPrefs` can
+    /// default — existing call sites that predate the roadmap/environment/settings phases
+    /// omit them and keep compiling.
     init(brief: CompanyBrief, departments: [DeptRef], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
          introSeenAt: Date? = nil,
          tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds,
-         decisions: [DecisionEntry] = []) {
+         decisions: [DecisionEntry] = [],
+         founderPrefs: FounderPrefs = .init()) {
         self.brief = brief
         self.departments = departments
         self.library = library
@@ -46,6 +51,29 @@ struct CompanyState: Codable, Hashable {
         self.tasks = tasks
         self.enabledTools = enabledTools
         self.decisions = decisions
+        self.founderPrefs = founderPrefs
+    }
+
+    /// Hand-written so a company document that predates a field still decodes: Swift's
+    /// synthesised `Decodable` calls `decode(forKey:)`, which throws `keyNotFound` rather
+    /// than falling back to the property's declared default. `founderPrefs` is the field
+    /// that forced this — every doc in Firestore was written before it existed — but every
+    /// key gets the same treatment, and the same default as the memberwise init above, so
+    /// the next added field doesn't have to relearn the lesson. Encoding stays synthesised.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        brief = try c.decodeIfPresent(CompanyBrief.self, forKey: .brief) ?? CompanyBrief()
+        departments = try c.decodeIfPresent([DeptRef].self, forKey: .departments) ?? []
+        library = try c.decodeIfPresent([Deliverable].self, forKey: .library) ?? []
+        stage = try c.decodeIfPresent(ProjectStage.self, forKey: .stage) ?? .idea
+        companionId = try c.decodeIfPresent(String.self, forKey: .companionId) ?? "byte"
+        onboardedAt = try c.decodeIfPresent(Date.self, forKey: .onboardedAt)
+        introSeenAt = try c.decodeIfPresent(Date.self, forKey: .introSeenAt)
+        tasks = try c.decodeIfPresent([RoadmapTask].self, forKey: .tasks) ?? []
+        enabledTools = try c.decodeIfPresent(Set<String>.self, forKey: .enabledTools)
+            ?? Toolkit.defaultEnabledIds
+        decisions = try c.decodeIfPresent([DecisionEntry].self, forKey: .decisions) ?? []
+        founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs) ?? .init()
     }
 
     static let empty = CompanyState(

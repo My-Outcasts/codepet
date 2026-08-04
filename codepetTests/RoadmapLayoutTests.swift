@@ -487,14 +487,22 @@ final class RoadmapLayoutTests: XCTestCase {
         XCTAssertEqual(node(l, "b").x, 232 + 268 + 64)                 // 564
     }
 
-    /// Height and lanes come from the EXPANDED columns only, so a collapsed phase's extra
-    /// department lane can't inflate the board the founder is looking at.
-    func testHeightIgnoresCollapsedPhases() {
+    /// Lanes come from the EXPANDED columns only, so a collapsed phase's extra department
+    /// lane can't inflate the board the founder is looking at. Its RAIL still has to fit,
+    /// though — a rail is centred on the lane and floored at `railMinH` so its label stays
+    /// readable, which on a one-row board hangs 8pt past the rows' own height.
+    func testHeightIgnoresCollapsedPhasesLanes() {
         let tasks = [t("a", .find, dept: "eng"),
                      t("b", .build, dept: "mkt"), t("c", .build, dept: "design")]
         // BUILD collapsed → its two department lanes leave the board entirely: one row.
         let expandedOnly = RoadmapLayoutEngine.layout(tasks, expanded: [.find])
-        XCTAssertEqual(expandedOnly.size.height, 40 + 64 + 16)         // 120
+        let rows = 40 + 64 + 16                                        // 120 — the lane part
+        XCTAssertEqual(expandedOnly.size.height,
+                       expandedOnly.spineY + expandedOnly.railH / 2 + RoadmapGeometry.railPad)
+        XCTAssertEqual(expandedOnly.size.height, 136)                  // rows 120 + 16 of rail
+        XCTAssertEqual(RoadmapLayoutEngine.layout(tasks, hasRoot: false,
+                                                  expanded: Set(RoadmapPhase.allCases)).size.height
+                       - CGFloat(96), CGFloat(rows))                   // lanes unchanged: 2 rows
 
         // BUILD expanded → eng and design share lane 0 (their columns don't clash), mkt takes
         // lane 1, so the ROW contribution grows by exactly one row pitch. Isolated with

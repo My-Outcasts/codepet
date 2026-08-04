@@ -21,6 +21,33 @@ enum RoadmapGeometry {
     /// three of them cost less than one card column.
     static let railW: CGFloat = 44
     static let railGap: CGFloat = 20
+    /// Breathing room a rail keeps beyond the card band it stands beside.
+    static let railPad: CGFloat = 8
+    /// A rail is never shorter than this: below it the vertical label can't be read even
+    /// after `minimumScaleFactor`, since the run available to it is `railMinH` minus the
+    /// count and progress bands.
+    static let railMinH: CGFloat = 112
+    /// …and never taller than this. A rail carries a name and a count; letting it grow with
+    /// the canvas turned five collapsed phases into a wall taller than every card on the
+    /// board, which inverted visual mass against information.
+    static let railMaxH: CGFloat = 200
+
+    /// The lane the rails and their spine sit on: the vertical centre of the card band.
+    ///
+    /// With one task row this is exactly row 0's card centre (`top + cardH/2` = 72), so the
+    /// spine continues the row it appears to leave. The rails used to be centred on the
+    /// CANVAS instead (`size.height / 2` = 60 at one row), which put the connector 12pt
+    /// above the lane — the same jog the root edges were fixed for, and it drifted with the
+    /// row count rather than being constant.
+    static func spineY(rows: Int) -> CGFloat {
+        top + CGFloat(max(1, rows) - 1) * rowPitch / 2 + cardH / 2
+    }
+
+    /// A rail's height: the card band plus `railPad` on each side, floored and capped.
+    static func railHeight(rows: Int) -> CGFloat {
+        let band = CGFloat(max(1, rows) - 1) * rowPitch + cardH
+        return min(max(band + railPad * 2, railMinH), railMaxH)
+    }
 
     // ── Edge routing ─────────────────────────────────────────────────────────────────
     /// How far a staggered vertical run keeps off BOTH walls of its gutter, so the spread can
@@ -108,6 +135,12 @@ struct RoadmapLayout {
     let root: CGRect?
     /// Root → entry-task connectors. Styled separately from dependency edges, never critical.
     let rootEdges: [EdgePath]
+    /// The lane the rails stand on and their spine is stroked along — the card band's centre,
+    /// NOT the canvas centre. See `RoadmapGeometry.spineY`.
+    let spineY: CGFloat
+    /// Every rail's height. Uniform by design: rails are a row of stations, and one taller
+    /// than its neighbours would read as more important rather than merely longer-named.
+    let railH: CGFloat
     let size: CGSize
 }
 
@@ -370,10 +403,22 @@ enum RoadmapLayoutEngine {
             + RoadmapGeometry.cardH + RoadmapGeometry.bottomPad
         // `corridorY(below: maxRows - 1)` lands exactly ON `rowsHeight`, so a corridor along the
         // bottom row would be stroked half-outside the canvas. Grow to keep it inside.
-        let height = deepestCorridor > 0
+        let corridorHeight = deepestCorridor > 0
             ? max(rowsHeight, deepestCorridor + RoadmapGeometry.corridorPad)
             : rowsHeight
         let width = RoadmapGeometry.boardWidth(expanded: expandedSet, hasRoot: hasRoot)
+
+        // A rail is centred on the lane, so at one row (`spineY` 72, `railMinH` 112) it hangs
+        // 8pt below a 120pt canvas. Grow to contain it — only when rails exist, so a fully
+        // expanded board keeps exactly the height its rows need. The rail can't run off the
+        // TOP for any row count: `spineY` grows by half a `rowPitch` per row while `railHeight`
+        // grows by a whole one until it caps, and at one row 72 - 56 still leaves 16pt.
+        let hasRails = RoadmapPhase.allCases.contains { !expandedSet.contains($0) }
+        let spineY = RoadmapGeometry.spineY(rows: maxRows)
+        let railH = RoadmapGeometry.railHeight(rows: maxRows)
+        let height = hasRails
+            ? max(corridorHeight, spineY + railH / 2 + RoadmapGeometry.railPad)
+            : corridorHeight
 
         // The current phase is read from the WHOLE task set, not just the shown ones: the
         // beacon's phase may be collapsed into a rail, so `shown`/`expandedSet` can't be used here.
@@ -429,6 +474,7 @@ enum RoadmapLayoutEngine {
 
         return RoadmapLayout(nodes: nodes, edges: edges, columns: columns, rails: rails,
                              root: root, rootEdges: rootEdges,
+                             spineY: spineY, railH: railH,
                              size: CGSize(width: width, height: height))
     }
 }

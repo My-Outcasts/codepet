@@ -43,6 +43,13 @@ struct RoadmapBoardView: View {
     private static let insetLeading: CGFloat = 26
     private static let insetTrailing: CGFloat = 24
 
+    /// The rail's top band, holding the done/total count.
+    private static let railCountBand: CGFloat = 30
+    /// The rail's foot band, holding the progress track. Reserved on every rail — including
+    /// the unplanned ones that draw no track — so all five labels share one run and scale
+    /// identically.
+    private static let railTrackBand: CGFloat = 14
+
     private var currentId: String? { RoadmapEngine.nextStep(tasks)?.id }
     private var herePhrase: String {
         RoadmapBoardCopy.herePhrase(founderName: founderName, lang: lang)
@@ -200,8 +207,8 @@ struct RoadmapBoardView: View {
             edgeCanvas(l)
             if let r = l.root { rootNode(r) }
             ForEach(l.rails) { r in
-                rail(r, height: l.size.height)
-                    .position(x: r.x + RoadmapGeometry.railW / 2, y: l.size.height / 2)
+                rail(r, height: l.railH)
+                    .position(x: r.x + RoadmapGeometry.railW / 2, y: l.spineY)
             }
             ForEach(l.nodes) { n in
                 let status = RoadmapEngine.status(for: n.task, in: tasks)
@@ -285,22 +292,31 @@ struct RoadmapBoardView: View {
     /// long names shrink (`minimumScaleFactor`) and then truncate rather than overrun the
     /// count's `[0, 44)` region above.
     private func railBody(_ r: PhaseRail, height: CGFloat, empty: Bool) -> some View {
-        // The vertical run the label may paint: everything below the count's region.
-        // Bounding the text's WIDTH before rotating is what makes this exact — `rotationEffect`
-        // doesn't participate in layout, so a label constrained only afterwards overflows its
-        // box symmetrically (upward into the count) whenever the rail is short.
-        let labelRun = max(0, height - 44)
+        // The rail's three bands, top to bottom: the count, the label's vertical run, and the
+        // progress track. The track's band is reserved even for an unplanned phase that draws
+        // no track, so every label in the row gets the same run and scales identically —
+        // otherwise "LAUNCH" would render a size larger than "BUILD" for no reason a founder
+        // could infer.
+        //
+        // Bounding the text's WIDTH before rotating is what makes the run exact —
+        // `rotationEffect` doesn't participate in layout, so a label constrained only
+        // afterwards overflows its box symmetrically (upward into the count).
+        let labelRun = max(0, height - Self.railCountBand - Self.railTrackBand)
         // Hover only lifts a rail that can actually expand — an empty phase has
         // nothing to open, so it stays inert AND stays visually still. The
         // difference in *behaviour* is what tells the two apart; before this, the
         // only cue was 40%-dimmer text on an already-muted label.
         let lifted = !empty && hoveredRail == r.phase
         return ZStack {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 11)
                 .fill(lifted ? CodepetTokens.railFillHover : CodepetTokens.railFill)
-            RoundedRectangle(cornerRadius: 10)
+            // An unplanned phase is drawn DASHED — the em-dash count alone read as missing
+            // data ("—" where a number should be) rather than as a phase nobody has planned
+            // yet. A dashed outline says "nothing here yet" before any text is read, and it
+            // separates the inert rails from the clickable ones without hovering.
+            RoundedRectangle(cornerRadius: 11)
                 .stroke(lifted ? CodepetTokens.railBorderHover : CodepetTokens.railBorder,
-                        lineWidth: 1)
+                        style: StrokeStyle(lineWidth: 1, dash: empty ? [3, 3] : []))
         }
         .frame(width: RoadmapGeometry.railW, height: height)
         .animation(.easeOut(duration: 0.12), value: lifted)
@@ -310,8 +326,9 @@ struct RoadmapBoardView: View {
             Text(RoadmapBoardCopy.railCount(done: r.done, total: r.total))
                 .font(CodepetTheme.inter(10)).monospacedDigit()
                 .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
-                .padding(.top, 10)
+                .padding(.top, 9)
         }
+        .overlay(alignment: .bottom) { progressTrack(r) }
         .overlay(alignment: .bottom) {
             Text(r.phase.label(lang).uppercased())
                 .font(CodepetTheme.inter(10.5))
@@ -323,6 +340,31 @@ struct RoadmapBoardView: View {
                 .frame(width: labelRun)                                  // ← bounds the run it will paint
                 .rotationEffect(.degrees(-90))
                 .frame(width: RoadmapGeometry.railW, height: labelRun)   // ← exact box, no overflow
+                .padding(.bottom, Self.railTrackBand)
+        }
+    }
+
+    /// How much of the phase is finished, as a track along the rail's foot.
+    ///
+    /// Without it a rail's progress lived only in a 10pt count at the far end of the slab, so
+    /// `2/3` and `0/2` were the same rectangle at a glance — the board could not answer "where
+    /// have I actually got to" without reading five numbers. An unplanned phase draws nothing:
+    /// an empty track would claim 0% of a plan that doesn't exist.
+    private func progressTrack(_ r: PhaseRail) -> some View {
+        let frac = r.total > 0 ? min(1, max(0, CGFloat(r.done) / CGFloat(r.total))) : 0
+        let w = RoadmapGeometry.railW - 14
+        return Group {
+            if r.total > 0 {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(CodepetTheme.mutedText.opacity(0.18))
+                        .frame(width: w, height: 3)
+                    if frac > 0 {
+                        Capsule().fill(RoadmapPalette.done.opacity(0.85))
+                            .frame(width: max(3, w * frac), height: 3)
+                    }
+                }
+                .padding(.bottom, 9)
+            }
         }
     }
 
@@ -379,13 +421,19 @@ struct RoadmapBoardView: View {
                 ctx.fill(Self.arrowhead(e.points, length: 7, halfWidth: 4),
                          with: .color(accent))
             }
-            // A short stub into each rail, so a collapsed phase still reads as part of one
-            // continuous journey rather than a detached sidebar.
-            let midY = (l.size.height / 2).rounded()
-            for r in l.rails {
-                ctx.stroke(path([CGPoint(x: r.x - RoadmapGeometry.railGap, y: midY),
-                                 CGPoint(x: r.x, y: midY)]),
-                           with: .color(accent.opacity(0.25)),
+            // ONE spine under the whole rail run, so the collapsed phases read as stations on
+            // a continuous journey. Three things were wrong with the per-rail stubs this
+            // replaces: each was drawn only in its rail's 20pt leading gap, so a full-height
+            // rail chopped the connector into five orphan ticks; they sat on the CANVAS centre,
+            // 12pt off the lane they appeared to continue; and they were accent-tinted, which
+            // spent the board's loudest colour on its emptiest region. It is stroked in `faint`
+            // like a dependency line — structure, not the critical path — and the rails, drawn
+            // after this canvas, cover the stretches they stand on.
+            if let first = l.rails.first, let last = l.rails.last {
+                let y = l.spineY.rounded()
+                ctx.stroke(path([CGPoint(x: first.x - RoadmapGeometry.railGap, y: y),
+                                 CGPoint(x: last.x + RoadmapGeometry.railW, y: y)]),
+                           with: .color(CodepetTokens.faint),
                            style: StrokeStyle(lineWidth: 1.5))
             }
         }

@@ -11,4 +11,10 @@ final class CompanionRowTests: XCTestCase {
         XCTAssertEqual(CompanionRowModel.summary(companionId: "nope", lang: .en), "Default")
         XCTAssertEqual(CompanionRowModel.summary(companionId: "", lang: .vi), "Mặc định")
     }
+
+    func test_allFollowsCanonicalNarrativeOrder() {
+        let allIds = CompanionRowModel.all.map(\.id)
+        XCTAssertEqual(Array(allIds.prefix(PetCharacter.starters.count)), PetCharacter.starters,
+                       "Companion list must start with canonical order (PetCharacter.starters), not alphabetical")
+    }
 }

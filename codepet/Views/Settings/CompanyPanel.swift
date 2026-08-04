@@ -3,9 +3,17 @@ import SwiftUI
 
 /// Pure naming for the companion row, so the fallback is testable without a view.
 enum CompanionRowModel {
-    /// Stable ordering, hoisted out of the deleted `SettingsView`'s private
-    /// `companions` property so both this panel and any future picker share one list.
-    static var all: [PetCharacter] { PetCharacter.all.values.sorted { $0.id < $1.id } }
+    /// Canonical narrative order (`PetCharacter.starters`), the order every other Codepet
+    /// surface uses — NOT alphabetical by id. The deleted `SettingsView` sorted by id,
+    /// which put crash and glitch before nova; founder's call, Aug 4. Any id present in
+    /// the catalogue but absent from `starters` is appended rather than silently dropped.
+    static var all: [PetCharacter] {
+        let canonical = PetCharacter.starters.compactMap { PetCharacter.all[$0] }
+        let extras = PetCharacter.all.values
+            .filter { !PetCharacter.starters.contains($0.id) }
+            .sorted { $0.id < $1.id }
+        return canonical + extras
+    }
 
     static func summary(companionId: String, lang: AppLanguage) -> String {
         if let c = PetCharacter.all[companionId] { return c.name }

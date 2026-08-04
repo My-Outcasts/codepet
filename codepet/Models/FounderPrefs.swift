@@ -68,7 +68,8 @@ struct AIStyle: Codable, Hashable {
         moreAboutYou = try container.decodeIfPresent(String.self, forKey: .moreAboutYou) ?? ""
     }
 
-    /// nil when every knob is `.default` and every string is blank.
+    /// nil when every knob is `.default` and every string is blank, and never longer than
+    /// `fragmentBudget` — see `roleLimit` for why that is a per-field bound, not a final clip.
     func promptFragment() -> String? {
         var lines: [String] = []
 
@@ -101,16 +102,68 @@ struct AIStyle: Codable, Hashable {
         case .less: lines.append("Never use emoji.")
         }
 
-        let r = role.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Each free-text field is bounded on its OWN budget (see `roleLimit` and friends), so
+        // the joined fragment can never reach `fragmentBudget` and the server never has to
+        // clip it. Bounding the join instead would truncate from the end — and the end is
+        // `customInstructions`, deliberately placed there to win.
+        let r = Self.bounded(role, to: Self.roleLimit)
         if !r.isEmpty { lines.append("The founder describes their role as: \(r).") }
 
-        let more = moreAboutYou.trimmingCharacters(in: .whitespacesAndNewlines)
+        let more = Self.bounded(moreAboutYou, to: Self.moreAboutYouLimit)
         if !more.isEmpty { lines.append("Keep in mind about the founder: \(more).") }
 
-        // Last, so an explicit instruction wins over the knobs above it.
-        let custom = customInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Last, so an explicit instruction wins over the knobs above it. A long
+        // `moreAboutYou` therefore costs `moreAboutYou` characters, never this line.
+        let custom = Self.bounded(customInstructions, to: Self.customInstructionsLimit)
         if !custom.isEmpty { lines.append(custom) }
 
         return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    // MARK: - Budget
+
+    /// What the server will actually forward. `styleBlock` in
+    /// `functions/src/companyChatCore.ts` clips the fragment it receives to 2000 characters
+    /// because it arrives from a client; this is the same number, named here so the client
+    /// can stay inside it deliberately instead of discovering the ceiling by truncation.
+    static let fragmentBudget = 2000
+
+    /// Per-field ceilings on the three free-text fields, sized so the JOINED fragment can
+    /// never reach `fragmentBudget` — proven for every knob combination by
+    /// `AIStyleTests.test_noStyleAtAllCanExceedTheServerBudget`.
+    ///
+    /// Bounding each FIELD rather than the join is the entire point. `customInstructions` is
+    /// appended LAST on purpose, so an explicit instruction wins over the knobs above it by
+    /// recency — which means a clip applied to the joined string removes exactly the
+    /// highest-priority part of it, and the part the founder most deliberately typed. A long
+    /// `moreAboutYou` has to cost `moreAboutYou` characters and nothing else. The generous
+    /// share goes to `customInstructions` for the same reason: it is the field that decides
+    /// behaviour, where `role` is a noun phrase.
+    ///
+    /// The server's 2000-char clip stays as the backstop for an older or non-native client;
+    /// nothing here relies on it, and a total cap here would have to drop from the middle to
+    /// keep the tail, which is worse than never overflowing in the first place.
+    static let roleLimit = 200
+    static let moreAboutYouLimit = 600
+    static let customInstructionsLimit = 800
+
+    /// `s` trimmed, and truncated to at most `limit` UTF-16 code units.
+    ///
+    /// UTF-16, not characters: `styleBlock`'s `String.prototype.slice` counts UTF-16 code
+    /// units, so an emoji costs 2 there and 1 to Swift's `count`. Truncation still happens on
+    /// whole `Character`s, so no grapheme is ever split in half, and the result is trimmed
+    /// again so a cut at a space never leaves " ." behind.
+    static func bounded(_ s: String, to limit: Int) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.utf16.count > limit else { return t }
+        var out = ""
+        var used = 0
+        for ch in t {
+            let w = ch.utf16.count
+            if used + w > limit { break }
+            out.append(ch)
+            used += w
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

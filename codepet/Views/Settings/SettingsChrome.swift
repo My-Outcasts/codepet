@@ -38,7 +38,16 @@ struct SettingsGroupLabel: View {
     }
 }
 
-/// A bordered card holding rows. Rows separate themselves with `Divider()`.
+/// Replaces `Divider()` to ensure row separators track `CodepetTheme` instead of using the system
+/// separator colour, keeping separators visually consistent with the group's `CodepetTheme.hairline` border.
+struct SettingsDivider: View {
+    var body: some View {
+        CodepetTheme.hairline
+            .frame(height: 1)
+    }
+}
+
+/// A bordered card holding rows. Rows separate themselves with `SettingsDivider()`.
 struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
 

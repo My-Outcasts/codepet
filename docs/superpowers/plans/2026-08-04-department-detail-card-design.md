@@ -478,6 +478,27 @@ In `codepet/Models/Department.swift`, insert this stored property immediately af
 
 Do not set a non-default value for any department yet. Task 6's visual check decides whether `fin` or `legal` needs one.
 
+> **CORRECTION (applied during execution, commit `f828b3f`).** As originally written this
+> plan did not compile: `.frame(width:height:alignment:)` takes an `Alignment`, and Step 2
+> below passed `d.coverAnchor` (a `UnitPoint`) straight into it. `Alignment` cannot be the
+> field's type either — `Department` gets `Hashable` by synthesis and `Alignment` is not
+> `Hashable`, while `UnitPoint` is. The field stays `UnitPoint` (the right type for a crop
+> anchor) and a file-private conversion is added in `DepartmentDetailView.swift`:
+>
+> ```swift
+> private extension UnitPoint {
+>     var frameAlignment: Alignment {
+>         let h: HorizontalAlignment = x < 0.5 ? .leading : x > 0.5 ? .trailing : .center
+>         let v: VerticalAlignment = y < 0.5 ? .top : y > 0.5 ? .bottom : .center
+>         return Alignment(horizontal: h, vertical: v)
+>     }
+> }
+> ```
+>
+> Step 2's frame call therefore reads `alignment: d.coverAnchor.frameAlignment`. The
+> conversion snaps any `UnitPoint` to the nearest of the 9 standard alignments, which covers
+> every anchor this feature can use.
+
 - [ ] **Step 2: Replace `hero` and add `badge`**
 
 In `codepet/Views/Company/DepartmentDetailView.swift`, replace the whole `private func hero(_ d: Department) -> some View { … }` function with:
@@ -495,7 +516,8 @@ In `codepet/Views/Company/DepartmentDetailView.swift`, replace the whole `privat
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: geo.size.width, height: 190, alignment: d.coverAnchor)
+                    .frame(width: geo.size.width, height: 190,
+                           alignment: d.coverAnchor.frameAlignment)   // see CORRECTION above
                     .clipped()
             }
             LinearGradient(stops: [

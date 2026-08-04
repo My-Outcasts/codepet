@@ -20,6 +20,18 @@ final class PetMemoryStore: ObservableObject {
     /// All memories keyed by resolved project path.
     @Published private(set) var memories: [String: PetMemory] = [:]
 
+    /// Mirrors `FounderPrefs.memoryEnabled` for THIS account. Pushed in by `CompanyStore`
+    /// (on hydrate, on every prefs write, and back to `true` on sign-out) because the
+    /// enrichers reach this store statically through `.shared` and have no company in hand.
+    /// Deliberately not `@Published`: it changes what goes into a prompt payload, never what
+    /// a view draws — the Memory panel reads the pref off the company doc, so republishing
+    /// here would only invalidate views for nothing.
+    private(set) var memoryEnabled = true
+
+    /// Off means off for BOTH stores: this silences derived coding activity, while
+    /// `ChatContext.compose(memoryEnabled:)` silences the facts the team was told.
+    func setMemoryEnabled(_ enabled: Bool) { memoryEnabled = enabled }
+
     init() {
         load()
     }
@@ -101,20 +113,20 @@ final class PetMemoryStore: ObservableObject {
     }
 
     /// Compact prompt-ready string for the Cloud Function (~300-500 chars).
+    /// `nil` while the founder has memory off — see `MemoryDigest.codingMemoryPrompt`, which
+    /// owns that decision so it stays provable without this singleton.
     func promptPayload(for projectPath: String?) -> String? {
         guard let p = projectPath else { return nil }
-        guard let mem = memories[p], mem.totalSessions > 0 else { return nil }
-        return mem.toPromptString()
+        return MemoryDigest.codingMemoryPrompt(memories[p], memoryEnabled: memoryEnabled)
     }
 
     /// Aggregated prompt across all projects. Used by Tips guidance which
     /// isn't scoped to a single project.
     func allMemoryPrompt() -> String? {
-        let active = memories.filter { $0.value.totalSessions > 0 }
-        guard !active.isEmpty else { return nil }
-        // Return the most-used project's memory (richest context).
-        let best = active.max(by: { $0.value.totalSessions < $1.value.totalSessions })
-        return best?.value.toPromptString()
+        // The most-used project's memory (richest context), among those actually worked in.
+        let best = memories.values.filter { $0.totalSessions > 0 }
+            .max(by: { $0.totalSessions < $1.totalSessions })
+        return MemoryDigest.codingMemoryPrompt(best, memoryEnabled: memoryEnabled)
     }
 
     // MARK: - Persistence

@@ -128,6 +128,12 @@ final class CompanyStore: ObservableObject {
     /// `VirtualCompanyInterviewFlag`.
     private let vcInterviewFlag: VirtualCompanyInterviewFlag
 
+    /// Pushes `FounderPrefs.memoryEnabled` into `PetMemoryStore`, the DERIVED half of memory.
+    /// A push (rather than a read) because the summarize enrichers reach that store
+    /// statically through `.shared` and never see a company — and injectable because a test
+    /// must be able to prove the switch travels without mutating a process-wide singleton.
+    private let codingMemoryGate: (Bool) -> Void
+
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
     /// instead of clobbering newer state.
@@ -184,7 +190,11 @@ final class CompanyStore: ObservableObject {
          // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
          // over `UserDefaults.standard`, and forming it in the nonisolated
          // default-argument context is what makes such defaults warn.
-         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil) {
+         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil,
+         // Defaulted in the init BODY for the same reason as `vcRunner`: the real one
+         // touches the `@MainActor` `PetMemoryStore.shared`, which a nonisolated
+         // default-argument context cannot reference.
+         codingMemoryGate: ((Bool) -> Void)? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -202,6 +212,7 @@ final class CompanyStore: ObservableObject {
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
+        self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -252,6 +263,10 @@ final class CompanyStore: ObservableObject {
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
+        // The incoming founder's memory switch has to reach `PetMemoryStore` here: it is
+        // read statically by the summarize enrichers, so without this push the previous
+        // account's answer would keep governing this account's payloads.
+        codingMemoryGate(loaded.founderPrefs.memoryEnabled)
     }
 
     /// Persist + stamp + leave onboarding. (Enrichment happens earlier, in
@@ -660,8 +675,11 @@ final class CompanyStore: ObservableObject {
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
+            // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
-                                          library: company.library, query: text, focusDepartment: department),
+                                          library: company.library, query: text, focusDepartment: department,
+                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
@@ -1196,7 +1214,8 @@ final class CompanyStore: ObservableObject {
                              reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
         RunTaskRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions),
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
             reviseNote: reviseNote, current: current)
     }
@@ -1500,6 +1519,39 @@ final class CompanyStore: ObservableObject {
         _ = await founderPrefsSaver(cid, prefs)
         guard token == hydrationToken, companyId == cid else { return }
         company.founderPrefs = prefs
+        codingMemoryGate(prefs.memoryEnabled)
+    }
+
+    /// Forget one fact the founder's team was told — the delete half of the Memory panel,
+    /// and the reason that panel can be trusted at all: today a fact recorded by
+    /// `remember_fact` can never be taken back.
+    ///
+    /// Persists through the EXISTING `decisionsSaver`, the same path `handleRemember` and
+    /// `lockInVirtualCompanyDecision` write on, so decisions still reach the document
+    /// exactly one way. Matched on topic + statement rather than by index, because a
+    /// `remember_fact` merge landing between render and tap can re-order the array — and
+    /// `firstIndex` means a doc that somehow holds duplicates loses ONE row, not both.
+    /// A row that is already gone is a silent no-op, not a redundant write.
+    ///
+    /// Carries `setFounderPrefs`'s hydration guard, for exactly the same reason: the
+    /// settings modal can stay open across a sign-out / account switch, and `hydrate` flips
+    /// `companyId` to the INCOMING account BEFORE `company` is loaded for it. A delete
+    /// issued in that window would run against the OUTGOING founder's list and be written
+    /// to the INCOMING founder's document. `isHydrating` is true for exactly that window,
+    /// and the token captured up front is re-checked after the write's await so a
+    /// hydrate/reset landing DURING it drops the stale in-memory removal instead of
+    /// clobbering the newly-hydrated company.
+    func forgetDecision(_ entry: DecisionEntry) async {
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        guard let i = company.decisions.firstIndex(where: {
+            $0.topic == entry.topic && $0.statement == entry.statement
+        }) else { return }
+        var remaining = company.decisions
+        remaining.remove(at: i)
+        _ = await decisionsSaver(cid, remaining)
+        guard token == hydrationToken, companyId == cid else { return }
+        company.decisions = remaining
     }
 
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows
@@ -1527,6 +1579,10 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         company = .empty
+        // `.empty`'s prefs are the defaults, and memory defaults to ON — restoring it here
+        // keeps `PetMemoryStore` in step with the company we just reset to, so the NEXT
+        // account never inherits the outgoing founder's switch.
+        codingMemoryGate(CompanyState.empty.founderPrefs.memoryEnabled)
         view = .roadmap
         isHydrating = false
         isOnboarding = false

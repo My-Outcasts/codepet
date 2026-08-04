@@ -406,6 +406,41 @@ describe("handleCompanyChat", () => {
       expect(body).toEqual({ reply: "Hello founder.", run_task_id: null });
     });
 
+    // ── founder style (Settings → AI) placement in the system blocks ─────────
+    // The behavioural point of the tone controls: the fragment has to land AFTER
+    // the persona sentence it may override ("No hype, no filler, no emoji") and
+    // BEFORE the company grounding, and it must stay out of the cached static
+    // block so a per-founder string doesn't shatter cache sharing.
+
+    test("style_fragment lands at the head of the volatile block, after the persona, before the company", async () => {
+      const req = makeReq({
+        body: { ...makeReq().body, style_fragment: "Never use emoji." }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      const call = mockMessagesCreate.mock.calls[0][0] as any;
+      const [staticBlock, volatileBlock] = call.system as Array<{ text: string }>;
+      // Static (cached) block keeps the persona sentence and gains nothing.
+      expect(staticBlock.text).toContain("no emoji");
+      expect(staticBlock.text).not.toContain("Never use emoji.");
+      // Volatile block: style first, company grounding after it.
+      expect(volatileBlock.text.startsWith("\n\nHow the founder wants you to write:\nNever use emoji.")).toBe(true);
+      expect(volatileBlock.text.indexOf("How the founder wants you to write:"))
+        .toBeLessThan(volatileBlock.text.indexOf("The founder's company:"));
+    });
+
+    test("omitting style_fragment leaves the system prompt byte-for-byte unchanged", async () => {
+      const req = makeReq();
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      const call = mockMessagesCreate.mock.calls[0][0] as any;
+      const volatileBlock = (call.system as Array<{ text: string }>)[1];
+      expect(volatileBlock.text).not.toContain("How the founder wants you to write");
+      expect(volatileBlock.text.startsWith("\n\nThe founder's company:")).toBe(true);
+    });
+
     test("returns 429 when rate-limited (before any Anthropic call)", async () => {
       const rl = require("../rateLimit");
       rl.checkAndIncrement.mockImplementationOnce(async () => ({

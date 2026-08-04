@@ -10,6 +10,7 @@ import {
   buildMessages,
   buildRunnableBlock,
   buildSetupBlock,
+  styleBlock,
   validateRunTaskToolUse,
   validateNavigateToolUse,
   validateSetupToolUse,
@@ -54,6 +55,11 @@ interface ChatRequestBody {
   // via the setup_capability tool (see companyChatCore). Backward-compatible: omitted
   // entirely by older clients → treated as [] → no tool offered.
   env_setup?: EnvSetupItem[];
+  // The founder's tone preferences, already composed into one prompt sentence by the
+  // client (`AIStyle.promptFragment()`). Backward-compatible: omitted by older clients,
+  // and omitted by current ones whenever the founder hasn't changed a knob → styleBlock
+  // returns "" → the system prompt is byte-for-byte what it was before this field.
+  style_fragment?: string;
 }
 
 const MAX_RUNNABLE_TASKS = 60;
@@ -228,10 +234,13 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
     language: body.language === "vi" ? "vi" : "en",
   });
-  // Runnable-task + setup-toolkit grounding are appended to the volatile context
-  // block (not the cached static one) since they're per-request, just like the
-  // context itself.
+  // The founder's tone preferences, runnable-task grounding and setup-toolkit
+  // grounding all live in the volatile context block (not the cached static one)
+  // since they're per-request, just like the context itself. The style leads: it
+  // sits directly after the persona sentence it may override, and before the
+  // company grounding.
   const contextBlock =
+    styleBlock(typeof body.style_fragment === "string" ? body.style_fragment : "") +
     buildContextBlock(typeof body.context === "string" ? body.context : "") +
     buildRunnableBlock(runnable) +
     buildSetupBlock(envSetup);

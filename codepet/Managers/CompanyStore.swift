@@ -662,7 +662,10 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text, focusDepartment: department),
-            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup)
+            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup,
+            // nil at defaults, so an untouched settings panel adds nothing to the wire
+            // and nothing to the prompt.
+            styleFragment: company.founderPrefs.style.promptFragment())
 
         // Department handoff: if a specialist leads this turn (chip focus or a
         // department named in the text), the reply is spoken by that specialist

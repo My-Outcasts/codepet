@@ -15,6 +15,31 @@ final class CompanyChatClientTests: XCTestCase {
         let back = try JSONDecoder().decode(CompanyChatRequest.self, from: data)
         XCTAssertEqual(back.history, req.history)
     }
+    /// The zero-cost default is the whole point of the tone controls: with every knob
+    /// untouched `promptFragment()` is nil, and a nil fragment must leave `style_fragment`
+    /// OFF the wire entirely — not present-but-empty, which would add a prompt heading
+    /// (and tokens) for a founder who changed nothing.
+    func testRequestOmitsStyleFragmentWhenNil() throws {
+        let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
+                                     context: "ctx", history: [], userMessage: "hello",
+                                     styleFragment: AIStyle().promptFragment())
+        let json = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(req)) as? [String: Any]
+        XCTAssertNil(AIStyle().promptFragment())
+        XCTAssertFalse(json?.keys.contains("style_fragment") ?? true)
+    }
+
+    func testRequestEncodesStyleFragmentWhenSet() throws {
+        var style = AIStyle()
+        style.emoji = .less
+        let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
+                                     context: "ctx", history: [], userMessage: "hello",
+                                     styleFragment: style.promptFragment())
+        let json = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(req)) as? [String: Any]
+        XCTAssertEqual(json?["style_fragment"] as? String, "Never use emoji.")
+    }
+
     func testResponseDecodesWithRunTaskId() throws {
         let data = "{\"reply\":\"On it\",\"run_task_id\":\"t1\"}".data(using: .utf8)!
         let r = try JSONDecoder().decode(CompanyChatResponse.self, from: data)

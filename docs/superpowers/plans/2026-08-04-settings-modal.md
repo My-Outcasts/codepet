@@ -6,7 +6,7 @@
 
 **Architecture:** Settings becomes an overlay keyed by `CompanyStore.settingsSection` (`nil` = closed) rather than an `AppView` destination, so closing returns the founder to where they were. Layout decisions live in pure `ShellLayout` helpers; a shared `SettingsChrome` row vocabulary keeps nine panels from drifting. The new tone/profile values persist as `FounderPrefs` on the company doc and reach the model through one `promptFragment()` seam composed into the system prompt in `companyChatCore.ts`.
 
-**Tech Stack:** SwiftUI (macOS 13+), XCTest, Firebase Firestore, TypeScript Cloud Functions, vitest.
+**Tech Stack:** SwiftUI (macOS 13+), XCTest, Firebase Firestore, TypeScript Cloud Functions, jest (ts-jest — `functions/` uses jest, NOT vitest; that is the web app).
 
 ## Global Constraints
 
@@ -1642,7 +1642,7 @@ git commit -m "feat(settings): AI Settings panel wired to FounderPrefs"
 
 ```ts
 // functions/src/__tests__/companyChatStyle.test.ts
-import { describe, it, expect } from "vitest";
+// No import: functions/ runs jest with globals injected (jest.config.js + ts-jest).
 import { styleBlock } from "../companyChatCore";
 
 describe("styleBlock", () => {
@@ -1667,7 +1667,7 @@ describe("styleBlock", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd functions && npx vitest run src/__tests__/companyChatStyle.test.ts`
+Run: `cd functions && npx jest src/__tests__/companyChatStyle.test.ts`
 Expected: FAIL — `styleBlock` is not exported
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1691,7 +1691,7 @@ Then append `styleBlock(req.styleFragment)` to the system prompt where the perso
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd functions && npx vitest run src/__tests__/companyChatStyle.test.ts`
+Run: `cd functions && npx jest src/__tests__/companyChatStyle.test.ts`
 Expected: PASS, 3 tests
 
 - [ ] **Step 5: Commit**
@@ -1870,16 +1870,37 @@ struct MemoryPanel: View {
         }
     }
 
-    /// Replace with the real accessor found by the grep in this task's preamble.
-    private var facts: [String] { companyStore.companyFacts }
+    /// The REAL store, verified against the tree. `remember_fact` (the chat tool) flows
+    /// through `CompanyStore.handleRemember` -> `Decisions.mergeDecisions` -> this array,
+    /// persisted by the EXISTING `decisionsSaver`. No new write path is needed.
+    private var facts: [DecisionEntry] { companyStore.company.decisions }
 
-    private func forget(_ fact: String) {
-        Task { await companyStore.forgetFact(fact) }
+    private func forget(_ entry: DecisionEntry) {
+        Task { await companyStore.forgetDecision(entry) }
     }
 }
 ```
 
-`companyStore.companyFacts` and `forgetFact(_:)` do not exist yet. Add both in this task, following `setCompanion`'s injected-saver idiom, writing back the same company-doc field the `remember_fact` tool writes. Extend `FounderPrefsPersistenceTests` with a case proving `forgetFact` removes exactly one entry and issues one write.
+**Verified API, replacing this plan's earlier guess.** There is no `companyFacts` and no
+`forgetFact`:
+
+- `CompanyState.decisions: [DecisionEntry]`, where `DecisionEntry` is
+  `{ topic: String, statement: String, source: String?, updatedAt: Double? }`
+  (`codepet/Models/Decisions.swift:8`).
+- `CompanyStore.handleRemember(_:cid:)` (~line 1094) already merges and persists through
+  `decisionsSaver`. **The write path exists — do not add a second one.**
+- Rows show `statement`, with `topic` as the secondary label.
+
+Add only `forgetDecision(_:)`, following `setFounderPrefs`'s finished idiom: capture
+`hydrationToken` synchronously, bail while hydrating, remove the entry, persist through the
+existing `decisionsSaver`, then re-check `token == hydrationToken && companyId == cid` after
+the await. Test that it removes exactly one entry, issues exactly one write, and that a
+superseded call does not write into an incoming account.
+
+**Scope:** `decisions` holds every fact the companion knows, including entries from the
+`extractDecisions` function, not only chat-remembered ones (`source` distinguishes them). The
+panel lists them ALL, because they all feed the prompt — filtering to `source == "chat"` would
+let a panel titled "What Crash knows" claim a completeness it does not have.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2033,10 +2054,10 @@ In `SettingsModal.swift`, the switch now covers all nine sections with no placeh
 ```bash
 pgrep -f 'codepet.app/Contents/MacOS/codepet' | xargs -r kill
 xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' 2>&1 | tail -20
-cd functions && npx vitest run && cd ..
+cd functions && npx jest && cd ..
 ```
 
-Expected: `** TEST SUCCEEDED **` with a test count at or above the pre-plan baseline, and green vitest.
+Expected: `** TEST SUCCEEDED **` with a test count at or above the pre-plan baseline, and green jest.
 
 - [ ] **Step 5: Signed build, then hand the visual check to the founder**
 

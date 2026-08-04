@@ -71,6 +71,18 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         XCTAssertFalse(EnrichInterview.detectGaps(nil).contains(.constraints))
     }
 
+    /// The store's seam is `(companyId) -> Bool`, so the injected stub cannot see the
+    /// key at all — which means a device-global key would slip past every store test
+    /// below. This is the only place that catches it.
+    func testTheFlagKeyIsPerCompanyAndProjectPrefixed() {
+        XCTAssertNotEqual(VirtualCompanyInterviewFlag.key("founderA"),
+                          VirtualCompanyInterviewFlag.key("founderB"),
+                          "a device-global key would never ask a second founder")
+        XCTAssertTrue(VirtualCompanyInterviewFlag.key("u").hasPrefix("cp_"),
+                      "account-scoped keys must be cp_-prefixed so AccountDataStore vaults them")
+        XCTAssertTrue(VirtualCompanyInterviewFlag.key("u").contains("u"))
+    }
+
     // MARK: - The trigger, through the store
 
     private static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
@@ -94,17 +106,32 @@ final class VirtualCompanyInterviewTests: XCTestCase {
     /// claim about the saver and not just about the in-memory struct.
     private final class SaveProbe { var briefs: [CompanyBrief] = [] }
 
+    /// Stands in for `UserDefaults` so no case touches the real defaults domain — and,
+    /// more importantly, so asked-ness cannot leak between cases (they all use cid "u").
+    /// Shared deliberately across two stores in the relaunch/switch tests: that shared
+    /// box IS the disk.
+    private final class FlagDisk {
+        var asked: Set<String> = []
+        var flag: VirtualCompanyInterviewFlag {
+            VirtualCompanyInterviewFlag(wasAsked: { [self] in asked.contains($0) },
+                                        markAsked: { [self] in asked.insert($0) })
+        }
+    }
+
     private func store(_ probe: SaveProbe,
+                       disk: FlagDisk = FlagDisk(),
+                       loader: @escaping (String) async -> CompanyState = { _ in .empty },
                        vcRunner: @escaping (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)
     -> CompanyStore {
-        CompanyStore(loader: { _ in .empty },
+        CompanyStore(loader: loader,
                      saver: { _, brief in probe.briefs.append(brief); return true },
                      chatSender: { _ in
                          try? await Task.sleep(nanoseconds: 30_000_000)
                          return CompanyChatReply(text: "byte's answer", runTaskId: nil)
                      },
                      chatStreamer: Self.failingStreamer,
-                     vcRunner: vcRunner)
+                     vcRunner: vcRunner,
+                     vcInterviewFlag: disk.flag)
     }
 
     private func runnerYielding(_ events: [VirtualCompanyEvent])
@@ -186,6 +213,111 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         await s.sendChat("free with ads or $9.99 once?", language: .en)
         XCTAssertNil(s.chatMessages.last?.interview)
         XCTAssertFalse(s.vcInterviewAsked)
+    }
+
+    // MARK: - Asked-ness is remembered per founder, not per session or per device
+
+    /// Skip is a no-write path and its semantics belong to the onboarding interview,
+    /// so nothing lands in the brief. A session-only flag would therefore re-ask on
+    /// the first brief of every launch, forever.
+    func testTheAskSurvivesARelaunchEvenWhenTheFounderSkippedBoth() async {
+        let disk = FlagDisk()
+        let probe = SaveProbe()
+        let first = store(probe, disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
+        await first.hydrate(companyId: "u")
+        await first.sendChat("first trade-off", language: .en)
+        // Skip both: nil answer → no brief write, so `constraints` stays nil and only
+        // the persisted flag can stop the re-ask.
+        await first.answerInterview(messageId: first.chatMessages.last!.id, gap: .runway,
+                                    answer: nil, language: .en)
+        await first.answerInterview(messageId: first.chatMessages.last!.id, gap: .constraints,
+                                   answer: nil, language: .en)
+        XCTAssertNil(first.company.brief.constraints, "skip must stay a no-write path")
+        XCTAssertEqual(disk.asked, ["u"])
+
+        // A fresh store over the same disk is the relaunch.
+        let relaunched = store(SaveProbe(), disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
+        await relaunched.hydrate(companyId: "u")
+        XCTAssertTrue(relaunched.vcInterviewAsked, "hydrate must re-derive it from this company's flag")
+        await relaunched.sendChat("second trade-off", language: .en)
+        XCTAssertNil(relaunched.chatMessages.last?.interview)
+    }
+
+    /// The cross-account bug: `reset()` used to leave the flag true, so founder B —
+    /// empty brief, nothing on record — was never asked at all.
+    func testAnotherFounderIsStillAskedAfterASignOut() async {
+        let disk = FlagDisk()
+        let s = store(SaveProbe(), disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("first trade-off", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.interview, .runway)
+
+        s.reset()
+        XCTAssertFalse(s.vcInterviewAsked, "reset() must not carry one founder's asked-ness over")
+
+        await s.hydrate(companyId: "v")
+        await s.sendChat("B's first trade-off", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.interview, .runway, "founder B was never asked")
+        XCTAssertEqual(disk.asked, ["u", "v"], "each founder gets their own key")
+    }
+
+    /// A founder who already has constraints on record is not asked, and the flag is
+    /// not spent on them either — `shouldAsk`'s brief check is the first line of defence
+    /// and the persisted flag is the second, independent one.
+    func testAFounderWithConstraintsOnRecordIsNeverAskedAndSpendsNoFlag() async {
+        let disk = FlagDisk()
+        var brief = CompanyBrief()
+        brief.constraints = "Không thuê người quý này."
+        let seeded = CompanyState(brief: brief, departments: [], library: [], stage: .idea,
+                                 companionId: "byte", onboardedAt: Date(), tasks: [])
+        let s = store(SaveProbe(), disk: disk, loader: { _ in seeded },
+                      vcRunner: runnerYielding(briefedRunEvents()))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("a trade-off", language: .en)
+        XCTAssertNil(s.chatMessages.last?.interview)
+        XCTAssertTrue(disk.asked.isEmpty)
+    }
+
+    // MARK: - The guard that protects the other engineer's flow
+
+    /// The ONLY thing standing between a briefed run and byte's first-run greeting.
+    /// Without `guard interviewState == nil`, a run landing while the first-run
+    /// interview is mid-queue would overwrite that queue — losing its remaining gaps
+    /// and flipping its tail to `seedGreetingWhenDone: false`, so the founder would
+    /// silently never be greeted. The composer is gated only on chat being busy, never
+    /// on a pending interview, so this ordering is reachable.
+    func testABriefedRunNeverJumpsAPendingFirstRunInterview() async {
+        let disk = FlagDisk()
+        let s = store(SaveProbe(), disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
+        await s.hydrate(companyId: "u")
+        XCTAssertTrue(s.startEnrichInterviewIfNeeded(language: .en))
+        XCTAssertEqual(s.chatMessages.last?.interview, .goal)
+
+        await s.sendChat("free with ads or $9.99 once?", language: .en)
+
+        // The run really happened — otherwise this test would pass against a fan-out
+        // that never ran.
+        XCTAssertNotNil(s.chatMessages.first(where: { $0.vcRun?.brief != nil }),
+                        "the room never delivered a brief, so nothing was guarded")
+        XCTAssertFalse(s.chatMessages.contains { $0.interview == .runway },
+                       "the VC interview jumped a pending first-run interview")
+        XCTAssertEqual(s.chatMessages.last(where: { $0.interview != nil })?.interview, .goal,
+                       "the first-run queue must still be waiting on its own question")
+        XCTAssertFalse(s.vcInterviewAsked, "merely deferred — it may still ask on a later run")
+        XCTAssertTrue(disk.asked.isEmpty, "and it must not have spent the founder's flag")
+
+        // And the first-run queue still drains into byte's greeting.
+        for gap in [InterviewGap.goal, .traction, .problem] {
+            guard let pending = s.chatMessages.last(where: {
+                $0.interview == gap && !$0.interviewAnswered
+            }) else { return XCTFail("first-run interview lost its \(gap) question") }
+            await s.answerInterview(messageId: pending.id, gap: gap, answer: "a", language: .en)
+        }
+        let greeting = FirstRunGreetingBuilder.build(
+            brief: s.company.brief, nextStep: RoadmapEngine.nextStep(s.company.tasks), language: .en)
+        XCTAssertFalse(greeting.text.isEmpty)
+        XCTAssertEqual(s.chatMessages.last?.text, greeting.text,
+                       "byte's first-run greeting was lost")
     }
 
     /// The escape hatch discards the run entirely, so nothing downstream of it —

@@ -118,6 +118,10 @@ final class CompanyStore: ObservableObject {
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
+    /// Where "already asked this founder for runway + constraints" lives. Per company
+    /// id, so it neither nags across launches nor leaks across accounts — see
+    /// `VirtualCompanyInterviewFlag`.
+    private let vcInterviewFlag: VirtualCompanyInterviewFlag
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -162,7 +166,11 @@ final class CompanyStore: ObservableObject {
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
-         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
+         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract,
+         // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
+         // over `UserDefaults.standard`, and forming it in the nonisolated
+         // default-argument context is what makes such defaults warn.
+         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -178,6 +186,7 @@ final class CompanyStore: ObservableObject {
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
+        self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -207,6 +216,11 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // Re-derived from THIS company's flag on every hydrate, so signing in as
+        // someone else never inherits the previous founder's asked-ness (and never
+        // re-asks a founder who already answered or skipped). Read synchronously and
+        // idempotently, so it needs no `hydrationToken` guard.
+        vcInterviewAsked = vcInterviewFlag.wasAsked(companyId)
         isHydrating = true
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
@@ -244,7 +258,13 @@ final class CompanyStore: ObservableObject {
     /// questions the onboarding brief is missing (goal / traction / problem), one at
     /// a time. A full brief means no gaps → caller falls through to the greeting.
     /// Returns true when an interview was started (so the caller skips the greeting).
-    private func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
+    ///
+    /// `internal`, not `private`, purely so a test can put a first-run interview in
+    /// flight — the flow it belongs to has no live caller today (the dock opens on the
+    /// landing hero instead, see `CompanyStoreFirstRunGreetingTests`) and it is owned
+    /// by another engineer, so `VirtualCompanyInterviewTests` cannot reach it any other
+    /// way. Behaviour is unchanged and the visibility stays module-only.
+    func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
         guard companyId != nil else { return false }
         let gaps = EnrichInterview.detectGaps(company.brief)
         guard !gaps.isEmpty else { return false }
@@ -803,9 +823,12 @@ final class CompanyStore: ObservableObject {
         maybeAskVirtualCompanyInterview(state, language: language)
     }
 
-    /// Asked at most once. Not persisted: re-asking after a relaunch is harmless
-    /// because `shouldAsk` also checks whether constraints are already on record.
-    @Published var vcInterviewAsked: Bool = false
+    /// Asked at most once per founder. Mirrors `vcInterviewFlag`, which persists it
+    /// per company id: `hydrate` re-derives this from the incoming company (so an
+    /// account switch never inherits the previous founder's asked-ness) and `reset`
+    /// clears it. It cannot be inferred from the brief alone, because skipping is a
+    /// no-write path and would otherwise re-ask on every launch, forever.
+    @Published private(set) var vcInterviewAsked: Bool = false
 
     /// Once the room has actually produced a brief, ask for the two facts that make
     /// every run after this one concrete. Reuses the existing interview queue:
@@ -820,6 +843,9 @@ final class CompanyStore: ObservableObject {
                                                 brief: company.brief,
                                                 alreadyAsked: vcInterviewAsked) else { return }
         vcInterviewAsked = true
+        // Persist BEFORE asking, keyed to this founder. Asking is the commitment —
+        // whether they answer or skip, we do not ask again.
+        if let cid = companyId { vcInterviewFlag.markAsked(cid) }
         let gaps = VirtualCompanyInterview.gaps
         // seedGreetingWhenDone: false — this interview happens mid-session, long
         // after onboarding. The first-run greeting would read as amnesia.
@@ -1336,6 +1362,11 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        // Session state about the OUTGOING founder. Leaving it true would mean the
+        // next account — empty brief, nothing on record — is never asked at all,
+        // because `hydrate` only ever sets it from the incoming company's flag and a
+        // sign-out with no re-hydrate would keep this stale `true`.
+        vcInterviewAsked = false
         closedTurns = []      // the messages they guarded are gone with `chatMessages`
         selectedDeptKey = nil
         activeProjectLink = nil

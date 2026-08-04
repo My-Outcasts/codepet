@@ -67,7 +67,9 @@ struct CopilotChatView: View {
                 ) { composer }
             } else {
                 messageList
-                Divider()
+                // No rule above the composer — it carries its own bordered container,
+                // so the seam was redundant chrome. Matches the header's no-divider
+                // direction: the chat runs edge to edge inside the dock.
                 composer.padding(12)
             }
         }
@@ -644,7 +646,14 @@ struct CopilotBubble: View {
     }
 
     @ViewBuilder private var textBubble: some View {
-        if isMe {
+        // A message shell can reach here with no text yet — while the companion is
+        // still typing, or when the turn carried only a payload. `MessageCard` always
+        // draws its fill and 1pt border, so rendering an empty one left a bare bordered
+        // box that read as an error state. `ChatThinkingRow` already covers the waiting
+        // beat, so render nothing rather than an empty card.
+        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            EmptyView()
+        } else if isMe {
             HStack {
                 Spacer(minLength: 24)
                 Text(message.text)

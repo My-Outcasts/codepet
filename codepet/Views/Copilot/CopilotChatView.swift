@@ -405,6 +405,20 @@ struct CopilotBubble: View {
             } else {
                 producingRow
             }
+        } else if let run = message.vcRun {
+            // First among the payload branches because a run owns the WHOLE turn:
+            // `publishRunProgress` replaces byte's partial answer with the handoff
+            // line, so there is nothing else on this message to show. Keeping the
+            // text bubble above the cards is what makes the handoff read as byte
+            // speaking, then the room. The interview branch below is unaffected —
+            // an interview message never carries a run.
+            VStack(alignment: .leading, spacing: 8) {
+                textBubble
+                VCRunCards(state: run) {
+                    Task { await companyStore.lockInVirtualCompanyDecision(run) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if let draft = message.draft {
             draftCard(draft)
         } else if let nav = message.navChip {

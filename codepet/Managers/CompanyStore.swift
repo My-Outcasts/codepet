@@ -793,6 +793,23 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].vcRun = state
     }
 
+    /// Records the brief as a decision the founder has locked in, which then grounds
+    /// chat and run-task through `ChatContext`. Never automatic — the button in the
+    /// brief card is the only caller (spec: approve-then-record).
+    ///
+    /// `async` because decisions do NOT go through `saver` (the brief saver); they go
+    /// through `decisionsSaver`, an async closure — same path `handleRemember` and
+    /// `rememberFromApproval` use.
+    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState) async {
+        guard let runId = state.runId,
+              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId) else { return }
+        let cid = companyId
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions,
+                                                     extracted: [extracted],
+                                                     now: Date().timeIntervalSince1970 * 1000)
+        if let cid { _ = await decisionsSaver(cid, company.decisions) }
+    }
+
     /// The specialist for a task's owning department, if it maps to a companion
     /// other than the host — used to attribute the run's producing row + draft.
     private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {

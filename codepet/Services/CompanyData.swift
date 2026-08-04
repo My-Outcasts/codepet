@@ -151,6 +151,23 @@ enum CompanyData {
         return [:]
     }
 
+    /// The complete description of a founder-prefs write — payload plus the fields it
+    /// replaces — or nil when there is nothing safe to write. Pure, so a test can assert
+    /// what reaches Firestore: that the write is a whole-field replace of `founderPrefs`
+    /// (see `saveFounderPrefs`, which passes both halves of this straight through and holds
+    /// the reasoning) and not a deep `merge: true` that could never clear a key.
+    ///
+    /// nil is the skip case: encoding `FounderPrefs` can't actually fail (every field is a
+    /// JSON primitive), but if it ever did the payload would be `[:]`, and with
+    /// `mergeFields` — unlike `merge` — writing that DELETES `founderPrefs` rather than
+    /// no-opping. Better to skip the write than erase prefs that are already stored.
+    static func founderPrefsWrite(_ prefs: FounderPrefs)
+        -> (payload: [String: Any], mergeFields: [String])? {
+        let payload = founderPrefsPayload(prefs)
+        guard !payload.isEmpty else { return nil }
+        return (payload: payload, mergeFields: ["founderPrefs"])
+    }
+
     /// Write companies/{uid}.founderPrefs. Fail-soft: false on error — a lost write
     /// only means the previous preferences come back on reload.
     ///
@@ -163,16 +180,15 @@ enum CompanyData {
     /// instead of recursing into it, so a cleared category actually clears. Every other
     /// field on the company doc is untouched either way, and the doc is still created if
     /// absent. Do not "simplify" this back to `merge: true`.
+    ///
+    /// Both arguments come from `founderPrefsWrite` and nothing else, so the shape of this
+    /// write is decided somewhere a test can read it; nil from there is the skip case
+    /// (documented on it).
     static func saveFounderPrefs(companyId: String, prefs: FounderPrefs) async -> Bool {
-        let payload = founderPrefsPayload(prefs)
-        // Encoding FounderPrefs can't actually fail (every field is a JSON primitive), but
-        // if it ever did, `payload` would be `[:]` — with `mergeFields`, unlike `merge`,
-        // writing that would DELETE `founderPrefs` rather than no-op, so skip the write
-        // entirely rather than risk erasing prefs that are already stored.
-        guard !payload.isEmpty else { return true }
+        guard let write = founderPrefsWrite(prefs) else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(payload, mergeFields: ["founderPrefs"])
+                .setData(write.payload, mergeFields: write.mergeFields)
             return true
         } catch {
             return false

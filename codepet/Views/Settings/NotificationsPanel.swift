@@ -32,6 +32,26 @@ enum NotificationCategory: String, CaseIterable, Identifiable {
     func channel(in prefs: FounderPrefs) -> NotificationChannel {
         prefs.notifications[key] ?? .inApp
     }
+
+    /// The notifications map that results from choosing `channel` for this category — the
+    /// whole of what `NotificationsPanel`'s picker decides, extracted so a test can drive
+    /// the real rule instead of re-typing it.
+    ///
+    /// Choosing the DEFAULT (`.inApp`) REMOVES the key rather than writing `.inApp`
+    /// explicitly. An absent key is what makes the "absent means in-app" contract in
+    /// `channel(in:)` real, and it is the only shape that reads back as the default on a
+    /// document written before this panel existed. The inverse of `channel(in:)`: for every
+    /// channel `c`, `channel(in:)` over `applying(c, to:)` is `c` again.
+    func applying(_ channel: NotificationChannel,
+                  to notifications: [String: NotificationChannel]) -> [String: NotificationChannel] {
+        var next = notifications
+        if channel == .inApp {
+            next.removeValue(forKey: key)
+        } else {
+            next[key] = channel
+        }
+        return next
+    }
 }
 
 /// What notifications the founder's team can send, and through what channel. Two
@@ -63,13 +83,9 @@ struct NotificationsPanel: View {
                     Picker("", selection: Binding(
                         get: { notifications[cat.key] ?? .inApp },
                         set: { channel in
-                            if channel == .inApp {
-                                // Back to default: remove the key rather than writing
-                                // `.inApp` explicitly — see the type doc comment.
-                                notifications.removeValue(forKey: cat.key)
-                            } else {
-                                notifications[cat.key] = channel
-                            }
+                            // The rule (including "back to default removes the key") lives in
+                            // `applying(_:to:)`, where a test can reach it — see its doc comment.
+                            notifications = cat.applying(channel, to: notifications)
                             commit()
                         }
                     )) {

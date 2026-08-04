@@ -112,4 +112,47 @@ final class FounderPrefsPersistenceTests: XCTestCase {
                        "B's loaded prefs must not be clobbered by A's draft")
         XCTAssertEqual(store.company.brief.projectName, "B-Co")
     }
+
+    /// Regression: every settings panel commits from an untracked `Task`, so two quick
+    /// changes put two prefs writes in flight at once and Firestore can finish them in
+    /// either order. The OLDER write completing last must NOT apply its value — panels read
+    /// the next draft off `company.founderPrefs`, so a clobber here also gets re-persisted.
+    ///
+    /// The account is never switched, so `hydrationToken` cannot see this: it takes the
+    /// per-write token to drop the stale commit.
+    func test_overlappingPrefsWritesLeaveTheNewerValueInMemory() async {
+        let olderEntered = OneShotGate()
+        let letOlderFinish = OneShotGate()
+        var finished: [String] = []
+
+        let store = CompanyStore(loader: { _ in .empty },
+                                 founderPrefsSaver: { _, prefs in
+            let which = prefs.style.customInstructions
+            if which == "older" {          // park the first write until the second is done
+                olderEntered.open()
+                await letOlderFinish.wait()
+            }
+            finished.append(which)
+            return true
+        })
+        await store.hydrate(companyId: "u")
+
+        var older = FounderPrefs(); older.style.customInstructions = "older"
+        var newer = FounderPrefs(); newer.style.customInstructions = "newer"
+
+        let olderWrite = Task { await store.setFounderPrefs(older) }
+        await olderEntered.wait()
+        await store.setFounderPrefs(newer)   // starts and completes while the older one is parked
+        letOlderFinish.open()
+        await olderWrite.value
+
+        XCTAssertEqual(finished, ["newer", "older"],
+                       "the older write has to be the one that lands last for this to test " +
+                       "anything — got \(finished)")
+        XCTAssertEqual(store.company.founderPrefs.style.customInstructions, "newer",
+                       "an out-of-order older write must not clobber the newer choice")
+        // Both writes still reach Firestore — sequencing drops the stale in-memory commit,
+        // not the persistence.
+        XCTAssertEqual(finished.count, 2)
+    }
 }

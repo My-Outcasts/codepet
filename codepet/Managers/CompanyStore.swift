@@ -146,6 +146,13 @@ final class CompanyStore: ObservableObject {
     /// brief into another's doc or clobber the newly-hydrated account.
     private(set) var onboardingToken = 0
 
+    /// Bumped on every `setFounderPrefs` that gets past its hydration guard; lets a
+    /// suspended prefs write detect that a NEWER write on the same account started while
+    /// it was awaiting Firestore, and discard its in-memory commit instead of clobbering
+    /// the newer choice. Separate from `hydrationToken`, which only moves on an account
+    /// switch and so cannot see two writes on one account.
+    private var founderPrefsWriteToken = 0
+
     /// First-run enrichment interview progress: the empty gaps to ask + the index
     /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
     /// no interview is active.
@@ -1536,11 +1543,27 @@ final class CompanyStore: ObservableObject {
     /// `isHydrating` covers exactly that window, and the token captured up front is
     /// re-checked after the save's await so a hydrate/reset landing DURING the write drops
     /// the stale in-memory commit instead of clobbering the newly-hydrated company.
+    ///
+    /// ALSO sequenced per write, a different hazard on the same account: every settings
+    /// panel commits from an untracked `Task` (a picker changed twice quickly fires two),
+    /// so two saves can be in flight at once and finish in either order. Without this the
+    /// OLDER write's `company.founderPrefs = prefs` would land last and clobber the newer
+    /// choice — and `MemoryPanel`/`AISettingsPanel` read the next draft off `company`, so
+    /// the stale value would then be re-persisted. `founderPrefsWriteToken` is bumped per
+    /// call and re-checked after the await (same idiom as `hydrationToken`), so a
+    /// superseded write still persists but never applies its result. Both guards are
+    /// needed: the hydration token cannot see a second write on the SAME account, and this
+    /// one cannot see an account switch.
     func setFounderPrefs(_ prefs: FounderPrefs) async {
         let token = hydrationToken
         guard !isHydrating, let cid = companyId else { return }
+        // Bumped only once past the guards, so a call dropped for hydration never
+        // supersedes a legitimate write already in flight.
+        founderPrefsWriteToken &+= 1
+        let writeToken = founderPrefsWriteToken
         _ = await founderPrefsSaver(cid, prefs)
         guard token == hydrationToken, companyId == cid else { return }
+        guard writeToken == founderPrefsWriteToken else { return }  // a newer write superseded us
         company.founderPrefs = prefs
         codingMemoryGate(prefs.memoryEnabled)
     }

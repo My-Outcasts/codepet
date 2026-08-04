@@ -32,10 +32,6 @@ struct CopilotChatView: View {
     private var companionColor: Color {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
-    private var companyName: String {
-        let n = (companyStore.company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return n.isEmpty ? "Codepet" : n
-    }
     private var canSend: Bool {
         !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
@@ -52,7 +48,6 @@ struct CopilotChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if showHistory {
                 ThreadListView(showHistory: $showHistory)
             } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
@@ -67,7 +62,9 @@ struct CopilotChatView: View {
                 ) { composer }
             } else {
                 messageList
-                Divider()
+                // No rule above the composer — it carries its own bordered container,
+                // so the seam was redundant chrome. Matches the header's no-divider
+                // direction: the chat runs edge to edge inside the dock.
                 composer.padding(12)
             }
         }
@@ -75,27 +72,37 @@ struct CopilotChatView: View {
         .background(ChatBackdrop())
     }
 
-    // Web Copilot header: "Your team" + "guiding · {company}" + History toggle
-    // (was an inert stub — now opens/closes the thread switcher below).
+    /// The dock's only chrome: a trailing pair of icon buttons — history (thread
+    /// switcher) and collapse (⌘B). No title row and no divider; the chat starts
+    /// at the top of the dock and these two controls sit quietly above it.
+    ///
+    /// History is icon-only, so both buttons carry `.help` tooltips — hover is the
+    /// only thing naming them now.
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(lang == .vi ? "Đội của bạn" : "Your team")
-                    .font(CodepetTheme.inter(14, weight: .semibold)).foregroundColor(CodepetTheme.primaryText)
-                Text((lang == .vi ? "đang hỗ trợ · " : "guiding · ") + companyName)
-                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText).lineLimit(1)
-            }
-            Spacer()
+        HStack(spacing: 2) {
+            Spacer(minLength: 0)
             Button { showHistory.toggle() } label: {
-                Text(lang == .vi ? "Lịch sử" : "History")
-                    .font(CodepetTheme.inter(11, weight: .medium))
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
                                      : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
+                    .padding(5)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isChatBusy)
+            .help(lang == .vi ? "Lịch sử hội thoại" : "Chat history")
+            Button { companyStore.dockCollapsed = true } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(5)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, 7).padding(.top, 6)
     }
 
     /// The shared composer — one `ChatComposer` instance used in BOTH the empty
@@ -644,7 +651,14 @@ struct CopilotBubble: View {
     }
 
     @ViewBuilder private var textBubble: some View {
-        if isMe {
+        // A message shell can reach here with no text yet — while the companion is
+        // still typing, or when the turn carried only a payload. `MessageCard` always
+        // draws its fill and 1pt border, so rendering an empty one left a bare bordered
+        // box that read as an error state. `ChatThinkingRow` already covers the waiting
+        // beat, so render nothing rather than an empty card.
+        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            EmptyView()
+        } else if isMe {
             HStack {
                 Spacer(minLength: 24)
                 Text(message.text)

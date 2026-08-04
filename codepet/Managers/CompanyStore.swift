@@ -134,7 +134,10 @@ final class CompanyStore: ObservableObject {
     /// First-run enrichment interview progress: the empty gaps to ask + the index
     /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
     /// no interview is active.
-    private var interviewState: (gaps: [InterviewGap], idx: Int)?
+    /// `seedGreetingWhenDone` distinguishes the two interviews that share this queue.
+    /// The first-run one hands off to byte's greeting when it empties; the Virtual
+    /// Company one happens mid-session, where that greeting would read as amnesia.
+    private var interviewState: (gaps: [InterviewGap], idx: Int, seedGreetingWhenDone: Bool)?
 
     /// Placeholder ids whose chat turn has already been CLOSED — flags cleared, thread
     /// flushed, founder reading the answer. A fan-out that has not decided by then has
@@ -245,7 +248,7 @@ final class CompanyStore: ObservableObject {
         guard companyId != nil else { return false }
         let gaps = EnrichInterview.detectGaps(company.brief)
         guard !gaps.isEmpty else { return false }
-        interviewState = (gaps: gaps, idx: 0)
+        interviewState = (gaps: gaps, idx: 0, seedGreetingWhenDone: true)
         askInterviewGap(gaps[0], language: language)
         return true
     }
@@ -278,6 +281,8 @@ final class CompanyStore: ObservableObject {
             case .goal: company.brief.goal = trimmed
             case .traction: company.brief.traction = trimmed
             case .problem: company.brief.problem = trimmed
+            case .runway: company.brief.runway = trimmed
+            case .constraints: company.brief.constraints = trimmed
             }
             _ = await saver(cid, company.brief)
             guard companyId == cid else { return }  // account switched mid-await → bail
@@ -290,7 +295,9 @@ final class CompanyStore: ObservableObject {
             askInterviewGap(st.gaps[st.idx], language: language)
         } else {
             interviewState = nil
-            seedFirstRunGreeting(language: language)
+            // Only the first-run interview earns the greeting. Welcoming the founder
+            // right after a mid-session runway question would read as amnesia.
+            if st.seedGreetingWhenDone { seedFirstRunGreeting(language: language) }
         }
     }
 
@@ -791,6 +798,33 @@ final class CompanyStore: ObservableObject {
                 : "This one needs the whole room — let me bring in product and finance."
         }
         chatMessages[i].vcRun = state
+        // Behind every guard above, so a discarded run (escape hatch), a killed run
+        // (503/429) or one that died before a brief can never trigger it.
+        maybeAskVirtualCompanyInterview(state, language: language)
+    }
+
+    /// Asked at most once. Not persisted: re-asking after a relaunch is harmless
+    /// because `shouldAsk` also checks whether constraints are already on record.
+    @Published var vcInterviewAsked: Bool = false
+
+    /// Once the room has actually produced a brief, ask for the two facts that make
+    /// every run after this one concrete. Reuses the existing interview queue:
+    /// `askInterviewGap` owns the card, `answerInterview` owns the reply path.
+    private func maybeAskVirtualCompanyInterview(_ state: VirtualCompanyRunState,
+                                                 language: AppLanguage) {
+        // Never stomp an interview already in flight (the first-run one owns the
+        // queue until it empties) — that would lose its remaining gaps AND its
+        // greeting tail.
+        guard interviewState == nil else { return }
+        guard VirtualCompanyInterview.shouldAsk(state: state,
+                                                brief: company.brief,
+                                                alreadyAsked: vcInterviewAsked) else { return }
+        vcInterviewAsked = true
+        let gaps = VirtualCompanyInterview.gaps
+        // seedGreetingWhenDone: false — this interview happens mid-session, long
+        // after onboarding. The first-run greeting would read as amnesia.
+        interviewState = (gaps: gaps, idx: 0, seedGreetingWhenDone: false)
+        askInterviewGap(gaps[0], language: language)
     }
 
     /// Records the brief as a decision the founder has locked in, which then grounds

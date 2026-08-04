@@ -9,40 +9,80 @@ struct DepartmentDetailView: View {
 
     private var dept: Department? { DepartmentCatalog.find(deptKey) }
     private var tasks: [RoadmapTask] { companyStore.company.tasks.filter { $0.dept == deptKey } }
-    private var left: Int { tasks.filter { !$0.done }.count }
+    /// The reading column. The shell hands this view the whole window
+    /// (`AppShellView.swift:130`), so uncapped the rationale runs ~150 characters. Follows
+    /// `RoadmapView.swift:187`'s capped column, a little wider because task cards live in this one.
+    private let column: CGFloat = 800
+
+    private var doneCount: Int { tasks.filter(\.done).count }
 
     var body: some View {
         guard let d = dept else { return AnyView(EmptyView()) }
         return AnyView(ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                        Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
-                    }.foregroundColor(CodepetTheme.bodyText)
-                }.buttonStyle(.plain)
-
-                hero(d)
-                Text(d.rationale).font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.primaryText)
+            // Grouped spacing, not a uniform gap: identity / context / work must read as three
+            // blocks. With one shared `spacing:` the section header floated midway between the
+            // text above it and the list it labels.
+            VStack(alignment: .leading, spacing: 0) {
+                backLink.padding(.bottom, 16)
+                hero(d).padding(.bottom, 18)
+                Text(d.rationale)
+                    .font(CodepetTheme.inter(16))
+                    .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .top, spacing: 8) {
-                    CharacterImage(companyStore.company.companionId, size: 28)
-                    Text(d.focus).font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let pulse = departmentPulse(d, mine: tasks, all: companyStore.company.tasks,
+                                               lang: lang) {
+                    HStack(alignment: .center, spacing: 8) {
+                        CharacterImage(companyStore.company.companionId, size: 22)
+                        Text(pulse)
+                            .font(CodepetTheme.inter(13))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 10)
                 }
-                Text(lang == .vi ? "Việc cần làm · còn \(left)/\(tasks.count)"
-                                 : "What needs doing · \(left) of \(tasks.count) left")
-                    .font(CodepetTheme.inter(13, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.top, 4)
+                sectionHeader.padding(.top, 30).padding(.bottom, 10)
                 if tasks.isEmpty {
-                    Text(lang == .vi ? "Chưa có việc trong phòng ban này." : "No tasks in this department yet.")
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    Text(lang == .vi ? "Chưa có việc trong phòng ban này."
+                                     : "No tasks in this department yet.")
+                        .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.mutedText)
                 } else {
-                    ForEach(tasks) { t in DepartmentTaskCard(task: t) }
+                    VStack(spacing: 10) {
+                        ForEach(tasks) { t in DepartmentTaskCard(task: t) }
+                    }
                 }
             }
-            .padding(20)
+            .frame(maxWidth: column, alignment: .leading)
+            // 26 matches `CompanyView`'s list padding, so the back link and hero stop shifting
+            // 6pt when you navigate in from a card.
+            .padding(.horizontal, 26)
+            .padding(.top, 22).padding(.bottom, 44)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }.frame(maxWidth: .infinity, maxHeight: .infinity))
+    }
+
+    private var backLink: some View {
+        Button(action: onBack) {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
+            }.foregroundColor(CodepetTheme.bodyText)
+        }.buttonStyle(.plain)
+    }
+
+    /// The count is appended only when it carries information — "1 of 1 left" says nothing until
+    /// something is done, so an untouched department just reads "WHAT NEEDS DOING".
+    private var sectionHeader: some View {
+        Text(headerText)
+            .font(CodepetTheme.inter(12, weight: .semibold))
+            .tracking(0.4)
+            .foregroundColor(CodepetTheme.mutedText)
+    }
+
+    private var headerText: String {
+        let base = (lang == .vi ? "Việc cần làm" : "What needs doing").uppercased()
+        guard doneCount > 0, doneCount < tasks.count else { return base }
+        return base + (lang == .vi ? " · \(doneCount)/\(tasks.count) đã xong"
+                                   : " · \(doneCount) of \(tasks.count) done")
     }
 
     private func hero(_ d: Department) -> some View {

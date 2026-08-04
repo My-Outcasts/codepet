@@ -250,9 +250,8 @@ struct RoadmapBoardView: View {
                     // The affordance the rails were missing: a rail that expands
                     // now lifts and shows the hand cursor, so "clickable" is
                     // discoverable without hovering for a tooltip.
-                    .onHover { inside in
+                    .cursorOnHover(.pointingHand) { inside in
                         hoveredRail = inside ? r.phase : (hoveredRail == r.phase ? nil : hoveredRail)
-                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                     }
             }
         }

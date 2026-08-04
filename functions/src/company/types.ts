@@ -1,18 +1,49 @@
 // Types for the Virtual Company multi-agent system.
 // Spec: codepet-multi-agent-prompt-en.md (PART 2 orchestration, PART 5.3 blackboard)
 
-export type AgentId = "chief_of_staff" | "devils_advocate" | "product" | "finance";
+export type AgentId =
+  | "chief_of_staff"
+  | "devils_advocate"
+  | "product"
+  | "finance"
+  | "engineering"
+  | "design"
+  | "marketing"
+  | "sales"
+  | "support"
+  | "operations"
+  | "legal";
 
 /** Full MVP roster. Order is stable so prompt caching stays byte-identical. */
 export const ALL_AGENTS: AgentId[] = [
   "chief_of_staff",
   "devils_advocate",
   "product",
-  "finance"
+  "finance",
+  // Appended, never reordered: the shared prompt prefix is byte-identical per
+  // run, but a reordering here would still churn every fixture that asserts the
+  // roster, for no gain.
+  "engineering",
+  "design",
+  "marketing",
+  "sales",
+  "support",
+  "operations",
+  "legal"
 ];
 
 /** Agents that own a departmental concern and submit a position in Phase 2. */
-export const DEPARTMENT_AGENTS: AgentId[] = ["product", "finance"];
+export const DEPARTMENT_AGENTS: AgentId[] = [
+  "product",
+  "finance",
+  "engineering",
+  "design",
+  "marketing",
+  "sales",
+  "support",
+  "operations",
+  "legal"
+];
 
 /**
  * Maps an agent to a `Department.key` on the client so the UI can reuse the
@@ -26,7 +57,16 @@ export const AGENT_DEPARTMENT_KEY: Record<AgentId, string | null> = {
   chief_of_staff: null,
   devils_advocate: null,
   product: "product",
-  finance: "fin"
+  finance: "fin",
+  // The values are `Department.key` on the client, not the agent id — the two
+  // differ wherever the client abbreviated (fin, mkt, ops, eng).
+  engineering: "eng",
+  design: "design",
+  marketing: "mkt",
+  sales: "sales",
+  support: "support",
+  operations: "ops",
+  legal: "legal"
 };
 
 export function isAgentId(value: unknown): value is AgentId {

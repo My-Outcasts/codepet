@@ -1455,9 +1455,26 @@ final class CompanyStore: ObservableObject {
     /// `finishOnboarding` already go through) rather than adding a second write path for a
     /// field the brief document already owns. Fail-soft: a lost write only means the old
     /// name comes back on reload, never a broken page.
+    ///
+    /// Guarded against a `hydrate`/`reset` landing mid-flight: `PreferencesPanel` commits
+    /// the draft on `.onDisappear`, which can fire from inside a sign-out/account switch —
+    /// and `hydrate` flips `companyId` to the INCOMING account before `company` is actually
+    /// loaded for it (see its doc comment). A write issued in that window would attach the
+    /// OUTGOING founder's draft, on the not-yet-loaded brief, to the INCOMING account's
+    /// document. `isHydrating` is true for exactly that window, so bail before touching
+    /// `company`/`saver` at all while it holds. The same token captured up front is
+    /// re-checked after the save's own await (mirroring `finishOnboarding`), so a
+    /// hydrate/reset that lands DURING the write also drops the stale in-memory commit
+    /// instead of clobbering the newly-hydrated company. Either path drops the write
+    /// rather than mis-attributing it.
     func setFounderName(_ name: String) async {
-        company.brief.founderName = name
-        if let cid = companyId { _ = await saver(cid, company.brief) }
+        let token = hydrationToken
+        guard !isHydrating, let cid = companyId else { return }
+        var brief = company.brief
+        brief.founderName = name
+        _ = await saver(cid, brief)
+        guard token == hydrationToken, companyId == cid else { return }
+        company.brief = brief
     }
 
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows

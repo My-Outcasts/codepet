@@ -135,6 +135,45 @@ extension View {
     ) -> some View {
         modifier(HoverAffordance(shape: shape, accent: accent))
     }
+
+    /// Show `cursor` while the pointer is inside, and guarantee the matching pop.
+    ///
+    /// `NSCursor.push()` and `.pop()` operate on a stack that must balance, and
+    /// `onHover(false)` does **not** fire when a view disappears from under the
+    /// pointer. A bare `if inside { push() } else { pop() }` therefore leaks: clicking
+    /// the dock divider to collapse it removed the handle mid-hover, leaving the
+    /// resize cursor set for the rest of the session. This pops on disappear, and
+    /// refuses to pop a push it never made — which also absorbs the repeated
+    /// `onHover(true)` callbacks that would otherwise push twice.
+    ///
+    /// `onChange` carries the hover state through for callers that also drive their
+    /// own highlight from it.
+    func cursorOnHover(_ cursor: NSCursor, onChange: ((Bool) -> Void)? = nil) -> some View {
+        modifier(CursorOnHover(cursor: cursor, onChange: onChange))
+    }
+}
+
+/// Backing modifier for `cursorOnHover(_:onChange:)` — needs `@State` to remember
+/// whether this view owns a push, so it cannot live in the `View` extension.
+struct CursorOnHover: ViewModifier {
+    let cursor: NSCursor
+    let onChange: ((Bool) -> Void)?
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                onChange?(inside)
+                guard inside != pushed else { return }
+                pushed = inside
+                if inside { cursor.push() } else { NSCursor.pop() }
+            }
+            .onDisappear {
+                guard pushed else { return }
+                pushed = false
+                NSCursor.pop()
+            }
+    }
 }
 
 /// Backing modifier for `hoverAffordance(_:accent:)` — needs `@State`, so it cannot

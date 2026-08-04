@@ -108,7 +108,7 @@ Email is read-only from `authManager`. Theme and Language keep their current hom
 | **Billing** | Plan name + one-line value prop + Compare plans (existing `BillingView` content) |
 | **Usage** | Runs used today against the 30/day cap, as a labelled meter |
 | **Support** | Existing `SupportView` content |
-| **Advanced** | Export data · Delete all chats (destructive) · Sign out · version |
+| **Advanced** | Sign out · version. Export data and Delete all chats are deferred to their own task — both need real Firestore work, and a button that does nothing is worse than a missing one |
 
 ## The payload contract
 

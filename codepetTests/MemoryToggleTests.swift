@@ -61,6 +61,65 @@ final class MemoryToggleTests: XCTestCase {
         }
     }
 
+    /// The OTHER route into a real model prompt: `extractDecisions` renders every fact it is
+    /// handed as "- topic: statement" and sends it to Anthropic, so approving a deliverable
+    /// with memory off must hand it nothing. Recording is deliberately untouched — what the
+    /// deliverable itself locks in still lands in `company.decisions` and still persists.
+    func test_approvalExtractDoesNotShipTheFactsStoreWhenMemoryIsOff() async {
+        for enabled in [true, false] {
+            var handed: [DecisionEntry]?
+            var saved: [DecisionEntry]?
+            let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
+                                      drafted: true,
+                                      draft: Deliverable(kind: .doc, title: "Positioning",
+                                                         body: "for solo founders", sourceTaskId: "t1"))
+            var seed = Self.company(memoryEnabled: enabled)
+            seed.tasks = [drafted]
+            let s = CompanyStore(loader: { _ in seed },
+                                 tasksSaver: { _, _ in true },
+                                 librarySaver: { _, _ in true },
+                                 decisionsSaver: { _, d in saved = d; return true },
+                                 decisionExtractor: { _, existing in
+                                     handed = existing
+                                     return [ExtractedDecision(topic: "positioning",
+                                                               statement: "for solo founders",
+                                                               source: "Positioning")]
+                                 })
+            await s.hydrate(companyId: "u")
+            await s.approveTask(id: "t1")
+            // rememberFromApproval is fire-and-forget — let it run.
+            await Task.yield(); try? await Task.sleep(nanoseconds: 50_000_000)
+
+            XCTAssertEqual(handed?.isEmpty, !enabled,
+                           "memoryEnabled=\(enabled) handed the extractor: \(handed ?? [])")
+            XCTAssertEqual(handed?.contains { $0.statement.contains("$29/mo") }, enabled,
+                           "memoryEnabled=\(enabled): the fact on record must reach the extract " +
+                           "prompt only with memory ON — handed \(handed ?? [])")
+            // Recording keeps working either way: off stops USE, not recording.
+            XCTAssertTrue(s.company.decisions.contains { $0.topic == "positioning" },
+                          "the approval's own fact must still be recorded: \(s.company.decisions)")
+            XCTAssertTrue(saved?.contains { $0.topic == "positioning" } ?? false)
+        }
+    }
+
+    /// CLAUDE.md is standing context the coding agent reads on every run, and it lives on
+    /// disk — the most durable use of memory there is. Asserted on the pure seam
+    /// (`claudeMdSeedDecisions` + `ClaudeMdBootstrap.compose`) rather than through
+    /// `linkProject`, which would need a real folder and a security-scoped bookmark.
+    func test_claudeMdSeedDropsTheFactsStoreWhenMemoryIsOff() async {
+        for enabled in [true, false] {
+            let s = CompanyStore(loader: { _ in Self.company(memoryEnabled: enabled) })
+            await s.hydrate(companyId: "u")
+
+            XCTAssertEqual(s.claudeMdSeedDecisions.isEmpty, !enabled)
+            let seed = ClaudeMdBootstrap.compose(brief: s.company.brief,
+                                                 decisions: s.claudeMdSeedDecisions)
+            XCTAssertEqual(seed.contains("$29/mo"), enabled,
+                           "memoryEnabled=\(enabled) seeded CLAUDE.md: \(seed)")
+            XCTAssertTrue(seed.contains("Co"), "the brief still seeds the file: \(seed)")
+        }
+    }
+
     // MARK: - Store 2: derived coding activity
 
     func test_codingMemoryPromptHonoursTheSwitch() {

@@ -451,11 +451,18 @@ final class CompanyStore: ObservableObject {
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
     /// from the brief/decisions (never clobbers an existing one), then probes.
+    ///
+    /// The seed honours `memoryEnabled` too: CLAUDE.md is standing context the coding agent
+    /// reads on every run, so writing the facts on record into it is the most durable USE of
+    /// memory there is — and it leaves them sitting in a file on disk, where a founder who
+    /// turned memory off would be right to be surprised to find them. With memory off the
+    /// seed carries the brief only.
     @discardableResult
     func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
         var link = ProjectProbe.probe(path: path)
         if bootstrapClaudeMd && !link.hasClaudeMd {
-            let seed = ClaudeMdBootstrap.compose(brief: company.brief, decisions: company.decisions)
+            let seed = ClaudeMdBootstrap.compose(brief: company.brief,
+                                                 decisions: claudeMdSeedDecisions)
             try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
             link = ProjectProbe.probe(path: path)
         }
@@ -465,6 +472,13 @@ final class CompanyStore: ObservableObject {
         }
         activeProjectLink = link
         return link
+    }
+
+    /// What the CLAUDE.md seed is allowed to say about the facts on record — the gate above,
+    /// lifted out of `linkProject` so it is provable without a real folder, a real write, or a
+    /// security-scoped bookmark. Empty while the founder has memory off.
+    var claudeMdSeedDecisions: [DecisionEntry] {
+        company.founderPrefs.memoryEnabled ? company.decisions : []
     }
 
     /// The specialist companion to bring in for this turn, if a department is in
@@ -1423,12 +1437,21 @@ final class CompanyStore: ObservableObject {
     /// Fire-and-forget after an approval: extract durable decisions the deliverable locks
     /// in, merge into memory, persist. Account-guarded + fail-open — a failed extract leaves
     /// decisions unchanged; the approval already happened. `dept` comes from the source task.
+    ///
+    /// `memoryEnabled` off withholds the facts on record here for the same reason
+    /// `ChatContext.compose` drops them: `extractDecisions` renders every entry it is handed
+    /// into a real model prompt ("- topic: statement"), so approving a deliverable with memory
+    /// off would ship the whole store to the model — the exact thing the switch promises not to
+    /// do. The extract path takes an empty list fine (it just has nothing to dedupe against),
+    /// and RECORDING is untouched: what the deliverable itself locks in is still merged and
+    /// persisted, so the panel keeps showing it. Off stops USE, not recording.
     private func rememberFromApproval(_ deliverable: Deliverable) async {
         let cid = companyId
         let dept = company.tasks.first { $0.id == deliverable.sourceTaskId }?.dept ?? ""
         let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
                                          type: deliverable.kind.rawValue, out: deliverable.body)
-        let extracted = await decisionExtractor(dto, company.decisions)
+        let onRecord = company.founderPrefs.memoryEnabled ? company.decisions : []
+        let extracted = await decisionExtractor(dto, onRecord)
         guard companyId == cid, !extracted.isEmpty else { return }
         let now = Date().timeIntervalSince1970 * 1000
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)

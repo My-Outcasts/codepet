@@ -66,4 +66,26 @@ enum ShellLayout {
     static func compactPageHeader(forWidth width: CGFloat) -> Bool {
         width > 0 && width < compactHeaderMaxWidth
     }
+
+    // MARK: - Settings modal
+
+    /// Fixed width of the settings rail. It carries its own "Settings" title and never
+    /// scrolls, so the founder can always see where they are.
+    static let settingsRailWidth: CGFloat = 220
+
+    /// Below this shell width the rail collapses to a section dropdown above the panel —
+    /// the same responsive move the dock makes at `dockExpandMinWidth`.
+    static let settingsRailMinWidth: CGFloat = 820
+
+    static func settingsRailCollapsed(forWidth width: CGFloat) -> Bool {
+        width < settingsRailMinWidth
+    }
+
+    /// The centered panel's size: inset 96pt from each window edge, capped at the ideal
+    /// so a fullscreen window does not turn settings into a full-screen sheet, and
+    /// floored so a tiny window still shows a usable form.
+    static func settingsPanelSize(forWidth w: CGFloat, height h: CGFloat) -> CGSize {
+        CGSize(width:  min(920, max(480, w - 96)),
+               height: min(660, max(400, h - 96)))
+    }
 }

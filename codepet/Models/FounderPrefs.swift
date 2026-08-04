@@ -12,6 +12,20 @@ struct FounderPrefs: Codable, Equatable {
     var memoryEnabled: Bool = true
     /// Category key -> channel. An absent key means that category's default.
     var notifications: [String: NotificationChannel] = [:]
+
+    // Adding init(from:) below suppresses Swift's synthesized no-argument initializer,
+    // so it has to be restated explicitly to keep `FounderPrefs()` working.
+    init() {}
+
+    // Hand-written so a document written before a future property was added still decodes:
+    // Swift's synthesized Decodable calls decode(forKey:), which throws keyNotFound on a
+    // missing key instead of falling back to the property's declared default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        style = try container.decodeIfPresent(AIStyle.self, forKey: .style) ?? .init()
+        memoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .memoryEnabled) ?? true
+        notifications = try container.decodeIfPresent([String: NotificationChannel].self, forKey: .notifications) ?? [:]
+    }
 }
 
 /// How the founder's team talks to them.
@@ -32,6 +46,23 @@ struct AIStyle: Codable, Equatable {
     var customInstructions: String = ""
     var role: String = ""
     var moreAboutYou: String = ""
+
+    // Adding init(from:) below suppresses Swift's synthesized no-argument initializer,
+    // so it has to be restated explicitly to keep `AIStyle()` working.
+    init() {}
+
+    // Hand-written for the same reason as FounderPrefs.init(from:): the synthesized
+    // decoder throws keyNotFound on an absent key instead of falling back to the default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseTone = try container.decodeIfPresent(BaseTone.self, forKey: .baseTone) ?? .default
+        warmth = try container.decodeIfPresent(Level.self, forKey: .warmth) ?? .default
+        enthusiasm = try container.decodeIfPresent(Level.self, forKey: .enthusiasm) ?? .default
+        emoji = try container.decodeIfPresent(Level.self, forKey: .emoji) ?? .default
+        customInstructions = try container.decodeIfPresent(String.self, forKey: .customInstructions) ?? ""
+        role = try container.decodeIfPresent(String.self, forKey: .role) ?? ""
+        moreAboutYou = try container.decodeIfPresent(String.self, forKey: .moreAboutYou) ?? ""
+    }
 
     /// nil when every knob is `.default` and every string is blank.
     func promptFragment() -> String? {

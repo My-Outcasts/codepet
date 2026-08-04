@@ -118,6 +118,19 @@ final class VirtualCompanyRunDTOTests: XCTestCase {
         XCTAssertEqual(reason, "Hết ngân sách cho lượt này.")
     }
 
+    func testDecodesTelemetryWithTokensPerAgent() throws {
+        let data = """
+        {"tokens_per_agent":{"product":{"input":1200,"output":340,"cache_read":900},\
+        "finance":{"input":800,"output":210,"cache_read":0}},\
+        "cost_estimate_usd":0.0842,"stopped_reason":null}
+        """
+        let event = try XCTUnwrap(VirtualCompanyEvent.from(frame: frame("telemetry", data)))
+        guard case let .telemetry(telemetry) = event else { return XCTFail("expected .telemetry") }
+        XCTAssertEqual(telemetry.tokensPerAgent["product"]?.cacheRead, 900)
+        XCTAssertEqual(telemetry.costEstimateUsd, 0.0842)
+        XCTAssertNil(telemetry.stoppedReason)
+    }
+
     func testUnknownEventDecodesToNilRatherThanThrowing() {
         // Forward compatibility: the backend may add frames. An unknown one must
         // be skipped, never crash a live run.

@@ -10,6 +10,10 @@ struct VCFounder: Codable, Equatable {
     let profile: String
     let stage: String
     let constraints: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case profile, stage, constraints
+    }
 }
 
 struct VirtualCompanyRequest: Codable, Equatable {
@@ -94,6 +98,10 @@ struct VCConflict: Codable, Equatable {
     let b: String
     let kind: String                // CONFLICT | BLOCKER | TENSION | ALIGNED
     let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case a, b, kind, reason
+    }
 }
 
 struct VCNegotiationTurn: Codable, Equatable {
@@ -113,6 +121,10 @@ struct VCNegotiationTurn: Codable, Equatable {
 struct VCNegotiationRound: Codable, Equatable {
     let round: Int
     let turns: [VCNegotiationTurn]
+
+    enum CodingKeys: String, CodingKey {
+        case round, turns
+    }
 }
 
 struct VCVerdict: Codable, Equatable {
@@ -138,6 +150,10 @@ struct VCVerdict: Codable, Equatable {
 struct VCNextAction: Codable, Equatable {
     let action: String
     let owner: String
+
+    enum CodingKeys: String, CodingKey {
+        case action, owner
+    }
 }
 
 struct VCBrief: Codable, Equatable {
@@ -162,19 +178,29 @@ struct VCBrief: Codable, Equatable {
     }
 }
 
+struct VCTokenUsage: Codable, Equatable {
+    let input: Int
+    let output: Int
+    let cacheRead: Int
+
+    enum CodingKeys: String, CodingKey {
+        case input, output
+        case cacheRead = "cache_read"
+    }
+}
+
 struct VCTelemetry: Codable, Equatable {
-    let costEstimateUsd: Double?
+    /// Keyed by agent id. Always present — the backend initialises it to {}.
+    let tokensPerAgent: [String: VCTokenUsage]
+    /// Always present; the backend initialises it to 0. Non-optional on purpose:
+    /// a missing value means a malformed payload, not a free run.
+    let costEstimateUsd: Double
     let stoppedReason: String?
 
     enum CodingKeys: String, CodingKey {
+        case tokensPerAgent = "tokens_per_agent"
         case costEstimateUsd = "cost_estimate_usd"
         case stoppedReason = "stopped_reason"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        costEstimateUsd = try c.decodeIfPresent(Double.self, forKey: .costEstimateUsd)
-        stoppedReason = try c.decodeIfPresent(String.self, forKey: .stoppedReason)
     }
 }
 

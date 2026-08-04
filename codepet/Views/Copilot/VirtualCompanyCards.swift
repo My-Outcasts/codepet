@@ -12,7 +12,7 @@ struct VCRunCards: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let routing = state.routing { routingCard(routing) }
-            if !state.agents.isEmpty { AgentsWorkingRow(runs: agentRuns) }
+            if !state.agents.isEmpty { agentsAtWorkCard }
             ForEach(state.agents, id: \.agentId) { meta in
                 if let position = state.positions[meta.agentId] {
                     positionCard(meta, position)
@@ -26,22 +26,68 @@ struct VCRunCards: View {
             if let verdict = state.verdict { verdictCard(verdict) }
             if let brief = state.brief { briefCard(brief) }
             if let stopped = state.stoppedReason { stoppedRow(stopped) }
+            // Contract: `error` is terminal and no `done` follows — after a failed
+            // run this is the ONLY signal the founder gets that the room stopped.
+            if let err = state.terminalError { terminalErrorCard(err) }
         }
     }
 
-    /// Bridges into the existing multi-agent row, which already knows how to show
-    /// N concurrent agents with avatar, dept, status pill and elapsed time.
-    private var agentRuns: [AgentRun] {
-        state.agentStatuses.map { entry in
-            let dept = DepartmentCatalog.all.first { $0.key == entry.meta.departmentKey }
-            return AgentRun(id: entry.meta.agentId,
-                            companionId: entry.meta.agentId,
-                            deptName: dept?.name ?? (lang == .vi ? "Ban điều hành" : "Chief of staff"),
-                            taskTitle: state.routing?.realQuestion ?? "",
-                            steps: [],
-                            status: entry.status,
-                            startedAt: Date())
+    /// A department-chip summary of who is in the room right now. Deliberately
+    /// NOT built on `AgentsWorkingRow`/`CompanionAvatar`/`PetCharacter`: those
+    /// personify a companion pet, and department agents (and the chief of staff /
+    /// devil's advocate roles) are not people (contract rule 9). A raw agent id
+    /// like "product" or "devils_advocate" never matches a `PetCharacter`, so
+    /// routing it through that bridge only ever produced a blank avatar image
+    /// next to the generic fallback name "Codepet" — an accidental, unintended
+    /// identity, not a deliberate one.
+    private var agentsAtWorkCard: some View {
+        HStack {
+            MessageCard(hue: CodepetTheme.accentPurple) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text((lang == .vi ? "Đang làm việc" : "Agents at work")
+                            + " · \(state.agentStatuses.count)")
+                        .font(CodepetTheme.inter(10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundColor(CodepetTheme.mutedText)
+                    ForEach(Array(state.agentStatuses.enumerated()), id: \.offset) { idx, entry in
+                        if idx > 0 { Divider().overlay(CodepetTheme.hairline) }
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(accent(entry.meta).opacity(0.16))
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Text(badge(entry.meta))
+                                        .font(CodepetTheme.inter(9, weight: .semibold))
+                                        .foregroundColor(accent(entry.meta))
+                                )
+                            Text(displayName(entry.meta))
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.primaryText)
+                            Spacer(minLength: 6)
+                            statusPill(entry.status)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 24)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statusPill(_ status: AgentRunStatus) -> some View {
+        let fg: Color
+        let bg: Color
+        switch status {
+        case .working:   fg = CodepetTheme.accentPurple; bg = CodepetTheme.accentPurple.opacity(0.14)
+        case .reviewing: fg = CodepetTheme.accentGold;   bg = CodepetTheme.accentGold.opacity(0.16)
+        case .done:      fg = CodepetTheme.accentTeal;   bg = CodepetTheme.accentTeal.opacity(0.16)
+        case .failed:    fg = Color.red;                 bg = Color.red.opacity(0.14)
+        }
+        return Text(status.label(lang))
+            .font(CodepetTheme.inter(9, weight: .semibold))
+            .foregroundColor(fg)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(bg))
     }
 
     // Spec §4.3: routing is CONTENT, not a loading state. It is the panel where
@@ -82,8 +128,9 @@ struct VCRunCards: View {
                         .background(Capsule().fill(accent(meta).opacity(0.12)))
                         .foregroundColor(accent(meta))
                     Spacer()
-                    Text("\(position.confidence)/5")
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    // Contract rule 7: confidence as dots, not a number — a number
+                    // implies false precision.
+                    confidenceDots(position.confidence)
                 }
                 Text(position.position).font(CodepetTheme.inter(14))
                     .foregroundColor(CodepetTheme.bodyText)
@@ -124,6 +171,11 @@ struct VCRunCards: View {
                         .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
                     Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
                         .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    // Contract rule 4: show each side's what_would_change_my_mind —
+                    // it teaches that disagreement is settled by evidence, not authority.
+                    Text((lang == .vi ? "Điều gì sẽ đổi ý họ: " : "What would change their mind: ")
+                         + turn.whatWouldChangeMyMind)
+                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
                 }
             }
         }
@@ -133,12 +185,32 @@ struct VCRunCards: View {
     private func verdictCard(_ verdict: VCVerdict) -> some View {
         MessageCard(hue: CodepetTheme.primaryText) {
             VStack(alignment: .leading, spacing: 6) {
-                label(lang == .vi ? "NGƯỜI PHẢN BIỆN" : "THE CHALLENGER")
+                // Contract: plan_is_sound true → render as endorsement, not attack.
+                label(verdict.planIsSound
+                      ? (lang == .vi ? "NGƯỜI PHẢN BIỆN — ĐỒNG Ý" : "THE CHALLENGER — ENDORSES")
+                      : (lang == .vi ? "NGƯỜI PHẢN BIỆN" : "THE CHALLENGER"))
                 Text(verdict.loadBearingAssumption).font(CodepetTheme.inter(14, weight: .medium))
                     .foregroundColor(CodepetTheme.primaryText)
-                Text(verdict.howItCouldBeFalse).font(CodepetTheme.inter(13))
-                    .foregroundColor(CodepetTheme.bodyText)
+                if verdict.planIsSound {
+                    Text(lang == .vi ? "Đã kiểm — kế hoạch vững." : "Stress-tested — the plan holds.")
+                        .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                } else {
+                    Text(verdict.howItCouldBeFalse).font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.bodyText)
+                }
                 Text((lang == .vi ? "Cách kiểm rẻ nhất: " : "Cheapest test: ") + verdict.cheapestTest)
+                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                if !verdict.objections.isEmpty {
+                    label(lang == .vi ? "CÁC PHẢN BÁC" : "OBJECTIONS")
+                    ForEach(Array(verdict.objections.enumerated()), id: \.offset) { idx, objection in
+                        Text("\(idx + 1). " + objection)
+                            .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                    }
+                }
+                Text((lang == .vi ? "Nếu thất bại: " : "If this fails: ") + verdict.failurePostMortem)
+                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                Text((lang == .vi ? "Ai không có trong phòng: " : "Who's not in the room: ")
+                     + verdict.whoIsNotInTheRoom)
                     .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
             }
         }
@@ -150,9 +222,28 @@ struct VCRunCards: View {
                 label(lang == .vi ? "KHUYẾN NGHỊ" : "RECOMMENDATION")
                 Text(brief.recommendation).font(CodepetTheme.inter(14))
                     .foregroundColor(CodepetTheme.bodyText)
+                HStack(spacing: 8) {
+                    // Contract rule 7: confidence as dots, not a number.
+                    confidenceDots(brief.confidence)
+                    Text(brief.confidenceReason).font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                // Contract rule 3: show the_real_disagreement verbatim. No
+                // paraphrasing, no softening.
+                label(lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT")
+                Text(brief.theRealDisagreement).font(CodepetTheme.inter(13))
+                    .foregroundColor(CodepetTheme.bodyText)
                 label(lang == .vi ? "ĐÁNH ĐỔI CHỈ BẠN QUYẾT ĐƯỢC" : "THE TRADE-OFF ONLY YOU CAN MAKE")
                 Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(13))
                     .foregroundColor(CodepetTheme.bodyText)
+                if brief.unresolved {
+                    // Contract rule 6: unresolved is a valid outcome, not an error —
+                    // present it as an honest answer, the trade-off is the founder's to make.
+                    Text(lang == .vi ? "Chưa ngã ngũ — đây là lựa chọn của bạn."
+                                     : "Unresolved — this is your call to make.")
+                        .font(CodepetTheme.inter(13, weight: .medium))
+                        .foregroundColor(CodepetTheme.primaryText)
+                }
                 label(lang == .vi ? "DỪNG NẾU" : "STOP IF")
                 ForEach(brief.killCriteria, id: \.self) { criterion in
                     Text("· " + criterion).font(CodepetTheme.inter(13))
@@ -186,6 +277,19 @@ struct VCRunCards: View {
         Text(reason).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
     }
 
+    // Contract: `error` is terminal, no `done` follows — this is the only signal
+    // of a failed run, so it must be visible, not muted like `stoppedRow`.
+    private func terminalErrorCard(_ code: String) -> some View {
+        MessageCard(hue: Color.red) {
+            VStack(alignment: .leading, spacing: 6) {
+                label(lang == .vi ? "LỖI" : "ERROR")
+                Text((lang == .vi ? "Phiên chạy đã dừng: " : "The run stopped: ") + code)
+                    .font(CodepetTheme.inter(13, weight: .medium))
+                    .foregroundColor(CodepetTheme.primaryText)
+            }
+        }
+    }
+
     private func errorRow(_ meta: VCAgentMeta, _ error: String) -> some View {
         Text("\(displayName(meta)): \(error)")
             .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
@@ -196,8 +300,41 @@ struct VCRunCards: View {
             .foregroundColor(CodepetTheme.mutedText)
     }
 
+    // Contract rule 7: dots, not a number — a number implies false precision.
+    // Clamped defensively; the wire contract guarantees 1..5.
+    private func confidenceDots(_ confidence: Int) -> some View {
+        let n = max(0, min(5, confidence))
+        return HStack(spacing: 3) {
+            ForEach(0..<5, id: \.self) { i in
+                Circle()
+                    .fill(i < n ? CodepetTheme.accentPurple : CodepetTheme.hairline)
+                    .frame(width: 6, height: 6)
+            }
+        }
+    }
+
     private func displayName(_ meta: VCAgentMeta) -> String {
-        DepartmentCatalog.all.first { $0.key == meta.departmentKey }?.name ?? meta.agentId
+        if let dept = DepartmentCatalog.all.first(where: { $0.key == meta.departmentKey }) {
+            return dept.name
+        }
+        // The two department_key == null roles (contract's mapping table) are not
+        // departments and have no catalog entry; name them by role, not a raw id.
+        switch meta.agentId {
+        case "chief_of_staff":  return lang == .vi ? "Ban điều hành" : "Chief of staff"
+        case "devils_advocate": return lang == .vi ? "Người phản biện" : "The Challenger"
+        default:                return meta.agentId
+        }
+    }
+
+    private func badge(_ meta: VCAgentMeta) -> String {
+        if let dept = DepartmentCatalog.all.first(where: { $0.key == meta.departmentKey }) {
+            return dept.ab
+        }
+        switch meta.agentId {
+        case "chief_of_staff":  return "CoS"
+        case "devils_advocate": return "DA"
+        default:                return String(meta.agentId.prefix(2)).uppercased()
+        }
     }
 
     private func accent(_ meta: VCAgentMeta) -> Color {

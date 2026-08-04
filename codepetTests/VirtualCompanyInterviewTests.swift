@@ -180,15 +180,60 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         XCTAssertEqual(s.company.brief.runway, "6 months")
         XCTAssertEqual(s.company.brief.constraints, "No hiring this quarter")
         XCTAssertEqual(probe.briefs.last?.constraints, "No hiring this quarter")
-        // The greeting would be a companion message appended after the founder's last
-        // answer. Asserted by identity rather than by a message count, which moved
-        // under this test once the room started appending its own message.
-        XCTAssertEqual(s.chatMessages.last?.role, .me)
+        // Asserted by identity, not by role or by a message count: both moved under
+        // this test once the room started appending its own message, and again once
+        // the interview earned a closing line. What must stay true is narrower than
+        // "no companion message follows" — it is that THIS particular message, the
+        // first-run welcome, is not among them.
         let greeting = FirstRunGreetingBuilder.build(brief: s.company.brief,
                                                      nextStep: RoadmapEngine.nextStep(s.company.tasks),
                                                      language: .en)
         XCTAssertFalse(s.chatMessages.contains { $0.text == greeting.text },
                        "the queue emptying must not welcome the founder like a new user")
+    }
+
+    func testTheInterviewClosesByQuotingTheAnswersBackAndNamingTheirEffect() async {
+        // The founder answered two questions and the conversation simply stopped —
+        // nothing said, nothing visibly changed. Neither answer appears anywhere in
+        // the UI, so this closing line is the only evidence they landed.
+        let probe = SaveProbe()
+        let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("free with ads or $9.99 once?", language: .en)
+
+        await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .runway,
+                                answer: "6 months", language: .en)
+        await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .constraints,
+                                answer: "No hiring this quarter", language: .en)
+
+        let close = try? XCTUnwrap(s.chatMessages.last)
+        XCTAssertEqual(close?.role, .companion)
+        // Quotes both answers back, so the founder sees the specifics were heard.
+        XCTAssertTrue(close?.text.contains("6 months") == true)
+        XCTAssertTrue(close?.text.contains("No hiring this quarter") == true)
+        // And names what they change — runway is what makes a three-week proposal
+        // unacceptable, and a founder has no way to infer that.
+        XCTAssertTrue(close?.text.contains("recommend") == true,
+                      "the close must say what the answers change, not just thank them")
+    }
+
+    func testSkippingBothQuestionsSaysSoRatherThanClaimingAnEffect() async {
+        let probe = SaveProbe()
+        let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("free with ads or $9.99 once?", language: .en)
+
+        await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .runway,
+                                answer: nil, language: .en)
+        await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .constraints,
+                                answer: nil, language: .en)
+
+        let close = s.chatMessages.last
+        XCTAssertEqual(close?.role, .companion)
+        XCTAssertTrue(close?.text.contains("more general") == true,
+                      "a skipped interview must not claim an effect it did not get")
+        XCTAssertNil(s.company.brief.runway)
+        XCTAssertNil(s.company.brief.constraints)
     }
 
     func testStoreAsksAtMostOnceAcrossTwoRuns() async {

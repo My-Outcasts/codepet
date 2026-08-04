@@ -325,8 +325,53 @@ final class CompanyStore: ObservableObject {
             interviewState = nil
             // Only the first-run interview earns the greeting. Welcoming the founder
             // right after a mid-session runway question would read as amnesia.
-            if st.seedGreetingWhenDone { seedFirstRunGreeting(language: language) }
+            if st.seedGreetingWhenDone {
+                seedFirstRunGreeting(language: language)
+            } else {
+                seedVirtualCompanyInterviewClose(language: language)
+            }
         }
+    }
+
+    /// Closes the Virtual Company's runway/constraints interview.
+    ///
+    /// Without this the founder answered two questions and the conversation simply
+    /// stopped — nothing said, nothing visibly changed. It read as "that did
+    /// nothing", which was fair: neither answer appears anywhere in the UI, so a
+    /// closing line is the only evidence they landed at all.
+    ///
+    /// It quotes both answers back rather than thanking them abstractly, because
+    /// the point is to show the room heard the specifics, and it names what the
+    /// answers change — a founder has no way to know that runway is what makes a
+    /// three-week proposal unacceptable.
+    private func seedVirtualCompanyInterviewClose(language: AppLanguage) {
+        let runway = (company.brief.runway ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let limits = (company.brief.constraints ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        // Both skipped: say so honestly instead of claiming an effect that is not
+        // there. The room will keep saying what it does not know.
+        guard !runway.isEmpty || !limits.isEmpty else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không sao — mình vẫn họp được, chỉ là các khuyến nghị sẽ chung chung hơn vì phòng họp chưa biết runway và ràng buộc của bạn."
+                : "No problem — the room can still meet, but its recommendations stay more general while it doesn't know your runway or your constraints."))
+            return
+        }
+
+        var recorded: [String] = []
+        if !runway.isEmpty { recorded.append((language == .vi ? "runway: " : "runway: ") + runway) }
+        if !limits.isEmpty { recorded.append(limits.joined(separator: " · ")) }
+        let echo = recorded.joined(separator: " · ")
+
+        let effect = language == .vi
+            ? "Từ giờ phòng họp cân cả hai khi ra khuyến nghị: nó sẽ loại những đề xuất ăn quá nhiều thời gian bạn còn, và không đề xuất thứ bạn đã gạt."
+            : "From now on the room weighs both when it recommends: it drops proposals that eat too much of the time you have left, and stops suggesting what you have already ruled out."
+
+        chatMessages.append(CopilotMessage(
+            role: .companion,
+            text: (language == .vi ? "Ghi lại rồi — " : "On record — ") + echo + ". " + effect))
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called

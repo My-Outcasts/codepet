@@ -5,7 +5,7 @@ import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { checkAndIncrement } from "../rateLimit";
 import { ROUTER_MODEL } from "../anthropic";
-import { AgentCaller, runIntake } from "./router";
+import { AgentCaller, POSITION_MAX_TOKENS, runIntake } from "./router";
 import { runIndependentPass } from "./independentPass";
 import { detectConflicts, needsNegotiation } from "./conflicts";
 import { runNegotiation } from "./negotiation";
@@ -74,7 +74,7 @@ function anthropicClient(): Anthropic {
 const defaultAgentCaller: AgentCaller = async (args) => {
   const response = await anthropicClient().messages.create({
     model: args.model,
-    max_tokens: 2000,
+    max_tokens: args.maxTokens ?? POSITION_MAX_TOKENS,
     system: args.system as any,
     tools: [args.tool as any],
     tool_choice: { type: "tool", name: args.toolName },
@@ -89,7 +89,9 @@ const defaultAgentCaller: AgentCaller = async (args) => {
 
   for (const block of response.content) {
     if (block.type === "tool_use" && block.name === args.toolName) {
-      return { input: block.input, usage };
+      // stop_reason travels with the result so the parse site can tell a
+      // truncated object from a model that ignored the schema.
+      return { input: block.input, usage, stopReason: response.stop_reason };
     }
   }
   throw new Error(`${args.agent} did not call ${args.toolName}`);

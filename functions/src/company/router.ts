@@ -144,7 +144,39 @@ export type AgentCaller = (args: {
   userMessage: string;
   tool: unknown;
   toolName: string;
-}) => Promise<{ input: unknown; usage: TokenUsage }>;
+  /**
+   * Output cap for this call. Phases declare it rather than sharing one number
+   * because the decision brief is several times longer than a position, and a
+   * Vietnamese brief is longer again — Vietnamese spends noticeably more tokens
+   * per sentence than English. A cap costs nothing when unused; hitting it
+   * truncates the tool JSON mid-object and silently drops the trailing fields.
+   */
+  maxTokens?: number;
+}) => Promise<{
+  input: unknown;
+  usage: TokenUsage;
+  /**
+   * Present when the caller can report it. `"max_tokens"` means the JSON above
+   * is truncated, so a missing field is a cap problem, not the model ignoring
+   * the schema — a distinction that is otherwise invisible at the parse site.
+   */
+  stopReason?: string | null;
+}>;
+
+/** Output caps per phase. Measured, not guessed — see BRIEF_MAX_TOKENS. */
+export const POSITION_MAX_TOKENS = 2000;
+/**
+ * A Vietnamese brief was measured truncating at 2000 on 2 of 3 attempts
+ * (stop_reason=max_tokens, output_tokens=2000), which dropped
+ * what_we_dont_know and sometimes next_action. A run that fit used 1955, so the
+ * ceiling was barely too low, not wildly. Doubled for headroom.
+ */
+export const BRIEF_MAX_TOKENS = 4000;
+/**
+ * Cap for the follow-up that fills in fields a brief left out. It writes two or
+ * three short fields, never the whole brief, so it needs a fraction of the room.
+ */
+export const PATCH_MAX_TOKENS = 800;
 
 const INTAKE_INSTRUCTION = `Perform your INTAKE duties on the founder's request below.
 

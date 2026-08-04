@@ -184,15 +184,24 @@ Ghi chú: kill switch **default = enabled** khi doc không tồn tại hoặc đ
 
 ### Chuẩn bị key một lần
 
-`.env` đã được gitignore trong `functions/`. Các script không tự đọc nó, nên source thủ công:
+Dùng `functions/local.env` (đã gitignore). Các script không tự đọc nó, nên source thủ công:
 
 ```bash
 cd functions
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env      # một lần
-set -a; . ./.env; set +a                        # mỗi shell mới
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > local.env   # một lần
+set -a; . ./local.env; set +a                     # mỗi shell mới
 ```
 
-Hoặc prefix từng lệnh: `ANTHROPIC_API_KEY=$(grep -h ANTHROPIC .env | cut -d= -f2) npm run ...`
+**Đừng đặt tên file là `.env`.** `firebase deploy` tự nạp mọi file `.env*` trong
+`functions/` thành env var **thường**, rồi đụng với khai báo `secrets:
+["ANTHROPIC_API_KEY"]` của `onRequest` và deploy chết ngay:
+
+```
+HTTP 400: Secret environment variable overlaps non secret
+          environment variable: ANTHROPIC_API_KEY
+```
+
+Đã dính đúng lỗi này một lần khi deploy `virtualCompanyRun` (2026-08-03).
 
 ### Chi phí thật cần biết trước
 
@@ -211,7 +220,7 @@ Ceiling cứng mỗi run: 200k token / $1.50 — vượt là `run_stopped`, khô
 
 ```bash
 cd functions
-set -a; . ./.env; set +a
+set -a; . ./local.env; set +a
 
 npx jest company                                          # 1. tầng 0, free
 npm run verify:company                                     # 2. tầng 1, pass/fail
@@ -223,16 +232,18 @@ Sửa `my-founder.json` trước khi chạy tầng 2 — file đang có mấy ch
 số beta user, constraint tài chính). Để nguyên `TODO` thì agent sẽ đoán, và bạn sẽ
 đánh giá sai chất lượng của nó.
 
-### Tầng 3 cần thêm 2 thứ
+### Tầng 3 — endpoint đã deploy (2026-08-03)
+
+`virtualCompanyRun` đã live tại `us-central1`, xác minh bằng curl: POST không token
+→ 401, GET → 405. Secret `ANTHROPIC_API_KEY` có sẵn trong project (v4 ENABLED).
+
+Deploy lại thì dùng **deploy có filter**, đừng deploy cả codebase trừ khi cố ý:
 
 ```bash
-npx firebase login --reauth      # credentials hiện tại đã hết hạn
-cd functions && npm run deploy   # deploy virtualCompanyRun
+npx firebase deploy --only functions:virtualCompanyRun --project devpet-8f4b1
 ```
 
-Rồi mint token và curl như mục 3 ở trên. Kiểm `ANTHROPIC_API_KEY` đã nằm trong
-Firebase secrets (endpoint khai `secrets: ["ANTHROPIC_API_KEY"]`) — chưa có thì
-`npx firebase functions:secrets:set ANTHROPIC_API_KEY`.
+Filter tránh việc ship kèm thay đổi prompt sang các function khác đang chạy.
 
 ---
 
@@ -348,16 +359,55 @@ không phải vấn đề tính đúng đắn.
 
 ---
 
+## Tầng 3 — PASS end-to-end (2026-08-03)
+
+Stream thật trên endpoint đã deploy, câu hỏi tiếng Việt:
+
+```
+run_started → routing → agent_start ×2 → agent_position ×2 → conflicts
+            → brief → telemetry → done
+```
+
+| Hạng mục | Kết quả |
+|---|---|
+| `run_started` đầu tiên, `done` cuối cùng | ✓ |
+| Mọi `agent_start` trước mọi `agent_position` | ✓ |
+| `agent_meta` | ✓ `product→product`, `finance→fin` |
+| `conflicts` toàn `ALIGNED` → **không** có `negotiation_round` | ✓ đúng contract |
+| `telemetry.tokens_per_agent` + `cost_estimate_usd` | ✓ |
+| `done.skipped = null` khi chạy đủ phase | ✓ |
+| Brief đủ 9 field, `next_action.owner = "Founder"` | ✓ |
+| 4 mã lỗi JSON (400 ×4, 401, 405) | ✓ |
+| Escape hatch (`single_agent`, `needs_clarification`) | ✓ đã test ở tầng 2 |
+
+Brief tiếng Việt ra số thật: *"ads cần ~500k impressions/tháng để ra $1,000 (eCPM $2), bất khả thi với 30 user"*.
+
+### Bài học đắt nhất: `max_tokens` không phải hằng số dùng chung
+
+`stop_reason=max_tokens` với `output_tokens` đúng bằng 2000 → JSON của tool bị cắt
+giữa object, và field ở cuối biến mất. Ở parse site nó **giống hệt** lỗi model phớt
+schema, nên dễ đi sửa sai chỗ.
+
+Brief tiếng Việt cần **2000–2600** output token. Tiếng Anh vừa 2000 nên fixture tầng 1
+pass hàng tuần trong khi đường `vi` chết. Giờ `max_tokens` khai theo từng phase
+(`BRIEF_MAX_TOKENS = 4000`), và `stopReason` được trả về cùng kết quả để lỗi tự khai
+là truncation.
+
+Khi thiếu field: **patch đúng field đó**, đừng sinh lại cả brief. Sinh lại tái tạo
+đúng điều kiện gây lỗi. Đo trên cùng một câu hỏi: **6/10 → 7/8 (1 patch) → 8/8 (2 patch)**.
+
+---
+
 ## Trạng thái đã verify
 
 | Thứ | Trạng thái |
 |---|---|
-| Tầng 0 — `npx jest` (toàn backend) | 21/21 suite, **262/262** test pass |
+| Tầng 0 — `npx jest` (toàn backend) | 28/28 suite, **417/417** test pass |
 | Tầng 1 — `verify:company` | **PASS** — 9 call, $0.1959, probe reuse OK, retry hoạt động thật |
 | Tầng 2 case 1 — full multi_agent | brief ra được, nhưng gặp bug 3 → chỉ 1 department. 4 call, $0.0936 |
 | Tầng 2 case 2 — one-dimensional | **PASS** — `single_agent`, 1 call, $0.0046 |
 | Tầng 2 case 3 — vague | **PASS** — `needs_clarification` + 5 câu hỏi cụ thể, 1 call, $0.0044 |
 | Tầng 2 case 4–6 | chưa chạy — chờ fix bug 3 (55% khả năng degrade) |
-| Tầng 3 — endpoint SSE | chưa chạy — cần `firebase login --reauth` + deploy |
+| Tầng 3 — endpoint SSE | **PASS** — 10 event đúng thứ tự, brief tiếng Việt hợp lệ |
 | `get-id-token.ts` — typecheck + 3 nhánh lỗi | pass, verify thật |
-| `get-id-token.ts` — nhánh thành công | **chưa verify** — cần bật anonymous auth hoặc credential thật |
+| `get-id-token.ts` — nhánh thành công | **PASS** — anonymous đã bật, mint token thật OK |

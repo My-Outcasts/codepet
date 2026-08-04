@@ -14,6 +14,7 @@
 - **Typography:** Inter only in this surface — `CodepetTheme.inter(_:weight:)`, `.title()`, `.subtitle()`, `.label(_:_:)`. Never `.pixelSystem` or `CodepetTheme.pixel` in any file this plan creates.
 - **Colours:** only `CodepetTheme` tokens (`surface`, `hairline`, `primaryText`, `bodyText`, `mutedText`, `accentPurple`, `accentOrange`). No literal hex.
 - **Destructive actions** use `CodepetTheme.accentOrange` text, never red literals.
+- **The Usage panel shows NO cap, NO denominator and NO meter.** The `30`/day figure in Task 6's `UsagePanel` code block below is WRONG and is superseded: there is no client-side counter, a 429 fixture shows the server returning `limit: 50`, and `MockChat.swift:365` describes the model as credits rather than a per-day cap. The section states plainly that usage is not tracked on this device. Founder's call, Aug 4.
 - **Separators are `SettingsDivider()`, never bare `Divider()`.** SwiftUI's `Divider()` renders in the system separator colour, which does not track `CodepetTheme` — a card's `hairline` border and a system separator inside it read as two different greys. `SettingsDivider` lives in `SettingsChrome.swift` and is backed by `CodepetTheme.hairline`. (Added after the Task 3 review; founder's call, Aug 4.)
 - **No accent-colour control.** The accent derives from the chosen companion; a user-set accent would compound the open roadmap accent-collision bug.
 - **Bilingual:** every user-facing string takes `lang == .vi ? "…" : "…"`, matching `AppView.title(_:)`.

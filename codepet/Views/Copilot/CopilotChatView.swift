@@ -151,6 +151,19 @@ struct CopilotChatView: View {
         }
     }
 
+    /// How many cards the newest Virtual Company run has put on screen. Every frame
+    /// adds one, so this rises monotonically through a run and is what the transcript
+    /// scrolls on — the run lives in a single message, so the message count cannot.
+    private var vcRunCardCount: Int {
+        guard let run = companyStore.chatMessages.last(where: { $0.vcRun != nil })?.vcRun
+        else { return 0 }
+        return (run.routing != nil ? 1 : 0) + run.agents.count + run.positions.count
+            + run.agentErrors.count + run.conflicts.count + run.negotiationRounds.count
+            + (run.verdict != nil ? 1 : 0) + (run.brief != nil ? 1 : 0)
+            + (run.telemetry != nil ? 1 : 0) + (run.stoppedReason != nil ? 1 : 0)
+            + (run.terminalError != nil ? 1 : 0)
+    }
+
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -189,6 +202,14 @@ struct CopilotChatView: View {
             }
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
+            }
+            // A Virtual Company run appends ONE message and then grows inside it for
+            // 30–60s, so `chatMessages.count` above scrolls to the room once and then
+            // stops while the cards pile up below the viewport. Follow the run itself
+            // — the same thing this file already does for the coding run and the
+            // fan-out row, neither of which changes the message count either.
+            .onChange(of: vcRunCardCount) { _, count in
+                if count > 0 { withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) } }
             }
             // Nested-ObservableObject publishers emit in willSet (before the new value
             // is assigned), so defer one runloop turn to re-render on the committed value —
@@ -406,12 +427,11 @@ struct CopilotBubble: View {
                 producingRow
             }
         } else if let run = message.vcRun {
-            // First among the payload branches because a run owns the WHOLE turn:
-            // `publishRunProgress` replaces byte's partial answer with the handoff
-            // line, so there is nothing else on this message to show. Keeping the
-            // text bubble above the cards is what makes the handoff read as byte
-            // speaking, then the room. The interview branch below is unaffected —
-            // an interview message never carries a run.
+            // The room has its own appended message and nothing else is ever written
+            // into it, so this branch's position in the chain is not load-bearing — but
+            // it stays first, ahead of the payloads that CAN coexist on one message.
+            // The text bubble above the cards is byte's handoff line: byte speaking,
+            // then the room.
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
                 VCRunCards(state: run) {

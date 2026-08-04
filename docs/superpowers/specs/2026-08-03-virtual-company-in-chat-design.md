@@ -28,24 +28,35 @@ Ordinary chat must be untouched. A founder who types "hi" should never learn tha
 `CompanyStore.sendChat` fans out to two endpoints at once:
 
 ```
-message ─┬─→ companyChat        (existing; streams immediately)
+message ─┬─→ companyChat        (existing; streams immediately, always completes)
          └─→ virtualCompanyRun  (new; Haiku intake, ~2s)
                    │
        ┌───────────┴────────────┐
   single_agent /           multi_agent
   needs_clarification           │
-       │                   byte hands off in one line,
-  run discarded,           then the room takes over
-  chat unaffected
+       │                   the room APPENDS its own companion
+  run discarded,           message under byte's reply and fills
+  chat unaffected          it in as the frames arrive
 ```
 
 **Why parallel rather than sequential.** Intake costs about $0.005 and takes ~2s. Running it first would put that 2s in front of *every* message, including "hi", before the first character appears. Running both means ordinary chat keeps its current latency exactly. The price is that a decision message pays for a `companyChat` reply that gets superseded.
 
 **Why no client-side gate.** A heuristic on length or on words like "hay"/"or" misses real decisions ("mình đang lo runway") and cannot reframe. The router already does this job better — measured: it turned "tăng giá hay ship team feature" into "do you have product-market fit, or are you optimizing packaging before validating that anyone will pay". Tier 2 confirmed both escape-hatch branches fire correctly on real questions.
 
-**Handoff copy.** On `routing` with `decision == "multi_agent"`, the in-flight `companyChat` stream is cancelled and its message is **replaced** with one line in byte's voice — "Cái này cần cả phòng, để mình gọi product với finance vào" — followed by the room cards. The founder sees a companion delegating, not a UI mode switch.
+**Handoff copy.** On `routing` with `decision == "multi_agent"`, byte's reply is left to finish normally and the room arrives as a **new appended companion message**, opening with one line in byte's voice — "Thật ra cái này cần cả phòng — để mình gọi product với finance vào" — followed by the room cards, which fill in as later frames arrive. The founder sees a companion escalating, not a UI mode switch.
 
-Replaced, not appended, even when deltas already arrived: half an answer to a decision question is noise sitting directly above the room that is about to answer it properly. Intake takes ~2s, so in practice there is usually little or nothing to discard.
+**Appended, not written into byte's message.** The first implementation replaced byte's in-flight reply, and every serious defect in the first review traced back to that one decision:
+
+- The transcript scrolls on `chatMessages.count` (`CopilotChatView:184`). A run rendered inside an already-appended message never changes the count, so 30–60s of cards grew below the viewport and the founder watched a static handoff line — then the interview's appended message finally moved the count and scrolled *past* the whole room.
+- byte's turn could not end, so `isCompanionTyping` stayed up and the typing dots sat pinned under the room's cards for the whole run.
+- byte's `done` side effects (`drafted = true`, `tasksSaver`, auto-merged `remember` decisions) still fired on a turn the founder had been told was superseded, and could contradict the brief they were about to lock in.
+- `virtualCompanyRun` cold-starts in 5–10s while byte's stream can finish in 4, so on the first decision of a session the routing frame usually arrived *after* the founder had read the answer. Rewriting it then was a defect, which needed a closed-turn guard, which in turn meant the room did not convene at all on a cold start.
+
+A separate message retires all four: the append is the count change the scroll already listens for, byte's turn is real and owns its own effects, and a late-arriving room is a new message rather than a rewrite. The run is therefore not awaited — it does not hold `isStreaming`, so Send, New chat and the thread switcher stay live throughout.
+
+The room is still bound to the conversation it was asked in: `publishRunProgress` refuses to write unless byte's message for that turn is still in the buffer, so a run that lands after New chat / a thread switch / a delete is dropped rather than appearing under an unrelated question. It also carries a client-side deadline (`CompanyStore.vcRunDeadlineNanos`), because `SSEParser` drops `:` keep-alive comments and a warm-but-silent connection would otherwise leave the agent columns spinning forever; the deadline cancels into the same seal a dropped stream reaches.
+
+The price of letting byte answer is that the founder reads a general reply and then a better one. Cheaper than the alternative: byte's answer *is* what the founder has if the room fails, is killed (503) or is capped (429).
 
 ## 4. Architecture
 
@@ -62,7 +73,7 @@ Replaced, not appended, even when deltas already arrived: half an answer to a de
 
 | File | Change |
 |---|---|
-| `codepet/Managers/CompanyStore.swift` | Fan-out in `sendChat`; `@Published var vcRun: VirtualCompanyRunState?`; handoff on `routing`; the constraints interview gate. |
+| `codepet/Managers/CompanyStore.swift` | Fan-out in `sendChat` (typed founder text only — never `walkThroughTask`'s synthesised ask); the room's appended message on `routing`; the constraints interview gate. |
 | `codepet/Models/CopilotMessage.swift` | One new optional payload field for a run, following the existing fat-struct/if-chain pattern. The chat-first redesign's enum refactor is explicitly out of scope (`2026-07-31-coding-agent-in-copilot-design.md` §2). |
 | `codepet/Views/Copilot/CopilotChatView.swift` | Render the new cards when a message carries a run. |
 | `codepet/Models/Department.swift` | Add a `product` entry. The SSE contract (line 161) already asks for this: the backend emits `department_key: "product"` and `Department.all` has no such key, so the column would render with no cover, name or accent. |
@@ -171,7 +182,7 @@ No network in tests. Following `CompanyChatClient`'s existing pattern:
 | Message kind | Added cost |
 |---|---|
 | Ordinary chat | +$0.005 (Haiku intake) |
-| Decision | ~$0.20 for the run, plus one superseded `companyChat` reply |
+| Decision | ~$0.20 for the run, plus byte's own `companyChat` reply — which is kept, not superseded, and is the whole answer if the run fails or is killed |
 
 Per-run server ceilings already exist: 200k tokens / $1.50, emitting `run_stopped` rather than truncating silently.
 

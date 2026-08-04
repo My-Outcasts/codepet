@@ -143,14 +143,22 @@ final class CompanyStore: ObservableObject {
     /// Company one happens mid-session, where that greeting would read as amnesia.
     private var interviewState: (gaps: [InterviewGap], idx: Int, seedGreetingWhenDone: Bool)?
 
-    /// Placeholder ids whose chat turn has already been CLOSED — flags cleared, thread
-    /// flushed, founder reading the answer. A fan-out that has not decided by then has
-    /// lost its claim on that message: `virtualCompanyRun` cold-starts in 5–10s while
-    /// byte's stream can finish in 4, so without this the first decision question of a
-    /// session would have byte's complete, already-read answer REPLACED by the handoff
-    /// line seconds later, while the founder is typing the next turn. Closing the turn
-    /// is the guard; racing it is not. Session-only and pruned by `reset()`/`newChat()`.
-    private var closedTurns: Set<String> = []
+    /// In-flight Virtual Company runs, keyed by the message the room will occupy.
+    /// Nobody awaits them — the room owns its own appended message, so it outlives
+    /// byte's turn instead of holding `isStreaming` (and with it Send, New chat and
+    /// the thread switcher) for the length of a run. Kept only so `reset()` can stop
+    /// the outgoing account's runs, and so the deadline watchdog has something to
+    /// cancel. Each run removes its own entry when it ends.
+    private var vcTasks: [String: Task<Void, Never>] = [:]
+
+    /// Client-side ceiling on one run. The server's own ceiling is 200k tokens /
+    /// $1.50, which in wall-clock terms is well inside this; the reason a client
+    /// bound is needed at all is that `SSEParser` drops `:` keep-alive comments
+    /// (SSEParser.swift:43), so a server that keeps the connection warm without
+    /// emitting an event resets URLSession's idle timer forever and would leave the
+    /// agent columns spinning with no error. Cancelling here reaches the seal below,
+    /// which turns it into a visible `stream_lost`.
+    static let vcRunDeadlineNanos: UInt64 = 240 * 1_000_000_000
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
@@ -481,10 +489,6 @@ final class CompanyStore: ObservableObject {
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
-        // Every closed turn it guards lives in the outgoing thread, and a fan-out that
-        // was still running when this fired was cancelled at its own turn's close, so
-        // the set has nothing left to protect — pruned so it cannot grow all session.
-        closedTurns = []
     }
 
     /// Switch the working buffer to a different thread: flush the outgoing one,
@@ -648,38 +652,49 @@ final class CompanyStore: ObservableObject {
         // never blocks the actor: `vcRunner` does its I/O in a `Task.detached` and
         // this loop only suspends waiting on the stream.
         let vcRunner = self.vcRunner
-        let vcTask = Task { [weak self] () -> VirtualCompanyRunState? in
+        // The room's OWN message, minted here so every frame addresses the same
+        // appended message. Nothing is appended until the router says `multi_agent`.
+        let roomMessageId = UUID().uuidString
+        let vcTask = Task { [weak self] () -> Void in
             var state = VirtualCompanyRunState()
             do {
                 for try await event in vcRunner(vcRequest) {
                     state.apply(event)
                     // The escape hatch fired: discard the run and let chat be.
                     // The founder never learns a routing decision happened.
-                    if state.isEscapeHatch { return nil }
-                    guard let self else { return nil }
-                    await self.publishRunProgress(state, placeholderId: placeholderId, cid: cid, language: language)
+                    if state.isEscapeHatch { break }
+                    guard let self else { return }
+                    await self.publishRunProgress(state, roomMessageId: roomMessageId,
+                                                  anchorId: placeholderId, cid: cid, language: language)
                 }
             } catch {
-                // A failed run must never damage the chat (spec §7). 503 is the
-                // kill switch and 429 the daily cap — both are silent by design.
-                // 400 is a client bug and the only one worth a log line.
-                if case let .http(status, body) = error as? VirtualCompanyRunError ?? .malformedResponse,
-                   status == 400 {
-                    print("virtualCompanyRun rejected the payload: \(body?.detail ?? "no detail")")
-                }
+                // A failed run must never damage the chat (spec §7). 503 is the kill
+                // switch and 429 the daily cap — both are silent to the FOUNDER by
+                // design, but not to the log: a live kill switch, an expired token and
+                // a broken client were previously indistinguishable from a working
+                // feature that never convened anyone.
+                Self.logRunFailure(error)
             }
-            // Seal a run that died with the room already on screen. A dropped stream,
-            // a TLS reset, a 60s idle timeout or a server that just stops without a
-            // `done` frame all arrive here having already replaced byte's answer with
-            // the handoff line, so returning silently would leave the agent columns
-            // spinning forever with no error and nothing to retry. `.failed` is
-            // excluded because a terminal `error` frame published its own code already.
+            // Seal a run that died with the room already on screen. A dropped stream, a
+            // TLS reset, an idle timeout, the deadline watchdog below, or a server that
+            // just stops without a `done` frame all arrive here with the room's cards
+            // already rendered, so returning silently would leave the agent columns
+            // spinning forever with no error and nothing to retry. `.failed` is excluded
+            // because a terminal `error` frame published its own code already.
             if state.handsOffToRoom, state.phase != .finished, state.phase != .failed {
                 state.terminalError = "stream_lost"
                 state.phase = .failed
-                await self?.publishRunProgress(state, placeholderId: placeholderId, cid: cid, language: language)
+                await self?.publishRunProgress(state, roomMessageId: roomMessageId,
+                                               anchorId: placeholderId, cid: cid, language: language)
             }
-            return state.handsOffToRoom ? state : nil
+            self?.vcTasks[roomMessageId] = nil
+        }
+        vcTasks[roomMessageId] = vcTask
+        // Bound the run (see `vcRunDeadlineNanos`). A no-op once the run has removed
+        // its own registry entry, which is every normal ending.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.vcRunDeadlineNanos)
+            self?.vcTasks[roomMessageId]?.cancel()
         }
 
         var streamedText = ""
@@ -692,9 +707,6 @@ final class CompanyStore: ObservableObject {
                 guard companyId == cid else { return }
                 switch event {
                 case .delta(let chunk):
-                    // The room took this turn: byte's partial answer is discarded
-                    // rather than left above the cards.
-                    if roomTookOver(placeholderId) { break }
                     if isCompanionTyping { isCompanionTyping = false }
                     streamedText += chunk
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
@@ -726,21 +738,17 @@ final class CompanyStore: ObservableObject {
         // net still works: a plain-JSON (non-SSE) response parses to zero
         // frames, so `.done` never fires and `!receivedDone` is true.
         // The decision itself lives in `ChatTailAction` (a testable value type); this
-        // only carries it out. If the room answered, an unreachable companyChat is
-        // irrelevant — do not overwrite the room with byte's offline line.
+        // only carries it out. The room is no longer part of this decision: it owns its
+        // own appended message, so byte's turn ends exactly as it did before the feature.
         switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
-                                     streamedText: streamedText,
-                                     roomTookOver: roomTookOver(placeholderId)) {
+                                     streamedText: streamedText) {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
-            // Re-decided, never cached: a handoff can land during `chatSender`'s own
-            // await, and this is the write that would clobber it.
-            if !roomTookOver(placeholderId),
-               let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = reply?.text ?? offline
             }
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
@@ -759,25 +767,11 @@ final class CompanyStore: ObservableObject {
         case .none:
             break
         }
-        // Hold `isStreaming` for the run ONLY when the room actually took this
-        // turn. Awaiting `vcTask` unconditionally would keep Send — and, via the
-        // same flag, "New chat"/switch/delete — disabled for the length of a run
-        // the founder cannot see: every escape-hatch run, every 503/429/400, and
-        // (worst) a hung endpoint, which would freeze the composer until
-        // URLSession times out. Conditional means chat's tail here is byte-for-byte
-        // the no-feature tail whenever the room did not take over.
-        if roomTookOver(placeholderId) {
-            _ = await vcTask.value
-            guard companyId == cid else { return }
-        } else {
-            // The room did not decide before this turn closed, so it does not get to
-            // reopen it (see `closedTurns`). Cancelling propagates through the
-            // stream's `onTermination` into the client's detached task, which drops
-            // the connection and ends the server's work — and its spend — rather than
-            // paying for a verdict that is no longer allowed to land.
-            closedTurns.insert(placeholderId)
-            vcTask.cancel()
-        }
+        // The run is NOT awaited. It writes into its own appended message, so it has
+        // no claim on byte's turn: byte's typing dots clear, Send/New chat/switch/delete
+        // re-enable, and this tail is byte-for-byte the no-feature tail. A run that is
+        // still going (or has not even routed yet) simply arrives later, which is a new
+        // message rather than a rewrite of an answer the founder has already read.
         isCompanionTyping = false
         isStreaming = false
         // Flush this turn into its thread — bumps `updatedAt` (re-sorts the thread
@@ -790,37 +784,70 @@ final class CompanyStore: ObservableObject {
 
     // MARK: - Virtual Company fan-out
 
-    /// True once the room has taken the turn anchored to `placeholderId`. Read at
-    /// every point chat is about to write into that message — never cached — because
-    /// a handoff can land during any of chat's awaits (the stream, the fallback's
-    /// `chatSender`, `handleDoneAction`).
-    private func roomTookOver(_ placeholderId: String) -> Bool {
-        chatMessages.first(where: { $0.id == placeholderId })?.vcRun != nil
-    }
-
-    /// Pushes run progress into the placeholder message. On the first handoff the
-    /// message text is REPLACED with byte's one-liner rather than appended to:
-    /// half an answer to a decision question is noise sitting above the room that
-    /// is about to answer it properly (spec §3).
+    /// Publishes run progress as the room's OWN companion message: appended once, on
+    /// the first `multi_agent` frame, then updated in place as later frames arrive.
+    ///
+    /// Appended, not written into byte's message (the shape this shipped with first),
+    /// for four reasons that all had the same root: the transcript scrolls on
+    /// `chatMessages.count`, so a run rendered inside an already-appended message grew
+    /// 30–60s of cards below the viewport and never scrolled; byte's turn could not end
+    /// normally, so its typing dots stayed pinned under the room's cards; byte's `done`
+    /// side effects (roadmap, decisions) ran on a turn the founder had been told was
+    /// superseded; and a run that decided after the turn closed rewrote an answer the
+    /// founder had already read, which needed a guard of its own. A separate message
+    /// removes all four — see the design doc §3.
     ///
     /// Every write is behind `handsOffToRoom`, so a run the router sent elsewhere —
     /// or one that died before routing — cannot touch `chatMessages` at all.
     private func publishRunProgress(_ state: VirtualCompanyRunState,
-                                    placeholderId: String,
+                                    roomMessageId: String,
+                                    anchorId: String,
                                     cid: String?,
                                     language: AppLanguage) async {
-        guard !closedTurns.contains(placeholderId) else { return }
         guard companyId == cid, state.handsOffToRoom else { return }
-        guard let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) else { return }
-        if chatMessages[i].vcRun == nil {
-            chatMessages[i].text = language == .vi
-                ? "Cái này cần cả phòng, để mình gọi product với finance vào."
-                : "This one needs the whole room — let me bring in product and finance."
+        // The room belongs to the conversation its question was asked in. `anchorId` is
+        // byte's message for that turn, so its absence means the founder has moved on
+        // (New chat, a thread switch, a delete) and the room must not land in whichever
+        // conversation happens to be on screen now. Switching back restores the buffer,
+        // and the state published is always the whole run, so nothing is lost by the
+        // frames refused in between.
+        guard chatMessages.contains(where: { $0.id == anchorId }) else { return }
+        if let i = chatMessages.firstIndex(where: { $0.id == roomMessageId }) {
+            chatMessages[i].vcRun = state
+        } else {
+            chatMessages.append(CopilotMessage(id: roomMessageId, role: .companion,
+                                               text: Self.handoffLine(language), vcRun: state))
         }
-        chatMessages[i].vcRun = state
         // Behind every guard above, so a discarded run (escape hatch), a killed run
         // (503/429) or one that died before a brief can never trigger it.
         maybeAskVirtualCompanyInterview(state, language: language)
+    }
+
+    /// byte's one line of handoff, spoken above the room's cards. It follows byte's
+    /// own complete answer now, so it reads as a second thought rather than a refusal
+    /// to answer — the founder sees a companion escalating, not a UI mode switch.
+    private static func handoffLine(_ language: AppLanguage) -> String {
+        language == .vi
+            ? "Thật ra cái này cần cả phòng — để mình gọi product với finance vào."
+            : "Actually — this one needs the whole room. Let me bring in product and finance."
+    }
+
+    /// One log line per failure mode. Every one of these was previously silent except
+    /// 400, so a kill switch (503), an exhausted cap (429), an expired token and a
+    /// renamed backend field all looked identical from the outside: a feature that
+    /// simply never convened anyone.
+    private static func logRunFailure(_ error: Error) {
+        switch error as? VirtualCompanyRunError {
+        case let .http(status, body):
+            print("virtualCompanyRun: HTTP \(status) — \(body?.error ?? "no error field")"
+                  + (body?.detail.map { ": \($0)" } ?? ""))
+        case .notSignedIn:
+            print("virtualCompanyRun: no Firebase ID token — the room cannot run")
+        case .malformedResponse:
+            print("virtualCompanyRun: malformed response (no HTTPURLResponse)")
+        case nil:
+            print("virtualCompanyRun: stream failed — \(error)")
+        }
     }
 
     /// Asked at most once per founder. Mirrors `vcInterviewFlag`, which persists it
@@ -1367,7 +1394,13 @@ final class CompanyStore: ObservableObject {
         // because `hydrate` only ever sets it from the incoming company's flag and a
         // sign-out with no re-hydrate would keep this stale `true`.
         vcInterviewAsked = false
-        closedTurns = []      // the messages they guarded are gone with `chatMessages`
+        // The outgoing founder's runs. The account guard already stops a late frame
+        // from landing in the incoming account's chat; cancelling also ends the
+        // server's work — and its spend — rather than paying for a verdict nobody
+        // will ever be shown. Cancellation propagates through the stream's
+        // `onTermination` into the client's detached task.
+        for task in vcTasks.values { task.cancel() }
+        vcTasks = [:]
         selectedDeptKey = nil
         activeProjectLink = nil
         codingRunAnchorId = nil

@@ -54,7 +54,10 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
     // MARK: - The room takes the turn
 
-    func testHandoffReplacesTheAnswerAndAttachesTheRun() async {
+    /// The room APPENDS. It is the whole point of the shape: the transcript scrolls on
+    /// `chatMessages.count`, byte's own turn keeps its side effects and its typing dots,
+    /// and byte's answer survives instead of being overwritten by the handoff line.
+    func testTheRoomArrivesAsItsOwnMessageAndLeavesBytesAnswerAlone() async {
         let s = store { _ in
             AsyncThrowingStream {
                 $0.yield(.runStarted(runId: "r1"))
@@ -64,11 +67,34 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
             }
         }
         await send(s)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
+        XCTAssertEqual(s.chatMessages[1].text, "byte's answer")
+        XCTAssertNil(s.chatMessages[1].vcRun)
         XCTAssertEqual(s.chatMessages.last?.text,
-                       "This one needs the whole room — let me bring in product and finance.")
+                       "Actually — this one needs the whole room. Let me bring in product and finance.")
         XCTAssertEqual(s.chatMessages.last?.vcRun?.phase, .finished)
         XCTAssertFalse(s.isStreaming)
         XCTAssertFalse(s.isCompanionTyping)
+    }
+
+    /// Every later frame updates the SAME appended message — a run must not stack one
+    /// message per frame down the transcript.
+    func testEveryFrameOfOneRunLandsInOneMessage() async {
+        let s = store { _ in
+            AsyncThrowingStream {
+                $0.yield(.routing(Self.routing("multi_agent")))
+                $0.yield(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+                $0.yield(.agentStart(VCAgentMeta(agentId: "finance", departmentKey: "fin")))
+                $0.yield(.conflicts([VCConflict(a: "product", b: "finance",
+                                                kind: "TENSION", reason: "r")]))
+                $0.yield(.done(runId: "r1", unresolved: false, skipped: nil))
+                $0.finish()
+            }
+        }
+        await send(s)
+        XCTAssertEqual(s.chatMessages.filter { $0.vcRun != nil }.count, 1)
+        XCTAssertEqual(s.chatMessages.last?.vcRun?.agents.count, 2)
+        XCTAssertEqual(s.chatMessages.last?.vcRun?.conflicts.count, 1)
     }
 
     /// Important 1: a run that dies with the room already on screen must say so.
@@ -165,18 +191,18 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
     }
 
     /// `virtualCompanyRun` cold-starts in 5–10s while byte's stream can finish in 4, so
-    /// a routing frame can arrive after the founder has read the answer. Rewriting a
-    /// finished, already-read message is the defect; `closedTurns` is the guard.
+    /// on the first decision of a session the routing frame usually arrives AFTER the
+    /// turn has closed and the founder has read byte's answer. That used to be a defect
+    /// — it rewrote a finished message — and needed a `closedTurns` guard that also
+    /// stopped the room from ever convening on a cold start. Appending makes the same
+    /// ordering correct: byte's answer stays, the room arrives underneath it, and the
+    /// count change scrolls the founder to it.
     ///
-    /// The ordering is a handshake, not a sleep, and it is built so `closedTurns` is
-    /// the ONLY thing that can stop the write — `vcTask.cancel()` cannot take the
-    /// credit. The routing frame is handed to the fan-out while it is already parked
-    /// in `next()` and the turn still owns the main actor, so the value is in the
-    /// task's hands BEFORE the cancel; cancellation is cooperative and cannot reach
-    /// back into a delivered element. The fan-out therefore resumes after the turn has
-    /// closed, applies the routing, and calls `publishRunProgress` for real — which is
-    /// exactly the production window this guard exists for.
-    func testARunDecidingAfterTheTurnClosedCannotRewriteTheAnswer() async {
+    /// The ordering is a handshake, not a sleep: the routing frame is handed to the
+    /// fan-out while it is already parked in `next()` and the turn still owns the main
+    /// actor, so the frame is in the task's hands before the turn closes and the room
+    /// necessarily publishes afterwards.
+    func testARunDecidingAfterTheTurnClosedStillConvenesTheRoom() async {
         final class Handshake {
             var events: AsyncThrowingStream<VirtualCompanyEvent, Error>.Continuation?
             var runnerStarted = false
@@ -213,11 +239,50 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
             })
 
         await send(s)
-        // Let the fan-out resume and make its (refused) write attempt.
+        // Let the fan-out resume and append the room.
         try? await Task.sleep(nanoseconds: 50_000_000)
 
         XCTAssertEqual(probe.invocations, 1)
-        XCTAssertEqual(s.chatMessages.last?.text, "byte's answer")
-        XCTAssertNil(s.chatMessages.last?.vcRun)
+        XCTAssertFalse(s.isStreaming, "the run must not hold the turn open")
+        XCTAssertEqual(s.chatMessages.count, 3)
+        XCTAssertEqual(s.chatMessages[1].text, "byte's answer", "byte's answer must survive")
+        XCTAssertNotNil(s.chatMessages.last?.vcRun, "the room convenes even on a cold start")
+    }
+
+    /// The room belongs to the conversation its question was asked in. Nothing holds
+    /// the turn open any more, so the founder can start a new chat while a run is still
+    /// going — and the room must not land in it. The anchor check in
+    /// `publishRunProgress` is the only thing standing here.
+    func testARunDecidingAfterANewChatDoesNotLandInIt() async {
+        final class Handshake {
+            var events: AsyncThrowingStream<VirtualCompanyEvent, Error>.Continuation?
+            var runnerStarted = false
+            var waiter: CheckedContinuation<Void, Never>?
+        }
+        let h = Handshake()
+
+        let s = CompanyStore(
+            loader: { _ in .empty }, saver: { _, _ in true },
+            chatSender: { _ in
+                if !h.runnerStarted { await withCheckedContinuation { h.waiter = $0 } }
+                return CompanyChatReply(text: "byte's answer", runTaskId: nil)
+            },
+            chatStreamer: Self.failingStreamer,
+            vcRunner: { _ in
+                AsyncThrowingStream { cont in
+                    h.events = cont
+                    h.runnerStarted = true
+                    if let waiter = h.waiter { h.waiter = nil; waiter.resume() }
+                }
+            })
+
+        await send(s)
+        s.newChat()                       // the founder moves on, mid-run
+        XCTAssertTrue(s.chatMessages.isEmpty)
+        h.events?.yield(.routing(Self.routing("multi_agent")))
+        h.events?.finish()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertTrue(s.chatMessages.isEmpty, "the room must not land in a conversation it was not asked in")
     }
 }

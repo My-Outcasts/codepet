@@ -1,69 +1,41 @@
 import XCTest
 @testable import codepet
 
-/// The four orderings of a Virtual Company handoff against a chat turn's tail.
-/// `CompanyStore` cannot be unit tested under Xcode 26.2 (isolated-deinit teardown
-/// crashes the XCTest host), so the decision it obeys is tested here instead.
+/// What a chat turn owes its placeholder once the companion stream is over.
+///
+/// The three "the room took this turn" cases this suite used to carry are gone with
+/// the `roomTookOver` input itself: the room is an appended message now, so it can no
+/// longer overwrite byte's bubble and the tail has nothing to defend against.
 final class ChatTailActionTests: XCTestCase {
 
-    // MARK: - The room took the turn
-
-    func testHandoffBeforeTheFirstDeltaDoesNotWriteTheLeadIn() {
-        // Deltas are dropped on purpose once the room takes over, so `streamedText`
-        // is legitimately empty even though the stream succeeded. The lead-in would
-        // overwrite byte's handoff line.
+    func testAGoodStreamIsLeftUntouched() {
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "", roomTookOver: true), .none)
+                                             streamedText: "A full reply."), .none)
     }
 
-    func testHandoffDuringTheFallbackDoesNotWriteTheOfflineLine() {
-        // companyChat threw, so the tail entered `.fallback`; the handoff landed
-        // during `chatSender`'s await. Re-deciding must now say "leave it alone".
+    func testFallsBackWhenTheStreamThrew() {
         XCTAssertEqual(ChatTailAction.decide(streamThrew: true, receivedDone: false,
-                                             streamedText: "", roomTookOver: false), .fallback)
-        XCTAssertEqual(ChatTailAction.decide(streamThrew: true, receivedDone: false,
-                                             streamedText: "", roomTookOver: true), .none)
+                                             streamedText: ""), .fallback)
     }
 
-    func testHandoffAfterDoneLeavesBytesPartialAnswerAlone() {
-        // The room replaced the text in `publishRunProgress`; the tail must not
-        // reinstate anything on top of it.
-        XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "Half an answer",
-                                             roomTookOver: true), .none)
-    }
-
-    // MARK: - No handoff: the pre-feature behaviour, unchanged
-
-    func testNoHandoffKeepsAGoodStreamUntouched() {
-        XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "A full reply.",
-                                             roomTookOver: false), .none)
-    }
-
-    func testNoHandoffFallsBackWhenTheStreamThrew() {
-        XCTAssertEqual(ChatTailAction.decide(streamThrew: true, receivedDone: false,
-                                             streamedText: "", roomTookOver: false), .fallback)
-    }
-
-    func testNoHandoffFallsBackWhenNoDoneFrameArrived() {
+    func testFallsBackWhenNoDoneFrameArrived() {
         // The pre-deploy shape: a plain-JSON body parses to zero SSE frames, so text
         // can even be present without a `done`.
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: false,
-                                             streamedText: "partial", roomTookOver: false), .fallback)
+                                             streamedText: "partial"), .fallback)
     }
 
-    func testNoHandoffWritesTheLeadInForARunTaskOnlyReply() {
+    func testWritesTheLeadInForARunTaskOnlyReply() {
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "", roomTookOver: false), .leadIn)
+                                             streamedText: ""), .leadIn)
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "  \n ", roomTookOver: false), .leadIn)
+                                             streamedText: "  \n "), .leadIn)
     }
 
     func testDoneWithTextNeverFallsBack() {
         // Guards the duplicate-run bug: falling back on empty text would fire a
         // second chatSender and run the same task twice.
         XCTAssertNotEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                                streamedText: "text", roomTookOver: false), .fallback)
+                                                streamedText: "text"), .fallback)
     }
 }

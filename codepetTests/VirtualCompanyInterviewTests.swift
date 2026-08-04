@@ -180,10 +180,15 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         XCTAssertEqual(s.company.brief.runway, "6 months")
         XCTAssertEqual(s.company.brief.constraints, "No hiring this quarter")
         XCTAssertEqual(probe.briefs.last?.constraints, "No hiring this quarter")
-        // [me, run, runway Q, me, constraints Q, me] — a 7th companion message here
-        // would be byte's first-run greeting.
-        XCTAssertEqual(s.chatMessages.count, 6)
+        // The greeting would be a companion message appended after the founder's last
+        // answer. Asserted by identity rather than by a message count, which moved
+        // under this test once the room started appending its own message.
         XCTAssertEqual(s.chatMessages.last?.role, .me)
+        let greeting = FirstRunGreetingBuilder.build(brief: s.company.brief,
+                                                     nextStep: RoadmapEngine.nextStep(s.company.tasks),
+                                                     language: .en)
+        XCTAssertFalse(s.chatMessages.contains { $0.text == greeting.text },
+                       "the queue emptying must not welcome the founder like a new user")
     }
 
     func testStoreAsksAtMostOnceAcrossTwoRuns() async {
@@ -199,8 +204,9 @@ final class VirtualCompanyInterviewTests: XCTestCase {
 
         await s.sendChat("second trade-off", language: .en)
         XCTAssertNil(s.chatMessages.last?.interview)
-        // me + the room's message only.
-        XCTAssertEqual(s.chatMessages.count, countAfterFirst + 2)
+        XCTAssertNotNil(s.chatMessages.last?.vcRun, "the second run still convenes")
+        // me + byte's own answer + the room's message. No third question.
+        XCTAssertEqual(s.chatMessages.count, countAfterFirst + 3)
     }
 
     /// A failed run must never damage the chat — and must never interrogate the

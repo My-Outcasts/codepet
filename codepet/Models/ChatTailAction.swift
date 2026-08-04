@@ -3,13 +3,15 @@ import Foundation
 
 /// What a chat turn owes its placeholder message once the companion stream is over.
 ///
-/// A value type, in its own file, deliberately: the Virtual Company fan-out made
-/// this the riskiest branch in `CompanyStore.sendMessage`, because four orderings of
-/// "did the room take this turn" against "did companyChat answer" all land here, and
-/// getting any one of them wrong either clobbers the room's handoff line or leaves
-/// the founder staring at an empty bubble. `CompanyStore` itself cannot be unit
-/// tested under Xcode 26.2 (the isolated-deinit teardown bug crashes the XCTest
-/// host), so the decision lives where tests can reach it and the store only obeys it.
+/// A value type, in its own file, deliberately: three stream outcomes (threw, ended
+/// with no `done`, ended clean) cross two text outcomes (empty, non-empty) and the
+/// wrong answer either fires a second `chatSender` — running the same task twice —
+/// or leaves the founder staring at an empty bubble.
+///
+/// The Virtual Company fan-out is deliberately NOT an input here. It used to be: the
+/// room rewrote byte's own message, so every write in the tail had to re-ask "did the
+/// room take this turn". The room now owns a separate appended message, so byte's
+/// tail is exactly what it was before the feature existed.
 enum ChatTailAction: Equatable {
     /// companyChat never delivered a well-formed reply (it threw, or it answered
     /// with no `done` frame — the shape a pre-deploy plain-JSON response collapses
@@ -21,18 +23,9 @@ enum ChatTailAction: Equatable {
     /// Leave the placeholder exactly as it stands.
     case none
 
-    /// `roomTookOver` must be read fresh at the moment of the decision, never cached
-    /// from before an `await`: a handoff can land while `chatSender` is in flight,
-    /// and `CompanyStore` re-decides after that await for exactly this reason.
     static func decide(streamThrew: Bool,
                        receivedDone: Bool,
-                       streamedText: String,
-                       roomTookOver: Bool) -> ChatTailAction {
-        // The room owns the turn. Both other actions write into the placeholder the
-        // room has already claimed — the offline line would overwrite the handoff,
-        // and the lead-in would too, because a handoff before the first delta means
-        // every delta was dropped on purpose and `streamedText` is legitimately empty.
-        if roomTookOver { return .none }
+                       streamedText: String) -> ChatTailAction {
         if streamThrew || !receivedDone { return .fallback }
         // Gated on "no `done`", NOT on empty text: byte can legitimately reply with
         // only a run-task decision, and falling back there would fire a second

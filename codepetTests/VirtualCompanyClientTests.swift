@@ -8,11 +8,16 @@ final class VCMockURLProtocol: URLProtocol {
     static var responseStatus: Int = 200
     static var responseHeaders: [String: String] = ["Content-Type": "text/event-stream"]
     static var responseChunks: [Data] = []
+    /// Set inside `stopLoading()` — proves the client tore down the connection
+    /// (via `continuation.onTermination` cancelling the detached Task) rather
+    /// than leaking it after the consumer walks away mid-stream.
+    static var stopLoadingCalled = false
 
     static func reset() {
         responseStatus = 200
         responseHeaders = ["Content-Type": "text/event-stream"]
         responseChunks = []
+        stopLoadingCalled = false
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -30,7 +35,9 @@ final class VCMockURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        VCMockURLProtocol.stopLoadingCalled = true
+    }
 }
 
 final class VirtualCompanyClientTests: XCTestCase {
@@ -72,6 +79,31 @@ final class VirtualCompanyClientTests: XCTestCase {
         XCTAssertEqual(events.count, 4)
         guard case let .done(_, _, skipped) = events[3] else { return XCTFail("expected .done last") }
         XCTAssertEqual(skipped, "single_agent")
+    }
+
+    func testAbandoningTheStreamTearsDownTheConnection() async throws {
+        VCMockURLProtocol.reset()
+        VCMockURLProtocol.responseChunks = [
+            "event: run_started\ndata: {\"run_id\":\"r1\"}\n\n".data(using: .utf8)!,
+            "event: agent_start\ndata: {\"agent_id\":\"product\",\"department_key\":null}\n\n".data(using: .utf8)!,
+            "event: agent_start\ndata: {\"agent_id\":\"finance\",\"department_key\":null}\n\n".data(using: .utf8)!,
+            "event: agent_start\ndata: {\"agent_id\":\"eng\",\"department_key\":null}\n\n".data(using: .utf8)!
+        ]
+
+        for try await _ in VirtualCompanyClient.run(request(),
+                                                    session: mockedSession(),
+                                                    authTokenProvider: { "fake" }) {
+            break // consume exactly one event, then walk away mid-stream
+        }
+
+        var torndown = VCMockURLProtocol.stopLoadingCalled
+        var attempts = 0
+        while !torndown && attempts < 50 {
+            try await Task.sleep(nanoseconds: 20_000_000) // 20ms
+            torndown = VCMockURLProtocol.stopLoadingCalled
+            attempts += 1
+        }
+        XCTAssertTrue(torndown, "expected stopLoading() to be called after the stream was abandoned")
     }
 
     func testFrameSplitAcrossChunksStillParses() async throws {

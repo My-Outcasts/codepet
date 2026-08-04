@@ -3,13 +3,15 @@ import Foundation
 /// The app's top-level destinations. Chat is the primary surface; Roadmap and
 /// Second Brain are the two halves of the retired Overview page.
 enum AppView: String, CaseIterable, Identifiable {
-    case chat, roadmap, secondBrain, tasks, library, environment, company, settings, billing, support
+    case chat, roadmap, secondBrain, tasks, library, environment, company
 
     var id: String { rawValue }
 
     /// Destinations shown as top-nav tabs, in order (web parity). Chat is the docked
-    /// copilot (no tab); Second Brain is a toggle on the Overview; settings/billing/
-    /// support live in the account dropdown.
+    /// copilot (no tab); Second Brain is a toggle on the Overview. Settings, Billing,
+    /// Usage and Support are NOT destinations at all — they are sections of the centered
+    /// settings modal (`SettingsSection`), opened as an overlay over whatever view the
+    /// founder is already on.
     static let topTabs: [AppView] = [.roadmap, .company, .tasks, .library, .environment]
 
     /// Nav label — the Roadmap destination is titled "Overview" in the top nav (web parity).
@@ -26,9 +28,6 @@ enum AppView: String, CaseIterable, Identifiable {
         case .library:     return lang == .vi ? "Thư viện" : "Library"
         case .environment: return lang == .vi ? "Môi trường" : "Environment"
         case .company:     return lang == .vi ? "Công ty" : "Company"
-        case .settings:    return lang == .vi ? "Cài đặt" : "Settings"
-        case .billing:     return lang == .vi ? "Thanh toán" : "Billing & Usage"
-        case .support:     return lang == .vi ? "Hỗ trợ" : "Support"
         }
     }
 
@@ -58,9 +57,6 @@ enum AppView: String, CaseIterable, Identifiable {
         case .library:     return "books.vertical"
         case .environment: return "wrench.and.screwdriver"
         case .company:     return "building.2"
-        case .settings:    return "gearshape"
-        case .billing:     return "creditcard"
-        case .support:     return "questionmark.circle"
         }
     }
 }

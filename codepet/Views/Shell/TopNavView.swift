@@ -62,7 +62,9 @@ struct TopNavView: View {
     }
 
     private var upgradeButton: some View {
-        Button { companyStore.selectedDeptKey = nil; companyStore.select(.billing) } label: {
+        // Opens the modal's Billing section over the current view — no longer a route,
+        // so it doesn't have to clear `selectedDeptKey` or take the founder off Company.
+        Button { companyStore.openSettings(.billing) } label: {
             UpgradePillLabel(title: lang == .vi ? "Nâng cấp" : "Upgrade")
         }.buttonStyle(.plain)
     }

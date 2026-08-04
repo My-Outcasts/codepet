@@ -156,12 +156,6 @@ struct AppShellView: View {
             LibraryView()
         } else if companyStore.view == .environment {
             EnvironmentView()
-        } else if companyStore.view == .settings {
-            SettingsView()
-        } else if companyStore.view == .billing {
-            BillingView()
-        } else if companyStore.view == .support {
-            SupportView()
         } else {
             // .chat and .secondBrain are no longer full-content destinations
             // (chat = docked copilot; second brain = Overview toggle).

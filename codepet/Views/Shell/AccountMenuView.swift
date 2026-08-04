@@ -3,8 +3,10 @@ import SwiftUI
 import FirebaseAuth
 
 /// The top-bar account menu (web AccountMenu.tsx): a purple initial-avatar + account
-/// name + chevron that opens a grouped dropdown — identity, Settings / Billing /
-/// Support, Appearance, Log out. Built as a Button + popover rather than a native
+/// name + chevron that opens a grouped dropdown — identity, Settings, Appearance,
+/// Log out. Billing and Support used to be their own rows here; both are sections of the
+/// settings modal now, so the one Settings row covers them. Built as a Button + popover
+/// rather than a native
 /// `Menu`, because a borderless `Menu` mis-renders a rich custom label on macOS
 /// (the avatar/name collapse to a bare disclosure). This gives web-exact chrome.
 struct AccountMenuView: View {
@@ -58,9 +60,9 @@ struct AccountMenuView: View {
             }
             .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 4)
             Divider()
+            // One row, because Billing, Usage and Support are now sections INSIDE the
+            // settings modal rather than separate destinations.
             menuRow(lang == .vi ? "Cài đặt" : "Settings") { companyStore.openSettings() }
-            menuRow(lang == .vi ? "Thanh toán & sử dụng" : "Billing & Usage") { companyStore.select(.billing) }
-            menuRow(lang == .vi ? "Hỗ trợ" : "Support") { companyStore.select(.support) }
             Divider()
             Text(lang == .vi ? "GIAO DIỆN" : "APPEARANCE")
                 .font(CodepetTheme.inter(9, weight: .bold)).foregroundColor(CodepetTheme.mutedText)

@@ -58,7 +58,43 @@ struct EnvironmentView: View {
                 .font(CodepetTheme.inter(15))
                 .foregroundColor(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
+            Button { askCompanion(about: nil) } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.bubble")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(lang == .vi ? "Hỏi nên thiết lập gì" : "Ask what to set up")
+                        .font(CodepetTheme.inter(12.5, weight: .semibold))
+                }
+                .foregroundColor(CodepetTheme.accentPurple)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .overlay(Capsule().stroke(CodepetTheme.hairline))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
         }
+    }
+
+    /// Seed a real founder turn into the copilot, scoped to a category when the ask
+    /// came from one. The Environment surface has no dock — `ShellLayout
+    /// .showsCopilot(in: .environment)` is false — so this navigates to `.chat`
+    /// rather than opening a panel in place. The question is sent as the founder's
+    /// own message so the transcript reads honestly on a later scroll-back.
+    private func askCompanion(about cat: ToolCategory?) {
+        let seed: String
+        if let cat {
+            let verb = cat.enableVerb(lang).lowercased()
+            seed = lang == .vi
+                ? "Mình nên \(verb) \(cat.label(lang).lowercased()) nào cho công ty của mình?"
+                : "Which \(cat.label(lang).lowercased()) should I \(verb) for my company?"
+        } else {
+            seed = lang == .vi
+                ? "Mình nên thiết lập gì trong môi trường của mình?"
+                : "What should I set up in my environment?"
+        }
+        companyStore.dockCollapsed = false
+        companyStore.select(.chat)
+        Task { await companyStore.sendChat(seed, language: lang, founderAsk: seed) }
     }
 
     /// web `.env-sech` — 10px, 1px tracking, uppercase, --t-4, 14px below.
@@ -261,10 +297,33 @@ struct EnvironmentView: View {
                     if i > 0 { Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1) }
                     ToolRowView(item: item, isOn: enabled.contains(item.id))
                 }
+                Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1)
+                notSureRow(cat)
             }
             .cardChrome(radius: 14, dark: isDark)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The last row of every category card: the founder who doesn't know which of
+    /// these thirteen items matters for *their* company taps here and gets the
+    /// question asked for them, already scoped to this category.
+    private func notSureRow(_ cat: ToolCategory) -> some View {
+        Button { askCompanion(about: cat) } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "questionmark.bubble")
+                    .font(.system(size: 11, weight: .medium))
+                Text(lang == .vi
+                     ? "Chưa chắc nên \(cat.enableVerb(lang).lowercased()) gì?"
+                     : "Not sure what to \(cat.enableVerb(lang).lowercased())?")
+                    .font(CodepetTheme.inter(12.5))
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(CodepetTheme.mutedText)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -98,11 +98,64 @@ final class DepartmentPulseTests: XCTestCase {
     }
 
     func testVietnamese() {
+        // All clear — mirrors testEverythingDoneReadsAllClear.
         let done = canDo("t1", done: true)
         XCTAssertEqual(departmentPulse(eng, mine: [done], all: [done], lang: .vi),
                        "Xong hết trong Engineering.")
+
+        // One needs-you — mirrors testOneTaskNeedsYou.
         let you = RoadmapTask(id: "t2", title: "A", detail: "", phase: .find, who: .you, dept: "eng")
         XCTAssertEqual(departmentPulse(eng, mine: [you], all: [you], lang: .vi),
                        "Một việc ở đây cần bạn.")
+
+        // One approval — mirrors testApprovalOutranksEverythingElse.
+        let draft = RoadmapTask(id: "t3", title: "Waitlist", detail: "", phase: .find,
+                                who: .does, drafted: true, dept: "eng")
+        let approvalOne = [draft, canDo("t4")]
+        XCTAssertEqual(departmentPulse(eng, mine: approvalOne, all: approvalOne, lang: .vi),
+                       "Có một bản nháp chờ bạn duyệt.")
+
+        // Two approvals — mirrors testTwoApprovalsPluralize.
+        let draftA = RoadmapTask(id: "t5", title: "A", detail: "", phase: .find, who: .does,
+                                 drafted: true, dept: "eng")
+        let draftB = RoadmapTask(id: "t6", title: "B", detail: "", phase: .find, who: .does,
+                                 drafted: true, dept: "eng")
+        let approvalTwo = [draftA, draftB]
+        XCTAssertEqual(departmentPulse(eng, mine: approvalTwo, all: approvalTwo, lang: .vi),
+                       "2 bản nháp chờ bạn duyệt.")
+
+        // Two need-you — mirrors testTwoTasksNeedYou.
+        let youA = RoadmapTask(id: "t7", title: "A", detail: "", phase: .find, who: .you, dept: "eng")
+        let youB = RoadmapTask(id: "t8", title: "B", detail: "", phase: .find, who: .you, dept: "eng")
+        let needsYouTwo = [youA, youB]
+        XCTAssertEqual(departmentPulse(eng, mine: needsYouTwo, all: needsYouTwo, lang: .vi),
+                       "2 việc ở đây cần bạn.")
+
+        // One runnable — mirrors testOneRunnableTask.
+        let runnableOne = canDo("t9")
+        XCTAssertEqual(departmentPulse(eng, mine: [runnableOne], all: [runnableOne], lang: .vi),
+                       "Không có gì chặn — tôi chạy được việc này ngay.")
+
+        // Two runnable — mirrors testTwoRunnableTasks.
+        let runnableTwo = [canDo("t10"), canDo("t11")]
+        XCTAssertEqual(departmentPulse(eng, mine: runnableTwo, all: runnableTwo, lang: .vi),
+                       "Không có gì chặn — tôi chạy được 2 việc ngay.")
+
+        // Blocked by a dependency in another department — mirrors
+        // testDependencyBlockedNamesTheBlockingTaskFromAnotherDepartment.
+        let hosting = canDo("ops2", "Set up hosting", dept: "ops")
+        let depBlocked = RoadmapTask(id: "t12", title: "Ship the page", detail: "", phase: .find,
+                                    who: .does, dependsOn: ["ops2"], dept: "eng")
+        XCTAssertEqual(departmentPulse(eng, mine: [depBlocked], all: [depBlocked, hosting], lang: .vi),
+                       "Mọi việc ở đây đang chờ: Set up hosting.")
+
+        // Blocked by a founder step holding the phase window shut — mirrors
+        // testPhaseBlockedNamesTheFounderStepHoldingTheWindow.
+        let gate = RoadmapTask(id: "f2", title: "Choose your launch date", detail: "",
+                               phase: .find, who: .you, dept: "mkt")
+        let phaseBlocked = RoadmapTask(id: "t13", title: "Build the editor", detail: "", phase: .build,
+                                      who: .does, dept: "eng")
+        XCTAssertEqual(departmentPulse(eng, mine: [phaseBlocked], all: [phaseBlocked, gate], lang: .vi),
+                       "Mọi việc ở đây đang chờ: Choose your launch date.")
     }
 }

@@ -4,7 +4,9 @@ import SwiftUI
 /// `Department.coverAnchor` is `UnitPoint` (not `Alignment`) because `Department` conforms to
 /// `Hashable` and `UnitPoint` does, while `Alignment` doesn't — but `.frame(alignment:)` takes
 /// an `Alignment`, so this converts. Only `.center`/`.top`/`.bottom` are in play today (see
-/// `Department.swift`'s `coverAnchor` doc), but this handles the full `UnitPoint` range.
+/// `Department.swift`'s `coverAnchor` doc); this snaps each axis into one of three buckets
+/// (`< 0.5` → leading/top, `> 0.5` → trailing/bottom, else center), landing on one of the 9
+/// standard `Alignment` values rather than mapping the coordinate proportionally.
 private extension UnitPoint {
     var frameAlignment: Alignment {
         let h: HorizontalAlignment = x < 0.5 ? .leading : x > 0.5 ? .trailing : .center

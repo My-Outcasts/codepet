@@ -12,6 +12,18 @@
 				<string>com.googleusercontent.apps.170846312834-pk2btv4bm6c19vpt27988mlbtm0s31vb</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- Connector OAuth. A provider will only redirect to http(s), so its
+			     callback lands on the Cloud Function first; the function stores the
+			     token and then redirects here, which is what lets
+			     ASWebAuthenticationSession close itself. See ConnectorAuth.swift. -->
+			<key>CFBundleURLName</key>
+			<string>Connector OAuth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>codepet</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

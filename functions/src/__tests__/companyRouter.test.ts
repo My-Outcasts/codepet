@@ -37,9 +37,43 @@ describe("ROUTING_TOOL", () => {
 
   test("offers only agents that exist in this deployment", () => {
     const agentEnum = (ROUTING_TOOL.input_schema.properties as any).agents.items.enum as string[];
-    expect([...agentEnum].sort()).toEqual(["devils_advocate", "finance", "product"]);
+    expect([...agentEnum].sort()).toEqual([
+      "design", "devils_advocate", "engineering", "finance", "legal",
+      "marketing", "operations", "product", "sales", "support"
+    ]);
+    // chief_of_staff stays out on purpose: it routes and synthesises, it does
+    // not hold a position, so offering it as a choice would let the router
+    // convene the referee as a player.
+    expect(agentEnum).not.toContain("chief_of_staff");
     expect(agentEnum).not.toContain("gtm");
-    expect(agentEnum).not.toContain("engineering");
+  });
+
+  test("the room is capped so the router cannot convene the whole company", () => {
+    // A prompt asking for the smallest room is a preference. The cap is the
+    // guarantee: phase 4 adds a call per conflicting department per round, so
+    // cost grows at roughly 3n and a nine-department room would be truncated by
+    // the per-run ceiling — on exactly the biggest questions.
+    const five = ["product", "finance", "engineering", "design", "marketing"];
+    const rejected = parseRoutingToolInput({
+      decision: "multi_agent", agents: five,
+      real_question: "q", request_type: "DECISION"
+    });
+    expect(rejected).toEqual({ error: expect.stringMatching(/at most 4 departments/) });
+
+    const four = ["product", "finance", "engineering", "design"];
+    expect(parseRoutingToolInput({
+      decision: "multi_agent", agents: four,
+      real_question: "q", request_type: "DECISION"
+    })).not.toHaveProperty("error");
+  });
+
+  test("the red team does not consume a seat in the cap", () => {
+    // It is triggered by phase 3, not chosen here, and it is not a department.
+    const fourPlusRedTeam = ["product", "finance", "engineering", "design", "devils_advocate"];
+    expect(parseRoutingToolInput({
+      decision: "multi_agent", agents: fourPlusRedTeam,
+      real_question: "q", request_type: "DECISION"
+    })).not.toHaveProperty("error");
   });
 });
 

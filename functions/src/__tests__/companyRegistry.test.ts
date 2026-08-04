@@ -1,5 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "../company/registry";
-import { ALL_AGENTS, FounderContext } from "../company/types";
+import { ALL_AGENTS, FounderContext, DEPARTMENT_AGENTS } from "../company/types";
 import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropic";
 
 const founder: FounderContext = {
@@ -98,14 +98,56 @@ describe("composeAgentSystem", () => {
     expect(a[1].text).toBe(AGENT_DEFS.product.role.trim());
   });
 
-  test("no agent's composed prompt introduces a cut department as a participant", () => {
+  test("the router is TOLD about every department it is allowed to convene", () => {
+    // The bug this exists for: engineering, design, marketing, sales, support,
+    // operations and legal were added to AgentId, to AGENT_DEFS, to
+    // ROUTABLE_AGENTS and to the tool's enum — and the chief_of_staff prompt,
+    // which is what the router actually reads to decide, still said "No other
+    // departments exist yet" and named engineering as a discipline it did NOT
+    // have. Every mechanism test passed. The router refused engineering on a
+    // build-vs-buy question with "Not a department in this deployment", because
+    // that is what we told it.
+    //
+    // Capability in the code is not capability in the model's belief.
+    const role = AGENT_DEFS.chief_of_staff.role;
+    for (const dept of DEPARTMENT_AGENTS) {
+      expect(role).toMatch(new RegExp(`\\b${dept}\\b`));
+    }
+  });
+
+  test("the router is never told a department is unavailable", () => {
+    // A denial survives adding the department everywhere else, and it is the
+    // model, not the code, that acts on it.
+    const role = AGENT_DEFS.chief_of_staff.role.toLowerCase();
+    for (const denial of [
+      "no other departments",
+      "do not have",
+      "you do not have",
+      "not available in this deployment",
+      "does not exist"
+    ]) {
+      expect(role).not.toContain(denial);
+    }
+  });
+
+  test("no role prompt tells an agent to push back on a department that does not exist", () => {
+    // This replaces an MVP-era check that asserted the cut departments were
+    // absent. The protection it gave is still worth having, inverted: every
+    // department named in a "WHERE YOU PUSH BACK" line must be a real agent, or
+    // the instruction addresses nobody. It caught "GTM" — written before
+    // Marketing and Sales existed, and ambiguous between them once they did.
+    const known = new Set([
+      ...DEPARTMENT_AGENTS.map((a) => a.charAt(0).toUpperCase() + a.slice(1)),
+      "everyone",
+      "the founder",
+      "yourself"
+    ]);
     for (const agent of ALL_AGENTS) {
-      const joined = composeAgentSystem({ agent, founder, rawRequest })
-        .map((b) => b.text)
-        .join("\n");
-      expect(joined).not.toContain("Head of Engineering");
-      expect(joined).not.toContain("Head of Go-to-Market");
-      expect(joined).not.toContain("Head of Design");
+      for (const line of AGENT_DEFS[agent].role.split("\n")) {
+        const m = /^- On (the founder|everyone|yourself|[A-Za-z]+)/.exec(line.trim());
+        if (!m) continue;
+        expect(known).toContain(m[1]);
+      }
     }
   });
 });

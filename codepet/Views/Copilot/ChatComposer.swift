@@ -91,6 +91,7 @@ struct ChatComposer: View {
                     .foregroundColor(CodepetTheme.mutedText)
                     .padding(.horizontal, 10).frame(height: 26)
                     .overlay(Capsule().stroke(CodepetTheme.hairline))
+                    .hoverAffordance(Capsule())
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
 
@@ -108,6 +109,7 @@ struct ChatComposer: View {
                     .foregroundColor(CodepetTheme.mutedText)
                     .padding(.horizontal, 8).frame(height: 26)
                     .overlay(Capsule().stroke(CodepetTheme.hairline))
+                    .hoverAffordance(Capsule())
                 }
                 .buttonStyle(.plain).fixedSize()
                 .help(link.path)
@@ -123,8 +125,13 @@ struct ChatComposer: View {
             Text(dep.name).font(CodepetTheme.inter(12, weight: .semibold))
                 .foregroundColor(on ? dep.accent : CodepetTheme.bodyText)
                 .padding(.horizontal, 10).frame(height: 26)
-                .background(Capsule().fill(on ? dep.accent.opacity(0.15) : Color.clear))
+                // Off used to be `Color.clear`, which made the chip hard to select and
+                // easy to deselect — the interior only existed once it was already on.
+                // `surface` is what the composer sits on, so this reads identically at
+                // rest while giving the off state a real interior.
+                .background(Capsule().fill(on ? dep.accent.opacity(0.15) : CodepetTheme.surface))
                 .overlay(Capsule().stroke(on ? dep.accent : CodepetTheme.hairline))
+                .hoverAffordance(Capsule(), accent: dep.accent)
         }.buttonStyle(.plain)
     }
 
@@ -146,6 +153,7 @@ struct ChatComposer: View {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .stroke(CodepetTheme.hairline)
                 )
+                .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -175,6 +183,7 @@ struct ChatComposer: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .stroke(CodepetTheme.hairline)
             )
+            .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)

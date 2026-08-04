@@ -290,4 +290,27 @@ enum CompanyData {
             return .empty
         }
     }
+
+    /// Which connectors this founder has authorised, from
+    /// `companies/{uid}/connectorStatus`.
+    ///
+    /// Deliberately a different collection from `connectors`, which holds the
+    /// sealed OAuth token and is closed to every client by the security rules —
+    /// this one carries no secret, so the Environment surface can answer "is
+    /// GitHub connected?" without the token ever being readable here.
+    ///
+    /// Fail-soft like the loads above: an empty set on error shows the connector
+    /// as not-connected rather than breaking the page.
+    static func loadConnectorStatus(_ companyId: String) async -> Set<String> {
+        do {
+            let snap = try await Firestore.firestore()
+                .collection("companies").document(companyId)
+                .collection("connectorStatus").getDocuments()
+            return Set(snap.documents.compactMap { doc in
+                (doc.data()["connected"] as? Bool) == true ? doc.documentID : nil
+            })
+        } catch {
+            return []
+        }
+    }
 }

@@ -108,7 +108,7 @@ function makeCaller(client: Anthropic): AgentCaller {
   return async (args) => {
     const response = await client.messages.create({
       model: args.model,
-      max_tokens: 2000,
+      max_tokens: args.maxTokens ?? 2000,
       system: args.system as any,
       tools: [args.tool as any],
       tool_choice: { type: "tool", name: args.toolName },
@@ -123,7 +123,7 @@ function makeCaller(client: Anthropic): AgentCaller {
     cost += priceOf(args.model, usage, (response.usage as any)?.cache_creation_input_tokens ?? 0);
     cacheRead += usage.cache_read;
     for (const b of response.content) {
-      if (b.type === "tool_use" && b.name === args.toolName) return { input: b.input, usage };
+      if (b.type === "tool_use" && b.name === args.toolName) return { input: b.input, usage, stopReason: response.stop_reason };
     }
     throw new Error(`${args.agent} did not call ${args.toolName}`);
   };

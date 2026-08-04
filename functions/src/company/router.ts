@@ -14,7 +14,38 @@ import {
  * Agents the router may convene. chief_of_staff is excluded on purpose: it is
  * the router and synthesiser, not a department that holds a position.
  */
-const ROUTABLE_AGENTS: AgentId[] = ["product", "finance", "devils_advocate"];
+const ROUTABLE_AGENTS: AgentId[] = [
+  "product",
+  "finance",
+  "engineering",
+  "design",
+  "marketing",
+  "sales",
+  "support",
+  "operations",
+  "legal",
+  "devils_advocate"
+];
+
+/**
+ * Most departments a room may convene, excluding the red team.
+ *
+ * The prompt asks for the smallest room that contains the real disagreement,
+ * but a prompt is a preference and this is a guarantee. Two reasons it has to
+ * be enforced rather than requested:
+ *
+ * Cost. Phase 2 is one call per department, and phase 4 adds one more per
+ * conflicting department per round, up to two rounds — so the bill grows at
+ * roughly 3n, not n. A nine-department room measures around 29 model calls
+ * against a per-run ceiling of $1.50, which means the founder's biggest
+ * questions would be the ones that get truncated by `run_stopped`.
+ *
+ * Quality. A room of nine produces a wall of position cards in a 380pt dock,
+ * and the departments with no real stake in the question pad it with agreement
+ * — which is the exact failure (false consensus) that the red team and the
+ * dissent guard exist to prevent.
+ */
+export const MAX_ROOM_AGENTS = 4;
 
 const REQUEST_TYPES: RequestType[] = ["DECISION", "DIAGNOSIS", "PLANNING", "REVIEW"];
 const DECISIONS: RoutingChoice[] = ["single_agent", "multi_agent", "needs_clarification"];
@@ -111,6 +142,17 @@ export function parseRoutingToolInput(
   if (decision === "multi_agent" && agents.length < 2) {
     return { error: `multi_agent requires at least two agents, got ${agents.length}` };
   }
+  // Counted without the red team: it is not a department and is triggered by
+  // phase 3, not chosen here.
+  const departments = agents.filter((a) => a !== "devils_advocate");
+  if (departments.length > MAX_ROOM_AGENTS) {
+    return {
+      error:
+        `a room may convene at most ${MAX_ROOM_AGENTS} departments, got ` +
+        `${departments.length}: ${departments.join(", ")}. Pick the ones whose ` +
+        `interests actually collide.`
+    };
+  }
 
   if (typeof raw.real_question !== "string" || raw.real_question.trim().length === 0) {
     return { error: "real_question is required" };
@@ -185,6 +227,15 @@ single_agent. Convening the company for a small question wastes the founder's
 money and trains them to ignore the output. Reserve multi_agent for decisions
 that are expensive, hard to reverse, or where you can name at least two
 departments whose interests actually pull in different directions.
+
+Nine departments exist. That is a menu, not a guest list. Convene the smallest
+room that contains the real disagreement — two is the common answer, three is
+occasionally right, four is the hard limit and needs a reason for each seat. A
+department with no stake in this particular question does not observe quietly;
+it pads the room with agreement, which is the one outcome this process exists
+to prevent. If you find yourself inviting five, you have not yet found the
+actual trade-off — say what it is in real_question and pick the two sides of
+it.
 
 Call record_routing.
 

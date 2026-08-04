@@ -156,18 +156,36 @@ final class CompanyStoreChatTests: XCTestCase {
 
     /// A `.done` carrying `nav` appends a nav-chip message (not an auto-navigate);
     /// tapping it (`activateNav`) then selects the resolved `AppView`.
-    func testDoneWithNavAppendsChipAndActivateNavSelects() async {
+    /// A `.done` carrying `nav` attaches the chip to the reply it belongs to rather
+    /// than appending a second message. The chip used to arrive as its own `text: ""`
+    /// message, which drew it outside the reply's bubble and outside the avatar
+    /// column; riding on the reply lets the view draw it inside that card.
+    func testDoneWithNavAttachesChipToReplyAndActivateNavSelects() async {
         let nav = NavAction(destination: "tasks", target: nil)
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.streamer(deltas: ["Here"], nav: nav))
         await s.hydrate(companyId: "u")
         await s.sendChat("where should I look?", language: .en)
-        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
         XCTAssertEqual(s.chatMessages.last?.navChip, nav)
+        XCTAssertEqual(s.chatMessages.last?.text, "Here")   // the reply kept its text
         XCTAssertEqual(s.view, .roadmap)   // still the default landing; unchanged until the chip is tapped
         s.activateNav(nav)
         XCTAssertEqual(s.view, .tasks)
+    }
+
+    /// The fallback still stands: a `nav` with no reply to attach to — an empty
+    /// transcript — keeps its own standalone message rather than being dropped.
+    func testNavWithNoReplyToAttachToStillAppendsItsOwnMessage() async {
+        let nav = NavAction(destination: "tasks", target: nil)
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
+                             chatStreamer: Self.streamer(deltas: [], nav: nav))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("where should I look?", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.navChip, nav)
+        XCTAssertEqual(s.chatMessages.last?.text, "")
     }
 
     /// `nav(department)` resolves `target` to a `DepartmentCatalog` key and opens

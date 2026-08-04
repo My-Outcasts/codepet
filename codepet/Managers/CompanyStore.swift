@@ -380,8 +380,53 @@ final class CompanyStore: ObservableObject {
             interviewState = nil
             // Only the first-run interview earns the greeting. Welcoming the founder
             // right after a mid-session runway question would read as amnesia.
-            if st.seedGreetingWhenDone { seedFirstRunGreeting(language: language) }
+            if st.seedGreetingWhenDone {
+                seedFirstRunGreeting(language: language)
+            } else {
+                seedVirtualCompanyInterviewClose(language: language)
+            }
         }
+    }
+
+    /// Closes the Virtual Company's runway/constraints interview.
+    ///
+    /// Without this the founder answered two questions and the conversation simply
+    /// stopped — nothing said, nothing visibly changed. It read as "that did
+    /// nothing", which was fair: neither answer appears anywhere in the UI, so a
+    /// closing line is the only evidence they landed at all.
+    ///
+    /// It quotes both answers back rather than thanking them abstractly, because
+    /// the point is to show the room heard the specifics, and it names what the
+    /// answers change — a founder has no way to know that runway is what makes a
+    /// three-week proposal unacceptable.
+    private func seedVirtualCompanyInterviewClose(language: AppLanguage) {
+        let runway = (company.brief.runway ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let limits = (company.brief.constraints ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        // Both skipped: say so honestly instead of claiming an effect that is not
+        // there. The room will keep saying what it does not know.
+        guard !runway.isEmpty || !limits.isEmpty else {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Không sao — mình vẫn họp được, chỉ là các khuyến nghị sẽ chung chung hơn vì phòng họp chưa biết runway và ràng buộc của bạn."
+                : "No problem — the room can still meet, but its recommendations stay more general while it doesn't know your runway or your constraints."))
+            return
+        }
+
+        var recorded: [String] = []
+        if !runway.isEmpty { recorded.append((language == .vi ? "runway: " : "runway: ") + runway) }
+        if !limits.isEmpty { recorded.append(limits.joined(separator: " · ")) }
+        let echo = recorded.joined(separator: " · ")
+
+        let effect = language == .vi
+            ? "Từ giờ phòng họp cân cả hai khi ra khuyến nghị: nó sẽ loại những đề xuất ăn quá nhiều thời gian bạn còn, và không đề xuất thứ bạn đã gạt."
+            : "From now on the room weighs both when it recommends: it drops proposals that eat too much of the time you have left, and stops suggesting what you have already ruled out."
+
+        chatMessages.append(CopilotMessage(
+            role: .companion,
+            text: (language == .vi ? "Ghi lại rồi — " : "On record — ") + echo + ". " + effect))
     }
 
     /// Skip: stamp with the current (empty) brief so they aren't re-blocked. Called
@@ -1046,10 +1091,64 @@ final class CompanyStore: ObservableObject {
     /// after the `taskRunner` await so an account switch mid-run can't append
     /// this account's draft into a different (already-hydrated) account's chat.
     private func handleRunTaskId(_ runId: String?, cid: String?, language: AppLanguage) async {
-        guard let runId,
-              let task = company.tasks.first(where: { $0.id == runId }),
-              RoadmapEngine.status(for: task, in: company.tasks) == .codepetCanDo else { return }
+        // No run was requested — the overwhelmingly common case. Say nothing.
+        guard let runId else { return }
+
+        // Everything below is the case where byte ALREADY promised. `sendMessage`
+        // writes "on it, putting that together now" before this runs, so returning
+        // silently here left the founder watching a promise nobody kept — observed
+        // in the app: lead-in, then nothing, forever. Each refusal knows exactly
+        // why, and three of the five reasons are the founder's own move rather than
+        // a failure, so every one of them is worth saying out loud.
+        guard let task = company.tasks.first(where: { $0.id == runId }) else {
+            appendRunRefusal(language == .vi
+                ? "Mình vừa nói sẽ làm, nhưng không tìm thấy việc đó trong lộ trình nữa — có thể nó đã bị đổi. Bạn nói lại là việc nào nhé."
+                : "I said I'd get on it, but I can't find that task in the roadmap any more — it may have changed. Tell me which one and I'll pick it up.")
+            return
+        }
+
+        let status = RoadmapEngine.status(for: task, in: company.tasks)
+        guard status == .codepetCanDo else {
+            appendRunRefusal(Self.runRefusalCopy(status, task: task, language: language))
+            return
+        }
         _ = await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    private func appendRunRefusal(_ text: String) {
+        chatMessages.append(CopilotMessage(role: .companion, text: text))
+    }
+
+    /// Why byte cannot run this task, in the founder's terms. Deliberately names the
+    /// task, because the founder did not choose it — byte did — so "that one" is not
+    /// enough to act on.
+    private static func runRefusalCopy(_ status: TaskStatus,
+                                      task: RoadmapTask,
+                                      language: AppLanguage) -> String {
+        let vi = language == .vi
+        switch status {
+        case .needsApproval:
+            return vi
+                ? "\"\(task.title)\" đã có bản nháp đang chờ bạn duyệt — mình không làm lại để khỏi ghi đè. Duyệt hoặc yêu cầu sửa bản đó trước nhé."
+                : "\"\(task.title)\" already has a draft waiting for your approval — I won't redo it and overwrite that. Approve or revise the existing one first."
+        case .done:
+            return vi
+                ? "\"\(task.title)\" đã xong rồi — mình không chạy lại. Nếu muốn làm lại từ đầu thì mở việc đó ra rồi nói mình."
+                : "\"\(task.title)\" is already done — I won't run it again. Open it and tell me if you want it redone from scratch."
+        case .blocked:
+            return vi
+                ? "\"\(task.title)\" chưa tới lượt — nó còn chờ một việc khác xong, hoặc giai đoạn của nó chưa mở."
+                : "\"\(task.title)\" isn't ready yet — it's still waiting on another task, or its phase hasn't opened."
+        case .needsYou:
+            return vi
+                ? "\"\(task.title)\" là việc chỉ bạn làm được, mình không thay bạn làm được việc đó. Cần thì mình hướng dẫn từng bước."
+                : "\"\(task.title)\" is yours to do — I can't do that one for you. I can walk you through it step by step if that helps."
+        case .codepetCanDo:
+            // Unreachable: the caller only lands here when the status is not runnable.
+            return vi
+                ? "Mình chưa chạy được \"\(task.title)\" lúc này."
+                : "I couldn't start \"\(task.title)\" just now."
+        }
     }
 
     /// The single inline-run path shared by EVERY chat run (typed "run" command
@@ -1134,16 +1233,40 @@ final class CompanyStore: ObservableObject {
 
     /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which
     /// shows a chip the founder taps). Tapping it later calls `activateNav`.
+    /// The reply an inline action belongs to: the last companion message that
+    /// actually said something and isn't already carrying a card of its own.
+    ///
+    /// Actions used to be appended as their own `text: ""` message, which drew the
+    /// control as a separate row — outside the reply's bubble and outside the avatar
+    /// column it should line up with, wasting the width of the dock. Attaching to
+    /// the reply lets the view draw the control inside that reply's card. The append
+    /// is kept as a fallback for an action that arrives with no reply to attach to.
+    private func inlineActionTarget() -> Int? {
+        guard let i = chatMessages.lastIndex(where: { $0.role == .companion }) else { return nil }
+        let m = chatMessages[i]
+        guard !m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !m.producing, m.draft == nil, m.vcRun == nil, m.interview == nil else { return nil }
+        return i
+    }
+
     private func handleNav(_ nav: NavAction?, cid: String?) async {
         guard let nav, companyId == cid else { return }
-        chatMessages.append(CopilotMessage(role: .companion, text: "", navChip: nav))
+        if let i = inlineActionTarget(), chatMessages[i].navChip == nil {
+            chatMessages[i].navChip = nav
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", navChip: nav))
+        }
     }
 
     /// `setup`: append a tappable enable-card. Tapping it later calls `activateSetup`
     /// (guarded — never flips an already-on tool off).
     private func handleSetup(_ setup: SetupAction?, cid: String?) async {
         guard let setup, companyId == cid else { return }
-        chatMessages.append(CopilotMessage(role: .companion, text: "", setupSuggestion: setup))
+        if let i = inlineActionTarget(), chatMessages[i].setupSuggestion == nil {
+            chatMessages[i].setupSuggestion = setup
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", setupSuggestion: setup))
+        }
     }
 
     /// `remember`: AUTO-merge + persist immediately (background memory, like the
@@ -1157,8 +1280,14 @@ final class CompanyStore: ObservableObject {
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
         guard companyId == cid else { return }
-        for fact in facts {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
+        // All facts land on the one reply rather than one bare row per fact — three
+        // remembered facts used to mean three separate chips stacked under the bubble.
+        if let i = inlineActionTarget(), chatMessages[i].noted == nil {
+            chatMessages[i].noted = facts
+        } else {
+            for fact in facts {
+                chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
+            }
         }
     }
 
@@ -1668,6 +1797,37 @@ final class CompanyStore: ObservableObject {
     }
 
     /// Enable/disable a toolkit item and persist (fail-soft).
+    /// Connector ids the founder has actually authorised, read from the server.
+    ///
+    /// Kept separate from `company.enabledTools` on purpose: that set is a local
+    /// preference the client owns, while this one is a fact about a stored OAuth
+    /// token that only the backend can establish. A connector row shows *this*,
+    /// so it can never claim "Connected" for a token that does not exist.
+    @Published private(set) var connectedProviders: Set<String> = []
+
+    func refreshConnectorStatus() async {
+        guard let cid = companyId else { return }
+        connectedProviders = await CompanyData.loadConnectorStatus(cid)
+    }
+
+    /// Run a provider's consent flow, then reconcile from the server rather than
+    /// assuming success — the token is written by the Cloud Function, so the
+    /// server is the only thing that knows whether it landed.
+    @discardableResult
+    func connectProvider(_ provider: ConnectorProvider) async -> ConnectorAuthResult {
+        let result = await ConnectorAuth.shared.connect(provider)
+        guard result == .connected else { return result }
+        await refreshConnectorStatus()
+        // Mirror into the toolkit flag so everything that already reads
+        // `enabledTools` — byte's env_setup list, the usage receipts — sees the
+        // connector as available, without those call sites learning about OAuth.
+        if connectedProviders.contains(provider.toolId),
+           !company.enabledTools.contains(provider.toolId) {
+            await toggleTool(id: provider.toolId)
+        }
+        return result
+    }
+
     func toggleTool(id: String) async {
         if company.enabledTools.contains(id) {
             company.enabledTools.remove(id)

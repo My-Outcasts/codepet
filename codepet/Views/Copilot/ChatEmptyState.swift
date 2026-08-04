@@ -111,6 +111,7 @@ struct ChatEmptyState<Composer: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CodepetTheme.surface))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CodepetTheme.hairline))
+            .hoverAffordance(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }.buttonStyle(.plain)
     }
 
@@ -127,6 +128,7 @@ struct ChatEmptyState<Composer: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CodepetTheme.surface))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CodepetTheme.hairline))
+            .hoverAffordance(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }.buttonStyle(.plain)
     }
 }

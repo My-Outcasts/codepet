@@ -52,9 +52,44 @@ final class CompanyStoreChatRunTests: XCTestCase {
                       runner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# y") })
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
-        XCTAssertEqual(s.chatMessages.count, 2)                   // me + lead-in only
         XCTAssertNil(s.chatMessages.last?.draft)
+        // byte had already promised in the lead-in, so silence left the founder
+        // watching a promise nobody kept. It now says why instead.
+        XCTAssertEqual(s.chatMessages.count, 3)                   // me + lead-in + why
+        XCTAssertTrue(s.chatMessages.last?.text.contains("can't find that task") == true)
     }
+
+    func testARefusalNamesTheTaskAndTheReason() async {
+        // Each refusal reason is a different founder action, so each has to be
+        // distinguishable — "couldn't run it" would be useless for all four.
+        let cases: [(RoadmapTask, String)] = [
+            (RoadmapTask(id: "t1", title: "Survey users", detail: "", phase: .find,
+                         who: .does, drafted: true), "waiting for your approval"),
+            (RoadmapTask(id: "t1", title: "Survey users", detail: "", phase: .find,
+                         who: .does, done: true), "already done"),
+            (RoadmapTask(id: "t1", title: "Survey users", detail: "", phase: .find,
+                         who: .you), "yours to do")
+        ]
+        for (task, expected) in cases {
+            let s = CompanyStore(loader: { _ in
+                CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                             companionId: "byte", onboardedAt: Date(), tasks: [task])
+            }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
+               chatSender: { _ in CompanyChatReply(text: "hm", runTaskId: "t1") },
+               chatStreamer: Self.failingStreamer,
+               taskRunner: { _ in XCTFail("an unrunnable task must not reach the runner"); return nil },
+               decisionExtractor: { _, _ in [] })
+            await s.hydrate(companyId: "u")
+            await s.sendChat("hi", language: .en)
+
+            XCTAssertNil(s.chatMessages.last?.draft)
+            let text = s.chatMessages.last?.text ?? ""
+            XCTAssertTrue(text.contains(expected), "expected \(expected) — got: \(text)")
+            XCTAssertTrue(text.contains("Survey users"),
+                          "the founder did not pick this task, byte did — naming it is what makes the refusal actionable")
+        }
+    }
+
     func testChatRunFailureHonestBubble() async {
         let s = store(reply: CompanyChatReply(text: "On it", runTaskId: "t1"),
                       runner: { _ in nil })
@@ -206,8 +241,9 @@ final class CompanyStoreChatRunTests: XCTestCase {
                              decisionExtractor: { _, _ in [] })
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
-        XCTAssertEqual(s.chatMessages.count, 2)                   // me + lead-in only
         XCTAssertNil(s.chatMessages.last?.draft)
+        XCTAssertEqual(s.chatMessages.count, 3)                   // me + lead-in + why
+        XCTAssertTrue(s.chatMessages.last?.text.contains("can't find that task") == true)
     }
 
     func testStreamingDoneWithNilRunTaskIdIsNoOp() async {

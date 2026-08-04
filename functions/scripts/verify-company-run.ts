@@ -76,7 +76,7 @@ function makeCaller(client: Anthropic): AgentCaller {
   return async (args) => {
     const response = await client.messages.create({
       model: args.model,
-      max_tokens: 2000,
+      max_tokens: args.maxTokens ?? 2000,
       system: args.system as any,
       tools: [args.tool as any],
       tool_choice: { type: "tool", name: args.toolName },
@@ -100,7 +100,7 @@ function makeCaller(client: Anthropic): AgentCaller {
 
     for (const block of response.content) {
       if (block.type === "tool_use" && block.name === args.toolName) {
-        return { input: block.input, usage };
+        return { input: block.input, usage, stopReason: response.stop_reason };
       }
     }
     fail(`${args.agent} did not call ${args.toolName} — forced tool_choice was ignored`);

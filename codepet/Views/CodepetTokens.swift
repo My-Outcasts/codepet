@@ -116,6 +116,80 @@ extension View {
                 .stroke(CodepetTokens.cardEdge, lineWidth: 1))
             .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
     }
+
+    /// The one hover + hit-area treatment for controls that opted out of AppKit's
+    /// chrome with `.buttonStyle(.plain)`.
+    ///
+    /// Two defects it repairs together. A shape drawn with `.stroke` hit-tests along
+    /// its 1pt path only, so an outlined pill responds on its outline and its glyphs
+    /// but not across the padding between them — `contentShape` gives the control the
+    /// hit area its outline always implied. And `.plain` strips the pointer response
+    /// AppKit would have drawn, which leaves a working control reading as a disabled
+    /// one; a faint same-shape fill on hover restores it.
+    ///
+    /// Nothing changes at rest: the fill is fully transparent until the pointer is
+    /// inside, so every surface keeps the design it has today.
+    func hoverAffordance<S: InsettableShape>(
+        _ shape: S,
+        accent: Color = CodepetTheme.accentPurple
+    ) -> some View {
+        modifier(HoverAffordance(shape: shape, accent: accent))
+    }
+
+    /// Show `cursor` while the pointer is inside, and guarantee the matching pop.
+    ///
+    /// `NSCursor.push()` and `.pop()` operate on a stack that must balance, and
+    /// `onHover(false)` does **not** fire when a view disappears from under the
+    /// pointer. A bare `if inside { push() } else { pop() }` therefore leaks: clicking
+    /// the dock divider to collapse it removed the handle mid-hover, leaving the
+    /// resize cursor set for the rest of the session. This pops on disappear, and
+    /// refuses to pop a push it never made — which also absorbs the repeated
+    /// `onHover(true)` callbacks that would otherwise push twice.
+    ///
+    /// `onChange` carries the hover state through for callers that also drive their
+    /// own highlight from it.
+    func cursorOnHover(_ cursor: NSCursor, onChange: ((Bool) -> Void)? = nil) -> some View {
+        modifier(CursorOnHover(cursor: cursor, onChange: onChange))
+    }
+}
+
+/// Backing modifier for `cursorOnHover(_:onChange:)` — needs `@State` to remember
+/// whether this view owns a push, so it cannot live in the `View` extension.
+struct CursorOnHover: ViewModifier {
+    let cursor: NSCursor
+    let onChange: ((Bool) -> Void)?
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                onChange?(inside)
+                guard inside != pushed else { return }
+                pushed = inside
+                if inside { cursor.push() } else { NSCursor.pop() }
+            }
+            .onDisappear {
+                guard pushed else { return }
+                pushed = false
+                NSCursor.pop()
+            }
+    }
+}
+
+/// Backing modifier for `hoverAffordance(_:accent:)` — needs `@State`, so it cannot
+/// live in the `View` extension itself.
+struct HoverAffordance<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let accent: Color
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(shape)
+            .background(shape.fill(accent.opacity(hovering ? 0.14 : 0)))
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
 }
 
 // MARK: - Overview roadmap board

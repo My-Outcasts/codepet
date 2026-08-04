@@ -124,10 +124,7 @@ struct AppShellView: View {
             .overlay(Color.clear.frame(width: 11).contentShape(Rectangle()))
             .help(uiLanguage == .vi ? "Nhấn để thu gọn (⌘B) · Kéo để đổi cỡ"
                                     : "Click to collapse (⌘B) · Drag to resize")
-            .onHover { inside in
-                handleHovered = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
+            .cursorOnHover(.resizeLeftRight) { handleHovered = $0 }
             .gesture(
                 DragGesture(minimumDistance: 3)
                     .onChanged { v in

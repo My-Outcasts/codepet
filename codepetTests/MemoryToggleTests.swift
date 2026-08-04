@@ -135,17 +135,16 @@ final class MemoryToggleTests: XCTestCase {
 
     /// The last link of store 2: the store itself consults the gate, so both payload
     /// accessors (`promptPayload(for:)` for the summarize CFs, `allMemoryPrompt()` for
-    /// Tips) go quiet. Uses its OWN instance and restores the UserDefaults key, so it
-    /// neither shares state with `PetMemoryStore.shared` nor eats real pet memory.
+    /// Tips) go quiet. Uses its OWN instance pointed at its OWN suite + key, so it can
+    /// neither share state with `PetMemoryStore.shared` nor touch real founder memory:
+    /// writing the live `cp_pet_memory_v1` key would put a save-restore race against any
+    /// running app, whose `.shared.save()` can land after the restore.
     func test_petMemoryStoreItselfGoesQuietWhenMemoryIsOff() {
-        let key = "cp_pet_memory_v1"
-        let saved = UserDefaults.standard.data(forKey: key)
-        defer {
-            if let saved { UserDefaults.standard.set(saved, forKey: key) }
-            else { UserDefaults.standard.removeObject(forKey: key) }
-        }
+        let suiteName = "app.murror.codepet.tests.memoryGate"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let path = "/tmp/codepet-memory-gate-test"
-        let store = PetMemoryStore()
+        let store = PetMemoryStore(defaults: defaults, key: "cp_pet_memory_test")
         store.resetAll()
         store.recordSessionEnd(projectPath: path, sessionDate: Date(), durationMinutes: 30,
                                summary: "shipped the settings modal", lesson: nil, filesWorkedOn: [])

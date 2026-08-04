@@ -15,7 +15,13 @@ final class PetMemoryStore: ObservableObject {
     static let shared = PetMemoryStore()
 
     private let logger = Logger(subsystem: "app.murror.codepet", category: "PetMemory")
-    private let key = "cp_pet_memory_v1"
+
+    /// Where memories live. Injectable ONLY so a test can point an instance at its own
+    /// suite/key: the app always uses the real `.standard` + `cp_pet_memory_v1`, and a test
+    /// that wrote there could have its `defer`-restore clobbered by a running app's `save()`
+    /// — i.e. eat real founder memory on the dev machine.
+    private let defaults: UserDefaults
+    private let key: String
 
     /// All memories keyed by resolved project path.
     @Published private(set) var memories: [String: PetMemory] = [:]
@@ -32,7 +38,9 @@ final class PetMemoryStore: ObservableObject {
     /// `ChatContext.compose(memoryEnabled:)` silences the facts the team was told.
     func setMemoryEnabled(_ enabled: Bool) { memoryEnabled = enabled }
 
-    init() {
+    init(defaults: UserDefaults = .standard, key: String = "cp_pet_memory_v1") {
+        self.defaults = defaults
+        self.key = key
         load()
     }
 
@@ -134,7 +142,7 @@ final class PetMemoryStore: ObservableObject {
     /// Clear all per-project pet memories. Called on account switch.
     func resetAll() {
         memories = [:]
-        UserDefaults.standard.removeObject(forKey: key)
+        defaults.removeObject(forKey: key)
     }
 
     /// Re-hydrate from the (account-swapped) UserDefaults key. Clears first so a
@@ -145,7 +153,7 @@ final class PetMemoryStore: ObservableObject {
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        guard let data = defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([String: PetMemory].self, from: data) else {
             return
         }
@@ -154,7 +162,7 @@ final class PetMemoryStore: ObservableObject {
 
     private func save() {
         guard let data = try? JSONEncoder().encode(memories) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        defaults.set(data, forKey: key)
     }
 
     private func shortenPath(_ path: String) -> String {

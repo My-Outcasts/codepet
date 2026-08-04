@@ -16,9 +16,11 @@ struct RoadmapView: View {
     @State private var headerWidth: CGFloat = 0
     private enum OverviewTab: Hashable { case roadmap, secondBrain }
 
-    /// The board re-tints with the chosen companion, exactly like the surrounding chrome
-    /// (`AppShellView.accent`) — web threads one `--accent` custom property through both.
-    private var accent: Color { PetCharacter.all[appState.activeChar]?.color ?? CodepetTheme.accentPurple }
+    /// Matches the surrounding chrome (`AppShellView.accent`) — web threads one
+    /// `--accent` through both. Founder call (Aug 3): that accent is Codepet purple,
+    /// NOT the companion's colour. Previously read from `appState.activeChar`, which
+    /// made the whole board, its connectors and the root node's glow red under Crash.
+    private var accent: Color { CodepetTheme.accentPurple }
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
     private var companionName: String {

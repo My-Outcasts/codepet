@@ -2,36 +2,6 @@
 import XCTest
 @testable import codepet
 
-/// One-shot async gate — same device as `CompanyStoreFounderNameTests`' `OneShotGate`,
-/// duplicated (file-private) rather than shared so neither test file owns the other's
-/// harness. Deterministically interleaves two concurrent `Task`s without `Task.sleep`.
-private final class PrefsGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var opened = false
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func wait() async {
-        lock.lock()
-        if opened { lock.unlock(); return }
-        lock.unlock()
-        await withCheckedContinuation { cont in
-            lock.lock()
-            if opened { lock.unlock(); cont.resume(); return }
-            continuation = cont
-            lock.unlock()
-        }
-    }
-
-    func open() {
-        lock.lock()
-        opened = true
-        let cont = continuation
-        continuation = nil
-        lock.unlock()
-        cont?.resume()
-    }
-}
-
 @MainActor
 final class FounderPrefsPersistenceTests: XCTestCase {
     func test_setFounderPrefs_updatesStateAndWritesOnce() async {
@@ -99,8 +69,8 @@ final class FounderPrefsPersistenceTests: XCTestCase {
     /// window (a settings panel committing a draft from inside a sign-out / account
     /// switch) must not land on the incoming account's document.
     func test_setFounderPrefsDroppedWhileHydratingADifferentAccount() async {
-        let loaderEntered = PrefsGate()
-        let letLoaderFinish = PrefsGate()
+        let loaderEntered = OneShotGate()
+        let letLoaderFinish = OneShotGate()
         var writes: [(cid: String, prefs: FounderPrefs)] = []
 
         let bState = CompanyState(brief: CompanyBrief(projectName: "B-Co"),

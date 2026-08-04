@@ -2,36 +2,6 @@
 import XCTest
 @testable import codepet
 
-/// One-shot async gate for deterministically interleaving two concurrent `Task`s in a
-/// test, without relying on timing (`Task.sleep`). `open()` is idempotent and safe to
-/// call before or after `wait()`.
-private final class OneShotGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var opened = false
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func wait() async {
-        lock.lock()
-        if opened { lock.unlock(); return }
-        lock.unlock()
-        await withCheckedContinuation { cont in
-            lock.lock()
-            if opened { lock.unlock(); cont.resume(); return }
-            continuation = cont
-            lock.unlock()
-        }
-    }
-
-    func open() {
-        lock.lock()
-        opened = true
-        let cont = continuation
-        continuation = nil
-        lock.unlock()
-        cont?.resume()
-    }
-}
-
 /// Regression (settings-modal review finding, Important): `PreferencesPanel` commits
 /// its Preferred Name draft on `.onDisappear`, which can fire from inside a sign-out /
 /// account-switch — i.e. AFTER `hydrate` has already flipped `companyId` to the

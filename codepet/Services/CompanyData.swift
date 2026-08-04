@@ -140,8 +140,9 @@ enum CompanyData {
     /// Pure Firestore payload for a founder-prefs write — testable without Firestore.
     /// Nested object (like `briefPayload`), so the whole prefs blob is one doc field.
     /// The encode-failed branch is unreachable (every field is a JSON primitive) but drops
-    /// the key rather than emitting `["founderPrefs": [:]]`: a merge of an empty map would
-    /// erase preferences that are already stored, where a no-op leaves them intact.
+    /// the key rather than emitting `["founderPrefs": [:]]`: see the guard in
+    /// `saveFounderPrefs`, which turns that empty payload into a skipped write rather than
+    /// a delete.
     static func founderPrefsPayload(_ prefs: FounderPrefs) -> [String: Any] {
         if let data = try? JSONEncoder().encode(prefs),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -150,12 +151,28 @@ enum CompanyData {
         return [:]
     }
 
-    /// Write companies/{uid}.founderPrefs, merge. Fail-soft: false on error — a lost write
+    /// Write companies/{uid}.founderPrefs. Fail-soft: false on error — a lost write
     /// only means the previous preferences come back on reload.
+    ///
+    /// `mergeFields: ["founderPrefs"]`, NOT `merge: true`: `founderPrefs.notifications`
+    /// is a nested map (category key -> channel), and Firestore's `merge: true` deep-merges
+    /// nested maps — it can only ADD or CHANGE keys inside `notifications`, never remove
+    /// one. Writing `notifications: [:]` to turn a category back to its default would then
+    /// leave the old entry in the document forever, and `state(from:)` would read it back
+    /// on next launch. `mergeFields` replaces the whole `founderPrefs` field wholesale
+    /// instead of recursing into it, so a cleared category actually clears. Every other
+    /// field on the company doc is untouched either way, and the doc is still created if
+    /// absent. Do not "simplify" this back to `merge: true`.
     static func saveFounderPrefs(companyId: String, prefs: FounderPrefs) async -> Bool {
+        let payload = founderPrefsPayload(prefs)
+        // Encoding FounderPrefs can't actually fail (every field is a JSON primitive), but
+        // if it ever did, `payload` would be `[:]` — with `mergeFields`, unlike `merge`,
+        // writing that would DELETE `founderPrefs` rather than no-op, so skip the write
+        // entirely rather than risk erasing prefs that are already stored.
+        guard !payload.isEmpty else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(founderPrefsPayload(prefs), merge: true)
+                .setData(payload, mergeFields: ["founderPrefs"])
             return true
         } catch {
             return false

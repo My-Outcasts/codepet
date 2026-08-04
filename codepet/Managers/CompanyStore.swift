@@ -1579,10 +1579,10 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         company = .empty
-        // `.empty`'s prefs are the defaults, and memory defaults to ON — restoring it here
-        // keeps `PetMemoryStore` in step with the company we just reset to, so the NEXT
-        // account never inherits the outgoing founder's switch.
-        codingMemoryGate(CompanyState.empty.founderPrefs.memoryEnabled)
+        // Read off the company we just reset to (so it can't drift from what `reset()`
+        // assigns), which means the default: memory ON. The NEXT account therefore never
+        // inherits the outgoing founder's switch — `hydrate` pushes theirs.
+        codingMemoryGate(company.founderPrefs.memoryEnabled)
         view = .roadmap
         isHydrating = false
         isOnboarding = false

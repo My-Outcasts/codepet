@@ -243,7 +243,12 @@ struct CodePetApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
                     // Guarded so the panel does not pop open the instant onboarding ends.
-                    guard !companyStore.isOnboarding else { return }
+                    // `companyId` is only set once a company is hydrated, which is also the
+                    // only state where `AppShellView` — the sole mount point for the
+                    // overlay — is on screen. Without it, ⌘, on the splash or sign-in
+                    // screen would silently arm the flag and greet the founder with a
+                    // settings panel over their first frame of the shell.
+                    guard companyStore.companyId != nil, !companyStore.isOnboarding else { return }
                     companyStore.openSettings()
                 }
                 .keyboardShortcut(",", modifiers: .command)

@@ -82,6 +82,10 @@ struct PreferencesPanel: View {
             }
         }
         .onAppear { draftName = companyStore.company.brief.founderName ?? "" }
+        // Return commits, and so does leaving: closing the modal or switching sections is
+        // the same "I'm done typing" as a keypress, and silently dropping a name the
+        // founder just typed because they clicked ✕ instead of Return is not a save policy.
+        .onDisappear { commitName() }
     }
 
     private func commitName() {

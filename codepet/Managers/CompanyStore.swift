@@ -1515,6 +1515,10 @@ final class CompanyStore: ObservableObject {
         for task in vcTasks.values { task.cancel() }
         vcTasks = [:]
         selectedDeptKey = nil
+        // The settings overlay only renders inside `AppShellView`, so signing out with it
+        // open hides it without closing it — leaving this set would hand the NEXT account
+        // a settings panel over their first frame of the shell.
+        settingsSection = nil
         activeProjectLink = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)

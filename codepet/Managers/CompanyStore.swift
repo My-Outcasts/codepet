@@ -11,6 +11,10 @@ final class CompanyStore: ObservableObject {
     /// User's manual collapse of the docked copilot (session-only). The shell also
     /// auto-collapses on a narrow window via ShellLayout; this is the manual override.
     @Published var dockCollapsed: Bool = false
+    /// Which settings section is open, or `nil` when settings is closed. Settings is an
+    /// overlay rather than an `AppView`, so opening it never changes `view` and closing
+    /// it needs no route to restore.
+    @Published var settingsSection: SettingsSection?
     @Published private(set) var company: CompanyState = .empty
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
@@ -198,6 +202,15 @@ final class CompanyStore: ObservableObject {
     }
 
     func select(_ view: AppView) { self.view = view }
+
+    var isSettingsOpen: Bool { settingsSection != nil }
+
+    /// Open settings, optionally on a specific section (chat cards deep-link this way).
+    func openSettings(_ section: SettingsSection = .preferences) {
+        settingsSection = section
+    }
+
+    func closeSettings() { settingsSection = nil }
 
     /// Mirrors the web (`Boolean(onboardedAt) || Object.keys(brief).length > 0`):
     /// onboard only when there is no stamp AND the brief has no signal at all.

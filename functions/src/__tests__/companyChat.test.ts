@@ -9,6 +9,9 @@ import {
   validateNavigateToolUse,
   validateSetupToolUse,
   coerceRememberFacts,
+  parseEnabledSkills,
+  buildSkillsBlock,
+  WEB_SEARCH_TOOL,
 } from "../companyChatCore";
 
 describe("companionFor", () => {
@@ -790,6 +793,34 @@ describe("handleCompanyChat", () => {
       expect((res as any).ended()).toBe(true);
     });
 
+    test("a server-side tool block never becomes a phantom client action", async () => {
+      // Anthropic runs web_search itself, so its block arrives as
+      // `server_tool_use` — which the raw-event mapper does NOT open an
+      // accumulator for. Its input still streams and its block still closes, so
+      // the handler sees a tool_use_delta + tool_use_stop for an index that was
+      // never started. That must be inert: an unguarded accumulator would
+      // fabricate a tool call out of a search the founder never asked for.
+      __setStreamFactoryForTests(async function* () {
+        yield { type: "tool_use_delta", index: 0, partial_json: '{"query":"claude pricing"}' };
+        yield { type: "tool_use_stop", index: 0 };
+        yield { type: "text", text: "Sonnet 5 is $3/MTok in." };
+        yield { type: "done", usage: { input_tokens: 5, output_tokens: 5 } };
+      });
+
+      const req = makeStreamingReq();
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      const body = (res as any).writes.join("");
+      expect(body).toContain('event: delta\ndata: {"text":"Sonnet 5 is $3/MTok in."}');
+      expect(body).toContain("event: done");
+      // No action of any kind was invented from the server-side search.
+      expect(body).not.toContain('"run_task_id":"');
+      expect(body).not.toContain('"nav":');
+      expect(body).not.toContain('"setup":');
+      expect((res as any).ended()).toBe(true);
+    });
+
     test("mid-stream failure emits an error frame (headers already sent)", async () => {
       __setStreamFactoryForTests(async function* () {
         yield { type: "text", text: "Here's " };
@@ -1016,5 +1047,63 @@ describe("handleCompanyChat", () => {
       expect(body).toContain('"nav":{"destination":"tasks"}');
       expect(body).toContain('"remember":[{"topic":"pricing","statement":"$10/mo plan decided."}]');
     });
+  });
+});
+
+describe("parseEnabledSkills", () => {
+  it("keeps only ids the backend actually implements", () => {
+    const s = parseEnabledSkills(["web-research", "prd-writer"]);
+    expect(s.has("web-research")).toBe(true);
+    expect(s.has("prd-writer")).toBe(true);
+    expect(s.size).toBe(2);
+  });
+  it("drops catalog items that exist in the app but have no implementation", () => {
+    // The founder can toggle these on today; nothing is built behind them, so
+    // the CF must ignore them rather than pretend.
+    const s = parseEnabledSkills(["code-review", "changelog", "explorer", "migrator"]);
+    expect(s.size).toBe(0);
+  });
+  it("normalizes case and whitespace", () => {
+    expect(parseEnabledSkills(["  Web-Research "]).has("web-research")).toBe(true);
+  });
+  it("ignores non-arrays and non-strings", () => {
+    expect(parseEnabledSkills(undefined).size).toBe(0);
+    expect(parseEnabledSkills("web-research").size).toBe(0);
+    expect(parseEnabledSkills([1, null, {}, ["web-research"]]).size).toBe(0);
+  });
+  it("dedupes", () => {
+    expect(parseEnabledSkills(["web-research", "web-research"]).size).toBe(1);
+  });
+});
+
+describe("buildSkillsBlock", () => {
+  it("is empty when no skills are on, leaving the prompt untouched", () => {
+    expect(buildSkillsBlock(new Set())).toBe("");
+  });
+  it("describes only the skills that are on", () => {
+    const b = buildSkillsBlock(new Set(["prd-writer"]));
+    expect(b).toContain("SKILLS THE FOUNDER HAS TURNED ON");
+    expect(b).toContain("PRD writer");
+    expect(b).not.toContain("Web research");
+  });
+  it("tells web research not to search what the context already answers", () => {
+    // The cost guard: an unconditional searcher would bill on every turn.
+    expect(buildSkillsBlock(new Set(["web-research"]))).toMatch(/already answered by the/i);
+  });
+  it("can carry both at once", () => {
+    const b = buildSkillsBlock(new Set(["web-research", "prd-writer"]));
+    expect(b).toContain("Web research");
+    expect(b).toContain("PRD writer");
+  });
+});
+
+describe("WEB_SEARCH_TOOL", () => {
+  it("is the dated server-side tool type the chat model supports", () => {
+    expect(WEB_SEARCH_TOOL.type).toBe("web_search_20260209");
+    expect(WEB_SEARCH_TOOL.name).toBe("web_search");
+  });
+  it("caps searches per request so one turn cannot outspend a day of chat", () => {
+    expect(WEB_SEARCH_TOOL.max_uses).toBeGreaterThan(0);
+    expect(WEB_SEARCH_TOOL.max_uses).toBeLessThanOrEqual(5);
   });
 });

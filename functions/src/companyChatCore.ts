@@ -335,6 +335,84 @@ export function validateSetupToolUse(rawInput: unknown, envSetup: EnvSetupItem[]
 }
 
 // ─── remember_fact tool (optional, always offered, orthogonal) ────────────
+// ─── Skills the founder has turned ON ────────────────────────────────────────
+// Distinct from `env_setup`, which carries the items that are OFF so byte can
+// offer them. This is the other half of that conversation, and until now it did
+// not exist: `enabledTools` never left the client, so turning a skill on changed
+// nothing about the request. A toggle that alters no behaviour is a promise the
+// app doesn't keep, which is exactly what this closes.
+//
+// THE BACKEND IS THE AUTHORITY ON WHAT IS REAL. The client may send any id from
+// its catalog; only ids listed here do anything. That keeps the honest boundary
+// in one place — a skill ships when it appears in this set and the code below
+// acts on it, not when someone adds a row to the catalog.
+export const IMPLEMENTED_SKILLS = ["web-research", "prd-writer"] as const;
+export type ImplementedSkill = (typeof IMPLEMENTED_SKILLS)[number];
+
+const IMPLEMENTED_SKILL_SET: ReadonlySet<string> = new Set(IMPLEMENTED_SKILLS);
+
+/**
+ * Anthropic's server-side web search. Hosted — declaring it is the whole
+ * integration; there is no handler to write.
+ *
+ * `max_uses` is a COST CEILING, not a hint. Each search is billed on top of
+ * tokens, and chat is priced to feel unlimited at ~0.25 credit/msg, so an
+ * uncapped tool could quietly make a single turn cost more than a day of chat.
+ * Three is enough to answer a real question and cheap enough to not notice.
+ */
+export const WEB_SEARCH_TOOL = {
+  type: "web_search_20260209",
+  name: "web_search",
+  max_uses: 3,
+} as const;
+
+/** The subset of `enabled_skills` this backend actually implements. */
+export function parseEnabledSkills(raw: unknown): Set<string> {
+  if (!Array.isArray(raw)) return new Set();
+  const out = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const id = v.trim().toLowerCase();
+    // Unknown ids are dropped rather than passed through: the founder may have
+    // toggled on a catalog item we have not built, and silence is the honest
+    // response to that until we have.
+    if (IMPLEMENTED_SKILL_SET.has(id)) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * Per-skill instructions, appended to the VOLATILE context block (never the
+ * cached static prompt — this varies per founder and per toggle).
+ *
+ * Empty input → '', so a founder with no skills on sees a byte-for-byte
+ * unchanged prompt. Same backward-compatible shape as buildSetupBlock.
+ */
+export function buildSkillsBlock(skills: Set<string>): string {
+  const parts: string[] = [];
+  if (skills.has("web-research")) {
+    parts.push(
+      "- Web research: you have a `web_search` tool. Use it only when the answer " +
+        "genuinely depends on current facts you cannot already know — competitor " +
+        "pricing, market numbers, library or API changes. Say what you found and " +
+        "where it came from. Do NOT search for anything already answered by the " +
+        "company context above, and do not search to pad a reply."
+    );
+  }
+  if (skills.has("prd-writer")) {
+    parts.push(
+      "- PRD writer: when the founder asks for a spec, a PRD, or what a feature " +
+        "should do, answer with a STRUCTURED product spec rather than prose — the " +
+        "problem and who has it, the requirements as a short numbered list, what is " +
+        "explicitly out of scope, and how they would know it works. Short enough to " +
+        "act on today; never pad it to look thorough. For anything that is not a " +
+        "spec request, ignore this and reply normally."
+    );
+  }
+  if (!parts.length) return "";
+  return `\n\nSKILLS THE FOUNDER HAS TURNED ON (behave accordingly):\n${parts.join("\n")}`;
+}
+
 // Mirrors the web app's REMEMBER_FACT_TOOL + chatMemory.ts: byte may record a
 // durable decision/fact the founder just stated, riding along on the same
 // generation (no extra model call). Unlike run_task/navigate/setup_capability,

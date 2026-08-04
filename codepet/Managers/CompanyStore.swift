@@ -756,6 +756,9 @@ final class CompanyStore: ObservableObject {
         let envSetup = Toolkit.catalog
             .filter { !company.enabledTools.contains($0.id) }
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
+        // The other half: the skills that are ON. Without this the CF could only
+        // ever be told what to offer, never what the founder already chose.
+        let enabledSkills = Toolkit.enabledSkillIds(in: company.enabledTools)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue, companionId: company.companionId,
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
@@ -766,7 +769,8 @@ final class CompanyStore: ObservableObject {
             history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
-            styleFragment: company.founderPrefs.style.promptFragment())
+            styleFragment: company.founderPrefs.style.promptFragment(),
+            enabledSkills: enabledSkills)
 
         // Department handoff: if a specialist leads this turn (chip focus or a
         // department named in the text), the reply is spoken by that specialist

@@ -68,6 +68,10 @@ struct CompanyChatRequest: Codable {
     /// and makes the zero-cost default observable: no key, no prompt section,
     /// no tokens.
     let styleFragment: String?
+    /// Skill ids the founder has turned ON — the mirror of `envSetup`, and what
+    /// makes a toggle mean something. Sent whole; the CF ignores any id it has
+    /// not implemented, so the app never has to track which are real.
+    let enabledSkills: [String]
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -79,14 +83,17 @@ struct CompanyChatRequest: Codable {
         case runnable
         case envSetup = "env_setup"
         case styleFragment = "style_fragment"
+        case enabledSkills = "enabled_skills"
     }
 
-    /// `runnable`/`envSetup` default to empty and `styleFragment` to nil so
-    /// existing call sites (and older tests built before these fields existed)
-    /// keep compiling without every caller having to name them explicitly.
+    /// `runnable`/`envSetup`/`enabledSkills` default to empty and
+    /// `styleFragment` to nil so existing call sites (and older tests built
+    /// before these fields existed) keep compiling without every caller having
+    /// to name them explicitly.
     init(companyId: String?, language: String, companionId: String, context: String,
          history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
-         envSetup: [SetupItemDTO] = [], styleFragment: String? = nil) {
+         envSetup: [SetupItemDTO] = [], styleFragment: String? = nil,
+         enabledSkills: [String] = []) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -96,6 +103,7 @@ struct CompanyChatRequest: Codable {
         self.runnable = runnable
         self.envSetup = envSetup
         self.styleFragment = styleFragment
+        self.enabledSkills = enabledSkills
     }
 }
 

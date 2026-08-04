@@ -105,6 +105,18 @@ enum Toolkit {
     static func items(in category: ToolCategory) -> [ToolItem] {
         catalog.filter { $0.category == category }
     }
+
+    /// The skill ids the founder has turned on, for the chat request's
+    /// `enabled_skills`. Sorted so the payload — and therefore the request the
+    /// CF caches against — is stable for an unchanged toolkit; a `Set`'s order
+    /// is not, and an order that churns per turn would look like a new prefix.
+    ///
+    /// Deliberately NOT filtered to "skills we've built": the CF is the
+    /// authority on that (see `IMPLEMENTED_SKILLS`), so shipping a skill is a
+    /// backend deploy, not a client release.
+    static func enabledSkillIds(in enabled: Set<String>) -> [String] {
+        items(in: .skills).map(\.id).filter(enabled.contains).sorted()
+    }
     static var recommended: [ToolItem] { catalog.filter(\.recommended) }
     static var defaultEnabledIds: Set<String> { Set(catalog.filter(\.defaultOn).map(\.id)) }
 

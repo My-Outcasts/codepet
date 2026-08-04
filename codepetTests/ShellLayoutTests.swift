@@ -58,6 +58,46 @@ final class ShellLayoutTests: XCTestCase {
         XCTAssertEqual(ShellLayout.clampDockWidth(620, windowWidth: 1400), 620)
     }
 
+    // MARK: Where the copilot appears
+
+    /// The copilot is an Overview surface. Founder call: it should not follow you
+    /// onto the other destinations.
+    func test_copilotShowsOnOverview() {
+        XCTAssertTrue(ShellLayout.showsCopilot(in: .roadmap))
+    }
+
+    func test_copilotHiddenOnEveryOtherDestination() {
+        for v in [AppView.company, .tasks, .library, .environment, .settings, .billing, .support] {
+            XCTAssertFalse(ShellLayout.showsCopilot(in: v),
+                           "copilot should not appear on \(v.rawValue)")
+        }
+    }
+
+    /// `.chat` and `.secondBrain` aren't reachable destinations — both fall through
+    /// to the Overview surface in `AppShellView.content`, so the copilot must stay
+    /// rather than vanish on a view that is visually Overview.
+    func test_copilotStaysOnTheViewsThatRenderOverview() {
+        XCTAssertTrue(ShellLayout.showsCopilot(in: .chat))
+        XCTAssertTrue(ShellLayout.showsCopilot(in: .secondBrain))
+    }
+
+    /// Every case is decided explicitly — a new destination added to `AppView`
+    /// should have to choose, not silently inherit a default.
+    func test_everyDestinationIsDecided() {
+        for v in AppView.allCases {
+            let shown = ShellLayout.showsCopilot(in: v)
+            XCTAssertEqual(shown, [.roadmap, .chat, .secondBrain].contains(v),
+                           "\(v.rawValue) is on the wrong side of the copilot rule")
+        }
+    }
+
+    /// Only Overview is a top-nav tab that keeps the copilot; the other four tabs
+    /// are full-width surfaces.
+    func test_onlyOverviewAmongTheTopTabsKeepsTheCopilot() {
+        let withCopilot = AppView.topTabs.filter { ShellLayout.showsCopilot(in: $0) }
+        XCTAssertEqual(withCopilot, [.roadmap])
+    }
+
     // MARK: Page header compaction
 
     func test_compactHeader_offWhenRoomy() {

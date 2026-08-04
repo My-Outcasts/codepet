@@ -17,7 +17,7 @@ struct TopNavView: View {
     var body: some View {
         HStack(spacing: 16) {
             Text("Codepet").font(CodepetTheme.pixel(18)).foregroundColor(CodepetTheme.primaryText)
-            AccountMenuView()   // compact:false → avatar + name + chevron + dropdown (Settings/Billing/Support)
+            AccountMenuView()   // compact:false → avatar + name + chevron + dropdown (Settings, Appearance, Log out)
             HStack(spacing: 4) { ForEach(AppView.topTabs) { tab($0) } }
             Spacer(minLength: 12)
             upgradeButton

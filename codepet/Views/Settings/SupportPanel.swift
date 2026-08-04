@@ -47,10 +47,13 @@ struct SupportPanel: View {
                             .fixedSize(horizontal: false, vertical: true)
                         TextEditor(text: $message)
                             .font(CodepetTheme.inter(13))
+                            .scrollContentBackground(.hidden)   // hide TextEditor's opaque default backing
                             .frame(minHeight: 140)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: CodepetTheme.inputRadius)
                                 .fill(CodepetTheme.hairline.opacity(0.5)))
+                            .overlay(RoundedRectangle(cornerRadius: CodepetTheme.inputRadius)
+                                .stroke(CodepetTheme.hairline, lineWidth: 1))
                         HStack {
                             Spacer()
                             // The ink is picked from whichever fill is actually drawn, so

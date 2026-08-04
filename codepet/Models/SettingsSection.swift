@@ -53,8 +53,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .support:
             return lang == .vi ? "Nhận trợ giúp về Codepet." : "Get help with Codepet."
         case .advanced:
-            return lang == .vi ? "Xuất dữ liệu, xoá và đăng xuất."
-                               : "Export, delete, and sign out."
+            return lang == .vi ? "Đăng xuất và thông tin phiên bản."
+                               : "Sign out and app version."
         }
     }
 

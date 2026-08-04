@@ -146,12 +146,25 @@ final class CompanyStore: ObservableObject {
     /// brief into another's doc or clobber the newly-hydrated account.
     private(set) var onboardingToken = 0
 
-    /// Bumped on every `setFounderPrefs` that gets past its hydration guard; lets a
+    /// Bumped on every `updateFounderPrefs` that gets past its hydration guard; lets a
     /// suspended prefs write detect that a NEWER write on the same account started while
     /// it was awaiting Firestore, and discard its in-memory commit instead of clobbering
     /// the newer choice. Separate from `hydrationToken`, which only moves on an account
     /// switch and so cannot see two writes on one account.
     private var founderPrefsWriteToken = 0
+
+    /// The founder's LATEST INTENDED preferences: `company.founderPrefs` plus every change
+    /// committed since, including ones whose Firestore write has not returned yet. Nil when
+    /// nothing is in flight.
+    ///
+    /// `company.founderPrefs` only catches up when a write completes, so a second panel
+    /// committing inside that window and reading the visible value would carry the in-flight
+    /// field's OLD value along with its own change — turn memory off, change a notification
+    /// before the first write lands, and `memoryEnabled` comes back as `true`. Every change is
+    /// therefore composed onto THIS value, so each commit contributes only its own field and
+    /// the two changes accumulate instead of racing. Cleared by `hydrate`/`reset` so one
+    /// account's in-flight intent can never be composed onto another's preferences.
+    private var pendingFounderPrefs: FounderPrefs?
 
     /// First-run enrichment interview progress: the empty gaps to ask + the index
     /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
@@ -267,6 +280,10 @@ final class CompanyStore: ObservableObject {
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
         company = loaded
+        // An in-flight prefs write belongs to the OUTGOING account (its own post-await guard
+        // drops its commit); leaving its intent here would compose the previous founder's
+        // half-written preferences onto this one's next settings change.
+        pendingFounderPrefs = nil
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
@@ -1547,25 +1564,45 @@ final class CompanyStore: ObservableObject {
     /// ALSO sequenced per write, a different hazard on the same account: every settings
     /// panel commits from an untracked `Task` (a picker changed twice quickly fires two),
     /// so two saves can be in flight at once and finish in either order. Without this the
-    /// OLDER write's `company.founderPrefs = prefs` would land last and clobber the newer
-    /// choice — and `MemoryPanel`/`AISettingsPanel` read the next draft off `company`, so
-    /// the stale value would then be re-persisted. `founderPrefsWriteToken` is bumped per
-    /// call and re-checked after the await (same idiom as `hydrationToken`), so a
-    /// superseded write still persists but never applies its result. Both guards are
-    /// needed: the hydration token cannot see a second write on the SAME account, and this
-    /// one cannot see an account switch.
-    func setFounderPrefs(_ prefs: FounderPrefs) async {
+    /// OLDER write's `company.founderPrefs = next` would land last and clobber the newer
+    /// choice — and the panels seed their drafts off `company`, so the stale value would then
+    /// be re-persisted. `founderPrefsWriteToken` is bumped per call and re-checked after the
+    /// await (same idiom as `hydrationToken`), so a superseded write still persists but never
+    /// applies its result. Both guards are needed: the hydration token cannot see a second
+    /// write on the SAME account, and this one cannot see an account switch.
+    ///
+    /// AND field-scoped, which is what makes three panels sharing one blob safe. `change` is
+    /// applied to `pendingFounderPrefs ?? company.founderPrefs` — the latest INTENDED value —
+    /// not to a copy the caller captured earlier, so a commit contributes ONLY its own field.
+    /// Every panel used to capture the whole struct and write it back, so a commit issued
+    /// while another panel's write was in flight resurrected that panel's stale value: turn
+    /// memory off, switch to Notifications, change a picker before the first write returned,
+    /// and `memoryEnabled` silently reverted to `true`. `founderPrefsWriteToken` cannot help
+    /// there — both writes are legitimate and touch different fields of one struct — which is
+    /// why the composition, not the sequencing, is the fix. The token stays load-bearing for
+    /// the case it was written for (two commits of the SAME field), and composing makes it
+    /// strictly safe: the newest write's value now carries every older write's change too, so
+    /// dropping a superseded commit loses nothing.
+    func updateFounderPrefs(_ change: (inout FounderPrefs) -> Void) async {
         let token = hydrationToken
         guard !isHydrating, let cid = companyId else { return }
+        let base = pendingFounderPrefs ?? company.founderPrefs
+        var next = base
+        change(&next)
+        guard next != base else { return }   // nothing actually changed → no write
+        pendingFounderPrefs = next
         // Bumped only once past the guards, so a call dropped for hydration never
         // supersedes a legitimate write already in flight.
         founderPrefsWriteToken &+= 1
         let writeToken = founderPrefsWriteToken
-        _ = await founderPrefsSaver(cid, prefs)
+        _ = await founderPrefsSaver(cid, next)
         guard token == hydrationToken, companyId == cid else { return }
         guard writeToken == founderPrefsWriteToken else { return }  // a newer write superseded us
-        company.founderPrefs = prefs
-        codingMemoryGate(prefs.memoryEnabled)
+        company.founderPrefs = next
+        codingMemoryGate(next.memoryEnabled)
+        // Only the newest write reaches here, and it just made the visible value match the
+        // intent, so nothing is in flight any more.
+        pendingFounderPrefs = nil
     }
 
     /// Forget one fact the founder's team was told — the delete half of the Memory panel,
@@ -1589,7 +1626,7 @@ final class CompanyStore: ObservableObject {
     /// re-derived list differs from what was persisted, one corrective write — through the same
     /// `decisionsSaver`, no new path — converges the document on it.
     ///
-    /// Carries `setFounderPrefs`'s hydration guard, for exactly the same reason: the
+    /// Carries `updateFounderPrefs`'s hydration guard, for exactly the same reason: the
     /// settings modal can stay open across a sign-out / account switch, and `hydrate` flips
     /// `companyId` to the INCOMING account BEFORE `company` is loaded for it. A delete
     /// issued in that window would run against the OUTGOING founder's list and be written
@@ -1649,6 +1686,9 @@ final class CompanyStore: ObservableObject {
         // assigns), which means the default: memory ON. The NEXT account therefore never
         // inherits the outgoing founder's switch — `hydrate` pushes theirs.
         codingMemoryGate(company.founderPrefs.memoryEnabled)
+        // Same reason as in `hydrate`: the outgoing founder's in-flight settings change must
+        // not be composed onto the next account's preferences.
+        pendingFounderPrefs = nil
         view = .roadmap
         isHydrating = false
         isOnboarding = false

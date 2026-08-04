@@ -59,9 +59,9 @@ enum NotificationCategory: String, CaseIterable, Identifiable {
 /// no email channel, because Codepet has no email infrastructure to send it through.
 ///
 /// Holds a local draft rather than binding the pickers straight to `companyStore`, same
-/// reason as `AISettingsPanel`: `setFounderPrefs` only updates `company.founderPrefs`
-/// AFTER its Firestore await returns, so a directly-bound control would visibly snap
-/// back to the old value for the length of that write.
+/// reason as `AISettingsPanel` and `MemoryPanel`: `updateFounderPrefs` only updates
+/// `company.founderPrefs` AFTER its Firestore await returns, so a directly-bound control
+/// would visibly snap back to the old value for the length of that write.
 ///
 /// "Back to default" REMOVES the category's key rather than writing `.inApp` explicitly.
 /// An absent key is what makes the "absent means in-app" contract in `NotificationCategory
@@ -105,11 +105,14 @@ struct NotificationsPanel: View {
 
     /// Dropdowns commit immediately on change — same as `AISettingsPanel`'s pickers —
     /// there is no text field here to debounce.
+    ///
+    /// Commits ONLY `notifications`, onto whatever the current preferences are: capturing the
+    /// whole `founderPrefs` here is what used to revert a memory switch whose write was still
+    /// in flight. See `CompanyStore.updateFounderPrefs`, which also owns the
+    /// redundant-write check.
     private func commit() {
         guard loaded else { return }
-        var prefs = companyStore.company.founderPrefs
-        guard prefs.notifications != notifications else { return }
-        prefs.notifications = notifications
-        Task { await companyStore.setFounderPrefs(prefs) }
+        let next = notifications
+        Task { await companyStore.updateFounderPrefs { $0.notifications = next } }
     }
 }

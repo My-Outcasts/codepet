@@ -167,11 +167,11 @@ final class MemoryToggleTests: XCTestCase {
         await s.hydrate(companyId: "u")
         XCTAssertEqual(pushed.last, false, "hydrate must push the loaded pref: \(pushed)")
 
-        await s.setFounderPrefs(FounderPrefs())   // memory back on
-        XCTAssertEqual(pushed.last, true, "setFounderPrefs must push the new pref: \(pushed)")
+        await s.updateFounderPrefs { $0 = FounderPrefs() }   // memory back on
+        XCTAssertEqual(pushed.last, true, "a prefs write must push the new pref: \(pushed)")
 
         var off = FounderPrefs(); off.memoryEnabled = false
-        await s.setFounderPrefs(off)
+        await s.updateFounderPrefs { $0 = off }
         XCTAssertEqual(pushed.last, false)
 
         s.reset()

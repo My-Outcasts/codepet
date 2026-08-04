@@ -106,11 +106,15 @@ struct AISettingsPanel: View {
             .onSubmit { commit() }
     }
 
+    /// Commits ONLY `style`, onto whatever the current preferences are — never a whole
+    /// `founderPrefs` captured here, which would revert a memory or notifications change whose
+    /// write was still in flight. The redundant-write check lives in
+    /// `CompanyStore.updateFounderPrefs`, which compares against the latest INTENDED value;
+    /// comparing here against `company.founderPrefs` would wrongly skip a commit that reverts
+    /// an in-flight change back to the visible value.
     private func commit() {
         guard loaded else { return }
-        var prefs = companyStore.company.founderPrefs
-        guard prefs.style != style else { return }
-        prefs.style = style
-        Task { await companyStore.setFounderPrefs(prefs) }
+        let next = style
+        Task { await companyStore.updateFounderPrefs { $0.style = next } }
     }
 }

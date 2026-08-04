@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class FounderPrefsPersistenceTests: XCTestCase {
-    func test_setFounderPrefs_updatesStateAndWritesOnce() async {
+    func test_updateFounderPrefs_updatesStateAndWritesOnce() async {
         var written: [FounderPrefs] = []
         let store = CompanyStore(loader: { _ in .empty },
                                  founderPrefsSaver: { _, prefs in
@@ -15,7 +15,7 @@ final class FounderPrefsPersistenceTests: XCTestCase {
         await store.hydrate(companyId: "u")
         var prefs = FounderPrefs()
         prefs.style.baseTone = .direct
-        await store.setFounderPrefs(prefs)
+        await store.updateFounderPrefs { $0 = prefs }
 
         XCTAssertEqual(store.company.founderPrefs.style.baseTone, .direct)
         XCTAssertEqual(written.count, 1)
@@ -68,7 +68,7 @@ final class FounderPrefsPersistenceTests: XCTestCase {
     /// INCOMING account BEFORE `company` loads for it, so a prefs write enqueued in that
     /// window (a settings panel committing a draft from inside a sign-out / account
     /// switch) must not land on the incoming account's document.
-    func test_setFounderPrefsDroppedWhileHydratingADifferentAccount() async {
+    func test_prefsWriteDroppedWhileHydratingADifferentAccount() async {
         let loaderEntered = OneShotGate()
         let letLoaderFinish = OneShotGate()
         var writes: [(cid: String, prefs: FounderPrefs)] = []
@@ -100,13 +100,13 @@ final class FounderPrefsPersistenceTests: XCTestCase {
 
         var prefs = FounderPrefs()
         prefs.style.customInstructions = "A's instruction"
-        await store.setFounderPrefs(prefs)
+        await store.updateFounderPrefs { $0 = prefs }
 
         letLoaderFinish.open()
         await hydrateTask.value
 
         XCTAssertTrue(writes.isEmpty,
-                      "setFounderPrefs must not write while a hydrate to a different " +
+                      "a prefs write must not land while a hydrate to a different " +
                       "account is in flight — got \(writes)")
         XCTAssertEqual(store.company.founderPrefs, FounderPrefs(),
                        "B's loaded prefs must not be clobbered by A's draft")
@@ -115,8 +115,8 @@ final class FounderPrefsPersistenceTests: XCTestCase {
 
     /// Regression: every settings panel commits from an untracked `Task`, so two quick
     /// changes put two prefs writes in flight at once and Firestore can finish them in
-    /// either order. The OLDER write completing last must NOT apply its value — panels read
-    /// the next draft off `company.founderPrefs`, so a clobber here also gets re-persisted.
+    /// either order. The OLDER write completing last must NOT apply its value — the panels seed
+    /// their drafts off `company.founderPrefs`, so a clobber here also gets re-persisted.
     ///
     /// The account is never switched, so `hydrationToken` cannot see this: it takes the
     /// per-write token to drop the stale commit.
@@ -140,9 +140,9 @@ final class FounderPrefsPersistenceTests: XCTestCase {
         var older = FounderPrefs(); older.style.customInstructions = "older"
         var newer = FounderPrefs(); newer.style.customInstructions = "newer"
 
-        let olderWrite = Task { await store.setFounderPrefs(older) }
+        let olderWrite = Task { await store.updateFounderPrefs { $0 = older } }
         await olderEntered.wait()
-        await store.setFounderPrefs(newer)   // starts and completes while the older one is parked
+        await store.updateFounderPrefs { $0 = newer }   // completes while the older one is parked
         letOlderFinish.open()
         await olderWrite.value
 
@@ -154,5 +154,117 @@ final class FounderPrefsPersistenceTests: XCTestCase {
         // Both writes still reach Firestore — sequencing drops the stale in-memory commit,
         // not the persistence.
         XCTAssertEqual(finished.count, 2)
+    }
+
+    /// Regression, THE settings-modal data-loss bug: three panels edit fields of one
+    /// `founderPrefs` struct, and each `commit()` used to capture the whole struct and write it
+    /// back. `company.founderPrefs` is only updated after the Firestore await, so a commit
+    /// issued inside another panel's write window carried that panel's OLD field along with its
+    /// own change — turn memory off, switch to Notifications, change a picker before the first
+    /// write lands, and `memoryEnabled` silently reverts to `true`.
+    ///
+    /// `founderPrefsWriteToken` cannot catch this: both writes are legitimate and touch
+    /// different fields, so neither should be dropped. The fix is that a commit applies only
+    /// its own change, to the latest intended value — hence a closure, not a struct.
+    func test_aCommitDuringAnotherPanelsWriteDoesNotResurrectTheStaleField() async {
+        let memoryWriteEntered = OneShotGate()
+        let letMemoryWriteFinish = OneShotGate()
+        var writes: [FounderPrefs] = []
+
+        let store = CompanyStore(loader: { _ in .empty }, founderPrefsSaver: { _, prefs in
+            writes.append(prefs)
+            // Park the memory write — the one that turns it off and touches nothing else.
+            if !prefs.memoryEnabled && prefs.notifications.isEmpty {
+                memoryWriteEntered.open()
+                await letMemoryWriteFinish.wait()
+            }
+            return true
+        })
+        await store.hydrate(companyId: "u")
+
+        // MemoryPanel: the Enable-memory switch goes off.
+        let memoryWrite = Task { await store.updateFounderPrefs { $0.memoryEnabled = false } }
+        await memoryWriteEntered.wait()
+        XCTAssertTrue(store.company.founderPrefs.memoryEnabled,
+                      "the memory write hasn't returned yet — that window is what this reproduces")
+
+        // NotificationsPanel, inside that window: a picker changes.
+        await store.updateFounderPrefs { $0.notifications["sessionNudges"] = .off }
+
+        letMemoryWriteFinish.open()
+        await memoryWrite.value
+
+        XCTAssertFalse(store.company.founderPrefs.memoryEnabled,
+                       "turning memory off must survive another panel's commit")
+        XCTAssertEqual(store.company.founderPrefs.notifications, ["sessionNudges": .off],
+                       "...and the notifications change must survive too")
+        // The document sees the union, not one field at a time: the second write carries both.
+        XCTAssertEqual(writes.last?.memoryEnabled, false)
+        XCTAssertEqual(writes.last?.notifications, ["sessionNudges": .off])
+    }
+
+    /// A commit issued while another account is being hydrated is dropped (the test above
+    /// this one), so its intent must not survive to be composed onto the INCOMING founder's
+    /// next settings change.
+    func test_anInFlightIntentDoesNotFollowTheFounderIntoAnotherAccount() async {
+        let writeEntered = OneShotGate()
+        let letWriteFinish = OneShotGate()
+        var writes: [FounderPrefs] = []
+
+        let store = CompanyStore(loader: { _ in .empty }, founderPrefsSaver: { _, prefs in
+            writes.append(prefs)
+            if !prefs.memoryEnabled {
+                writeEntered.open()
+                await letWriteFinish.wait()
+            }
+            return true
+        })
+        await store.hydrate(companyId: "A")
+
+        let write = Task { await store.updateFounderPrefs { $0.memoryEnabled = false } }
+        await writeEntered.wait()
+        await store.hydrate(companyId: "B")     // account switch lands mid-write
+        letWriteFinish.open()
+        await write.value
+
+        // B's own change must not carry A's memory switch.
+        await store.updateFounderPrefs { $0.notifications["sessionNudges"] = .off }
+        XCTAssertTrue(store.company.founderPrefs.memoryEnabled,
+                      "A's in-flight intent must not be composed onto B's preferences")
+        XCTAssertEqual(writes.last?.memoryEnabled, true)
+    }
+
+    /// The store owns the redundant-write check, and it compares against the latest INTENDED
+    /// value rather than the visible one: a change that reverts an in-flight change back to
+    /// what is still on screen is a real write, and a no-op closure is not.
+    func test_theStoreSkipsANoOpChangeButNotARevertOfAnInFlightOne() async {
+        let firstEntered = OneShotGate()
+        let letFirstFinish = OneShotGate()
+        var writes: [FounderPrefs] = []
+
+        let store = CompanyStore(loader: { _ in .empty }, founderPrefsSaver: { _, prefs in
+            writes.append(prefs)
+            if !prefs.memoryEnabled {
+                firstEntered.open()
+                await letFirstFinish.wait()
+            }
+            return true
+        })
+        await store.hydrate(companyId: "u")
+
+        await store.updateFounderPrefs { $0.memoryEnabled = true }   // already true
+        XCTAssertTrue(writes.isEmpty, "a change that changes nothing must not write")
+
+        let off = Task { await store.updateFounderPrefs { $0.memoryEnabled = false } }
+        await firstEntered.wait()
+        // Flipped back ON while the OFF write is still in flight. `company.founderPrefs` still
+        // says `true`, so comparing against it would drop this — but the founder's intent
+        // genuinely changed, twice.
+        await store.updateFounderPrefs { $0.memoryEnabled = true }
+        letFirstFinish.open()
+        await off.value
+
+        XCTAssertEqual(writes.count, 2, "the revert has to reach Firestore — got \(writes)")
+        XCTAssertTrue(store.company.founderPrefs.memoryEnabled)
     }
 }

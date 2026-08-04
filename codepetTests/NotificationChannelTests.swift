@@ -80,13 +80,13 @@ final class NotificationChannelTests: XCTestCase {
         let cat = NotificationCategory.sessionNudges
         var prefs = store.company.founderPrefs
         prefs.notifications = cat.applying(.off, to: prefs.notifications)
-        await store.setFounderPrefs(prefs)
+        await store.updateFounderPrefs { $0 = prefs }
         XCTAssertEqual(written.last, ["sessionNudges": .off])
 
         // Back to default, through the same rule the picker runs.
         var backToDefault = store.company.founderPrefs
         backToDefault.notifications = cat.applying(.inApp, to: backToDefault.notifications)
-        await store.setFounderPrefs(backToDefault)
+        await store.updateFounderPrefs { $0 = backToDefault }
 
         XCTAssertEqual(written.last, [:],
                        "the payload must carry an empty notifications map, not a stale entry")

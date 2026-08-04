@@ -14,19 +14,25 @@ import SwiftUI
 /// `extractDecisions` function wrote (`source` distinguishes them from chat ones), and all of
 /// them ground the prompt — showing only the chat-remembered ones would let a panel titled
 /// "What your team knows" claim a completeness it does not have.
+///
+/// Holds a local draft of the switch rather than binding it straight to `companyStore`, same
+/// as `AISettingsPanel` and `NotificationsPanel`: `updateFounderPrefs` only updates
+/// `company.founderPrefs` AFTER its Firestore await returns, so a directly-bound `Toggle`
+/// visibly snapped back to the old position for the length of that round trip. The draft also
+/// drives the dimming below, so the two halves of the panel fade the moment the switch moves.
 struct MemoryPanel: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @ObservedObject private var petMemory = PetMemoryStore.shared
 
     @State private var confirmReset = false
+    @State private var memoryEnabled = true
+    @State private var loaded = false
 
     /// The REAL store, verified against the tree: the chat tool `remember_fact` flows through
     /// `CompanyStore.handleRemember` → `Decisions.mergeDecisions` → this array, persisted by
     /// the existing `decisionsSaver`. There is no separate "facts" collection.
     private var facts: [DecisionEntry] { companyStore.company.decisions }
-
-    private var memoryEnabled: Bool { companyStore.company.founderPrefs.memoryEnabled }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -37,16 +43,8 @@ struct MemoryPanel: View {
                         ? "Cho đội của bạn dùng những gì đã học về công ty bạn."
                         : "Let your team personalise using what they've learned about your company."
                 ) {
-                    Toggle("", isOn: Binding(
-                        get: { memoryEnabled },
-                        set: { on in
-                            var prefs = companyStore.company.founderPrefs
-                            guard prefs.memoryEnabled != on else { return }
-                            prefs.memoryEnabled = on
-                            Task { await companyStore.setFounderPrefs(prefs) }
-                        }
-                    ))
-                    .labelsHidden()
+                    Toggle("", isOn: $memoryEnabled)
+                        .labelsHidden()
                 }
             }
 
@@ -96,6 +94,22 @@ struct MemoryPanel: View {
                 }
             }
             .opacity(memoryEnabled ? 1 : 0.55)
+        }
+        // Seeded once. Seeding a `false` moves the draft, so `onChange` below fires on first
+        // appearance — `updateFounderPrefs` sees a change that changes nothing and returns
+        // without writing, so this costs no Firestore round trip.
+        .onAppear {
+            guard !loaded else { return }
+            memoryEnabled = companyStore.company.founderPrefs.memoryEnabled
+            loaded = true
+        }
+        // Commits ONLY `memoryEnabled`, onto whatever the current preferences are — never a
+        // whole struct captured here — so a notifications or style commit still in flight
+        // keeps its own field instead of being reverted by this one. See
+        // `CompanyStore.updateFounderPrefs`.
+        .onChange(of: memoryEnabled) { _, on in
+            guard loaded else { return }
+            Task { await companyStore.updateFounderPrefs { $0.memoryEnabled = on } }
         }
         // Same confirmation idiom as `AdvancedPanel`'s sign-out: a Reset clears every
         // project's streak and session count, and nothing brings them back.

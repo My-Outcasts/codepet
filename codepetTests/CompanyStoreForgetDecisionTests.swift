@@ -123,7 +123,7 @@ final class CompanyStoreForgetDecisionTests: XCTestCase {
                        "and the document must converge on it: \(writes)")
     }
 
-    /// Regression, the same hazard `setFounderName`/`setFounderPrefs` carry: `hydrate`
+    /// Regression, the same hazard `setFounderName`/`updateFounderPrefs` carry: `hydrate`
     /// flips `companyId` to the INCOMING account BEFORE `company` is loaded for it, so a
     /// forget tapped in that window (settings still open across a sign-out / account
     /// switch) must not delete out of the incoming founder's document.

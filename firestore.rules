@@ -1,94 +1,132 @@
 rules_version = '2';
 
-// Codepet Firestore security rules.
+// Codepet Firestore security rules — SHARED project devpet-8f4b1 (iOS app + web app).
+// This file MERGES the existing iOS-app rules (users + feedback) with the new web-app
+// rules (companies). Firestore is deny-by-default, so anything not matched here is
+// blocked for client access — collections used only by Cloud Functions / the Admin SDK
+// (dictionary_cache, narratives_cache, usage) don't need rules and are intentionally
+// omitted, exactly as before.
 //
-// Deploy with:  firebase deploy --only firestore:rules
-//
-// This file is the source of truth for the rules — editing them in the Firebase
-// console is overwritten on the next deploy. Keep it in sync with the documents
-// the app actually reads/writes (see CloudSyncService + FeatureFeedbackManager).
-
+// ⚠️ This file drifted from the deployment once already: an earlier revision was a
+// rewrite rather than an edit, and dropped the membership model and the subcollection
+// wildcard below. Deploying it would have locked every founder out of their own
+// departments, threads, and library. It has since been restored FROM the live ruleset
+// (release cloud.firestore, ruleset 8394fc8b, deployed 2026-07-13) and re-verified.
+// Before `firebase deploy --only firestore:rules`, diff against the live ruleset — do
+// not assume this file is ahead of it.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- User progress: cloud sync under users/{uid} ---
-    // Each signed-in user (incl. anonymous auth) may read/write only their own
-    // document and anything nested under it. Mirrors "users/{uid}" cloud sync.
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    function signedIn() {
+      return request.auth != null;
+    }
 
+    // ---- Existing (iOS app) ----
+
+    // A user owns their profile doc AND anything nested under it
+    // (e.g. users/{uid}/extensions/cursor). The web app also writes users/{uid}.
+    match /users/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
       match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if signedIn() && request.auth.uid == userId;
       }
     }
 
-    // --- First-experience feedback ---
-    // FeatureFeedbackManager.submit() does a create-only addDocument() to the
-    // top-level `feedback` collection. Clients may CREATE a feedback doc but can
-    // never read, update, or delete one (reads are admin/console-only).
-    //
-    // Validated on create: a signed-in author, a 1-5 integer rating, and a
-    // string feature key. We intentionally do NOT require userId == auth.uid so
-    // a guest (anonymous-auth) submission whose client-side userId lags can't be
-    // silently rejected — tighten this if feedback spoofing ever matters.
+    // App feedback — anyone using the app can submit a valid payload; clients can't
+    // read or edit. Restored verbatim from the previous ruleset.
     match /feedback/{docId} {
-      allow create: if request.auth != null
-                    && request.resource.data.rating is int
-                    && request.resource.data.rating >= 1
-                    && request.resource.data.rating <= 5
-                    && request.resource.data.feature is string;
+      allow create: if request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.feature is string;
       allow read, update, delete: if false;
     }
 
-    // --- The founder's company ---
-    // ⚠️ INFERRED, NOT VERIFIED AGAINST THE DEPLOYED RULES. `CompanyData.swift`
-    // reads and writes companies/{uid} straight from the client, so the live
-    // project must already allow this — but this file did not, which means the
-    // file and the deployment have drifted. Diff against the console before any
-    // `firebase deploy --only firestore:rules`: deploying a file that omits this
-    // rule locks the app out of its own company document.
-    //
-    // Note there is deliberately NO `{document=**}` here. A recursive allow would
-    // also grant the connector subcollections below, and in this language allows
-    // are additive — a nested `if false` does NOT claw back access a parent match
-    // already granted. Subcollections must opt in one at a time.
-    match /companies/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // ---- New (Codepet web — companies) ----
+    // Model: a user owns exactly one company whose id equals their uid (v1). Rules are
+    // written for membership so teams work later without a rewrite, but ownership has a
+    // get()-free fast path. That fast path is also what lets the sign-up *batch* seed a
+    // company + its subcollections in one commit — inside a batch, get() can't see the
+    // company doc being created alongside the subdocs.
 
-      // --- Connector credentials (sealed OAuth tokens) ---
-      // Closed to every client, including the owner. Only the Cloud Functions
-      // touch these, and the admin SDK bypasses rules entirely. The token is
-      // encrypted at rest, but encryption is the second line: an exfiltrated
-      // blob is still offline material for whoever holds it, and the client has
-      // no reason to ever hold one. See functions/src/oauth/githubOAuth.ts.
-      match /connectors/{provider} {
-        allow read, write: if false;
-      }
+    // v1 convention: your company id is your uid. No get(), so it holds even during
+    // the seeding batch before the company doc is committed.
+    function ownsByConvention(companyId) {
+      return signedIn() && request.auth.uid == companyId;
+    }
 
-      // --- Connector status (no secrets) ---
-      // What the Environment surface renders: connected or not, which scopes,
-      // when. Split from the document above precisely so the UI can answer
-      // "is GitHub connected?" without the sealed token ever being readable.
-      // Written only by the callback function.
-      match /connectorStatus/{provider} {
-        allow read: if request.auth != null && request.auth.uid == userId;
-        allow write: if false;
+    // Team-member check for the future multi-member case (safe outside batched seeds).
+    function isMember(companyId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/companies/$(companyId)).data.memberIds;
+    }
+
+    // Ownership must never change on an update — no escalating yourself to owner.
+    function ownershipUnchanged() {
+      return request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    match /companies/{companyId} {
+      // Creator must own the company by convention and list themselves as a member.
+      // ownerId/memberIds are pinned to the caller, so a company can only ever be
+      // created for the account that owns it.
+      allow create: if signedIn()
+        && companyId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds is list
+        && request.auth.uid in request.resource.data.memberIds;
+
+      allow read: if ownsByConvention(companyId) || isMember(companyId);
+
+      // Owner (by convention) may edit company data and manage the member list, but
+      // can never reassign ownership. A non-owner member may edit data only — not
+      // ownerId and not the member list (no privilege escalation).
+      allow update: if (ownsByConvention(companyId) && ownershipUnchanged())
+        || (isMember(companyId)
+            && ownershipUnchanged()
+            && request.resource.data.memberIds == resource.data.memberIds);
+
+      // Only the owner can delete the whole company.
+      allow delete: if ownsByConvention(companyId);
+
+      // Departments, library, chat, and any future per-company subcollection — scoped
+      // to the company's owner/members. Deny-by-default keeps every other account out.
+      // The leading {sub} segment is load-bearing: a v2 recursive wildcard matches ZERO
+      // or more segments, so a bare `match /{document=**}` here would also match the
+      // company doc itself and blanket-grant write on it — bypassing the strict
+      // create/update/delete rules above (e.g. letting a plain member escalate to owner
+      // or delete the company). Requiring {sub} keeps this strictly below the doc.
+      //
+      // The two connector subcollections are carved out IN THIS CONDITION rather than
+      // in nested matches of their own. Allows are additive and a nested `if false`
+      // cannot claw back access a parent match already granted, so excluding them here
+      // is the only thing that actually denies:
+      //
+      //   connectors/      sealed OAuth tokens. Written and read solely by the Cloud
+      //                    Functions via the admin SDK, which bypasses rules. Denied to
+      //                    clients for read AND write. Write matters most: the chat
+      //                    function sends the DECRYPTED token to whatever `mcpUrl` this
+      //                    document names, so a client that could edit that field could
+      //                    redirect a live credential to a server of its choosing.
+      //
+      //   connectorStatus/ no secrets — provider, connected, scope, timestamp. The
+      //                    Environment surface reads it to answer "is GitHub
+      //                    connected?". Readable by the owner, but write-denied so the
+      //                    UI cannot be made to claim a connection that has no token
+      //                    behind it. Only the OAuth callback writes it.
+      match /{sub}/{document=**} {
+        allow read: if (ownsByConvention(companyId) || isMember(companyId))
+          && sub != 'connectors';
+        allow write: if (ownsByConvention(companyId) || isMember(companyId))
+          && sub != 'connectors'
+          && sub != 'connectorStatus';
       }
     }
 
-    // --- Virtual Company runs ---
-    // Written only by Cloud Functions (the admin SDK bypasses these rules), so
-    // clients are denied write outright. The owning founder may read their own
-    // run back — that is what makes a completed run replayable without the
-    // client having to cache the whole event stream itself.
-    match /company_runs/{runId} {
-      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
-      allow write: if false;
-    }
-
-    // --- Default deny ---
-    // Anything not matched above is closed. New collections must opt in here.
-    match /{document=**} {
+    // BYOK secrets — a user's ENCRYPTED Anthropic key. Read/written ONLY by the server via the
+    // Admin SDK (which bypasses rules); no client may ever touch it. Explicit deny over the
+    // deny-by-default, because this holds a secret and must never be client-reachable.
+    match /userSecrets/{userId} {
       allow read, write: if false;
     }
   }

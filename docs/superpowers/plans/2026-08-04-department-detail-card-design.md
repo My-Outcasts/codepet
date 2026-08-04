@@ -555,6 +555,18 @@ In `codepet/Views/Company/DepartmentDetailView.swift`, replace the whole `privat
     }
 ```
 
+> **CORRECTION (final code review, 2026-08-04).** The `hero(_:)` doc comment in the code
+> block above ("keeps roughly 76% of its height … kept about 40%") is wrong on both
+> figures, and this is what actually shipped, so the drift matters. Under
+> `contentMode: .fill`, retained height = source aspect ÷ frame aspect: new hero
+> 1.778 ÷ (800/190 ≈ 4.21) ≈ **42%**; old hero 1.778 ÷ 6.9 ≈ **26%**. The real change is
+> 26% → 42% (≈1.6×), not 40% → 76%, and it is a material reduction, not a fix — `dept-fin`
+> (4:3) keeps ≈32%, `dept-legal` (1:1) keeps ≈24%, which is why the fin/legal crop check
+> in Task 6 is a real gate. The shipped comment in
+> `codepet/Views/Company/DepartmentDetailView.swift` has been corrected to match; this
+> plan file is left as originally written (the historical record) with this note
+> appended, per the same convention as the `frameAlignment` correction above.
+
 - [ ] **Step 3: Build to verify it compiles**
 
 ```bash

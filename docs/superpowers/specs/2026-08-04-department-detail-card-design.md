@@ -43,6 +43,13 @@ saturated art (`:51`), which muddies rather than identifies: Engineering's accen
 (`CompanyView.swift:137-142`), so per-department colour identity is weakest exactly where
 it should be strongest.
 
+> **CORRECTION (final code review, 2026-08-04).** "~40%" above is wrong. Under
+> `contentMode: .fill`, retained height = source aspect ÷ frame aspect. A 16:9 cover
+> (aspect 1.778) in a 6.9:1 frame retains 1.778 ÷ 6.9 ≈ **26%**, not 40%. The qualitative
+> point — `dept-eng`'s subject was cut — still holds; only the percentage was
+> miscalculated. See the matching correction under Design §2 for the corrected
+> before/after and the two non-16:9 covers' numbers.
+
 **Two lines say the same thing.** `rationale` and `focus` restate each other for several
 departments — eng: "Build and ship the product itself…" / "This is where the thing you're
 building actually gets made."; ops: "Stand up the machinery…" / "The boring plumbing that
@@ -82,6 +89,16 @@ something is done.
 
 - Height **190** (was 140). In an 800pt column that is 4.2:1 rather than 6.9:1, so a 16:9
   cover keeps roughly 76% of its height instead of ~40% and subjects survive the crop.
+
+  > **CORRECTION (final code review, 2026-08-04).** Both percentages above are wrong, and
+  > "subjects survive the crop" overstates the result. Under `contentMode: .fill`, retained
+  > height = source aspect ÷ frame aspect: new hero 1.778 ÷ (800/190 ≈ 4.21) ≈ **42%**; old
+  > hero 1.778 ÷ 6.9 ≈ **26%**. The real change is 26% → 42% (≈1.6×), not 40% → 76%. The
+  > two non-16:9 covers retain less than either figure: `dept-fin` (4:3, aspect 1.333) ≈
+  > **32%**; `dept-legal` (1:1, aspect 1.0) ≈ **24%**. At 42% the crop is materially
+  > reduced, not solved — which is exactly why the `fin`/`legal` visual check in Task 6 is
+  > a real gate, not a formality. The separate claim in Known Limits that the hero is
+  > "~2.5× upscaled" is unaffected by this correction and remains correct.
 - Explicit `.interpolation(.high)`, matching `CompanyView.swift:127`.
 - The accent leaves the gradient. The tint becomes a **neutral scrim** — black 0 →
   0.72, starting at 40% down — chosen for text contrast over any cover, however
@@ -111,6 +128,15 @@ something is done.
 `cardTitle()` / `cardDetail()` in `CodepetTheme.swift:133-134` are shared with other
 surfaces, so this page overrides the sizes locally rather than changing the shared
 helpers.
+
+> **CORRECTION (final code review, 2026-08-04).** "Shared with other surfaces" was false:
+> `grep -rn "cardTitle\|cardDetail"` across `codepet/` and `codepetTests/` turned up only
+> the two definitions themselves — `DepartmentDetailView` was their sole consumer, and
+> after this pass it doesn't call them either (the task card sets its type directly with
+> `CodepetTheme.inter(...)` at the sizes in the table above). The two helpers were
+> therefore dead code and have been deleted from `CodepetTheme.swift`. The real reason
+> this page sets its sizes inline is simply that 15/13 are this page's own numbers, not a
+> role shared with anything else.
 
 ### 4. Task card
 
@@ -160,6 +186,17 @@ only it can say.
   | any `.codepetCanDo` | "Nothing blocked — I can run ‹N› of these now." (singular: "Nothing blocked — I can run this one now.") |
   | all remaining `.blocked` | "Everything here is waiting on ‹blocker title›." — blocker from `RoadmapGating.blocker(for:in:)` on the first blocked task; if it returns nil, "Nothing here is unblocked yet." |
 
+> **CORRECTION (final code review, 2026-08-04).** The "Nothing here is unblocked yet."
+> fallback in the row above was never implemented, and that omission is correct, not a
+> gap. `.blocked` has exactly two causes (`RoadmapEngine.swift:27-28`): a shut phase,
+> which by construction means a founder step exists to hold it shut, or an unmet
+> `dependsOn`, which by construction means a not-done dependency exists. Either way,
+> `RoadmapGating.blocker` always resolves to a task for a `.blocked` task today — it
+> cannot return nil on this path. `DepartmentPulse.swift` returns `nil` from the whole
+> function in that branch instead of inventing copy for a state that cannot occur:
+> returning nil beats inventing a string for dead code. Do not add the string; there is
+> nothing that reaches it.
+
 - Vietnamese strings for every branch, following the existing `lang == .vi` pattern in the
   file.
 - Sprite drops 28 → **22** and centres against the text (`HStack(alignment: .center)`)
@@ -189,8 +226,13 @@ consistent with the list card's cover panel.
 - Blocker resolution itself is already covered by `RoadmapGatingTests.swift`, so it gets no
   duplicate tests. What is new and therefore tested here: the all-blocked pulse branch
   names the blocker (including a blocker owned by another department, proving resolution
-  runs against all tasks rather than the filtered list) and falls back cleanly when
-  `blocker` returns nil.
+  runs against all tasks rather than the filtered list).
+
+  > **CORRECTION (final code review, 2026-08-04).** This bullet originally also promised
+  > a test that "falls back cleanly when `blocker` returns nil." That test does not exist,
+  > correctly — see the correction under §5's table: the nil path is unreachable by
+  > construction, so there is no state to build a fixture from, and no test was written
+  > for it.
 - Type, spacing and hero changes carry no automated test; they are verified visually.
 - **Visual verification is a handoff.** This session cannot screenshot the native app.
   After a TEAM-signed build, the checks to run are: all 8 departments for hero crop

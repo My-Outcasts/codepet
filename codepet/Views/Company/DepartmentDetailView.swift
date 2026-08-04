@@ -24,8 +24,9 @@ struct DepartmentDetailView: View {
     private var dept: Department? { DepartmentCatalog.find(deptKey) }
     private var tasks: [RoadmapTask] { companyStore.company.tasks.filter { $0.dept == deptKey } }
     /// The reading column. The shell hands this view the whole window
-    /// (`AppShellView.swift:130`), so uncapped the rationale runs ~150 characters. Follows
-    /// `RoadmapView.swift:187`'s capped column, a little wider because task cards live in this one.
+    /// (`AppShellView.swift:130`), so uncapped the rationale ran ~150 characters at a normal
+    /// window width — well past a comfortable measure. 800, not narrower, because task cards
+    /// live in this column too and need the room.
     private let column: CGFloat = 800
 
     private var doneCount: Int { tasks.filter(\.done).count }
@@ -99,11 +100,15 @@ struct DepartmentDetailView: View {
                                    : " · \(doneCount) of \(tasks.count) done")
     }
 
-    /// 190pt in an 800 column is 4.2:1, so a 16:9 cover keeps roughly 76% of its height —
-    /// the old 140pt strip was 6.9:1 and kept about 40%, cutting the subject out of every
-    /// cover. The scrim is NEUTRAL on purpose: the accent used to flood it at 0.55, which
-    /// muddied art it clashes with (Engineering's accent is blue over hot-pink art) and
-    /// dimmed the title sitting on it. Identity moves to the badge instead.
+    /// 190pt in an 800pt column is 4.21:1. Under `contentMode: .fill`, retained height =
+    /// source aspect ÷ frame aspect, so a 16:9 cover keeps ≈42% of its height — up from the
+    /// old 140pt strip's 6.9:1, which kept ≈26% (≈1.6×, not the 40%→76% this comment used to
+    /// claim). That's a material reduction, not a fix: `dept-fin` (4:3) keeps ≈32%,
+    /// `dept-legal` (1:1) keeps ≈24%, which is why the fin/legal crop check is a real visual
+    /// gate rather than a formality. The scrim is NEUTRAL on purpose: the accent used to
+    /// flood it at 0.55, which muddied art it clashes with (Engineering's accent is blue
+    /// over hot-pink art) and dimmed the title sitting on it. Identity moves to the badge
+    /// instead.
     private func hero(_ d: Department) -> some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geo in
@@ -132,9 +137,13 @@ struct DepartmentDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// The Company list card's badge treatment (`CompanyView.swift:137-142`), reused verbatim:
-    /// with the scrim neutral this chip is the page's only carrier of the department's accent,
-    /// and the two surfaces must agree on how a department is coloured.
+    /// The Company list card's badge treatment (`CompanyView.swift:137-142`) — same fill,
+    /// accent overlay, and hairline stroke — minus that card's drop shadow (`:142`,
+    /// `.shadow(color: .black.opacity(0.5), radius: 3.5, y: 2)`), omitted on purpose: the
+    /// list card's badge sits directly on cover art and needs the shadow for contrast, while
+    /// this one sits on the hero's dark scrim, which already gives it that. With the scrim
+    /// neutral this chip is the page's only carrier of the department's accent, and the two
+    /// surfaces must still agree on how a department is coloured.
     private func badge(_ d: Department) -> some View {
         Text(d.ab)
             .font(CodepetTheme.inter(11, weight: .semibold))

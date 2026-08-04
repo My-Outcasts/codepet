@@ -10,6 +10,12 @@ struct Department: Identifiable, Hashable {
     let ab: String          // 2-letter badge
     let accent: Color
     let rationale: String    // web `d.need` — what this department must accomplish
+    /// Prompt-only now: no longer rendered anywhere in the UI (`DepartmentDetailView`
+    /// replaced its render with the derived `departmentPulse` line). Its only remaining
+    /// consumers are `ChatContext.swift`'s two prompt strings (~95, ~108) — one is the
+    /// `s.currentTaskTitle ?? s.department.focus` fallback that fires only for a department
+    /// with no open tasks, the other unconditionally grounds the focus-department prompt.
+    /// Keep this field: don't delete it as unused, and don't resurrect it as UI text.
     let focus: String        // web `d.byte` — a short companion-style focus line
     /// Where the hero's wide crop anchors. Six covers are 16:9 and centre fine; `dept-fin`
     /// (4:3) and `dept-legal` (1:1) lose more height, so they can pin the crop without

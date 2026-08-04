@@ -3,9 +3,14 @@ import SwiftUI
 
 /// The app's top-level shell — a top nav bar (`TopNavView`), a content area
 /// switching on the store's view, and a docked copilot (`CopilotChatView`) on the
-/// right. The dock collapses to a slim reopen handle per `ShellLayout` when the
-/// window is narrow or the user manually collapses it. Styled in CodepetTheme;
-/// accents follow the active companion's color.
+/// right. The dock collapses to a circular logo button (`CollapsedCopilotButton`)
+/// per `ShellLayout` when the window is narrow or the user collapses it.
+///
+/// The copilot appears on the OVERVIEW destination only (`ShellLayout.showsCopilot`)
+/// — on Company, Tasks, Library, Environment and the account destinations the
+/// content takes the full width and neither the dock nor its button is rendered.
+///
+/// Styled in CodepetTheme; the chrome accent is Codepet purple, not the companion's.
 struct AppShellView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState
@@ -37,6 +42,9 @@ struct AppShellView: View {
 
     var body: some View {
         GeometryReader { geo in
+            // The copilot is an Overview surface — everywhere else the content takes
+            // the full width and neither the dock nor its button appears.
+            let showsCopilot = ShellLayout.showsCopilot(in: companyStore.view)
             let collapsed = ShellLayout.dockCollapsed(forWidth: geo.size.width, manual: companyStore.dockCollapsed)
             // Expanded copilot defaults to half the window; a drag on the divider
             // resizes it (clamped so both panes stay usable), a click collapses it.
@@ -54,7 +62,7 @@ struct AppShellView: View {
                     content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .bottomTrailing) {
-                            if collapsed {
+                            if showsCopilot && collapsed {
                                 CollapsedCopilotButton(
                                     companionName: companionName,
                                     needsYou: CollapsedCopilotState.needsYouCount(
@@ -66,7 +74,7 @@ struct AppShellView: View {
                                 )
                             }
                         }
-                    if !collapsed {
+                    if showsCopilot && !collapsed {
                         resizeHandle(windowWidth: geo.size.width, currentWidth: dockWidth)
                         // The collapse chevron lives in `CopilotChatView`'s single
                         // header row (next to History) — no separate strip here.
@@ -77,9 +85,11 @@ struct AppShellView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(CodepetTheme.pageBackground)
-            // ⌘B toggles the copilot dock (collapse / reopen).
+            // ⌘B toggles the copilot dock (collapse / reopen). Inert off Overview:
+            // toggling a dock that isn't rendered would silently flip the state and
+            // surprise you with a different dock next time you came back.
             .background(
-                Button("") { companyStore.dockCollapsed.toggle() }
+                Button("") { if showsCopilot { companyStore.dockCollapsed.toggle() } }
                     .keyboardShortcut("b", modifiers: .command)
                     .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
             )

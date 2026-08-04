@@ -40,6 +40,21 @@ enum ShellLayout {
         return min(max(dockMinWidth, desired), maxDock)
     }
 
+    /// Whether the copilot belongs on this destination at all.
+    ///
+    /// Founder call (Aug 4): the copilot is an Overview surface. On Company, Tasks,
+    /// Library, Environment, Settings, Billing and Support it does not appear —
+    /// neither the dock nor its collapsed button — and the content takes the full
+    /// width. `.chat` and `.secondBrain` are not reachable destinations (both fall
+    /// through to the Overview surface in `AppShellView.content`), so they count as
+    /// Overview rather than as somewhere the copilot would vanish.
+    static func showsCopilot(in view: AppView) -> Bool {
+        switch view {
+        case .roadmap, .chat, .secondBrain: return true
+        case .company, .tasks, .library, .environment, .settings, .billing, .support: return false
+        }
+    }
+
     /// Content-pane width below which a page header must abbreviate its controls —
     /// the "How to read this map" button drops to its bare "?" — so the title and the
     /// controls still share ONE row. Above it everything shows its full label.

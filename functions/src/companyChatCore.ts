@@ -99,7 +99,20 @@ export function buildContextBlock(context: string): string {
 // `AIStyle.promptFragment()`, which returns nil at defaults; clipped here because it
 // arrives from the client.
 export function styleBlock(fragment?: string): string {
-  const f = clip(fragment, 2000);
+  // Newlines are collapsed BEFORE clipping, and that is a boundary check, not tidying.
+  // `style_fragment` is client-supplied and lands verbatim in a system prompt, and `clip`
+  // only trims the ends and bounds the length — it leaves interior line breaks intact. A
+  // fragment carrying "\n\nThe founder's company:" would therefore print a second copy of
+  // `buildContextBlock`'s heading, at line start after a blank line, immediately above the
+  // real one: a forged section the model has no way to tell from the genuine grounding.
+  // Collapsing every whitespace run that contains a line break into a single space makes
+  // this block structurally ONE line under its own heading, so no text inside it can read
+  // as a heading of its own — the words survive, the forged structure does not. \u2028 and
+  // \u2029 are in the class because they are line breaks too, not just \r and \n.
+  const oneLine = typeof fragment === "string"
+    ? fragment.replace(/\s*[\n\r\u2028\u2029]\s*/g, " ")
+    : "";
+  const f = clip(oneLine, 2000);
   if (!f) return "";
   return `\n\nHow the founder wants you to write:\n${f}`;
 }

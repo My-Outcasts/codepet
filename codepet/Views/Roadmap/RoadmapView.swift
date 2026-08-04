@@ -11,6 +11,14 @@ struct RoadmapView: View {
     @State private var showMapIntro = false
     @State private var introShown = false
     @State private var openDeliverable: Deliverable?
+    /// The node whose panel is open. Tapping a card opens this rather than firing the action —
+    /// a card should be readable before it starts an agent.
+    @State private var panelTask: RoadmapTask?
+    /// The task whose draft is under review. Set by `dispatch`'s `.approve` case — a
+    /// drafted task's action opens this real review sheet (shared with the Tasks board
+    /// and the department page) instead of copying the unread draft into the library on
+    /// one click.
+    @State private var previewTask: RoadmapTask?
     @State private var overviewTab: OverviewTab = .roadmap
     /// Measured width of the header row — drives the compact/roomy control switch.
     @State private var headerWidth: CGFloat = 0
@@ -74,6 +82,15 @@ struct RoadmapView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { if tasks.isEmpty { await companyStore.generateRoadmap(language: lang) } }
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
+        .sheet(item: $panelTask) { node in
+            TaskNodePanel(task: node, accent: accent,
+                          onAction: { dispatch($0) },
+                          onMarkDoneToggle: { t in
+                              panelTask = nil
+                              Task { await companyStore.toggleTaskDone(id: t.id) }
+                          })
+        }
         .sheet(isPresented: $showMapIntro) {
             OverviewIntroSheet(companionName: companionName,
                                projectName: displayProjectName,
@@ -101,14 +118,22 @@ struct RoadmapView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
             OverviewChromeRow(tasks: tasks, companionName: companionName, accent: accent,
-                              onStart: { dispatch($0) }, onOpenTask: { dispatch($0) })
+                              // The beacon's filled Start dispatches directly — that one-click
+                              // path is the mitigation for board cards now opening the panel.
+                              // `dispatch` itself is safe for a drafted beacon: its `.approve`
+                              // case opens the same `TaskDraftPreview` review sheet the panel
+                              // and the Tasks board use, rather than copying the unread draft
+                              // into the library. The quieter suggestion rows below the beacon
+                              // open the panel instead: they render as plain text with no
+                              // button chrome.
+                              onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.horizontal, 24).padding(.top, 16)
             RoadmapBoardView(tasks: tasks, companionName: companionName,
                              founderName: founderName,
                              projectName: displayProjectName,
                              tagline: oneLiner,
                              accent: accent,
-                             onTaskTap: { dispatch($0) })
+                             onTaskTap: { panelTask = $0 })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -203,7 +228,7 @@ struct RoadmapView: View {
         switch action {
         case .run:              Task { await companyStore.runTask(task, language: lang) }
         case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
-        case .approve:          Task { await companyStore.approveTask(id: task.id) }
+        case .approve:          previewTask = task   // review before approve — never blind (matches Tasks board)
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
         case .editCode:
             companyStore.codingRunAnchorId = nil   // no chat ask → card at transcript bottom
@@ -211,7 +236,7 @@ struct RoadmapView: View {
                                            plannedFiles: 2, needsBash: false,
                                            link: companyStore.activeProjectLink)
         case .showBlocker:
-            guard depth == 0, let blocker = RoadmapGating.blocker(for: task, in: tasks) else { break }
+            guard depth == 0, let blocker = RoadmapGating.escapeHatch(for: task, in: tasks) else { break }
             dispatch(blocker, depth: 1)
         case .none:             break
         }

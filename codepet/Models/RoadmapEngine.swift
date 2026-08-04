@@ -78,6 +78,52 @@ enum RoadmapEngine {
         return out
     }
 
+    /// Up to `limit` suggestions for the founder's next moves: the beacon first, then one
+    /// actionable task per DISTINCT department, in roadmap order — actionable meaning a task
+    /// inside the open window, PLUS a drafted task anywhere, even one sitting in a closed phase.
+    ///
+    /// That second half is deliberate, not a leak: `status` ranks `needsApproval` above the
+    /// phase-window check (see its doc comment) precisely so a draft that's already done and
+    /// waiting on the founder's review never goes unreachable just because its phase closed
+    /// underneath it. This is the one way `suggestedNext` can disagree with `nextStep`, which
+    /// filters `open.contains(phase)` strictly and so never returns a task — drafted or not —
+    /// from a closed phase.
+    ///
+    /// Deliberately NOT `nextMoves`. That one is the chat fan-out: it keeps only `codepetCanDo`
+    /// tasks whose department maps to a specialist companion, which excludes every `needsYou`
+    /// task — including the beacon on most real boards. Suggesting the founder's own next step
+    /// is the whole point here, so this one admits `needsYou` and `needsApproval` too.
+    ///
+    /// `nextStep`'s result is forced into first place so the beacon card and this list can never
+    /// disagree about what comes next. Legacy dept-less tasks each occupy their own slot rather
+    /// than collapsing into one.
+    static func suggestedNext(_ tasks: [RoadmapTask], limit: Int) -> [RoadmapTask] {
+        guard limit > 0 else { return [] }
+        let actionable: Set<TaskStatus> = [.codepetCanDo, .needsYou, .needsApproval]
+        let ordered = tasks.enumerated().sorted { a, b in
+            a.element.phase.order != b.element.phase.order
+                ? a.element.phase.order < b.element.phase.order
+                : a.offset < b.offset
+        }.map { $0.element }
+
+        var out: [RoadmapTask] = []
+        var seenDepts = Set<String>()
+        func slot(_ task: RoadmapTask) -> String { task.dept ?? "__none__\(task.id)" }
+
+        if let beacon = nextStep(tasks) {
+            out.append(beacon)
+            seenDepts.insert(slot(beacon))
+        }
+        for task in ordered where out.count < limit {
+            guard !out.contains(where: { $0.id == task.id }),
+                  actionable.contains(status(for: task, in: tasks)),
+                  !seenDepts.contains(slot(task)) else { continue }
+            seenDepts.insert(slot(task))
+            out.append(task)
+        }
+        return Array(out.prefix(limit))
+    }
+
     static func progressPercent(_ tasks: [RoadmapTask]) -> Int {
         guard !tasks.isEmpty else { return 0 }
         let done = tasks.filter { $0.done }.count

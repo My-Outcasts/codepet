@@ -14,6 +14,11 @@ struct RoadmapCardView: View {
     let herePhrase: String
     let pulsing: Bool
     let accent: Color
+    /// The strict blocker's title, shown on a locked card's face so it explains itself without
+    /// a hover. nil when nothing resolves (a dangling dependency, or a cycle).
+    let blockerTitle: String?
+    /// This task's agent run is in flight — `CompanyStore.runningTaskIds`.
+    let isRunning: Bool
     let onTap: () -> Void
 
     @Environment(\.uiLanguage) private var lang
@@ -34,8 +39,26 @@ struct RoadmapCardView: View {
                     .lineSpacing(0)   // cancel SwiftUI's extra leading; web sets line-height 1.2
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 150, alignment: .leading)
-                if let verb = RoadmapBoardCopy.verb(for: status, lang) {
+                if isRunning {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text(RoadmapBoardCopy.inProgress(lang))
+                    }
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+                } else if let verb = RoadmapBoardCopy.verb(for: status, lang) {
                     chip(verb)
+                } else if isLocked, let blockerTitle {
+                    // The blocker's bare title, not "Waiting on: <title>" — at 10pt in the
+                    // card's ~150pt text column the prefix would eat the name it exists to
+                    // show. The full phrasing lives in the hover peek and the node panel.
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill").font(.system(size: 8, weight: .semibold))
+                        Text(blockerTitle).lineLimit(1).truncationMode(.tail)
+                    }
+                    .font(CodepetTheme.inter(10, weight: .semibold))
+                    .foregroundColor(tint)
+                    .frame(maxWidth: 150, alignment: .leading)
                 } else if let quiet = RoadmapBoardCopy.quietLabel(for: status, lang: lang) {
                     Text(quiet)
                         .font(CodepetTheme.inter(10, weight: .semibold))

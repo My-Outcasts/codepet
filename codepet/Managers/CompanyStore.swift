@@ -723,9 +723,18 @@ final class CompanyStore: ObservableObject {
             // Reflect the run on the roadmap so the task leaves the "next moves" set
             // and can't be re-run into a duplicate draft (mirrors the board runTask).
             if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
-                company.tasks[ti].draft = draft
-                company.tasks[ti].drafted = true
-                if let cid { _ = await tasksSaver(cid, company.tasks) }
+                // `handleRunTaskId`'s `status == .codepetCanDo` guard ran BEFORE the
+                // `taskRunner` await above, so mark-complete ("I already did this") may
+                // have set `done = true` on this very task while the run was in flight.
+                // Writing `drafted` onto a done task strands the draft forever:
+                // `RoadmapEngine.status` short-circuits to `.done` before ever consulting
+                // `drafted`, `approveTask` refuses (its own `!done` guard), and the
+                // library never receives it — so skip the write when done wins the race.
+                if !company.tasks[ti].done {
+                    company.tasks[ti].draft = draft
+                    company.tasks[ti].drafted = true
+                    if let cid { _ = await tasksSaver(cid, company.tasks) }
+                }
             }
             return true
         } else {
@@ -1046,6 +1055,14 @@ final class CompanyStore: ObservableObject {
             return
         }
         guard let i = company.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        // The `runningTaskIds` guard above ran BEFORE the `taskRunner` await, so
+        // mark-complete ("I already did this") may have set `done = true` on this task
+        // while the run was in flight — `runningTaskIds` only blocks a second RUN from
+        // starting, not the panel's mark-done. Writing `drafted` onto a done task
+        // strands the draft forever: `RoadmapEngine.status` short-circuits to `.done`
+        // before ever consulting `drafted`, `approveTask` refuses (its own `!done`
+        // guard), and the library never receives it — so skip the write when done wins.
+        guard !company.tasks[i].done else { return }
         company.tasks[i].draft = deliverable
         company.tasks[i].drafted = true
         if let cid { _ = await tasksSaver(cid, company.tasks) }

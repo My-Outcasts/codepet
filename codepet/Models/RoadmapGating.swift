@@ -66,25 +66,27 @@ enum RoadmapGating {
         return nil
     }
 
-    /// The one task standing between the founder and `task`, so a locked card can explain
-    /// itself and hand the founder something to actually do.
+    /// The one thing standing in front of `task`, for DISPLAY — the card face and the node
+    /// panel both render this by name, so it is strict: the first unfinished dependency, or the
+    /// founder step holding the rolling window shut. No walk and no fallback, because a
+    /// fallback would let a cyclic graph put an unrelated task's name on the card.
     ///
-    /// Phase-gated → `founderStep`. This is NOT always the beacon: `nextStep` minimises over
-    /// the whole open window, so once the prefix spans more than one populated phase the beacon
-    /// can sit in an EARLIER phase than this blocker (the earliest unsettled one). Dependency-
-    /// gated → the first unfinished dependency.
-    ///
-    /// Either way, the candidate is then walked forward to something the founder can actually
-    /// act on today (see `actionable`) — a founder-owned step can itself be blocked on its own
-    /// unmet dependency, and handing the founder a second dead end defeats the point of the
-    /// escape hatch. A genuine dependency cycle can't walk forever (each hop must be an
-    /// unvisited task) and falls back to `RoadmapEngine.nextStep`, which is nil only when
-    /// nothing in the whole roadmap is currently actionable.
+    /// NOT always the beacon: `RoadmapEngine.nextStep` minimises over the whole open window, so
+    /// once the prefix spans more than one populated phase the beacon can sit in an EARLIER
+    /// phase than this blocker (the earliest unsettled one). Both are legitimate.
     static func blocker(for task: RoadmapTask, in tasks: [RoadmapTask]) -> RoadmapTask? {
-        let candidate = openPhases(tasks).contains(task.phase)
+        openPhases(tasks).contains(task.phase)
             ? task.dependsOn.compactMap { id in tasks.first { $0.id == id && !$0.done } }.first
             : founderStep(in: tasks)
-        guard let candidate else { return nil }
+    }
+
+    /// Where a locked card's tap should GO — the blocker walked forward to something the founder
+    /// can act on today. A founder-owned step can itself be dependency-blocked, and handing the
+    /// founder a second dead end defeats the escape hatch. Terminates on cyclic and
+    /// self-referencing graphs (see `actionable`) and falls back to the beacon, which is nil only
+    /// when nothing in the roadmap is actionable at all.
+    static func escapeHatch(for task: RoadmapTask, in tasks: [RoadmapTask]) -> RoadmapTask? {
+        guard let candidate = blocker(for: task, in: tasks) else { return nil }
         return actionable(candidate, in: tasks, avoiding: [task.id])
     }
 

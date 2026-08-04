@@ -230,6 +230,32 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertEqual(runs, 0)   // no draft → never runs
     }
 
+    /// The unrecoverable done+drafted race (final-review Important 1, board path): `runTask`'s
+    /// `!done` guard runs BEFORE the `taskRunner` await, so a mark-done that lands while the run
+    /// is in flight must not be clobbered by the write that follows the await. Simulates that
+    /// landing by toggling `done` from inside the stubbed `taskRunner` itself.
+    func testRunTaskSkipsDraftWriteWhenMarkedDoneMidRun() async {
+        var tasksSaverCalls = 0
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [task()])
+        var ref: CompanyStore?
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in tasksSaverCalls += 1; return true },
+                             taskRunner: { _ in
+                                 // Mark-done (the panel's "I already did this") lands here,
+                                 // mid-await, exactly like the chat/board race in the wild.
+                                 await ref?.toggleTaskDone(id: "t1")
+                                 return RunTaskResponse(kind: "doc", title: "Out", body: "the body")
+                             })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.runTask(s.company.tasks[0], language: .en)
+        XCTAssertTrue(s.company.tasks[0].done)            // mark-done won the race
+        XCTAssertFalse(s.company.tasks[0].drafted)        // draft write skipped — not stranded
+        XCTAssertNil(s.company.tasks[0].draft)
+        XCTAssertEqual(tasksSaverCalls, 1)                // only toggleTaskDone's own save fired
+    }
+
     func testApproveFailOpenWhenExtractorReturnsEmpty() async {
         let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
                                   drafted: true, draft: Deliverable(kind: .doc, title: "X", body: "y", sourceTaskId: "t1"))

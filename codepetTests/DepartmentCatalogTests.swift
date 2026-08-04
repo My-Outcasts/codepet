@@ -2,9 +2,9 @@ import XCTest
 @testable import codepet
 
 final class DepartmentCatalogTests: XCTestCase {
-    func testEightDepartmentsInOrder() {
+    func testNineDepartmentsInOrder() {
         XCTAssertEqual(DepartmentCatalog.all.map(\.key),
-                       ["eng","design","mkt","sales","support","fin","ops","legal"])
+                       ["eng","product","design","mkt","sales","support","fin","ops","legal"])
         XCTAssertEqual(DepartmentCatalog.find("eng")?.name, "Engineering")
         XCTAssertEqual(DepartmentCatalog.find("eng")?.ab, "En")
         XCTAssertNil(DepartmentCatalog.find(nil))

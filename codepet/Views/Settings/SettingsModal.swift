@@ -112,8 +112,9 @@ struct SettingsModal: View {
         case .usage: UsagePanel()
         case .support: SupportPanel()
         case .advanced: AdvancedPanel()
-        case .aiSettings, .memory, .notifications:
-            // Claimed by Tasks 9, 11 and 12. No `default:` here on purpose — the switch
+        case .aiSettings: AISettingsPanel()
+        case .memory, .notifications:
+            // Claimed by Tasks 11 and 12. No `default:` here on purpose — the switch
             // stays compiler-exhaustive so each of those tasks has to come here and take
             // its case rather than inheriting a placeholder forever.
             Text(lang == .vi ? "Đang chuyển sang cửa sổ này." : "Moving into this window.")

@@ -51,6 +51,7 @@ enum CodepetTheme {
     static let accentTeal   = Color.dyn("#2dd4bf", "#3fe0cb")
     static let accentOrange = Color.dyn("#ff8c42", "#ff9b5e")
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
+    static let accentGreen  = Color.dyn("#16a34a", "#4ade80")
 
     // MARK: Geometry
 

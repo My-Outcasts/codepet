@@ -5,6 +5,9 @@ import Foundation
 /// in priority order. Verbatim-logic port of the web `Gap` (lib/ai/enrichInterview.ts).
 enum InterviewGap: String, CaseIterable, Equatable {
     case goal, traction, problem
+    /// Asked by the Virtual Company, not by the first-run interview — deliberately
+    /// absent from `gapOrder` so `detectGaps` never surfaces them in onboarding.
+    case runway, constraints
 }
 
 /// byte's question for a gap plus the one-line reason it's asking (so it reads
@@ -35,6 +38,8 @@ enum EnrichInterview {
         case .goal: return brief.goal
         case .traction: return brief.traction
         case .problem: return brief.problem
+        case .runway: return brief.runway
+        case .constraints: return brief.constraints
         }
     }
 
@@ -73,6 +78,22 @@ enum EnrichInterview {
                 : InterviewQuestion(
                     ask: "What problem does it solve, and who feels it most?",
                     why: "so your positioning and copy speak to the real user")
+        case .runway:
+            return language == .vi
+                ? InterviewQuestion(
+                    ask: "Tiền hiện tại còn đủ cho bao lâu?",
+                    why: "để phòng họp cân được chi phí với thời gian bạn còn")
+                : InterviewQuestion(
+                    ask: "How long does your current money last?",
+                    why: "so the room can weigh cost against the time you actually have")
+        case .constraints:
+            return language == .vi
+                ? InterviewQuestion(
+                    ask: "Có ràng buộc nào phòng họp không được đề xuất? (không thuê người, hạn ship, không nhận đầu tư…)",
+                    why: "để không ai đề xuất thứ bạn đã loại từ đầu")
+                : InterviewQuestion(
+                    ask: "Any constraint the room must not propose? (no hiring, a ship date, no outside investment…)",
+                    why: "so nobody recommends something you already ruled out")
         }
     }
 }

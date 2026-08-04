@@ -151,6 +151,25 @@ struct CopilotChatView: View {
         }
     }
 
+    /// The newest Virtual Company run's message — the room sits under its OWN question,
+    /// which is not necessarily the end of the transcript, so this is what the scroll
+    /// follows rather than `chatMessages.last`.
+    private var vcRunMessage: CopilotMessage? {
+        companyStore.chatMessages.last { $0.vcRun != nil }
+    }
+
+    /// How many cards that run has put on screen. Every frame adds one, so this rises
+    /// monotonically through a run and is what the transcript scrolls on — the run lives
+    /// in a single message, so the message count cannot.
+    private var vcRunCardCount: Int {
+        guard let run = vcRunMessage?.vcRun else { return 0 }
+        return (run.routing != nil ? 1 : 0) + run.agents.count + run.positions.count
+            + run.agentErrors.count + run.conflicts.count + run.negotiationRounds.count
+            + (run.verdict != nil ? 1 : 0) + (run.brief != nil ? 1 : 0)
+            + (run.telemetry != nil ? 1 : 0) + (run.stoppedReason != nil ? 1 : 0)
+            + (run.terminalError != nil ? 1 : 0)
+    }
+
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -190,6 +209,17 @@ struct CopilotChatView: View {
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
+            // A Virtual Company run is ONE message that then grows for 30–60s, so
+            // `chatMessages.count` above scrolls to it once (and only if it landed last)
+            // and then stops while the cards pile up out of view. Follow the run itself
+            // — the same thing this file already does for the coding run and the fan-out
+            // row, neither of which changes the message count either. Scrolling to the
+            // ROOM's id, not to the transcript bottom: the room is inserted under its own
+            // question, so the bottom may be an unrelated later turn.
+            .onChange(of: vcRunCardCount) { _, count in
+                guard count > 0, let id = vcRunMessage?.id else { return }
+                withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+            }
             // Nested-ObservableObject publishers emit in willSet (before the new value
             // is assigned), so defer one runloop turn to re-render on the committed value —
             // otherwise the card sticks on "running" until a tab switch.
@@ -224,7 +254,13 @@ struct CopilotChatView: View {
         showHistory = false   // sending always returns to the live conversation
         switch mode {
         case .ask, .plan:
-            Task { await companyStore.sendChat(mode.shape(text, language: lang), language: lang, department: selectedDept) }
+            // `founderAsk` is the unshaped text: byte should see the mode's framing
+            // ("Help me plan this — …"), the Virtual Company's router should not, since
+            // it decides `request_type` and rewrites the question into `real_question`.
+            Task {
+                await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
+                                            department: selectedDept, founderAsk: text)
+            }
         case .build:
             companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
         }
@@ -405,6 +441,21 @@ struct CopilotBubble: View {
             } else {
                 producingRow
             }
+        } else if let run = message.vcRun {
+            // The room has its own appended message and nothing else is ever written
+            // into it, so this branch's position in the chain is not load-bearing — but
+            // it stays first, ahead of the payloads that CAN coexist on one message.
+            // The text bubble above the cards is byte's handoff line: byte speaking,
+            // then the room.
+            VStack(alignment: .leading, spacing: 8) {
+                textBubble
+                VCRunCards(state: run, lockedIn: message.actionConsumed) {
+                    Task {
+                        await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if let draft = message.draft {
             draftCard(draft)
         } else if let nav = message.navChip {

@@ -19,12 +19,23 @@ enum DepartmentCompanions {
 
     static func companionId(for deptKey: String) -> String? { map[deptKey] }
 
-    /// The first department whose NAME appears in `text` (case-insensitive), so a
-    /// free-text mention ("help me with marketing") can bring in the right pet.
-    /// Matches on the human name only (not the short key) to avoid substring
+    /// The first department whose NAME appears in `text` (case-insensitive) AND has a
+    /// companion to bring in, so a free-text mention ("help me with marketing") gets the
+    /// right pet. Matches on the human name only (not the short key) to avoid substring
     /// false positives; the department chip remains the precise trigger.
+    ///
+    /// Unmapped departments are SKIPPED rather than returned-and-dropped. Adding
+    /// `product` to the catalog (for the Virtual Company's `department_key`) put an
+    /// entry with no companion at index 1, and because the caller
+    /// (`CompanyStore.actingSpecialist`) resolves the single returned key and gives up if
+    /// it maps to nothing, "what should the design of my product page be?" silently lost
+    /// luna · Design. Skipping here keeps the next match reachable. The alternative —
+    /// mapping a companion to the word "product" — would hijack one of the most common
+    /// words a founder types.
     static func mentionedDeptKey(in text: String) -> String? {
         let lower = text.lowercased()
-        return DepartmentCatalog.all.first { lower.contains($0.name.lowercased()) }?.key
+        return DepartmentCatalog.all.first {
+            map[$0.key] != nil && lower.contains($0.name.lowercased())
+        }?.key
     }
 }

@@ -104,6 +104,12 @@ final class CompanyStore: ObservableObject {
     /// supply a synthetic `AsyncThrowingStream`). `chatSender` stays wired in
     /// as `sendChat`'s fallback — see its doc comment.
     private let chatStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error>
+    /// The Virtual Company fan-out, injected exactly like `chatStreamer` so the
+    /// handoff/escape-hatch/failure orderings can be driven from a synthetic stream
+    /// with no network. Defaulted in the init BODY (not as a default argument) so the
+    /// closure is formed inside this `@MainActor` type instead of in the nonisolated
+    /// default-argument context, which is what makes `chatStreamer`'s default warn.
+    private let vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
@@ -112,6 +118,10 @@ final class CompanyStore: ObservableObject {
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
+    /// Where "already asked this founder for runway + constraints" lives. Per company
+    /// id, so it neither nags across launches nor leaks across accounts — see
+    /// `VirtualCompanyInterviewFlag`.
+    private let vcInterviewFlag: VirtualCompanyInterviewFlag
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -128,7 +138,27 @@ final class CompanyStore: ObservableObject {
     /// First-run enrichment interview progress: the empty gaps to ask + the index
     /// we're on. Session-only, never persisted (mirrors the web useRef). Nil when
     /// no interview is active.
-    private var interviewState: (gaps: [InterviewGap], idx: Int)?
+    /// `seedGreetingWhenDone` distinguishes the two interviews that share this queue.
+    /// The first-run one hands off to byte's greeting when it empties; the Virtual
+    /// Company one happens mid-session, where that greeting would read as amnesia.
+    private var interviewState: (gaps: [InterviewGap], idx: Int, seedGreetingWhenDone: Bool)?
+
+    /// In-flight Virtual Company runs, keyed by the message the room will occupy.
+    /// Nobody awaits them — the room owns its own appended message, so it outlives
+    /// byte's turn instead of holding `isStreaming` (and with it Send, New chat and
+    /// the thread switcher) for the length of a run. Kept only so `reset()` can stop
+    /// the outgoing account's runs, and so the deadline watchdog has something to
+    /// cancel. Each run removes its own entry when it ends.
+    private var vcTasks: [String: Task<Void, Never>] = [:]
+
+    /// Client-side ceiling on one run. The server's own ceiling is 200k tokens /
+    /// $1.50, which in wall-clock terms is well inside this; the reason a client
+    /// bound is needed at all is that `SSEParser` drops `:` keep-alive comments
+    /// (SSEParser.swift:43), so a server that keeps the connection warm without
+    /// emitting an event resets URLSession's idle timer forever and would leave the
+    /// agent columns spinning with no error. Cancelling here reaches the seal below,
+    /// which turns it into a visible `stream_lost`.
+    static let vcRunDeadlineNanos: UInt64 = 240 * 1_000_000_000
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
@@ -136,6 +166,7 @@ final class CompanyStore: ObservableObject {
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { CompanyChatClient.sendStream($0) },
+         vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
@@ -143,13 +174,18 @@ final class CompanyStore: ObservableObject {
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
-         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract) {
+         decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract,
+         // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
+         // over `UserDefaults.standard`, and forming it in the nonisolated
+         // default-argument context is what makes such defaults warn.
+         vcInterviewFlag: VirtualCompanyInterviewFlag? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
         self.tasksSaver = tasksSaver
         self.chatSender = chatSender
         self.chatStreamer = chatStreamer
+        self.vcRunner = vcRunner ?? { VirtualCompanyClient.run($0) }
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
@@ -158,6 +194,7 @@ final class CompanyStore: ObservableObject {
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
+        self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -187,6 +224,11 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // Re-derived from THIS company's flag on every hydrate, so signing in as
+        // someone else never inherits the previous founder's asked-ness (and never
+        // re-asks a founder who already answered or skipped). Read synchronously and
+        // idempotently, so it needs no `hydrationToken` guard.
+        vcInterviewAsked = vcInterviewFlag.wasAsked(companyId)
         isHydrating = true
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
@@ -224,11 +266,17 @@ final class CompanyStore: ObservableObject {
     /// questions the onboarding brief is missing (goal / traction / problem), one at
     /// a time. A full brief means no gaps → caller falls through to the greeting.
     /// Returns true when an interview was started (so the caller skips the greeting).
-    private func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
+    ///
+    /// `internal`, not `private`, purely so a test can put a first-run interview in
+    /// flight — the flow it belongs to has no live caller today (the dock opens on the
+    /// landing hero instead, see `CompanyStoreFirstRunGreetingTests`) and it is owned
+    /// by another engineer, so `VirtualCompanyInterviewTests` cannot reach it any other
+    /// way. Behaviour is unchanged and the visibility stays module-only.
+    func startEnrichInterviewIfNeeded(language: AppLanguage) -> Bool {
         guard companyId != nil else { return false }
         let gaps = EnrichInterview.detectGaps(company.brief)
         guard !gaps.isEmpty else { return false }
-        interviewState = (gaps: gaps, idx: 0)
+        interviewState = (gaps: gaps, idx: 0, seedGreetingWhenDone: true)
         askInterviewGap(gaps[0], language: language)
         return true
     }
@@ -261,6 +309,8 @@ final class CompanyStore: ObservableObject {
             case .goal: company.brief.goal = trimmed
             case .traction: company.brief.traction = trimmed
             case .problem: company.brief.problem = trimmed
+            case .runway: company.brief.runway = trimmed
+            case .constraints: company.brief.constraints = trimmed
             }
             _ = await saver(cid, company.brief)
             guard companyId == cid else { return }  // account switched mid-await → bail
@@ -273,7 +323,9 @@ final class CompanyStore: ObservableObject {
             askInterviewGap(st.gaps[st.idx], language: language)
         } else {
             interviewState = nil
-            seedFirstRunGreeting(language: language)
+            // Only the first-run interview earns the greeting. Welcoming the founder
+            // right after a mid-session runway question would read as amnesia.
+            if st.seedGreetingWhenDone { seedFirstRunGreeting(language: language) }
         }
     }
 
@@ -339,7 +391,21 @@ final class CompanyStore: ObservableObject {
     /// shared streamed-send core — see its doc comment for the full flow, fallback,
     /// and token-guard semantics). `department` defaults to nil so existing callers
     /// (`sendChat(x, language: y)`) keep compiling unchanged.
-    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
+    ///
+    /// This is also the ONLY entry point that convenes the Virtual Company (design §1:
+    /// the trigger is what the founder types into chat). The core `sendMessage` must not
+    /// fan out on its own, or `walkThroughTask`'s synthesised "walk me through it" ask
+    /// would convene the room and the founder's step-by-step guidance could be answered
+    /// with a meeting instead.
+    ///
+    /// `founderAsk` is the founder's own words BEFORE `ChatMode` shaping. `.plan`/`.build`
+    /// prepend their intent ("Help me plan this — give me the concrete next steps: …"),
+    /// which byte should see — it is what the founder chose — but the router should not:
+    /// it decides `request_type` and rewrites the question into `real_question`, so the
+    /// mode's framing would bias both. Defaults to the shaped text for callers that do
+    /// no shaping.
+    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
+                  founderAsk: String? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -347,7 +413,9 @@ final class CompanyStore: ObservableObject {
             dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
             return
         }
-        await sendMessage(text, language: language, department: department)
+        let ask = (founderAsk ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        await sendMessage(text, language: language, department: department,
+                          convene: ask.isEmpty ? text : ask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -548,7 +616,13 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
+    ///
+    /// `convene` is the question to put to the Virtual Company, or nil for "do not
+    /// convene". Only `sendChat` passes it: a synthesised ask (`walkThroughTask`) is not
+    /// a founder deciding something, and answering "walk me through how to do this
+    /// myself" with a meeting is a worse answer than the guidance that was asked for.
+    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
+                             convene: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
@@ -583,6 +657,16 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
                                             companionId: specialist?.companionId, deptName: specialist?.deptName))
         isStreaming = true
+
+        // Fan-out: the room is convened by the router's escape hatch, not by a
+        // client-side heuristic. Both calls go out at once so ordinary chat keeps
+        // its current latency — running intake first would put ~2s in front of
+        // every message, including "hi". `convene` is nil for a synthesised ask, and
+        // carries the founder's own words (pre-`ChatMode` shaping) for a typed one.
+        if let convene {
+            startVirtualCompanyRun(ask: convene, anchorId: placeholderId,
+                                   cid: cid, language: language)
+        }
 
         var streamedText = ""
         var streamThrew = false
@@ -624,7 +708,12 @@ final class CompanyStore: ObservableObject {
         // means the stream succeeded, so no fallback. The pre-deploy safety
         // net still works: a plain-JSON (non-SSE) response parses to zero
         // frames, so `.done` never fires and `!receivedDone` is true.
-        if streamThrew || !receivedDone {
+        // The decision itself lives in `ChatTailAction` (a testable value type); this
+        // only carries it out. The room is no longer part of this decision: it owns its
+        // own appended message, so byte's turn ends exactly as it did before the feature.
+        switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
+                                     streamedText: streamedText) {
+        case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
@@ -637,7 +726,7 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [])
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
-        } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        case .leadIn:
             // A `.done` was received but byte sent zero chat text (a
             // run-task-only reply) — don't leave the placeholder blank.
             let leadIn = language == .vi
@@ -646,7 +735,14 @@ final class CompanyStore: ObservableObject {
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = leadIn
             }
+        case .none:
+            break
         }
+        // The run is NOT awaited. It writes into its own appended message, so it has
+        // no claim on byte's turn: byte's typing dots clear, Send/New chat/switch/delete
+        // re-enable, and this tail is byte-for-byte the no-feature tail. A run that is
+        // still going (or has not even routed yet) simply arrives later, which is a new
+        // message rather than a rewrite of an answer the founder has already read.
         isCompanionTyping = false
         isStreaming = false
         // Flush this turn into its thread — bumps `updatedAt` (re-sorts the thread
@@ -655,6 +751,206 @@ final class CompanyStore: ObservableObject {
         // where hydrate() already reset chatMessages/threads for the new account —
         // nothing stale to flush there.
         flushActiveThread()
+    }
+
+    // MARK: - Virtual Company fan-out
+
+    /// Start a Virtual Company run for `ask`, anchored to byte's message for this turn.
+    /// Never awaited by the caller — see `publishRunProgress` for why the room owns its
+    /// own appended message, and `vcTasks`/`vcRunDeadlineNanos` for what bounds it.
+    private func startVirtualCompanyRun(ask: String, anchorId: String,
+                                        cid: String?, language: AppLanguage) {
+        let vcRequest = VirtualCompanyRequest(
+            request: ask,
+            language: language.rawValue,
+            founder: FounderContextMapper.founder(from: company.brief),
+            stressTest: false)
+        // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
+        // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
+        // `chatMessages` writes it makes through `publishRunProgress` — run on the
+        // main actor with no hop and no `MainActor.run` wrapper. The network itself
+        // never blocks the actor: `vcRunner` does its I/O in a `Task.detached` and
+        // this loop only suspends waiting on the stream.
+        let vcRunner = self.vcRunner
+        // The room's OWN message, minted here so every frame addresses the same
+        // appended message. Nothing is appended until the router says `multi_agent`.
+        let roomMessageId = UUID().uuidString
+        let vcTask = Task { [weak self] () -> Void in
+            var state = VirtualCompanyRunState()
+            do {
+                for try await event in vcRunner(vcRequest) {
+                    state.apply(event)
+                    // The escape hatch fired: discard the run and let chat be.
+                    // The founder never learns a routing decision happened.
+                    if state.isEscapeHatch { break }
+                    guard let self else { return }
+                    await self.publishRunProgress(state, roomMessageId: roomMessageId,
+                                                  anchorId: anchorId, cid: cid, language: language)
+                }
+            } catch {
+                // A failed run must never damage the chat (spec §7). 503 is the kill
+                // switch and 429 the daily cap — both are silent to the FOUNDER by
+                // design, but not to the log: a live kill switch, an expired token and
+                // a broken client were previously indistinguishable from a working
+                // feature that never convened anyone.
+                Self.logRunFailure(error)
+            }
+            // Seal a run that died with the room already on screen. A dropped stream, a
+            // TLS reset, an idle timeout, the deadline watchdog below, or a server that
+            // just stops without a `done` frame all arrive here with the room's cards
+            // already rendered, so returning silently would leave the agent columns
+            // spinning forever with no error and nothing to retry. `.failed` is excluded
+            // because a terminal `error` frame published its own code already.
+            if state.handsOffToRoom, state.phase != .finished, state.phase != .failed {
+                state.terminalError = "stream_lost"
+                state.phase = .failed
+                await self?.publishRunProgress(state, roomMessageId: roomMessageId,
+                                               anchorId: anchorId, cid: cid, language: language)
+            }
+            self?.vcTasks[roomMessageId] = nil
+        }
+        vcTasks[roomMessageId] = vcTask
+        // Bound the run (see `vcRunDeadlineNanos`). A no-op once the run has removed
+        // its own registry entry, which is every normal ending.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.vcRunDeadlineNanos)
+            self?.vcTasks[roomMessageId]?.cancel()
+        }
+    }
+
+    /// Publishes run progress as the room's OWN companion message: appended once, on
+    /// the first `multi_agent` frame, then updated in place as later frames arrive.
+    ///
+    /// Appended, not written into byte's message (the shape this shipped with first),
+    /// for four reasons that all had the same root: the transcript scrolls on
+    /// `chatMessages.count`, so a run rendered inside an already-appended message grew
+    /// 30–60s of cards below the viewport and never scrolled; byte's turn could not end
+    /// normally, so its typing dots stayed pinned under the room's cards; byte's `done`
+    /// side effects (roadmap, decisions) ran on a turn the founder had been told was
+    /// superseded; and a run that decided after the turn closed rewrote an answer the
+    /// founder had already read, which needed a guard of its own. A separate message
+    /// removes all four — see the design doc §3.
+    ///
+    /// Every write is behind `handsOffToRoom`, so a run the router sent elsewhere —
+    /// or one that died before routing — cannot touch `chatMessages` at all.
+    private func publishRunProgress(_ state: VirtualCompanyRunState,
+                                    roomMessageId: String,
+                                    anchorId: String,
+                                    cid: String?,
+                                    language: AppLanguage) async {
+        guard companyId == cid, state.handsOffToRoom else { return }
+        // The room belongs to the conversation its question was asked in. `anchorId` is
+        // byte's message for that turn, so its absence means the founder has moved on
+        // (New chat, a thread switch, a delete) and the room must not land in whichever
+        // conversation happens to be on screen now. Switching back restores the buffer,
+        // and the state published is always the whole run, so nothing is lost by the
+        // frames refused in between.
+        guard let anchor = chatMessages.firstIndex(where: { $0.id == anchorId }) else { return }
+        if let i = chatMessages.firstIndex(where: { $0.id == roomMessageId }) {
+            chatMessages[i].vcRun = state
+        } else {
+            // INSERTED under its own question, not appended. Nothing holds the composer
+            // any more, so the founder can complete two more turns while a run is still
+            // going: appending would drop "Actually — this one needs the whole room"
+            // beneath an unrelated answer, reading as a reply to that instead. Later
+            // frames resolve by id, so the position is decided once, here.
+            chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
+                                               text: Self.handoffLine(language), vcRun: state),
+                                at: anchor + 1)
+        }
+        // Behind every guard above, so a discarded run (escape hatch), a killed run
+        // (503/429) or one that died before a brief can never trigger it.
+        maybeAskVirtualCompanyInterview(state, language: language)
+    }
+
+    /// byte's one line of handoff, spoken above the room's cards. It follows byte's
+    /// own complete answer now, so it reads as a second thought rather than a refusal
+    /// to answer — the founder sees a companion escalating, not a UI mode switch.
+    private static func handoffLine(_ language: AppLanguage) -> String {
+        language == .vi
+            ? "Thật ra cái này cần cả phòng — để mình gọi product với finance vào."
+            : "Actually — this one needs the whole room. Let me bring in product and finance."
+    }
+
+    /// One log line per failure mode. Every one of these was previously silent except
+    /// 400, so a kill switch (503), an exhausted cap (429), an expired token and a
+    /// renamed backend field all looked identical from the outside: a feature that
+    /// simply never convened anyone.
+    private static func logRunFailure(_ error: Error) {
+        switch error as? VirtualCompanyRunError {
+        case let .http(status, body):
+            print("virtualCompanyRun: HTTP \(status) — \(body?.error ?? "no error field")"
+                  + (body?.detail.map { ": \($0)" } ?? ""))
+        case .notSignedIn:
+            print("virtualCompanyRun: no Firebase ID token — the room cannot run")
+        case .malformedResponse:
+            print("virtualCompanyRun: malformed response (no HTTPURLResponse)")
+        case nil:
+            print("virtualCompanyRun: stream failed — \(error)")
+        }
+    }
+
+    /// Asked at most once per founder. Mirrors `vcInterviewFlag`, which persists it
+    /// per company id: `hydrate` re-derives this from the incoming company (so an
+    /// account switch never inherits the previous founder's asked-ness) and `reset`
+    /// clears it. It cannot be inferred from the brief alone, because skipping is a
+    /// no-write path and would otherwise re-ask on every launch, forever.
+    @Published private(set) var vcInterviewAsked: Bool = false
+
+    /// Once the room has actually produced a brief, ask for the two facts that make
+    /// every run after this one concrete. Reuses the existing interview queue:
+    /// `askInterviewGap` owns the card, `answerInterview` owns the reply path.
+    private func maybeAskVirtualCompanyInterview(_ state: VirtualCompanyRunState,
+                                                 language: AppLanguage) {
+        // Never stomp an interview already in flight (the first-run one owns the
+        // queue until it empties) — that would lose its remaining gaps AND its
+        // greeting tail.
+        guard interviewState == nil else { return }
+        guard VirtualCompanyInterview.shouldAsk(state: state,
+                                                brief: company.brief,
+                                                alreadyAsked: vcInterviewAsked) else { return }
+        vcInterviewAsked = true
+        // Persist BEFORE asking, keyed to this founder. Asking is the commitment —
+        // whether they answer or skip, we do not ask again.
+        if let cid = companyId { vcInterviewFlag.markAsked(cid) }
+        let gaps = VirtualCompanyInterview.gaps
+        // seedGreetingWhenDone: false — this interview happens mid-session, long
+        // after onboarding. The first-run greeting would read as amnesia.
+        interviewState = (gaps: gaps, idx: 0, seedGreetingWhenDone: false)
+        askInterviewGap(gaps[0], language: language)
+    }
+
+    /// Records the brief as a decision the founder has locked in, which then grounds
+    /// chat and run-task through `ChatContext`. Never automatic — the button in the
+    /// brief card is the only caller (spec: approve-then-record).
+    ///
+    /// `async` because decisions do NOT go through `saver` (the brief saver); they go
+    /// through `decisionsSaver`, an async closure — same path `handleRemember` and
+    /// `rememberFromApproval` use.
+    ///
+    /// It must SAY something. This is the feature's only call to action, and it used to
+    /// persist in silence: no chip, no consumed state, nothing at all when the brief had
+    /// no recommendation or the run no id. So it marks the run's message consumed (the
+    /// card then reads "locked in" instead of offering the button again) and appends the
+    /// same 📌 "Noted" chip `handleRemember` uses for a fact byte recorded on its own —
+    /// one affordance for "this is on the record now", not two.
+    ///
+    /// `messageId` is the run's own message, which is also the idempotency key: a second
+    /// tap (or a double-click) does nothing rather than appending a second chip.
+    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState, messageId: String) async {
+        guard let runId = state.runId,
+              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId),
+              let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              !chatMessages[i].actionConsumed else { return }
+        chatMessages[i].actionConsumed = true
+        let cid = companyId
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions,
+                                                     extracted: [extracted],
+                                                     now: Date().timeIntervalSince1970 * 1000)
+        chatMessages.append(CopilotMessage(
+            role: .companion, text: "",
+            noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
+        if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
     /// The specialist for a task's owning department, if it maps to a companion
@@ -1183,6 +1479,18 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        // Session state about the OUTGOING founder. Leaving it true would mean the
+        // next account — empty brief, nothing on record — is never asked at all,
+        // because `hydrate` only ever sets it from the incoming company's flag and a
+        // sign-out with no re-hydrate would keep this stale `true`.
+        vcInterviewAsked = false
+        // The outgoing founder's runs. The account guard already stops a late frame
+        // from landing in the incoming account's chat; cancelling also ends the
+        // server's work — and its spend — rather than paying for a verdict nobody
+        // will ever be shown. Cancellation propagates through the stream's
+        // `onTermination` into the client's detached task.
+        for task in vcTasks.values { task.cancel() }
+        vcTasks = [:]
         selectedDeptKey = nil
         activeProjectLink = nil
         codingRunAnchorId = nil

@@ -31,17 +31,24 @@ struct CompanyBrief: Codable, Hashable, Equatable {
     var traction: String?
     /// The problem the product solves + who feels it most (sharpens positioning).
     var problem: String?
+    /// How long the founder's current money lasts. Raw founder text, not distilled.
+    var runway: String?
+    /// What the company must not propose — no hiring, a ship date, no outside
+    /// investment. Raw founder text; one constraint per line.
+    var constraints: String?
 
     init(founderName: String? = nil, role: String? = nil, tech: String? = nil,
          stage: String? = nil, projectName: String? = nil, oneLiner: String? = nil,
          summary: String? = nil, notes: String? = nil, link: String? = nil,
          categories: [String]? = nil, audience: String? = nil,
-         goal: String? = nil, traction: String? = nil, problem: String? = nil) {
+         goal: String? = nil, traction: String? = nil, problem: String? = nil,
+         runway: String? = nil, constraints: String? = nil) {
         self.founderName = founderName; self.role = role; self.tech = tech
         self.stage = stage; self.projectName = projectName; self.oneLiner = oneLiner
         self.summary = summary; self.notes = notes; self.link = link
         self.categories = categories; self.audience = audience
         self.goal = goal; self.traction = traction; self.problem = problem
+        self.runway = runway; self.constraints = constraints
     }
 
     /// True when the brief carries any founder-supplied signal. Mirrors the web
@@ -54,6 +61,7 @@ struct CompanyBrief: Codable, Hashable, Equatable {
         return s(founderName) || s(role) || s(tech) || s(stage)
             || s(projectName) || s(oneLiner) || s(summary) || s(notes)
             || s(link) || s(audience) || s(goal) || s(traction) || s(problem)
+            || s(runway) || s(constraints)
             || !(categories?.isEmpty ?? true)
     }
 }

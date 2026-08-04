@@ -14,6 +14,7 @@
 - **Typography:** Inter only in this surface — `CodepetTheme.inter(_:weight:)`, `.title()`, `.subtitle()`, `.label(_:_:)`. Never `.pixelSystem` or `CodepetTheme.pixel` in any file this plan creates.
 - **Colours:** only `CodepetTheme` tokens (`surface`, `hairline`, `primaryText`, `bodyText`, `mutedText`, `accentPurple`, `accentOrange`). No literal hex.
 - **Destructive actions** use `CodepetTheme.accentOrange` text, never red literals.
+- **Separators are `SettingsDivider()`, never bare `Divider()`.** SwiftUI's `Divider()` renders in the system separator colour, which does not track `CodepetTheme` — a card's `hairline` border and a system separator inside it read as two different greys. `SettingsDivider` lives in `SettingsChrome.swift` and is backed by `CodepetTheme.hairline`. (Added after the Task 3 review; founder's call, Aug 4.)
 - **No accent-colour control.** The accent derives from the chosen companion; a user-set accent would compound the open roadmap accent-collision bug.
 - **Bilingual:** every user-facing string takes `lang == .vi ? "…" : "…"`, matching `AppView.title(_:)`.
 - **Language is read from the environment**, not the store: `@Environment(\.uiLanguage) private var lang` — the idiom the deleted `SettingsView` used. Only the Language *picker* binds `$appState.uiLanguage` (the storage behind that key). **Every panel code block below writes `private var lang: AppLanguage { appState.uiLanguage }` for readability; replace that line with the `@Environment` property wrapper in each file, and drop `@EnvironmentObject var appState` from any panel that used it only for `lang`.**
@@ -357,7 +358,7 @@ struct SettingsGroupLabel: View {
     }
 }
 
-/// A bordered card holding rows. Rows separate themselves with `Divider()`.
+/// A bordered card holding rows. Rows separate themselves with `SettingsDivider()`.
 struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -560,7 +561,7 @@ struct SettingsModal: View {
         HStack(spacing: 0) {
             if !railCollapsed {
                 SettingsRail(selection: $selection)
-                Divider()
+                SettingsDivider()
             }
             VStack(spacing: 0) {
                 header(railCollapsed: railCollapsed)
@@ -654,7 +655,7 @@ struct PreferencesPanel: View {
                 }
                 .padding(.vertical, 14)
 
-                Divider()
+                SettingsDivider()
                 SettingsRow(label: lang == .vi ? "Tên gọi" : "Preferred Name") {
                     TextField("", text: $draftName)
                         .textFieldStyle(.plain)
@@ -665,7 +666,7 @@ struct PreferencesPanel: View {
                             .fill(CodepetTheme.hairline.opacity(0.5)))
                         .onSubmit { commitName() }
                 }
-                Divider()
+                SettingsDivider()
                 SettingsRow(label: "Email") {
                     Text(email ?? "—")
                         .font(CodepetTheme.inter(12))
@@ -685,7 +686,7 @@ struct PreferencesPanel: View {
                     .labelsHidden()
                     .frame(width: 240)
                 }
-                Divider()
+                SettingsDivider()
                 SettingsRow(label: lang == .vi ? "Ngôn ngữ" : "Language") {
                     Picker("", selection: $appState.uiLanguage) {
                         Text("English").tag(AppLanguage.en)
@@ -861,7 +862,7 @@ struct CompanyPanel: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Divider()
+                SettingsDivider()
                 SettingsRow(label: lang == .vi ? "Hồ sơ công ty" : "Company brief") {
                     Button(lang == .vi ? "Chỉnh sửa" : "Edit") { editingBrief = true }
                         .buttonStyle(.plain)
@@ -882,7 +883,7 @@ struct CompanyPanel: View {
     private var companionList: some View {
         SettingsGroup {
             ForEach(Array(CompanionRowModel.all.enumerated()), id: \.element.id) { idx, c in
-                if idx > 0 { Divider() }
+                if idx > 0 { SettingsDivider() }
                 Button {
                     Task { await companyStore.setCompanion(id: c.id) }
                     appState.activeChar = c.id
@@ -1531,9 +1532,9 @@ struct AISettingsPanel: View {
             SettingsGroupLabel(lang == .vi ? "Đặc điểm" : "Characteristics")
             SettingsGroup {
                 levelRow(lang == .vi ? "Ấm áp" : "Warm", $style.warmth)
-                Divider()
+                SettingsDivider()
                 levelRow(lang == .vi ? "Nhiệt tình" : "Enthusiastic", $style.enthusiasm)
-                Divider()
+                SettingsDivider()
                 levelRow("Emoji", $style.emoji)
             }
 
@@ -1542,7 +1543,7 @@ struct AISettingsPanel: View {
                 SettingsRow(label: lang == .vi ? "Vai trò" : "Role") {
                     field($style.role, placeholder: lang == .vi ? "nhà sáng lập" : "solo founder")
                 }
-                Divider()
+                SettingsDivider()
                 SettingsRow(
                     label: lang == .vi ? "Thêm về bạn" : "More about you",
                     description: lang == .vi ? "Sở thích, giá trị, điều cần nhớ."
@@ -1550,7 +1551,7 @@ struct AISettingsPanel: View {
                 ) {
                     field($style.moreAboutYou, placeholder: "")
                 }
-                Divider()
+                SettingsDivider()
                 SettingsRow(label: lang == .vi ? "Hướng dẫn riêng" : "Custom instructions") {
                     field($style.customInstructions,
                           placeholder: lang == .vi ? "Hành vi, phong cách…"
@@ -1816,7 +1817,7 @@ struct MemoryPanel: View {
                     }
                 } else {
                     ForEach(Array(facts.enumerated()), id: \.offset) { idx, fact in
-                        if idx > 0 { Divider() }
+                        if idx > 0 { SettingsDivider() }
                         SettingsRow(label: fact) {
                             Button { forget(fact) } label: {
                                 Image(systemName: "xmark")
@@ -1983,7 +1984,7 @@ struct NotificationsPanel: View {
     var body: some View {
         SettingsGroup {
             ForEach(Array(NotificationCategory.allCases.enumerated()), id: \.element.id) { idx, cat in
-                if idx > 0 { Divider() }
+                if idx > 0 { SettingsDivider() }
                 SettingsRow(label: cat.title(lang), description: cat.description(lang)) {
                     Picker("", selection: Binding(
                         get: { cat.channel(in: companyStore.company.founderPrefs) },

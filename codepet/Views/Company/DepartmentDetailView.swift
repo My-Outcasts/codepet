@@ -163,9 +163,11 @@ private struct DepartmentTaskCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(task.title).font(CodepetTheme.cardTitle()).foregroundColor(CodepetTheme.primaryText)
+                    Text(task.title).font(CodepetTheme.inter(15, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
                     if !task.detail.isEmpty {
-                        Text(task.detail).font(CodepetTheme.cardDetail()).foregroundColor(CodepetTheme.mutedText)
+                        Text(task.detail).font(CodepetTheme.inter(13))
+                            .foregroundColor(CodepetTheme.mutedText)
                             .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -179,17 +181,32 @@ private struct DepartmentTaskCard: View {
             }
             if task.done {
                 Button {
-                    openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)
+                    openDeliverable = RoadmapEngine.deliverable(for: task,
+                                                                in: companyStore.company.library)
                 } label: {
                     Text(lang == .vi ? "✓ Đã duyệt · đã giao" : "✓ Approved · delivered")
                         .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentTeal)
                 }
                 .buttonStyle(.plain)
             } else {
-                actionButton
+                HStack(spacing: 10) {
+                    actionButton
+                    // A dead button needs a reason next to it. `RoadmapGating.blocker` resolves
+                    // both causes of `.blocked` — an unmet dependency, or the founder step
+                    // holding the phase window shut — and it resolves against the WHOLE board,
+                    // because the blocker usually belongs to another department.
+                    if status == .blocked,
+                       let blocker = RoadmapGating.blocker(for: task,
+                                                           in: companyStore.company.tasks) {
+                        Text(RoadmapBoardCopy.waitingOn(blocker.title, lang: lang))
+                            .font(CodepetTheme.inter(12))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                }
             }
         }
-        .padding(12)
+        .padding(14)
         .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
@@ -198,6 +215,7 @@ private struct DepartmentTaskCard: View {
 
     @ViewBuilder private var actionButton: some View {
         let running = companyStore.runningTaskIds.contains(task.id)
+        let blocked = status == .blocked
         Button {
             if status == .needsApproval { previewTask = task }
             else if task.who == .you { Task { await companyStore.walkThroughTask(task, language: lang) } }
@@ -207,15 +225,19 @@ private struct DepartmentTaskCard: View {
                 if running { ProgressView().controlSize(.mini) }
                 Text(running ? (lang == .vi ? "Đang chạy…" : "Running…") : buttonLabel)
             }
-            .font(CodepetTheme.inter(12, weight: .semibold))
-            .foregroundColor(task.who == .you ? CodepetTheme.bodyText : .white)
+            .font(CodepetTheme.inter(12.5, weight: .semibold))
+            // Blocked must not wear the accent fill: it was disabled but still painted like the
+            // live primary action, so the only honest read was "this button is broken".
+            .foregroundColor(blocked ? CodepetTheme.mutedText
+                                     : (task.who == .you ? CodepetTheme.bodyText : .white))
             .padding(.horizontal, 11).padding(.vertical, 5)
-            .background(task.who == .you
+            .background(blocked || task.who == .you
                 ? AnyView(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
                 : AnyView(Capsule().fill(CodepetTheme.accentPurple)))
+            .opacity(blocked ? 0.55 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(status == .blocked || running)
+        .disabled(blocked || running)
     }
 
     private var buttonLabel: String {

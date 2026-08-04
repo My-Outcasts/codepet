@@ -14,6 +14,15 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
         AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
     }
 
+    /// Proves the store really called the fan-out. Without it, a test that asserts
+    /// "nothing about the chat changed" would pass just as happily against a runner
+    /// that never ran — "the feature correctly did nothing" and "the feature never
+    /// happened" have to be distinguishable. Mutated only from the `vcRunner` closure,
+    /// which the store invokes on the main actor, same as this suite.
+    private final class RunnerProbe {
+        var invocations = 0
+    }
+
     private static func routing(_ decision: String) -> VCRouting {
         let json: [String: Any] = ["decision": decision, "agents": ["product", "finance"],
                                    "real_question": "q", "request_type": "DECISION"]
@@ -105,26 +114,39 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
     // MARK: - The chat must be untouched otherwise
 
     func testEscapeHatchLeavesTheChatExactlyAsItWas() async {
+        let probe = RunnerProbe()
+        let consumed = expectation(description: "the store consumed the fan-out stream")
         let s = store { _ in
-            AsyncThrowingStream {
-                $0.yield(.runStarted(runId: "r1"))
-                $0.yield(.routing(Self.routing("single_agent")))
-                $0.finish()
+            probe.invocations += 1
+            return AsyncThrowingStream { cont in
+                cont.onTermination = { _ in consumed.fulfill() }
+                cont.yield(.runStarted(runId: "r1"))
+                cont.yield(.routing(Self.routing("single_agent")))
+                cont.finish()
             }
         }
         await send(s)
+        await fulfillment(of: [consumed], timeout: 2)
+        // The run really happened and really was read — and still changed nothing.
+        XCTAssertEqual(probe.invocations, 1)
         XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])
         XCTAssertEqual(s.chatMessages.last?.text, "byte's answer")
         XCTAssertNil(s.chatMessages.last?.vcRun)
     }
 
     func testAKillSwitchOrCapLeavesTheChatExactlyAsItWas() async {
+        let probe = RunnerProbe()
+        let consumed = expectation(description: "the store consumed the fan-out stream")
         let s = store { _ in
-            AsyncThrowingStream {
-                $0.finish(throwing: VirtualCompanyRunError.http(status: 503, body: nil))
+            probe.invocations += 1
+            return AsyncThrowingStream { cont in
+                cont.onTermination = { _ in consumed.fulfill() }
+                cont.finish(throwing: VirtualCompanyRunError.http(status: 503, body: nil))
             }
         }
         await send(s)
+        await fulfillment(of: [consumed], timeout: 2)
+        XCTAssertEqual(probe.invocations, 1)
         XCTAssertEqual(s.chatMessages.last?.text, "byte's answer")
         XCTAssertNil(s.chatMessages.last?.vcRun)
         XCTAssertFalse(s.isStreaming)
@@ -142,20 +164,59 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
         XCTAssertNil(s.chatMessages.last?.vcRun)
     }
 
-    /// Important 2: `virtualCompanyRun` cold-starts in 5–10s while byte's stream can
-    /// finish in 4, so a routing frame can arrive after the founder has read the
-    /// answer. It must not reopen a closed turn.
+    /// `virtualCompanyRun` cold-starts in 5–10s while byte's stream can finish in 4, so
+    /// a routing frame can arrive after the founder has read the answer. Rewriting a
+    /// finished, already-read message is the defect; `closedTurns` is the guard.
+    ///
+    /// The ordering is a handshake, not a sleep, and it is built so `closedTurns` is
+    /// the ONLY thing that can stop the write — `vcTask.cancel()` cannot take the
+    /// credit. The routing frame is handed to the fan-out while it is already parked
+    /// in `next()` and the turn still owns the main actor, so the value is in the
+    /// task's hands BEFORE the cancel; cancellation is cooperative and cannot reach
+    /// back into a delivered element. The fan-out therefore resumes after the turn has
+    /// closed, applies the routing, and calls `publishRunProgress` for real — which is
+    /// exactly the production window this guard exists for.
     func testARunDecidingAfterTheTurnClosedCannotRewriteTheAnswer() async {
-        final class Box { var cont: AsyncThrowingStream<VirtualCompanyEvent, Error>.Continuation? }
-        let box = Box()
-        let s = store { _ in AsyncThrowingStream { box.cont = $0 } }
-        await send(s)
-        XCTAssertEqual(s.chatMessages.last?.text, "byte's answer")
+        final class Handshake {
+            var events: AsyncThrowingStream<VirtualCompanyEvent, Error>.Continuation?
+            var runnerStarted = false
+            var waiter: CheckedContinuation<Void, Never>?
+        }
+        let h = Handshake()
+        let probe = RunnerProbe()
 
-        // The turn is closed. Land the handoff now — it must be refused.
-        box.cont?.yield(.routing(Self.routing("multi_agent")))
-        box.cont?.finish()
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        let s = CompanyStore(
+            loader: { _ in .empty }, saver: { _, _ in true },
+            chatSender: { _ in
+                // Park until the fan-out has built its stream. Once its builder has
+                // returned, the task's very next act is `next()` with nothing buffered,
+                // and a continuation resumed on the main actor cannot preempt a task
+                // that is still running — so by the time this resumes, the fan-out is
+                // suspended waiting for its first frame.
+                if !h.runnerStarted {
+                    await withCheckedContinuation { h.waiter = $0 }
+                }
+                // Deliver the decision to that suspended consumer while THIS turn still
+                // holds the actor. It lands before the turn closes and before cancel.
+                h.events?.yield(.routing(Self.routing("multi_agent")))
+                h.events?.finish()
+                return CompanyChatReply(text: "byte's answer", runTaskId: nil)
+            },
+            chatStreamer: Self.failingStreamer,
+            vcRunner: { _ in
+                probe.invocations += 1
+                return AsyncThrowingStream { cont in
+                    h.events = cont
+                    h.runnerStarted = true
+                    if let waiter = h.waiter { h.waiter = nil; waiter.resume() }
+                }
+            })
+
+        await send(s)
+        // Let the fan-out resume and make its (refused) write attempt.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(probe.invocations, 1)
         XCTAssertEqual(s.chatMessages.last?.text, "byte's answer")
         XCTAssertNil(s.chatMessages.last?.vcRun)
     }

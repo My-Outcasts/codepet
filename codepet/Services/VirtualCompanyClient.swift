@@ -48,7 +48,16 @@ enum VirtualCompanyClient {
             // exercises `CompanyStore.sendMessage`. "No Firebase app" is
             // indistinguishable from "no credentials" as far as this endpoint is
             // concerned (it answers 401 either way), so report it as such.
-            guard FirebaseApp.app() != nil else { throw VirtualCompanyRunError.notSignedIn }
+            guard FirebaseApp.app() != nil else {
+                // Leave a trace: the throw alone is silent (only 400 is logged
+                // downstream), so a distribution build shipped without the plist would
+                // disable the room forever, indistinguishable from a signed-out
+                // founder. A log line rather than `assertionFailure`, because the
+                // XCTest host deliberately never configures Firebase and a trap there
+                // would fail every suite that exercises a chat send.
+                print("virtualCompanyRun: no FirebaseApp configured — the room cannot run")
+                throw VirtualCompanyRunError.notSignedIn
+            }
             guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
                 throw VirtualCompanyRunError.notSignedIn
             }

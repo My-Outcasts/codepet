@@ -107,8 +107,9 @@ struct SettingsModal: View {
     @ViewBuilder private func sectionBody(for section: SettingsSection) -> some View {
         switch section {
         case .preferences: PreferencesPanel()
-        case .aiSettings, .company, .memory, .notifications, .billing, .usage, .support, .advanced:
-            // Replaced by Tasks 5, 6, 8, 10, 11 and 12. Phase 1 does not ship with any
+        case .company: CompanyPanel()
+        case .aiSettings, .memory, .notifications, .billing, .usage, .support, .advanced:
+            // Replaced by Tasks 6, 8, 10, 11 and 12. Phase 1 does not ship with any
             // of these remaining.
             Text(lang == .vi ? "Đang chuyển sang cửa sổ này." : "Moving into this window.")
                 .font(CodepetTheme.inter(13))

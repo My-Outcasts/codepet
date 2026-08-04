@@ -96,8 +96,12 @@ enum DepartmentCatalog {
             }
             let open = mine.filter { !$0.done }
             let statuses = open.map { RoadmapEngine.status(for: $0, in: tasks) }
+            // `.needsApproval` counts as `.attention` too: `RoadmapGating.needsFounder` already
+            // treats a drafted task and a founder-owned (`who == .you`) task identically — both
+            // are work only the founder can clear — so a pending draft must not collapse into
+            // `.idle`. `.ready` means "Codepet can act"; an unapproved draft is not that.
             let status: DepartmentStatus =
-                statuses.contains(.needsYou) ? .attention
+                statuses.contains(.needsYou) || statuses.contains(.needsApproval) ? .attention
                 : statuses.contains(.codepetCanDo) ? .ready
                 : .idle
             return DepartmentSummary(department: dep, status: status,

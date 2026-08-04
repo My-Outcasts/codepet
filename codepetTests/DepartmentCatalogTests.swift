@@ -10,8 +10,10 @@ final class DepartmentCatalogTests: XCTestCase {
         XCTAssertNil(DepartmentCatalog.find(nil))
         XCTAssertFalse(DepartmentCatalog.find("eng")!.rationale.isEmpty)
     }
-    private func task(_ id: String, dept: String?, who: TaskWho, done: Bool = false, deps: [String] = []) -> RoadmapTask {
-        RoadmapTask(id: id, title: id, detail: "", phase: .find, who: who, dependsOn: deps, done: done, dept: dept)
+    private func task(_ id: String, dept: String?, who: TaskWho, done: Bool = false, deps: [String] = [],
+                       drafted: Bool = false) -> RoadmapTask {
+        RoadmapTask(id: id, title: id, detail: "", phase: .find, who: who, dependsOn: deps, done: done,
+                    drafted: drafted, dept: dept)
     }
     func testSummaryStatusAndCounts() {
         let tasks = [
@@ -29,5 +31,18 @@ final class DepartmentCatalogTests: XCTestCase {
         XCTAssertEqual(s.first { $0.department.key == "fin" }!.status, .idle)   // only a done task
         XCTAssertEqual(s.first { $0.department.key == "legal" }!.status, .later) // zero tasks
         XCTAssertEqual(DepartmentCatalog.needToday(s), 1)   // only eng is attention
+    }
+
+    /// A drafted-but-unapproved task is founder-owned work (`RoadmapGating.needsFounder`
+    /// treats `drafted` and `who == .you` identically), so it must read `.attention`, not
+    /// collapse into `.idle` — and it must raise the header's `needToday` count.
+    func testDraftedOnlyTaskReadsAttention() {
+        let tasks = [
+            task("e", dept: "support", who: .draft, drafted: true), // needsApproval → attention
+        ]
+        let s = DepartmentCatalog.summaries(tasks: tasks)
+        let support = s.first { $0.department.key == "support" }!
+        XCTAssertEqual(support.status, .attention)
+        XCTAssertEqual(DepartmentCatalog.needToday(s), 1)
     }
 }

@@ -85,7 +85,9 @@ struct DepartmentDetailView: View {
     }
 
     /// The count is appended only when it carries information — "1 of 1 left" says nothing until
-    /// something is done, so an untouched department just reads "WHAT NEEDS DOING".
+    /// something is done, so an untouched department just reads "WHAT NEEDS DOING". A
+    /// fully-done department DOES carry information ("8 of 8 done") — dropping it there left the
+    /// header contradicting the "All clear" pulse line above it and the delivered rows below it.
     private var sectionHeader: some View {
         Text(headerText)
             .font(CodepetTheme.inter(12, weight: .semibold))
@@ -95,7 +97,7 @@ struct DepartmentDetailView: View {
 
     private var headerText: String {
         let base = (lang == .vi ? "Việc cần làm" : "What needs doing").uppercased()
-        guard doneCount > 0, doneCount < tasks.count else { return base }
+        guard doneCount > 0 else { return base }
         return base + (lang == .vi ? " · \(doneCount)/\(tasks.count) đã xong"
                                    : " · \(doneCount) of \(tasks.count) done")
     }

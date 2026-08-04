@@ -106,7 +106,7 @@ Email is read-only from `authManager`. Theme and Language keep their current hom
 | **Memory** | Enable memory · "What Crash knows" (deletable rows) · "Coding activity" (read-only + Reset) |
 | **Notifications** | Category rows with `Off │ In-app`: session nudges (`HealthNudgeController`), run finished |
 | **Billing** | Plan name + one-line value prop + Compare plans (existing `BillingView` content) |
-| **Usage** | Runs used today against the 30/day cap, as a labelled meter |
+| **Usage** | No number, no cap, no meter: usage is not tracked client-side. The section states that plainly. The 30/day figure this spec originally asserted is wrong — a 429 fixture shows the server returning `limit: 50`, and `MockChat.swift:365` describes the model as credits, not a per-day cap. Founder's call, Aug 4: keep the section, drop the invented figure |
 | **Support** | Existing `SupportView` content |
 | **Advanced** | Sign out · version. Export data and Delete all chats are deferred to their own task — both need real Firestore work, and a button that does nothing is worse than a missing one |
 

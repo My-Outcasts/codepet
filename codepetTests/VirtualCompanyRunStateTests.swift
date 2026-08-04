@@ -138,4 +138,24 @@ final class VirtualCompanyRunStateTests: XCTestCase {
         XCTAssertEqual(state.verdict?.objections, ["one"])
         XCTAssertNil(state.agentStatuses.first { $0.meta.agentId == "devils_advocate" }?.meta.departmentKey)
     }
+
+    func testRepeatedAgentStartDoesNotDuplicateTheAgent() {
+        var state = VirtualCompanyRunState()
+        state.apply(.routing(routing("multi_agent")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        XCTAssertEqual(state.agents.count, 1)
+        XCTAssertEqual(state.agentStatuses.count, 1)
+    }
+
+    func testEventsForAnAgentThatNeverStartedStillRegisterItExactlyOnce() {
+        var state = VirtualCompanyRunState()
+        state.apply(.routing(routing("multi_agent")))
+        state.apply(.agentPosition(VCAgentMeta(agentId: "finance", departmentKey: "fin"), position()))
+        state.apply(.agentError(VCAgentMeta(agentId: "finance", departmentKey: "fin"), "529 upstream"))
+        XCTAssertEqual(state.agents.count, 1)
+        XCTAssertNotNil(state.positions["finance"])
+        XCTAssertEqual(state.agentStatuses.first?.status, .failed)
+    }
 }

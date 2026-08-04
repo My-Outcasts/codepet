@@ -110,3 +110,20 @@ struct VirtualCompanyRunState: Equatable {
         }
     }
 }
+
+/// Turns a finished run into a decision the founder can lock in.
+///
+/// Never automatic. The app's own pattern is approve-then-record —
+/// `DecisionsClient.extract` takes an `ApprovedDeliverableDTO`, never a draft —
+/// and the brief exists precisely to hand the founder a trade-off nobody else can
+/// make. Recording it before they decide would put words in their mouth.
+enum VirtualCompanyDecision {
+    static func extracted(from state: VirtualCompanyRunState, runId: String) -> ExtractedDecision? {
+        guard let brief = state.brief else { return nil }
+        let topic = state.routing?.realQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !topic.isEmpty else { return nil }
+        return ExtractedDecision(topic: topic,
+                                 statement: brief.recommendation,
+                                 source: "virtual-company/\(runId)")
+    }
+}

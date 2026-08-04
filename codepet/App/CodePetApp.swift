@@ -237,6 +237,18 @@ struct CodePetApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            // ⌘, is the macOS convention and lands in the app menu for free. As a menu
+            // command it routes regardless of which field has focus, and typing an
+            // unmodified comma in the composer is unaffected.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    // Guarded so the panel does not pop open the instant onboarding ends.
+                    guard !companyStore.isOnboarding else { return }
+                    companyStore.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandMenu("Navigation") {
                 Button("Home") { appState.selectedTab = .home }
                     .keyboardShortcut("1", modifiers: .command)

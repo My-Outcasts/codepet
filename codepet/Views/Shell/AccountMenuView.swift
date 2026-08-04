@@ -58,7 +58,7 @@ struct AccountMenuView: View {
             }
             .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 4)
             Divider()
-            menuRow(lang == .vi ? "Cài đặt" : "Settings") { companyStore.select(.settings) }
+            menuRow(lang == .vi ? "Cài đặt" : "Settings") { companyStore.openSettings() }
             menuRow(lang == .vi ? "Thanh toán & sử dụng" : "Billing & Usage") { companyStore.select(.billing) }
             menuRow(lang == .vi ? "Hỗ trợ" : "Support") { companyStore.select(.support) }
             Divider()

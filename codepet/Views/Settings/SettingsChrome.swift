@@ -41,9 +41,16 @@ struct SettingsGroupLabel: View {
 /// Replaces `Divider()` to ensure row separators track `CodepetTheme` instead of using the system
 /// separator colour, keeping separators visually consistent with the group's `CodepetTheme.hairline` border.
 struct SettingsDivider: View {
+    /// `.horizontal` (the default, so every row call site stays `SettingsDivider()`) draws
+    /// the 1pt rule BETWEEN stacked rows. `.vertical` draws the 1pt column rule between the
+    /// modal's rail and its panel — an outer `.frame` cannot rotate the horizontal one,
+    /// because the fixed 1pt height wins over anything the parent proposes.
+    var axis: Axis = .horizontal
+
     var body: some View {
         CodepetTheme.hairline
-            .frame(height: 1)
+            .frame(width:  axis == .vertical   ? 1 : nil,
+                   height: axis == .horizontal ? 1 : nil)
     }
 }
 

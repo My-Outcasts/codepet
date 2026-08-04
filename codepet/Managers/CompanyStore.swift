@@ -1450,6 +1450,16 @@ final class CompanyStore: ObservableObject {
         if let cid = companyId { _ = await companionSaver(cid, id) }
     }
 
+    /// Persist the founder's preferred name onto the brief. Reuses the ONE brief writer
+    /// (`saver`, the injected `CompanyData.saveBrief` that `answerInterview` and
+    /// `finishOnboarding` already go through) rather than adding a second write path for a
+    /// field the brief document already owns. Fail-soft: a lost write only means the old
+    /// name comes back on reload, never a broken page.
+    func setFounderName(_ name: String) async {
+        company.brief.founderName = name
+        if let cid = companyId { _ = await saver(cid, company.brief) }
+    }
+
     /// Remember that this account has seen the Overview briefing, so the first-run modal shows
     /// once per account rather than once per device. Fail-soft: a lost write only means the
     /// briefing appears one more time, never a broken page.

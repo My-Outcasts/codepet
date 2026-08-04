@@ -135,6 +135,23 @@ struct VCRunCards: View {
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
+                // Why each department was left out. With nine to choose from the
+                // router writes several of these per run, and they are the clearest
+                // statement of what the question is NOT about — spec §4.2A, the
+                // founder learns problem decomposition from this panel. They were
+                // collected and persisted from the start and never once shown.
+                //
+                // Sorted, because `excluded` is a dictionary: unsorted iteration
+                // reshuffles the list on every redraw of a live card.
+                if !routing.excluded.isEmpty {
+                    Divider().overlay(CodepetTheme.hairline)
+                    label(lang == .vi ? "KHÔNG MỜI, VÌ" : "NOT IN THE ROOM, BECAUSE")
+                    ForEach(routing.excluded.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
+                        Text("✗ \(roleName(entry.key)) — \(entry.value)")
+                            .font(CodepetTheme.inter(12))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                }
                 if !routing.missingInfo.isEmpty {
                     Text((lang == .vi ? "Còn thiếu: " : "Missing: ")
                          + routing.missingInfo.joined(separator: "; "))
@@ -357,6 +374,24 @@ struct VCRunCards: View {
                     .fill(i < n ? CodepetTheme.accentPurple : CodepetTheme.hairline)
                     .frame(width: 6, height: 6)
             }
+        }
+    }
+
+    /// A founder-facing name for an agent we have only an id for — the `excluded`
+    /// map is keyed by id and carries no `agent_meta`.
+    ///
+    /// Title-casing the id lands on exactly the client's own department names for
+    /// all nine (engineering → Engineering, operations → Operations), so this stays
+    /// consistent with the invited rows above WITHOUT duplicating the backend's
+    /// id→`Department.key` mapping here, where it would silently drift.
+    private func roleName(_ agentId: String) -> String {
+        switch agentId {
+        case "chief_of_staff":  return lang == .vi ? "Ban điều hành" : "Chief of staff"
+        case "devils_advocate": return lang == .vi ? "Người phản biện" : "The Challenger"
+        default:
+            return agentId.split(separator: "_")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
         }
     }
 

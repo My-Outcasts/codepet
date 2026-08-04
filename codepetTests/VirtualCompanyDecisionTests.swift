@@ -40,3 +40,51 @@ final class VirtualCompanyDecisionTests: XCTestCase {
         XCTAssertEqual(merged.last?.source, "virtual-company/run_42")
     }
 }
+
+/// The routing panel's refusals. Sorting is the substance here, not style: with
+/// nine departments the router writes several refusals per run, and `excluded` is
+/// a dictionary — unsorted iteration reshuffles a live card on every redraw.
+final class VirtualCompanyRoutingExclusionTests: XCTestCase {
+
+    private func routing(excluded: [String: String]) -> VCRouting {
+        let json: [String: Any] = [
+            "decision": "multi_agent", "agents": ["product", "legal"],
+            "real_question": "q", "request_type": "DECISION",
+            "reason_per_agent": ["product": "owns retention policy"],
+            "excluded": excluded
+        ]
+        return try! JSONDecoder().decode(
+            VCRouting.self, from: try! JSONSerialization.data(withJSONObject: json))
+    }
+
+    func testExclusionsDecodeAndSurviveAsAWholeSet() {
+        // Seven refusals is the normal shape now, not an edge case.
+        let seven = ["engineering": "follows the policy decision",
+                     "design": "not a design question",
+                     "marketing": "messaging follows the choice",
+                     "sales": "downstream of the choice",
+                     "support": "not a stakeholder in direction",
+                     "operations": "not operationally material",
+                     "finance": "cost is an input, not the decision"]
+        let r = routing(excluded: seven)
+        XCTAssertEqual(r.excluded.count, 7)
+        XCTAssertEqual(r.excluded["engineering"], "follows the policy decision")
+    }
+
+    func testTheRenderedOrderIsStableAcrossRedraws() {
+        let r = routing(excluded: ["support": "b", "engineering": "a", "marketing": "c"])
+        let first = r.excluded.sorted(by: { $0.key < $1.key }).map(\.key)
+        let again = r.excluded.sorted(by: { $0.key < $1.key }).map(\.key)
+        XCTAssertEqual(first, again)
+        XCTAssertEqual(first, ["engineering", "marketing", "support"])
+    }
+
+    func testAMissingExcludedMapIsNotAnError() {
+        // The backend omits it on some decisions; a routing frame must still render.
+        let json: [String: Any] = ["decision": "multi_agent", "agents": ["product", "legal"],
+                                   "real_question": "q", "request_type": "DECISION"]
+        let r = try! JSONDecoder().decode(
+            VCRouting.self, from: try! JSONSerialization.data(withJSONObject: json))
+        XCTAssertTrue(r.excluded.isEmpty)
+    }
+}

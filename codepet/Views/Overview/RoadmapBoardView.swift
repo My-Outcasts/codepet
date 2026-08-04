@@ -35,6 +35,8 @@ struct RoadmapBoardView: View {
     /// Phases the founder expanded by hand from their rail. Session-only: the width rule
     /// (`RoadmapFocus`) picks the default set on every layout pass.
     @State private var userExpanded: Set<RoadmapPhase> = []
+    /// The rail under the pointer, if it can expand. Drives the hover lift.
+    @State private var hoveredRail: RoadmapPhase?
 
     /// Page gutters for the board. Leading is wider than the page's 24pt because the root
     /// node's aura bleeds 26pt past its own box — at 24pt the glow clips on the window edge.
@@ -245,6 +247,13 @@ struct RoadmapBoardView: View {
             } else {
                 Button { expand(r.phase) } label: { railBody(r, height: height, empty: false) }
                     .buttonStyle(.plain)
+                    // The affordance the rails were missing: a rail that expands
+                    // now lifts and shows the hand cursor, so "clickable" is
+                    // discoverable without hovering for a tooltip.
+                    .onHover { inside in
+                        hoveredRail = inside ? r.phase : (hoveredRail == r.phase ? nil : hoveredRail)
+                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                    }
             }
         }
         .help(help)
@@ -281,18 +290,27 @@ struct RoadmapBoardView: View {
         // doesn't participate in layout, so a label constrained only afterwards overflows its
         // box symmetrically (upward into the count) whenever the rail is short.
         let labelRun = max(0, height - 44)
+        // Hover only lifts a rail that can actually expand — an empty phase has
+        // nothing to open, so it stays inert AND stays visually still. The
+        // difference in *behaviour* is what tells the two apart; before this, the
+        // only cue was 40%-dimmer text on an already-muted label.
+        let lifted = !empty && hoveredRail == r.phase
         return ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.well)
-            RoundedRectangle(cornerRadius: 10).stroke(CodepetTheme.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10)
+                .fill(lifted ? CodepetTokens.railFillHover : CodepetTokens.railFill)
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(lifted ? CodepetTokens.railBorderHover : CodepetTokens.railBorder,
+                        lineWidth: 1)
         }
         .frame(width: RoadmapGeometry.railW, height: height)
+        .animation(.easeOut(duration: 0.12), value: lifted)
         .overlay(alignment: .top) {
-            if !empty {
-                Text("\(r.done)/\(r.total)")
-                    .font(CodepetTheme.inter(10)).monospacedDigit()
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .padding(.top, 10)
-            }
+            // Always occupied — an em dash for an unplanned phase, so the slot is
+            // never blank and the row keeps one rhythm.
+            Text(RoadmapBoardCopy.railCount(done: r.done, total: r.total))
+                .font(CodepetTheme.inter(10)).monospacedDigit()
+                .foregroundColor(CodepetTheme.mutedText.opacity(empty ? 0.6 : 1))
+                .padding(.top, 10)
         }
         .overlay(alignment: .bottom) {
             Text(r.phase.label(lang).uppercased())

@@ -183,4 +183,16 @@ enum RoadmapBoardCopy {
         return lang == .vi ? "\(d) · mở khoá \(unlockCount) bước sau"
                            : "\(d) · unlocks \(unlockCount) later steps"
     }
+
+    /// What a collapsed rail prints where its count goes.
+    ///
+    /// An unplanned phase (`total == 0`) used to print NOTHING — the count was
+    /// simply omitted, so the rail was structurally identical to one whose number
+    /// had failed to render, and the only explanation lived in a hover tooltip
+    /// nobody finds. It now prints an em dash: a visible "no work here yet" that
+    /// can't be mistaken for a missing value, and that keeps every rail's count
+    /// slot occupied so the row reads as one rhythm.
+    static func railCount(done: Int, total: Int) -> String {
+        total == 0 ? "—" : "\(done)/\(total)"
+    }
 }

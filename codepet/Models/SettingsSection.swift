@@ -45,11 +45,18 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .notifications:
             return lang == .vi ? "Chọn khi nào Codepet nhắc bạn."
                                : "Choose when Codepet interrupts you."
+        // Both of these say only what their panel actually shows. `BillingPanel` has no
+        // checkout — there is no billing backend to point one at — so it must not be
+        // introduced as "your payment method"; and `UsagePanel` deliberately carries no
+        // per-day framing, because the account is priced in credits, not a daily cap, and
+        // nothing on this device counts runs. A subtitle promising either would reinstate,
+        // one file over, exactly the claim the panel was written to avoid.
         case .billing:
-            return lang == .vi ? "Gói và phương thức thanh toán."
-                               : "Your plan and payment method."
+            return lang == .vi ? "Gói của bạn. Chưa thanh toán được trong ứng dụng."
+                               : "Your plan. There's no checkout in the app yet."
         case .usage:
-            return lang == .vi ? "Mức dùng hôm nay." : "What you've used today."
+            return lang == .vi ? "Tín dụng của bạn, và những gì máy này biết."
+                               : "Your credits, and what this device can tell you."
         case .support:
             return lang == .vi ? "Nhận trợ giúp về Codepet." : "Get help with Codepet."
         case .advanced:

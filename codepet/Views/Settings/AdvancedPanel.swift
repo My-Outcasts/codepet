@@ -3,10 +3,11 @@ import SwiftUI
 
 /// Sign-out and the version row.
 ///
-/// The section subtitle promises Export and Delete too; both need real Firestore work
-/// (a full account read-out, and a chat-tree delete that can't half-finish) and land in
-/// their own task. A button that silently does nothing would be worse than an absent one,
-/// so they are absent — not stubbed.
+/// Export and Delete are deferred, not stubbed: both need real Firestore work (a full
+/// account read-out, and a chat-tree delete that can't half-finish) and land in their own
+/// task. A button that silently does nothing would be worse than an absent one — so the
+/// section subtitle promises only sign-out and the version, and nothing here claims an
+/// action the app can't perform.
 struct AdvancedPanel: View {
     @EnvironmentObject var authManager: AuthManager
     @Environment(\.uiLanguage) private var lang

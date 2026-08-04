@@ -299,6 +299,7 @@ struct CodeRunCardView: View {
                     Text(lang == .vi ? "+\(overflow) dòng nữa — xem toàn bộ" : "+\(overflow) more lines — open full diff")
                         .font(CodepetTheme.inter(10, weight: .medium)).foregroundColor(hue)
                         .padding(.horizontal, 8).padding(.vertical, 3)
+                        .hoverAffordance(Capsule(), accent: hue)
                 }.buttonStyle(.plain)
             }
         }
@@ -339,6 +340,8 @@ struct CodeRunCardView: View {
                 Button(lang == .vi ? "Xong" : "Done") { showingFullDiff = false }
                     .buttonStyle(.plain).foregroundColor(hue)
                     .font(CodepetTheme.inter(13, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .hoverAffordance(Capsule(), accent: hue)
             }
             .padding(14)
             Divider().overlay(CodepetTheme.hairline)
@@ -428,6 +431,10 @@ struct CodeRunCardView: View {
                     Capsule().fill(filled ? hue : Color.clear)
                         .overlay(Capsule().stroke(filled || subtle ? Color.clear : hue.opacity(0.5), lineWidth: 1))
                 )
+                // Unfilled, this was a stroked capsule over `Color.clear`: the run's
+                // secondary actions hit-tested on their outline and glyphs only. The
+                // fill stays clear — `hoverAffordance` supplies the interior.
+                .hoverAffordance(Capsule(), accent: hue)
         }
         .buttonStyle(.plain)
     }

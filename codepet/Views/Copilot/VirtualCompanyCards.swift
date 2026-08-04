@@ -329,6 +329,7 @@ struct VCRunCards: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 12).padding(.vertical, 7)
                             .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.accentPurple))
+                            .hoverAffordance(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                 }

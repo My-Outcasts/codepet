@@ -116,6 +116,41 @@ extension View {
                 .stroke(CodepetTokens.cardEdge, lineWidth: 1))
             .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
     }
+
+    /// The one hover + hit-area treatment for controls that opted out of AppKit's
+    /// chrome with `.buttonStyle(.plain)`.
+    ///
+    /// Two defects it repairs together. A shape drawn with `.stroke` hit-tests along
+    /// its 1pt path only, so an outlined pill responds on its outline and its glyphs
+    /// but not across the padding between them — `contentShape` gives the control the
+    /// hit area its outline always implied. And `.plain` strips the pointer response
+    /// AppKit would have drawn, which leaves a working control reading as a disabled
+    /// one; a faint same-shape fill on hover restores it.
+    ///
+    /// Nothing changes at rest: the fill is fully transparent until the pointer is
+    /// inside, so every surface keeps the design it has today.
+    func hoverAffordance<S: InsettableShape>(
+        _ shape: S,
+        accent: Color = CodepetTheme.accentPurple
+    ) -> some View {
+        modifier(HoverAffordance(shape: shape, accent: accent))
+    }
+}
+
+/// Backing modifier for `hoverAffordance(_:accent:)` — needs `@State`, so it cannot
+/// live in the `View` extension itself.
+struct HoverAffordance<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let accent: Color
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(shape)
+            .background(shape.fill(accent.opacity(hovering ? 0.14 : 0)))
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
 }
 
 // MARK: - Overview roadmap board

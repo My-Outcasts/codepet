@@ -1158,16 +1158,40 @@ final class CompanyStore: ObservableObject {
 
     /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which
     /// shows a chip the founder taps). Tapping it later calls `activateNav`.
+    /// The reply an inline action belongs to: the last companion message that
+    /// actually said something and isn't already carrying a card of its own.
+    ///
+    /// Actions used to be appended as their own `text: ""` message, which drew the
+    /// control as a separate row — outside the reply's bubble and outside the avatar
+    /// column it should line up with, wasting the width of the dock. Attaching to
+    /// the reply lets the view draw the control inside that reply's card. The append
+    /// is kept as a fallback for an action that arrives with no reply to attach to.
+    private func inlineActionTarget() -> Int? {
+        guard let i = chatMessages.lastIndex(where: { $0.role == .companion }) else { return nil }
+        let m = chatMessages[i]
+        guard !m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !m.producing, m.draft == nil, m.vcRun == nil, m.interview == nil else { return nil }
+        return i
+    }
+
     private func handleNav(_ nav: NavAction?, cid: String?) async {
         guard let nav, companyId == cid else { return }
-        chatMessages.append(CopilotMessage(role: .companion, text: "", navChip: nav))
+        if let i = inlineActionTarget(), chatMessages[i].navChip == nil {
+            chatMessages[i].navChip = nav
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", navChip: nav))
+        }
     }
 
     /// `setup`: append a tappable enable-card. Tapping it later calls `activateSetup`
     /// (guarded — never flips an already-on tool off).
     private func handleSetup(_ setup: SetupAction?, cid: String?) async {
         guard let setup, companyId == cid else { return }
-        chatMessages.append(CopilotMessage(role: .companion, text: "", setupSuggestion: setup))
+        if let i = inlineActionTarget(), chatMessages[i].setupSuggestion == nil {
+            chatMessages[i].setupSuggestion = setup
+        } else {
+            chatMessages.append(CopilotMessage(role: .companion, text: "", setupSuggestion: setup))
+        }
     }
 
     /// `remember`: AUTO-merge + persist immediately (background memory, like the
@@ -1181,8 +1205,14 @@ final class CompanyStore: ObservableObject {
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
         guard companyId == cid else { return }
-        for fact in facts {
-            chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
+        // All facts land on the one reply rather than one bare row per fact — three
+        // remembered facts used to mean three separate chips stacked under the bubble.
+        if let i = inlineActionTarget(), chatMessages[i].noted == nil {
+            chatMessages[i].noted = facts
+        } else {
+            for fact in facts {
+                chatMessages.append(CopilotMessage(role: .companion, text: "", noted: [fact]))
+            }
         }
     }
 

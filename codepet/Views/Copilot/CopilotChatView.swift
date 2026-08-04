@@ -465,11 +465,15 @@ struct CopilotBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let draft = message.draft {
             draftCard(draft)
-        } else if let nav = message.navChip {
+        // An action now rides on the reply it belongs to and is drawn inside that
+        // reply's card (see `inlineActions`). These three branches remain only for
+        // the fallback the store still writes: an action with no reply to attach to,
+        // which has nothing to sit inside and so keeps its standalone row.
+        } else if let nav = message.navChip, textIsBlank {
             navChip(nav)
-        } else if let setup = message.setupSuggestion {
+        } else if let setup = message.setupSuggestion, textIsBlank {
             setupCard(setup)
-        } else if let facts = message.noted, !facts.isEmpty {
+        } else if let facts = message.noted, !facts.isEmpty, textIsBlank {
             notedChip(facts)
         } else if let action = message.firstRunAction, !message.actionConsumed {
             VStack(alignment: .leading, spacing: 8) {
@@ -492,7 +496,7 @@ struct CopilotBubble: View {
                 .font(.pixelSystem(size: 11, weight: .semibold))
                 .foregroundColor(.white)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(CodepetTheme.accentPurple))
+                .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -501,17 +505,34 @@ struct CopilotBubble: View {
     /// (mirrors the web: the founder taps to move). Tapping resolves + applies
     /// the destination via `CompanyStore.activateNav` (sync — `select`/
     /// `selectedDeptKey` are plain mutations, no await needed).
-    private func navChip(_ nav: NavAction) -> some View {
+    private var textIsBlank: Bool {
+        message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The actions belonging to THIS reply, drawn inside its card. Each is the bare
+    /// control: the surrounding `MessageCard` already supplies the tint, border and
+    /// padding these used to draw for themselves when they were separate rows.
+    @ViewBuilder private var inlineActions: some View {
+        if let nav = message.navChip { navChipButton(nav) }
+        if let setup = message.setupSuggestion { setupInline(setup) }
+        if let facts = message.noted, !facts.isEmpty { notedInline(facts) }
+    }
+
+    private func navChipButton(_ nav: NavAction) -> some View {
         let label = AppView.from(navDestination: nav.destination)?.title(lang) ?? nav.destination
-        return HStack {
-            Button { companyStore.activateNav(nav) } label: {
-                Text((lang == .vi ? "Đi tới " : "Go to ") + label)
-                    .font(.pixelSystem(size: 11, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(Capsule().fill(CodepetTheme.accentPurple))
-            }
-            .buttonStyle(.plain)
+        return Button { companyStore.activateNav(nav) } label: {
+            Text((lang == .vi ? "Đi tới " : "Go to ") + label)
+                .font(.pixelSystem(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func navChip(_ nav: NavAction) -> some View {
+        HStack {
+            navChipButton(nav)
             Spacer(minLength: 24)
         }
     }
@@ -520,34 +541,33 @@ struct CopilotBubble: View {
     /// wire {category,name} to its `Toolkit` item for the display name/why-line
     /// and the category-appropriate enable verb; tapping runs the GUARDED
     /// enable in `CompanyStore.activateSetup` (never flips an already-on item off).
-    private func setupCard(_ setup: SetupAction) -> some View {
+    @ViewBuilder private func setupInline(_ setup: SetupAction) -> some View {
         let item = Toolkit.find(category: setup.category, name: setup.name)
-        let name = item?.name ?? setup.name
         let why = item?.why
-        let verb = item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable")
-        return HStack {
-            CodepetCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(name)
-                        .font(.pixelSystem(size: 12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                    if let why, !why.isEmpty {
-                        Text(why)
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Button { Task { await companyStore.activateSetup(setup) } } label: {
-                        Text(verb)
-                            .font(.pixelSystem(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(CodepetTheme.accentPurple))
-                    }.buttonStyle(.plain)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item?.name ?? setup.name)
+                .font(.pixelSystem(size: 12, weight: .semibold))
+                .foregroundColor(CodepetTheme.primaryText)
+            if let why, !why.isEmpty {
+                Text(why)
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Button { Task { await companyStore.activateSetup(setup) } } label: {
+                Text(item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable"))
+                    .font(.pixelSystem(size: 10, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+            }.buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func setupCard(_ setup: SetupAction) -> some View {
+        HStack {
+            CodepetCard { setupInline(setup).padding(12) }
             Spacer(minLength: 24)
         }
     }
@@ -555,17 +575,21 @@ struct CopilotBubble: View {
     /// A transient "Noted" chip per remembered fact — memory is already merged +
     /// persisted (`CompanyStore.handleRemember`) by the time this renders, so
     /// there is no tap/approval affordance here, just an acknowledgement.
+    private func notedInline(_ facts: [RememberedFact]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(facts, id: \.topic) { fact in
+                Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
+                    .font(.pixelSystem(size: 10))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(CodepetTheme.surface))
+            }
+        }
+    }
+
     private func notedChip(_ facts: [RememberedFact]) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(facts, id: \.topic) { fact in
-                    Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
-                        .font(.pixelSystem(size: 10))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(CodepetTheme.surface))
-                }
-            }
+            notedInline(facts)
             Spacer(minLength: 24)
         }
     }
@@ -625,6 +649,7 @@ struct CopilotBubble: View {
                                     .foregroundColor(CodepetTheme.mutedText)
                                     .padding(.horizontal, 14).padding(.vertical, 7)
                                     .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                                    .hoverAffordance(Capsule())
                             }
                             .buttonStyle(.plain)
                         }
@@ -682,11 +707,14 @@ struct CopilotBubble: View {
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                     MessageCard(hue: headerAccent) {
-                        Text(message.text)
-                            .font(CodepetTheme.inter(13.5))
-                            .lineSpacing(3)
-                            .foregroundColor(CodepetTheme.primaryText)
-                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(message.text)
+                                .font(CodepetTheme.inter(13.5))
+                                .lineSpacing(3)
+                                .foregroundColor(CodepetTheme.primaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                            inlineActions
+                        }
                     }
                 }
                 Spacer(minLength: 8)
@@ -729,7 +757,7 @@ struct CopilotBubble: View {
                                     .font(.pixelSystem(size: 10, weight: .semibold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(Capsule().fill(CodepetTheme.accentPurple))
+                                    .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
                             }.buttonStyle(.plain)
                             Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
                                 Text(lang == .vi ? "Làm lại" : "Redo")
@@ -737,6 +765,7 @@ struct CopilotBubble: View {
                                     .foregroundColor(CodepetTheme.bodyText)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
                                     .background(Capsule().stroke(CodepetTheme.hairline))
+                                    .hoverAffordance(Capsule())
                             }.buttonStyle(.plain)
                         }
                         // Revise chips: one-tap re-runs of THIS draft with a targeted
@@ -753,6 +782,7 @@ struct CopilotBubble: View {
                                         .foregroundColor(CodepetTheme.mutedText)
                                         .padding(.horizontal, 8).padding(.vertical, 3)
                                         .background(Capsule().stroke(CodepetTheme.hairline))
+                                        .hoverAffordance(Capsule())
                                 }.buttonStyle(.plain)
                             }
                         }

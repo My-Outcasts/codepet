@@ -39,7 +39,7 @@ message ─┬─→ companyChat        (existing; streams immediately, always c
   chat unaffected          it in as the frames arrive
 ```
 
-**Why parallel rather than sequential.** Intake costs about $0.005 and takes ~2s. Running it first would put that 2s in front of *every* message, including "hi", before the first character appears. Running both means ordinary chat keeps its current latency exactly. The price is that a decision message pays for a `companyChat` reply that gets superseded.
+**Why parallel rather than sequential.** Intake costs about $0.005 and takes ~2s. Running it first would put that 2s in front of *every* message, including "hi", before the first character appears. Running both means ordinary chat keeps its current latency exactly. The price is that a decision message pays for a `companyChat` reply the room then out-answers — kept, not discarded, and the only answer the founder has if the run fails.
 
 **Why no client-side gate.** A heuristic on length or on words like "hay"/"or" misses real decisions ("mình đang lo runway") and cannot reframe. The router already does this job better — measured: it turned "tăng giá hay ship team feature" into "do you have product-market fit, or are you optimizing packaging before validating that anyone will pay". Tier 2 confirmed both escape-hatch branches fire correctly on real questions.
 
@@ -80,7 +80,9 @@ The price of letting byte answer is that the founder reads a general reply and t
 
 ### 4.3 Event → UI mapping
 
-Phase 2 reuses `AgentsWorkingRow` unchanged. It already renders N concurrent department agents with avatar, name·dept, status pill and elapsed time, driven today by `runTask` fan-out. The contract's guarantee that every `agent_start` arrives before any `agent_position` is what makes the row open all its columns at once.
+Phase 2 does **not** reuse `AgentsWorkingRow`, though this document originally said it would. That row is companion-centric — it resolves `AgentRun.companionId` through `PetCharacter.all` — and a department agent id ("product", "devils_advocate") never matches a pet, so every column came out as a blank avatar labelled "Codepet". Contract rule 9 says these are departments, not simulated people, so the cards carry their own department-chip row instead and `AgentsWorkingRow` is left untouched for the `runTask` fan-out that owns it.
+
+The contract's guarantee that every `agent_start` arrives before any `agent_position` is what makes that row open all its columns at once. A status pill is only `.working` while the run is still going: once `phase` is `.finished` or `.failed`, an agent with neither a position nor an error has stalled (a budget stop, or the seal), and saying "working" forever is a lie the founder cannot act on.
 
 | Event | UI |
 |---|---|
@@ -91,10 +93,10 @@ Phase 2 reuses `AgentsWorkingRow` unchanged. It already renders N concurrent dep
 | `agent_error` | That agent flips to `.failed` with its message. The run continues |
 | `conflicts` | `ConflictCard`. Not collapsed, not in an accordion — the contract calls this the highest-value view in the feature |
 | `negotiation_round` | Appended under the conflict, one block per round |
-| `devils_advocate` | Its own card with a distinct visual identity — **no department colour.** It is not a department |
+| `devils_advocate` | Its own card with a distinct visual identity — **no department colour.** It is not a department. Its chip takes the card's own ink (`CodepetTheme.primaryText`); the generic accent fallback was `accentPurple`, which is Design's, Sales' and Legal's |
 | `brief` | `BriefCard`, with the "Chốt quyết định này" action (§6) |
 | `run_stopped` | Reason shown **verbatim**; a `done` still follows |
-| `telemetry` | Cost line on the brief card |
+| `telemetry` | A cost line of its own, at the bottom of the stack — NOT inside the brief card, which a failed or budget-stopped run never reaches even though it cost money (spec §4.3) |
 | `done` | State moves to finished |
 | `error` | §7 |
 
@@ -152,6 +154,8 @@ Decisions.upsert(topic: routing.real_question,
 
 `Decisions` already grounds both chat and `runTask` (`ChatContext.swift:84` — "Do not contradict the naming, pricing, positioning, or decisions already delivered"), so a locked-in decision stops the rest of the app from arguing against a call the founder has made.
 
+It also has to **say** something. Locking in marks the run's message consumed — the card then reads "locked in" instead of offering the button again — and appends the same 📌 "Noted" chip `handleRemember` uses when byte records a fact on its own, so "this is on the record now" has one affordance, not two. When there is nothing to record (no run id, no `real_question`, or a blank recommendation) the button is not offered at all rather than being a silent no-op.
+
 **Not automatic**, for two reasons. The app's own pattern is approve-then-record: `DecisionsClient.extract` takes an `ApprovedDeliverableDTO`, never a draft. And the brief exists precisely to hand the founder a trade-off nobody else can make — recording it as decided before they decide would put words in their mouth.
 
 ## 7. Failure behaviour
@@ -159,9 +163,11 @@ Decisions.upsert(topic: routing.real_question,
 | Case | Behaviour |
 |---|---|
 | `event: error` (terminal, no `done` follows) | Keep the `companyChat` reply if one arrived; otherwise byte's existing offline line. Never a raw error string |
-| HTTP 503 `feature_disabled` | Kill switch. Discard the run silently; chat is untouched and the founder sees nothing |
-| HTTP 429 `daily_limit_reached` | Same: chat unaffected |
+| HTTP 503 `feature_disabled` | Kill switch. Discard the run silently; chat is untouched and the founder sees nothing. **Logged** — a live kill switch and a broken client must not look identical |
+| HTTP 429 `daily_limit_reached` | Same: chat unaffected, logged |
 | HTTP 400 `invalid_payload` | A client bug, not a founder-facing state. Log the `detail`, discard the run |
+| 401 / no Firebase token / malformed response | Silent to the founder, logged. Same reasoning as 503 |
+| A known event whose payload will not decode | Logged with the event name and the decoding error. An unknown event name stays silent (forward compatibility), and the two must be distinguishable: one renamed field otherwise ends every successful run in a `stream_lost` card with no trace |
 | `agent_error` mid-run | That column only; the run and the brief still complete |
 | `run_stopped` | Budget ceiling. Show `reason` verbatim, then the partial result |
 
@@ -190,4 +196,5 @@ Per-run server ceilings already exist: 200k tokens / $1.50, emitting `run_stoppe
 
 - **`detectConflicts` reports a false `BLOCKER`** when both departments file hard blockers pointing the same way. Negotiation then runs on a disagreement that does not exist — two wasted Sonnet calls. Synthesis notices and says so in the brief, so this is a cost problem, not a correctness one. Fixing it means comparing free-text intent.
 - **Roster is 4 agents against the UI's 8 departments.** Product call, not an engineering one.
-- **Devil's advocate visual identity.** The contract forbids giving it a department colour but does not say what it should look like. Needs a design answer before that card is more than a plain panel.
+- **Devil's advocate visual identity.** The contract forbids giving it a department colour but does not say what it should look like. It currently takes neutral ink (its card's own `primaryText`), which is honest but not a design. Needs a design answer before that card is more than a plain panel.
+- **Product has no cover art.** `DepartmentCatalog` carries a `product` entry because the backend emits `department_key: "product"`, but `dept-product.png` is a copy of `dept-eng.png`, so Product is kept out of `DepartmentCatalog.roster` (the Company rows and the composer chips) while still resolving everywhere the wire needs it. Chat grounding still sees all nine, so a product-tagged task is not hidden. Real art retires the filter.

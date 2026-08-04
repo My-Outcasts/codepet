@@ -725,7 +725,7 @@ final class VirtualCompanyClientTests: XCTestCase {
             "event: run_started\ndata: {\"run_id\":\"r1\"}\n\n".data(using: .utf8)!,
             ("event: routing\ndata: {\"decision\":\"single_agent\",\"agents\":[\"product\"],"
              + "\"real_question\":\"Which label?\",\"request_type\":\"DECISION\"}\n\n").data(using: .utf8)!,
-            "event: telemetry\ndata: {\"cost_estimate_usd\":0.004}\n\n".data(using: .utf8)!,
+            "event: telemetry\ndata: {\"tokens_per_agent\":{},\"cost_estimate_usd\":0.004,\"stopped_reason\":null}\n\n".data(using: .utf8)!,
             "event: done\ndata: {\"run_id\":\"r1\",\"unresolved\":false,\"skipped\":\"single_agent\"}\n\n".data(using: .utf8)!
         ]
 
@@ -1146,7 +1146,9 @@ final class VirtualCompanyRunStateTests: XCTestCase {
         state.apply(.brief(brief()))
         XCTAssertEqual(state.phase, .briefing)
         state.apply(.telemetry(try! JSONDecoder().decode(
-            VCTelemetry.self, from: #"{"cost_estimate_usd":0.21}"#.data(using: .utf8)!)))
+            VCTelemetry.self,
+            from: #"{"tokens_per_agent":{},"cost_estimate_usd":0.21,"stopped_reason":null}"#
+                .data(using: .utf8)!)))
         state.apply(.done(runId: "r1", unresolved: false, skipped: nil))
         XCTAssertEqual(state.phase, .finished)
         XCTAssertEqual(state.telemetry?.costEstimateUsd, 0.21)
@@ -1351,7 +1353,9 @@ Expected: BUILD SUCCEEDED. If a memberwise initialiser call now fails to compile
 
 - [ ] **Step 3: Add the fan-out**
 
-In `CompanyStore.sendMessage`, immediately after `let req = CompanyChatRequest(...)` is built and before the streaming `do { ... }` block, start the run in parallel:
+In `CompanyStore.sendMessage`, insert this **after `isStreaming = true` (currently line 585) and before `var streamedText = ""` (currently line 587)**. Not right after `let req = ...` as an earlier draft of this plan said: the snippet references `placeholderId`, which is only declared at line 582, so inserting before that point does not compile.
+
+`cid` is already in scope from `let cid = companyId` (line 558) and its type is `String?`, because `companyId` is declared `private(set) var companyId: String?`. Keep that optionality — do not force-unwrap it.
 
 ```swift
         // Fan-out: the room is convened by the router's escape hatch, not by a
@@ -1397,7 +1401,7 @@ Add the two supporting members to `CompanyStore`:
     /// is about to answer it properly (spec §3).
     private func publishRunProgress(_ state: VirtualCompanyRunState,
                                     placeholderId: String,
-                                    cid: String,
+                                    cid: String?,
                                     language: AppLanguage) async {
         guard companyId == cid, state.handsOffToRoom else { return }
         guard let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) else { return }
@@ -2008,7 +2012,25 @@ Expected: PASS. (If no such suite exists, run the whole `codepetTests` target an
 
 - [ ] **Step 6: Wire it into the store**
 
-In `CompanyStore`, add the flag and the trigger, and call the trigger from `publishRunProgress` (Task 6) once `state.brief != nil`:
+**First, a trap in the machinery being reused.** `answerInterview` ends by exhausting the queue and calling `seedFirstRunGreeting(language:)` (`CompanyStore.swift:291-294`) — byte's "welcome, here is your best first move" message. That is correct for the first-run interview it was built for, and wrong for this one: the founder would be welcomed like a new user immediately after asking a pricing question mid-session.
+
+So `interviewState` needs to say which tail it wants. Widen it to
+`(gaps: [InterviewGap], idx: Int, seedGreetingWhenDone: Bool)` and update its three uses:
+
+- `startEnrichInterviewIfNeeded` sets `seedGreetingWhenDone: true` (unchanged behaviour).
+- The Virtual Company trigger below sets `seedGreetingWhenDone: false`.
+- The tail becomes `if st.seedGreetingWhenDone { seedFirstRunGreeting(language: language) }`.
+
+Also extend the exhaustive `switch gap` at `CompanyStore.swift:277-281` with the two new cases — the compiler forces this, and it is where the answers land:
+
+```swift
+            case .runway: company.brief.runway = trimmed
+            case .constraints: company.brief.constraints = trimmed
+```
+
+Persistence is already correct for them: the surrounding code calls `_ = await saver(cid, company.brief)`, the brief saver, so the new fields persist and sync with no extra work.
+
+Then add the flag and the trigger, and call the trigger from `publishRunProgress` (Task 6) once `state.brief != nil`:
 
 ```swift
     /// Asked at most once. Not persisted: re-asking after a relaunch is harmless
@@ -2024,7 +2046,9 @@ In `CompanyStore`, add the flag and the trigger, and call the trigger from `publ
         // Reuses the existing queue: askInterviewGap owns the card, answerInterview
         // owns the reply path.
         let gaps = VirtualCompanyInterview.gaps
-        interviewState = (gaps: gaps, idx: 0)
+        // seedGreetingWhenDone: false — this interview happens mid-session, long
+        // after onboarding. The first-run greeting would read as amnesia.
+        interviewState = (gaps: gaps, idx: 0, seedGreetingWhenDone: false)
         askInterviewGap(gaps[0], language: language)
     }
 ```

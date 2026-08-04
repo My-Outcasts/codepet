@@ -3,6 +3,7 @@ import { Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
+import { buildMcpConfig, loadConnectors, MCP_CLIENT_BETA, type McpConfig } from "./oauth/connectors";
 import { checkAndIncrement } from "./rateLimit";
 import {
   buildSystemPrompt,
@@ -113,6 +114,8 @@ type StreamFactory = (args: {
   systemBlocks: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
   messages: ClaudeMessage[];
   tools?: unknown[];
+  /** Connector MCP servers, when the founder has authorised any. */
+  mcpServers?: McpConfig["mcpServers"];
 }) => AsyncIterable<StreamEvent>;
 
 let _streamFactory: StreamFactory | null = null;
@@ -130,14 +133,25 @@ async function* defaultStreamFactory(args: {
   systemBlocks: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
   messages: ClaudeMessage[];
   tools?: unknown[];
+  mcpServers?: McpConfig["mcpServers"];
 }): AsyncIterable<StreamEvent> {
-  const stream = args.client.messages.stream({
+  const params = {
     model: CHAT_MODEL,
     max_tokens: 1024,
     system: args.systemBlocks as any,
     messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
     ...(args.tools && args.tools.length ? { tools: args.tools as any } : {}),
-  });
+  };
+  // Only take the beta path when there is actually a connector to reach. A turn
+  // for a founder who has authorised nothing keeps the exact request it has
+  // today, so connectors cannot regress the common case.
+  const stream = args.mcpServers && args.mcpServers.length
+    ? args.client.beta.messages.stream({
+        ...params,
+        betas: [MCP_CLIENT_BETA],
+        mcp_servers: args.mcpServers,
+      } as any)
+    : args.client.messages.stream(params);
 
   for await (const event of stream) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
@@ -252,11 +266,25 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
   // per-request list, so they're always offered. NOT forced via tool_choice —
   // byte stays free to reply in plain text, or ask a clarifying question,
   // instead of calling any of them.
+  // Connectors the founder has authorised (step 6 of the OAuth work). Fail-open:
+  // if the read or a decrypt throws, chat proceeds with no connectors rather than
+  // taking byte offline for that founder over one bad credential.
+  let mcp: McpConfig = { mcpServers: [], mcpToolsets: [] };
+  try {
+    const encKey = process.env.CONNECTOR_ENC_KEY;
+    if (encKey) mcp = buildMcpConfig(await loadConnectors(auth.uid, encKey));
+  } catch (err) {
+    logger.warn("connector load failed; continuing without", { uid: auth.uid, err: String(err) });
+  }
+
   const tools: unknown[] = [
     ...(runnable.length ? [RUN_TASK_TOOL] : []),
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
     REMEMBER_TOOL,
+    // Each declared server must be referenced by exactly one toolset, or the
+    // request is rejected — `buildMcpConfig` keeps the two lists in step.
+    ...mcp.mcpToolsets,
   ];
 
   const wantsStream = typeof req.headers.accept === "string" && req.headers.accept.includes("text/event-stream");
@@ -266,13 +294,20 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     // a real run_task_id (was hardcoded null); already-deployed native app
     // versions that never send `runnable` still get run_task_id: null unchanged.
     try {
-      const response = await client().messages.create({
+      const baseParams = {
         model: CHAT_MODEL,
         max_tokens: 1024,
         system: systemBlocks as any,
         messages: messages as any,
         ...(tools ? { tools: tools as any } : {}),
-      });
+      };
+      const response = mcp.mcpServers.length
+        ? await client().beta.messages.create({
+            ...baseParams,
+            betas: [MCP_CLIENT_BETA],
+            mcp_servers: mcp.mcpServers,
+          } as any)
+        : await client().messages.create(baseParams);
       const reply = response.content
         .filter((b) => b.type === "text")
         .map((b) => (b as { text: string }).text)
@@ -326,7 +361,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       client: _streamFactory ? (null as any) : client(),
       systemBlocks,
       messages,
-      tools
+      tools,
+      mcpServers: mcp.mcpServers
     })) {
       if (event.type === "text") {
         writeFrame(res, "delta", { text: event.text });

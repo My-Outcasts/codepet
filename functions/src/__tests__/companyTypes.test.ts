@@ -6,23 +6,56 @@ import {
 } from "../company/types";
 
 describe("agent roster", () => {
-  test("MVP roster is exactly 4 agents", () => {
+  test("the roster is nine departments plus two agents that are not departments", () => {
     expect(ALL_AGENTS).toEqual([
       "chief_of_staff",
       "devils_advocate",
       "product",
-      "finance"
+      "finance",
+      "engineering",
+      "design",
+      "marketing",
+      "sales",
+      "support",
+      "operations",
+      "legal"
     ]);
   });
 
-  test("only product and finance produce positions", () => {
-    expect(DEPARTMENT_AGENTS).toEqual(["product", "finance"]);
+  test("every department the client can render is a department that can hold a position", () => {
+    // The nine keys here are DepartmentCatalog's on the client. A department the
+    // UI can draw but the backend cannot convene would be a dead chip.
+    expect(DEPARTMENT_AGENTS).toEqual([
+      "product",
+      "finance",
+      "engineering",
+      "design",
+      "marketing",
+      "sales",
+      "support",
+      "operations",
+      "legal"
+    ]);
+    expect(DEPARTMENT_AGENTS).not.toContain("chief_of_staff");
+    expect(DEPARTMENT_AGENTS).not.toContain("devils_advocate");
   });
 
-  test("cut agents are not in the roster", () => {
-    for (const cut of ["engineering", "design", "gtm", "legal", "security"]) {
-      expect(ALL_AGENTS).not.toContain(cut);
+  test("chief_of_staff and devils_advocate map to no department key", () => {
+    // Not cosmetic: the client renders a null key with its own identity, and the
+    // contract forbids giving the red team a department colour.
+    expect(AGENT_DEPARTMENT_KEY.chief_of_staff).toBeNull();
+    expect(AGENT_DEPARTMENT_KEY.devils_advocate).toBeNull();
+    for (const dept of DEPARTMENT_AGENTS) {
+      expect(AGENT_DEPARTMENT_KEY[dept]).toBeTruthy();
     }
+  });
+
+  test("department keys are the client's abbreviations, not the agent ids", () => {
+    // These four differ, and a mismatch renders a column with no name or accent.
+    expect(AGENT_DEPARTMENT_KEY.finance).toBe("fin");
+    expect(AGENT_DEPARTMENT_KEY.engineering).toBe("eng");
+    expect(AGENT_DEPARTMENT_KEY.marketing).toBe("mkt");
+    expect(AGENT_DEPARTMENT_KEY.operations).toBe("ops");
   });
 
   test("isAgentId accepts roster members and rejects everything else", () => {

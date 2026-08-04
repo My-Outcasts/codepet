@@ -1,5 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "../company/registry";
-import { ALL_AGENTS, FounderContext } from "../company/types";
+import { ALL_AGENTS, FounderContext, DEPARTMENT_AGENTS } from "../company/types";
 import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropic";
 
 const founder: FounderContext = {
@@ -98,14 +98,24 @@ describe("composeAgentSystem", () => {
     expect(a[1].text).toBe(AGENT_DEFS.product.role.trim());
   });
 
-  test("no agent's composed prompt introduces a cut department as a participant", () => {
+  test("no role prompt tells an agent to push back on a department that does not exist", () => {
+    // This replaces an MVP-era check that asserted the cut departments were
+    // absent. The protection it gave is still worth having, inverted: every
+    // department named in a "WHERE YOU PUSH BACK" line must be a real agent, or
+    // the instruction addresses nobody. It caught "GTM" — written before
+    // Marketing and Sales existed, and ambiguous between them once they did.
+    const known = new Set([
+      ...DEPARTMENT_AGENTS.map((a) => a.charAt(0).toUpperCase() + a.slice(1)),
+      "everyone",
+      "the founder",
+      "yourself"
+    ]);
     for (const agent of ALL_AGENTS) {
-      const joined = composeAgentSystem({ agent, founder, rawRequest })
-        .map((b) => b.text)
-        .join("\n");
-      expect(joined).not.toContain("Head of Engineering");
-      expect(joined).not.toContain("Head of Go-to-Market");
-      expect(joined).not.toContain("Head of Design");
+      for (const line of AGENT_DEFS[agent].role.split("\n")) {
+        const m = /^- On (the founder|everyone|yourself|[A-Za-z]+)/.exec(line.trim());
+        if (!m) continue;
+        expect(known).toContain(m[1]);
+      }
     }
   });
 });

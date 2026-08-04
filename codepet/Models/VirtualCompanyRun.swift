@@ -225,72 +225,92 @@ enum VirtualCompanyEvent: Equatable {
     /// Decodes a frame, or returns nil when the event name is unknown or the
     /// payload will not parse. Nil rather than throw on purpose: the backend may
     /// add frames later, and one unrecognised frame must not kill a live run.
+    ///
+    /// The two nils are NOT the same thing, though, and used to be indistinguishable.
+    /// An unknown event name is expected — forward compatibility, silent by design. A
+    /// known event whose payload will not decode is a broken contract: one renamed
+    /// backend field would drop every frame of every run, and because a run that hands
+    /// off and then goes quiet is sealed as `stream_lost`, the founder would see a red
+    /// error card on every success with nothing anywhere to say why. So the second kind
+    /// logs, loudly, naming the event and the decoding error.
     static func from(frame: SSEFrame) -> VirtualCompanyEvent? {
-        guard let data = frame.data.data(using: .utf8) else { return nil }
-        let decoder = JSONDecoder()
-
+        guard let data = frame.data.data(using: .utf8) else {
+            print("virtualCompanyRun: event \(frame.event) payload was not UTF-8")
+            return nil
+        }
         switch frame.event {
         case "run_started":
             struct P: Codable { let run_id: String }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .runStarted(runId: p.run_id)
 
         case "routing":
-            guard let p = try? decoder.decode(VCRouting.self, from: data) else { return nil }
+            guard let p = decode(VCRouting.self, from: data, event: frame.event) else { return nil }
             return .routing(p)
 
         case "agent_start":
-            guard let p = try? decoder.decode(VCAgentMeta.self, from: data) else { return nil }
+            guard let p = decode(VCAgentMeta.self, from: data, event: frame.event) else { return nil }
             return .agentStart(p)
 
         case "agent_position":
             struct P: Codable { let agent_id: String; let department_key: String?; let position: VCPosition }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .agentPosition(VCAgentMeta(agentId: p.agent_id, departmentKey: p.department_key), p.position)
 
         case "agent_error":
             struct P: Codable { let agent_id: String; let department_key: String?; let error: String }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .agentError(VCAgentMeta(agentId: p.agent_id, departmentKey: p.department_key), p.error)
 
         case "conflicts":
             struct P: Codable { let conflicts: [VCConflict] }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .conflicts(p.conflicts)
 
         case "negotiation_round":
-            guard let p = try? decoder.decode(VCNegotiationRound.self, from: data) else { return nil }
+            guard let p = decode(VCNegotiationRound.self, from: data, event: frame.event) else { return nil }
             return .negotiationRound(p)
 
         case "devils_advocate":
             struct P: Codable { let agent_id: String; let department_key: String?; let verdict: VCVerdict }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .devilsAdvocate(VCAgentMeta(agentId: p.agent_id, departmentKey: p.department_key), p.verdict)
 
         case "brief":
-            guard let p = try? decoder.decode(VCBrief.self, from: data) else { return nil }
+            guard let p = decode(VCBrief.self, from: data, event: frame.event) else { return nil }
             return .brief(p)
 
         case "run_stopped":
             struct P: Codable { let run_id: String; let reason: String }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .runStopped(runId: p.run_id, reason: p.reason)
 
         case "telemetry":
-            guard let p = try? decoder.decode(VCTelemetry.self, from: data) else { return nil }
+            guard let p = decode(VCTelemetry.self, from: data, event: frame.event) else { return nil }
             return .telemetry(p)
 
         case "done":
             struct P: Codable { let run_id: String; let unresolved: Bool; let skipped: String? }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .done(runId: p.run_id, unresolved: p.unresolved, skipped: p.skipped)
 
         case "error":
             struct P: Codable { let error: String; let detail: String? }
-            guard let p = try? decoder.decode(P.self, from: data) else { return nil }
+            guard let p = decode(P.self, from: data, event: frame.event) else { return nil }
             return .error(p.error, p.detail)
 
         default:
+            return nil
+        }
+    }
+
+    /// One place to turn a decode failure into a diagnosable event. See `from(frame:)`.
+    private static func decode<T: Decodable>(_ type: T.Type, from data: Data,
+                                             event: String) -> T? {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            print("virtualCompanyRun: event \(event) did not decode as \(type) — \(error)")
             return nil
         }
     }

@@ -32,6 +32,14 @@ struct VirtualCompanyRunState: Equatable {
     /// The one question CompanyStore asks: does byte hand this to the room?
     var handsOffToRoom: Bool { routing?.decision == "multi_agent" }
 
+    /// Whether "lock this decision in" has anything to record. Without a run id, a
+    /// topic (`real_question`) and a non-blank recommendation the button would be a
+    /// silent no-op, so it is not offered at all.
+    var canLockIn: Bool {
+        guard let runId else { return false }
+        return VirtualCompanyDecision.extracted(from: self, runId: runId) != nil
+    }
+
     /// The router judged this doesn't need the company. A correct, common outcome
     /// — not a failure.
     var isEscapeHatch: Bool {
@@ -39,12 +47,21 @@ struct VirtualCompanyRunState: Equatable {
         return decision != "multi_agent"
     }
 
-    /// Feeds the existing `AgentsWorkingRow`, which renders N concurrent agents.
+    /// One status pill per agent in the room.
+    ///
+    /// `.working` is only honest while the run is still going. A budget-stopped run
+    /// (`run_stopped` then `done`) and a lost stream (the seal: `terminalError`,
+    /// `.failed`) both end with departments that never filed a position, and reading
+    /// those as "working" left their columns spinning forever — in the seal's case
+    /// underneath a red error card saying the run had stopped. Once the run is over, an
+    /// agent with neither a position nor an error has stalled, so it reads `.failed`:
+    /// there is no outcome coming.
     var agentStatuses: [(meta: VCAgentMeta, status: AgentRunStatus)] {
-        agents.map { meta in
+        let runEnded = phase == .finished || phase == .failed
+        return agents.map { meta in
             if agentErrors[meta.agentId] != nil { return (meta, .failed) }
             if positions[meta.agentId] != nil { return (meta, .done) }
-            return (meta, .working)
+            return (meta, runEnded ? .failed : .working)
         }
     }
 
@@ -121,9 +138,12 @@ enum VirtualCompanyDecision {
     static func extracted(from state: VirtualCompanyRunState, runId: String) -> ExtractedDecision? {
         guard let brief = state.brief else { return nil }
         let topic = state.routing?.realQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !topic.isEmpty else { return nil }
+        // A blank recommendation would record a decision that says nothing, and ground
+        // every later chat turn on it.
+        let statement = brief.recommendation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty, !statement.isEmpty else { return nil }
         return ExtractedDecision(topic: topic,
-                                 statement: brief.recommendation,
+                                 statement: statement,
                                  source: "virtual-company/\(runId)")
     }
 }

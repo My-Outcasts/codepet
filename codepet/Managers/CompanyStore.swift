@@ -391,7 +391,21 @@ final class CompanyStore: ObservableObject {
     /// shared streamed-send core — see its doc comment for the full flow, fallback,
     /// and token-guard semantics). `department` defaults to nil so existing callers
     /// (`sendChat(x, language: y)`) keep compiling unchanged.
-    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil) async {
+    ///
+    /// This is also the ONLY entry point that convenes the Virtual Company (design §1:
+    /// the trigger is what the founder types into chat). The core `sendMessage` must not
+    /// fan out on its own, or `walkThroughTask`'s synthesised "walk me through it" ask
+    /// would convene the room and the founder's step-by-step guidance could be answered
+    /// with a meeting instead.
+    ///
+    /// `founderAsk` is the founder's own words BEFORE `ChatMode` shaping. `.plan`/`.build`
+    /// prepend their intent ("Help me plan this — give me the concrete next steps: …"),
+    /// which byte should see — it is what the founder chose — but the router should not:
+    /// it decides `request_type` and rewrites the question into `real_question`, so the
+    /// mode's framing would bias both. Defaults to the shaped text for callers that do
+    /// no shaping.
+    func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
+                  founderAsk: String? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -399,7 +413,9 @@ final class CompanyStore: ObservableObject {
             dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
             return
         }
-        await sendMessage(text, language: language, department: department)
+        let ask = (founderAsk ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        await sendMessage(text, language: language, department: department,
+                          convene: ask.isEmpty ? text : ask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -600,7 +616,13 @@ final class CompanyStore: ObservableObject {
     /// fall back to the existing non-streaming `chatSender(req)` and fill the SAME
     /// placeholder — preserving every existing semantic: the offline copy, the
     /// runTaskId/draft-run chaining, and the account guard.
-    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil) async {
+    ///
+    /// `convene` is the question to put to the Virtual Company, or nil for "do not
+    /// convene". Only `sendChat` passes it: a synthesised ask (`walkThroughTask`) is not
+    /// a founder deciding something, and answering "walk me through how to do this
+    /// myself" with a meeting is a worse answer than the guidance that was asked for.
+    private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
+                             convene: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: text))
         isCompanionTyping = true
@@ -639,62 +661,11 @@ final class CompanyStore: ObservableObject {
         // Fan-out: the room is convened by the router's escape hatch, not by a
         // client-side heuristic. Both calls go out at once so ordinary chat keeps
         // its current latency — running intake first would put ~2s in front of
-        // every message, including "hi".
-        let vcRequest = VirtualCompanyRequest(
-            request: text,
-            language: language.rawValue,
-            founder: FounderContextMapper.founder(from: company.brief),
-            stressTest: false)
-        // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
-        // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
-        // `chatMessages` writes it makes through `publishRunProgress` — run on the
-        // main actor with no hop and no `MainActor.run` wrapper. The network itself
-        // never blocks the actor: `vcRunner` does its I/O in a `Task.detached` and
-        // this loop only suspends waiting on the stream.
-        let vcRunner = self.vcRunner
-        // The room's OWN message, minted here so every frame addresses the same
-        // appended message. Nothing is appended until the router says `multi_agent`.
-        let roomMessageId = UUID().uuidString
-        let vcTask = Task { [weak self] () -> Void in
-            var state = VirtualCompanyRunState()
-            do {
-                for try await event in vcRunner(vcRequest) {
-                    state.apply(event)
-                    // The escape hatch fired: discard the run and let chat be.
-                    // The founder never learns a routing decision happened.
-                    if state.isEscapeHatch { break }
-                    guard let self else { return }
-                    await self.publishRunProgress(state, roomMessageId: roomMessageId,
-                                                  anchorId: placeholderId, cid: cid, language: language)
-                }
-            } catch {
-                // A failed run must never damage the chat (spec §7). 503 is the kill
-                // switch and 429 the daily cap — both are silent to the FOUNDER by
-                // design, but not to the log: a live kill switch, an expired token and
-                // a broken client were previously indistinguishable from a working
-                // feature that never convened anyone.
-                Self.logRunFailure(error)
-            }
-            // Seal a run that died with the room already on screen. A dropped stream, a
-            // TLS reset, an idle timeout, the deadline watchdog below, or a server that
-            // just stops without a `done` frame all arrive here with the room's cards
-            // already rendered, so returning silently would leave the agent columns
-            // spinning forever with no error and nothing to retry. `.failed` is excluded
-            // because a terminal `error` frame published its own code already.
-            if state.handsOffToRoom, state.phase != .finished, state.phase != .failed {
-                state.terminalError = "stream_lost"
-                state.phase = .failed
-                await self?.publishRunProgress(state, roomMessageId: roomMessageId,
-                                               anchorId: placeholderId, cid: cid, language: language)
-            }
-            self?.vcTasks[roomMessageId] = nil
-        }
-        vcTasks[roomMessageId] = vcTask
-        // Bound the run (see `vcRunDeadlineNanos`). A no-op once the run has removed
-        // its own registry entry, which is every normal ending.
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.vcRunDeadlineNanos)
-            self?.vcTasks[roomMessageId]?.cancel()
+        // every message, including "hi". `convene` is nil for a synthesised ask, and
+        // carries the founder's own words (pre-`ChatMode` shaping) for a typed one.
+        if let convene {
+            startVirtualCompanyRun(ask: convene, anchorId: placeholderId,
+                                   cid: cid, language: language)
         }
 
         var streamedText = ""
@@ -783,6 +754,69 @@ final class CompanyStore: ObservableObject {
     }
 
     // MARK: - Virtual Company fan-out
+
+    /// Start a Virtual Company run for `ask`, anchored to byte's message for this turn.
+    /// Never awaited by the caller — see `publishRunProgress` for why the room owns its
+    /// own appended message, and `vcTasks`/`vcRunDeadlineNanos` for what bounds it.
+    private func startVirtualCompanyRun(ask: String, anchorId: String,
+                                        cid: String?, language: AppLanguage) {
+        let vcRequest = VirtualCompanyRequest(
+            request: ask,
+            language: language.rawValue,
+            founder: FounderContextMapper.founder(from: company.brief),
+            stressTest: false)
+        // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
+        // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
+        // `chatMessages` writes it makes through `publishRunProgress` — run on the
+        // main actor with no hop and no `MainActor.run` wrapper. The network itself
+        // never blocks the actor: `vcRunner` does its I/O in a `Task.detached` and
+        // this loop only suspends waiting on the stream.
+        let vcRunner = self.vcRunner
+        // The room's OWN message, minted here so every frame addresses the same
+        // appended message. Nothing is appended until the router says `multi_agent`.
+        let roomMessageId = UUID().uuidString
+        let vcTask = Task { [weak self] () -> Void in
+            var state = VirtualCompanyRunState()
+            do {
+                for try await event in vcRunner(vcRequest) {
+                    state.apply(event)
+                    // The escape hatch fired: discard the run and let chat be.
+                    // The founder never learns a routing decision happened.
+                    if state.isEscapeHatch { break }
+                    guard let self else { return }
+                    await self.publishRunProgress(state, roomMessageId: roomMessageId,
+                                                  anchorId: anchorId, cid: cid, language: language)
+                }
+            } catch {
+                // A failed run must never damage the chat (spec §7). 503 is the kill
+                // switch and 429 the daily cap — both are silent to the FOUNDER by
+                // design, but not to the log: a live kill switch, an expired token and
+                // a broken client were previously indistinguishable from a working
+                // feature that never convened anyone.
+                Self.logRunFailure(error)
+            }
+            // Seal a run that died with the room already on screen. A dropped stream, a
+            // TLS reset, an idle timeout, the deadline watchdog below, or a server that
+            // just stops without a `done` frame all arrive here with the room's cards
+            // already rendered, so returning silently would leave the agent columns
+            // spinning forever with no error and nothing to retry. `.failed` is excluded
+            // because a terminal `error` frame published its own code already.
+            if state.handsOffToRoom, state.phase != .finished, state.phase != .failed {
+                state.terminalError = "stream_lost"
+                state.phase = .failed
+                await self?.publishRunProgress(state, roomMessageId: roomMessageId,
+                                               anchorId: anchorId, cid: cid, language: language)
+            }
+            self?.vcTasks[roomMessageId] = nil
+        }
+        vcTasks[roomMessageId] = vcTask
+        // Bound the run (see `vcRunDeadlineNanos`). A no-op once the run has removed
+        // its own registry entry, which is every normal ending.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.vcRunDeadlineNanos)
+            self?.vcTasks[roomMessageId]?.cancel()
+        }
+    }
 
     /// Publishes run progress as the room's OWN companion message: appended once, on
     /// the first `multi_agent` frame, then updated in place as later frames arrive.
@@ -887,13 +921,29 @@ final class CompanyStore: ObservableObject {
     /// `async` because decisions do NOT go through `saver` (the brief saver); they go
     /// through `decisionsSaver`, an async closure — same path `handleRemember` and
     /// `rememberFromApproval` use.
-    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState) async {
+    ///
+    /// It must SAY something. This is the feature's only call to action, and it used to
+    /// persist in silence: no chip, no consumed state, nothing at all when the brief had
+    /// no recommendation or the run no id. So it marks the run's message consumed (the
+    /// card then reads "locked in" instead of offering the button again) and appends the
+    /// same 📌 "Noted" chip `handleRemember` uses for a fact byte recorded on its own —
+    /// one affordance for "this is on the record now", not two.
+    ///
+    /// `messageId` is the run's own message, which is also the idempotency key: a second
+    /// tap (or a double-click) does nothing rather than appending a second chip.
+    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState, messageId: String) async {
         guard let runId = state.runId,
-              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId) else { return }
+              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId),
+              let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              !chatMessages[i].actionConsumed else { return }
+        chatMessages[i].actionConsumed = true
         let cid = companyId
         company.decisions = Decisions.mergeDecisions(existing: company.decisions,
                                                      extracted: [extracted],
                                                      now: Date().timeIntervalSince1970 * 1000)
+        chatMessages.append(CopilotMessage(
+            role: .companion, text: "",
+            noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 

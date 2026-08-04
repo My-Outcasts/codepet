@@ -48,7 +48,8 @@ enum DepartmentCatalog {
         Department(key: "eng", name: "Engineering", ab: "En", accent: CodepetTheme.accentBlue,
             rationale: "Build and ship the product itself — the features, the technical foundation, the things users touch.",
             focus: "This is where the thing you're building actually gets made."),
-        Department(key: "product", name: "Product", ab: "Pr", accent: CodepetTheme.accentTeal,
+        // Its own accent, not ops' teal: the two sit four rows apart in the same list.
+        Department(key: "product", name: "Product", ab: "Pr", accent: CodepetTheme.accentGreen,
             rationale: "Decide what to build next and what to leave alone — sequencing, scope, and whether anyone actually wants it.",
             focus: "This is where you find out if the thing is worth building before you build it."),
         Department(key: "design", name: "Design", ab: "De", accent: CodepetTheme.accentPurple,
@@ -79,9 +80,25 @@ enum DepartmentCatalog {
         return all.first { $0.key == key }
     }
 
-    /// Derive a summary per department (catalog order) from the dept-tagged tasks.
-    static func summaries(tasks: [RoadmapTask]) -> [DepartmentSummary] {
-        all.map { dep in
+    /// The departments the founder is shown as rows/chips — the catalog minus any entry
+    /// that exists purely to resolve a wire key.
+    ///
+    /// `product` is such an entry. The Virtual Company's backend emits
+    /// `department_key: "product"` and the contract asks the client to resolve it, so the
+    /// catalog needs it; but it has no cover illustration of its own (`dept-product.png`
+    /// is a byte-identical copy of `dept-eng.png`), and a roster row wearing
+    /// Engineering's art is a worse defect than a missing row — it ships to every
+    /// founder, whether or not they ever convene the room. Give Product real art and
+    /// delete this filter.
+    static let roster: [Department] = all.filter { $0.key != "product" }
+
+    /// Derive a summary per department from the dept-tagged tasks, in catalog order.
+    /// `departments` defaults to the whole catalog — chat grounding
+    /// (`ChatContext.composeDepartments`) must still see every department a task can be
+    /// tagged with; the Company view passes `roster`.
+    static func summaries(tasks: [RoadmapTask],
+                          departments: [Department] = all) -> [DepartmentSummary] {
+        departments.map { dep in
             let mine = tasks.filter { $0.dept == dep.key }
             if mine.isEmpty {
                 return DepartmentSummary(department: dep, status: .later, pending: 0, currentTaskTitle: nil)

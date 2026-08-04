@@ -65,7 +65,7 @@ struct ChatComposer: View {
     private var deptChips: some View {
         // Dock adaptation (380pt): show the first 2 chips + overflow, not 3 —
         // keeps the row + the active-project chip from overflowing the dock width.
-        let firstTwo = Array(DepartmentCatalog.all.prefix(2))
+        let firstTwo = Array(DepartmentCatalog.roster.prefix(2))
         // A department chosen from the ••• overflow menu isn't one of the visible
         // chips, so its selection was invisible. Surface it as its own chip.
         let overflowSelected: Department? = selectedDept.flatMap { sel in
@@ -79,7 +79,7 @@ struct ChatComposer: View {
                 chip(sel)
             }
             Menu {
-                ForEach(DepartmentCatalog.all.dropFirst(2)) { dep in
+                ForEach(DepartmentCatalog.roster.dropFirst(2)) { dep in
                     Button {
                         selectedDept = (selectedDept?.key == dep.key) ? nil : dep
                     } label: {

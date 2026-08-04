@@ -245,7 +245,13 @@ struct CopilotChatView: View {
         showHistory = false   // sending always returns to the live conversation
         switch mode {
         case .ask, .plan:
-            Task { await companyStore.sendChat(mode.shape(text, language: lang), language: lang, department: selectedDept) }
+            // `founderAsk` is the unshaped text: byte should see the mode's framing
+            // ("Help me plan this — …"), the Virtual Company's router should not, since
+            // it decides `request_type` and rewrites the question into `real_question`.
+            Task {
+                await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
+                                            department: selectedDept, founderAsk: text)
+            }
         case .build:
             companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
         }
@@ -434,8 +440,10 @@ struct CopilotBubble: View {
             // then the room.
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
-                VCRunCards(state: run) {
-                    Task { await companyStore.lockInVirtualCompanyDecision(run) }
+                VCRunCards(state: run, lockedIn: message.actionConsumed) {
+                    Task {
+                        await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

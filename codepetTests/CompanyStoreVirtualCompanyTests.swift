@@ -285,4 +285,121 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
         XCTAssertTrue(s.chatMessages.isEmpty, "the room must not land in a conversation it was not asked in")
     }
+
+    // MARK: - Only a founder-typed chat turn convenes the room
+
+    /// "Walk me through it" on a task card composes a founder-shaped ask and sends it
+    /// through the same core as a typed message. It must NOT fan out: the founder asked
+    /// for step-by-step guidance, and having it replaced by a meeting is a worse answer
+    /// than the one they asked for.
+    func testWalkThroughTaskNeverConvenesTheRoom() async {
+        let probe = RunnerProbe()
+        let s = store { _ in
+            probe.invocations += 1
+            return AsyncThrowingStream {
+                $0.yield(.routing(Self.routing("multi_agent")))
+                $0.finish()
+            }
+        }
+        await s.hydrate(companyId: "u")
+        let task = RoadmapTask(id: "t1", title: "Write the pricing page", detail: "one tier",
+                               phase: .ship, who: .you, dept: "mkt")
+        await s.walkThroughTask(task, language: .en)
+        XCTAssertEqual(probe.invocations, 0, "a synthesised ask must not convene the company")
+        XCTAssertNil(s.chatMessages.last?.vcRun)
+    }
+
+    /// `ChatMode.plan` prepends its framing before the send, which byte should see (the
+    /// founder chose it) and the router should not: it decides `request_type` and
+    /// rewrites the question into `real_question`.
+    func testTheRouterSeesTheFoundersOwnWordsNotTheModesFraming() async {
+        final class Asked { var requests: [String] = [] }
+        let asked = Asked()
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer,
+                             vcRunner: { req in
+                                 asked.requests.append(req.request)
+                                 return AsyncThrowingStream { $0.finish() }
+                             })
+        await s.hydrate(companyId: "u")
+        let raw = "team seats or single player first?"
+        await s.sendChat(ChatMode.plan.shape(raw, language: .en), language: .en, founderAsk: raw)
+        XCTAssertEqual(asked.requests, [raw])
+    }
+
+    // MARK: - Locking the brief in
+
+    private static func aBrief(_ recommendation: String) -> VCBrief {
+        VCBrief(recommendation: recommendation, confidence: 4, confidenceReason: "c",
+                theRealDisagreement: "d", tradeoffFounderMustOwn: "t", killCriteria: ["k"],
+                nextAction: VCNextAction(action: "a", owner: "Founder"),
+                whatWeDontKnow: "u", unresolved: false)
+    }
+
+    /// Runs a real fan-out that delivers a brief, then hands back the room's own message
+    /// — the same object the card's button is wired to.
+    private func roomWithABrief(_ recommendation: String,
+                                decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = { _, _ in true })
+    async -> (store: CompanyStore, messageId: String, run: VirtualCompanyRunState) {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer,
+                             vcRunner: { _ in
+                                 AsyncThrowingStream {
+                                     $0.yield(.runStarted(runId: "r1"))
+                                     $0.yield(.routing(Self.routing("multi_agent")))
+                                     $0.yield(.brief(Self.aBrief(recommendation)))
+                                     $0.yield(.done(runId: "r1", unresolved: false, skipped: nil))
+                                     $0.finish()
+                                 }
+                             },
+                             decisionsSaver: decisionsSaver)
+        await send(s)
+        // The run outlives the turn by design, so wait for the room rather than
+        // assuming it has landed by the time `sendChat` returns.
+        for _ in 0..<100 where !s.chatMessages.contains(where: { $0.vcRun != nil }) {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let room = s.chatMessages.last { $0.vcRun != nil }!
+        return (s, room.id, room.vcRun!)
+    }
+
+    /// The feature's only call to action used to persist in silence. It must confirm in
+    /// chat, mark itself consumed, and be idempotent.
+    func testLockingInRecordsTheDecisionAndSaysSoOnce() async {
+        final class SaveProbe { var saves = 0 }
+        let probe = SaveProbe()
+        let (s, roomId, run) = await roomWithABrief("Price the single-player product first.",
+                                                    decisionsSaver: { _, _ in probe.saves += 1; return true })
+        XCTAssertTrue(run.canLockIn)
+        let before = s.chatMessages.count
+
+        await s.lockInVirtualCompanyDecision(run, messageId: roomId)
+        XCTAssertEqual(s.company.decisions.map(\.statement), ["Price the single-player product first."])
+        XCTAssertEqual(s.company.decisions.first?.source, "virtual-company/r1")
+        XCTAssertEqual(s.chatMessages.first { $0.id == roomId }?.actionConsumed, true,
+                       "the card must not offer the button again")
+        XCTAssertEqual(s.chatMessages.count, before + 1)
+        XCTAssertEqual(s.chatMessages.last?.noted?.first?.statement, "Price the single-player product first.")
+        XCTAssertEqual(probe.saves, 1)
+
+        // A second tap (or a double click) is a no-op, not a second chip.
+        await s.lockInVirtualCompanyDecision(run, messageId: roomId)
+        XCTAssertEqual(s.chatMessages.count, before + 1)
+        XCTAssertEqual(s.company.decisions.count, 1)
+        XCTAssertEqual(probe.saves, 1)
+    }
+
+    /// A blank recommendation used to make the button a silent no-op. Now the card does
+    /// not offer it at all (`canLockIn`), and the store refuses it too.
+    func testLockingInABlankRecommendationRecordsAndSaysNothing() async {
+        let (s, roomId, run) = await roomWithABrief("   ")
+        XCTAssertFalse(run.canLockIn)
+        let before = s.chatMessages.count
+        await s.lockInVirtualCompanyDecision(run, messageId: roomId)
+        XCTAssertTrue(s.company.decisions.isEmpty)
+        XCTAssertEqual(s.chatMessages.count, before, "no chip")
+        XCTAssertEqual(s.chatMessages.first { $0.id == roomId }?.actionConsumed, false)
+    }
 }

@@ -16,7 +16,8 @@ struct CompanyView: View {
     private var isDark: Bool { scheme == .dark }
 
     private var summaries: [DepartmentSummary] {
-        DepartmentCatalog.summaries(tasks: companyStore.company.tasks)
+        DepartmentCatalog.summaries(tasks: companyStore.company.tasks,
+                                    departments: DepartmentCatalog.roster)
     }
 
     var body: some View {

@@ -158,4 +158,58 @@ final class VirtualCompanyRunStateTests: XCTestCase {
         XCTAssertNotNil(state.positions["finance"])
         XCTAssertEqual(state.agentStatuses.first?.status, .failed)
     }
+
+    // MARK: - A finished run has no working agents
+
+    /// A budget-stopped run: the un-answered department must not spin forever. The
+    /// status derived from "no position and no error" is only honest while the run is
+    /// still going.
+    func testAnAgentThatNeverAnsweredIsNotWorkingOnceTheRunFinished() {
+        var state = VirtualCompanyRunState()
+        state.apply(.routing(routing("multi_agent")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "finance", departmentKey: "fin")))
+        state.apply(.agentPosition(VCAgentMeta(agentId: "product", departmentKey: "product"), position()))
+        XCTAssertEqual(state.agentStatuses.first { $0.meta.agentId == "finance" }?.status, .working)
+
+        state.apply(.runStopped(runId: "r1", reason: "Budget ceiling reached."))
+        state.apply(.done(runId: "r1", unresolved: true, skipped: nil))
+        XCTAssertEqual(state.agentStatuses.first { $0.meta.agentId == "product" }?.status, .done)
+        XCTAssertEqual(state.agentStatuses.first { $0.meta.agentId == "finance" }?.status, .failed,
+                       "a department that never answered a finished run has stalled, not working")
+    }
+
+    /// The seal (`terminalError` + `.failed`) renders a red card. Columns must not keep
+    /// spinning underneath it.
+    func testAFailedRunLeavesNoAgentWorking() {
+        var state = VirtualCompanyRunState()
+        state.apply(.routing(routing("multi_agent")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        state.apply(.agentStart(VCAgentMeta(agentId: "finance", departmentKey: "fin")))
+        state.terminalError = "stream_lost"
+        state.phase = .failed
+        XCTAssertTrue(state.agentStatuses.allSatisfy { $0.status != .working })
+    }
+
+    // MARK: - Lockability
+
+    func testABriefWithARunIdAndARecommendationIsLockable() {
+        var state = VirtualCompanyRunState()
+        state.apply(.runStarted(runId: "r1"))
+        state.apply(.routing(routing("multi_agent")))
+        XCTAssertFalse(state.canLockIn, "no brief yet")
+        state.apply(.brief(brief()))
+        XCTAssertTrue(state.canLockIn)
+    }
+
+    func testABlankRecommendationIsNotLockable() {
+        var state = VirtualCompanyRunState()
+        state.apply(.runStarted(runId: "r1"))
+        state.apply(.routing(routing("multi_agent")))
+        state.apply(.brief(VCBrief(recommendation: "   ", confidence: 3, confidenceReason: "c",
+                                   theRealDisagreement: "d", tradeoffFounderMustOwn: "t",
+                                   killCriteria: [], nextAction: VCNextAction(action: "a", owner: "Founder"),
+                                   whatWeDontKnow: "u", unresolved: true)))
+        XCTAssertFalse(state.canLockIn, "the button would record a decision that says nothing")
+    }
 }

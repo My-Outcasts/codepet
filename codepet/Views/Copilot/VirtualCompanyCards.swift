@@ -5,6 +5,11 @@ import SwiftUI
 /// 380pt wide — positions cannot sit in columns here, so they read as a sequence.
 struct VCRunCards: View {
     let state: VirtualCompanyRunState
+    /// The founder has already locked this brief in — the card says so instead of
+    /// offering the button a second time. Carried on the message (`actionConsumed`),
+    /// not inside the run state, so a `telemetry`/`done` frame arriving after the tap
+    /// cannot un-consume it.
+    let lockedIn: Bool
     let onLockIn: () -> Void
 
     @Environment(\.uiLanguage) private var lang
@@ -29,6 +34,30 @@ struct VCRunCards: View {
             // Contract: `error` is terminal and no `done` follows — after a failed
             // run this is the ONLY signal the founder gets that the room stopped.
             if let err = state.terminalError { terminalErrorCard(err) }
+            // Spec §4.3: the founder has a right to know what the answer cost them —
+            // including when the answer never arrived. Telemetry is emitted on the
+            // escape hatch and on a budget stop too, so this is the one place it belongs.
+            if let cost = state.telemetry?.costEstimateUsd { costRow(cost) }
+        }
+    }
+
+    private func costRow(_ cost: Double) -> some View {
+        Text(String(format: (lang == .vi ? "Phiên này tốn $%.3f" : "This run cost $%.3f"), cost))
+            .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+    }
+
+    /// CONFLICT / BLOCKER / TENSION / ALIGNED are wire values, not founder-facing copy.
+    private func kindLabel(_ kind: String) -> String {
+        switch (kind, lang) {
+        case ("ALIGNED", .vi):  return "đồng ý"
+        case ("ALIGNED", _):    return "aligned"
+        case ("BLOCKER", .vi):  return "chặn"
+        case ("BLOCKER", _):    return "blocker"
+        case ("TENSION", .vi):  return "căng"
+        case ("TENSION", _):    return "tension"
+        case ("CONFLICT", .vi): return "xung đột"
+        case ("CONFLICT", _):   return "conflict"
+        default:                return kind.lowercased()
         }
     }
 
@@ -148,11 +177,21 @@ struct VCRunCards: View {
 
     // Spec §4.3: the highest-value view in the feature. Never collapsed.
     private var conflictCard: some View {
-        MessageCard(hue: CodepetTheme.accentOrange) {
+        // The contract documents an all-ALIGNED outcome as normal (the "nothing to
+        // debate" flow), and "WHERE THEY DISAGREE" over a list of agreements is a lie.
+        // Every row is still shown either way — contract rule 2 forbids collapsing the
+        // positions into one "we agree" paragraph.
+        let allAligned = !state.conflicts.isEmpty && state.conflicts.allSatisfy { $0.kind == "ALIGNED" }
+        return MessageCard(hue: allAligned ? CodepetTheme.accentTeal : CodepetTheme.accentOrange) {
             VStack(alignment: .leading, spacing: 6) {
-                label(lang == .vi ? "HỌ KHÔNG ĐỒNG Ý Ở ĐÂU" : "WHERE THEY DISAGREE")
-                ForEach(state.conflicts, id: \.reason) { conflict in
-                    Text("\(conflict.a) ↔ \(conflict.b) · \(conflict.kind)")
+                label(allAligned ? (lang == .vi ? "HỌ ĐỒNG Ý Ở ĐÂU" : "WHERE THEY AGREE")
+                                 : (lang == .vi ? "HỌ KHÔNG ĐỒNG Ý Ở ĐÂU" : "WHERE THEY DISAGREE"))
+                // `id: \.offset`, not `\.reason`: the reason is free text the model
+                // writes, and two identical reasons (likely in the all-ALIGNED flow)
+                // silently collapsed into one row.
+                ForEach(Array(state.conflicts.enumerated()), id: \.offset) { _, conflict in
+                    Text("\(displayName(agentId: conflict.a)) ↔ \(displayName(agentId: conflict.b))"
+                         + " · \(kindLabel(conflict.kind))")
                         .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                     Text(conflict.reason).font(CodepetTheme.inter(13))
@@ -166,8 +205,10 @@ struct VCRunCards: View {
         MessageCard(hue: CodepetTheme.hairline) {
             VStack(alignment: .leading, spacing: 6) {
                 label((lang == .vi ? "VÒNG " : "ROUND ") + "\(round.round)")
-                ForEach(round.turns, id: \.agent) { turn in
-                    Text("\(turn.agent): \(turn.preciseDisagreement)")
+                // `id: \.offset`, not `\.agent`: one agent can take two turns in a
+                // round, and the second one vanished.
+                ForEach(Array(round.turns.enumerated()), id: \.offset) { _, turn in
+                    Text("\(displayName(agentId: turn.agent)): \(turn.preciseDisagreement)")
                         .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
                     Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
                         .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
@@ -255,19 +296,25 @@ struct VCRunCards: View {
                     .foregroundColor(CodepetTheme.primaryText)
                 Text((lang == .vi ? "Vẫn chưa biết: " : "Still unknown: ") + brief.whatWeDontKnow)
                     .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                if let cost = state.telemetry?.costEstimateUsd {
-                    // Spec §4.3: the founder has a right to know what the answer cost.
-                    Text(String(format: "$%.3f", cost))
-                        .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                // The cost line is NOT here: a run that failed or was budget-stopped
+                // still cost the founder money and never reaches this card. It renders
+                // once, for every outcome, at the bottom of the stack (`costRow`).
+                if lockedIn {
+                    Text("📌 " + (lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
+                                              : "Locked in — this decision now grounds the rest of the app."))
+                        .font(CodepetTheme.inter(12, weight: .medium))
+                        .foregroundColor(CodepetTheme.accentTeal)
+                } else if state.canLockIn {
+                    // Only offered when there is something to record — see `canLockIn`.
+                    Button(action: onLockIn) {
+                        Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
+                            .font(CodepetTheme.inter(13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.accentPurple))
+                    }
+                    .buttonStyle(.plain)
                 }
-                Button(action: onLockIn) {
-                    Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
-                        .font(CodepetTheme.inter(13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.accentPurple))
-                }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -326,6 +373,16 @@ struct VCRunCards: View {
         }
     }
 
+    /// Same names, resolved from a bare `agent_id` — conflicts and negotiation turns
+    /// carry only the id, and `devils_advocate` / `chief_of_staff` / `finance` are wire
+    /// values, never something to print at a founder. The department key comes from the
+    /// agent's own `agent_start`/`agent_meta` entry when there is one.
+    private func displayName(agentId: String) -> String {
+        let meta = state.agents.first { $0.agentId == agentId }
+            ?? state.routing?.agentMeta.first { $0.agentId == agentId }
+        return displayName(meta ?? VCAgentMeta(agentId: agentId, departmentKey: nil))
+    }
+
     private func badge(_ meta: VCAgentMeta) -> String {
         if let dept = DepartmentCatalog.all.first(where: { $0.key == meta.departmentKey }) {
             return dept.ab
@@ -338,8 +395,16 @@ struct VCRunCards: View {
     }
 
     private func accent(_ meta: VCAgentMeta) -> Color {
-        DepartmentCatalog.all.first { $0.key == meta.departmentKey }?.accent
-            ?? CodepetTheme.accentPurple
+        if let dept = DepartmentCatalog.all.first(where: { $0.key == meta.departmentKey }) {
+            return dept.accent
+        }
+        // Contract rule 9 / the mapping table: the challenger must NOT wear a department
+        // colour. The old fallback handed it `accentPurple` — Design's, Sales' and
+        // Legal's — which is exactly the misrepresentation the rule forbids. It gets the
+        // same ink as its own verdict card instead.
+        // The chief of staff falls through to neutral ink for the same reason: every
+        // accent in the theme is already some department's.
+        return meta.agentId == "devils_advocate" ? CodepetTheme.primaryText : CodepetTheme.mutedText
     }
 
     private func stanceLabel(_ stance: String) -> String {

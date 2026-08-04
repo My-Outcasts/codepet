@@ -12,6 +12,9 @@ import {
   buildRunnableBlock,
   buildSetupBlock,
   styleBlock,
+  buildSkillsBlock,
+  parseEnabledSkills,
+  WEB_SEARCH_TOOL,
   validateRunTaskToolUse,
   validateNavigateToolUse,
   validateSetupToolUse,
@@ -61,6 +64,10 @@ interface ChatRequestBody {
   // and omitted by current ones whenever the founder hasn't changed a knob → styleBlock
   // returns "" → the system prompt is byte-for-byte what it was before this field.
   style_fragment?: string;
+  // Toolkit skills the founder has turned ON. The mirror of env_setup, and the
+  // reason a toggle now means something. Backward-compatible in the same way:
+  // omitted by older clients → treated as none → no skill block, no extra tool.
+  enabled_skills?: unknown;
 }
 
 const MAX_RUNNABLE_TASKS = 60;
@@ -243,6 +250,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
 
   const runnable = parseRunnable(body.runnable);
   const envSetup = parseEnvSetup(body.env_setup);
+  const skills = parseEnabledSkills(body.enabled_skills);
 
   const staticSystem = buildSystemPrompt({
     companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
@@ -257,7 +265,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     styleBlock(typeof body.style_fragment === "string" ? body.style_fragment : "") +
     buildContextBlock(typeof body.context === "string" ? body.context : "") +
     buildRunnableBlock(runnable) +
-    buildSetupBlock(envSetup);
+    buildSetupBlock(envSetup) +
+    buildSkillsBlock(skills);
   const messages = buildMessages(Array.isArray(body.history) ? body.history : [], userMessage);
 
   // Two system blocks in both paths: the static companion prompt carries the
@@ -291,6 +300,11 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
     REMEMBER_TOOL,
+    // Server-side, so this declaration IS the integration — Anthropic runs the
+    // search and feeds the results back. Offered only to founders who turned the
+    // skill on, both because it costs money per search and because a tool byte
+    // holds is a tool byte will eventually reach for.
+    ...(skills.has("web-research") ? [WEB_SEARCH_TOOL] : []),
     // Each declared server must be referenced by exactly one toolset, or the
     // request is rejected — `buildMcpConfig` keeps the two lists in step.
     ...mcp.mcpToolsets,

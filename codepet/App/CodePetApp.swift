@@ -149,6 +149,10 @@ struct CodePetApp: App {
                     gameState.setAppState(appState)
                     gameState.processReturnFromIdle()
 
+                    // Wire HealthNudgeController → CompanyStore so a nudge can read the
+                    // founder's Settings → Notifications choice before firing (Task 12).
+                    healthNudge.companyStore = companyStore
+
                     // Sync real coding XP from MCP server
                     mcpBridge.refresh()
                     appState.syncFromMCP(mcpBridge)

@@ -114,13 +114,7 @@ struct SettingsModal: View {
         case .advanced: AdvancedPanel()
         case .aiSettings: AISettingsPanel()
         case .memory: MemoryPanel()
-        case .notifications:
-            // Claimed by Task 12. No `default:` here on purpose — the switch stays
-            // compiler-exhaustive so that task has to come here and take its case rather
-            // than inheriting a placeholder forever.
-            Text(lang == .vi ? "Đang chuyển sang cửa sổ này." : "Moving into this window.")
-                .font(CodepetTheme.inter(13))
-                .foregroundColor(CodepetTheme.mutedText)
+        case .notifications: NotificationsPanel()
         }
     }
 }

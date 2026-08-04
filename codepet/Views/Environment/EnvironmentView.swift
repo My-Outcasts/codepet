@@ -44,6 +44,10 @@ struct EnvironmentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The server owns connector state, so re-read it whenever this surface
+        // appears — a consent completed in another window must not leave a stale
+        // "Connect" button here.
+        .task { await companyStore.refreshConnectorStatus() }
     }
 
     private var header: some View {
@@ -335,6 +339,23 @@ struct ToolRowView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var hovered = false
+    @State private var connecting = false
+
+    /// The connector behind this row, when a real consent flow exists for it.
+    ///
+    /// `nil` for skills and agents — which are genuine local flips — and also for
+    /// connectors whose OAuth is not built yet. Those keep the toggle they have
+    /// today rather than being quietly disabled; see the note in the PR.
+    private var provider: ConnectorProvider? {
+        item.category == .connectors ? ConnectorProvider(rawValue: item.id) : nil
+    }
+
+    /// A real connector reports the server's view of whether a token exists. Only
+    /// a local toggle may report the local flag.
+    private var on: Bool {
+        if let provider { return companyStore.connectedProviders.contains(provider.toolId) }
+        return isOn
+    }
 
     var body: some View {
         HStack(spacing: 13) {
@@ -352,8 +373,24 @@ struct ToolRowView: View {
                     .foregroundColor(CodepetTheme.primaryText)
             }
             Spacer(minLength: 8)
-            Button { Task { await companyStore.toggleTool(id: item.id) } } label: {
-                if isOn {
+            Button {
+                if let provider {
+                    // A real connector: consent, then reconcile from the server.
+                    // Never flips a local flag on its own — the token has to exist.
+                    connecting = true
+                    Task {
+                        await companyStore.connectProvider(provider)
+                        connecting = false
+                    }
+                } else {
+                    Task { await companyStore.toggleTool(id: item.id) }
+                }
+            } label: {
+                if connecting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.horizontal, 15).padding(.vertical, 4)
+                } else if on {
                     // web `.eb.on` — borderless, quiet: a filled tick + muted label
                     HStack(spacing: 6) {
                         Text("✓")
@@ -379,6 +416,7 @@ struct ToolRowView: View {
             }
             .buttonStyle(.plain)
             .fixedSize()
+            .disabled(connecting)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)

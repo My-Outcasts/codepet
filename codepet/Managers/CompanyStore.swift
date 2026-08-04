@@ -1577,6 +1577,37 @@ final class CompanyStore: ObservableObject {
     }
 
     /// Enable/disable a toolkit item and persist (fail-soft).
+    /// Connector ids the founder has actually authorised, read from the server.
+    ///
+    /// Kept separate from `company.enabledTools` on purpose: that set is a local
+    /// preference the client owns, while this one is a fact about a stored OAuth
+    /// token that only the backend can establish. A connector row shows *this*,
+    /// so it can never claim "Connected" for a token that does not exist.
+    @Published private(set) var connectedProviders: Set<String> = []
+
+    func refreshConnectorStatus() async {
+        guard let cid = companyId else { return }
+        connectedProviders = await CompanyData.loadConnectorStatus(cid)
+    }
+
+    /// Run a provider's consent flow, then reconcile from the server rather than
+    /// assuming success — the token is written by the Cloud Function, so the
+    /// server is the only thing that knows whether it landed.
+    @discardableResult
+    func connectProvider(_ provider: ConnectorProvider) async -> ConnectorAuthResult {
+        let result = await ConnectorAuth.shared.connect(provider)
+        guard result == .connected else { return result }
+        await refreshConnectorStatus()
+        // Mirror into the toolkit flag so everything that already reads
+        // `enabledTools` — byte's env_setup list, the usage receipts — sees the
+        // connector as available, without those call sites learning about OAuth.
+        if connectedProviders.contains(provider.toolId),
+           !company.enabledTools.contains(provider.toolId) {
+            await toggleTool(id: provider.toolId)
+        }
+        return result
+    }
+
     func toggleTool(id: String) async {
         if company.enabledTools.contains(id) {
             company.enabledTools.remove(id)

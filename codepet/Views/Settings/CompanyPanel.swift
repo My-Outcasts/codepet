@@ -35,11 +35,11 @@ struct CompanyPanel: View {
                         : "Choose a companion that works alongside you."
                 ) {
                     Button {
-                        pickingCompanion = true
+                        pickingCompanion.toggle()
                     } label: {
                         HStack(spacing: 4) {
                             Text(lang == .vi ? "Chọn" : "Select")
-                            Image(systemName: "chevron.right").font(.system(size: 10))
+                            Image(systemName: pickingCompanion ? "chevron.down" : "chevron.right").font(.system(size: 10))
                         }
                         .font(CodepetTheme.inter(12, weight: .medium))
                         .foregroundColor(CodepetTheme.mutedText)

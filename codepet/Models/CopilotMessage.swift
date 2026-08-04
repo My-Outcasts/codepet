@@ -46,6 +46,10 @@ struct CopilotMessage: Identifiable, Equatable {
     /// message — revealed progressively as the run proceeds. Nil/empty for an
     /// ordinary producing placeholder (renders the plain orb instead).
     var execSteps: [ExecStep]?
+    /// A Virtual Company run rendered inside this message. Follows the existing
+    /// fat-struct/if-chain pattern rather than an enum refactor, per
+    /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
+    var vcRun: VirtualCompanyRunState?
 
     init(id: String = UUID().uuidString, role: CopilotRole, text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
@@ -54,7 +58,7 @@ struct CopilotMessage: Identifiable, Equatable {
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
-         execSteps: [ExecStep]? = nil) {
+         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -71,5 +75,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.companionId = companionId
         self.deptName = deptName
         self.execSteps = execSteps
+        self.vcRun = vcRun
     }
 }

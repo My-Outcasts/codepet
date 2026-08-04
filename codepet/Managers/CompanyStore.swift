@@ -584,6 +584,45 @@ final class CompanyStore: ObservableObject {
                                             companionId: specialist?.companionId, deptName: specialist?.deptName))
         isStreaming = true
 
+        // Fan-out: the room is convened by the router's escape hatch, not by a
+        // client-side heuristic. Both calls go out at once so ordinary chat keeps
+        // its current latency — running intake first would put ~2s in front of
+        // every message, including "hi".
+        let vcRequest = VirtualCompanyRequest(
+            request: text,
+            language: language.rawValue,
+            founder: FounderContextMapper.founder(from: company.brief),
+            stressTest: false)
+        // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
+        // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
+        // `chatMessages` writes it makes through `publishRunProgress` — run on the
+        // main actor with no hop and no `MainActor.run` wrapper. The network itself
+        // never blocks the actor: `VirtualCompanyClient.run` does its I/O in a
+        // `Task.detached` and this loop only suspends waiting on the stream.
+        let vcTask = Task { [weak self] () -> VirtualCompanyRunState? in
+            var state = VirtualCompanyRunState()
+            do {
+                for try await event in VirtualCompanyClient.run(vcRequest) {
+                    state.apply(event)
+                    // The escape hatch fired: discard the run and let chat be.
+                    // The founder never learns a routing decision happened.
+                    if state.isEscapeHatch { return nil }
+                    guard let self else { return nil }
+                    await self.publishRunProgress(state, placeholderId: placeholderId, cid: cid, language: language)
+                }
+            } catch {
+                // A failed run must never damage the chat (spec §7). 503 is the
+                // kill switch and 429 the daily cap — both are silent by design.
+                // 400 is a client bug and the only one worth a log line.
+                if case let .http(status, body) = error as? VirtualCompanyRunError ?? .malformedResponse,
+                   status == 400 {
+                    print("virtualCompanyRun rejected the payload: \(body?.detail ?? "no detail")")
+                }
+                return nil
+            }
+            return state.handsOffToRoom ? state : nil
+        }
+
         var streamedText = ""
         var streamThrew = false
         var receivedDone = false
@@ -594,6 +633,9 @@ final class CompanyStore: ObservableObject {
                 guard companyId == cid else { return }
                 switch event {
                 case .delta(let chunk):
+                    // The room took this turn: byte's partial answer is discarded
+                    // rather than left above the cards.
+                    if roomTookOver(placeholderId) { break }
                     if isCompanionTyping { isCompanionTyping = false }
                     streamedText += chunk
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
@@ -624,28 +666,49 @@ final class CompanyStore: ObservableObject {
         // means the stream succeeded, so no fallback. The pre-deploy safety
         // net still works: a plain-JSON (non-SSE) response parses to zero
         // frames, so `.done` never fires and `!receivedDone` is true.
-        if streamThrew || !receivedDone {
+        // If the room answered, an unreachable companyChat is irrelevant — do not
+        // overwrite the room with byte's offline line. Re-checked (not cached)
+        // before every write below, because a handoff can land during the
+        // fallback's own `await`.
+        if (streamThrew || !receivedDone) && !roomTookOver(placeholderId) {
             let reply = await chatSender(req)
             guard companyId == cid else { return }
             let offline = language == .vi
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
-            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+            if !roomTookOver(placeholderId),
+               let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = reply?.text ?? offline
             }
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
                                          setup: reply?.setup, remember: reply?.remember ?? [])
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
-        } else if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        } else if !roomTookOver(placeholderId),
+                  streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // A `.done` was received but byte sent zero chat text (a
             // run-task-only reply) — don't leave the placeholder blank.
+            // Also skipped when the room took over BEFORE the first delta: the
+            // deltas were dropped on purpose, so `streamedText` is empty and this
+            // lead-in would otherwise clobber byte's handoff line.
             let leadIn = language == .vi
                 ? "Được rồi — mình chuẩn bị việc đó ngay đây."
                 : "On it — putting that together now."
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = leadIn
             }
+        }
+        // Hold `isStreaming` for the run ONLY when the room actually took this
+        // turn. Awaiting `vcTask` unconditionally would keep Send — and, via the
+        // same flag, "New chat"/switch/delete — disabled for the length of a run
+        // the founder cannot see: every escape-hatch run, every 503/429/400, and
+        // (worst) a hung endpoint, which would freeze the composer until
+        // URLSession times out. Conditional means chat's tail here is byte-for-byte
+        // the no-feature tail whenever the room did not take over; the discarded
+        // run finishes on its own time and, having no handoff, never writes.
+        if roomTookOver(placeholderId) {
+            _ = await vcTask.value
+            guard companyId == cid else { return }
         }
         isCompanionTyping = false
         isStreaming = false
@@ -655,6 +718,37 @@ final class CompanyStore: ObservableObject {
         // where hydrate() already reset chatMessages/threads for the new account —
         // nothing stale to flush there.
         flushActiveThread()
+    }
+
+    // MARK: - Virtual Company fan-out
+
+    /// True once the room has taken the turn anchored to `placeholderId`. Read at
+    /// every point chat is about to write into that message — never cached — because
+    /// a handoff can land during any of chat's awaits (the stream, the fallback's
+    /// `chatSender`, `handleDoneAction`).
+    private func roomTookOver(_ placeholderId: String) -> Bool {
+        chatMessages.first(where: { $0.id == placeholderId })?.vcRun != nil
+    }
+
+    /// Pushes run progress into the placeholder message. On the first handoff the
+    /// message text is REPLACED with byte's one-liner rather than appended to:
+    /// half an answer to a decision question is noise sitting above the room that
+    /// is about to answer it properly (spec §3).
+    ///
+    /// Every write is behind `handsOffToRoom`, so a run the router sent elsewhere —
+    /// or one that died before routing — cannot touch `chatMessages` at all.
+    private func publishRunProgress(_ state: VirtualCompanyRunState,
+                                    placeholderId: String,
+                                    cid: String?,
+                                    language: AppLanguage) async {
+        guard companyId == cid, state.handsOffToRoom else { return }
+        guard let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) else { return }
+        if chatMessages[i].vcRun == nil {
+            chatMessages[i].text = language == .vi
+                ? "Cái này cần cả phòng, để mình gọi product với finance vào."
+                : "This one needs the whole room — let me bring in product and finance."
+        }
+        chatMessages[i].vcRun = state
     }
 
     /// The specialist for a task's owning department, if it maps to a companion

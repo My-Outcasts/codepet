@@ -43,8 +43,8 @@ struct CopilotChatView: View {
     }
 
     var body: some View {
-        // The chat box measures itself so the reading column can be a SHARE of that width
-        // rather than a fixed number of points (`ChatColumn`). Measured here, at the dock's
+        // The chat box measures itself so the reading column can be derived from its width
+        // (`ChatColumn`: a fixed inset, capped). Measured here, at the dock's
         // own bounds, and passed down explicitly: the transcript's column lives inside a
         // ScrollView and the composer's does not, so reading a container-relative width at
         // each site would be asking two different questions and getting two different
@@ -898,10 +898,10 @@ enum ReviseKind: CaseIterable {
 /// the divider re-wraps the lines and moves the scroll offset. Founder call, Aug 5, asked
 /// with that cost stated — proportional margins won.
 ///
-/// Points are gone on purpose. Every fixed number tried here (700 total, then 520+36, then a
-/// fixed 420+36) was right at exactly one dock width and wrong either side of it, because the
-/// dock ranges from `ShellLayout.dockMinWidth` (360pt) to well past `dockIdealMaxWidth`
-/// (560pt). A ratio has no such width.
+/// The dock no longer moves with the window (`ShellLayout.dockDefaultWidth`), so at the
+/// default this column is stable by construction: the only thing that changes it is the
+/// founder dragging the divider, which is a deliberate act rather than a side effect of
+/// resizing a window.
 enum ChatColumn {
     /// A percentage was the wrong MODEL, not just the wrong number, and three rounds of
     /// "still too wide" is what it took to see it. The references do not scale their margins
@@ -919,21 +919,13 @@ enum ChatColumn {
     /// a full-bleed web page does not.
     static let inset: CGFloat = 18
 
-    /// The widest the words go. Set to the measure the founder approved on screen — the
-    /// ~380pt dock minus its two insets — so expanding the dock CANNOT change the reading
-    /// experience: past `measureCap + 2 × inset` (380pt) every extra point becomes margin
-    /// and the column stays exactly as it looks now, centred in the space.
-    ///
-    /// This is a deliberately tight cap, and the trade comes with it: drag the dock to 900pt
-    /// and the gutters reach 278pt a side, because "don't scale the content out" and "fill a
-    /// wide dock" are the same knob pulled in opposite directions. Founder call, Aug 5,
-    /// choosing the first. It was 640 for one commit, which still grew the text from 344 to
-    /// 640 on the way there.
-    ///
-    /// Side effect worth keeping: at any dock wider than 380pt the column is fixed, so
-    /// dragging the divider no longer re-wraps a single line — the stability asked for
-    /// earlier, arrived at from the other direction.
-    static let measureCap: CGFloat = 344
+    /// The widest the words go, for the case this cannot control: a founder who drags the
+    /// divider out. At the default 380pt dock it never binds — the inset decides the column —
+    /// which is why pinning it to 344 was the wrong fix for "don't scale the content out".
+    /// That made a dragged-wide dock 278pt of gutter a side; the actual ask was that RESIZING
+    /// THE WINDOW leave the chat alone, and that belongs in `ShellLayout`, where the dock's
+    /// width is now a constant rather than half the window.
+    static let measureCap: CGFloat = 640
 
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.

@@ -13,19 +13,26 @@ enum ShellLayout {
         manual || width < dockExpandMinWidth
     }
 
-    /// Widest the dock grows on its own. Chat is a single column of text, so past this
-    /// it gains nothing from more width while the content pane — a roadmap whose header
-    /// and board both want room — keeps paying for it. Without the cap a fullscreen
-    /// 1470pt window handed the dock 735pt; it now stops at 560pt and the map takes the
-    /// surplus. Dragging the resize handle still overrides this up to `clampDockWidth`.
-    static let dockIdealMaxWidth: CGFloat = 560
+    /// The dock's width, full stop — it does NOT track the window.
+    ///
+    /// Chat is one column of text: it has an ideal measure and gains nothing past it, while
+    /// the content pane — a roadmap whose header and board both want room — gains from every
+    /// point. A share of the window gave chat width it could not use and made the reading
+    /// column change size whenever the window did. Halving the window (with a 560pt cap) was
+    /// the previous rule; going fullscreen still moved the dock 500 → 560 and re-wrapped every
+    /// line of the transcript with it.
+    ///
+    /// 380pt is the width the founder settled on by dragging, and the value the chat's own
+    /// `ChatColumn` was calibrated against. Founder call, Aug 5: resizing the window must not
+    /// change the chat at all — the map takes every new point.
+    ///
+    /// Still a DEFAULT, not a ceiling: `AppShellView`'s drag handle overrides it for the
+    /// session via `clampDockWidth`, which is also what keeps this honest on a small window
+    /// (floored at `dockMinWidth`, and never so wide the content drops under `contentFloor`).
+    static let dockDefaultWidth: CGFloat = 380
 
-    /// Expanded copilot width: half the window up to `dockIdealMaxWidth`, so a narrow
-    /// window keeps the even 50/50 split while a wide one spends the extra space on
-    /// content. Floored at 360pt so the dock-adapted chat stays usable even at the
-    /// `dockExpandMinWidth` boundary; the content area takes the remainder.
     static func dockWidth(forWidth width: CGFloat) -> CGFloat {
-        clampDockWidth(min((width * 0.5).rounded(), dockIdealMaxWidth), windowWidth: width)
+        clampDockWidth(dockDefaultWidth, windowWidth: width)
     }
 
     /// Minimum width the main content pane keeps when the dock is dragged wider.

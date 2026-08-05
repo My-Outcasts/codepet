@@ -15,28 +15,30 @@ final class ChatColumnTests: XCTestCase {
     /// over at `measureCap + 2 × inset` (380pt). This is the assertion the percentage model
     /// fails — a ratio drifts at every one of these widths.
     func testInsetHoldsAtEveryDockWidthBelowTheCap() {
-        for box in [CGFloat(360), 368, 376, 380] {
+        for box in [CGFloat(360), 380, 420, 480, 500, 560, 620, 676] {
             XCTAssertEqual(ChatColumn.margin(forBox: box), ChatColumn.inset, accuracy: 0.51,
                            "box \(box): margin drifted to \(ChatColumn.margin(forBox: box))pt")
         }
     }
 
-    /// Below the cap the words take everything the inset leaves.
+    /// Below the cap the words take everything the inset leaves, so a DRAGGED dock lengthens
+    /// the lines one point for one. Window resizing can no longer reach this code path —
+    /// `ShellLayout.dockWidth` is a constant now — so the only caller is a deliberate drag.
     func testColumnAbsorbsWidthUpToTheCap() {
-        XCTAssertEqual(ChatColumn.textWidth(forBox: 370), 370 - ChatColumn.inset * 2, accuracy: 1)
-        XCTAssertEqual(ChatColumn.textWidth(forBox: 360), 360 - ChatColumn.inset * 2, accuracy: 1)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 380), 380 - ChatColumn.inset * 2, accuracy: 1)
+        let a = ChatColumn.textWidth(forBox: 400)
+        let b = ChatColumn.textWidth(forBox: 500)
+        XCTAssertEqual(b - a, 100, accuracy: 1)
     }
 
-    /// The founder approved the measure at a ~380pt dock and asked that expanding the dock
-    /// not change it. So EVERY width past the cap must yield the same column — this is the
-    /// assertion that would have caught the 640pt cap, which grew the text from 344 to 640
-    /// on its way to being generous.
-    func testExpandingTheDockNeverChangesTheMeasure() {
-        let approved = ChatColumn.textWidth(forBox: 380)
-        for box in [CGFloat(420), 500, 560, 700, 900, 1400] {
-            XCTAssertEqual(ChatColumn.textWidth(forBox: box), approved,
-                           "box \(box) re-scaled the reading column to \(ChatColumn.textWidth(forBox: box))pt")
-        }
+    /// The column at the shell's default dock width is the layout the founder approved, and
+    /// it must be the inset that decides it rather than the cap — if the cap ever binds here,
+    /// the default dock and the reading column have drifted out of step.
+    func testTheDefaultDockYieldsTheApprovedColumn() {
+        let box = ShellLayout.dockDefaultWidth
+        XCTAssertEqual(ChatColumn.textWidth(forBox: box), box - ChatColumn.inset * 2, accuracy: 1)
+        XCTAssertEqual(ChatColumn.margin(forBox: box), ChatColumn.inset, accuracy: 0.51)
+        XCTAssertLessThan(ChatColumn.textWidth(forBox: box), ChatColumn.measureCap)
     }
 
     /// Past the cap the words stop growing and every further point becomes margin — the

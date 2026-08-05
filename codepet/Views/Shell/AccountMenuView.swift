@@ -3,12 +3,18 @@ import SwiftUI
 import FirebaseAuth
 
 /// The top-bar account menu (web AccountMenu.tsx): a purple initial-avatar + account
-/// name + chevron that opens a grouped dropdown — identity, Settings, Appearance,
-/// Log out. Billing and Support used to be their own rows here; both are sections of the
-/// settings modal now, so the one Settings row covers them. Built as a Button + popover
-/// rather than a native
-/// `Menu`, because a borderless `Menu` mis-renders a rich custom label on macOS
-/// (the avatar/name collapse to a bare disclosure). This gives web-exact chrome.
+/// name + chevron opening a grouped dropdown — identity, Upgrade, Settings, Appearance,
+/// Log out.
+///
+/// It is the ONLY control on the right of the top bar (founder call, Aug 5). It used to
+/// sit between the wordmark and the tabs, with an Upgrade pill out here; the pill is
+/// gone, so this menu now carries the app's only upgrade prompt — hence Upgrade leading,
+/// in accent. Billing, Usage and Support are sections of the settings modal rather than
+/// destinations, so Upgrade deep-links to Billing and Settings covers the rest.
+///
+/// Built as a Button + popover rather than a native `Menu`, because a borderless `Menu`
+/// mis-renders a rich custom label on macOS (the avatar/name collapse to a bare
+/// disclosure). This gives web-exact chrome.
 struct AccountMenuView: View {
     /// True in the left rail (64 pt wide): renders only the avatar, omitting the
     /// name text + chevron that would otherwise overflow the rail. Defaults false
@@ -60,8 +66,14 @@ struct AccountMenuView: View {
             }
             .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 4)
             Divider()
-            // One row, because Billing, Usage and Support are now sections INSIDE the
-            // settings modal rather than separate destinations.
+            // Upgrade leads, in accent: with the top-bar pill removed this menu carries
+            // the only upgrade prompt in the app, so it should not read as one more
+            // neutral row. It opens the settings modal's Billing section — the same
+            // destination the pill had — where Billing and Usage are adjacent sections,
+            // so a founder after their usage rather than a plan still finds it.
+            menuRow(lang == .vi ? "Nâng cấp" : "Upgrade", tint: CodepetTheme.accentPurple) {
+                companyStore.openSettings(.billing)
+            }
             menuRow(lang == .vi ? "Cài đặt" : "Settings") { companyStore.openSettings() }
             Divider()
             Text(lang == .vi ? "GIAO DIỆN" : "APPEARANCE")
@@ -79,10 +91,14 @@ struct AccountMenuView: View {
         .frame(width: 230)
     }
 
-    private func menuRow(_ title: String, destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
+    /// `tint` overrides the row's ink — used by Upgrade, which is a call to action rather
+    /// than a neutral destination. `destructive` is the same idea for Log out and stays
+    /// separate so call sites read as intent, not colour.
+    private func menuRow(_ title: String, destructive: Bool = false, tint: Color? = nil,
+                         _ action: @escaping () -> Void) -> some View {
         Button { showMenu = false; action() } label: {
-            Text(title).font(CodepetTheme.inter(13, weight: .medium))
-                .foregroundColor(destructive ? CodepetTheme.accentOrange : CodepetTheme.bodyText)
+            Text(title).font(CodepetTheme.inter(13, weight: tint == nil ? .medium : .semibold))
+                .foregroundColor(tint ?? (destructive ? CodepetTheme.accentOrange : CodepetTheme.bodyText))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .contentShape(Rectangle())

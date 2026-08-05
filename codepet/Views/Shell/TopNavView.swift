@@ -17,10 +17,15 @@ struct TopNavView: View {
     var body: some View {
         HStack(spacing: 16) {
             Text("Codepet").font(CodepetTheme.pixel(18)).foregroundColor(CodepetTheme.primaryText)
-            AccountMenuView()   // compact:false → avatar + name + chevron + dropdown (Settings, Appearance, Log out)
             HStack(spacing: 4) { ForEach(AppView.topTabs) { tab($0) } }
             Spacer(minLength: 12)
-            upgradeButton
+            // The account control is the ONLY thing on the right (founder call, Aug 5).
+            // It used to sit between the wordmark and the tabs — an identity control in
+            // the middle of navigation — and the Upgrade pill sat out here. The pill is
+            // gone: upgrading is an account-level act, so it lives in the account menu
+            // and in the settings modal's Billing section, which is where the pill was
+            // already pointing.
+            AccountMenuView()
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(CodepetTheme.surface)
@@ -66,30 +71,5 @@ struct TopNavView: View {
         }
     }
 
-    private var upgradeButton: some View {
-        // Opens the modal's Billing section over the current view — no longer a route,
-        // so it doesn't have to clear `selectedDeptKey` or take the founder off Company.
-        Button { companyStore.openSettings(.billing) } label: {
-            UpgradePillLabel(title: lang == .vi ? "Nâng cấp" : "Upgrade")
-        }.buttonStyle(.plain)
-    }
 }
 
-/// The Upgrade CTA's visuals, split out from the button so the light/dark contrast
-/// can be pixel-tested without standing up the whole nav bar (which needs Firebase).
-///
-/// This is an INVERTED "ink" pill: it fills with the primary TEXT color, so the pill
-/// itself flips near-black (light) → near-cream (dark). A hardcoded white label
-/// therefore vanished in dark mode. `onAccent` picks the ink from the fill's luminance
-/// per drawing appearance — white-on-black in light, black-on-cream in dark.
-struct UpgradePillLabel: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(CodepetTheme.inter(13.5, weight: .semibold))
-            .foregroundColor(CodepetTheme.onAccent(CodepetTheme.primaryText))
-            .padding(.horizontal, 13).padding(.vertical, 7)
-            .background(Capsule().fill(CodepetTheme.primaryText))
-    }
-}

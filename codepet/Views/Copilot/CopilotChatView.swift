@@ -868,12 +868,29 @@ enum ReviseKind: CaseIterable {
 /// missed for a reason worth writing down: the dock is ~478pt, NARROWER than the
 /// references' measure, so a 700pt cap never bound and the 24pt inset was the whole margin.
 /// At a dock this size the air has to come out of the inset.
+/// The measure is deliberately NARROWER than the dock's default width, which is what makes
+/// the line length stop moving. Two founder complaints turned out to have one cause: while
+/// the column tracked the dock (a 592pt total against a ~478pt dock), every drag of the
+/// divider re-wrapped every line — text visibly re-flowing and the transcript's height
+/// changing under a top-anchored scroll view, which reads as the message scrolling by
+/// itself — and the inset was left as the only margin, so the prose still crowded the edge.
+///
+/// Fixed at 380pt, the drag does nothing but move the column: the wrap points, the number
+/// of lines, and therefore the scroll offset are all unchanged, and the width the dock
+/// gains becomes gutter. Below `measure + 2 × inset` the frame falls back to shrinking
+/// (a dock dragged that narrow must still show its text), so the reflow-free promise holds
+/// down to 460pt and no further.
+///
+/// The trade is real and it is the founder's call: at a 478pt dock you cannot have both a
+/// 60pt margin and a 450pt measure. Asked for margin twice, so margin wins — 380pt is
+/// ~55 characters a line, inside the comfortable band, and dragging the dock wider now
+/// buys air rather than longer lines.
 private enum ChatColumn {
-    /// The words themselves, capped. Widening the dock past this turns into margin.
-    static let measure: CGFloat = 520
-    /// Gap between the words and the dock's edge, on both sides. The only thing standing
-    /// between the prose and the panel edge at the dock's default width.
-    static let inset: CGFloat = 36
+    /// The words themselves — fixed while the dock has room for it.
+    static let measure: CGFloat = 380
+    /// Minimum gap between the words and the dock's edge, on both sides. Whatever the dock
+    /// has beyond the column is split evenly on top of this.
+    static let inset: CGFloat = 40
     /// Total column, insets included.
     static var maxWidth: CGFloat { measure + inset * 2 }
 }

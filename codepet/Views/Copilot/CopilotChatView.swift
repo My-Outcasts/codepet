@@ -43,30 +43,39 @@ struct CopilotChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if showHistory {
-                ThreadListView(showHistory: $showHistory)
-            } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
-                ChatEmptyState(
-                    state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
-                    onOpenRoadmap: { companyStore.select(.roadmap) },
-                    onStarter: { starter in
-                        companyStore.chatDraft = starter
-                        mode = .ask
-                        send()
-                    }
-                ) { composer }
-            } else {
-                messageList
-                // No rule above the composer — it carries its own bordered container,
-                // so the seam was redundant chrome. Matches the header's no-divider
-                // direction. It shares the transcript's reading column, so the composer
-                // and the words above it start and end on the same two vertical lines.
-                composer.readingColumn().padding(.bottom, 12)
+        // The chat box measures itself so the reading column can be a SHARE of that width
+        // rather than a fixed number of points (`ChatColumn`). Measured here, at the dock's
+        // own bounds, and passed down explicitly: the transcript's column lives inside a
+        // ScrollView and the composer's does not, so reading a container-relative width at
+        // each site would be asking two different questions and getting two different
+        // answers — and these two must line up exactly.
+        GeometryReader { geo in
+            let column = ChatColumn.textWidth(forBox: geo.size.width)
+            VStack(spacing: 0) {
+                header
+                if showHistory {
+                    ThreadListView(showHistory: $showHistory)
+                } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
+                    ChatEmptyState(
+                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        onOpenRoadmap: { companyStore.select(.roadmap) },
+                        onStarter: { starter in
+                            companyStore.chatDraft = starter
+                            mode = .ask
+                            send()
+                        }
+                    ) { composer }
+                } else {
+                    messageList(column: column)
+                    // No rule above the composer — it carries its own bordered container,
+                    // so the seam was redundant chrome. Matches the header's no-divider
+                    // direction. It shares the transcript's reading column, so the composer
+                    // and the words above it start and end on the same two vertical lines.
+                    composer.readingColumn(column).padding(.bottom, 12)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(maxHeight: .infinity)
         .background(ChatBackdrop())
     }
 
@@ -177,7 +186,7 @@ struct CopilotChatView: View {
             + (run.terminalError != nil ? 1 : 0)
     }
 
-    private var messageList: some View {
+    private func messageList(column: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
@@ -204,7 +213,7 @@ struct CopilotChatView: View {
                     // static typingRow. Generic label (no single-run step source here).
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
-                .readingColumn()
+                .readingColumn(column)
                 .padding(.vertical, 12)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
@@ -868,46 +877,47 @@ enum ReviseKind: CaseIterable {
 /// missed for a reason worth writing down: the dock is ~478pt, NARROWER than the
 /// references' measure, so a 700pt cap never bound and the 24pt inset was the whole margin.
 /// At a dock this size the air has to come out of the inset.
-/// The measure is deliberately NARROWER than the dock's default width, which is what makes
-/// the line length stop moving. Two founder complaints turned out to have one cause: while
-/// the column tracked the dock (a 592pt total against a ~478pt dock), every drag of the
-/// divider re-wrapped every line — text visibly re-flowing and the transcript's height
-/// changing under a top-anchored scroll view, which reads as the message scrolling by
-/// itself — and the inset was left as the only margin, so the prose still crowded the edge.
+/// A SHARE of the chat box, not a number of points: 18% margin on each side, 64% for the
+/// words, recomputed at every width the dock is dragged to.
 ///
-/// Fixed at 380pt, the drag does nothing but move the column: the wrap points, the number
-/// of lines, and therefore the scroll offset are all unchanged, and the width the dock
-/// gains becomes gutter. Below `measure + 2 × inset` the frame falls back to shrinking
-/// (a dock dragged that narrow must still show its text), so the reflow-free promise holds
-/// down to 460pt and no further.
+/// The fraction is measured, not chosen. Read off the founder's own reference screenshots
+/// at 2×: Claude runs ~159pt gutters in an ~805pt pane (19.8% a side) and ChatGPT ~150pt in
+/// ~822pt (18.2%) — so a shade over 18% a side is what those layouts actually do, and it is
+/// what makes them read as deliberate at any window size.
 ///
-/// The trade is real and it is the founder's call: at a 478pt dock you cannot have both a
-/// 60pt margin and a 450pt measure. Asked for margin twice, so margin wins — 380pt is
-/// ~55 characters a line, inside the comfortable band, and dragging the dock wider now
-/// buys air rather than longer lines.
-private enum ChatColumn {
-    /// The words themselves — fixed while the dock has room for it. 380pt read too narrow;
-    /// 420 is the width the tracking column happened to produce at this dock size, so this
-    /// is the previous measure with the reflow removed rather than a return to it.
-    static let measure: CGFloat = 420
-    /// Minimum gap between the words and the dock's edge, on both sides. Whatever the dock
-    /// has beyond the column is split evenly on top of this.
-    static let inset: CGFloat = 36
-    /// Total column, insets included. Kept under `ShellLayout.dockWidth` at a 1000pt window
-    /// (500pt) on purpose — one point over and the column starts tracking the dock again,
-    /// which is what brought the reflow back last time.
-    static var maxWidth: CGFloat { measure + inset * 2 }
+/// This deliberately reintroduces reflow, which an earlier fixed-measure column had removed:
+/// a width defined as a share of the box necessarily changes when the box does, so dragging
+/// the divider re-wraps the lines and moves the scroll offset. Founder call, Aug 5, asked
+/// with that cost stated — proportional margins won.
+///
+/// Points are gone on purpose. Every fixed number tried here (700 total, then 520+36, then a
+/// fixed 420+36) was right at exactly one dock width and wrong either side of it, because the
+/// dock ranges from `ShellLayout.dockMinWidth` (360pt) to well past `dockIdealMaxWidth`
+/// (560pt). A ratio has no such width.
+enum ChatColumn {
+    /// Share of the chat box given to the words. The remainder is split evenly as margin,
+    /// so this is also the whole spec: `(1 - 0.64) / 2` = 18% a side.
+    static let textFraction: CGFloat = 0.64
+
+    /// The reading column's width inside a chat box of `box` points. Rounded, because a
+    /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
+    ///
+    /// No floor: at the 360pt dock minimum this yields 230pt (~33 characters), which is
+    /// tight but legible, and a floor would silently break the "18% a side at every width"
+    /// promise exactly where the founder is most likely to be looking for it.
+    static func textWidth(forBox box: CGFloat) -> CGFloat {
+        max(0, (box * textFraction).rounded())
+    }
 }
 
 private extension View {
-    /// Inset, capped and centred. Two frames, in this order: the first bounds the content
-    /// at the column width (left-aligned inside it, so a companion reply and a right-hand
-    /// founder pill both anchor to the same edges), the second expands to the available
-    /// width and centres that column in it.
-    func readingColumn() -> some View {
+    /// Sized to the column and centred in whatever is left. Two frames, in this order: the
+    /// first sets the content to the column width and left-aligns inside it — so a companion
+    /// reply and a right-hand founder pill anchor to the same two edges — and the second
+    /// expands to the available width and centres that column in it.
+    func readingColumn(_ column: CGFloat) -> some View {
         self
-            .padding(.horizontal, ChatColumn.inset)
-            .frame(maxWidth: ChatColumn.maxWidth, alignment: .leading)
+            .frame(width: column, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
     }
 }

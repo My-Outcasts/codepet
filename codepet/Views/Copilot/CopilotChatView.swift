@@ -52,7 +52,7 @@ struct CopilotChatView: View {
         GeometryReader { geo in
             let column = ChatColumn.textWidth(forBox: geo.size.width)
             VStack(spacing: 0) {
-                header
+                header(column: column)
                 if showHistory {
                     ThreadListView(showHistory: $showHistory)
                 } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
@@ -85,12 +85,31 @@ struct CopilotChatView: View {
     ///
     /// History is icon-only, so both buttons carry `.help` tooltips — hover is the
     /// only thing naming them now.
-    private var header: some View {
+    /// Leading, not trailing — and the panel toggle first, which is where ChatGPT puts its
+    /// sidebar control. Founder call, Aug 5, with their icon as the reference: a panel glyph
+    /// rather than a bare chevron, because a chevron says "go" and this hides a panel.
+    ///
+    /// Sized to the reading column so the two controls sit on the same left edge as the words
+    /// below them, at any dock width — the alternative is a fixed inset that lines up at
+    /// exactly one width, which is the mistake this file has already made five times.
+    private func header(column: CGFloat) -> some View {
         HStack(spacing: 2) {
-            Spacer(minLength: 0)
+            Button { companyStore.dockCollapsed = true } label: {
+                // Mirrors the dock it collapses: the filled half sits on the side the panel is
+                // on. `leadinghalf` is the glyph ChatGPT uses, but their sidebar is on the left
+                // and this dock is on the right, so the mirrored variant is the same icon
+                // pointing at the right panel.
+                Image(systemName: "rectangle.trailinghalf.filled")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(5)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
             Button { showHistory.toggle() } label: {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
                                      : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
                     .padding(5)
@@ -99,17 +118,11 @@ struct CopilotChatView: View {
             .buttonStyle(.plain)
             .disabled(isChatBusy)
             .help(lang == .vi ? "Lịch sử hội thoại" : "Chat history")
-            Button { companyStore.dockCollapsed = true } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .padding(5)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(lang == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 7).padding(.top, 6)
+        .frame(width: column, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 6)
     }
 
     /// The shared composer — one `ChatComposer` instance used in BOTH the empty

@@ -14,22 +14,64 @@ struct VCRunCards: View {
 
     @Environment(\.uiLanguage) private var lang
 
+    /// TWO shapes, because a run in flight and a run that has landed are different reading
+    /// tasks — and the contract binds them differently.
+    ///
+    /// WHILE RUNNING the whole process is on screen: the question decomposed, the agents, and
+    /// each position appearing in the agent's own row the moment it lands. That is rule 1
+    /// ("never collapse the process into a spinner plus an answer") and it is also the answer
+    /// to the founder's third complaint — results used to be appended as fresh cards further
+    /// down the transcript, so a finished agent's row still said "Done" while its content sat
+    /// somewhere below.
+    ///
+    /// ONCE THE BRIEF LANDS the call leads and the process folds into disclosures. The founder
+    /// was reading ~1,500 words of routing rationale and positions before reaching the one
+    /// thing she could act on; the most visually dominant block was the justification for who
+    /// was NOT invited. Founder call, Aug 5.
+    ///
+    /// Two things stay expanded against that instruction, because the contract outranks it
+    /// (CLAUDE.md) and says so explicitly: the conflict card (spec §4.3, "the highest-value
+    /// view in the feature", plus rule 4's `what_would_change_my_mind`) and
+    /// `the_real_disagreement` (rule 3, verbatim). THE CALL also ends on
+    /// `tradeoff_founder_must_own`, which is rule 5 — an answer-first order must not lose the
+    /// either/or, so the either/or moves INTO the leading card rather than trailing the stack.
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let routing = state.routing { routingCard(routing) }
-            if !state.agents.isEmpty { agentsAtWorkCard }
-            ForEach(state.agents, id: \.agentId) { meta in
-                if let position = state.positions[meta.agentId] {
-                    positionCard(meta, position)
+            if let brief = state.brief {
+                theCall(brief)
+                if !state.conflicts.isEmpty { conflictCard }
+                realDisagreement(brief)
+                Disclosure(title: (lang == .vi ? "Từng phòng ban đã nói gì" : "What each department said")
+                            + " · \(state.agents.count)") {
+                    departmentsSaid
                 }
-                if let error = state.agentErrors[meta.agentId] {
-                    errorRow(meta, error)
+                if let routing = state.routing {
+                    Disclosure(title: (lang == .vi ? "Ai ở trong phòng, và vì sao" : "Who was in the room, and why")
+                                + " · \(routing.agents.count)") {
+                        routingCard(routing)
+                    }
                 }
+                if !state.negotiationRounds.isEmpty {
+                    Disclosure(title: (lang == .vi ? "Họ thương lượng thế nào" : "How they negotiated")
+                                + " · \(state.negotiationRounds.count)") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+                        }
+                    }
+                }
+                if let verdict = state.verdict {
+                    Disclosure(title: lang == .vi ? "Điều gì có thể khiến kết luận này sai"
+                                                  : "What could make this wrong") {
+                        verdictCard(verdict)
+                    }
+                }
+            } else {
+                if let routing = state.routing { routingCard(routing) }
+                if !state.agents.isEmpty { liveAgents }
+                if !state.conflicts.isEmpty { conflictCard }
+                ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+                if let verdict = state.verdict { verdictCard(verdict) }
             }
-            if !state.conflicts.isEmpty { conflictCard }
-            ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
-            if let verdict = state.verdict { verdictCard(verdict) }
-            if let brief = state.brief { briefCard(brief) }
             if let stopped = state.stoppedReason { stoppedRow(stopped) }
             // Contract: `error` is terminal and no `done` follows — after a failed
             // run this is the ONLY signal the founder gets that the room stopped.
@@ -69,10 +111,22 @@ struct VCRunCards: View {
     /// routing it through that bridge only ever produced a blank avatar image
     /// next to the generic fallback name "Codepet" — an accidental, unintended
     /// identity, not a deliberate one.
-    private var agentsAtWorkCard: some View {
+    /// The room while it works — and where each department's answer LANDS.
+    ///
+    /// Previously this was a status list and nothing else: it showed "Done" next to an agent
+    /// whose position had been appended as a separate card further down the transcript, so the
+    /// two halves of one agent's work sat in different places and the list itself carried no
+    /// information once every row said Done. Now the row IS the agent: it shows a live bar
+    /// while thinking, and the moment `agent_position` arrives the answer opens underneath the
+    /// name it belongs to. Founder call, Aug 5 — "results should be displayed immediately upon
+    /// completion, not on a new line".
+    ///
+    /// The bar is driven by real state (`.working` until a position or an error arrives), not a
+    /// timer — rule 8 forbids artificial progress.
+    private var liveAgents: some View {
         HStack {
             MessageCard(hue: CodepetTheme.accentPurple) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text((lang == .vi ? "Đang làm việc" : "Agents at work")
                             + " · \(state.agentStatuses.count)")
                         .font(CodepetTheme.inter(10, weight: .semibold))
@@ -80,27 +134,116 @@ struct VCRunCards: View {
                         .foregroundColor(CodepetTheme.mutedText)
                     ForEach(Array(state.agentStatuses.enumerated()), id: \.offset) { idx, entry in
                         if idx > 0 { Divider().overlay(CodepetTheme.hairline) }
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(accent(entry.meta).opacity(0.16))
-                                .frame(width: 20, height: 20)
-                                .overlay(
-                                    Text(badge(entry.meta))
-                                        .font(CodepetTheme.inter(9, weight: .semibold))
-                                        .foregroundColor(accent(entry.meta))
-                                )
-                            Text(displayName(entry.meta))
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.primaryText)
-                            Spacer(minLength: 6)
-                            statusPill(entry.status)
-                        }
+                        agentRow(entry)
                     }
                 }
             }
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func agentRow(_ entry: (meta: VCAgentMeta, status: AgentRunStatus)) -> some View {
+        let position = state.positions[entry.meta.agentId]
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(accent(entry.meta).opacity(0.16))
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Text(badge(entry.meta))
+                            .font(CodepetTheme.inter(9, weight: .semibold))
+                            .foregroundColor(accent(entry.meta))
+                    )
+                Text(displayName(entry.meta))
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                if let position {
+                    Text(stanceLabel(position.stance))
+                        .font(CodepetTheme.inter(11, weight: .semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(accent(entry.meta).opacity(0.12)))
+                        .foregroundColor(accent(entry.meta))
+                }
+                Spacer(minLength: 6)
+                // Contract rule 7: dots, never a number.
+                if let position { confidenceDots(position.confidence) } else { statusPill(entry.status) }
+            }
+            if let position {
+                Text(position.position).font(CodepetTheme.inter(14)).lineSpacing(6)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let blocker = position.hardBlocker {
+                    Text("🔒 " + blocker)
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let error = state.agentErrors[entry.meta.agentId] {
+                Text(error).font(CodepetTheme.inter(13)).foregroundColor(Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if entry.status == .working || entry.status == .reviewing {
+                ProgressView().progressViewStyle(.linear).tint(accent(entry.meta))
+            }
+        }
+    }
+
+    /// Every department's full position, verbatim and individually — contract rule 2 forbids
+    /// summarising them into one paragraph, and a disclosure is a place to put them, not a
+    /// licence to condense them.
+    private var departmentsSaid: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(state.agents, id: \.agentId) { meta in
+                if let position = state.positions[meta.agentId] {
+                    positionCard(meta, position)
+                }
+                if let error = state.agentErrors[meta.agentId] {
+                    errorRow(meta, error)
+                }
+            }
+        }
+    }
+
+    /// Rule 3: `the_real_disagreement` verbatim, and never behind a disclosure.
+    private func realDisagreement(_ brief: VCBrief) -> some View {
+        MessageCard(hue: CodepetTheme.accentPurple) {
+            VStack(alignment: .leading, spacing: 8) {
+                label(lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT")
+                Text(brief.theRealDisagreement).font(CodepetTheme.inter(14)).lineSpacing(6)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// A collapsed section of the room. Closed by default: the founder opens the process she
+    /// wants rather than scrolling past all of it to reach the answer.
+    private struct Disclosure<Content: View>: View {
+        let title: String
+        @ViewBuilder var content: Content
+        @State private var open = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: open ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(title).font(CodepetTheme.inter(12, weight: .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 11).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(CodepetTheme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(CodepetTheme.hairline, lineWidth: 1))
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                if open { content }
+            }
+        }
     }
 
     private func statusPill(_ status: AgentRunStatus) -> some View {
@@ -274,10 +417,20 @@ struct VCRunCards: View {
         }
     }
 
-    private func briefCard(_ brief: VCBrief) -> some View {
+    /// THE CALL — what the room decided, what to do, and the one trade-off that is the
+    /// founder's. Everything a founder acts on, in one block, at the top.
+    ///
+    /// It carries `tradeoff_founder_must_own` LAST of the reading content, because rule 5 says
+    /// the presentation ends on the either/or. In the old chronological order that came for
+    /// free (the brief was the final card); with the call leading, the either/or has to move
+    /// inside it or the rule is quietly lost.
+    ///
+    /// `the_real_disagreement` deliberately does NOT live here — it has its own always-visible
+    /// block (rule 3) so this card stays the size of a decision rather than a document.
+    private func theCall(_ brief: VCBrief) -> some View {
         MessageCard(hue: CodepetTheme.accentPurple) {
             VStack(alignment: .leading, spacing: 8) {
-                label(lang == .vi ? "KHUYẾN NGHỊ" : "RECOMMENDATION")
+                label(lang == .vi ? "QUYẾT ĐỊNH" : "THE CALL")
                 Text(brief.recommendation).font(CodepetTheme.inter(14.5)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                 HStack(spacing: 8) {
@@ -286,14 +439,22 @@ struct VCRunCards: View {
                     Text(brief.confidenceReason).font(CodepetTheme.inter(13.5)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                 }
-                // Contract rule 3: show the_real_disagreement verbatim. No
-                // paraphrasing, no softening.
-                label(lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT")
-                Text(brief.theRealDisagreement).font(CodepetTheme.inter(14)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.bodyText)
+                Text((lang == .vi ? "Việc tiếp theo (\(brief.nextAction.owner)): "
+                                  : "Next action (\(brief.nextAction.owner)): ") + brief.nextAction.action)
+                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                label(lang == .vi ? "DỪNG NẾU" : "STOP IF")
+                ForEach(brief.killCriteria, id: \.self) { criterion in
+                    Text("· " + criterion).font(CodepetTheme.inter(14)).lineSpacing(6)
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // LAST of the reading content — rule 5.
                 label(lang == .vi ? "ĐÁNH ĐỔI CHỈ BẠN QUYẾT ĐƯỢC" : "THE TRADE-OFF ONLY YOU CAN MAKE")
                 Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
                 if brief.unresolved {
                     // Contract rule 6: unresolved is a valid outcome, not an error —
                     // present it as an honest answer, the trade-off is the founder's to make.
@@ -302,17 +463,9 @@ struct VCRunCards: View {
                         .font(CodepetTheme.inter(13, weight: .medium))
                         .foregroundColor(CodepetTheme.primaryText)
                 }
-                label(lang == .vi ? "DỪNG NẾU" : "STOP IF")
-                ForEach(brief.killCriteria, id: \.self) { criterion in
-                    Text("· " + criterion).font(CodepetTheme.inter(14)).lineSpacing(6)
-                        .foregroundColor(CodepetTheme.bodyText)
-                }
-                Text((lang == .vi ? "Việc tiếp theo (\(brief.nextAction.owner)): "
-                                  : "Next action (\(brief.nextAction.owner)): ") + brief.nextAction.action)
-                    .font(CodepetTheme.inter(13, weight: .medium))
-                    .foregroundColor(CodepetTheme.primaryText)
                 Text((lang == .vi ? "Vẫn chưa biết: " : "Still unknown: ") + brief.whatWeDontKnow)
                     .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
                 // The cost line is NOT here: a run that failed or was budget-stopped
                 // still cost the founder money and never reaches this card. It renders
                 // once, for every outcome, at the bottom of the stack (`costRow`).

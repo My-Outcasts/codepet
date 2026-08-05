@@ -72,9 +72,9 @@ struct RoadmapView: View {
             if overviewTab == .roadmap {
                 roadmapBody
             } else {
-                // Aligned to the column SecondBrainView itself uses, so the toggle sits over its
-                // content's left edge rather than 2pt outside it.
-                overviewToggle.padding(.horizontal, 26).padding(.top, 16).pageColumn()
+                // Full width like the rest of this tab; only the horizontal inset is shared with
+                // the content below, so the toggle still starts on the same left edge.
+                overviewToggle.padding(.horizontal, 26).padding(.top, 16)
                 SecondBrainView()
             }
         }
@@ -114,11 +114,17 @@ struct RoadmapView: View {
     /// The former `body` contents (roadmap map + chrome), extracted so the toggle can swap it.
     private var roadmapBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The house scale (CodepetTokens.Space / viewHeadPadding / pageColumn), which every
-            // other tab adopted in PR #73 and this page missed — it was still on raw 22/16/24
-            // with no column cap, so on a wide window the Overview masthead ran edge to edge
-            // while its five siblings capped and inset. Audited Aug 5.
-            header.viewHeadPadding()
+            // The house SPACING (32 top, 26 horizontal, `Space.headToBody` below) but NOT the
+            // house column cap — Overview stays full width, unlike the five tabs that adopted
+            // `pageColumn()` in PR #73. Founder call, Aug 5: this tab is a map, not a document.
+            // Capping it to a 1280pt reading column centred the masthead and the chrome row over
+            // a board that legitimately runs the whole window, so the page read as two different
+            // widths stacked on top of each other.
+            //
+            // So `viewHeadPadding()` is deliberately NOT used here — it bundles `pageColumn()`.
+            // Anyone bringing this page onto the column later has to move the board too, or the
+            // mismatch comes back.
+            header.padding(.top, 32).padding(.horizontal, 26)
             OverviewChromeRow(tasks: tasks, accent: accent,
                               // The beacon's filled Start dispatches directly — that one-click
                               // path is the mitigation for board cards now opening the panel.
@@ -130,7 +136,6 @@ struct RoadmapView: View {
                               // button chrome.
                               onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26)
-                .pageColumn()
             // NOT `pageColumn()`. The board is a horizontally-scrolling diagram and needs every
             // point of width — capping it would turn its own scroll into a nested one. Its
             // `insetLeading` is already 26, so with the masthead now on 26 the two finally share

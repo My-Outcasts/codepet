@@ -261,6 +261,12 @@ enum CompanyChatClient {
                         throw CompanyChatStreamError.malformedResponse
                     }
 
+                    // Transport shape: an SSE stream that arrives as one buffered blob, or
+                    // with a Content-Encoding an intermediate applied, is indistinguishable in
+                    // the transcript from the model stopping early.
+                    Self.streamLog.info("""
+                        response \(http.statusCode, privacy: .public)                         type=\(http.value(forHTTPHeaderField: "Content-Type") ?? "-", privacy: .public)                         enc=\(http.value(forHTTPHeaderField: "Content-Encoding") ?? "-", privacy: .public)                         len=\(http.value(forHTTPHeaderField: "Content-Length") ?? "-", privacy: .public)
+                        """)
                     if http.statusCode != 200 {
                         // Non-streaming error body. Read fully then throw.
                         var data = Data()
@@ -287,6 +293,7 @@ enum CompanyChatClient {
                             lineBuffer.removeAll(keepingCapacity: true)
                             frameCount += 1
                             for frame in parser.feedLines([line ?? ""]) {
+                                Self.streamLog.info("frame \(frame.event, privacy: .public) — \(frame.data.count, privacy: .public) bytes")
                                 try Self.handleStreamFrame(frame: frame, continuation: continuation)
                             }
                         } else {

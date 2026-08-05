@@ -1,6 +1,7 @@
 // codepet/Managers/CompanyStore.swift
 import Foundation
 import Combine
+import os
 
 /// The app's primary store — the single company (companies/{uid}) + the active
 /// view. Native port of the web `useApp`/`lib/store`. Replaces ProjectStore's
@@ -746,6 +747,8 @@ final class CompanyStore: ObservableObject {
     /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
     /// The model still receives the shaped text — the mode is a real instruction — but the
     /// transcript, the history built from it, and the thread title derived from it are hers.
+    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
+
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
@@ -857,8 +860,15 @@ final class CompanyStore: ObservableObject {
         // The decision itself lives in `ChatTailAction` (a testable value type); this
         // only carries it out. The room is no longer part of this decision: it owns its
         // own appended message, so byte's turn ends exactly as it did before the feature.
-        switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
-                                     streamedText: streamedText, action: doneAction) {
+        // Which tail ran, and on what. `.fallback` REPLACES the text the founder watched
+        // arrive with a second, independent generation — invisible from the transcript, and the
+        // difference between "the model stopped" and "we threw its answer away".
+        let tail = ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
+                                         streamedText: streamedText, action: doneAction)
+        Self.chatLog.info("""
+            tail=\(String(describing: tail), privacy: .public) threw=\(streamThrew, privacy: .public)             done=\(receivedDone, privacy: .public) chars=\(streamedText.count, privacy: .public)
+            """)
+        switch tail {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }

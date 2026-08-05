@@ -126,15 +126,16 @@ struct RoadmapBoardView: View {
                                        startPoint: .leading, endPoint: .trailing)
                         // Web: `justify-content: flex-end; padding-right: 6` — pinned to the
                         // trailing edge of the strip, not centered within it.
-                        Circle()
-                            .fill(CodepetTheme.surface)
-                            .overlay(Circle().stroke(CodepetTheme.hairline, lineWidth: 1))
-                            .frame(width: 22, height: 22)
-                            .overlay(
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundColor(CodepetTheme.mutedText))
-                            .padding(.trailing, 6)
+                        // A bare glyph, not a circled one. This whole overlay is
+                        // `allowsHitTesting(false)`, and a 22pt circle with a surface fill and a
+                        // hairline border is button chrome — it promised a "scroll right" control
+                        // that does not exist. The directional hint survives; the affordance does
+                        // not. (If it should become a real control, it needs a scroll target: the
+                        // columns carry no scroll ids today, only the cards do.)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText.opacity(0.55))
+                            .padding(.trailing, 8)
                     }
                     .frame(width: 56)
                 }

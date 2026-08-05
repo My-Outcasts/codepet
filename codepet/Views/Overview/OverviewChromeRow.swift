@@ -154,6 +154,12 @@ struct OverviewChromeRow: View {
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Without this the row was clickable only across its WORDS. A stack's hit
+                    // area is the union of its children, not its own frame, and both labels are
+                    // `lineLimit(1)` — so the empty width to the right of a short title, which
+                    // is most of the row, missed. It reads as a full-width row and now behaves
+                    // like one.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(s.title)

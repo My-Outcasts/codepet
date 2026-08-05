@@ -72,7 +72,9 @@ struct RoadmapView: View {
             if overviewTab == .roadmap {
                 roadmapBody
             } else {
-                overviewToggle.padding(.horizontal, 24).padding(.top, 16)
+                // Aligned to the column SecondBrainView itself uses, so the toggle sits over its
+                // content's left edge rather than 2pt outside it.
+                overviewToggle.padding(.horizontal, 26).padding(.top, 16).pageColumn()
                 SecondBrainView()
             }
         }
@@ -112,7 +114,11 @@ struct RoadmapView: View {
     /// The former `body` contents (roadmap map + chrome), extracted so the toggle can swap it.
     private var roadmapBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header.padding(.horizontal, 24).padding(.top, 22)
+            // The house scale (CodepetTokens.Space / viewHeadPadding / pageColumn), which every
+            // other tab adopted in PR #73 and this page missed — it was still on raw 22/16/24
+            // with no column cap, so on a wide window the Overview masthead ran edge to edge
+            // while its five siblings capped and inset. Audited Aug 5.
+            header.viewHeadPadding()
             OverviewChromeRow(tasks: tasks, accent: accent,
                               // The beacon's filled Start dispatches directly — that one-click
                               // path is the mitigation for board cards now opening the panel.
@@ -123,7 +129,13 @@ struct RoadmapView: View {
                               // open the panel instead: they render as plain text with no
                               // button chrome.
                               onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
-                .padding(.horizontal, 24).padding(.top, 16)
+                .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26)
+                .pageColumn()
+            // NOT `pageColumn()`. The board is a horizontally-scrolling diagram and needs every
+            // point of width — capping it would turn its own scroll into a nested one. Its
+            // `insetLeading` is already 26, so with the masthead now on 26 the two finally share
+            // a left edge; they were 2pt apart, which is why the root node never quite lined up
+            // under the title.
             RoadmapBoardView(tasks: tasks, founderName: founderName,
                              projectName: displayProjectName,
                              tagline: oneLiner,

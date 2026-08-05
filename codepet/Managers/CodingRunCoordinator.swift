@@ -76,14 +76,29 @@ final class CodingRunCoordinator: ObservableObject {
             workingDir = s.shadowDir
         }
 
+        // Tool activity reads as terminal output, because that is what it is — the runner's own
+        // steps, not narration. The web prints rows like `claude editing Analytics.swift +11 −4`
+        // with the numbers derived from the task title's length; native has the real thing, so
+        // the equivalent row is appended from the actual diffs below.
         let outcome = await runner.run(prompt: current.ask, workingDir: workingDir,
-                                       onStep: { [weak self] step in self?.steps.append(step) })
+                                       onStep: { [weak self] step in
+                                           self?.steps.append(ExecStep(id: step.id, label: step.label,
+                                                                       done: step.done, kind: .mono))
+                                       })
         guard var after = run else { return }
         if let failure = outcome.failure {
             teardownSession()
             after.phase = .failed(failure)
             run = after
             return
+        }
+        // One real row per changed file: the file's own name, and its own line counts.
+        for diff in outcome.diffs {
+            let added = diff.lines.filter { $0.kind == .added }.count
+            let removed = diff.lines.filter { $0.kind == .removed }.count
+            let verb = diff.isNewFile ? "created" : "edited"
+            steps.append(ExecStep(label: "claude  \(verb) \(diff.fileName)  +\(added) −\(removed)",
+                                  done: true, kind: .mono))
         }
         after.diffs = outcome.diffs
         after.acceptedPaths = Set(outcome.diffs.map {

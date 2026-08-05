@@ -793,18 +793,21 @@ struct CopilotBubble: View {
             if showSteps {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(steps) { step in
-                        // Same rule the live log uses (`ExecLogRow.stepRow`): a checkpoint is
-                        // recognised by its label, not by a field. Every step is done by the
-                        // time this renders, so the checkpoint's gold is the only distinction
-                        // left worth drawing.
-                        let isCheckpoint = step.label.lowercased().hasPrefix("checkpoint")
+                        let isCheckpoint = step.kind == .checkpoint
                         HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: isCheckpoint ? "circle.fill" : "checkmark")
-                                .font(.system(size: isCheckpoint ? 6 : 8, weight: .bold))
-                                .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.accentPurple)
-                                .frame(width: 10, height: 12)
+                            if step.kind == .mono {
+                                Text("›").font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .frame(width: 10, height: 12)
+                            } else {
+                                Image(systemName: isCheckpoint ? "circle.fill" : "checkmark")
+                                    .font(.system(size: isCheckpoint ? 6 : 8, weight: .bold))
+                                    .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.accentPurple)
+                                    .frame(width: 10, height: 12)
+                            }
                             Text(step.label)
-                                .font(.pixelSystem(size: 10))
+                                .font(step.kind == .mono ? .system(size: 10, design: .monospaced)
+                                                         : .pixelSystem(size: 10))
                                 .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.mutedText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

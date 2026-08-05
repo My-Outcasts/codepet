@@ -82,10 +82,16 @@ struct ExecLogRow: View {
     }
 
     @ViewBuilder private func stepRow(_ step: ExecStep, isCurrent: Bool) -> some View {
-        let isCheckpoint = step.label.lowercased().hasPrefix("checkpoint")
+        // By `kind` now, not by sniffing the label — the same rule the static record uses, and
+        // the only way a Vietnamese checkpoint could ever be recognised.
+        let isCheckpoint = step.kind == .checkpoint
         HStack(alignment: .top, spacing: 8) {
             Group {
-                if isCheckpoint {
+                if step.kind == .mono {
+                    // Real tool activity, so it reads like a terminal rather than narration.
+                    Text("›").font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(CodepetTheme.mutedText)
+                } else if isCheckpoint {
                     Circle().fill(CodepetTheme.accentGold).frame(width: 10, height: 10)
                 } else if step.done {
                     Image(systemName: "checkmark.circle.fill")
@@ -100,7 +106,8 @@ struct ExecLogRow: View {
             }
             .frame(width: 16, height: 16)
             Text(step.label)
-                .font(CodepetTheme.inter(13.5))
+                .font(step.kind == .mono ? .system(size: 12, design: .monospaced)
+                                         : CodepetTheme.inter(13.5))
                 .foregroundColor(isCheckpoint ? CodepetTheme.accentGold
                                  : (step.done ? CodepetTheme.bodyText : CodepetTheme.mutedText))
                 .fixedSize(horizontal: false, vertical: true)

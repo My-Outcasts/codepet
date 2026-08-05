@@ -1502,20 +1502,8 @@ final class CompanyStore: ObservableObject {
     /// and department context). Revealed progressively as the run proceeds.
     static func execSteps(task: RoadmapTask, specialist: (companionId: String, deptName: String)?,
                           decisionCount: Int, language: AppLanguage) -> [ExecStep] {
-        let vi = language == .vi
-        var out: [ExecStep] = []
-        let ctx = decisionCount > 0
-            ? (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu (và \(decisionCount) quyết định)"
-                  : "Reading your brief — mission, audience, your voice (+ \(decisionCount) decisions)")
-            : (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu của bạn"
-                  : "Reading your brief — mission, audience, your voice")
-        out.append(ExecStep(label: ctx))
-        if let s = specialist {
-            out.append(ExecStep(label: vi ? "Vận dụng cẩm nang \(s.deptName)" : "Pulling in the \(s.deptName) playbook"))
-        }
-        out.append(ExecStep(label: vi ? "Soạn \(task.title)" : "Drafting \(task.title)"))
-        out.append(ExecStep(label: vi ? "Khớp giọng điệu và quyết định của bạn" : "Matching your tone and past decisions"))
-        return out
+        ExecScript.steps(title: task.title, dept: task.dept, deptName: specialist?.deptName,
+                         decisionCount: decisionCount, language: language)
     }
 
     /// Fan out the next actionable task in up to `maxFanOut` departments as parallel

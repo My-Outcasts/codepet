@@ -895,18 +895,31 @@ enum ReviseKind: CaseIterable {
 /// dock ranges from `ShellLayout.dockMinWidth` (360pt) to well past `dockIdealMaxWidth`
 /// (560pt). A ratio has no such width.
 enum ChatColumn {
-    /// Share of the chat box given to the words. The remainder is split evenly as margin,
-    /// so this is also the whole spec: `(1 - 0.64) / 2` = 18% a side.
-    static let textFraction: CGFloat = 0.64
+    /// Margin as a share of the chat box — the ratio, before clamping.
+    ///
+    /// 18% (the references' own figure) proved to be the wrong ratio for a panel this
+    /// narrow: at the 381pt dock the founder had dragged to, 18% is 69pt a side and leaves
+    /// 242pt of text, which reads as margin with a column of words in it. The references
+    /// earn 18% because their pane is ~800pt — twice this dock — so the same percentage
+    /// takes a much smaller share of the reading experience. 12% holds the proportional
+    /// behaviour that was asked for while staying reasonable at the narrow end.
+    static let marginFraction: CGFloat = 0.12
+
+    /// Clamps. A pure ratio is wrong at both extremes: at the 360pt dock minimum a large
+    /// fraction squeezes the text to nothing, and on a dock dragged past 900pt an unbounded
+    /// one pushes the margins past any sensible gutter. Between them the ratio governs.
+    static let minMargin: CGFloat = 24
+    static let maxMargin: CGFloat = 112
+
+    /// The margin on each side inside a chat box of `box` points.
+    static func margin(forBox box: CGFloat) -> CGFloat {
+        min(max(box * marginFraction, minMargin), maxMargin)
+    }
 
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
-    ///
-    /// No floor: at the 360pt dock minimum this yields 230pt (~33 characters), which is
-    /// tight but legible, and a floor would silently break the "18% a side at every width"
-    /// promise exactly where the founder is most likely to be looking for it.
     static func textWidth(forBox box: CGFloat) -> CGFloat {
-        max(0, (box * textFraction).rounded())
+        max(0, (box - margin(forBox: box) * 2).rounded())
     }
 }
 

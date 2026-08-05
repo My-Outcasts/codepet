@@ -57,6 +57,43 @@ final class MockFixtureRunnableTests: XCTestCase {
         XCTAssertFalse(blocked.isEmpty, "the whole point of the needs-you card is that it blocks something")
     }
 
+    /// End-to-end: driving the real `fanOutNextMoves` against the fixture must put agents on
+    /// screen. The four assertions above check the roadmap's shape; this one checks that the
+    /// shape actually reaches `activeAgentRuns`, which is the only thing `AgentsWorkingRow`
+    /// renders from. Asserted from INSIDE `taskRunner` — the moment the agents are working —
+    /// because by the time the call returns the row has already been cleared.
+    @MainActor
+    func testFanOutPutsAgentsOnScreen() async {
+        let previousPacing = (CompanyStore.execStepNanos, CompanyStore.execDoneBeatNanos)
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+        defer { (CompanyStore.execStepNanos, CompanyStore.execDoneBeatNanos) = previousPacing }
+
+        var agentsOnScreen = 0
+        var deptsOnScreen: Set<String> = []
+        var ref: CompanyStore?
+        let store = CompanyStore(
+            loader: { _ in MockChat.company() }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
+            chatSender: { _ in nil },
+            chatStreamer: { _ in AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) } },
+            taskRunner: { req in
+                let runs = ref?.activeAgentRuns ?? []
+                agentsOnScreen = max(agentsOnScreen, runs.count)
+                deptsOnScreen.formUnion(runs.map(\.deptName))
+                return RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# draft")
+            },
+            decisionExtractor: { _, _ in [] })
+        ref = store
+        await store.hydrate(companyId: "u")
+        await store.fanOutNextMoves(language: .en)
+
+        XCTAssertEqual(agentsOnScreen, CompanyStore.maxFanOut,
+                       "AgentsWorkingRow had \(agentsOnScreen) agents to draw, expected \(CompanyStore.maxFanOut)")
+        XCTAssertEqual(deptsOnScreen.count, CompanyStore.maxFanOut, "each agent must name its own department")
+        XCTAssertTrue(store.activeAgentRuns.isEmpty, "the row must clear when the fan-out finishes")
+        XCTAssertFalse(store.chatMessages.filter { $0.draft != nil }.isEmpty, "each agent should land a draft")
+    }
+
     /// Every runnable task's title must carry the keyword the mock router matches, or typing
     /// "run <keyword>" silently falls through to the first task in the list instead.
     func testEachRunnableTaskIsReachableByItsKeyword() {

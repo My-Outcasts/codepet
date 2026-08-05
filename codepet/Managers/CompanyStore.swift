@@ -1171,6 +1171,35 @@ final class CompanyStore: ObservableObject {
         _ = await produceDraftInline(for: task, cid: cid, language: language)
     }
 
+    /// Re-ask the question that produced `messageId`, replacing the reply.
+    ///
+    /// The whole turn goes — the question, the reply, and anything the reply spawned (a draft, a
+    /// room, a chip) — and then the question is asked again. Dropping only the reply would leave
+    /// its draft card and its room orphaned above a fresh answer, attributed to a turn that no
+    /// longer exists.
+    ///
+    /// A room in flight for a removed turn is cancelled, or it would publish into a transcript
+    /// that no longer contains its anchor (`publishRunProgress` guards that, but leaving the
+    /// task running to be refused later is worse than stopping it).
+    ///
+    /// The mode's framing is deliberately not reapplied: the retry sends what the founder can
+    /// see in her own bubble. Asking the same question twice and getting a differently-framed
+    /// answer would be its own confusion.
+    func retryReply(messageId: String, language: AppLanguage) async {
+        guard !isCompanionTyping, !isStreaming, !isFanningOut else { return }
+        guard let replyIndex = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let askIndex = chatMessages[..<replyIndex].lastIndex(where: { $0.role == .me })
+        else { return }
+        let ask = chatMessages[askIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ask.isEmpty else { return }
+        for message in chatMessages[askIndex...] where message.vcRun != nil {
+            vcTasks[message.id]?.cancel()
+            vcTasks[message.id] = nil
+        }
+        chatMessages.removeSubrange(askIndex...)
+        await sendChat(ask, language: language, founderAsk: ask)
+    }
+
     private func appendRunRefusal(_ text: String) {
         chatMessages.append(CopilotMessage(role: .companion, text: text))
     }

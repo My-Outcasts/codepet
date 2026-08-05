@@ -433,6 +433,9 @@ struct CopilotBubble: View {
     @State private var showDetail = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
+    /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
+    @State private var hovering = false
+    @State private var copied = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
@@ -505,6 +508,73 @@ struct CopilotBubble: View {
         } else {
             textBubble
         }
+    }
+
+    /// Per-message actions, revealed on hover — the row both references put under an answer
+    /// (copy · retry · a timestamp). Deliberately only two buttons: thumbs would need a
+    /// `feedback` collection and a Firestore rule that do not exist natively yet, and a control
+    /// that silently drops the founder's opinion is worse than no control. Speak and share are
+    /// the same judgement — offered when they do something.
+    ///
+    /// Hover-only because an answer is for reading; the affordances belong to the moment you
+    /// reach for them, not to the reading. `opacity` rather than a conditional so the row's
+    /// height never changes under the cursor.
+    @ViewBuilder private var messageActions: some View {
+        HStack(spacing: 2) {
+            actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.text, forType: .string)
+                copied = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_400_000_000)
+                    copied = false
+                }
+            }
+            .overlay(alignment: .leading) {
+                if copied {
+                    Text(lang == .vi ? "Đã sao chép" : "Copied")
+                        .font(.pixelSystem(size: 9, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentTeal)
+                        .offset(x: 22)
+                        .transition(.opacity)
+                }
+            }
+            actionIcon("arrow.clockwise", help: lang == .vi ? "Hỏi lại" : "Try again") {
+                Task { await companyStore.retryReply(messageId: message.id, language: lang) }
+            }
+            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            Text(Self.age(of: message.createdAt, lang: lang))
+                .font(.pixelSystem(size: 9))
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.leading, 4)
+        }
+        .opacity(hovering ? 1 : 0)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
+        .onHover { hovering = $0 }
+    }
+
+    private func actionIcon(_ system: String, help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// "just now" until a minute has passed, then minutes, then hours — the reference's
+    /// "3 hours ago" without pretending to know about sessions that are already over.
+    static func age(of date: Date, lang: AppLanguage) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return lang == .vi ? "vừa xong" : "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return lang == .vi ? "\(minutes) phút trước" : "\(minutes)m ago" }
+        let hours = minutes / 60
+        return lang == .vi ? "\(hours) giờ trước" : "\(hours)h ago"
     }
 
     private func actionButton(_ action: FirstRunAction) -> some View {
@@ -763,6 +833,7 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     inlineActions
+                    messageActions
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

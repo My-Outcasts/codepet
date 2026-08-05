@@ -94,6 +94,61 @@ final class CompanyStoreChatTests: XCTestCase {
                       "got: \(s.chatMessages.last?.text ?? "nil")")
     }
 
+    /// Retry re-asks the question that produced a reply, and the whole turn is replaced.
+    func testRetryReplacesTheWholeTurn() async {
+        var asks: [String] = []
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { req in
+                                 asks.append(req.userMessage)
+                                 return CompanyChatReply(text: "answer \(asks.count)", runTaskId: nil)
+                             },
+                             chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("what should I do?", language: .en)
+        guard let replyId = s.chatMessages.last?.id else { return XCTFail("no reply") }
+        await s.retryReply(messageId: replyId, language: .en)
+        XCTAssertEqual(asks, ["what should I do?", "what should I do?"])   // asked again, verbatim
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])      // one turn, not two
+        XCTAssertEqual(s.chatMessages.first?.text, "what should I do?")
+        XCTAssertEqual(s.chatMessages.last?.text, "answer 2")              // the new answer
+    }
+
+    /// Anything the old reply produced goes with it. A draft card left above a fresh answer
+    /// would be attributed to a turn that no longer exists.
+    func testRetryTakesTheOldTurnsPayloadWithIt() async {
+        let s = CompanyStore(loader: { _ in
+            CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                         companionId: "byte", onboardedAt: Date(),
+                         tasks: [RoadmapTask(id: "t1", title: "Survey users", detail: "", phase: .find, who: .does)])
+        }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
+           chatSender: { req in
+               req.userMessage.contains("run") ? CompanyChatReply(text: "On it", runTaskId: "t1")
+                                               : CompanyChatReply(text: "plain", runTaskId: nil)
+           },
+           chatStreamer: Self.failingStreamer,
+           taskRunner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") },
+           decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertTrue(s.chatMessages.contains { $0.draft != nil })
+        guard let replyId = s.chatMessages.first(where: { $0.role == .companion })?.id else {
+            return XCTFail("no reply")
+        }
+        await s.retryReply(messageId: replyId, language: .en)
+        XCTAssertFalse(s.chatMessages.contains { $0.draft != nil }, "the old draft outlived its turn")
+    }
+
+    /// An unknown id must not clear the transcript — the guard that keeps a stale tap (a retry
+    /// on a message a thread switch already removed) from wiping the conversation.
+    func testRetryOnAnUnknownMessageIsANoOp() async {
+        let s = store { _ in CompanyChatReply(text: "answer", runTaskId: nil) }
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        let before = s.chatMessages.map(\.text)
+        await s.retryReply(messageId: "no-such-message", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.text), before)
+    }
+
     func testSendAppendsUserThenCompanionReply() async {
         let s = store { _ in CompanyChatReply(text: "Hello founder", runTaskId: nil) }
         await s.hydrate(companyId: "u")

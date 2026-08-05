@@ -429,7 +429,13 @@ enum MockChat {
     /// fanned the root out to all nine — the board could not exercise its own flow rendering
     /// at all. This graph is shaped to cover each routing case exactly once:
     ///
-    ///   - `interviews` is the only depless task → the root draws ONE edge, not nine.
+    ///   - The depless tasks are the FIND four (`interviews` + the three runnable ones), so
+    ///     the root draws FOUR edges, not nine. It drew one until Aug 5, when `.find` gained
+    ///     runnable work; four is still a fan-out the board must route rather than the
+    ///     degenerate nine-way spray this graph exists to avoid, and it is what a real
+    ///     scaffolded roadmap looks like — an opening phase of parallel research. If you are
+    ///     testing single-entry routing specifically, drop the three and expect the fan-out
+    ///     and in-chat runs to stop working (`MockFixtureRunnableTests` will say so).
     ///   - `interviews → {brand, landing, pricing}` touches the beacon, so these are the
     ///     `critical` edges (halo + solid) — previously unreachable in the mock.
     ///   - `brand → landing` is an IN-COLUMN edge → `sideElbow`'s left-gutter hook.
@@ -442,15 +448,40 @@ enum MockChat {
     ///
     /// NOTE the phase window, not these deps, is what locks the downstream cards:
     /// `interviews` is `who: .you`, so `RoadmapGating.openPhases` stops at `.find` and
-    /// `RoadmapEngine.status` blocks all eight later tasks regardless of `dependsOn`. That
-    /// also means the "three runnable departments → 3 parallel agents" fan-out this fixture
-    /// once served has NOT worked since phase gating landed — nothing here is `codepetCanDo`.
-    /// Restoring it needs runnable work inside `.find`, which is a separate call.
+    /// `RoadmapEngine.status` blocks all eight later tasks regardless of `dependsOn`.
+    ///
+    /// That silently broke the fixture's whole purpose, and the note this replaces recorded it
+    /// as a known dead end rather than a bug: with every task either founder-owned or behind
+    /// the window, NOTHING was `codepetCanDo`, so the client sent an empty `runnable` list and
+    /// the mock router answered "you don't have a task I can run right now" to every "run the
+    /// landing page". No execute log, no draft, and no 3-agent fan-out — the three surfaces
+    /// this fixture exists to demonstrate. Reported from the app on Aug 5 as "the UI for
+    /// showing which agents are running still isn't working": it was the roadmap, not the UI.
+    ///
+    /// The fix is what that note called a separate call — three Codepet-owned tasks INSIDE
+    /// `.find`, in three distinct departments. Inside the open window they are `codepetCanDo`
+    /// while `interviews` keeps holding the later phases shut, so the fixture demonstrates
+    /// both halves at once: runnable work in the open phase, and the gating that the founder's
+    /// own step imposes on everything after it. Three distinct departments because
+    /// `RoadmapEngine.nextMoves` takes the first runnable task per DEPARTMENT, so a fan-out
+    /// of three needs three of them.
     static func roadmap() -> [RoadmapTask] {
         [
-            // ONE Codepet-can-do task per department (all 8) so every department's
-            // card is testable. Each title carries a keyword ("run <keyword>") the
-            // mock router matches to this task; each maps to a tailored deliverable.
+            // ── FIND: runnable now (the open phase) ────────────────────────────────
+            // Each title carries the keyword the mock router matches on ("run competitors").
+            RoadmapTask(id: "mock-competitors", title: "Scan five competitors' positioning",
+                        detail: "What they claim, who they target, and where the gap is.",
+                        phase: .find, who: .draft, dept: "mkt"),             // run competitors
+            RoadmapTask(id: "mock-personas", title: "Sketch two early user personas",
+                        detail: "Who feels this pain most, and what they do today instead.",
+                        phase: .find, who: .draft, dept: "design"),          // run personas
+            RoadmapTask(id: "mock-market", title: "Size the market you're entering",
+                        detail: "A rough top-down number you can sanity-check later.",
+                        phase: .find, who: .draft, dept: "fin"),             // run market
+            // ── Later phases: one task per department (all 8) so every department's card
+            // is testable, and all of them BLOCKED behind `interviews` — which is the
+            // gating the founder should be able to see and feel, not a fixture defect.
+            // Each title carries a keyword ("run <keyword>") the mock router matches.
             RoadmapTask(id: "mock-brand", title: "Design your brand look",
                         detail: "A simple visual direction — colors, type, and a logo mark.",
                         phase: .foundation, who: .draft,

@@ -23,12 +23,6 @@ struct AppShellView: View {
     /// identity (name, sprite, voice, and its tint inside the chat); it no longer
     /// owns the brand.
     private var accent: Color { CodepetTheme.accentPurple }
-    /// Named on the collapsed bar's placeholder ("Ask Crash anything…") so the
-    /// closed copilot still says who you'd be talking to.
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
-
     /// User-dragged copilot width (session-only). nil → the default half-window.
     @State private var manualDockWidth: CGFloat?
     /// Dock width captured at the start of a resize drag, so the drag delta is
@@ -64,7 +58,6 @@ struct AppShellView: View {
                         .overlay(alignment: .bottomTrailing) {
                             if showsCopilot && collapsed {
                                 CollapsedCopilotButton(
-                                    companionName: companionName,
                                     needsYou: CollapsedCopilotState.needsYouCount(
                                         tasks: companyStore.company.tasks),
                                     unread: CollapsedCopilotState.showsUnreadDot(

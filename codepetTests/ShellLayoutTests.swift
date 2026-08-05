@@ -16,38 +16,38 @@ final class ShellLayoutTests: XCTestCase {
         XCTAssertFalse(ShellLayout.dockCollapsed(forWidth: 900, manual: false))
     }
 
-    func test_dockWidth_isHalfTheWindow_whileHalfFitsUnderTheCap() {
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1000), 500)
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1100), 550)
+    /// The dock does not track the window. This is the assertion the 50%-of-window rule
+    /// fails, and the reason it exists: while the dock moved with the window, resizing
+    /// re-wrapped every line of the transcript, because `ChatColumn` sizes the reading
+    /// column from the dock's width. Founder call, Aug 5 — resizing must not touch the chat.
+    func test_dockWidth_doesNotTrackTheWindow() {
+        for window in [CGFloat(900), 1000, 1100, 1200, 1470, 1920, 2560] {
+            XCTAssertEqual(ShellLayout.dockWidth(forWidth: window), ShellLayout.dockDefaultWidth,
+                           "window \(window) moved the dock to \(ShellLayout.dockWidth(forWidth: window))pt")
+        }
     }
 
-    /// Past the cap the dock stops growing and the CONTENT pane takes the surplus —
-    /// this is what stops a fullscreen window handing chat 735pt of blank column.
-    func test_dockWidth_capsSoContentTakesTheSurplus() {
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1200), 560)
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1470), 560)
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 1920), 560)
+    /// Every point a bigger window brings goes to the content pane, so the map's share of
+    /// the shell rises with the window instead of staying pinned at half.
+    func test_aBiggerWindowGivesEveryNewPointToTheMap() {
+        let small = 918.0, large = 1470.0
+        let smallMap = small - ShellLayout.dockWidth(forWidth: small)
+        let largeMap = large - ShellLayout.dockWidth(forWidth: large)
+        XCTAssertEqual(largeMap - smallMap, large - small, accuracy: 0.5)
+        XCTAssertGreaterThan(largeMap / large, smallMap / small)
     }
 
-    func test_goingFullscreenGivesContentABiggerShare() {
-        let windowed = 918.0, fullscreen = 1470.0
-        let windowedShare = (windowed - ShellLayout.dockWidth(forWidth: windowed)) / windowed
-        let fullscreenShare = (fullscreen - ShellLayout.dockWidth(forWidth: fullscreen)) / fullscreen
-        // Windowed stays an even split; fullscreen tilts toward the map because the dock
-        // stops growing. Under the old 50/50 rule both shares were exactly 0.5.
-        XCTAssertEqual(windowedShare, 0.5, accuracy: 0.01)
-        XCTAssertGreaterThan(fullscreenShare, 0.6)
-    }
-
-    /// The cap is a default, not a ceiling — dragging the handle still widens the dock.
+    /// The default is a default, not a ceiling — dragging the handle still widens the dock.
     func test_dragStillOverridesTheCap() {
         XCTAssertEqual(ShellLayout.clampDockWidth(800, windowWidth: 1470), 800)
     }
-    func test_dockWidth_flooredAt360() {
-        // At the 900 expand boundary, half is 450 (above the floor); a hypothetical
-        // narrower expanded case never drops below the usable floor.
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 900), 450)
-        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 600), 360)
+    /// On a window too small for the default, the content pane's floor wins and the dock
+    /// gives way — down to its own floor and no further.
+    func test_dockWidth_yieldsToTheContentFloorOnASmallWindow() {
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 900), ShellLayout.dockDefaultWidth)  // 900-420 = 480, room to spare
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 760), 340 < ShellLayout.dockMinWidth
+                                                             ? ShellLayout.dockMinWidth : 340)
+        XCTAssertEqual(ShellLayout.dockWidth(forWidth: 600), ShellLayout.dockMinWidth)
     }
     func test_clampDockWidth_keepsBothPanesUsable() {
         // Drag wider than allowed → capped so content keeps its 420 floor.

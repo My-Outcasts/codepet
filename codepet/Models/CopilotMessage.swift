@@ -9,6 +9,9 @@ enum CopilotRole { case me, companion }
 struct CopilotMessage: Identifiable, Equatable {
     let id: String
     let role: CopilotRole
+    /// When this turn landed. Session-only, like the transcript itself (threads are not
+    /// persisted), so it measures THIS session honestly and claims nothing about earlier ones.
+    var createdAt: Date = Date()
     /// `var` (not `let`): a streaming companion reply is filled in place, chunk
     /// by chunk, into this same message (found by `id`) rather than replaced.
     var text: String

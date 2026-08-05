@@ -35,6 +35,13 @@ import {
 
 const CHAT_MODEL = "claude-sonnet-5";
 
+// Output budget for one chat turn. Was 1024, which truncated real answers mid-word — the
+// founder reported two, and the cap covers the WHOLE response, so a turn that also files a
+// remember_fact spends the same budget on tool JSON. 4096 leaves room for a numbered plan plus
+// a memory note. A turn that still hits it is now logged rather than silently cut (see the
+// stop_reason warn below), because the failure is invisible from the transcript.
+const CHAT_MAX_TOKENS = 4096;
+
 let _client: Anthropic | null = null;
 function client(): Anthropic {
   if (!_client) {
@@ -120,7 +127,7 @@ type StreamEvent =
   | { type: "tool_use_start"; index: number; name: string }
   | { type: "tool_use_delta"; index: number; partial_json: string }
   | { type: "tool_use_stop"; index: number }
-  | { type: "done"; usage?: { cache_read_input_tokens?: number; input_tokens?: number; output_tokens?: number } };
+  | { type: "done"; stopReason?: string | null; usage?: { cache_read_input_tokens?: number; input_tokens?: number; output_tokens?: number } };
 
 type StreamFactory = (args: {
   client: Anthropic;
@@ -150,7 +157,7 @@ async function* defaultStreamFactory(args: {
 }): AsyncIterable<StreamEvent> {
   const params = {
     model: CHAT_MODEL,
-    max_tokens: 1024,
+    max_tokens: CHAT_MAX_TOKENS,
     system: args.systemBlocks as any,
     messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
     ...(args.tools && args.tools.length ? { tools: args.tools as any } : {}),
@@ -181,6 +188,7 @@ async function* defaultStreamFactory(args: {
   const final = await stream.finalMessage();
   yield {
     type: "done",
+    stopReason: final.stop_reason ?? null,
     usage: {
       cache_read_input_tokens: (final.usage as any)?.cache_read_input_tokens ?? 0,
       input_tokens: final.usage?.input_tokens ?? 0,
@@ -319,7 +327,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     try {
       const baseParams = {
         model: CHAT_MODEL,
-        max_tokens: 1024,
+        max_tokens: CHAT_MAX_TOKENS,
         system: systemBlocks as any,
         messages: messages as any,
         ...(tools ? { tools: tools as any } : {}),
@@ -378,6 +386,11 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
   // tool this turn might call, including several in the same response.
   const openToolUses = new Map<number, { name: string; json: string }>();
   const completedToolUses: Array<{ name: string; input: unknown }> = [];
+  // Enough to attribute an empty turn without guessing: how much text ever streamed, and which
+  // tools the model reached for. A turn with zero of both is the shape the founder saw as "I
+  // didn't have an answer for that" — measured client-side as one `done` frame, no deltas.
+  let textChars = 0;
+  const toolsCalled: string[] = [];
 
   try {
     for await (const event of factory({
@@ -388,8 +401,10 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       mcpServers: mcp.mcpServers
     })) {
       if (event.type === "text") {
+        textChars += event.text.length;
         writeFrame(res, "delta", { text: event.text });
       } else if (event.type === "tool_use_start") {
+        toolsCalled.push(event.name);
         openToolUses.set(event.index, { name: event.name, json: "" });
       } else if (event.type === "tool_use_delta") {
         const acc = openToolUses.get(event.index);
@@ -414,6 +429,38 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       } else if (event.type === "done") {
         const cacheHit = (event.usage?.cache_read_input_tokens ?? 0) > 0;
         const { runTaskId, nav, setup, remember } = resolveActions(completedToolUses, runnable, envSetup);
+        // Truncation was silent by construction: the API reports it, this function ignored it,
+        // and the client rendered half a sentence as a finished answer.
+        if (event.stopReason === "max_tokens") {
+          logger.warn("companyChat hit the output cap", {
+            uid: auth.uid, textChars, toolsCalled, max_tokens: CHAT_MAX_TOKENS
+          });
+        }
+        // A tool that fired and did not validate is dropped on purpose (a hallucinated task id
+        // must not run something), but dropping it QUIETLY made "can we do the task in here"
+        // answerable with nothing at all.
+        const droppedTools = completedToolUses
+          .filter((t) => (t.name === "run_task" && !runTaskId)
+                      || (t.name === "navigate" && !nav)
+                      || (t.name === "setup_capability" && !setup))
+          .map((t) => ({ name: t.name, input: t.input }));
+        if (droppedTools.length) {
+          logger.warn("companyChat dropped a tool call that failed validation", {
+            uid: auth.uid, droppedTools, runnableIds: runnable.map((r) => r.id)
+          });
+        }
+        // The whole point of this pass: an empty turn is now attributable rather than a mystery.
+        if (textChars === 0 && !runTaskId && !nav && !setup && !remember.length) {
+          logger.warn("companyChat produced an EMPTY turn", {
+            uid: auth.uid,
+            stopReason: event.stopReason ?? null,
+            toolsCalled,
+            completedToolUses: completedToolUses.map((t) => t.name),
+            mcpServers: mcp.mcpServers.length,
+            toolsOffered: (tools as Array<{ name?: string }>).map((t) => t?.name ?? "?"),
+            messageCount: messages.length
+          });
+        }
         // run_task_id/nav/setup/remember are additive on the existing done
         // frame — old clients that only look for {model, cache_hit,
         // run_task_id} are unaffected; nav/setup/remember are only included

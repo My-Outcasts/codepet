@@ -150,10 +150,8 @@ final class RoadmapBoardCopyTests: XCTestCase {
         let banned = ["click to start", "click to add", "click to open the result", "nhấn để bắt đầu"]
         for isCurrent in [false, true] {
             for status in [TaskStatus.done, .needsApproval, .blocked, .needsYou, .codepetCanDo] {
-                let en = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
-                                                     companionName: "Byte", lang: .en)
-                let vi = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
-                                                     companionName: "Byte", lang: .vi)
+                let en = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent, lang: .en)
+                let vi = RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent, lang: .vi)
                 XCTAssertFalse(en.isEmpty)
                 XCTAssertFalse(vi.isEmpty)
                 XCTAssertNotEqual(en, vi)
@@ -173,13 +171,28 @@ final class RoadmapBoardCopyTests: XCTestCase {
     /// reads "…'s next move", a merely-runnable sibling reads "… can run this now" — but both
     /// still describe opening the panel, not running the task.
     func testPeekActionDistinguishesCurrentFromRunnableForCodepetCanDo() {
-        let current = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: true,
-                                                   companionName: "Byte", lang: .en)
-        let runnable = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: false,
-                                                    companionName: "Byte", lang: .en)
+        let current = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: true, lang: .en)
+        let runnable = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: false, lang: .en)
         XCTAssertNotEqual(current, runnable)
         XCTAssertTrue(current.contains("next move"))
         XCTAssertTrue(runnable.contains("can run this now"))
+    }
+
+    /// Board chrome says "Codepet", never the companion's name. The pet's own name belongs to
+    /// the moment it answers in chat (`CopilotChatView.headerName`) — everywhere else the
+    /// founder is addressing the product, so a founder running Glitch must not read
+    /// "Glitch can run this now" on a card. Went red the day this copy was companion-keyed.
+    func testPeekActionNamesTheProductNotTheCompanion() {
+        let names = ["Byte", "Nova", "Crash", "Luna", "Sage", "Glitch", "Null"]
+        for isCurrent in [false, true] {
+            for lang in [AppLanguage.en, .vi] {
+                let copy = RoadmapBoardCopy.peekAction(for: .codepetCanDo, isCurrent: isCurrent, lang: lang)
+                XCTAssertTrue(copy.contains("Codepet"), "expected the product name in: \(copy)")
+                for name in names {
+                    XCTAssertFalse(copy.contains(name), "\(name) leaked into board chrome: \(copy)")
+                }
+            }
+        }
     }
 
     /// The reason is a leverage signal, so the unlock count has to appear — and zero gets its

@@ -298,6 +298,69 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)
     }
 
+    /// The run's execute log survives onto the deliverable it produced.
+    ///
+    /// Web parity (inline-run transparency, web #71): the live log collapses into a
+    /// "▸ What Nova did · N steps" disclosure on the finished card. The native port dropped it
+    /// — `produceDraftInline` removed the producing row and appended the draft with no steps —
+    /// so how the work happened was visible for the four seconds of the run and then gone.
+    /// Founder call, Aug 5, comparing the web against the native chat.
+    func testFinishedDraftKeepsTheRunsExecuteLog() async {
+        let s = store(reply: CompanyChatReply(text: "On it", runTaskId: "t1"),
+                      runner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        guard let draftMessage = s.chatMessages.last(where: { $0.draft != nil }) else {
+            return XCTFail("no draft landed")
+        }
+        let steps = draftMessage.execSteps ?? []
+        XCTAssertFalse(steps.isEmpty, "the deliverable card has no log to disclose")
+        XCTAssertTrue(steps.allSatisfy(\.done), "a finished run's log must read as finished")
+        XCTAssertFalse(s.chatMessages.contains { $0.producing }, "the transient row must still be gone")
+    }
+
+    /// A draft that never ran in chat — the board's own `runTask` path — carries no steps, so
+    /// the disclosure has nothing to draw and does not appear. Guards against the card
+    /// growing an empty "What it did · 0 steps" affordance.
+    func testABoardRunDraftHasNoLogToDisclose() async {
+        let s = store(reply: nil, runner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") })
+        await s.hydrate(companyId: "u")
+        guard let task = s.company.tasks.first else { return XCTFail("no seeded task") }
+        await s.runTask(task, language: .en)
+        let chatDrafts = s.chatMessages.filter { $0.draft != nil }
+        XCTAssertTrue(chatDrafts.allSatisfy { ($0.execSteps ?? []).isEmpty })
+    }
+
+    /// A lead-in is only a lead-in if it is on screen BEFORE the work it leads into.
+    /// On the streaming path the `.done` action used to be dispatched from inside the
+    /// stream loop, so the whole run — a CF call plus the execute-log reveal — happened
+    /// against a bubble that was still blank, and "On it — putting that together now."
+    /// landed after the draft it was announcing. Asserted from inside `taskRunner`,
+    /// which is the moment the run actually begins.
+    func testLeadInIsOnScreenBeforeTheRunBegins() async {
+        var textWhenRunBegan: String?
+        var ref: CompanyStore?
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: "t1")))
+                continuation.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer,
+                             taskRunner: { _ in
+                                 textWhenRunBegan = ref?.chatMessages.first { $0.role == .companion }?.text
+                                 return RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1")
+                             },
+                             decisionExtractor: { _, _ in [] })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertTrue(textWhenRunBegan?.contains("On it") ?? false,
+                      "the lead-in must be written before the run starts, not after it finishes")
+    }
+
     /// The unrecoverable done+drafted race (final-review Important 1, chat path): `handleRunTaskId`'s
     /// `status == .codepetCanDo` guard runs BEFORE the `taskRunner` await inside
     /// `produceDraftInline`, so a mark-done that lands while the chat run is in flight must not be

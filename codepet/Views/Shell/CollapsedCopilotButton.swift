@@ -29,7 +29,6 @@ import SwiftUI
 /// (`RoadmapBoardView`): `.interpolation(.none)`, per the project rule that pixel
 /// art never gets smoothed.
 struct CollapsedCopilotButton: View {
-    let companionName: String
     /// Work waiting on the founder, from `CollapsedCopilotState.needsYouCount`.
     let needsYou: Int
     /// A reply or run landed while the dock was closed.
@@ -49,7 +48,7 @@ struct CollapsedCopilotButton: View {
     /// type comment.
     private var brand: Color { CodepetTheme.accentPurple }
     private var openLabel: String {
-        lang == .vi ? "Mở \(companionName) (⌘B)" : "Open \(companionName) (⌘B)"
+        lang == .vi ? "Mở Codepet (⌘B)" : "Open Codepet (⌘B)"
     }
 
     var body: some View {
@@ -108,8 +107,7 @@ struct CollapsedCopilotButton: View {
         Spacer()
         HStack {
             Spacer()
-            CollapsedCopilotButton(companionName: "Codepet",
-                                   needsYou: 5, unread: false, onExpand: {})
+            CollapsedCopilotButton(needsYou: 5, unread: false, onExpand: {})
         }
     }
     .frame(width: 420, height: 240)

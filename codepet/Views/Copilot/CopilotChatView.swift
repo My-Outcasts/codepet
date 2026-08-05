@@ -24,9 +24,6 @@ struct CopilotChatView: View {
     /// `sendChat(department:)` for the specialist handoff.
     @State private var selectedDept: Department?
 
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
     private var companionColor: Color {
@@ -46,29 +43,39 @@ struct CopilotChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if showHistory {
-                ThreadListView(showHistory: $showHistory)
-            } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
-                ChatEmptyState(
-                    state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
-                    onOpenRoadmap: { companyStore.select(.roadmap) },
-                    onStarter: { starter in
-                        companyStore.chatDraft = starter
-                        mode = .ask
-                        send()
-                    }
-                ) { composer }
-            } else {
-                messageList
-                // No rule above the composer — it carries its own bordered container,
-                // so the seam was redundant chrome. Matches the header's no-divider
-                // direction: the chat runs edge to edge inside the dock.
-                composer.padding(12)
+        // The chat box measures itself so the reading column can be derived from its width
+        // (`ChatColumn`: a fixed inset, capped). Measured here, at the dock's
+        // own bounds, and passed down explicitly: the transcript's column lives inside a
+        // ScrollView and the composer's does not, so reading a container-relative width at
+        // each site would be asking two different questions and getting two different
+        // answers — and these two must line up exactly.
+        GeometryReader { geo in
+            let column = ChatColumn.textWidth(forBox: geo.size.width)
+            VStack(spacing: 0) {
+                header(column: column)
+                if showHistory {
+                    ThreadListView(showHistory: $showHistory)
+                } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
+                    ChatEmptyState(
+                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        onOpenRoadmap: { companyStore.select(.roadmap) },
+                        onStarter: { starter in
+                            companyStore.chatDraft = starter
+                            mode = .ask
+                            send()
+                        }
+                    ) { composer }
+                } else {
+                    messageList(column: column)
+                    // No rule above the composer — it carries its own bordered container,
+                    // so the seam was redundant chrome. Matches the header's no-divider
+                    // direction. It shares the transcript's reading column, so the composer
+                    // and the words above it start and end on the same two vertical lines.
+                    composer.readingColumn(column).padding(.bottom, 12)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(maxHeight: .infinity)
         .background(ChatBackdrop())
     }
 
@@ -78,12 +85,31 @@ struct CopilotChatView: View {
     ///
     /// History is icon-only, so both buttons carry `.help` tooltips — hover is the
     /// only thing naming them now.
-    private var header: some View {
+    /// Leading, not trailing — and the panel toggle first, which is where ChatGPT puts its
+    /// sidebar control. Founder call, Aug 5, with their icon as the reference: a panel glyph
+    /// rather than a bare chevron, because a chevron says "go" and this hides a panel.
+    ///
+    /// Sized to the reading column so the two controls sit on the same left edge as the words
+    /// below them, at any dock width — the alternative is a fixed inset that lines up at
+    /// exactly one width, which is the mistake this file has already made five times.
+    private func header(column: CGFloat) -> some View {
         HStack(spacing: 2) {
-            Spacer(minLength: 0)
+            Button { companyStore.dockCollapsed = true } label: {
+                // Mirrors the dock it collapses: the filled half sits on the side the panel is
+                // on. `leadinghalf` is the glyph ChatGPT uses, but their sidebar is on the left
+                // and this dock is on the right, so the mirrored variant is the same icon
+                // pointing at the right panel.
+                Image(systemName: "rectangle.trailinghalf.filled")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(5)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
             Button { showHistory.toggle() } label: {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundColor(isChatBusy ? CodepetTheme.mutedText.opacity(0.5)
                                      : (showHistory ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
                     .padding(5)
@@ -92,17 +118,11 @@ struct CopilotChatView: View {
             .buttonStyle(.plain)
             .disabled(isChatBusy)
             .help(lang == .vi ? "Lịch sử hội thoại" : "Chat history")
-            Button { companyStore.dockCollapsed = true } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .padding(5)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(lang == .vi ? "Thu gọn trợ lý (⌘B)" : "Collapse copilot (⌘B)")
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 7).padding(.top, 6)
+        .frame(width: column, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 6)
     }
 
     /// The shared composer — one `ChatComposer` instance used in BOTH the empty
@@ -115,8 +135,10 @@ struct CopilotChatView: View {
             mode: $mode,
             canSend: canSend,
             focus: $inputFocused,
-            placeholder: lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…"
-                                     : "Ask \(companionName) anything about your company…",
+            // "Codepet", not the pet's name: the founder is talking to the product, and
+            // the pet's own name belongs to the moment it answers (`headerName`).
+            placeholder: lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
+                                     : "Ask Codepet anything about your company…",
             quickActions: quickActions,
             accent: companionColor,
             accent2: CodepetTheme.accentPink,
@@ -177,12 +199,19 @@ struct CopilotChatView: View {
             + (run.terminalError != nil ? 1 : 0)
     }
 
-    private var messageList: some View {
+    private func messageList(column: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(companyStore.chatMessages) { m in
-                        CopilotBubble(message: m).id(m.id)
+                VStack(alignment: .leading, spacing: ChatRhythm.messageGap) {
+                    // Enumerated for ONE reason: the gap above a message depends on who spoke
+                    // before it. A flat spacing gives a question and its answer the same
+                    // distance as two paragraphs from the same speaker, which is what made
+                    // the transcript read as one undivided block.
+                    ForEach(Array(companyStore.chatMessages.enumerated()), id: \.element.id) { idx, m in
+                        let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
+                        CopilotBubble(message: m)
+                            .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
+                            .id(m.id)
                         if companyStore.codingRun.run != nil,
                            companyStore.codingRunAnchorId == m.id {
                             CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
@@ -204,8 +233,9 @@ struct CopilotChatView: View {
                     // static typingRow. Generic label (no single-run step source here).
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .readingColumn(column)
+                .padding(.top, ChatRhythm.transcriptTop)
+                .padding(.bottom, ChatRhythm.transcriptBottom)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
@@ -414,6 +444,11 @@ struct CopilotBubble: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
+    /// Expansion of the finished run's "What <Name> did" log on a draft card.
+    @State private var showSteps = false
+    /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
+    @State private var hovering = false
+    @State private var copied = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
@@ -488,6 +523,73 @@ struct CopilotBubble: View {
         }
     }
 
+    /// Per-message actions, revealed on hover — the row both references put under an answer
+    /// (copy · retry · a timestamp). Deliberately only two buttons: thumbs would need a
+    /// `feedback` collection and a Firestore rule that do not exist natively yet, and a control
+    /// that silently drops the founder's opinion is worse than no control. Speak and share are
+    /// the same judgement — offered when they do something.
+    ///
+    /// Hover-only because an answer is for reading; the affordances belong to the moment you
+    /// reach for them, not to the reading. `opacity` rather than a conditional so the row's
+    /// height never changes under the cursor.
+    @ViewBuilder private var messageActions: some View {
+        HStack(spacing: 2) {
+            actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.text, forType: .string)
+                copied = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_400_000_000)
+                    copied = false
+                }
+            }
+            .overlay(alignment: .leading) {
+                if copied {
+                    Text(lang == .vi ? "Đã sao chép" : "Copied")
+                        .font(.pixelSystem(size: 9, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentTeal)
+                        .offset(x: 22)
+                        .transition(.opacity)
+                }
+            }
+            actionIcon("arrow.clockwise", help: lang == .vi ? "Hỏi lại" : "Try again") {
+                Task { await companyStore.retryReply(messageId: message.id, language: lang) }
+            }
+            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            Text(Self.age(of: message.createdAt, lang: lang))
+                .font(.pixelSystem(size: 9))
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.leading, 4)
+        }
+        .opacity(hovering ? 1 : 0)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
+        .onHover { hovering = $0 }
+    }
+
+    private func actionIcon(_ system: String, help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// "just now" until a minute has passed, then minutes, then hours — the reference's
+    /// "3 hours ago" without pretending to know about sessions that are already over.
+    static func age(of date: Date, lang: AppLanguage) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return lang == .vi ? "vừa xong" : "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return lang == .vi ? "\(minutes) phút trước" : "\(minutes)m ago" }
+        let hours = minutes / 60
+        return lang == .vi ? "\(hours) giờ trước" : "\(hours)h ago"
+    }
+
     private func actionButton(_ action: FirstRunAction) -> some View {
         Button {
             Task { await companyStore.runFirstRunAction(messageId: message.id, language: lang) }
@@ -509,12 +611,22 @@ struct CopilotBubble: View {
         message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The actions belonging to THIS reply, drawn inside its card. Each is the bare
-    /// control: the surrounding `MessageCard` already supplies the tint, border and
-    /// padding these used to draw for themselves when they were separate rows.
+    /// The actions belonging to THIS reply, drawn directly under its text.
+    ///
+    /// The nav chip and the noted rows carry their own capsule, so they stand on the
+    /// backdrop unaided. The setup suggestion does not — it is a name, a why-line and an
+    /// Enable button that used to be bounded by the reply's `MessageCard`, and with the
+    /// prose un-carded it would spill onto the backdrop as loose text. So it keeps a
+    /// container of its own, which is the same rule the standalone `setupCard` follows:
+    /// an offer is an object, the sentence introducing it is not.
     @ViewBuilder private var inlineActions: some View {
         if let nav = message.navChip { navChipButton(nav) }
-        if let setup = message.setupSuggestion { setupInline(setup) }
+        if let setup = message.setupSuggestion {
+            HStack {
+                CodepetCard { setupInline(setup).padding(12) }
+                Spacer(minLength: 24)
+            }
+        }
         if let facts = message.noted, !facts.isEmpty { notedInline(facts) }
     }
 
@@ -578,11 +690,20 @@ struct CopilotBubble: View {
     private func notedInline(_ facts: [RememberedFact]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(facts, id: \.topic) { fact in
+                // CLAMPED, and a capsule no longer: `statement` is whatever the model chose to
+                // remember, and when the Virtual Company files its brief that is several hundred
+                // words. Unclamped inside a Capsule it rendered as a wall of grey text taller
+                // than the answer it summarised (seen in the app, Aug 5). An acknowledgement is
+                // one line; the fact itself lives in Settings → Memory.
                 Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
                     .font(.pixelSystem(size: 10))
                     .foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(CodepetTheme.surface))
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(CodepetTheme.surface))
             }
         }
     }
@@ -669,7 +790,8 @@ struct CopilotBubble: View {
     private var producingRow: some View {
         HStack(spacing: 8) {
             CompanionOrb(size: 20, glow: false, isWorking: true)
-            Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
+            // Ambient status, not the pet speaking — so "Codepet", like the composer.
+            Text(lang == .vi ? "Codepet đang tổng hợp…" : "Codepet is putting that together…")
                 .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
             Spacer(minLength: 8)
         }
@@ -688,38 +810,95 @@ struct CopilotBubble: View {
                 Spacer(minLength: 24)
                 Text(message.text)
                     .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(3)
+                    .lineSpacing(ChatRhythm.lineSpacing)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(CodepetTheme.accentPurple))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            // Teammate card: companion (or specialist) avatar + "Name · Dept"
-            // header + reply in a tinted surface. `CompanionAvatar` shows the
-            // specialist's sprite for a handoff, the host orb otherwise.
-            HStack(alignment: .top, spacing: 8) {
-                CompanionAvatar(companionId: message.companionId, size: 22)
-                VStack(alignment: .leading, spacing: 4) {
+            // Attribution row, then the answer at the FULL width of the dock.
+            //
+            // The reply used to sit in a tinted, bordered `MessageCard` inside an avatar
+            // gutter, which cost it the gutter's 30pt plus the card's 24pt of padding on
+            // every line — in a dock this narrow that is a word or two per line, and the
+            // long answers are exactly the ones worth reading. A container earns its
+            // edges when it bounds an OBJECT (a draft, a room, an exec log); prose is not
+            // an object, and the name row above it already says where it came from.
+            // Founder call, Aug 5.
+            //
+            // `CompanionAvatar` shows the specialist's sprite for a handoff, the host orb
+            // otherwise, and `headerName` carries the "Name · Dept" attribution — so the
+            // one place the pet's own name appears is the moment it answers.
+            VStack(alignment: .leading, spacing: ChatRhythm.nameToProse) {
+                HStack(spacing: 8) {
+                    CompanionAvatar(companionId: message.companionId, size: 22)
                     Text(headerName)
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    MessageCard(hue: headerAccent) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(message.text)
-                                .font(CodepetTheme.inter(13.5))
-                                .lineSpacing(3)
-                                .foregroundColor(CodepetTheme.primaryText)
+                }
+                VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+                    Text(message.text)
+                        .font(CodepetTheme.inter(13.5))
+                        .lineSpacing(ChatRhythm.lineSpacing)
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    inlineActions
+                    messageActions
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The finished run's steps, collapsed behind a disclosure on the deliverable card.
+    /// Deliberately quiet: it is a receipt, not the headline — the deliverable is. Named after
+    /// the specialist who did the work (`headerName` carries "Nova · Marketing", so just the
+    /// name here), matching the web's "What Nova did".
+    private func whatItDid(_ steps: [ExecStep]) -> some View {
+        let who = PetCharacter.all[message.companionId ?? companyStore.company.companionId]?.name ?? "Codepet"
+        return VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.easeInOut(duration: 0.15)) { showSteps.toggle() } } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: showSteps ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                    Text(lang == .vi ? "\(who) đã làm gì · \(steps.count) bước"
+                                     : "What \(who) did · \(steps.count) steps")
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                .hoverAffordance(Capsule())
+            }
+            .buttonStyle(.plain)
+            if showSteps {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(steps) { step in
+                        let isCheckpoint = step.kind == .checkpoint
+                        HStack(alignment: .top, spacing: 6) {
+                            if step.kind == .mono {
+                                Text("›").font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .frame(width: 10, height: 12)
+                            } else {
+                                Image(systemName: isCheckpoint ? "circle.fill" : "checkmark")
+                                    .font(.system(size: isCheckpoint ? 6 : 8, weight: .bold))
+                                    .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.accentPurple)
+                                    .frame(width: 10, height: 12)
+                            }
+                            Text(step.label)
+                                .font(step.kind == .mono ? .system(size: 10, design: .monospaced)
+                                                         : .pixelSystem(size: 10))
+                                .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.mutedText)
                                 .fixedSize(horizontal: false, vertical: true)
-                            inlineActions
                         }
                     }
                 }
-                Spacer(minLength: 8)
+                .padding(.leading, 2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -742,6 +921,16 @@ struct CopilotBubble: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { showDetail = true }
+
+                    // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity
+                    // (inline-run transparency): the live execute-log collapses onto the
+                    // finished deliverable instead of vanishing with it, so "how did it get
+                    // this?" is answerable after the fact and not only during the four seconds
+                    // the run was on screen. Absent → nothing renders, so a draft from the
+                    // board (no chat run, no steps) is unchanged.
+                    if let steps = message.execSteps, !steps.isEmpty {
+                        whatItDid(steps)
+                    }
 
                     if message.draftApproved {
                         HStack(spacing: 5) {
@@ -826,5 +1015,130 @@ enum ReviseKind: CaseIterable {
         case (.punchier, .vi): return "Làm ấn tượng hơn"
         case (.punchier, _): return "Make it punchier"
         }
+    }
+}
+
+// MARK: - The chat's reading column
+
+/// The transcript and the composer share one measured column, the way ChatGPT's and
+/// Claude's do: inset from the dock's edges, capped at a comfortable line length, and
+/// centred in whatever width is left.
+///
+/// Why a cap and not just padding: the dock is user-resizable, so padding alone means the
+/// line length grows with the window and a wide dock produces 140-character lines that the
+/// eye loses its place in. Capping the measure turns extra dock width into margin instead.
+/// This landed right after the reply lost its bubble — un-carding the prose removed the
+/// last thing bounding it, and it ran the full width of the panel. Both numbers are a
+/// taste call and this is the only place they live.
+///
+/// Founder call, Aug 5, referencing ChatGPT and Claude.
+/// Both numbers are calibrated against the references rather than guessed. Measured off
+/// the founder's own screenshots at 2×: in an ~800pt pane, Claude runs a ~490pt text
+/// measure with ~159pt gutters, ChatGPT ~518pt with ~150pt. So the target is a measure
+/// near 520pt with generous air — and the first attempt at this (700pt total, 24pt inset)
+/// missed for a reason worth writing down: the dock is ~478pt, NARROWER than the
+/// references' measure, so a 700pt cap never bound and the 24pt inset was the whole margin.
+/// At a dock this size the air has to come out of the inset.
+/// A SHARE of the chat box, not a number of points: 18% margin on each side, 64% for the
+/// words, recomputed at every width the dock is dragged to.
+///
+/// The fraction is measured, not chosen. Read off the founder's own reference screenshots
+/// at 2×: Claude runs ~159pt gutters in an ~805pt pane (19.8% a side) and ChatGPT ~150pt in
+/// ~822pt (18.2%) — so a shade over 18% a side is what those layouts actually do, and it is
+/// what makes them read as deliberate at any window size.
+///
+/// This deliberately reintroduces reflow, which an earlier fixed-measure column had removed:
+/// a width defined as a share of the box necessarily changes when the box does, so dragging
+/// the divider re-wraps the lines and moves the scroll offset. Founder call, Aug 5, asked
+/// with that cost stated — proportional margins won.
+///
+/// The dock no longer moves with the window (`ShellLayout.dockDefaultWidth`), so at the
+/// default this column is stable by construction: the only thing that changes it is the
+/// founder dragging the divider, which is a deliberate act rather than a side effect of
+/// resizing a window.
+enum ChatColumn {
+    /// A percentage was the wrong MODEL, not just the wrong number, and three rounds of
+    /// "still too wide" is what it took to see it. The references do not scale their margins
+    /// with the pane at all: ChatGPT's reading surfaces are `max-width: 800px` with `40px
+    /// 16px` padding — a fixed 16px gutter, with air appearing only once the viewport
+    /// outgrows the cap. That is why they look tight on a narrow window and generous on a
+    /// wide one, and it is already the house rule here: `CodepetTokens.pageColumnWidth` plus
+    /// a fixed 26pt page padding, measured from the same place in f05eff2.
+    ///
+    /// So: a fixed inset that holds at every dock width the founder actually uses, and a cap
+    /// that turns a dragged-wide dock into gutter. At the 381pt dock that is 18pt a side
+    /// instead of the 34 a 9% ratio produced.
+    ///
+    /// 18 rather than ChatGPT's 16 because the dock carries a border and a scroll track that
+    /// a full-bleed web page does not.
+    static let inset: CGFloat = 18
+
+    /// The widest the words go, for the case this cannot control: a founder who drags the
+    /// divider out. At the default 380pt dock it never binds — the inset decides the column —
+    /// which is why pinning it to 344 was the wrong fix for "don't scale the content out".
+    /// That made a dragged-wide dock 278pt of gutter a side; the actual ask was that RESIZING
+    /// THE WINDOW leave the chat alone, and that belongs in `ShellLayout`, where the dock's
+    /// width is now a constant rather than half the window.
+    static let measureCap: CGFloat = 640
+
+    /// The reading column's width inside a chat box of `box` points. Rounded, because a
+    /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
+    static func textWidth(forBox box: CGFloat) -> CGFloat {
+        max(0, min(box - inset * 2, measureCap).rounded())
+    }
+
+    /// The margin each side — whatever the column leaves, split in two. Derived rather than
+    /// stated so it can never disagree with the column.
+    static func margin(forBox box: CGFloat) -> CGFloat {
+        max(0, (box - textWidth(forBox: box)) / 2)
+    }
+}
+
+/// The chat's vertical rhythm. Measured off the founder's reference screenshots as RATIOS,
+/// which survive not knowing the screenshots' scale: in both Claude and ChatGPT the body's
+/// line height is ~1.6× the font size, and the gap between one speaker's turn and the next
+/// is ~2.2–2.7 line heights. Ours was 1.42× and a flat 10pt between every message — which is
+/// the whole of the "too cramped, no breathing room" complaint, and the flat gap is the worse
+/// half: a question and its answer sat as close together as two paragraphs from one speaker,
+/// so the transcript read as one undivided block of text.
+///
+/// Values are for the 13.5pt body. Font size is deliberately unchanged: at this dock width a
+/// bigger face would cost characters per line, and the ask was for whitespace.
+enum ChatRhythm {
+    /// Extra leading between lines. SwiftUI's `lineSpacing` adds to the font's natural ~1.2em,
+    /// so 6 on 13.5pt lands at ~1.64em — the references' ratio.
+    static let lineSpacing: CGFloat = 6
+    /// Between consecutive messages from the SAME speaker.
+    static let messageGap: CGFloat = 12
+    /// Added on top of `messageGap` when the speaker changes, so a turn boundary reads as
+    /// one: 12 + 26 = 38pt, ~1.8 line heights.
+    static let speakerChangeGap: CGFloat = 26
+    /// The attribution row to the words it introduces.
+    static let nameToProse: CGFloat = 8
+    /// The words to the chip or card that belongs to them.
+    static let proseToAction: CGFloat = 12
+    /// Head of the transcript, so the first message doesn't touch the dock's chrome.
+    static let transcriptTop: CGFloat = 20
+    /// Tail of the transcript — larger than the head so the last message clears the composer.
+    static let transcriptBottom: CGFloat = 24
+
+    /// The extra gap above a message, given who spoke before it. Pure so the rule is
+    /// testable: nil `previous` is the first message in the transcript (no gap to add — the
+    /// transcript's own top padding does that job), and a repeated role is a continuation.
+    static func extraGap(after previous: CopilotRole?, before current: CopilotRole) -> CGFloat {
+        guard let previous, previous != current else { return 0 }
+        return speakerChangeGap
+    }
+}
+
+private extension View {
+    /// Sized to the column and centred in whatever is left. Two frames, in this order: the
+    /// first sets the content to the column width and left-aligns inside it — so a companion
+    /// reply and a right-hand founder pill anchor to the same two edges — and the second
+    /// expands to the available width and centres that column in it.
+    func readingColumn(_ column: CGFloat) -> some View {
+        self
+            .frame(width: column, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 }

@@ -31,9 +31,6 @@ struct RoadmapView: View {
     private var accent: Color { CodepetTheme.accentPurple }
 
     private var tasks: [RoadmapTask] { companyStore.company.tasks }
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
     /// Placeholder-junk filtered, mirroring web's `cleanCompanyName` — onboarding lets people
     /// type anything, so a company name that's really "12" or an email must not reach the UI.
     private var projectName: String? {
@@ -56,8 +53,8 @@ struct RoadmapView: View {
     private var subtitle: String {
         if let p = projectName, let o = oneLiner { return "\(p) — \(o)" }
         return lang == .vi
-            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, \(companionName) làm gì tiếp theo, và bạn đã đi được bao xa."
-            : "Your whole company as a roadmap — where you are, what \(companionName) does next, and how far you've come."
+            ? "Toàn bộ công ty của bạn dưới dạng lộ trình — bạn đang ở đâu, Codepet làm gì tiếp theo, và bạn đã đi được bao xa."
+            : "Your whole company as a roadmap — where you are, what Codepet does next, and how far you've come."
     }
     /// Codepet's read of the company for the briefing — web's fallback chain minus the AI
     /// `projectAnalysis` layer, which native doesn't have yet.
@@ -92,8 +89,7 @@ struct RoadmapView: View {
                           })
         }
         .sheet(isPresented: $showMapIntro) {
-            OverviewIntroSheet(companionName: companionName,
-                               projectName: displayProjectName,
+            OverviewIntroSheet(projectName: displayProjectName,
                                summary: briefSummary, tasks: tasks,
                                accent: accent,
                                onDismiss: {
@@ -117,7 +113,7 @@ struct RoadmapView: View {
     private var roadmapBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 24).padding(.top, 22)
-            OverviewChromeRow(tasks: tasks, companionName: companionName, accent: accent,
+            OverviewChromeRow(tasks: tasks, accent: accent,
                               // The beacon's filled Start dispatches directly — that one-click
                               // path is the mitigation for board cards now opening the panel.
                               // `dispatch` itself is safe for a drafted beacon: its `.approve`
@@ -128,8 +124,7 @@ struct RoadmapView: View {
                               // button chrome.
                               onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.horizontal, 24).padding(.top, 16)
-            RoadmapBoardView(tasks: tasks, companionName: companionName,
-                             founderName: founderName,
+            RoadmapBoardView(tasks: tasks, founderName: founderName,
                              projectName: displayProjectName,
                              tagline: oneLiner,
                              accent: accent,

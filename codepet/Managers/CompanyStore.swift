@@ -1,6 +1,7 @@
 // codepet/Managers/CompanyStore.swift
 import Foundation
 import Combine
+import os
 
 /// The app's primary store — the single company (companies/{uid}) + the active
 /// view. Native port of the web `useApp`/`lib/store`. Replaces ProjectStore's
@@ -514,8 +515,12 @@ final class CompanyStore: ObservableObject {
             return
         }
         let ask = (founderAsk ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        // `ask` does double duty: the room's question AND the founder's bubble. Both want her
+        // words rather than the mode's framing, and both fall back to the shaped text for
+        // callers that do no shaping (`walkThroughTask`, the Environment seed).
         await sendMessage(text, language: language, department: department,
-                          convene: ask.isEmpty ? text : ask)
+                          convene: ask.isEmpty ? text : ask,
+                          display: ask.isEmpty ? text : ask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -735,10 +740,19 @@ final class CompanyStore: ObservableObject {
     /// convene". Only `sendChat` passes it: a synthesised ask (`walkThroughTask`) is not
     /// a founder deciding something, and answering "walk me through how to do this
     /// myself" with a meeting is a worse answer than the guidance that was asked for.
+    /// `display` is what the founder's own bubble shows, when that differs from `text` —
+    /// which is what goes on the wire. `ChatMode.plan`/`.build` prepend their intent ("Help me
+    /// plan this — give me the concrete next steps: …"), and that framing was being rendered
+    /// as the founder's words: machinery in her mouth, and the reason a message she typed
+    /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
+    /// The model still receives the shaped text — the mode is a real instruction — but the
+    /// transcript, the history built from it, and the thread title derived from it are hers.
+    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
+
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
-                             convene: String? = nil) async {
+                             convene: String? = nil, display: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
-        chatMessages.append(CopilotMessage(role: .me, text: text))
+        chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
         let history = chatMessages.dropLast().suffix(20).map {
             ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
@@ -795,6 +809,16 @@ final class CompanyStore: ObservableObject {
         var streamedText = ""
         var streamThrew = false
         var receivedDone = false
+        // The `.done` frame's actions, CAPTURED here and dispatched below — after the
+        // tail has written this reply's text. Dispatching from inside the loop (the
+        // shape this shipped with) ran every action against a bubble that was still
+        // empty, which broke both halves of an action's contract: `inlineActionTarget`
+        // rejects an empty reply, so a nav/setup chip fell to its standalone-row
+        // fallback and drew detached from the reply it belongs to; and a run's whole
+        // execute-log played out before the lead-in announcing it was written. The
+        // non-streaming fallback below always had this order right — now both paths
+        // share it.
+        var doneAction: ChatDoneAction?
         do {
             for try await event in chatStreamer(req) {
                 // Checked before touching state on every event: a switch mid-stream
@@ -812,10 +836,11 @@ final class CompanyStore: ObservableObject {
                     // (and nav/setup/remember) handling must fire here too —
                     // not just in the fallback below (previously the only
                     // place run_task_id ran, back when streaming usually
-                    // failed pre-deploy).
+                    // failed pre-deploy). Captured rather than dispatched: the
+                    // reply's own text is written by the tail, and every action
+                    // belongs to a reply that has already spoken.
                     receivedDone = true
-                    await handleDoneAction(action, cid: cid, language: language)
-                    guard companyId == cid else { return }
+                    doneAction = action
                 }
             }
         } catch {
@@ -835,8 +860,15 @@ final class CompanyStore: ObservableObject {
         // The decision itself lives in `ChatTailAction` (a testable value type); this
         // only carries it out. The room is no longer part of this decision: it owns its
         // own appended message, so byte's turn ends exactly as it did before the feature.
-        switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
-                                     streamedText: streamedText) {
+        // Which tail ran, and on what. `.fallback` REPLACES the text the founder watched
+        // arrive with a second, independent generation — invisible from the transcript, and the
+        // difference between "the model stopped" and "we threw its answer away".
+        let tail = ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
+                                         streamedText: streamedText, action: doneAction)
+        Self.chatLog.info("""
+            tail=\(String(describing: tail), privacy: .public) threw=\(streamThrew, privacy: .public)             done=\(receivedDone, privacy: .public) chars=\(streamedText.count, privacy: .public)
+            """)
+        switch tail {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
@@ -844,23 +876,43 @@ final class CompanyStore: ObservableObject {
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = reply?.text ?? offline
+                // The retry can itself come back wordless (it is the same model on the same
+                // prompt). An empty bubble is worse than an honest one, so the admission that
+                // used to be printed instead of retrying is what fills it when the retry fails
+                // too — and only then.
+                let text = (reply?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    chatMessages[i].text = text
+                } else {
+                    chatMessages[i].text = reply == nil ? offline
+                                                        : Self.leadInCopy(.nothing, language: language)
+                }
             }
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
                                          setup: reply?.setup, remember: reply?.remember ?? [])
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
-        case .leadIn:
-            // A `.done` was received but byte sent zero chat text (a
-            // run-task-only reply) — don't leave the placeholder blank.
-            let leadIn = language == .vi
-                ? "Được rồi — mình chuẩn bị việc đó ngay đây."
-                : "On it — putting that together now."
+        case .leadIn(let kind):
+            // A `.done` was received but byte sent zero chat text — don't leave the
+            // placeholder blank. WHICH line depends on what came back: only a run is
+            // work being started (see `ChatTailAction.LeadIn`).
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = leadIn
+                chatMessages[i].text = Self.leadInCopy(kind, language: language)
             }
         case .none:
             break
+        }
+        // Dispatched HERE, not from the `.done` case above: the reply now carries its
+        // text (streamed or lead-in), so a chip attaches to it instead of appending a
+        // detached row, and a run announces itself before it starts.
+        //
+        // Skipped after `.fallback`, which has already dispatched the RETRY's own action. The
+        // streamed action that led here was empty by definition (that is what chose fallback),
+        // so dispatching it too would be a no-op — but an explicit no-op is a trap for whoever
+        // next adds a side effect to `handleDoneAction`.
+        if tail != .fallback, let doneAction {
+            await handleDoneAction(doneAction, cid: cid, language: language)
+            guard companyId == cid else { return }
         }
         // The run is NOT awaited. It writes into its own appended message, so it has
         // no claim on byte's turn: byte's typing dots clear, Send/New chat/switch/delete
@@ -1119,8 +1171,64 @@ final class CompanyStore: ObservableObject {
         _ = await produceDraftInline(for: task, cid: cid, language: language)
     }
 
+    /// Re-ask the question that produced `messageId`, replacing the reply.
+    ///
+    /// The whole turn goes — the question, the reply, and anything the reply spawned (a draft, a
+    /// room, a chip) — and then the question is asked again. Dropping only the reply would leave
+    /// its draft card and its room orphaned above a fresh answer, attributed to a turn that no
+    /// longer exists.
+    ///
+    /// A room in flight for a removed turn is cancelled, or it would publish into a transcript
+    /// that no longer contains its anchor (`publishRunProgress` guards that, but leaving the
+    /// task running to be refused later is worse than stopping it).
+    ///
+    /// The mode's framing is deliberately not reapplied: the retry sends what the founder can
+    /// see in her own bubble. Asking the same question twice and getting a differently-framed
+    /// answer would be its own confusion.
+    func retryReply(messageId: String, language: AppLanguage) async {
+        guard !isCompanionTyping, !isStreaming, !isFanningOut else { return }
+        guard let replyIndex = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let askIndex = chatMessages[..<replyIndex].lastIndex(where: { $0.role == .me })
+        else { return }
+        let ask = chatMessages[askIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ask.isEmpty else { return }
+        for message in chatMessages[askIndex...] where message.vcRun != nil {
+            vcTasks[message.id]?.cancel()
+            vcTasks[message.id] = nil
+        }
+        chatMessages.removeSubrange(askIndex...)
+        await sendChat(ask, language: language, founderAsk: ask)
+    }
+
     private func appendRunRefusal(_ text: String) {
         chatMessages.append(CopilotMessage(role: .companion, text: text))
+    }
+
+    /// The line that fills a reply which carried an action but no words of its own. Each
+    /// says only what the action it belongs to actually delivers: the chip below it opens
+    /// a place or offers a switch, and neither is work being produced. "On it — putting
+    /// that together now." is reserved for the one case where something IS being made.
+    private static func leadInCopy(_ kind: ChatTailAction.LeadIn, language: AppLanguage) -> String {
+        let vi = language == .vi
+        switch kind {
+        case .run:
+            return vi ? "Được rồi — mình chuẩn bị việc đó ngay đây."
+                      : "On it — putting that together now."
+        case .nav:
+            return vi ? "Được rồi — chỗ đó đây, bấm vào là tới."
+                      : "Sure — this takes you there."
+        case .setup:
+            return vi ? "Đây là thứ nên bật cho việc này."
+                      : "This is the one to turn on for that."
+        case .noted:
+            return vi ? "Mình ghi lại rồi." : "Noted."
+        case .nothing:
+            // A well-formed reply with no words and nothing on offer is a failure, and the
+            // founder is owed that rather than a promise. Says nothing about why, because
+            // this side of the wire does not know.
+            return vi ? "Mình chưa có câu trả lời nào ở đây — bạn nhắc lại giúp mình nhé?"
+                      : "I didn't have an answer for that — ask me again?"
+        }
     }
 
     /// Why byte cannot run this task, in the founder's terms. Deliberately names the
@@ -1190,10 +1298,18 @@ final class CompanyStore: ObservableObject {
         }
         try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
         guard companyId == cid else { return false }
+        // The finished log, carried onto the draft rather than thrown away with the producing
+        // row. The web keeps it as a "▸ What Nova did · N steps" disclosure on the deliverable
+        // card (inline-run transparency, web #71), and the native port dropped it: the steps
+        // died with `removeAll` below and the draft was appended with none, so how the work
+        // happened was visible for four seconds and then gone. Read back from the message
+        // rather than from `steps`, so it reflects the completed state that was on screen.
+        let finishedSteps = chatMessages.first { $0.id == producingId }?.execSteps
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
-                                               companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                               companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                               execSteps: finishedSteps))
             // Reflect the run on the roadmap so the task leaves the "next moves" set
             // and can't be re-run into a duplicate draft (mirrors the board runTask).
             if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
@@ -1407,28 +1523,16 @@ final class CompanyStore: ObservableObject {
     /// Execute-log pacing (tunable; tests set to 0 to stay instant). `execStepNanos`
     /// is the delay between revealing each step; `execDoneBeatNanos` is the hold after
     /// the result lands so the completed log reads before collapsing to the draft.
-    static var execStepNanos: UInt64 = 420_000_000
-    static var execDoneBeatNanos: UInt64 = 260_000_000
+    static var execStepNanos: UInt64 = 420_000_000 * RunPacing.multiplier
+    static var execDoneBeatNanos: UInt64 = 260_000_000 * RunPacing.multiplier
 
     /// The execute-log steps for a run — a truthful description of the pipeline the
     /// deliverable goes through (the request genuinely carries the brief, decisions,
     /// and department context). Revealed progressively as the run proceeds.
     static func execSteps(task: RoadmapTask, specialist: (companionId: String, deptName: String)?,
                           decisionCount: Int, language: AppLanguage) -> [ExecStep] {
-        let vi = language == .vi
-        var out: [ExecStep] = []
-        let ctx = decisionCount > 0
-            ? (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu (và \(decisionCount) quyết định)"
-                  : "Reading your brief — mission, audience, your voice (+ \(decisionCount) decisions)")
-            : (vi ? "Đọc brief — sứ mệnh, khách hàng, giọng điệu của bạn"
-                  : "Reading your brief — mission, audience, your voice")
-        out.append(ExecStep(label: ctx))
-        if let s = specialist {
-            out.append(ExecStep(label: vi ? "Vận dụng cẩm nang \(s.deptName)" : "Pulling in the \(s.deptName) playbook"))
-        }
-        out.append(ExecStep(label: vi ? "Soạn \(task.title)" : "Drafting \(task.title)"))
-        out.append(ExecStep(label: vi ? "Khớp giọng điệu và quyết định của bạn" : "Matching your tone and past decisions"))
-        return out
+        ExecScript.steps(title: task.title, dept: task.dept, deptName: specialist?.deptName,
+                         decisionCount: decisionCount, language: language)
     }
 
     /// Fan out the next actionable task in up to `maxFanOut` departments as parallel

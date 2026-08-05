@@ -16,6 +16,139 @@ final class CompanyStoreChatTests: XCTestCase {
                      chatSender: sender, chatStreamer: Self.failingStreamer)
     }
 
+    /// The founder's bubble shows HER words; the wire carries the shaped ones.
+    ///
+    /// `ChatMode.plan` prepends "Help me plan this — give me the concrete next steps: " and that
+    /// framing was being rendered as the founder's own message. Observed Aug 5 in a screen
+    /// recording: a message she sent that already contained that sentence read as if the app
+    /// had said it twice, because the app had — once in her text and once in her bubble. The
+    /// mode is a real instruction, so the model must still receive it; only the transcript is
+    /// hers. History and the thread title are both derived from the transcript, so they follow.
+    func testFounderBubbleShowsHerWordsWhileTheWireCarriesTheShapedText() async {
+        var sent: String?
+        let shaped = "Help me plan this — give me the concrete next steps: fix onboarding"
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { req in
+                                 sent = req.userMessage
+                                 return CompanyChatReply(text: "Here's the plan", runTaskId: nil)
+                             },
+                             chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat(shaped, language: .en, founderAsk: "fix onboarding")
+        XCTAssertEqual(sent, shaped)                                 // the model sees the mode
+        XCTAssertEqual(s.chatMessages.first?.text, "fix onboarding") // the founder sees herself
+        XCTAssertEqual(s.chatMessages.first?.role, .me)
+    }
+
+    /// A caller that does no shaping passes no `founderAsk` — `walkThroughTask` and the
+    /// Environment seed both synthesise the ask they want shown — so the bubble must still
+    /// carry the text it was given rather than falling back to empty.
+    func testUnshapedSendStillShowsItsOwnText() async {
+        let s = store { _ in CompanyChatReply(text: "ok", runTaskId: nil) }
+        await s.hydrate(companyId: "u")
+        await s.sendChat("What should I set up in my environment?", language: .en)
+        XCTAssertEqual(s.chatMessages.first?.text, "What should I set up in my environment?")
+    }
+
+    /// End to end: a stream that completes with a wordless, actionless `done` retries on the
+    /// non-streaming path and shows THAT reply — exactly once. The shape measured in the app on
+    /// Aug 5, where companyChat returned `frame done — 63 bytes` and nothing else while the
+    /// Virtual Company room for the same turn came back complete.
+    func testAWordlessStreamRecoversViaTheNonStreamingRetry() async {
+        var senderCalls = 0
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { c in
+                c.yield(.done(model: "m", cacheHit: true, action: ChatDoneAction()))
+                c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in
+                                 senderCalls += 1
+                                 return CompanyChatReply(text: "Here is the real answer", runTaskId: nil)
+                             },
+                             chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("give me the launch checklist", language: .en)
+        XCTAssertEqual(senderCalls, 1)
+        XCTAssertEqual(s.chatMessages.last?.text, "Here is the real answer")
+        XCTAssertEqual(s.chatMessages.count, 2)
+    }
+
+    /// When the retry is ALSO wordless, the founder gets the admission rather than an empty
+    /// bubble — the copy that used to print instead of retrying now only appears once both
+    /// attempts have produced nothing.
+    func testWhenTheRetryIsAlsoWordlessTheFounderIsToldSo() async {
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { c in
+                c.yield(.done(model: "m", cacheHit: true, action: ChatDoneAction()))
+                c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "   ", runTaskId: nil) },
+                             chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertTrue(s.chatMessages.last?.text.contains("didn't have an answer") ?? false,
+                      "got: \(s.chatMessages.last?.text ?? "nil")")
+    }
+
+    /// Retry re-asks the question that produced a reply, and the whole turn is replaced.
+    func testRetryReplacesTheWholeTurn() async {
+        var asks: [String] = []
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { req in
+                                 asks.append(req.userMessage)
+                                 return CompanyChatReply(text: "answer \(asks.count)", runTaskId: nil)
+                             },
+                             chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("what should I do?", language: .en)
+        guard let replyId = s.chatMessages.last?.id else { return XCTFail("no reply") }
+        await s.retryReply(messageId: replyId, language: .en)
+        XCTAssertEqual(asks, ["what should I do?", "what should I do?"])   // asked again, verbatim
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])      // one turn, not two
+        XCTAssertEqual(s.chatMessages.first?.text, "what should I do?")
+        XCTAssertEqual(s.chatMessages.last?.text, "answer 2")              // the new answer
+    }
+
+    /// Anything the old reply produced goes with it. A draft card left above a fresh answer
+    /// would be attributed to a turn that no longer exists.
+    func testRetryTakesTheOldTurnsPayloadWithIt() async {
+        let s = CompanyStore(loader: { _ in
+            CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                         companionId: "byte", onboardedAt: Date(),
+                         tasks: [RoadmapTask(id: "t1", title: "Survey users", detail: "", phase: .find, who: .does)])
+        }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
+           chatSender: { req in
+               req.userMessage.contains("run") ? CompanyChatReply(text: "On it", runTaskId: "t1")
+                                               : CompanyChatReply(text: "plain", runTaskId: nil)
+           },
+           chatStreamer: Self.failingStreamer,
+           taskRunner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") },
+           decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertTrue(s.chatMessages.contains { $0.draft != nil })
+        guard let replyId = s.chatMessages.first(where: { $0.role == .companion })?.id else {
+            return XCTFail("no reply")
+        }
+        await s.retryReply(messageId: replyId, language: .en)
+        XCTAssertFalse(s.chatMessages.contains { $0.draft != nil }, "the old draft outlived its turn")
+    }
+
+    /// An unknown id must not clear the transcript — the guard that keeps a stale tap (a retry
+    /// on a message a thread switch already removed) from wiping the conversation.
+    func testRetryOnAnUnknownMessageIsANoOp() async {
+        let s = store { _ in CompanyChatReply(text: "answer", runTaskId: nil) }
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        let before = s.chatMessages.map(\.text)
+        await s.retryReply(messageId: "no-such-message", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.text), before)
+    }
+
     func testSendAppendsUserThenCompanionReply() async {
         let s = store { _ in CompanyChatReply(text: "Hello founder", runTaskId: nil) }
         await s.hydrate(companyId: "u")
@@ -175,17 +308,30 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.view, .tasks)
     }
 
-    /// The fallback still stands: a `nav` with no reply to attach to — an empty
-    /// transcript — keeps its own standalone message rather than being dropped.
-    func testNavWithNoReplyToAttachToStillAppendsItsOwnMessage() async {
+    /// A `nav` on a reply that carried ZERO chat text still rides the reply — the
+    /// lead-in the tail writes IS that reply, so the chip belongs inside its bubble.
+    ///
+    /// This is the shape the live CF actually sends when it calls `navigate` and says
+    /// nothing alongside it, and it used to draw the chip as a second, standalone row
+    /// under the lead-in: the action was dispatched from inside the stream loop, so
+    /// `inlineActionTarget` saw a placeholder that was still empty (its own non-empty
+    /// -text guard rejected it) and took the append fallback. Observed in the app,
+    /// Aug 5 — "On it — putting that together now." with a detached "Go to Company"
+    /// chip below it, twice in a row. The order the fallback path always used (write
+    /// the reply's text, THEN dispatch its actions) is now the order both paths use.
+    func testNavOnATextlessReplyRidesTheLeadInBubble() async {
         let nav = NavAction(destination: "tasks", target: nil)
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.streamer(deltas: [], nav: nav))
         await s.hydrate(companyId: "u")
         await s.sendChat("where should I look?", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])   // no detached chip row
+        XCTAssertEqual(s.chatMessages.count, 2)
         XCTAssertEqual(s.chatMessages.last?.navChip, nav)
-        XCTAssertEqual(s.chatMessages.last?.text, "")
+        // The lead-in this reply DID get: a nav chip is a way there, not work starting,
+        // so the run's "putting that together now" must not appear on it.
+        XCTAssertEqual(s.chatMessages.last?.text, "Sure — this takes you there.")
     }
 
     /// `nav(department)` resolves `target` to a `DepartmentCatalog` key and opens

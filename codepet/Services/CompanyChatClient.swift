@@ -1,6 +1,7 @@
 // codepet/Services/CompanyChatClient.swift
 import Foundation
 import FirebaseAuth
+import os
 
 /// One prior chat turn sent to the CF as history.
 struct ChatTurnDTO: Codable, Equatable {
@@ -260,6 +261,12 @@ enum CompanyChatClient {
                         throw CompanyChatStreamError.malformedResponse
                     }
 
+                    // Transport shape: an SSE stream that arrives as one buffered blob, or
+                    // with a Content-Encoding an intermediate applied, is indistinguishable in
+                    // the transcript from the model stopping early.
+                    Self.streamLog.info("""
+                        response \(http.statusCode, privacy: .public)                         type=\(http.value(forHTTPHeaderField: "Content-Type") ?? "-", privacy: .public)                         enc=\(http.value(forHTTPHeaderField: "Content-Encoding") ?? "-", privacy: .public)                         len=\(http.value(forHTTPHeaderField: "Content-Length") ?? "-", privacy: .public)
+                        """)
                     if http.statusCode != 200 {
                         // Non-streaming error body. Read fully then throw.
                         var data = Data()
@@ -272,17 +279,28 @@ enum CompanyChatClient {
 
                     var parser = SSEParser()
                     var lineBuffer: [UInt8] = []
+                    var frameCount = 0
                     for try await byte in bytes {
                         if byte == UInt8(ascii: "\n") {
-                            let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
+                            var line = String(bytes: lineBuffer, encoding: .utf8)
+                            if line == nil {
+                                // The whole line is discarded when this happens, so a delta's
+                                // text vanishes without a trace. Never observed; logged because
+                                // it would look exactly like the model stopping mid-sentence.
+                                Self.streamLog.error("line not UTF-8 — \(lineBuffer.count, privacy: .public) bytes dropped")
+                                line = ""
+                            }
                             lineBuffer.removeAll(keepingCapacity: true)
-                            for frame in parser.feedLines([line]) {
+                            frameCount += 1
+                            for frame in parser.feedLines([line ?? ""]) {
+                                Self.streamLog.info("frame \(frame.event, privacy: .public) — \(frame.data.count, privacy: .public) bytes")
                                 try Self.handleStreamFrame(frame: frame, continuation: continuation)
                             }
                         } else {
                             lineBuffer.append(byte)
                         }
                     }
+                    Self.streamLog.info("stream ended — \(frameCount, privacy: .public) lines read")
                     // Flush leftover bytes (no trailing newline).
                     if !lineBuffer.isEmpty {
                         let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
@@ -303,16 +321,31 @@ enum CompanyChatClient {
         }
     }
 
+    /// Stream diagnostics. Every drop on this path used to be silent — an undecodable frame,
+    /// a line that failed UTF-8, a stream that ended with no `done` — which is why a reply
+    /// truncated mid-sentence could not be attributed to the model, the function, or this
+    /// parser. Reported from the app twice on Aug 5 ("3. Give Encountered," and "…no sales
+    /// pitch." Personal"), both unexplainable from code alone. Read with:
+    ///   log show --last 15m --predicate 'subsystem == "app.murror.codepet"' --info
+    static let streamLog = Logger(subsystem: "app.murror.codepet", category: "ChatStream")
+
     private static func handleStreamFrame(
         frame: SSEFrame,
         continuation: AsyncThrowingStream<CompanyChatStreamEvent, Error>.Continuation
     ) throws {
-        guard let payload = frame.data.data(using: .utf8) else { return }
+        guard let payload = frame.data.data(using: .utf8) else {
+            streamLog.error("frame data not UTF-8 — event=\(frame.event, privacy: .public) dropped")
+            return
+        }
         switch frame.event {
         case "delta":
             struct DeltaPayload: Codable { let text: String }
             if let d = try? JSONDecoder().decode(DeltaPayload.self, from: payload) {
                 continuation.yield(.delta(d.text))
+            } else {
+                // A dropped delta is invisible in the transcript: the text simply lacks that
+                // fragment, which reads as the model having stopped there.
+                streamLog.error("delta frame undecodable — \(payload.count, privacy: .public) bytes DROPPED")
             }
         case "done":
             struct DonePayload: Codable {
@@ -331,6 +364,10 @@ enum CompanyChatClient {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
                                              remember: d.remember ?? [])
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
+            } else {
+                // Worse than a dropped delta: with no `done` the store falls back to the
+                // non-streaming sender and REPLACES the text the founder just watched arrive.
+                streamLog.error("done frame undecodable — \(payload.count, privacy: .public) bytes; the tail will fall back")
             }
         case "error":
             let parsed = try? JSONDecoder().decode(CompanyChatStreamErrorBody.self, from: payload)

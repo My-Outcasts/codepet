@@ -5,7 +5,6 @@ import SwiftUI
 /// account, and "How to read this map" reopens it any time, so the instructions are never
 /// lost after the one-time dismissal. Native port of the modal in web `OverviewSection.tsx`.
 struct OverviewIntroSheet: View {
-    let companionName: String
     let projectName: String
     /// Codepet's one-line read of the company. Web prefers its AI `projectAnalysis.overall` and
     /// falls back through the brief; native has no analysis surface yet, so the caller passes
@@ -35,7 +34,7 @@ struct OverviewIntroSheet: View {
                     .frame(width: 40, height: 40)
                     .shadow(color: accent.opacity(0.7), radius: 11, x: 0, y: 8)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(companionName.uppercased())
+                    Text("CODEPET")
                         .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1.26)
                         .foregroundColor(accent)
                     Text(lang == .vi ? "\(projectName), trên bản đồ" : "\(projectName), mapped")

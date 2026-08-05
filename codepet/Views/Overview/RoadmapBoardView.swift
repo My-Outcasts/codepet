@@ -8,7 +8,6 @@ import SwiftUI
 /// dotted dependency. The tree begins at a luminous company root node.
 struct RoadmapBoardView: View {
     let tasks: [RoadmapTask]
-    let companionName: String
     let founderName: String?
     let projectName: String
     let tagline: String?
@@ -538,7 +537,7 @@ struct RoadmapBoardView: View {
             parts.append(RoadmapBoardCopy.waitingOn(b.title, lang: lang))
         }
         parts.append(RoadmapBoardCopy.peekAction(for: status, isCurrent: isCurrent,
-                                                 companionName: companionName, lang: lang))
+                                                 lang: lang))
         return parts.joined(separator: "\n")
     }
 }

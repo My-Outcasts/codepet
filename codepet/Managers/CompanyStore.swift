@@ -514,8 +514,12 @@ final class CompanyStore: ObservableObject {
             return
         }
         let ask = (founderAsk ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        // `ask` does double duty: the room's question AND the founder's bubble. Both want her
+        // words rather than the mode's framing, and both fall back to the shaped text for
+        // callers that do no shaping (`walkThroughTask`, the Environment seed).
         await sendMessage(text, language: language, department: department,
-                          convene: ask.isEmpty ? text : ask)
+                          convene: ask.isEmpty ? text : ask,
+                          display: ask.isEmpty ? text : ask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -735,10 +739,17 @@ final class CompanyStore: ObservableObject {
     /// convene". Only `sendChat` passes it: a synthesised ask (`walkThroughTask`) is not
     /// a founder deciding something, and answering "walk me through how to do this
     /// myself" with a meeting is a worse answer than the guidance that was asked for.
+    /// `display` is what the founder's own bubble shows, when that differs from `text` —
+    /// which is what goes on the wire. `ChatMode.plan`/`.build` prepend their intent ("Help me
+    /// plan this — give me the concrete next steps: …"), and that framing was being rendered
+    /// as the founder's words: machinery in her mouth, and the reason a message she typed
+    /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
+    /// The model still receives the shaped text — the mode is a real instruction — but the
+    /// transcript, the history built from it, and the thread title derived from it are hers.
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
-                             convene: String? = nil) async {
+                             convene: String? = nil, display: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
-        chatMessages.append(CopilotMessage(role: .me, text: text))
+        chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
         let history = chatMessages.dropLast().suffix(20).map {
             ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)

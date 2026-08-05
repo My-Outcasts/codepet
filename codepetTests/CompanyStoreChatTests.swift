@@ -16,6 +16,40 @@ final class CompanyStoreChatTests: XCTestCase {
                      chatSender: sender, chatStreamer: Self.failingStreamer)
     }
 
+    /// The founder's bubble shows HER words; the wire carries the shaped ones.
+    ///
+    /// `ChatMode.plan` prepends "Help me plan this — give me the concrete next steps: " and that
+    /// framing was being rendered as the founder's own message. Observed Aug 5 in a screen
+    /// recording: a message she sent that already contained that sentence read as if the app
+    /// had said it twice, because the app had — once in her text and once in her bubble. The
+    /// mode is a real instruction, so the model must still receive it; only the transcript is
+    /// hers. History and the thread title are both derived from the transcript, so they follow.
+    func testFounderBubbleShowsHerWordsWhileTheWireCarriesTheShapedText() async {
+        var sent: String?
+        let shaped = "Help me plan this — give me the concrete next steps: fix onboarding"
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { req in
+                                 sent = req.userMessage
+                                 return CompanyChatReply(text: "Here's the plan", runTaskId: nil)
+                             },
+                             chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat(shaped, language: .en, founderAsk: "fix onboarding")
+        XCTAssertEqual(sent, shaped)                                 // the model sees the mode
+        XCTAssertEqual(s.chatMessages.first?.text, "fix onboarding") // the founder sees herself
+        XCTAssertEqual(s.chatMessages.first?.role, .me)
+    }
+
+    /// A caller that does no shaping passes no `founderAsk` — `walkThroughTask` and the
+    /// Environment seed both synthesise the ask they want shown — so the bubble must still
+    /// carry the text it was given rather than falling back to empty.
+    func testUnshapedSendStillShowsItsOwnText() async {
+        let s = store { _ in CompanyChatReply(text: "ok", runTaskId: nil) }
+        await s.hydrate(companyId: "u")
+        await s.sendChat("What should I set up in my environment?", language: .en)
+        XCTAssertEqual(s.chatMessages.first?.text, "What should I set up in my environment?")
+    }
+
     func testSendAppendsUserThenCompanionReply() async {
         let s = store { _ in CompanyChatReply(text: "Hello founder", runTaskId: nil) }
         await s.hydrate(companyId: "u")

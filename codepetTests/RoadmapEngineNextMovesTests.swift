@@ -52,9 +52,12 @@ final class RoadmapEngineNextMovesTests: XCTestCase {
     /// department, none of them may reach the fan-out — every fixture in this file predates
     /// gating and happens to have no founder-owned work in an earlier phase, so none of them
     /// would have caught a regression here.
+    /// The fan-out never reaches past the open window. The gate is an unapproved draft — a
+    /// founder-owned task stopped closing the window on Aug 5, precisely so the fan-out could
+    /// still find work while the founder's own step was open.
     func testFanOutIsConfinedToTheOpenWindow() {
         let tasks = [
-            task("gate", dept: "eng", phase: .find, who: .you),
+            task("gate", dept: "eng", phase: .find, drafted: true),   // unreviewed output gates
             task("e1", dept: "eng", phase: .build),
             task("m1", dept: "mkt", phase: .launch),
             task("f1", dept: "fin", phase: .grow),

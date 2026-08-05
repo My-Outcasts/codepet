@@ -77,11 +77,22 @@ final class RoadmapEngineTests: XCTestCase {
     // MARK: rolling window (RoadmapGating)
 
     func testStatusIsBlockedOutsideTheOpenWindow() {
-        let gate = t("y", .find, who: .you)     // holds FIND shut
-        let later = t("b", .build)              // .does, no deps → would otherwise be codepetCanDo
+        // The gate is an unapproved DRAFT. A founder-owned task stopped gating on Aug 5 —
+        // see `RoadmapGating.settled`. Unreviewed output still does.
+        let gate = t("y", .find, drafted: true)   // holds FIND shut
+        let later = t("b", .build)                // .does, no deps → would otherwise be codepetCanDo
         let all = [gate, later]
         XCTAssertEqual(RoadmapEngine.status(for: later, in: all), .blocked)
-        XCTAssertEqual(RoadmapEngine.status(for: gate, in: all), .needsYou)
+        XCTAssertEqual(RoadmapEngine.status(for: gate, in: all), .needsApproval)
+    }
+
+    /// The other half of that change: a founder-owned step leaves later work RUNNABLE.
+    func testAFounderOwnedStepDoesNotBlockLaterWork() {
+        let mine = t("y", .find, who: .you)
+        let later = t("b", .build)
+        let all = [mine, later]
+        XCTAssertEqual(RoadmapEngine.status(for: later, in: all), .codepetCanDo)
+        XCTAssertEqual(RoadmapEngine.status(for: mine, in: all), .needsYou)
     }
 
     /// A drafted task in a CLOSED phase still says "needs approval": the draft already exists,
@@ -93,10 +104,11 @@ final class RoadmapEngineTests: XCTestCase {
     }
 
     func testNextStepDoesNotSkipAheadOfAClosedPhase() {
-        // FIND's two founder steps block each other, so FIND has no actionable task at all.
-        // Without the window the beacon would jump to BUILD; with it, there is no beacon.
-        let a = t("a", .find, who: .you, deps: ["b"])
-        let b = t("b", .find, who: .you, deps: ["a"])
+        // FIND holds a draft, so the window stops there; its two tasks also block each other,
+        // so FIND has no actionable task at all and there is no beacon. Under the old rule the
+        // gate was founder-owned; it is unreviewed output now.
+        let a = t("a", .find, deps: ["b"], drafted: true)
+        let b = t("b", .find, deps: ["a"], drafted: true)
         let later = t("c", .build)
         XCTAssertNil(RoadmapEngine.nextStep([a, b, later]))
     }

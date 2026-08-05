@@ -26,9 +26,15 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertTrue(RoadmapGating.settled(.find, in: all))
     }
 
-    func testPhaseHoldingFounderWorkIsNotSettled() {
-        XCTAssertFalse(RoadmapGating.settled(.find, in: [t("a", .find, who: .you)]))
+    /// CHANGED Aug 5: only unreviewed OUTPUT holds a phase. A founder-owned task no longer
+    /// does — one parked step used to switch the whole AI team off, measured four times in the
+    /// app that day. This is the assertion that flips, and it is the whole product change.
+    func testOnlyAnUnapprovedDraftHoldsAPhase() {
         XCTAssertFalse(RoadmapGating.settled(.find, in: [t("a", .find, drafted: true)]))
+        XCTAssertTrue(RoadmapGating.settled(.find, in: [t("a", .find, who: .you)]),
+                      "a founder-owned task must not gate the phase any more")
+        // Still the right answer to "what is waiting on you" — only no longer a gate.
+        XCTAssertTrue(RoadmapGating.needsFounder(t("a", .find, who: .you)))
     }
 
     func testEmptyPhaseIsSettled() {
@@ -38,14 +44,49 @@ final class RoadmapGatingTests: XCTestCase {
 
     // MARK: openPhases
 
-    func testOpenSetIsAPrefixEndingAtTheFirstUnsettledPhase() {
-        // FIND settled (Codepet-owned), FOUNDATION holds a founder step → the window stops there.
-        let all = [t("f", .find), t("y", .foundation, who: .you), t("b", .build)]
+    func testOpenSetIsAPrefixEndingAtTheFirstUNREVIEWEDPhase() {
+        // FOUNDATION holds a DRAFT → the window stops there, and that phase is itself open.
+        let all = [t("f", .find), t("y", .foundation, drafted: true), t("b", .build)]
         let open = RoadmapGating.openPhases(all)
         XCTAssertTrue(open.contains(.find))
-        XCTAssertTrue(open.contains(.foundation))      // the unsettled phase is itself open
+        XCTAssertTrue(open.contains(.foundation))
         XCTAssertFalse(open.contains(.build))
         XCTAssertFalse(open.contains(.grow))
+    }
+
+    /// The reason the rule changed: the founder's own open step must not shut the phases behind
+    /// it. This is the exact shape she was stuck in — "Talk to 5 potential users" open in `.find`
+    /// with eight Codepet-owned tasks reading `.blocked` behind it.
+    func testAFounderOwnedStepNoLongerShutsTheRoadmap() {
+        let all = [t("interviews", .find, who: .you),
+                   t("brand", .foundation), t("landing", .foundation), t("waitlist", .build)]
+        XCTAssertEqual(RoadmapGating.openPhases(all), Set(RoadmapPhase.allCases))
+        // And the work behind it is genuinely runnable, not merely "open".
+        for id in ["brand", "landing", "waitlist"] {
+            let task = all.first { $0.id == id }!
+            XCTAssertEqual(RoadmapEngine.status(for: task, in: all), .codepetCanDo, id)
+        }
+        // Her own step is untouched: still hers, still counted as needing her.
+        XCTAssertEqual(RoadmapEngine.status(for: all[0], in: all), .needsYou)
+    }
+
+    /// What must NOT have changed: a task that genuinely depends on her step still waits. The
+    /// phase stopped gating; the dependency did not, because the input really does not exist.
+    func testWorkThatDependsOnHerStepStillWaits() {
+        let all = [t("interviews", .find, who: .you),
+                   t("copy", .foundation, deps: ["interviews"])]
+        XCTAssertTrue(RoadmapGating.openPhases(all).contains(.foundation))   // phase is open…
+        XCTAssertEqual(RoadmapEngine.status(for: all[1], in: all), .blocked) // …the dependency is not
+        XCTAssertEqual(RoadmapGating.blocker(for: all[1], in: all)?.id, "interviews")
+    }
+
+    /// The pipeline stays self-limiting: Codepet may run ahead, but never further ahead than the
+    /// founder has reviewed. Three drafts in FOUNDATION shut BUILD until she approves them.
+    func testUnreviewedOutputStillCapsHowFarAheadCodepetRuns() {
+        let all = [t("a", .foundation, drafted: true), t("b", .build)]
+        XCTAssertFalse(RoadmapGating.openPhases(all).contains(.build))
+        XCTAssertEqual(RoadmapEngine.status(for: all[1], in: all), .blocked)
+        XCTAssertEqual(RoadmapGating.founderStep(in: all)?.id, "a")
     }
 
     func testCodepetLeftoversDoNotHoldTheWindowShut() {
@@ -60,8 +101,8 @@ final class RoadmapGatingTests: XCTestCase {
     }
 
     func testEmptyPhasesAreTransparentToTheWindow() {
-        // Nothing in FIND or FOUNDATION; BUILD holds founder work → SHIP is closed, BUILD open.
-        let all = [t("y", .build, who: .you), t("s", .ship)]
+        // Nothing in FIND or FOUNDATION; BUILD holds unreviewed output → SHIP closed, BUILD open.
+        let all = [t("y", .build, drafted: true), t("s", .ship)]
         let open = RoadmapGating.openPhases(all)
         XCTAssertTrue(open.contains(.build))
         XCTAssertFalse(open.contains(.ship))
@@ -70,7 +111,7 @@ final class RoadmapGatingTests: XCTestCase {
     // MARK: states
 
     func testStatesPrecedenceCompleteBeatsOpen() {
-        let all = [t("f", .find, done: true), t("y", .foundation, who: .you), t("b", .build)]
+        let all = [t("f", .find, done: true), t("y", .foundation, drafted: true), t("b", .build)]
         let s = RoadmapGating.states(all)
         XCTAssertEqual(s[.find], .complete)
         XCTAssertEqual(s[.foundation], .open)
@@ -79,9 +120,9 @@ final class RoadmapGatingTests: XCTestCase {
     }
 
     func testPreviewSkipsEmptyPhases() {
-        // FIND holds founder work; FOUNDATION is empty → the preview is BUILD, the next
+        // FIND holds unreviewed output; FOUNDATION is empty → the preview is BUILD, the next
         // phase that actually has tasks.
-        let all = [t("y", .find, who: .you), t("b", .build)]
+        let all = [t("y", .find, drafted: true), t("b", .build)]
         let s = RoadmapGating.states(all)
         XCTAssertEqual(s[.find], .open)
         XCTAssertEqual(s[.foundation], .later)
@@ -89,7 +130,7 @@ final class RoadmapGatingTests: XCTestCase {
     }
 
     func testEmptyPhaseIsNeverCompleteOrPreview() {
-        let s = RoadmapGating.states([t("y", .find, who: .you)])
+        let s = RoadmapGating.states([t("y", .find, drafted: true)])
         XCTAssertEqual(s[.grow], .later)
         XCTAssertEqual(s.count, RoadmapPhase.allCases.count)
     }
@@ -97,11 +138,19 @@ final class RoadmapGatingTests: XCTestCase {
     // MARK: founderStep
 
     func testFounderStepReturnsTheEarliestUnsettledPhasesTask() {
-        // Both FIND and FOUNDATION hold founder work, but FIND is the earlier unsettled
-        // phase — founderStep must stop there, not walk on to FOUNDATION's task.
-        let a = t("a", .find, who: .you)
-        let b = t("b", .foundation, who: .you)
+        // Both FIND and FOUNDATION hold an unapproved draft, but FIND is the earlier unsettled
+        // phase — founderStep must stop there, not walk on to FOUNDATION's task. (Founder-OWNED
+        // work no longer makes a phase unsettled, so the fixture uses drafts.)
+        let a = t("a", .find, drafted: true)
+        let b = t("b", .foundation, drafted: true)
         XCTAssertEqual(RoadmapGating.founderStep(in: [a, b])?.id, "a")
+    }
+
+    /// And the case the change created: an open founder-owned step with no drafts behind it
+    /// holds nothing, so there is no step to name.
+    func testFounderStepIsNilWhenOnlyFounderOwnedWorkIsOpen() {
+        XCTAssertNil(RoadmapGating.founderStep(in: [t("mine", .find, who: .you),
+                                                    t("theirs", .build)]))
     }
 
     func testFounderStepCountsADraftAsFounderWork() {
@@ -118,7 +167,7 @@ final class RoadmapGatingTests: XCTestCase {
     // MARK: blocker
 
     func testBlockerOfAPhaseGatedTaskIsTheEarliestFounderStep() {
-        let gate = t("y", .find, who: .you)
+        let gate = t("y", .find, drafted: true)
         let later = t("b", .build)
         XCTAssertEqual(RoadmapGating.blocker(for: later, in: [gate, later])?.id, "y")
     }
@@ -130,7 +179,7 @@ final class RoadmapGatingTests: XCTestCase {
         // the prefix spans more than one populated phase, `nextStep` minimises over the whole
         // window while `blocker` always names the earliest unsettled phase, so they can
         // legitimately point at different (both valid) tasks — see `blocker`'s doc comment.
-        let gate = t("y", .find, who: .you)
+        let gate = t("y", .find, drafted: true)
         let later = t("b", .build)
         let all = [gate, later]
         XCTAssertEqual(RoadmapGating.blocker(for: later, in: all)?.id,
@@ -149,16 +198,22 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertNil(RoadmapGating.blocker(for: a, in: [a]))
     }
 
+    /// The walk past a dead end, now exercised through a DEPENDENCY chain — which is the only
+    /// way left to reach it. `c` waits on `b`, which waits on `a`: handing the founder `b` would
+    /// be a second dead end, so the hatch walks to `a`.
+    ///
+    /// The old fixture used a founder-owned phase gate that was itself dependency-blocked. That
+    /// shape is now unreachable BY CONSTRUCTION: only a draft closes a phase, and
+    /// `RoadmapEngine.status` returns `.needsApproval` for a draft before it ever consults
+    /// dependencies — so a gating task can never be `.blocked`. Recorded rather than deleted,
+    /// because "why is there no phase-gate case here" is otherwise a fair question.
     func testEscapeHatchChainResolvesToAnActionableTaskNotABlockedOne() {
-        // y is founder-owned (so it's the naive "earliest founder step" answer) but y itself
-        // is blocked on z, its own unmet dependency — handing the founder y would be a second
-        // dead end. The escape hatch must walk past y to z, which is actually actionable.
-        let z = t("z", .find)
-        let y = t("y", .find, who: .you, deps: ["z"])
-        let later = t("b", .build)
-        let all = [z, y, later]
-        let escapeHatch = RoadmapGating.escapeHatch(for: later, in: all)
-        XCTAssertEqual(escapeHatch?.id, "z")
+        let a = t("a", .find)
+        let b = t("b", .find, deps: ["a"])
+        let c = t("c", .find, deps: ["b"])
+        let all = [a, b, c]
+        let escapeHatch = RoadmapGating.escapeHatch(for: c, in: all)
+        XCTAssertEqual(escapeHatch?.id, "a")
         XCTAssertNotEqual(RoadmapEngine.status(for: escapeHatch!, in: all), .blocked)
     }
 
@@ -178,15 +233,18 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertNotNil(RoadmapGating.escapeHatch(for: a, in: all))
     }
 
-    func testStrictBlockerOfAPhaseGatedTaskIsTheFounderStepItself() {
-        // FIND's founder step is itself dependency-blocked, so the escape hatch walks past it
-        // while the strict blocker still names it — that IS what's holding the window shut.
-        let gate = t("y", .find, who: .you, deps: ["p"])
-        let pre = t("p", .find)
+    /// A phase-gated card names the draft holding the window — and its escape hatch now lands
+    /// on that same draft rather than walking past it. That is the better answer, not a
+    /// regression: the draft is `.needsApproval`, so tapping through puts the founder one tap
+    /// from unblocking the phase. Under the old rule the gate was a founder-owned task that
+    /// could itself be dependency-blocked, which is why the hatch had to walk at all.
+    func testStrictBlockerOfAPhaseGatedTaskIsTheGatingDraft() {
+        let gate = t("y", .find, drafted: true)
         let later = t("b", .build)
-        let all = [gate, pre, later]
+        let all = [gate, later]
         XCTAssertEqual(RoadmapGating.blocker(for: later, in: all)?.id, "y")
-        XCTAssertEqual(RoadmapGating.escapeHatch(for: later, in: all)?.id, "p")
+        XCTAssertEqual(RoadmapGating.escapeHatch(for: later, in: all)?.id, "y")
+        XCTAssertEqual(RoadmapEngine.status(for: gate, in: all), .needsApproval)
     }
 
     func testStrictBlockerIsNilWhenNothingBlocks() {

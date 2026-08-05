@@ -85,7 +85,9 @@ final class RoadmapNodeDetailTests: XCTestCase {
     /// The phase window is a requirement too — and it names the phase that has to settle plus
     /// the step holding it shut, which is the one thing Cofounder's panel can't show.
     func testPhaseGatedTaskGetsAPhaseWindowRequirement() {
-        let gate = t("y", .find, who: .you)
+        // An unapproved draft is what closes a phase now; founder-owned work stopped doing so
+        // on Aug 5, so a phase-window requirement needs a draft to exist at all.
+        let gate = t("y", .find, drafted: true)
         let later = t("b", .build)
         let all = [gate, later]
         let reqs = RoadmapNodeDetail.build(for: later, in: all, lang: .en).requiredFirst
@@ -99,7 +101,7 @@ final class RoadmapNodeDetailTests: XCTestCase {
     /// The phase named is the earliest UNSETTLED phase, not the task's own phase.
     func testPhaseWindowRequirementNamesTheEarliestUnsettledPhase() {
         let f = t("f", .find)                      // Codepet-owned → FIND settles
-        let gate = t("y", .foundation, who: .you)  // FOUNDATION is what's unsettled
+        let gate = t("y", .foundation, drafted: true)  // FOUNDATION is what's unsettled
         let later = t("s", .ship)
         let reqs = RoadmapNodeDetail.build(for: later, in: [f, gate, later], lang: .en).requiredFirst
         XCTAssertEqual(reqs.first?.kind, .phaseWindow(.foundation))
@@ -122,7 +124,7 @@ final class RoadmapNodeDetailTests: XCTestCase {
     /// `openPhases([gate, target]) == [.find]` — BUILD is closed. `target` (BUILD, `done: true`)
     /// still has `status == .done` because `RoadmapEngine.status` checks `task.done` first.
     func testDoneTaskInAClosedPhaseGetsNoPhaseWindowRequirement() {
-        let gate = t("gate", .find, who: .you)
+        let gate = t("gate", .find, drafted: true)
         let target = t("target", .build, done: true)
         let all = [gate, target]
         XCTAssertEqual(RoadmapGating.openPhases(all), [.find])
@@ -141,7 +143,7 @@ final class RoadmapNodeDetailTests: XCTestCase {
     /// `RoadmapEngine.status` returns `.blocked` on the window check (it runs before the deps
     /// check) — `dep` being unmet is a second, independent reason it's blocked.
     func testTaskWithBothAnUnmetDependencyAndAClosedPhaseListsBoth() {
-        let gate = t("gate", .find, who: .you)
+        let gate = t("gate", .find, drafted: true)
         let dep = t("dep", .find)
         let target = t("target", .build, deps: ["dep"])
         let all = [gate, dep, target]

@@ -49,12 +49,22 @@ final class MockFixtureRunnableTests: XCTestCase {
         }
     }
 
-    /// And the gating itself must survive: the founder-owned step still holds the later
-    /// phases shut, because that state is the other half of what the fixture demonstrates.
-    func testFounderStepStillGatesTheLaterPhases() {
-        XCTAssertEqual(RoadmapGating.founderStep(in: tasks)?.id, "mock-interviews")
+    /// The fixture must still demonstrate BLOCKED work — but for the right reason. Since Aug 5 a
+    /// founder-owned step no longer shuts later phases; only unreviewed output does, and real
+    /// DEPENDENCIES still gate. So `mock-interviews` (who: .you) gates nothing by itself, while
+    /// the eight tasks that depend on it still wait for it — which is the honest version of the
+    /// state the founder was stuck in.
+    func testDependenciesStillGateEvenThoughTheFounderStepDoesNot() {
+        XCTAssertNil(RoadmapGating.founderStep(in: tasks),
+                     "no drafts in the fixture, so nothing should be holding the window")
+        let interviews = tasks.first { $0.id == "mock-interviews" }
+        XCTAssertEqual(interviews?.who, .you)
         let blocked = tasks.filter { RoadmapEngine.status(for: $0, in: tasks) == .blocked }
-        XCTAssertFalse(blocked.isEmpty, "the whole point of the needs-you card is that it blocks something")
+        XCTAssertFalse(blocked.isEmpty, "the dependency chain must still hold work back")
+        for task in blocked {
+            XCTAssertFalse(task.dependsOn.isEmpty,
+                           "\(task.id) is blocked with no dependencies — that would be phase gating")
+        }
     }
 
     /// End-to-end: driving the real `fanOutNextMoves` against the fixture must put agents on

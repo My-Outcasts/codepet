@@ -11,29 +11,38 @@ import XCTest
 /// Every failure looked reasonable in review. These assertions fail loudly instead.
 final class ChatColumnTests: XCTestCase {
 
-    /// The inset holds across the dock's whole usual travel — `ShellLayout.dockMinWidth`
-    /// (360pt) up to the cap. This is the assertion the percentage model fails.
+    /// The inset holds from `ShellLayout.dockMinWidth` (360pt) up to where the cap takes
+    /// over at `measureCap + 2 × inset` (380pt). This is the assertion the percentage model
+    /// fails — a ratio drifts at every one of these widths.
     func testInsetHoldsAtEveryDockWidthBelowTheCap() {
-        for box in [CGFloat(360), 381, 420, 480, 500, 560, 620, 676] {
+        for box in [CGFloat(360), 368, 376, 380] {
             XCTAssertEqual(ChatColumn.margin(forBox: box), ChatColumn.inset, accuracy: 0.51,
                            "box \(box): margin drifted to \(ChatColumn.margin(forBox: box))pt")
         }
     }
 
-    /// Below the cap the words take everything the inset leaves, so widening the dock
-    /// lengthens the lines one point for one.
+    /// Below the cap the words take everything the inset leaves.
     func testColumnAbsorbsWidthUpToTheCap() {
-        XCTAssertEqual(ChatColumn.textWidth(forBox: 381), 381 - ChatColumn.inset * 2, accuracy: 1)
-        let a = ChatColumn.textWidth(forBox: 400)
-        let b = ChatColumn.textWidth(forBox: 500)
-        XCTAssertEqual(b - a, 100, accuracy: 1)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 370), 370 - ChatColumn.inset * 2, accuracy: 1)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 360), 360 - ChatColumn.inset * 2, accuracy: 1)
+    }
+
+    /// The founder approved the measure at a ~380pt dock and asked that expanding the dock
+    /// not change it. So EVERY width past the cap must yield the same column — this is the
+    /// assertion that would have caught the 640pt cap, which grew the text from 344 to 640
+    /// on its way to being generous.
+    func testExpandingTheDockNeverChangesTheMeasure() {
+        let approved = ChatColumn.textWidth(forBox: 380)
+        for box in [CGFloat(420), 500, 560, 700, 900, 1400] {
+            XCTAssertEqual(ChatColumn.textWidth(forBox: box), approved,
+                           "box \(box) re-scaled the reading column to \(ChatColumn.textWidth(forBox: box))pt")
+        }
     }
 
     /// Past the cap the words stop growing and every further point becomes margin — the
     /// behaviour that makes a wide dock read like the references rather than a billboard.
     func testSurplusPastTheCapBecomesMargin() {
         XCTAssertEqual(ChatColumn.textWidth(forBox: 900), ChatColumn.measureCap)
-        XCTAssertEqual(ChatColumn.textWidth(forBox: 1400), ChatColumn.measureCap)
         XCTAssertEqual(ChatColumn.margin(forBox: 900), (900 - ChatColumn.measureCap) / 2, accuracy: 0.51)
         XCTAssertGreaterThan(ChatColumn.margin(forBox: 1400), ChatColumn.margin(forBox: 900))
     }

@@ -919,10 +919,21 @@ enum ChatColumn {
     /// a full-bleed web page does not.
     static let inset: CGFloat = 18
 
-    /// The widest the words go. Past `measureCap + 2 × inset` (676pt) the surplus becomes
-    /// margin, so a dock dragged very wide reads like the references rather than like a
-    /// billboard.
-    static let measureCap: CGFloat = 640
+    /// The widest the words go. Set to the measure the founder approved on screen — the
+    /// ~380pt dock minus its two insets — so expanding the dock CANNOT change the reading
+    /// experience: past `measureCap + 2 × inset` (380pt) every extra point becomes margin
+    /// and the column stays exactly as it looks now, centred in the space.
+    ///
+    /// This is a deliberately tight cap, and the trade comes with it: drag the dock to 900pt
+    /// and the gutters reach 278pt a side, because "don't scale the content out" and "fill a
+    /// wide dock" are the same knob pulled in opposite directions. Founder call, Aug 5,
+    /// choosing the first. It was 640 for one commit, which still grew the text from 344 to
+    /// 640 on the way there.
+    ///
+    /// Side effect worth keeping: at any dock wider than 380pt the column is fixed, so
+    /// dragging the divider no longer re-wraps a single line — the stability asked for
+    /// earlier, arrived at from the other direction.
+    static let measureCap: CGFloat = 344
 
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.

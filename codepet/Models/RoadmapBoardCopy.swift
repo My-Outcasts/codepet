@@ -36,16 +36,20 @@ enum RoadmapBoardCopy {
     /// `isCurrent` only matters for `.codepetCanDo` — it distinguishes the single beacon card
     /// ("…'s next move") from a merely-runnable one ("… can run this now"); every other status
     /// has one sentence regardless of `isCurrent`.
-    static func peekAction(for status: TaskStatus, isCurrent: Bool, companionName: String,
+    ///
+    /// Says "Codepet", not the companion's name: board chrome is the product talking, and the
+    /// pet's own name is reserved for the moment it answers in chat. Took a `companionName`
+    /// until Aug 5, when that rule made the parameter dead.
+    static func peekAction(for status: TaskStatus, isCurrent: Bool,
                            lang: AppLanguage) -> String {
         switch status {
         case .codepetCanDo:
             if isCurrent {
-                return lang == .vi ? "Nước đi tiếp theo của \(companionName). Nhấn để xem chi tiết."
-                                   : "\(companionName)'s next move. Click to see details."
+                return lang == .vi ? "Nước đi tiếp theo của Codepet. Nhấn để xem chi tiết."
+                                   : "Codepet's next move. Click to see details."
             }
-            return lang == .vi ? "\(companionName) có thể làm ngay bây giờ. Nhấn để xem chi tiết."
-                               : "\(companionName) can run this now. Click to see details."
+            return lang == .vi ? "Codepet có thể làm ngay bây giờ. Nhấn để xem chi tiết."
+                               : "Codepet can run this now. Click to see details."
         case .needsYou:
             return lang == .vi ? "Cần bạn nhập. Nhấn để xem cách làm."
                                : "Your input needed. Click to see how."

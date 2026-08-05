@@ -62,7 +62,6 @@ struct TasksView: View {
     /// tap on an Awaiting card; the sheet shows the draft + Revise/Approve controls.
     @State private var previewTask: RoadmapTask?
 
-    private var companionName: String { PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,8 +71,8 @@ struct TasksView: View {
                     .font(CodepetTheme.inter(28, weight: .semibold))
                     .tracking(-0.5)
                     .foregroundColor(CodepetTheme.primaryText)
-                Text(lang == .vi ? "Việc \(companionName) đang làm, đang soạn, hoặc đang chờ bạn."
-                                 : "What \(companionName) is doing, drafting, or waiting on you for.")
+                Text(lang == .vi ? "Việc Codepet đang làm, đang soạn, hoặc đang chờ bạn."
+                                 : "What Codepet is doing, drafting, or waiting on you for.")
                     .font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.mutedText)
             }
             .viewHeadPadding()

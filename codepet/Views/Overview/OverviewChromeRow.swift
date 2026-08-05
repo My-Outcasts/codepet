@@ -6,7 +6,6 @@ import SwiftUI
 /// web `OverviewSection.tsx`.
 struct OverviewChromeRow: View {
     let tasks: [RoadmapTask]
-    let companionName: String
     let accent: Color
     let onStart: (RoadmapTask) -> Void
     let onOpenTask: (RoadmapTask) -> Void
@@ -121,7 +120,7 @@ struct OverviewChromeRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 pingDot
-                Text("\(companionName) · " + (lang == .vi ? "LÀM ĐIỀU NÀY TIẾP" : "DO THIS NEXT"))
+                Text("Codepet · " + (lang == .vi ? "LÀM ĐIỀU NÀY TIẾP" : "DO THIS NEXT"))
                     .font(CodepetTheme.inter(10)).tracking(1.3)      // web .13em at 10px
                     .foregroundColor(accent)
                     .textCase(.uppercase)
@@ -203,7 +202,7 @@ struct OverviewChromeRow: View {
     private var keyItems: [(String, Color)] {
         [
             (lang == .vi ? "Xong" : "Done", RoadmapPalette.done),
-            (lang == .vi ? "\(companionName) làm được" : "\(companionName) can do this", RoadmapPalette.canDo),
+            (lang == .vi ? "Codepet làm được" : "Codepet can do this", RoadmapPalette.canDo),
             (lang == .vi ? "Cần bạn nhập" : "Needs your input", RoadmapPalette.needsYou),
             (lang == .vi ? "Cần duyệt" : "Needs approval", RoadmapPalette.approve),
             (lang == .vi ? "Cần bước trước" : "Needs earlier steps", RoadmapPalette.blocked),

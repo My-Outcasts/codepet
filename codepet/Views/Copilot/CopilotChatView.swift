@@ -24,9 +24,6 @@ struct CopilotChatView: View {
     /// `sendChat(department:)` for the specialist handoff.
     @State private var selectedDept: Department?
 
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
     private var companionColor: Color {
@@ -115,8 +112,10 @@ struct CopilotChatView: View {
             mode: $mode,
             canSend: canSend,
             focus: $inputFocused,
-            placeholder: lang == .vi ? "Hỏi \(companionName) bất cứ điều gì về công ty…"
-                                     : "Ask \(companionName) anything about your company…",
+            // "Codepet", not the pet's name: the founder is talking to the product, and
+            // the pet's own name belongs to the moment it answers (`headerName`).
+            placeholder: lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
+                                     : "Ask Codepet anything about your company…",
             quickActions: quickActions,
             accent: companionColor,
             accent2: CodepetTheme.accentPink,
@@ -509,12 +508,22 @@ struct CopilotBubble: View {
         message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The actions belonging to THIS reply, drawn inside its card. Each is the bare
-    /// control: the surrounding `MessageCard` already supplies the tint, border and
-    /// padding these used to draw for themselves when they were separate rows.
+    /// The actions belonging to THIS reply, drawn directly under its text.
+    ///
+    /// The nav chip and the noted rows carry their own capsule, so they stand on the
+    /// backdrop unaided. The setup suggestion does not — it is a name, a why-line and an
+    /// Enable button that used to be bounded by the reply's `MessageCard`, and with the
+    /// prose un-carded it would spill onto the backdrop as loose text. So it keeps a
+    /// container of its own, which is the same rule the standalone `setupCard` follows:
+    /// an offer is an object, the sentence introducing it is not.
     @ViewBuilder private var inlineActions: some View {
         if let nav = message.navChip { navChipButton(nav) }
-        if let setup = message.setupSuggestion { setupInline(setup) }
+        if let setup = message.setupSuggestion {
+            HStack {
+                CodepetCard { setupInline(setup).padding(12) }
+                Spacer(minLength: 24)
+            }
+        }
         if let facts = message.noted, !facts.isEmpty { notedInline(facts) }
     }
 
@@ -669,7 +678,8 @@ struct CopilotBubble: View {
     private var producingRow: some View {
         HStack(spacing: 8) {
             CompanionOrb(size: 20, glow: false, isWorking: true)
-            Text(lang == .vi ? "\(companionName) đang tổng hợp…" : "\(companionName) is putting that together…")
+            // Ambient status, not the pet speaking — so "Codepet", like the composer.
+            Text(lang == .vi ? "Codepet đang tổng hợp…" : "Codepet is putting that together…")
                 .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
             Spacer(minLength: 8)
         }
@@ -697,27 +707,34 @@ struct CopilotBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            // Teammate card: companion (or specialist) avatar + "Name · Dept"
-            // header + reply in a tinted surface. `CompanionAvatar` shows the
-            // specialist's sprite for a handoff, the host orb otherwise.
-            HStack(alignment: .top, spacing: 8) {
-                CompanionAvatar(companionId: message.companionId, size: 22)
-                VStack(alignment: .leading, spacing: 4) {
+            // Attribution row, then the answer at the FULL width of the dock.
+            //
+            // The reply used to sit in a tinted, bordered `MessageCard` inside an avatar
+            // gutter, which cost it the gutter's 30pt plus the card's 24pt of padding on
+            // every line — in a dock this narrow that is a word or two per line, and the
+            // long answers are exactly the ones worth reading. A container earns its
+            // edges when it bounds an OBJECT (a draft, a room, an exec log); prose is not
+            // an object, and the name row above it already says where it came from.
+            // Founder call, Aug 5.
+            //
+            // `CompanionAvatar` shows the specialist's sprite for a handoff, the host orb
+            // otherwise, and `headerName` carries the "Name · Dept" attribution — so the
+            // one place the pet's own name appears is the moment it answers.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    CompanionAvatar(companionId: message.companionId, size: 22)
                     Text(headerName)
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    MessageCard(hue: headerAccent) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(message.text)
-                                .font(CodepetTheme.inter(13.5))
-                                .lineSpacing(3)
-                                .foregroundColor(CodepetTheme.primaryText)
-                                .fixedSize(horizontal: false, vertical: true)
-                            inlineActions
-                        }
-                    }
                 }
-                Spacer(minLength: 8)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(message.text)
+                        .font(CodepetTheme.inter(13.5))
+                        .lineSpacing(3)
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    inlineActions
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

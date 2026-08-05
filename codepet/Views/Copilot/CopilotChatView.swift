@@ -886,12 +886,16 @@ enum ReviseKind: CaseIterable {
 /// ~55 characters a line, inside the comfortable band, and dragging the dock wider now
 /// buys air rather than longer lines.
 private enum ChatColumn {
-    /// The words themselves — fixed while the dock has room for it.
-    static let measure: CGFloat = 380
+    /// The words themselves — fixed while the dock has room for it. 380pt read too narrow;
+    /// 420 is the width the tracking column happened to produce at this dock size, so this
+    /// is the previous measure with the reflow removed rather than a return to it.
+    static let measure: CGFloat = 420
     /// Minimum gap between the words and the dock's edge, on both sides. Whatever the dock
     /// has beyond the column is split evenly on top of this.
-    static let inset: CGFloat = 40
-    /// Total column, insets included.
+    static let inset: CGFloat = 36
+    /// Total column, insets included. Kept under `ShellLayout.dockWidth` at a 1000pt window
+    /// (500pt) on purpose — one point over and the column starts tracking the dock again,
+    /// which is what brought the reflow back last time.
     static var maxWidth: CGFloat { measure + inset * 2 }
 }
 

@@ -298,6 +298,36 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)
     }
 
+    /// A lead-in is only a lead-in if it is on screen BEFORE the work it leads into.
+    /// On the streaming path the `.done` action used to be dispatched from inside the
+    /// stream loop, so the whole run — a CF call plus the execute-log reveal — happened
+    /// against a bubble that was still blank, and "On it — putting that together now."
+    /// landed after the draft it was announcing. Asserted from inside `taskRunner`,
+    /// which is the moment the run actually begins.
+    func testLeadInIsOnScreenBeforeTheRunBegins() async {
+        var textWhenRunBegan: String?
+        var ref: CompanyStore?
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: "t1")))
+                continuation.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer,
+                             taskRunner: { _ in
+                                 textWhenRunBegan = ref?.chatMessages.first { $0.role == .companion }?.text
+                                 return RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1")
+                             },
+                             decisionExtractor: { _, _ in [] })
+        ref = s
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        XCTAssertTrue(textWhenRunBegan?.contains("On it") ?? false,
+                      "the lead-in must be written before the run starts, not after it finishes")
+    }
+
     /// The unrecoverable done+drafted race (final-review Important 1, chat path): `handleRunTaskId`'s
     /// `status == .codepetCanDo` guard runs BEFORE the `taskRunner` await inside
     /// `produceDraftInline`, so a mark-done that lands while the chat run is in flight must not be

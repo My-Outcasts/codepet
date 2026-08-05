@@ -795,6 +795,16 @@ final class CompanyStore: ObservableObject {
         var streamedText = ""
         var streamThrew = false
         var receivedDone = false
+        // The `.done` frame's actions, CAPTURED here and dispatched below — after the
+        // tail has written this reply's text. Dispatching from inside the loop (the
+        // shape this shipped with) ran every action against a bubble that was still
+        // empty, which broke both halves of an action's contract: `inlineActionTarget`
+        // rejects an empty reply, so a nav/setup chip fell to its standalone-row
+        // fallback and drew detached from the reply it belongs to; and a run's whole
+        // execute-log played out before the lead-in announcing it was written. The
+        // non-streaming fallback below always had this order right — now both paths
+        // share it.
+        var doneAction: ChatDoneAction?
         do {
             for try await event in chatStreamer(req) {
                 // Checked before touching state on every event: a switch mid-stream
@@ -812,10 +822,11 @@ final class CompanyStore: ObservableObject {
                     // (and nav/setup/remember) handling must fire here too —
                     // not just in the fallback below (previously the only
                     // place run_task_id ran, back when streaming usually
-                    // failed pre-deploy).
+                    // failed pre-deploy). Captured rather than dispatched: the
+                    // reply's own text is written by the tail, and every action
+                    // belongs to a reply that has already spoken.
                     receivedDone = true
-                    await handleDoneAction(action, cid: cid, language: language)
-                    guard companyId == cid else { return }
+                    doneAction = action
                 }
             }
         } catch {
@@ -861,6 +872,14 @@ final class CompanyStore: ObservableObject {
             }
         case .none:
             break
+        }
+        // Dispatched HERE, not from the `.done` case above: the reply now carries its
+        // text (streamed or lead-in), so a chip attaches to it instead of appending a
+        // detached row, and a run announces itself before it starts. `.fallback` has
+        // already dispatched its own action and left this nil.
+        if let doneAction {
+            await handleDoneAction(doneAction, cid: cid, language: language)
+            guard companyId == cid else { return }
         }
         // The run is NOT awaited. It writes into its own appended message, so it has
         // no claim on byte's turn: byte's typing dots clear, Send/New chat/switch/delete

@@ -175,17 +175,28 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.view, .tasks)
     }
 
-    /// The fallback still stands: a `nav` with no reply to attach to — an empty
-    /// transcript — keeps its own standalone message rather than being dropped.
-    func testNavWithNoReplyToAttachToStillAppendsItsOwnMessage() async {
+    /// A `nav` on a reply that carried ZERO chat text still rides the reply — the
+    /// lead-in the tail writes IS that reply, so the chip belongs inside its bubble.
+    ///
+    /// This is the shape the live CF actually sends when it calls `navigate` and says
+    /// nothing alongside it, and it used to draw the chip as a second, standalone row
+    /// under the lead-in: the action was dispatched from inside the stream loop, so
+    /// `inlineActionTarget` saw a placeholder that was still empty (its own non-empty
+    /// -text guard rejected it) and took the append fallback. Observed in the app,
+    /// Aug 5 — "On it — putting that together now." with a detached "Go to Company"
+    /// chip below it, twice in a row. The order the fallback path always used (write
+    /// the reply's text, THEN dispatch its actions) is now the order both paths use.
+    func testNavOnATextlessReplyRidesTheLeadInBubble() async {
         let nav = NavAction(destination: "tasks", target: nil)
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in XCTFail("fallback must not run on a successful stream"); return nil },
                              chatStreamer: Self.streamer(deltas: [], nav: nav))
         await s.hydrate(companyId: "u")
         await s.sendChat("where should I look?", language: .en)
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])   // no detached chip row
+        XCTAssertEqual(s.chatMessages.count, 2)
         XCTAssertEqual(s.chatMessages.last?.navChip, nav)
-        XCTAssertEqual(s.chatMessages.last?.text, "")
+        XCTAssertTrue(s.chatMessages.last?.text.contains("On it") ?? false)
     }
 
     /// `nav(department)` resolves `target` to a `DepartmentCatalog` key and opens

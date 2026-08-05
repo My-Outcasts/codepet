@@ -607,11 +607,20 @@ struct CopilotBubble: View {
     private func notedInline(_ facts: [RememberedFact]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(facts, id: \.topic) { fact in
+                // CLAMPED, and a capsule no longer: `statement` is whatever the model chose to
+                // remember, and when the Virtual Company files its brief that is several hundred
+                // words. Unclamped inside a Capsule it rendered as a wall of grey text taller
+                // than the answer it summarised (seen in the app, Aug 5). An acknowledgement is
+                // one line; the fact itself lives in Settings → Memory.
                 Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
                     .font(.pixelSystem(size: 10))
                     .foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(CodepetTheme.surface))
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(CodepetTheme.surface))
             }
         }
     }

@@ -43,7 +43,7 @@ struct VCRunCards: View {
 
     private func costRow(_ cost: Double) -> some View {
         Text(String(format: (lang == .vi ? "Phiên này tốn $%.3f" : "This run cost $%.3f"), cost))
-            .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
     }
 
     /// CONFLICT / BLOCKER / TENSION / ALIGNED are wire values, not founder-facing copy.
@@ -126,12 +126,12 @@ struct VCRunCards: View {
             VStack(alignment: .leading, spacing: 8) {
                 label(lang == .vi ? "CÂU HỎI THẬT" : "THE REAL QUESTION")
                 Text(routing.realQuestion)
-                    .font(CodepetTheme.inter(15, weight: .medium))
+                    .font(CodepetTheme.inter(16.5, weight: .semibold)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.primaryText)
                 ForEach(routing.agentMeta, id: \.agentId) { meta in
                     if let why = routing.reasonPerAgent[meta.agentId] {
                         Text("✓ \(displayName(meta)) — \(why)")
-                            .font(CodepetTheme.inter(13))
+                            .font(CodepetTheme.inter(14)).lineSpacing(6)
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
@@ -148,14 +148,14 @@ struct VCRunCards: View {
                     label(lang == .vi ? "KHÔNG MỜI, VÌ" : "NOT IN THE ROOM, BECAUSE")
                     ForEach(routing.excluded.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
                         Text("✗ \(roleName(entry.key)) — \(entry.value)")
-                            .font(CodepetTheme.inter(12))
+                            .font(CodepetTheme.inter(13.5)).lineSpacing(5)
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
                 if !routing.missingInfo.isEmpty {
                     Text((lang == .vi ? "Còn thiếu: " : "Missing: ")
                          + routing.missingInfo.joined(separator: "; "))
-                        .font(CodepetTheme.inter(12))
+                        .font(CodepetTheme.inter(13.5)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                 }
             }
@@ -178,11 +178,11 @@ struct VCRunCards: View {
                     // implies false precision.
                     confidenceDots(position.confidence)
                 }
-                Text(position.position).font(CodepetTheme.inter(14))
+                Text(position.position).font(CodepetTheme.inter(14.5)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                 Text((lang == .vi ? "Cái này khiến họ mất: " : "Costs their department: ")
                      + position.costToMyDept)
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 if let blocker = position.hardBlocker {
                     Text("🔒 " + blocker)
                         .font(CodepetTheme.inter(12, weight: .semibold))
@@ -211,7 +211,7 @@ struct VCRunCards: View {
                          + " · \(kindLabel(conflict.kind))")
                         .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    Text(conflict.reason).font(CodepetTheme.inter(13))
+                    Text(conflict.reason).font(CodepetTheme.inter(14)).lineSpacing(6)
                         .foregroundColor(CodepetTheme.bodyText)
                 }
             }
@@ -226,14 +226,14 @@ struct VCRunCards: View {
                 // round, and the second one vanished.
                 ForEach(Array(round.turns.enumerated()), id: \.offset) { _, turn in
                     Text("\(displayName(agentId: turn.agent)): \(turn.preciseDisagreement)")
-                        .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                        .font(CodepetTheme.inter(14)).lineSpacing(6).foregroundColor(CodepetTheme.bodyText)
                     Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                        .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                     // Contract rule 4: show each side's what_would_change_my_mind —
                     // it teaches that disagreement is settled by evidence, not authority.
                     Text((lang == .vi ? "Điều gì sẽ đổi ý họ: " : "What would change their mind: ")
                          + turn.whatWouldChangeMyMind)
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                        .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 }
             }
         }
@@ -247,29 +247,29 @@ struct VCRunCards: View {
                 label(verdict.planIsSound
                       ? (lang == .vi ? "NGƯỜI PHẢN BIỆN — ĐỒNG Ý" : "THE CHALLENGER — ENDORSES")
                       : (lang == .vi ? "NGƯỜI PHẢN BIỆN" : "THE CHALLENGER"))
-                Text(verdict.loadBearingAssumption).font(CodepetTheme.inter(14, weight: .medium))
+                Text(verdict.loadBearingAssumption).font(CodepetTheme.inter(14.5, weight: .medium)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.primaryText)
                 if verdict.planIsSound {
                     Text(lang == .vi ? "Đã kiểm — kế hoạch vững." : "Stress-tested — the plan holds.")
-                        .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                        .font(CodepetTheme.inter(14)).lineSpacing(6).foregroundColor(CodepetTheme.bodyText)
                 } else {
-                    Text(verdict.howItCouldBeFalse).font(CodepetTheme.inter(13))
+                    Text(verdict.howItCouldBeFalse).font(CodepetTheme.inter(14)).lineSpacing(6)
                         .foregroundColor(CodepetTheme.bodyText)
                 }
                 Text((lang == .vi ? "Cách kiểm rẻ nhất: " : "Cheapest test: ") + verdict.cheapestTest)
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 if !verdict.objections.isEmpty {
                     label(lang == .vi ? "CÁC PHẢN BÁC" : "OBJECTIONS")
                     ForEach(Array(verdict.objections.enumerated()), id: \.offset) { idx, objection in
                         Text("\(idx + 1). " + objection)
-                            .font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
+                            .font(CodepetTheme.inter(14)).lineSpacing(6).foregroundColor(CodepetTheme.bodyText)
                     }
                 }
                 Text((lang == .vi ? "Nếu thất bại: " : "If this fails: ") + verdict.failurePostMortem)
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 Text((lang == .vi ? "Ai không có trong phòng: " : "Who's not in the room: ")
                      + verdict.whoIsNotInTheRoom)
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
             }
         }
     }
@@ -278,21 +278,21 @@ struct VCRunCards: View {
         MessageCard(hue: CodepetTheme.accentPurple) {
             VStack(alignment: .leading, spacing: 8) {
                 label(lang == .vi ? "KHUYẾN NGHỊ" : "RECOMMENDATION")
-                Text(brief.recommendation).font(CodepetTheme.inter(14))
+                Text(brief.recommendation).font(CodepetTheme.inter(14.5)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                 HStack(spacing: 8) {
                     // Contract rule 7: confidence as dots, not a number.
                     confidenceDots(brief.confidence)
-                    Text(brief.confidenceReason).font(CodepetTheme.inter(12))
+                    Text(brief.confidenceReason).font(CodepetTheme.inter(13.5)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                 }
                 // Contract rule 3: show the_real_disagreement verbatim. No
                 // paraphrasing, no softening.
                 label(lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT")
-                Text(brief.theRealDisagreement).font(CodepetTheme.inter(13))
+                Text(brief.theRealDisagreement).font(CodepetTheme.inter(14)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                 label(lang == .vi ? "ĐÁNH ĐỔI CHỈ BẠN QUYẾT ĐƯỢC" : "THE TRADE-OFF ONLY YOU CAN MAKE")
-                Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(13))
+                Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                 if brief.unresolved {
                     // Contract rule 6: unresolved is a valid outcome, not an error —
@@ -304,7 +304,7 @@ struct VCRunCards: View {
                 }
                 label(lang == .vi ? "DỪNG NẾU" : "STOP IF")
                 ForEach(brief.killCriteria, id: \.self) { criterion in
-                    Text("· " + criterion).font(CodepetTheme.inter(13))
+                    Text("· " + criterion).font(CodepetTheme.inter(14)).lineSpacing(6)
                         .foregroundColor(CodepetTheme.bodyText)
                 }
                 Text((lang == .vi ? "Việc tiếp theo (\(brief.nextAction.owner)): "
@@ -312,7 +312,7 @@ struct VCRunCards: View {
                     .font(CodepetTheme.inter(13, weight: .medium))
                     .foregroundColor(CodepetTheme.primaryText)
                 Text((lang == .vi ? "Vẫn chưa biết: " : "Still unknown: ") + brief.whatWeDontKnow)
-                    .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 // The cost line is NOT here: a run that failed or was budget-stopped
                 // still cost the founder money and never reaches this card. It renders
                 // once, for every outcome, at the bottom of the stack (`costRow`).
@@ -339,7 +339,7 @@ struct VCRunCards: View {
 
     // Written for the founder by the backend — shown verbatim (contract).
     private func stoppedRow(_ reason: String) -> some View {
-        Text(reason).font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+        Text(reason).font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
     }
 
     // Contract: `error` is terminal, no `done` follows — this is the only signal
@@ -357,7 +357,7 @@ struct VCRunCards: View {
 
     private func errorRow(_ meta: VCAgentMeta, _ error: String) -> some View {
         Text("\(displayName(meta)): \(error)")
-            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+            .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
     }
 
     private func label(_ text: String) -> some View {

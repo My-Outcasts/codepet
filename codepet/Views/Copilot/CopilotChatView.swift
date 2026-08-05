@@ -460,15 +460,20 @@ struct CopilotBubble: View {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
 
-    /// Specialist handoff attribution (Task 7): when a message carries a
-    /// `companionId` (a department specialist led the turn), the header reads
-    /// "Name · Dept" and the avatar/hue switch to that specialist. A nil
-    /// `companionId` keeps the host companion's name, orb, and accent.
+    /// Who is speaking. "Codepet" for the product's own voice; a pet's name ONLY when that pet
+    /// is the one doing the work — a department specialist, carried on `companionId`.
+    ///
+    /// The founder's model, stated Aug 5: she chats with Codepet. Glitch, Nova, Luna and the
+    /// rest are department characters, not the assistant — so signing a general answer "Glitch"
+    /// named the wrong thing. (This reverses the reading I shipped earlier the same day, where
+    /// the header carried the CHOSEN companion's name. "The name appears when it responds" meant
+    /// when a PET responds, i.e. on a department's task, not on every reply.)
     private var headerName: String {
-        guard let id = message.companionId else { return companionName }
-        let name = PetCharacter.all[id]?.name ?? companionName
-        if let dept = message.deptName, !dept.isEmpty { return "\(name) · \(dept)" }
-        return name
+        guard let id = message.companionId, let pet = PetCharacter.all[id] else {
+            return CodepetBrand.name
+        }
+        if let dept = message.deptName, !dept.isEmpty { return "\(pet.name) · \(dept)" }
+        return pet.name
     }
     private var headerAccent: Color {
         guard let id = message.companionId else { return companionAccent }
@@ -725,7 +730,7 @@ struct CopilotBubble: View {
         return HStack(alignment: .top, spacing: 8) {
             CompanionOrb(size: 22, glow: false)
             VStack(alignment: .leading, spacing: 4) {
-                Text(companionName)
+                Text(CodepetBrand.name)
                     .font(CodepetTheme.inter(12.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                 MessageCard(hue: companionAccent) {

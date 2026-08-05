@@ -83,6 +83,17 @@ final class CompanyStore: ObservableObject {
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
     @Published var activeAgentRuns: [AgentRun] = []
+
+    /// A run started OUTSIDE chat — the Start button on the Overview beacon, Run on the Tasks
+    /// board, Run in a department, Run on a roadmap card. Keyed by task id so each surface can
+    /// render the agent working on the card the founder pressed.
+    ///
+    /// The chat path has shown its agent since the port (`produceDraftInline` → `ExecLogRow`),
+    /// but `runTask` showed nothing at all: it called the function, wrote the draft, and the only
+    /// signal was a button reading "Running…". So the most common way to run a task was the one
+    /// way that hid the agent doing it. Founder's model, stated Aug 5: any task from any
+    /// department runs through the agent-working UI, always, with that department's character.
+    @Published private(set) var taskRuns: [String: TaskRunProgress] = [:]
     /// True while a fan-out is in flight — serializes it against a normal chat turn
     /// and disables the composer (same busy model as a single run).
     @Published private(set) var isFanningOut: Bool = false
@@ -1131,10 +1142,16 @@ final class CompanyStore: ObservableObject {
 
     /// The specialist for a task's owning department, if it maps to a companion
     /// other than the host — used to attribute the run's producing row + draft.
+    /// The pet that runs this task, and the department it runs for.
+    ///
+    /// No "not if it is also the host" guard any more. That guard belongs to CHAT handoff, where
+    /// announcing a handoff to yourself is meaningless — but it was also stripping the department
+    /// character off RUNS: with Glitch as the founder's companion, every ops and legal task ran
+    /// with no pet at all, because Glitch is this map's ops/legal specialist. A run is always
+    /// performed BY a department, so it always shows that department's character.
     private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
         guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
-              let companionId = DepartmentCompanions.companionId(for: deptKey),
-              companionId != company.companionId else { return nil }
+              let companionId = DepartmentCompanions.companionId(for: deptKey) else { return nil }
         return (companionId, dept.name)
     }
 
@@ -1654,8 +1671,32 @@ final class CompanyStore: ObservableObject {
         runningTaskIds.insert(task.id)
         runError = nil
         let cid = companyId
+        // The agent, visible. Same script and same pacing as a chat run, so a task run looks
+        // the same wherever it was started from — and attributed to the department's own pet.
+        let specialist = taskSpecialist(for: task)
+        let steps = Self.execSteps(task: task, specialist: specialist,
+                                   decisionCount: company.decisions.count, language: language)
+        taskRuns[task.id] = TaskRunProgress(taskId: task.id,
+                                            companionId: specialist?.companionId,
+                                            deptName: specialist?.deptName,
+                                            steps: steps)
+        let reveal = Task { [cid] in
+            for idx in 0..<max(0, steps.count - 1) {
+                try? await Task.sleep(nanoseconds: Self.execStepNanos)
+                guard companyId == cid, taskRuns[task.id] != nil else { return }
+                taskRuns[task.id]?.steps[idx].done = true
+            }
+        }
         let result = await taskRunner(runRequest(for: task, language: language))
+        _ = await reveal.value
+        if companyId == cid, let count = taskRuns[task.id]?.steps.count {
+            for i in 0..<count { taskRuns[task.id]?.steps[i].done = true }
+            try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
+        }
         runningTaskIds.remove(task.id)
+        // Cleared on EVERY exit below, including the failure and account-switch paths — a strip
+        // left behind would claim an agent is still working on a task nobody is running.
+        taskRuns[task.id] = nil
         guard companyId == cid else { return }
         guard let deliverable = buildDeliverable(from: result, task: task) else {
             runError = language == .vi

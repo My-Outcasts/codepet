@@ -189,6 +189,7 @@ struct TasksView: View {
     /// --t-3); native had the two reversed.
     private func cardBody(_ t: RoadmapTask, status: TaskStatus) -> some View {
         Group {
+            VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     if let d = DepartmentCatalog.find(t.dept)?.name {
@@ -212,6 +213,13 @@ struct TasksView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
                 }
+            }
+            // The agent, on the card the founder pressed. `taskRuns` is populated by
+            // `CompanyStore.runTask`, so this appears wherever the run was started — before,
+            // a board run showed nothing but a button reading "Running…".
+            if let progress = companyStore.taskRuns[t.id] {
+                AgentRunStrip(progress: progress)
+            }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)

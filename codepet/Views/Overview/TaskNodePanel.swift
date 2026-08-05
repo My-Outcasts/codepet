@@ -127,6 +127,22 @@ struct TaskNodePanel: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Above the buttons, so the founder's eye lands on the agent rather than on a
+            // primary button that is now disabled mid-run.
+            if let progress = companyStore.taskRuns[liveTask.id] {
+                AgentRunStrip(progress: progress)
+            }
+            footerButtons
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .background(CodepetTheme.surface)
+        .overlay(alignment: .top) {
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+        }
+    }
+
+    private var footerButtons: some View {
         HStack(spacing: 10) {
             if !primaryActionIsDeadEnd {
                 Button {
@@ -173,11 +189,6 @@ struct TaskNodePanel: View {
                 .opacity(isRunning ? 0.45 : 1)
             }
             Spacer()
-        }
-        .padding(.horizontal, 22).padding(.vertical, 16)
-        .background(CodepetTheme.surface)
-        .overlay(alignment: .top) {
-            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
         }
     }
 

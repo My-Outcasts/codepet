@@ -104,6 +104,10 @@ private struct DepartmentTaskCard: View {
                 // so. Founder call, Aug 5, alongside the same clean-up on the Tasks board.
                 actionButton
             }
+            // Same agent, same script, on the row the founder pressed.
+            if let progress = companyStore.taskRuns[task.id] {
+                AgentRunStrip(progress: progress)
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))

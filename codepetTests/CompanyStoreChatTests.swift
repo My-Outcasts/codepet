@@ -50,6 +50,50 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.first?.text, "What should I set up in my environment?")
     }
 
+    /// End to end: a stream that completes with a wordless, actionless `done` retries on the
+    /// non-streaming path and shows THAT reply — exactly once. The shape measured in the app on
+    /// Aug 5, where companyChat returned `frame done — 63 bytes` and nothing else while the
+    /// Virtual Company room for the same turn came back complete.
+    func testAWordlessStreamRecoversViaTheNonStreamingRetry() async {
+        var senderCalls = 0
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { c in
+                c.yield(.done(model: "m", cacheHit: true, action: ChatDoneAction()))
+                c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in
+                                 senderCalls += 1
+                                 return CompanyChatReply(text: "Here is the real answer", runTaskId: nil)
+                             },
+                             chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("give me the launch checklist", language: .en)
+        XCTAssertEqual(senderCalls, 1)
+        XCTAssertEqual(s.chatMessages.last?.text, "Here is the real answer")
+        XCTAssertEqual(s.chatMessages.count, 2)
+    }
+
+    /// When the retry is ALSO wordless, the founder gets the admission rather than an empty
+    /// bubble — the copy that used to print instead of retrying now only appears once both
+    /// attempts have produced nothing.
+    func testWhenTheRetryIsAlsoWordlessTheFounderIsToldSo() async {
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { c in
+                c.yield(.done(model: "m", cacheHit: true, action: ChatDoneAction()))
+                c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "   ", runTaskId: nil) },
+                             chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertTrue(s.chatMessages.last?.text.contains("didn't have an answer") ?? false,
+                      "got: \(s.chatMessages.last?.text ?? "nil")")
+    }
+
     func testSendAppendsUserThenCompanionReply() async {
         let s = store { _ in CompanyChatReply(text: "Hello founder", runTaskId: nil) }
         await s.hydrate(companyId: "u")

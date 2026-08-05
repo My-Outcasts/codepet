@@ -61,14 +61,30 @@ final class ChatTailActionTests: XCTestCase {
                                              streamedText: "", action: withRun), .leadIn(.run))
     }
 
-    /// A well-formed reply that said nothing and offered nothing. The founder is owed an
-    /// admission, not a promise — so this case must be distinguishable from `.run`.
-    func testAnEmptyReplyWithNoActionAdmitsIt() {
+    /// A well-formed reply that said nothing and offered nothing is not an answer — it is a
+    /// turn that produced nothing, so it earns a RETRY rather than an admission. Measured in
+    /// the app on Aug 5: `frame done — 63 bytes`, zero deltas, `chars=0`, while the Virtual
+    /// Company room for the same turn came back complete. Printing the dead end was the old
+    /// behaviour; this asserts the recovery.
+    func testAWordlessActionlessReplyRetriesInsteadOfGivingUp() {
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
                                              streamedText: "", action: ChatDoneAction(runTaskId: nil)),
-                       .leadIn(.nothing))
+                       .fallback)
         XCTAssertEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
-                                             streamedText: "", action: nil), .leadIn(.nothing))
+                                             streamedText: "", action: nil), .fallback)
+    }
+
+    /// The retry must NOT extend to a wordless reply that DID something. That is the duplicate
+    /// -run bug this file was written to prevent: falling back after a valid `run_task` was
+    /// dispatched ran the task twice and appended two drafts.
+    func testAWordlessReplyThatActedIsNeverRetried() {
+        for action in [ChatDoneAction(runTaskId: "t1"),
+                       ChatDoneAction(nav: NavAction(destination: "tasks", target: nil)),
+                       ChatDoneAction(setup: SetupAction(category: "connectors", name: "GitHub")),
+                       ChatDoneAction(remember: [RememberedFact(topic: "beta", statement: "31 invited")])] {
+            XCTAssertNotEqual(ChatTailAction.decide(streamThrew: false, receivedDone: true,
+                                                    streamedText: "", action: action), .fallback)
+        }
     }
 
     func testDoneWithTextNeverFallsBack() {

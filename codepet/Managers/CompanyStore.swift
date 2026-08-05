@@ -876,7 +876,17 @@ final class CompanyStore: ObservableObject {
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = reply?.text ?? offline
+                // The retry can itself come back wordless (it is the same model on the same
+                // prompt). An empty bubble is worse than an honest one, so the admission that
+                // used to be printed instead of retrying is what fills it when the retry fails
+                // too — and only then.
+                let text = (reply?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    chatMessages[i].text = text
+                } else {
+                    chatMessages[i].text = reply == nil ? offline
+                                                        : Self.leadInCopy(.nothing, language: language)
+                }
             }
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
                                          setup: reply?.setup, remember: reply?.remember ?? [])
@@ -894,9 +904,13 @@ final class CompanyStore: ObservableObject {
         }
         // Dispatched HERE, not from the `.done` case above: the reply now carries its
         // text (streamed or lead-in), so a chip attaches to it instead of appending a
-        // detached row, and a run announces itself before it starts. `.fallback` has
-        // already dispatched its own action and left this nil.
-        if let doneAction {
+        // detached row, and a run announces itself before it starts.
+        //
+        // Skipped after `.fallback`, which has already dispatched the RETRY's own action. The
+        // streamed action that led here was empty by definition (that is what chose fallback),
+        // so dispatching it too would be a no-op — but an explicit no-op is a trap for whoever
+        // next adds a side effect to `handleDoneAction`.
+        if tail != .fallback, let doneAction {
             await handleDoneAction(doneAction, cid: cid, language: language)
             guard companyId == cid else { return }
         }

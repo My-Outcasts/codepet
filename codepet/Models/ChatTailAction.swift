@@ -50,7 +50,26 @@ enum ChatTailAction: Equatable {
         // only a run-task decision, and falling back there would fire a second
         // chatSender call and run the same task twice.
         guard streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .none }
+        // A `done` carrying neither text nor any action is not a reply — it is a turn that
+        // produced nothing, and the founder was being shown that as an answer ("I didn't have
+        // an answer for that"). Measured in the app on Aug 5: `frame done — 63 bytes`, zero
+        // delta frames, `chars=0`, while the Virtual Company room for the same turn came back
+        // complete. So retry once on the non-streaming path — a second, independent generation
+        // — instead of printing the dead end.
+        //
+        // Safe against the duplicate-run bug this file exists to prevent: the old defect was
+        // falling back when a VALID `run_task` had already been dispatched, which ran it twice.
+        // This falls back ONLY when nothing was dispatched at all, so there is no side effect
+        // to repeat. A run-task-only reply still takes `.leadIn(.run)` and never lands here.
+        if isEmpty(action) { return .fallback }
         return .leadIn(leadIn(for: action))
+    }
+
+    /// Nothing to show and nothing to do: no task, no destination, no toolkit item, no fact.
+    private static func isEmpty(_ action: ChatDoneAction?) -> Bool {
+        guard let action else { return true }
+        return action.runTaskId == nil && action.nav == nil && action.setup == nil
+            && action.remember.isEmpty
     }
 
     /// Precedence mirrors the CF's own: `run_task`/`navigate`/`setup_capability` are

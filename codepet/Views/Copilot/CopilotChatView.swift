@@ -903,34 +903,37 @@ enum ReviseKind: CaseIterable {
 /// dock ranges from `ShellLayout.dockMinWidth` (360pt) to well past `dockIdealMaxWidth`
 /// (560pt). A ratio has no such width.
 enum ChatColumn {
-    /// Margin as a share of the chat box — the ratio, before clamping.
+    /// A percentage was the wrong MODEL, not just the wrong number, and three rounds of
+    /// "still too wide" is what it took to see it. The references do not scale their margins
+    /// with the pane at all: ChatGPT's reading surfaces are `max-width: 800px` with `40px
+    /// 16px` padding — a fixed 16px gutter, with air appearing only once the viewport
+    /// outgrows the cap. That is why they look tight on a narrow window and generous on a
+    /// wide one, and it is already the house rule here: `CodepetTokens.pageColumnWidth` plus
+    /// a fixed 26pt page padding, measured from the same place in f05eff2.
     ///
-    /// 18% (the references' own figure) proved to be the wrong ratio for a panel this
-    /// narrow: at the 381pt dock the founder had dragged to, 18% is 69pt a side and leaves
-    /// 242pt of text, which reads as margin with a column of words in it. The references
-    /// earn 18% because their pane is ~800pt — twice this dock — so the same percentage
-    /// takes a much smaller share of the reading experience. 12% holds the proportional
-    /// behaviour that was asked for while staying reasonable at the narrow end.
-    /// The bracket this was narrowed to, since the number came from four rounds of looking:
-    /// at a 500pt dock, 36pt (7.2%) read as too close to the edge; at a 381pt dock, 46pt
-    /// (12%) read as too wide. 9% sits between them — 34pt at 381, 45pt at 500.
-    static let marginFraction: CGFloat = 0.09
+    /// So: a fixed inset that holds at every dock width the founder actually uses, and a cap
+    /// that turns a dragged-wide dock into gutter. At the 381pt dock that is 18pt a side
+    /// instead of the 34 a 9% ratio produced.
+    ///
+    /// 18 rather than ChatGPT's 16 because the dock carries a border and a scroll track that
+    /// a full-bleed web page does not.
+    static let inset: CGFloat = 18
 
-    /// Clamps. A pure ratio is wrong at both extremes: at the 360pt dock minimum a large
-    /// fraction squeezes the text to nothing, and on a dock dragged past 900pt an unbounded
-    /// one pushes the margins past any sensible gutter. Between them the ratio governs.
-    static let minMargin: CGFloat = 24
-    static let maxMargin: CGFloat = 112
-
-    /// The margin on each side inside a chat box of `box` points.
-    static func margin(forBox box: CGFloat) -> CGFloat {
-        min(max(box * marginFraction, minMargin), maxMargin)
-    }
+    /// The widest the words go. Past `measureCap + 2 × inset` (676pt) the surplus becomes
+    /// margin, so a dock dragged very wide reads like the references rather than like a
+    /// billboard.
+    static let measureCap: CGFloat = 640
 
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
     static func textWidth(forBox box: CGFloat) -> CGFloat {
-        max(0, (box - margin(forBox: box) * 2).rounded())
+        max(0, min(box - inset * 2, measureCap).rounded())
+    }
+
+    /// The margin each side — whatever the column leaves, split in two. Derived rather than
+    /// stated so it can never disagree with the column.
+    static func margin(forBox box: CGFloat) -> CGFloat {
+        max(0, (box - textWidth(forBox: box)) / 2)
     }
 }
 

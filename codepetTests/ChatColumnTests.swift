@@ -1,51 +1,41 @@
 import XCTest
 @testable import codepet
 
-/// The chat's reading column: a margin that is a SHARE of the chat box, clamped at both
-/// ends, with the words taking the rest.
+/// The chat's reading column: a fixed inset that holds at the widths the dock actually uses,
+/// plus a cap that turns a dragged-wide dock into gutter.
 ///
-/// Worth a suite of its own because this arithmetic took six passes to get right by eye.
-/// Four fixed-point attempts each read correctly at exactly one dock width and wrong either
-/// side of it; the fifth was a pure 18% ratio, right at the ~800pt pane it was measured from
-/// and too generous at the 381pt dock the founder actually had. Every failure looked
-/// reasonable in review — the numbers were all plausible. These assertions fail loudly.
+/// Worth a suite of its own because this took seven passes. Four fixed-point attempts were
+/// each right at exactly one dock width; then two percentages, which were the wrong MODEL —
+/// the references do not scale their gutters with the pane at all (ChatGPT: `max-width: 800px`
+/// with `40px 16px` padding), which is why they read tight when narrow and generous when wide.
+/// Every failure looked reasonable in review. These assertions fail loudly instead.
 final class ChatColumnTests: XCTestCase {
 
-    /// Between the clamps the ratio governs: 9% a side, so the words keep 82%.
-    func testMarginIsNinePercentASideThroughTheDocksUsualTravel() {
-        for box in [CGFloat(381), 420, 480, 500, 560, 700, 900] {
-            let share = ChatColumn.margin(forBox: box) / box
-            XCTAssertEqual(share, 0.09, accuracy: 0.005,
-                           "box \(box): margin \(ChatColumn.margin(forBox: box))pt is \(share * 100)% a side")
+    /// The inset holds across the dock's whole usual travel — `ShellLayout.dockMinWidth`
+    /// (360pt) up to the cap. This is the assertion the percentage model fails.
+    func testInsetHoldsAtEveryDockWidthBelowTheCap() {
+        for box in [CGFloat(360), 381, 420, 480, 500, 560, 620, 676] {
+            XCTAssertEqual(ChatColumn.margin(forBox: box), ChatColumn.inset, accuracy: 0.51,
+                           "box \(box): margin drifted to \(ChatColumn.margin(forBox: box))pt")
         }
     }
 
-    /// The point of a ratio: the column tracks the box instead of standing still. A fixed
-    /// measure passes the percentage test at ONE width and fails this one.
-    func testColumnGrowsWithTheBox() {
-        let narrow = ChatColumn.textWidth(forBox: 400)
-        let wide = ChatColumn.textWidth(forBox: 800)
-        XCTAssertGreaterThan(wide, narrow)
-        XCTAssertEqual(wide, narrow * 2, accuracy: 1)   // strictly proportional inside the band
+    /// Below the cap the words take everything the inset leaves, so widening the dock
+    /// lengthens the lines one point for one.
+    func testColumnAbsorbsWidthUpToTheCap() {
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 381), 381 - ChatColumn.inset * 2, accuracy: 1)
+        let a = ChatColumn.textWidth(forBox: 400)
+        let b = ChatColumn.textWidth(forBox: 500)
+        XCTAssertEqual(b - a, 100, accuracy: 1)
     }
 
-    /// Narrow end: the floor is a guard against a degenerate layout pass, not a working
-    /// case — at `ShellLayout.dockMinWidth` (360pt) the ratio still governs, and the floor
-    /// only bites well below any width the dock can actually be dragged to.
-    func testFloorOnlyBitesBelowTheDockMinimum() {
-        XCTAssertEqual(ChatColumn.margin(forBox: 360), 32.4, accuracy: 0.01)   // ratio still governs
-        XCTAssertEqual(ChatColumn.margin(forBox: 200), ChatColumn.minMargin)   // floor
-        XCTAssertEqual(ChatColumn.margin(forBox: 100), ChatColumn.minMargin)
-    }
-
-    /// Wide end: a dock dragged very wide must not become two enormous gutters. Past ~1244pt
-    /// the ceiling holds the margin and every further point goes to the words.
-    func testCeilingHoldsTheMarginOnAVeryWideDock() {
-        XCTAssertEqual(ChatColumn.margin(forBox: 1400), ChatColumn.maxMargin)
-        XCTAssertEqual(ChatColumn.margin(forBox: 1800), ChatColumn.maxMargin)
-        let a = ChatColumn.textWidth(forBox: 1400)
-        let b = ChatColumn.textWidth(forBox: 1600)
-        XCTAssertEqual(b - a, 200, accuracy: 1)   // surplus goes to the column, one for one
+    /// Past the cap the words stop growing and every further point becomes margin — the
+    /// behaviour that makes a wide dock read like the references rather than a billboard.
+    func testSurplusPastTheCapBecomesMargin() {
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 900), ChatColumn.measureCap)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 1400), ChatColumn.measureCap)
+        XCTAssertEqual(ChatColumn.margin(forBox: 900), (900 - ChatColumn.measureCap) / 2, accuracy: 0.51)
+        XCTAssertGreaterThan(ChatColumn.margin(forBox: 1400), ChatColumn.margin(forBox: 900))
     }
 
     /// Rounded to whole points — a fractional column width lands the text's leading edge
@@ -62,7 +52,8 @@ final class ChatColumnTests: XCTestCase {
     func testDegenerateBoxNeverGoesNegative() {
         XCTAssertEqual(ChatColumn.textWidth(forBox: 0), 0)
         XCTAssertEqual(ChatColumn.textWidth(forBox: -50), 0)
-        XCTAssertEqual(ChatColumn.textWidth(forBox: 40), 0)   // narrower than its own margins
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 30), 0)   // narrower than its own insets
+        XCTAssertGreaterThanOrEqual(ChatColumn.margin(forBox: 0), 0)
     }
 }
 

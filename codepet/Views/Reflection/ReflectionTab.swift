@@ -565,15 +565,10 @@ struct ReflectionTab: View {
         return "\(prefix) \(timeDisplay(session.startedAt))"
     }
 
-    /// Strips inline Markdown markers (**, *, `, leading #/>) from titles so they
-    /// read as plain prose in the list instead of showing raw syntax.
-    private func stripMarkdown(_ s: String) -> String {
-        var out = s
-            .replacingOccurrences(of: "*", with: "")
-            .replacingOccurrences(of: "`", with: "")
-        while let first = out.first, "#>".contains(first) { out.removeFirst() }
-        return out.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    /// Strips inline Markdown so titles read as plain prose instead of raw syntax.
+    /// Delegates to `PlainProse` — the Library needed the same thing, and two copies
+    /// of this would drift.
+    private func stripMarkdown(_ s: String) -> String { PlainProse.strip(s) }
 
     /// Turns a raw folder name into a tidy label for the sidebar header:
     /// hyphens/underscores become spaces, sentence-cased (leading capital, rest

@@ -1523,8 +1523,8 @@ final class CompanyStore: ObservableObject {
     /// Execute-log pacing (tunable; tests set to 0 to stay instant). `execStepNanos`
     /// is the delay between revealing each step; `execDoneBeatNanos` is the hold after
     /// the result lands so the completed log reads before collapsing to the draft.
-    static var execStepNanos: UInt64 = 420_000_000
-    static var execDoneBeatNanos: UInt64 = 260_000_000
+    static var execStepNanos: UInt64 = 420_000_000 * RunPacing.multiplier
+    static var execDoneBeatNanos: UInt64 = 260_000_000 * RunPacing.multiplier
 
     /// The execute-log steps for a run — a truthful description of the pipeline the
     /// deliverable goes through (the request genuinely carries the brief, decisions,

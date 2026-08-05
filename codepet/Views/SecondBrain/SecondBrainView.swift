@@ -18,6 +18,7 @@ struct SecondBrainView: View {
                     .font(CodepetTheme.subtitle()).foregroundColor(CodepetTheme.mutedText)
             }
             .padding(.horizontal, 24).padding(.top, 22)
+            .pageColumn()
 
             SecondBrainPanel(data: SecondBrainData(company: companyStore.company), lang: lang,
                              onOpenDept: { key in
@@ -25,7 +26,8 @@ struct SecondBrainView: View {
                                  companyStore.select(.company)
                              })
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.horizontal, 24).padding(.top, 14)
+                .padding(.horizontal, 24).padding(.top, CodepetTokens.Space.headToBody)
+                .pageColumn()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

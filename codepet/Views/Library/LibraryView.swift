@@ -46,6 +46,27 @@ private enum Lib {
         }
     }
 
+    /// Two letters standing in for the kind on the row badge.
+    ///
+    /// Language-independent on purpose: the badge is a glyph, and a Vietnamese
+    /// abbreviation of "live site" would not read as one. The full kind still appears
+    /// as the translated tag line beside it.
+    static func badge(_ k: DeliverableKind) -> String {
+        switch k {
+        case .site:      return "St"
+        case .screens:   return "Sc"
+        case .sheet:     return "Sh"
+        case .post:      return "Po"
+        case .email:     return "Em"
+        case .calendar:  return "Ca"
+        case .legal:     return "Lg"
+        case .dms:       return "Dm"
+        case .plan:      return "Pl"
+        case .checklist: return "Ch"
+        default:         return "Dr"
+        }
+    }
+
     /// LIB_TAG — the terse row tag per kind (EN + VI to match the app's style).
     static func tag(_ k: DeliverableKind, _ lang: AppLanguage) -> String {
         let vi = lang == .vi
@@ -70,7 +91,7 @@ private func pad2(_ n: Int) -> String { String(format: "%02d", n) }
 
 /// The Library = delivered work. Web-parity poster wall: item-count header, bucket
 /// filter chips, grouped by department (catalog order, unknown/none last), each row a
-/// per-type OutcomePreview + tag + title + 2-line desc + live/draft pip. Tapping a row
+/// per-row kind badge + tag + title + 2-line plain-prose desc + live/draft pip. Tapping a row
 /// opens the (unchanged) markdown detail sheet. Empty → an honest empty state.
 struct LibraryView: View {
     @EnvironmentObject var companyStore: CompanyStore
@@ -140,16 +161,19 @@ struct LibraryView: View {
                         .foregroundColor(CodepetTokens.faint)
                         .lineSpacing(13 * 0.6)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 44)
+                        .padding(.top, 20).padding(.horizontal, 26).padding(.bottom, 56)
                 } else {
                     filterBar
                     ForEach(Array(groups.enumerated()), id: \.offset) { i, g in
                         groupSection(g.dept, g.items)
-                            .padding(.bottom, i == groups.count - 1 ? 44 : 0)
+                            .padding(.bottom, i == groups.count - 1 ? CodepetTokens.Space.pageBottom : 0)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The column goes on the WHOLE stack, not on one branch: the masthead,
+            // the filter bar and every group have to share one measure or the title
+            // stops lining up with the cards under it.
+            .pageColumn()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: $selected) { DeliverableDetailView(deliverable: $0) }
@@ -195,7 +219,10 @@ struct LibraryView: View {
                 chip(b, count: counts[b] ?? 0, key: b)
             }
         }
-        .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 2)
+        // 34 above / 20 below: at 18/2 the filter row was welded to the first group
+        // label. ChatGPT's Library leaves ~85pt here; 20 + the body's 20 lands close
+        // enough for a desktop app without going web-marketing airy.
+        .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26).padding(.bottom, 20)
     }
 
     /// web `.lib-chip` — a quiet uppercase catalog tab that inverts to an ink pill
@@ -228,10 +255,18 @@ struct LibraryView: View {
                     .foregroundColor(CodepetTokens.faint)
                 Spacer()
             }
-            .padding(.top, 20).padding(.horizontal, 26).padding(.bottom, 14)
+            // 36 above / 10 below. At 20/14 the label sat nearly equidistant between
+            // the card above and the cards below, so it read as belonging to the wrong
+            // group — a proximity error, not a taste one.
+            .padding(.top, CodepetTokens.Space.sectionAbove).padding(.horizontal, 26).padding(.bottom, CodepetTokens.Space.sectionBelow)
 
             // web `.lib-grid { gap: 10px; padding: 0 26px }`
-            VStack(spacing: 10) {
+            // 12. Was 10, briefly 22 — but measuring ChatGPT showed its list rows sit
+            // back-to-back (61pt, hairline, ~1pt gap): the calm comes from a narrow
+            // measure and big SECTION gaps, not from spacing siblings out. These rows
+            // still carry card chrome, which needs a little separation, so 12 rather
+            // than 0 — see the note in the report about going to hairline rows.
+            VStack(spacing: CodepetTokens.Space.itemGap) {
                 ForEach(list) { d in
                     Button { selected = d } label: { LibraryRowView(deliverable: d) }
                         .buttonStyle(.plain)
@@ -276,37 +311,45 @@ private struct LibChip: View {
     }
 }
 
-/// One library poster row — OutcomePreview thumbnail + tag + title + 2-line desc + live/draft pip.
+/// One library row — a 40pt kind badge, tag, title, 2-line desc and a live/draft pip.
 struct LibraryRowView: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
     @Environment(\.colorScheme) private var scheme
     @State private var hovered = false
 
-    /// First 2 non-empty lines of the markdown body.
+    /// First 2 non-empty lines of the body, as plain prose.
+    ///
+    /// The body is Markdown and this preview renders text as-is, so without the strip
+    /// the card showed `**Palette**` and backticked hex codes verbatim.
     private var desc: String {
-        deliverable.body
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .prefix(2)
-            .joined(separator: " ")
+        PlainProse.strip(
+            deliverable.body
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .prefix(2)
+                .joined(separator: " "))
     }
 
     var body: some View {
         let k = deliverable.kind
         let live = Lib.isLive(k)
-        return HStack(spacing: 0) {
-            // web `.lt-prev { width: 300px; flex: none; padding: 16px }` with a hairline
-            // separating it from the copy — a full-height panel, not a thumbnail.
-            OutcomePreview(deliverable: deliverable, panel: true)
-                .frame(width: 300)
-                .frame(maxHeight: .infinity)
-                .overlay(alignment: .trailing) {
-                    Rectangle().fill(CodepetTokens.cardEdge).frame(width: 1)
-                }
+        return HStack(alignment: .top, spacing: 14) {
+            // A 40pt kind badge, not the old 300pt preview panel.
+            //
+            // That panel drew placeholder capsules — fake document lines that said
+            // nothing about the deliverable — so every row carried ~300x150pt of dead
+            // space while the rows themselves sat 10pt apart. Founder call, Aug 5: the
+            // air belongs BETWEEN the rows. The two-letter badge is the same vocabulary
+            // the department chips and the Environment cards already use.
+            Text(Lib.badge(k))
+                .font(CodepetTheme.inter(13, weight: .bold))
+                .foregroundColor(CodepetTheme.onAccent(Lib.accent(k)))
+                .frame(width: 40, height: 40)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Lib.accent(k)))
 
-            // web `.lt-info { padding: 15px 18px }`
             VStack(alignment: .leading, spacing: 0) {
                 Text(Lib.tag(k, lang).uppercased())
                     .font(CodepetTheme.inter(10, weight: .semibold))
@@ -351,10 +394,9 @@ struct LibraryRowView: View {
                 }
                 .padding(.top, 12)
             }
-            .padding(.horizontal, 18).padding(.vertical, 15)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(minHeight: 150)   // web `.lib-tile { min-height: 150px }`
+        .padding(.horizontal, 16).padding(.vertical, 15)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(CodepetTokens.cardRaised))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -364,220 +406,6 @@ struct LibraryRowView: View {
                 radius: hovered ? 26 : 2, y: hovered ? 10 : 1)
         .offset(y: hovered ? -2 : 0)   // `.lib-tile:hover { translateY(-2px) }`
         .onHover { h in withAnimation(.easeOut(duration: 0.14)) { hovered = h } }
-    }
-}
-
-/// A small, purpose-built visual preview of a deliverable's outcome, shown on the left
-/// of each poster row. Presentational only — static shapes tinted by the type's accent,
-/// plus a few short real strings pulled from the structured payload (or the body's first
-/// line when a kind has no native payload field). Ports the web OutcomePreview shapes.
-struct OutcomePreview: View {
-    let deliverable: Deliverable
-    /// true = the web `.lt-prev` full panel (square corners, 16pt padding, no border
-    /// of its own — the tile clips it); false = the small rounded thumbnail.
-    var panel = false
-
-    private var accent: Color { Lib.accent(deliverable.kind) }
-
-    private var firstLine: String {
-        deliverable.body
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty } ?? ""
-    }
-
-    var body: some View {
-        if panel {
-            Rectangle()
-                .fill(accent.opacity(0.12))
-                .overlay(inner.padding(16))
-        } else {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(accent.opacity(0.12))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(accent.opacity(0.25), lineWidth: 1))
-                .overlay(inner.padding(7))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-    }
-
-    @ViewBuilder private var inner: some View {
-        switch deliverable.kind {
-        case .site:      chrome
-        case .screens:   phones
-        case .plan:      steps
-        case .sheet:     sheetRows
-        case .post:      post
-        case .email:     email
-        case .calendar:  calendar
-        case .dms:       dms
-        case .checklist: checks
-        default:         docPage   // doc, legal, text, other → generic doc look
-        }
-    }
-
-    // browser chrome (site)
-    private var chrome: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle().fill(accent.opacity(0.5)).frame(width: 4, height: 4)
-                }
-                Capsule().fill(accent.opacity(0.2)).frame(height: 4).frame(maxWidth: .infinity)
-            }
-            Capsule().fill(accent.opacity(0.45)).frame(width: 22, height: 5)
-            Capsule().fill(accent.opacity(0.25)).frame(height: 3).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(width: 38, height: 3)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // two phone rectangles (screens)
-    private var phones: some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 3).fill(accent.opacity(0.25)).frame(width: 20, height: 34)
-            RoundedRectangle(cornerRadius: 3).fill(accent.opacity(0.45)).frame(width: 20, height: 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-    // numbered step bars (plan) — count follows payload.steps when present
-    private var steps: some View {
-        let n: Int = {
-            if let s = deliverable.payload?.steps, !s.isEmpty { return min(s.count, 3) }
-            return 3
-        }()
-        let widths: [CGFloat] = [40, 52, 30]
-        return VStack(alignment: .leading, spacing: 5) {
-            ForEach(0..<n, id: \.self) { i in
-                HStack(spacing: 5) {
-                    Text("\(i + 1)")
-                        .font(.pixelSystem(size: 8, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 12, height: 12)
-                        .background(Circle().fill(accent.opacity(0.7)))
-                    Capsule().fill(accent.opacity(0.3)).frame(width: widths[i], height: 4)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-
-    // spreadsheet rows (sheet)
-    private var sheetRows: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Capsule().fill(accent.opacity(0.55)).frame(height: 5).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(height: 4).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(height: 4).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(width: 34, height: 4)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // avatar + name + body text (post)
-    private var post: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Circle().fill(accent.opacity(0.5)).frame(width: 12, height: 12)
-                Capsule().fill(accent.opacity(0.35)).frame(width: 26, height: 4)
-            }
-            Text(firstLine)
-                .font(.pixelSystem(size: 8))
-                .foregroundColor(CodepetTheme.bodyText)
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // subject + 3 bars (email)
-    private var email: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(firstLine.isEmpty ? "Email" : firstLine)
-                .font(.pixelSystem(size: 8, weight: .semibold))
-                .foregroundColor(CodepetTheme.primaryText)
-                .lineLimit(1)
-            Capsule().fill(accent.opacity(0.25)).frame(height: 3).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(height: 3).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.25)).frame(width: 30, height: 3)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // 14-cell grid, cells 0/3/7/10 marked (calendar)
-    private var calendar: some View {
-        let marked: Set<Int> = [0, 3, 7, 10]
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7), spacing: 3) {
-            ForEach(0..<14, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(marked.contains(i) ? accent.opacity(0.6) : accent.opacity(0.15))
-                    .aspectRatio(1, contentMode: .fit)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-    // generic doc page (doc / legal / default)
-    private var docPage: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Capsule().fill(accent.opacity(0.5)).frame(width: 24, height: 5)
-            Capsule().fill(accent.opacity(0.22)).frame(height: 3).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.22)).frame(height: 3).frame(maxWidth: .infinity)
-            Capsule().fill(accent.opacity(0.22)).frame(width: 40, height: 3)
-            Capsule().fill(accent.opacity(0.22)).frame(height: 3).frame(maxWidth: .infinity)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // two chat bubbles, outgoing carries the first payload message (dms)
-    private var dms: some View {
-        let msg: String = {
-            if let m = deliverable.payload?.messages?.first?.msg, !m.isEmpty { return m }
-            return firstLine
-        }()
-        return VStack(alignment: .leading, spacing: 5) {
-            Capsule().fill(accent.opacity(0.22)).frame(width: 30, height: 10)
-            HStack {
-                Spacer(minLength: 0)
-                Text(msg)
-                    .font(.pixelSystem(size: 7))
-                    .foregroundColor(.white)
-                    .lineLimit(2)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(accent.opacity(0.7)))
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    // 4 check rows, done state from payload.items (checklist)
-    private var checks: some View {
-        let rows: [Bool] = {
-            if let items = deliverable.payload?.items, !items.isEmpty {
-                return items.prefix(4).map { $0.done }
-            }
-            return [true, true, false, false]
-        }()
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, done in
-                HStack(spacing: 5) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(done ? accent.opacity(0.7) : Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(accent.opacity(0.5), lineWidth: 1))
-                        .frame(width: 9, height: 9)
-                        .overlay(alignment: .center) {
-                            if done {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 5, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                    Capsule().fill(accent.opacity(done ? 0.3 : 0.18)).frame(height: 3).frame(maxWidth: .infinity)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 

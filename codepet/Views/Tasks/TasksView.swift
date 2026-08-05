@@ -83,7 +83,8 @@ struct TasksView: View {
             HStack(alignment: .top, spacing: 14) {
                 ForEach(TaskColumn.allCases, id: \.self) { col in column(col) }
             }
-            .padding(.top, 14).padding(.horizontal, 26).padding(.bottom, 18)
+            .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26).padding(.bottom, CodepetTokens.Space.pageBottom)
+            .pageColumn()
             .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -120,7 +121,7 @@ struct TasksView: View {
 
             // web `.kb-list { gap: 10px; padding: 2px 12px 14px; overflow-y: auto }`
             ScrollView {
-                VStack(spacing: 10) {
+                VStack(spacing: CodepetTokens.Space.itemGap) {
                     if items.isEmpty {
                         Text(lang == .vi ? "Trống" : "Nothing here")
                             .font(CodepetTheme.inter(12)).foregroundColor(CodepetTokens.faint)
@@ -141,7 +142,20 @@ struct TasksView: View {
 
     private func card(_ t: RoadmapTask) -> some View {
         let status = RoadmapEngine.status(for: t, in: companyStore.company.tasks)
-        return Button {
+        // A blocked card is NOT a disabled control — it is a card with nothing to tap.
+        //
+        // It used to be a `Button` with `.disabled(status == .blocked)`, and SwiftUI dims
+        // a disabled button's whole label: the department name, the task line AND the
+        // status pill all lost contrast at once, stacked on an already-dark card, until
+        // the entire "Up next" lane read as switched off (founder, Aug 5). Same defect
+        // class as the collapsed phase rails.
+        //
+        // Rendering it as a plain view keeps full contrast and still cannot be tapped —
+        // and it is the honest structure, since `.showBlocker` is a no-op on this board.
+        // "Locked" is carried by the "Needs earlier steps" pill and the absence of any
+        // hover affordance, not by draining the card of ink.
+        if status == .blocked { return AnyView(cardBody(t, status: status)) }
+        return AnyView(Button {
             let action = RoadmapDispatch.action(for: status,
                                                 isEngineering: t.dept == "eng",
                                                 projectLinked: companyStore.activeProjectLink != nil)
@@ -164,9 +178,18 @@ struct TasksView: View {
             case .none:            break
             }
         } label: {
-            // web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT
-            // leads in full ink (.kb-dept, 700) and the task is the supporting line
-            // (.kb-title, 500, --t-3); native had the two reversed.
+            cardBody(t, status: status)
+        }
+        .buttonStyle(.plain))
+    }
+
+    /// The card's contents, shared by the tappable and the blocked rendering.
+    ///
+    /// web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT leads in
+    /// full ink (.kb-dept, 700) and the task is the supporting line (.kb-title, 500,
+    /// --t-3); native had the two reversed.
+    private func cardBody(_ t: RoadmapTask, status: TaskStatus) -> some View {
+        Group {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     if let d = DepartmentCatalog.find(t.dept)?.name {
@@ -195,9 +218,5 @@ struct TasksView: View {
             .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)
             .cardChrome(radius: 12, dark: scheme == .dark)
         }
-        .buttonStyle(.plain)
-        // A locked card's tap is a dead end (`.showBlocker` no-ops on this board — see
-        // above), so don't offer it as a tappable affordance in the first place.
-        .disabled(status == .blocked)
     }
 }

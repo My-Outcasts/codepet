@@ -15,6 +15,57 @@ import SwiftUI
 /// itself the way the web does.
 enum CodepetTokens {
 
+    // MARK: Layout
+
+    /// Widest the reading column grows before it stops following the window.
+    ///
+    /// **One number for every page in every tab** (founder call, Aug 5) — a founder
+    /// tabbing between surfaces should never see the measure jump.
+    ///
+    /// Measured ChatGPT rather than guessing: `/library`, `/projects` and `/codex` all
+    /// use `max-width: 800px` with `40px 16px` padding — a 736-768px measure, identical
+    /// on all three, with a 28px title like ours. The lesson that holds is where the air
+    /// goes: their list rows sit back-to-back (61pt, hairline), and the calm comes from
+    /// short lines plus big SECTION gaps, not from spacing siblings out.
+    ///
+    /// The 800 itself does NOT transfer, and 880 was tried and read as tight (founder,
+    /// Aug 5). A ChatGPT library row is a filename, a date and a size; a Codepet row is
+    /// a 40%-wide cover image beside a name, a status pill, a task line and a count —
+    /// far more to seat across the measure. Walked up with the founder watching on a
+    /// 1470pt window: 880 read tight, 1040 snug, 1160 closer, 1280 settled — wide enough
+    /// for a cover-plus-columns row, still ~95pt of margin each side so the page reads as
+    /// a column rather than the full-bleed wall it started as (~1900). This is about the
+    /// ceiling on a 1470pt window: past it the margins stop looking deliberate. The
+    /// Environment grid holds three cards per row from 1040 up.
+    static let pageColumnWidth: CGFloat = 1280
+
+    /// The page rhythm — one scale for every page in every tab (founder call, Aug 5).
+    ///
+    /// Before this, each surface carried its own numbers: header-to-content was 14 on
+    /// Tasks, 18 on Company and Environment, 22 on Second Brain, and item gaps were
+    /// 10, 14 and 18. Nothing was wrong individually; together they read as four
+    /// pages built by four people.
+    ///
+    /// Measured from ChatGPT (`/library`, `/projects`, `/codex`): the air goes at
+    /// SECTION seams, not between siblings — their list rows sit back-to-back while
+    /// the column takes 40px of padding and the title-to-content run is ~190px.
+    enum Space {
+        /// Masthead to the first block of content.
+        static let headToBody: CGFloat = 34
+        /// Above a section label (eyebrow, group header).
+        static let sectionAbove: CGFloat = 36
+        /// Below a section label — deliberately much smaller than `sectionAbove` so the
+        /// label sits WITH the group it names. At 20/14 the Library's group header read
+        /// as belonging to the group above it.
+        static let sectionBelow: CGFloat = 10
+        /// Between sibling cards. Carded items need to read as separate objects, which
+        /// is why this is not ChatGPT's zero — their rows have no chrome. 14 is what
+        /// the Environment grid already used, so it is the house value.
+        static let itemGap: CGFloat = 14
+        /// Tail of a scrolling page, so the last row never sits on the window edge.
+        static let pageBottom: CGFloat = 56
+    }
+
     // MARK: Neutrals
 
     static let well      = Color.dyn("#f1efe9", "#26211a")   // --well
@@ -102,8 +153,26 @@ enum CodepetTokens {
 extension View {
     /// web `.vhead { padding: 22px 26px 0 }` — every view's masthead sits on the
     /// same optical margin, and the body blocks below carry their own 26px gutter.
+    ///
+    /// Also carries the centered column, because a masthead that ran edge to edge
+    /// while the body below it was capped would stop lining up with its own content.
     func viewHeadPadding() -> some View {
-        self.padding(.top, 22).padding(.horizontal, 26)
+        self.padding(.top, 32).padding(.horizontal, 26).pageColumn()
+    }
+
+    /// The reading column: capped, content left-aligned inside it, column centred in
+    /// the window.
+    ///
+    /// Claude's "Apps and extensions" and ChatGPT's "Plugins" both cap the column and
+    /// centre it rather than running the full width of the window — at ~1900pt the
+    /// Environment grid was fitting five cards per row and the eye had nowhere to
+    /// land. Founder call, Aug 5.
+    ///
+    /// **Header and body must both use this** (`viewHeadPadding()` already does), or
+    /// the title stops lining up with the cards under it.
+    func pageColumn() -> some View {
+        self.frame(maxWidth: CodepetTokens.pageColumnWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 
     /// A raised card: the theme's lifted fill, a visible edge, and `--sh-s`.

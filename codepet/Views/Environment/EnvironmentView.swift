@@ -29,18 +29,17 @@ struct EnvironmentView: View {
         VStack(alignment: .leading, spacing: 0) {
             header.viewHeadPadding()
             ScrollView {
-                // web `.envwrap { padding: 18px 26px 48px }`
+                // Spacing comes from `CodepetTokens.Space`, not the web's `.envwrap`
+                // numbers — one rhythm across every tab.
                 VStack(alignment: .leading, spacing: 0) {
-                    companionLine
                     linkedProjectSection
                     sectionEyebrow(lang == .vi ? "Đề xuất cho dự án của bạn" : "Recommended for your project")
                     recommendationGrid
                     sectionEyebrow(lang == .vi ? "Xem tất cả" : "Browse all")
-                        .padding(.top, 36)   // web inline `marginTop: 36`
                     browseAll
                 }
-                .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 48)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26).padding(.bottom, CodepetTokens.Space.pageBottom)
+                .pageColumn()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -56,12 +55,7 @@ struct EnvironmentView: View {
                 .font(CodepetTheme.inter(28, weight: .semibold))
                 .tracking(-0.5)
                 .foregroundColor(CodepetTheme.primaryText)
-            Text(lang == .vi
-                 ? "Thiết lập bộ công cụ của Codepet — kỹ năng, kết nối và trợ lý — để nó có thể làm nhiều việc hơn cho bạn."
-                 : "Set up Codepet's toolkit — skills, connectors, and agents — so it can do more of the work for you.")
-                .font(CodepetTheme.inter(15))
-                .foregroundColor(CodepetTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
+            introParagraph
             Button { askCompanion(about: nil) } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "questionmark.bubble")
@@ -101,33 +95,43 @@ struct EnvironmentView: View {
         Task { await companyStore.sendChat(seed, language: lang, founderAsk: seed) }
     }
 
-    /// web `.env-sech` — 10px, 1px tracking, uppercase, --t-4, 14px below.
+    /// web `.env-sech` — 10px, 1px tracking, uppercase, --t-4. Spacing is the shared
+    /// section rhythm: a large gap above, a small one below, so the label reads as
+    /// belonging to the group it introduces.
     private func sectionEyebrow(_ text: String) -> some View {
         Text(text.uppercased())
             .font(CodepetTheme.inter(10, weight: .regular))
             .tracking(1)
             .foregroundColor(CodepetTokens.faint)
-            .padding(.horizontal, 2).padding(.bottom, 14)
+            .padding(.top, CodepetTokens.Space.sectionAbove).padding(.horizontal, 2).padding(.bottom, CodepetTokens.Space.sectionBelow)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// web `.env-byte` — accent-tinted strip, 14pt radius, 13.5px copy, 24px below.
-    private var companionLine: some View {
-        HStack(alignment: .top, spacing: 11) {
-            CharacterImage(companyStore.company.companionId, size: 28)
-            companionText
-                .font(CodepetTheme.inter(13.5))
-                .foregroundColor(CodepetTheme.bodyText)
-                .lineSpacing(13.5 * 0.55)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(CodepetTheme.accentPurple.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .stroke(CodepetTheme.accentPurple.opacity(0.20), lineWidth: 1))
-        .padding(.top, 2).padding(.bottom, 24)
+    /// What the page is, then what the companion makes of it — ONE flowing paragraph.
+    ///
+    /// Three steps to get here, all founder calls on Aug 5: it began as an accent-tinted
+    /// full-width strip below the "Ask what to set up" button (web `.env-byte`), moved up
+    /// under the subtitle and lost its card, and now runs directly on from the subtitle
+    /// sentence instead of sitting on its own line.
+    ///
+    /// No sprite. An inline `Text(Image("char-…"))` was tried and is a trap: inline
+    /// sizing-to-the-line holds for SF Symbols, NOT for asset-catalog images, which
+    /// render at intrinsic size — the companion filled the page (founder caught it,
+    /// Aug 5). A leading `CharacterImage` sibling cannot work either, because a
+    /// paragraph will not flow around a sibling view, and flowing is the point.
+    ///
+    /// The voice still reads without a marker: "here's the toolkit **I'd** set up"
+    /// is plainly the companion talking, not the product describing itself.
+    private var introParagraph: some View {
+        let subtitle = lang == .vi
+            ? "Thiết lập bộ công cụ của Codepet — kỹ năng, kết nối và trợ lý — để nó có thể làm nhiều việc hơn cho bạn."
+            : "Set up Codepet's toolkit — skills, connectors, and agents — so it can do more of the work for you."
+        return (Text(subtitle) + Text("  ") + companionText)
+            .font(CodepetTheme.inter(15))
+            .foregroundColor(CodepetTheme.mutedText)
+            .lineSpacing(15 * 0.42)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // "Linked project" — the repo the coding agent edits, linked via ProjectLinker
@@ -170,8 +174,10 @@ struct EnvironmentView: View {
 
     /// The web bolds the stage inside the sentence (`.env-byte .txt b`).
     private var companionText: Text {
+        // 15 to match `introParagraph`'s size — a 13.5 bold span inside a 15pt
+        // paragraph reads as a rendering mistake rather than emphasis.
         let boldStage = Text(stageLabel)
-            .font(CodepetTheme.inter(13.5, weight: .semibold))
+            .font(CodepetTheme.inter(15, weight: .semibold))
             .foregroundColor(CodepetTheme.primaryText)
         if lang == .vi {
             let tail = needsYouCount > 0 ? " — bạn chỉ cần kết nối \(needsYouCount) tài khoản." : "."

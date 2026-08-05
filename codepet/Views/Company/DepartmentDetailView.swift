@@ -96,7 +96,12 @@ private struct DepartmentTaskCard: View {
                         .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.accentTeal)
                 }
                 .buttonStyle(.plain)
-            } else {
+            } else if status != .blocked {
+                // No action button on a blocked task — it had one, dimmed and unpressable
+                // (`.disabled(status == .blocked)`), which is a dead affordance: it reads
+                // as "there is something to do here, but not for you". There is nothing to
+                // do until an earlier task lands, and the status pill above already says
+                // so. Founder call, Aug 5, alongside the same clean-up on the Tasks board.
                 actionButton
             }
         }
@@ -126,7 +131,10 @@ private struct DepartmentTaskCard: View {
                 : AnyView(Capsule().fill(CodepetTheme.accentPurple)))
         }
         .buttonStyle(.plain)
-        .disabled(status == .blocked || running)
+        // Only the TRANSIENT disable remains. A running task's dimmed pill plus its
+        // spinner correctly reads as "working on it"; a blocked task simply has no
+        // button now, so `.blocked` no longer belongs in this condition.
+        .disabled(running)
     }
 
     private var buttonLabel: String {

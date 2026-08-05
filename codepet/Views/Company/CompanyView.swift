@@ -27,13 +27,18 @@ struct CompanyView: View {
             // can't express as a flex basis — measure the list width once and pass the
             // resolved cover width down to every row.
             GeometryReader { geo in
-                let cardWidth = max(0, geo.size.width - 52)   // 26pt gutter each side
+                // Measured on the COLUMN, not the window: the content is capped at
+                // `pageColumnWidth`, so a width taken straight off `geo` would make
+                // `coverWidth` ~70% of the card on a wide display instead of 40%.
+                let cardWidth = max(0, min(geo.size.width, CodepetTokens.pageColumnWidth) - 52)
                 ScrollView {
-                    // web `.deptlist { gap: 18px; padding: 18px 26px 44px }`
-                    VStack(spacing: 18) {
+                    // Spacing from `CodepetTokens.Space` rather than the web's
+                    // `.deptlist` numbers, so every tab shares one rhythm.
+                    VStack(spacing: CodepetTokens.Space.itemGap) {
                         ForEach(summaries) { s in row(s, coverWidth: cardWidth * 0.40) }
                     }
-                    .padding(.top, 18).padding(.horizontal, 26).padding(.bottom, 44)
+                    .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26).padding(.bottom, CodepetTokens.Space.pageBottom)
+                    .pageColumn()
                 }
             }
         }

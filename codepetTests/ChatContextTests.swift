@@ -87,5 +87,46 @@ final class ChatContextTests: XCTestCase {
         XCTAssertFalse(ctx.contains("Open tasks:"))
         XCTAssertFalse(ctx.contains("Departments:"))
         XCTAssertFalse(ctx.contains("Already-shipped work"))
+        XCTAssertFalse(ctx.contains("cannot run any roadmap task"))   // no roadmap, nothing to explain
+    }
+
+    // MARK: - "you cannot run anything this turn"
+
+    /// The state the founder hit on Aug 5: their own step sits in the first phase, so the
+    /// rolling window holds every later phase shut and NOTHING is `codepetCanDo`. The client
+    /// then sends an empty runnable list, the CF withholds `run_task` entirely, and "do the
+    /// task in here" cannot be answered with a run — so the grounding has to say so, and
+    /// name the step, or the founder is told "On it" about work that will never start.
+    func testGroundingSaysNothingIsRunnableAndNamesTheFounderStep() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Talk to 5 potential users", detail: "", phase: .find, who: .you),
+            RoadmapTask(id: "b", title: "Draft the landing page", detail: "", phase: .build, who: .does),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertTrue(ctx.contains("cannot run any roadmap task"))
+        XCTAssertTrue(ctx.contains("\"Talk to 5 potential users\" is the founder's own step"))
+        XCTAssertTrue(ctx.contains("do NOT say you are on it"))
+        XCTAssertTrue(ctx.contains("walk them through"))
+    }
+
+    /// The opposite state must stay silent: one runnable task means the CF gets `run_task`,
+    /// so telling the model it cannot run anything would be a lie in the other direction.
+    func testGroundingStaysSilentWhenSomethingIsRunnable() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Draft the landing page", detail: "", phase: .find, who: .does),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertFalse(ctx.contains("cannot run any roadmap task"))
+    }
+
+    /// Every task done — nothing runnable, but no founder step holding anything either. The
+    /// gate still fires (there is genuinely nothing to run) and must not invent a blocker.
+    func testGroundingOmitsTheBlockerClauseWhenNoStepIsHoldingTheWindow() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Interview users", detail: "", phase: .find, who: .you, done: true),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertTrue(ctx.contains("cannot run any roadmap task"))
+        XCTAssertFalse(ctx.contains("own step"))
     }
 }

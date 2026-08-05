@@ -196,7 +196,9 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])   // no detached chip row
         XCTAssertEqual(s.chatMessages.count, 2)
         XCTAssertEqual(s.chatMessages.last?.navChip, nav)
-        XCTAssertTrue(s.chatMessages.last?.text.contains("On it") ?? false)
+        // The lead-in this reply DID get: a nav chip is a way there, not work starting,
+        // so the run's "putting that together now" must not appear on it.
+        XCTAssertEqual(s.chatMessages.last?.text, "Sure — this takes you there.")
     }
 
     /// `nav(department)` resolves `target` to a `DepartmentCatalog` key and opens

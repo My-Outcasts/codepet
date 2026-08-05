@@ -98,6 +98,39 @@ enum ChatContext {
         return "Departments:\n" + lines.joined(separator: "\n")
     }
 
+    /// Says out loud that nothing on the roadmap is runnable this turn, and names the step
+    /// holding it shut — the companion's own words are the only place the founder can learn
+    /// this, and without it they don't.
+    ///
+    /// The CF is only given the `run_task` tool when the client sends a non-empty runnable
+    /// list (`companyChat.ts`: `...(runnable.length ? [RUN_TASK_TOOL] : [])`), and that list
+    /// is exactly the `codepetCanDo` tasks. So on a roadmap whose window is held shut by the
+    /// founder's own step, "do this task here" cannot be answered with a run no matter how
+    /// plainly it is asked — and what the founder got instead was "On it — putting that
+    /// together now." plus a chip to go somewhere else. Observed in the app, Aug 5.
+    ///
+    /// `runRefusalCopy` already holds the honest sentence for every un-runnable status, but
+    /// it only fires on a returned `run_task_id`, which this is precisely the case that can
+    /// never produce. So the refusal has to come from the reply itself, which means the model
+    /// has to know. Empty when at least one task IS runnable: then the tool is on the table
+    /// and nothing needs saying.
+    private static func composeRunnableGate(_ tasks: [RoadmapTask]) -> String {
+        guard !tasks.isEmpty,
+              !tasks.contains(where: { RoadmapEngine.status(for: $0, in: tasks) == .codepetCanDo })
+        else { return "" }
+        var lines: [String] = [
+            "You cannot run any roadmap task in this conversation right now — not one of them is runnable.",
+        ]
+        if let step = RoadmapGating.founderStep(in: tasks) {
+            let title: String = step.title
+            lines.append("\"\(title)\" is the founder's own step, and the roadmap stays shut until they finish it.")
+        }
+        lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do NOT say"
+            + " you are on it, and do not imply anything is being produced. Say which step is theirs and what it is"
+            + " holding up, then offer to walk them through that step.")
+        return lines.joined(separator: " ")
+    }
+
     /// `memoryEnabled` mirrors `FounderPrefs.memoryEnabled` and gates ONE of the two memory
     /// stores: the facts the founder's team was told (`decisions`). Off means the block is
     /// never composed, so nothing the founder asked to be forgotten leaks back in through
@@ -123,6 +156,10 @@ enum ChatContext {
         if !openTitles.isEmpty {
             parts.append("Open tasks: " + openTitles.joined(separator: "; ") + ".")
         }
+        // Directly after the task list it qualifies: the titles above are the ones the
+        // founder can see, and this is what the companion may and may not promise about them.
+        let gate = composeRunnableGate(tasks)
+        if !gate.isEmpty { parts.append(gate) }
         let deptBlock = composeDepartments(DepartmentCatalog.summaries(tasks: tasks))
         if !deptBlock.isEmpty { parts.append(deptBlock) }
         let priorBlock = composePriorWork(selectPriorWork(library, query: query))

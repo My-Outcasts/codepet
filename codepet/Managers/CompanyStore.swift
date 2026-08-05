@@ -847,7 +847,7 @@ final class CompanyStore: ObservableObject {
         // only carries it out. The room is no longer part of this decision: it owns its
         // own appended message, so byte's turn ends exactly as it did before the feature.
         switch ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
-                                     streamedText: streamedText) {
+                                     streamedText: streamedText, action: doneAction) {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
@@ -861,14 +861,12 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [])
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
-        case .leadIn:
-            // A `.done` was received but byte sent zero chat text (a
-            // run-task-only reply) — don't leave the placeholder blank.
-            let leadIn = language == .vi
-                ? "Được rồi — mình chuẩn bị việc đó ngay đây."
-                : "On it — putting that together now."
+        case .leadIn(let kind):
+            // A `.done` was received but byte sent zero chat text — don't leave the
+            // placeholder blank. WHICH line depends on what came back: only a run is
+            // work being started (see `ChatTailAction.LeadIn`).
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = leadIn
+                chatMessages[i].text = Self.leadInCopy(kind, language: language)
             }
         case .none:
             break
@@ -1140,6 +1138,33 @@ final class CompanyStore: ObservableObject {
 
     private func appendRunRefusal(_ text: String) {
         chatMessages.append(CopilotMessage(role: .companion, text: text))
+    }
+
+    /// The line that fills a reply which carried an action but no words of its own. Each
+    /// says only what the action it belongs to actually delivers: the chip below it opens
+    /// a place or offers a switch, and neither is work being produced. "On it — putting
+    /// that together now." is reserved for the one case where something IS being made.
+    private static func leadInCopy(_ kind: ChatTailAction.LeadIn, language: AppLanguage) -> String {
+        let vi = language == .vi
+        switch kind {
+        case .run:
+            return vi ? "Được rồi — mình chuẩn bị việc đó ngay đây."
+                      : "On it — putting that together now."
+        case .nav:
+            return vi ? "Được rồi — chỗ đó đây, bấm vào là tới."
+                      : "Sure — this takes you there."
+        case .setup:
+            return vi ? "Đây là thứ nên bật cho việc này."
+                      : "This is the one to turn on for that."
+        case .noted:
+            return vi ? "Mình ghi lại rồi." : "Noted."
+        case .nothing:
+            // A well-formed reply with no words and nothing on offer is a failure, and the
+            // founder is owed that rather than a promise. Says nothing about why, because
+            // this side of the wire does not know.
+            return vi ? "Mình chưa có câu trả lời nào ở đây — bạn nhắc lại giúp mình nhé?"
+                      : "I didn't have an answer for that — ask me again?"
+        }
     }
 
     /// Why byte cannot run this task, in the founder's terms. Deliberately names the

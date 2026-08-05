@@ -11,11 +11,11 @@ import XCTest
 /// reasonable in review — the numbers were all plausible. These assertions fail loudly.
 final class ChatColumnTests: XCTestCase {
 
-    /// Between the clamps the ratio governs: 12% a side, so the words keep 76%.
-    func testMarginIsTwelvePercentASideThroughTheDocksUsualTravel() {
+    /// Between the clamps the ratio governs: 9% a side, so the words keep 82%.
+    func testMarginIsNinePercentASideThroughTheDocksUsualTravel() {
         for box in [CGFloat(381), 420, 480, 500, 560, 700, 900] {
             let share = ChatColumn.margin(forBox: box) / box
-            XCTAssertEqual(share, 0.12, accuracy: 0.005,
+            XCTAssertEqual(share, 0.09, accuracy: 0.005,
                            "box \(box): margin \(ChatColumn.margin(forBox: box))pt is \(share * 100)% a side")
         }
     }
@@ -33,18 +33,18 @@ final class ChatColumnTests: XCTestCase {
     /// case — at `ShellLayout.dockMinWidth` (360pt) the ratio still governs, and the floor
     /// only bites well below any width the dock can actually be dragged to.
     func testFloorOnlyBitesBelowTheDockMinimum() {
-        XCTAssertEqual(ChatColumn.margin(forBox: 360), 43.2, accuracy: 0.01)   // ratio still governs
-        XCTAssertEqual(ChatColumn.margin(forBox: 150), ChatColumn.minMargin)   // floor
+        XCTAssertEqual(ChatColumn.margin(forBox: 360), 32.4, accuracy: 0.01)   // ratio still governs
+        XCTAssertEqual(ChatColumn.margin(forBox: 200), ChatColumn.minMargin)   // floor
         XCTAssertEqual(ChatColumn.margin(forBox: 100), ChatColumn.minMargin)
     }
 
-    /// Wide end: a dock dragged very wide must not become two enormous gutters. Past ~933pt
+    /// Wide end: a dock dragged very wide must not become two enormous gutters. Past ~1244pt
     /// the ceiling holds the margin and every further point goes to the words.
     func testCeilingHoldsTheMarginOnAVeryWideDock() {
-        XCTAssertEqual(ChatColumn.margin(forBox: 1200), ChatColumn.maxMargin)
-        XCTAssertEqual(ChatColumn.margin(forBox: 1600), ChatColumn.maxMargin)
-        let a = ChatColumn.textWidth(forBox: 1200)
-        let b = ChatColumn.textWidth(forBox: 1400)
+        XCTAssertEqual(ChatColumn.margin(forBox: 1400), ChatColumn.maxMargin)
+        XCTAssertEqual(ChatColumn.margin(forBox: 1800), ChatColumn.maxMargin)
+        let a = ChatColumn.textWidth(forBox: 1400)
+        let b = ChatColumn.textWidth(forBox: 1600)
         XCTAssertEqual(b - a, 200, accuracy: 1)   // surplus goes to the column, one for one
     }
 
@@ -63,5 +63,38 @@ final class ChatColumnTests: XCTestCase {
         XCTAssertEqual(ChatColumn.textWidth(forBox: 0), 0)
         XCTAssertEqual(ChatColumn.textWidth(forBox: -50), 0)
         XCTAssertEqual(ChatColumn.textWidth(forBox: 40), 0)   // narrower than its own margins
+    }
+}
+
+/// The chat's vertical rhythm. Only the speaker-change rule has logic worth testing; the
+/// rest are constants the views read directly.
+final class ChatRhythmTests: XCTestCase {
+
+    /// A turn boundary gets the extra gap; a continuation from the same speaker does not.
+    /// This is the rule that stopped a question and its answer sitting as close together as
+    /// two paragraphs from one speaker.
+    func testSpeakerChangeEarnsTheExtraGap() {
+        XCTAssertEqual(ChatRhythm.extraGap(after: .me, before: .companion), ChatRhythm.speakerChangeGap)
+        XCTAssertEqual(ChatRhythm.extraGap(after: .companion, before: .me), ChatRhythm.speakerChangeGap)
+    }
+
+    func testSameSpeakerStaysAContinuation() {
+        XCTAssertEqual(ChatRhythm.extraGap(after: .companion, before: .companion), 0)
+        XCTAssertEqual(ChatRhythm.extraGap(after: .me, before: .me), 0)
+    }
+
+    /// The first message has no predecessor — the transcript's top padding already spaces it,
+    /// so adding a turn gap would double it.
+    func testFirstMessageGetsNoExtraGap() {
+        XCTAssertEqual(ChatRhythm.extraGap(after: nil, before: .companion), 0)
+        XCTAssertEqual(ChatRhythm.extraGap(after: nil, before: .me), 0)
+    }
+
+    /// The references put ~1.6em under a line of body text; SwiftUI's lineSpacing adds to the
+    /// font's natural ~1.2em, so this is the arithmetic that has to hold for 13.5pt body.
+    func testLineSpacingLandsNearTheReferenceLineHeight() {
+        let body: CGFloat = 13.5
+        let lineHeight = body * 1.2 + ChatRhythm.lineSpacing
+        XCTAssertEqual(lineHeight / body, 1.6, accuracy: 0.1)
     }
 }

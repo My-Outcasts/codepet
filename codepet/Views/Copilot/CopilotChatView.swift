@@ -189,9 +189,16 @@ struct CopilotChatView: View {
     private func messageList(column: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(companyStore.chatMessages) { m in
-                        CopilotBubble(message: m).id(m.id)
+                VStack(alignment: .leading, spacing: ChatRhythm.messageGap) {
+                    // Enumerated for ONE reason: the gap above a message depends on who spoke
+                    // before it. A flat spacing gives a question and its answer the same
+                    // distance as two paragraphs from the same speaker, which is what made
+                    // the transcript read as one undivided block.
+                    ForEach(Array(companyStore.chatMessages.enumerated()), id: \.element.id) { idx, m in
+                        let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
+                        CopilotBubble(message: m)
+                            .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
+                            .id(m.id)
                         if companyStore.codingRun.run != nil,
                            companyStore.codingRunAnchorId == m.id {
                             CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
@@ -214,7 +221,8 @@ struct CopilotChatView: View {
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
                 .readingColumn(column)
-                .padding(.vertical, 12)
+                .padding(.top, ChatRhythm.transcriptTop)
+                .padding(.bottom, ChatRhythm.transcriptBottom)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
@@ -708,10 +716,10 @@ struct CopilotBubble: View {
                 Spacer(minLength: 24)
                 Text(message.text)
                     .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(3)
+                    .lineSpacing(ChatRhythm.lineSpacing)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(CodepetTheme.accentPurple))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -730,17 +738,17 @@ struct CopilotBubble: View {
             // `CompanionAvatar` shows the specialist's sprite for a handoff, the host orb
             // otherwise, and `headerName` carries the "Name · Dept" attribution — so the
             // one place the pet's own name appears is the moment it answers.
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: ChatRhythm.nameToProse) {
                 HStack(spacing: 8) {
                     CompanionAvatar(companionId: message.companionId, size: 22)
                     Text(headerName)
                         .font(CodepetTheme.inter(12.5, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                 }
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
                     Text(message.text)
                         .font(CodepetTheme.inter(13.5))
-                        .lineSpacing(3)
+                        .lineSpacing(ChatRhythm.lineSpacing)
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     inlineActions
@@ -903,7 +911,10 @@ enum ChatColumn {
     /// earn 18% because their pane is ~800pt — twice this dock — so the same percentage
     /// takes a much smaller share of the reading experience. 12% holds the proportional
     /// behaviour that was asked for while staying reasonable at the narrow end.
-    static let marginFraction: CGFloat = 0.12
+    /// The bracket this was narrowed to, since the number came from four rounds of looking:
+    /// at a 500pt dock, 36pt (7.2%) read as too close to the edge; at a 381pt dock, 46pt
+    /// (12%) read as too wide. 9% sits between them — 34pt at 381, 45pt at 500.
+    static let marginFraction: CGFloat = 0.09
 
     /// Clamps. A pure ratio is wrong at both extremes: at the 360pt dock minimum a large
     /// fraction squeezes the text to nothing, and on a dock dragged past 900pt an unbounded
@@ -920,6 +931,43 @@ enum ChatColumn {
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
     static func textWidth(forBox box: CGFloat) -> CGFloat {
         max(0, (box - margin(forBox: box) * 2).rounded())
+    }
+}
+
+/// The chat's vertical rhythm. Measured off the founder's reference screenshots as RATIOS,
+/// which survive not knowing the screenshots' scale: in both Claude and ChatGPT the body's
+/// line height is ~1.6× the font size, and the gap between one speaker's turn and the next
+/// is ~2.2–2.7 line heights. Ours was 1.42× and a flat 10pt between every message — which is
+/// the whole of the "too cramped, no breathing room" complaint, and the flat gap is the worse
+/// half: a question and its answer sat as close together as two paragraphs from one speaker,
+/// so the transcript read as one undivided block of text.
+///
+/// Values are for the 13.5pt body. Font size is deliberately unchanged: at this dock width a
+/// bigger face would cost characters per line, and the ask was for whitespace.
+enum ChatRhythm {
+    /// Extra leading between lines. SwiftUI's `lineSpacing` adds to the font's natural ~1.2em,
+    /// so 6 on 13.5pt lands at ~1.64em — the references' ratio.
+    static let lineSpacing: CGFloat = 6
+    /// Between consecutive messages from the SAME speaker.
+    static let messageGap: CGFloat = 12
+    /// Added on top of `messageGap` when the speaker changes, so a turn boundary reads as
+    /// one: 12 + 26 = 38pt, ~1.8 line heights.
+    static let speakerChangeGap: CGFloat = 26
+    /// The attribution row to the words it introduces.
+    static let nameToProse: CGFloat = 8
+    /// The words to the chip or card that belongs to them.
+    static let proseToAction: CGFloat = 12
+    /// Head of the transcript, so the first message doesn't touch the dock's chrome.
+    static let transcriptTop: CGFloat = 20
+    /// Tail of the transcript — larger than the head so the last message clears the composer.
+    static let transcriptBottom: CGFloat = 24
+
+    /// The extra gap above a message, given who spoke before it. Pure so the rule is
+    /// testable: nil `previous` is the first message in the transcript (no gap to add — the
+    /// transcript's own top padding does that job), and a repeated role is a continuation.
+    static func extraGap(after previous: CopilotRole?, before current: CopilotRole) -> CGFloat {
+        guard let previous, previous != current else { return 0 }
+        return speakerChangeGap
     }
 }
 

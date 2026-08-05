@@ -861,11 +861,21 @@ enum ReviseKind: CaseIterable {
 /// taste call and this is the only place they live.
 ///
 /// Founder call, Aug 5, referencing ChatGPT and Claude.
+/// Both numbers are calibrated against the references rather than guessed. Measured off
+/// the founder's own screenshots at 2×: in an ~800pt pane, Claude runs a ~490pt text
+/// measure with ~159pt gutters, ChatGPT ~518pt with ~150pt. So the target is a measure
+/// near 520pt with generous air — and the first attempt at this (700pt total, 24pt inset)
+/// missed for a reason worth writing down: the dock is ~478pt, NARROWER than the
+/// references' measure, so a 700pt cap never bound and the 24pt inset was the whole margin.
+/// At a dock this size the air has to come out of the inset.
 private enum ChatColumn {
-    /// Total column width, insets included — text measure is this minus 2×`inset`.
-    static let maxWidth: CGFloat = 700
-    /// Gap between the words and the dock's edge, on both sides.
-    static let inset: CGFloat = 24
+    /// The words themselves, capped. Widening the dock past this turns into margin.
+    static let measure: CGFloat = 520
+    /// Gap between the words and the dock's edge, on both sides. The only thing standing
+    /// between the prose and the panel edge at the dock's default width.
+    static let inset: CGFloat = 36
+    /// Total column, insets included.
+    static var maxWidth: CGFloat { measure + inset * 2 }
 }
 
 private extension View {

@@ -1245,10 +1245,18 @@ final class CompanyStore: ObservableObject {
         }
         try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
         guard companyId == cid else { return false }
+        // The finished log, carried onto the draft rather than thrown away with the producing
+        // row. The web keeps it as a "▸ What Nova did · N steps" disclosure on the deliverable
+        // card (inline-run transparency, web #71), and the native port dropped it: the steps
+        // died with `removeAll` below and the draft was appended with none, so how the work
+        // happened was visible for four seconds and then gone. Read back from the message
+        // rather than from `steps`, so it reflects the completed state that was on screen.
+        let finishedSteps = chatMessages.first { $0.id == producingId }?.execSteps
         chatMessages.removeAll { $0.id == producingId }
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
-                                               companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                               companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                               execSteps: finishedSteps))
             // Reflect the run on the roadmap so the task leaves the "next moves" set
             // and can't be re-run into a duplicate draft (mirrors the board runTask).
             if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {

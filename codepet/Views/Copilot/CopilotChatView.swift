@@ -431,6 +431,8 @@ struct CopilotBubble: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @State private var showDetail = false
+    /// Expansion of the finished run's "What <Name> did" log on a draft card.
+    @State private var showSteps = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
@@ -758,6 +760,52 @@ struct CopilotBubble: View {
         }
     }
 
+    /// The finished run's steps, collapsed behind a disclosure on the deliverable card.
+    /// Deliberately quiet: it is a receipt, not the headline — the deliverable is. Named after
+    /// the specialist who did the work (`headerName` carries "Nova · Marketing", so just the
+    /// name here), matching the web's "What Nova did".
+    private func whatItDid(_ steps: [ExecStep]) -> some View {
+        let who = PetCharacter.all[message.companionId ?? companyStore.company.companionId]?.name ?? "Codepet"
+        return VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.easeInOut(duration: 0.15)) { showSteps.toggle() } } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: showSteps ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                    Text(lang == .vi ? "\(who) đã làm gì · \(steps.count) bước"
+                                     : "What \(who) did · \(steps.count) steps")
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                .hoverAffordance(Capsule())
+            }
+            .buttonStyle(.plain)
+            if showSteps {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(steps) { step in
+                        // Same rule the live log uses (`ExecLogRow.stepRow`): a checkpoint is
+                        // recognised by its label, not by a field. Every step is done by the
+                        // time this renders, so the checkpoint's gold is the only distinction
+                        // left worth drawing.
+                        let isCheckpoint = step.label.lowercased().hasPrefix("checkpoint")
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: isCheckpoint ? "circle.fill" : "checkmark")
+                                .font(.system(size: isCheckpoint ? 6 : 8, weight: .bold))
+                                .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.accentPurple)
+                                .frame(width: 10, height: 12)
+                            Text(step.label)
+                                .font(.pixelSystem(size: 10))
+                                .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.mutedText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.leading, 2)
+            }
+        }
+    }
+
     private func draftCard(_ d: Deliverable) -> some View {
         HStack {
             CodepetCard {
@@ -777,6 +825,16 @@ struct CopilotBubble: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { showDetail = true }
+
+                    // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity
+                    // (inline-run transparency): the live execute-log collapses onto the
+                    // finished deliverable instead of vanishing with it, so "how did it get
+                    // this?" is answerable after the fact and not only during the four seconds
+                    // the run was on screen. Absent → nothing renders, so a draft from the
+                    // board (no chat run, no steps) is unchanged.
+                    if let steps = message.execSteps, !steps.isEmpty {
+                        whatItDid(steps)
+                    }
 
                     if message.draftApproved {
                         HStack(spacing: 5) {

@@ -14,6 +14,7 @@ struct OverviewChromeRow: View {
     @State private var pinging = false
 
     /// The two cards sit side by side, each ~HUD-sized. The row is capped so they stay small.
+    private let panelW: CGFloat = 430
 
     private var pct: Int { RoadmapEngine.progressPercent(tasks) }
     /// The beacon plus up to two more moves, one per department. `suggestedNext` guarantees
@@ -43,17 +44,9 @@ struct OverviewChromeRow: View {
                 progressCard
                 if let b = beacon { beaconCard(b) }
             }
-            // Full width, and NO Spacer between the pair and the KEY. The pair used to be
-            // capped at a fixed 430pt with a Spacer pushing the legend to the far edge, which
-            // left a growing void in the middle of the row — ~235pt of nothing at the founder's
-            // window width. Founder call, Aug 5.
-            //
-            // The Spacer had to go rather than just the cap: a `maxWidth: .infinity` frame and a
-            // Spacer are both flexible, so SwiftUI would have split the leftover between them
-            // and the cards would have reached only half way. With the Spacer gone the pair
-            // takes everything the KEY's intrinsic width does not.
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: panelW, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
             key
         }
     }

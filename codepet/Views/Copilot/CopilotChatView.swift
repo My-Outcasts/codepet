@@ -61,8 +61,9 @@ struct CopilotChatView: View {
                 messageList
                 // No rule above the composer — it carries its own bordered container,
                 // so the seam was redundant chrome. Matches the header's no-divider
-                // direction: the chat runs edge to edge inside the dock.
-                composer.padding(12)
+                // direction. It shares the transcript's reading column, so the composer
+                // and the words above it start and end on the same two vertical lines.
+                composer.readingColumn().padding(.bottom, 12)
             }
         }
         .frame(maxHeight: .infinity)
@@ -203,8 +204,8 @@ struct CopilotChatView: View {
                     // static typingRow. Generic label (no single-run step source here).
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .readingColumn()
+                .padding(.vertical, 12)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
@@ -843,5 +844,39 @@ enum ReviseKind: CaseIterable {
         case (.punchier, .vi): return "Làm ấn tượng hơn"
         case (.punchier, _): return "Make it punchier"
         }
+    }
+}
+
+// MARK: - The chat's reading column
+
+/// The transcript and the composer share one measured column, the way ChatGPT's and
+/// Claude's do: inset from the dock's edges, capped at a comfortable line length, and
+/// centred in whatever width is left.
+///
+/// Why a cap and not just padding: the dock is user-resizable, so padding alone means the
+/// line length grows with the window and a wide dock produces 140-character lines that the
+/// eye loses its place in. Capping the measure turns extra dock width into margin instead.
+/// This landed right after the reply lost its bubble — un-carding the prose removed the
+/// last thing bounding it, and it ran the full width of the panel. Both numbers are a
+/// taste call and this is the only place they live.
+///
+/// Founder call, Aug 5, referencing ChatGPT and Claude.
+private enum ChatColumn {
+    /// Total column width, insets included — text measure is this minus 2×`inset`.
+    static let maxWidth: CGFloat = 700
+    /// Gap between the words and the dock's edge, on both sides.
+    static let inset: CGFloat = 24
+}
+
+private extension View {
+    /// Inset, capped and centred. Two frames, in this order: the first bounds the content
+    /// at the column width (left-aligned inside it, so a companion reply and a right-hand
+    /// founder pill both anchor to the same edges), the second expands to the available
+    /// width and centres that column in it.
+    func readingColumn() -> some View {
+        self
+            .padding(.horizontal, ChatColumn.inset)
+            .frame(maxWidth: ChatColumn.maxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 }

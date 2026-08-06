@@ -53,6 +53,9 @@ struct CopilotMessage: Identifiable, Equatable {
     /// fat-struct/if-chain pattern rather than an enum refactor, per
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
     var vcRun: VirtualCompanyRunState?
+    /// A run started from a surface and offered here before it happens — see `RunProposal`.
+    /// `actionConsumed` hides the button once pressed, the same way it does for `firstRunAction`.
+    var runProposal: RunProposal?
 
     /// `createdAt` is injectable and defaults to now.
     ///
@@ -70,7 +73,8 @@ struct CopilotMessage: Identifiable, Equatable {
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
-         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil) {
+         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
+         runProposal: RunProposal? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -89,5 +93,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.deptName = deptName
         self.execSteps = execSteps
         self.vcRun = vcRun
+        self.runProposal = runProposal
     }
 }

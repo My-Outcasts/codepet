@@ -84,16 +84,6 @@ final class CompanyStore: ObservableObject {
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
     @Published var activeAgentRuns: [AgentRun] = []
 
-    /// A run started OUTSIDE chat — the Start button on the Overview beacon, Run on the Tasks
-    /// board, Run in a department, Run on a roadmap card. Keyed by task id so each surface can
-    /// render the agent working on the card the founder pressed.
-    ///
-    /// The chat path has shown its agent since the port (`produceDraftInline` → `ExecLogRow`),
-    /// but `runTask` showed nothing at all: it called the function, wrote the draft, and the only
-    /// signal was a button reading "Running…". So the most common way to run a task was the one
-    /// way that hid the agent doing it. Founder's model, stated Aug 5: any task from any
-    /// department runs through the agent-working UI, always, with that department's character.
-    @Published private(set) var taskRuns: [String: TaskRunProgress] = [:]
     /// True while a fan-out is in flight — serializes it against a normal chat turn
     /// and disables the composer (same busy model as a single run).
     @Published private(set) var isFanningOut: Bool = false
@@ -1664,6 +1654,43 @@ final class CompanyStore: ObservableObject {
     /// library — the deliverable is copied there only on approve. Dedupe: a task already
     /// drafted & awaiting approval is not re-run (mirrors web's "you already have a
     /// draft"), so repeat taps never duplicate work. Fail-open + account-guarded.
+    /// Offer a surface-initiated run in chat, and wait for the founder to confirm it.
+    ///
+    /// Every `Start`/`Run` control routes here rather than to `runTask`. Web parity, verified
+    /// live Aug 6: clicking a roadmap card opens the copilot and PROPOSES the run; only the
+    /// proposal's own button spends anything. See `RunProposal` for why the step exists.
+    func proposeRun(_ task: RoadmapTask, language: AppLanguage) {
+        guard !runningTaskIds.contains(task.id) else { return }
+        if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
+           company.tasks[i].done || company.tasks[i].drafted { return }
+        // A second tap on the same card must not stack a second proposal — the founder would
+        // confirm one and be left with an orphan offering to run work that is already drafted.
+        guard !chatMessages.contains(where: {
+            $0.runProposal?.taskId == task.id && !$0.actionConsumed
+        }) else { dockCollapsed = false; return }
+        let specialist = taskSpecialist(for: task)
+        let proposal = RunProposal(taskId: task.id, title: task.title,
+                                   deptName: specialist?.deptName,
+                                   companionId: specialist?.companionId)
+        // The host proposes; the specialist does the work. Matches the web, where Null offers
+        // and Luna runs it — so no `companionId` here, deliberately.
+        chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
+                                           runProposal: proposal))
+        dockCollapsed = false
+        flushActiveThread()
+    }
+
+    /// Accept a proposal and run it. Consumes the button first, so a double-press cannot start
+    /// the same run twice even before `runningTaskIds` is set inside `runTask`.
+    func confirmRun(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let proposal = chatMessages[i].runProposal,
+              !chatMessages[i].actionConsumed,
+              let task = company.tasks.first(where: { $0.id == proposal.taskId }) else { return }
+        chatMessages[i].actionConsumed = true
+        await runTask(task, language: language)
+    }
+
     func runTask(_ task: RoadmapTask, language: AppLanguage) async {
         guard !runningTaskIds.contains(task.id) else { return }
         if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
@@ -1671,51 +1698,29 @@ final class CompanyStore: ObservableObject {
         runningTaskIds.insert(task.id)
         runError = nil
         let cid = companyId
-        // The agent, visible. Same script and same pacing as a chat run, so a task run looks
-        // the same wherever it was started from — and attributed to the department's own pet.
-        let specialist = taskSpecialist(for: task)
-        let steps = Self.execSteps(task: task, specialist: specialist,
-                                   decisionCount: company.decisions.count, language: language)
-        taskRuns[task.id] = TaskRunProgress(taskId: task.id,
-                                            companionId: specialist?.companionId,
-                                            deptName: specialist?.deptName,
-                                            steps: steps)
-        let reveal = Task { [cid] in
-            for idx in 0..<max(0, steps.count - 1) {
-                try? await Task.sleep(nanoseconds: Self.execStepNanos)
-                guard companyId == cid, taskRuns[task.id] != nil else { return }
-                taskRuns[task.id]?.steps[idx].done = true
-            }
-        }
-        let result = await taskRunner(runRequest(for: task, language: language))
-        _ = await reveal.value
-        if companyId == cid, let count = taskRuns[task.id]?.steps.count {
-            for i in 0..<count { taskRuns[task.id]?.steps[i].done = true }
-            try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
-        }
+        // The run plays in the copilot, as the full execute-log — the same card a chat-initiated
+        // run has always shown (`produceDraftInline` → `ExecLogRow`), with the deliverable
+        // collapsing out of it into an Approve/Redo card.
+        //
+        // It used to publish a one-line `AgentRunStrip` onto whichever card was pressed instead.
+        // That was my call and it was wrong: the theater IS the feature the founder asked for,
+        // and shrinking it on four of the five run surfaces meant the feature mostly wasn't
+        // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
+        // answer to one question.
+        dockCollapsed = false
+        let produced = await produceDraftInline(for: task, cid: cid, language: language)
         runningTaskIds.remove(task.id)
-        // Cleared on EVERY exit below, including the failure and account-switch paths — a strip
-        // left behind would claim an agent is still working on a task nobody is running.
-        taskRuns[task.id] = nil
         guard companyId == cid else { return }
-        guard let deliverable = buildDeliverable(from: result, task: task) else {
+        // `produceDraftInline` owns the draft, the task write and its own honest failure bubble,
+        // so there is nothing left to build here. `runError` still fires for the surfaces that
+        // show it inline.
+        guard produced else {
             runError = language == .vi
                 ? "Không tạo được \"\(task.title)\" — thử lại nhé."
                 : "Couldn't generate \"\(task.title)\" — try again."
             return
         }
-        guard let i = company.tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        // The `runningTaskIds` guard above ran BEFORE the `taskRunner` await, so
-        // mark-complete ("I already did this") may have set `done = true` on this task
-        // while the run was in flight — `runningTaskIds` only blocks a second RUN from
-        // starting, not the panel's mark-done. Writing `drafted` onto a done task
-        // strands the draft forever: `RoadmapEngine.status` short-circuits to `.done`
-        // before ever consulting `drafted`, `approveTask` refuses (its own `!done`
-        // guard), and the library never receives it — so skip the write when done wins.
-        guard !company.tasks[i].done else { return }
-        company.tasks[i].draft = deliverable
-        company.tasks[i].drafted = true
-        if let cid { _ = await tasksSaver(cid, company.tasks) }
+        flushActiveThread()
     }
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,

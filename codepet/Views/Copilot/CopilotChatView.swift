@@ -523,11 +523,55 @@ struct CopilotBubble: View {
                 actionButton(action)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let proposal = message.runProposal {
+            runProposalCard(proposal)
         } else if let gap = message.interview, !message.interviewAnswered {
             interviewCard(gap)
         } else {
             textBubble
         }
+    }
+
+    /// A run the founder started from a surface, offered before it happens.
+    ///
+    /// The sentence stays a plain reply — the proposal is Codepet talking, not a widget — and the
+    /// only chrome is the confirm button under it. Once pressed, `actionConsumed` retires the
+    /// button and the sentence remains as the record of what was asked for, so the transcript
+    /// reads "we agreed to do this" and then shows the run.
+    @ViewBuilder private func runProposalCard(_ proposal: RunProposal) -> some View {
+        VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+            textBubble
+            if message.actionConsumed {
+                // Retired, not removed: a vanished button loses the fact a run was confirmed.
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(lang == .vi ? "Đã bắt đầu" : "Started")
+                }
+                .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            } else {
+                Button {
+                    Task { await companyStore.confirmRun(messageId: message.id, language: lang) }
+                } label: {
+                    Text(proposal.buttonLabel(lang))
+                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                        .hoverAffordance(Capsule())
+                }
+                .buttonStyle(.plain)
+                .cursorOnHover(.pointingHand)
+                // A run is the one action here that spends credits, so it must not be
+                // pressable while another run or a chat turn is already in flight.
+                .disabled(companyStore.isStreaming || companyStore.isCompanionTyping
+                          || companyStore.runningTaskIds.contains(proposal.taskId))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Per-message actions, revealed on hover — the row both references put under an answer

@@ -160,7 +160,9 @@ struct TasksView: View {
                                                 projectLinked: companyStore.activeProjectLink != nil)
             switch action {
             case .approve:         previewTask = t   // the board reviews via a preview sheet
-            case .run:             Task { await companyStore.runTask(t, language: lang) }
+            // Proposes rather than runs: the run plays in the copilot as the full execute-log,
+            // after the founder confirms it there. Web parity, Aug 6.
+            case .run:             companyStore.proposeRun(t, language: lang)
             case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
             case .editCode:
@@ -213,12 +215,6 @@ struct TasksView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
                 }
-            }
-            // The agent, on the card the founder pressed. `taskRuns` is populated by
-            // `CompanyStore.runTask`, so this appears wherever the run was started — before,
-            // a board run showed nothing but a button reading "Running…".
-            if let progress = companyStore.taskRuns[t.id] {
-                AgentRunStrip(progress: progress)
             }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

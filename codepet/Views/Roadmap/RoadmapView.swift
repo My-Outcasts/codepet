@@ -238,7 +238,7 @@ struct RoadmapView: View {
                                             isEngineering: task.dept == "eng",
                                             projectLinked: companyStore.activeProjectLink != nil)
         switch action {
-        case .run:              Task { await companyStore.runTask(task, language: lang) }
+        case .run:              companyStore.proposeRun(task, language: lang)
         case .walkThrough:      Task { await companyStore.walkThroughTask(task, language: lang) }
         case .approve:          previewTask = task   // review before approve — never blind (matches Tasks board)
         case .openDeliverable:  openDeliverable = RoadmapEngine.deliverable(for: task, in: companyStore.company.library)

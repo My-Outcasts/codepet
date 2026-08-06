@@ -1450,13 +1450,43 @@ final class CompanyStore: ObservableObject {
         await toggleTool(id: item.id)
     }
 
-    /// Approve a chat draft: append it to the library (approved) + persist.
+    /// Approve a chat draft — and COMPLETE the task it came from.
+    ///
+    /// This used to file the deliverable into the library and stop there, so the roadmap task it
+    /// came from stayed `drafted` forever: the card kept reading "Review", the phase never settled,
+    /// and every task behind it stayed blocked — permanently, since the chat card would not offer
+    /// Approve twice. Two Approve buttons, two different outcomes, and the founder's stated model
+    /// ("only after the user reviews and approves it is the task considered complete") held on the
+    /// board and not in chat, which is the surface she uses. Found Aug 6.
+    ///
+    /// The fix is not a second copy of `approveTask`'s body — that duplication is exactly how the
+    /// two drifted. Both paths now call `fileApproval`, and a test asserts they agree.
     func approveDraft(messageId: String) async {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
-        company.library.append(draft)
         chatMessages[i].draftApproved = true
-        if let cid = companyId { _ = await librarySaver(cid, company.library) }
+        await fileApproval(draft, taskId: draft.sourceTaskId)
+    }
+
+    /// The one approval path: file the deliverable in the library exactly once, complete its task,
+    /// persist both, and extract what the deliverable locks in.
+    ///
+    /// `taskId` nil (or absent from the roadmap) → library only. That is a real case: a deliverable
+    /// can be produced by a chat ask that no roadmap task owns, and it should still be keepable.
+    private func fileApproval(_ draft: Deliverable, taskId: String?) async {
+        company.library.append(draft)
+        var wroteTasks = false
+        if let taskId, let ti = company.tasks.firstIndex(where: { $0.id == taskId }),
+           !company.tasks[ti].done {
+            company.tasks[ti].done = true
+            company.tasks[ti].drafted = false
+            company.tasks[ti].draft = nil
+            wroteTasks = true
+        }
+        if let cid = companyId {
+            _ = await librarySaver(cid, company.library)
+            if wroteTasks { _ = await tasksSaver(cid, company.tasks) }
+        }
         Task { await rememberFromApproval(draft) }
     }
 
@@ -1553,7 +1583,7 @@ final class CompanyStore: ObservableObject {
             // "nothing left" — it can just as easily mean "nothing until you finish your own
             // step." Say which one it actually is: genuinely done vs. waiting on the founder.
             let text: String
-            if let blocker = RoadmapGating.founderStep(in: company.tasks) {
+            if let blocker = RoadmapGating.blockingDraft(in: company.tasks) {
                 if blocker.drafted {
                     text = language == .vi
                         ? "Mình chưa chạy được gì tiếp — đang chờ bạn duyệt \"\(blocker.title)\" trước đã."
@@ -1729,16 +1759,7 @@ final class CompanyStore: ObservableObject {
     func approveTask(id: String) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }),
               let draft = company.tasks[i].draft, !company.tasks[i].done else { return }
-        let approved = draft
-        company.library.append(draft)
-        company.tasks[i].done = true
-        company.tasks[i].drafted = false
-        company.tasks[i].draft = nil
-        if let cid = companyId {
-            _ = await librarySaver(cid, company.library)
-            _ = await tasksSaver(cid, company.tasks)
-        }
-        Task { await rememberFromApproval(approved) }
+        await fileApproval(draft, taskId: id)
     }
 
     /// Fire-and-forget after an approval: extract durable decisions the deliverable locks

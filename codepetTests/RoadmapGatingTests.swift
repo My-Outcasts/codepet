@@ -86,7 +86,7 @@ final class RoadmapGatingTests: XCTestCase {
         let all = [t("a", .foundation, drafted: true), t("b", .build)]
         XCTAssertFalse(RoadmapGating.openPhases(all).contains(.build))
         XCTAssertEqual(RoadmapEngine.status(for: all[1], in: all), .blocked)
-        XCTAssertEqual(RoadmapGating.founderStep(in: all)?.id, "a")
+        XCTAssertEqual(RoadmapGating.blockingDraft(in: all)?.id, "a")
     }
 
     func testCodepetLeftoversDoNotHoldTheWindowShut() {
@@ -135,33 +135,33 @@ final class RoadmapGatingTests: XCTestCase {
         XCTAssertEqual(s.count, RoadmapPhase.allCases.count)
     }
 
-    // MARK: founderStep
+    // MARK: blockingDraft
 
     func testFounderStepReturnsTheEarliestUnsettledPhasesTask() {
         // Both FIND and FOUNDATION hold an unapproved draft, but FIND is the earlier unsettled
-        // phase — founderStep must stop there, not walk on to FOUNDATION's task. (Founder-OWNED
+        // phase — blockingDraft must stop there, not walk on to FOUNDATION's task. (Founder-OWNED
         // work no longer makes a phase unsettled, so the fixture uses drafts.)
         let a = t("a", .find, drafted: true)
         let b = t("b", .foundation, drafted: true)
-        XCTAssertEqual(RoadmapGating.founderStep(in: [a, b])?.id, "a")
+        XCTAssertEqual(RoadmapGating.blockingDraft(in: [a, b])?.id, "a")
     }
 
     /// And the case the change created: an open founder-owned step with no drafts behind it
     /// holds nothing, so there is no step to name.
     func testFounderStepIsNilWhenOnlyFounderOwnedWorkIsOpen() {
-        XCTAssertNil(RoadmapGating.founderStep(in: [t("mine", .find, who: .you),
+        XCTAssertNil(RoadmapGating.blockingDraft(in: [t("mine", .find, who: .you),
                                                     t("theirs", .build)]))
     }
 
     func testFounderStepCountsADraftAsFounderWork() {
         // Not `who: .you` — a draft still needs the founder's approval to move.
         let d = t("d", .find, drafted: true)
-        XCTAssertEqual(RoadmapGating.founderStep(in: [d])?.id, "d")
+        XCTAssertEqual(RoadmapGating.blockingDraft(in: [d])?.id, "d")
     }
 
     func testFounderStepIsNilWhenEveryPhaseIsSettled() {
         let all = [t("a", .find), t("b", .foundation, done: true)]
-        XCTAssertNil(RoadmapGating.founderStep(in: all))
+        XCTAssertNil(RoadmapGating.blockingDraft(in: all))
     }
 
     // MARK: blocker

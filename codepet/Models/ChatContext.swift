@@ -121,13 +121,38 @@ enum ChatContext {
         var lines: [String] = [
             "You cannot run any roadmap task in this conversation right now — not one of them is runnable.",
         ]
-        if let step = RoadmapGating.founderStep(in: tasks) {
-            let title: String = step.title
-            lines.append("\"\(title)\" is the founder's own step, and the roadmap stays shut until they finish it.")
+        // WHY nothing is runnable, and therefore what to offer. These are two different situations
+        // with two different remedies, and the gate used to have one branch for both — the wrong one.
+        //
+        // Observed Aug 6: two drafts Codepet had produced sat waiting for approval, holding the
+        // Build phase shut. The gate reached for `founderStep` (now `blockingDraft`), which returns
+        // an unapproved DRAFT, and told the model it was "the founder's own step" that the roadmap
+        // was waiting on her to FINISH — then instructed it to offer a walkthrough. The model
+        // obeyed: it said "I can't produce these tasks for you outright — building the company is
+        // your work" about a task the roadmap itself marks Codepet-can-do, and hand-wrote the cold
+        // outreach email in prose. The one thing that would have unblocked her — approving two
+        // drafts, one click each — was never mentioned.
+        if let draft = RoadmapGating.blockingDraft(in: tasks) {
+            let unlocks = tasks.filter { !$0.done && $0.dependsOn.contains(draft.id) }.count
+            var line = "\"\(draft.title)\" is work YOU already drafted and it is waiting for the founder's"
+                + " approval — that approval is what unlocks the rest of the roadmap."
+            if unlocks > 0 {
+                line += " Approving it unblocks \(unlocks) later task\(unlocks == 1 ? "" : "s")."
+            }
+            lines.append(line)
+            lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do"
+                + " NOT say you are on it, and do not imply anything is being produced. Do NOT offer to walk"
+                + " them through it and do NOT write the deliverable out in the chat: the work is already done"
+                + " and waiting. Ask them to review and approve the draft, and say what that unlocks.")
+        } else if let mine = RoadmapGating.openFounderTask(in: tasks) {
+            lines.append("\"\(mine.title)\" is the founder's own step — it is not something you can do for them.")
+            lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do"
+                + " NOT say you are on it, and do not imply anything is being produced. Say which step is"
+                + " theirs, then offer to walk them through it.")
+        } else {
+            lines.append("There is genuinely nothing left for you to pick up — say so plainly rather than"
+                + " inventing work, and do not imply anything is being produced.")
         }
-        lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do NOT say"
-            + " you are on it, and do not imply anything is being produced. Say which step is theirs and what it is"
-            + " holding up, then offer to walk them through that step.")
         return lines.joined(separator: " ")
     }
 

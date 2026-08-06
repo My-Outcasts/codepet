@@ -19,11 +19,17 @@ final class ChatContextTests: XCTestCase {
         XCTAssertFalse(ctx.isEmpty)
         XCTAssertTrue(ctx.contains("No brief yet"))
     }
+    /// `createdAt` is pinned on both sides: it joined the struct in `f0f9253` and the synthesized
+    /// `Equatable` began comparing a timestamp taken at construction, so two messages built one
+    /// statement apart were never equal. This suite went red then and stayed red — the sibling fix
+    /// in `CopilotMessageDraftTests` on Aug 6 missed it, because I fixed the suite I was running
+    /// rather than grepping for the pattern.
     func testCopilotMessageIdentityAndEquatable() {
-        let m = CopilotMessage(id: "1", role: .me, text: "hi")
+        let t = Date(timeIntervalSince1970: 1_754_400_000)
+        let m = CopilotMessage(id: "1", role: .me, createdAt: t, text: "hi")
         XCTAssertEqual(m.id, "1")
-        XCTAssertEqual(m, CopilotMessage(id: "1", role: .me, text: "hi"))
-        XCTAssertNotEqual(m, CopilotMessage(id: "2", role: .companion, text: "hi"))
+        XCTAssertEqual(m, CopilotMessage(id: "1", role: .me, createdAt: t, text: "hi"))
+        XCTAssertNotEqual(m, CopilotMessage(id: "2", role: .companion, createdAt: t, text: "hi"))
     }
 
     // MARK: - selectPriorWork
@@ -92,21 +98,89 @@ final class ChatContextTests: XCTestCase {
 
     // MARK: - "you cannot run anything this turn"
 
-    /// The state the founder hit on Aug 5: their own step sits in the first phase, so the
-    /// rolling window holds every later phase shut and NOTHING is `codepetCanDo`. The client
-    /// then sends an empty runnable list, the CF withholds `run_task` entirely, and "do the
-    /// task in here" cannot be answered with a run — so the grounding has to say so, and
-    /// name the step, or the founder is told "On it" about work that will never start.
-    func testGroundingSaysNothingIsRunnableAndNamesTheFounderStep() {
+    /// THIS TEST WAS RED on the branch and nobody noticed. It was written when one open
+    /// founder-owned step shut every later phase, so with `a` open nothing was runnable. The Aug 5
+    /// gating change ended that — a founder step no longer gates — which makes `b` runnable and the
+    /// gate correctly silent. Rewritten to the state that now produces an empty runnable set: a
+    /// task the founder owns, with nothing else open.
+    func testGroundingNamesTheFoundersOwnStepWhenThatIsAllThatIsLeft() {
         let tasks = [
             RoadmapTask(id: "a", title: "Talk to 5 potential users", detail: "", phase: .find, who: .you),
-            RoadmapTask(id: "b", title: "Draft the landing page", detail: "", phase: .build, who: .does),
         ]
         let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
         XCTAssertTrue(ctx.contains("cannot run any roadmap task"))
         XCTAssertTrue(ctx.contains("\"Talk to 5 potential users\" is the founder's own step"))
         XCTAssertTrue(ctx.contains("do NOT say you are on it"))
         XCTAssertTrue(ctx.contains("walk them through"))
+    }
+
+    /// A founder-owned step no longer shuts the phases behind it, so work Codepet CAN do stays
+    /// runnable and the gate must stay quiet. This is the state the old version of the test above
+    /// asserted the opposite of.
+    func testAFounderOwnedStepDoesNotSilenceTheRestOfTheRoadmap() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Talk to 5 potential users", detail: "", phase: .find, who: .you),
+            RoadmapTask(id: "b", title: "Draft the landing page", detail: "", phase: .build, who: .does),
+        ]
+        XCTAssertFalse(ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+                        .contains("cannot run any roadmap task"))
+    }
+
+    // MARK: - A draft awaiting approval is NOT "the founder's own step"
+
+    /// The Aug 6 failure, pinned.
+    ///
+    /// Two drafts Codepet had produced sat waiting for approval, holding Build shut. The gate
+    /// reached for `blockingDraft` — which returns an unapproved DRAFT — and told the model it was
+    /// "the founder's own step" the roadmap was waiting on her to FINISH, then told it to offer a
+    /// walkthrough. So Codepet said "I can't produce these tasks for you outright — building the
+    /// company is your work" about work the roadmap marks Codepet-can-do, and hand-wrote the
+    /// deliverable in chat. The one unblocking move — approve, one click — was never mentioned.
+    func testADraftAwaitingApprovalAsksForApprovalNotForTheFounderToDoIt() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Write your landing page copy", detail: "", phase: .find,
+                        who: .does, drafted: true),
+            RoadmapTask(id: "b", title: "Set up a waitlist signup", detail: "", phase: .build,
+                        who: .does, dependsOn: ["a"]),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertTrue(ctx.contains("cannot run any roadmap task"))
+        XCTAssertTrue(ctx.contains("\"Write your landing page copy\" is work YOU already drafted"))
+        XCTAssertTrue(ctx.contains("waiting for the founder's approval"))
+        XCTAssertTrue(ctx.contains("review and approve"))
+        // The two instructions that produced the wrong reply must be absent for this cause.
+        XCTAssertFalse(ctx.contains("the founder's own step"),
+                       "a draft Codepet produced is not the founder's work")
+        // The AFFIRMATIVE form only. The draft branch deliberately contains the words "Do NOT
+        // offer to walk them through it", so a bare substring check on "walk them through" passes
+        // for the wrong reason — and it did, which is how this assertion caught itself.
+        XCTAssertFalse(ctx.contains("then offer to walk them through"),
+                       "there is nothing to walk through — the work is done and waiting")
+        XCTAssertTrue(ctx.contains("Do NOT offer to walk them through"))
+    }
+
+    /// It must say what approving buys, or "approve this" is just another chore.
+    func testTheGateSaysHowManyTasksTheApprovalUnblocks() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Write your landing page copy", detail: "", phase: .find,
+                        who: .does, drafted: true),
+            RoadmapTask(id: "b", title: "Waitlist", detail: "", phase: .build, who: .does, dependsOn: ["a"]),
+            RoadmapTask(id: "c", title: "Cold outreach", detail: "", phase: .build, who: .does, dependsOn: ["a"]),
+        ]
+        XCTAssertTrue(ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+                        .contains("unblocks 2 later tasks"))
+    }
+
+    /// A draft blocking nothing downstream still needs approving — it just must not claim to
+    /// unblock work that does not exist.
+    func testADraftThatUnblocksNothingClaimsNothing() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "Write your landing page copy", detail: "", phase: .find,
+                        who: .does, drafted: true),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertTrue(ctx.contains("already drafted"))
+        XCTAssertFalse(ctx.contains("unblocks"))
     }
 
     /// The opposite state must stay silent: one runnable task means the CF gets `run_task`,

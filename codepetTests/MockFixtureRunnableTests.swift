@@ -55,7 +55,7 @@ final class MockFixtureRunnableTests: XCTestCase {
     /// the eight tasks that depend on it still wait for it — which is the honest version of the
     /// state the founder was stuck in.
     func testDependenciesStillGateEvenThoughTheFounderStepDoesNot() {
-        XCTAssertNil(RoadmapGating.founderStep(in: tasks),
+        XCTAssertNil(RoadmapGating.blockingDraft(in: tasks),
                      "no drafts in the fixture, so nothing should be holding the window")
         let interviews = tasks.first { $0.id == "mock-interviews" }
         XCTAssertEqual(interviews?.who, .you)

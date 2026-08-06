@@ -13,7 +13,7 @@ enum PhaseState: Equatable { case complete, open, preview, later }
 enum RoadmapGating {
     /// Work only the FOUNDER can clear: their own step, or a draft awaiting their approval.
     ///
-    /// Still the right question for "what is waiting on you" (`founderStep`, the blocker copy,
+    /// Still the right question for "what is waiting on you" (`blockingDraft`, the blocker copy,
     /// the needs-you counts). It is NO LONGER what holds the phase window shut — see `settled`.
     ///
     /// Deliberately STRUCTURAL rather than asking `RoadmapEngine.status` — `status` consults
@@ -90,11 +90,34 @@ enum RoadmapGating {
     /// unsettled, and asking the broader question here could name a founder-owned task that
     /// happens to sit earlier in the array than the draft — putting a name on the card that is
     /// not the thing in the way.
-    static func founderStep(in tasks: [RoadmapTask]) -> RoadmapTask? {
+    /// RENAMED from `founderStep` on Aug 7. It never returned a founder's step — it reads
+    /// `awaitsApproval`, so it only ever returns an unapproved DRAFT, which is Codepet's own work
+    /// waiting on a click. The misnomer is what let the chat grounding tell the founder that work
+    /// Codepet had already drafted was "the founder's own step, and the roadmap stays shut until
+    /// they finish it" — so Codepet refused to run anything and offered to walk her through doing
+    /// its job by hand, when the real answer was "approve these two". See `ChatContext`.
+    static func blockingDraft(in tasks: [RoadmapTask]) -> RoadmapTask? {
         for phase in RoadmapPhase.allCases where !settled(phase, in: tasks) {
             return tasks.first { $0.phase == phase && awaitsApproval($0) }
         }
         return nil
+    }
+
+    /// The founder's own open work, when that is what is left.
+    ///
+    /// Distinct from `blockingDraft` and needed alongside it: since Aug 5 a founder-owned step no
+    /// longer shuts the phases behind it, so "nothing is runnable" has two different causes with
+    /// two different remedies — a draft needs APPROVING (one click), a founder step needs DOING.
+    /// Conflating them is the bug this pair exists to prevent.
+    ///
+    /// Scoped to the open window, because a founder task sitting behind an unfinished dependency
+    /// is not what the founder can pick up today.
+    static func openFounderTask(in tasks: [RoadmapTask]) -> RoadmapTask? {
+        let open = openPhases(tasks)
+        return tasks.first { task in
+            !task.done && task.who == .you && open.contains(task.phase)
+                && task.dependsOn.allSatisfy { id in tasks.first { $0.id == id }?.done ?? true }
+        }
     }
 
     /// The one thing standing in front of `task`, for DISPLAY — the card face and the node
@@ -108,7 +131,7 @@ enum RoadmapGating {
     static func blocker(for task: RoadmapTask, in tasks: [RoadmapTask]) -> RoadmapTask? {
         openPhases(tasks).contains(task.phase)
             ? task.dependsOn.compactMap { id in tasks.first { $0.id == id && !$0.done } }.first
-            : founderStep(in: tasks)
+            : blockingDraft(in: tasks)
     }
 
     /// Where a locked card's tap should GO — the blocker walked forward to something the founder

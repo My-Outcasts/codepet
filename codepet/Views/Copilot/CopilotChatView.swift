@@ -443,6 +443,8 @@ struct CopilotBubble: View {
     let message: CopilotMessage
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
+    @Environment(\.colorScheme) private var scheme
     @State private var showDetail = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
@@ -871,10 +873,10 @@ struct CopilotBubble: View {
                         .font(.system(size: 8, weight: .bold))
                     Text(lang == .vi ? "\(who) đã làm gì · \(steps.count) bước"
                                      : "What \(who) did · \(steps.count) steps")
-                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
                 }
                 .foregroundColor(CodepetTheme.mutedText)
-                .padding(.horizontal, 8).padding(.vertical, 5)
+                .padding(.horizontal, 11).padding(.vertical, 6)
                 .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
                 .hoverAffordance(Capsule())
             }
@@ -895,8 +897,9 @@ struct CopilotBubble: View {
                                     .frame(width: 10, height: 12)
                             }
                             Text(step.label)
-                                .font(step.kind == .mono ? .system(size: 10, design: .monospaced)
-                                                         : .pixelSystem(size: 10))
+                                .font(step.kind == .mono
+                                      ? .system(size: DraftCardMetrics.chip, design: .monospaced)
+                                      : .pixelSystem(size: DraftCardMetrics.chip))
                                 .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.mutedText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -909,23 +912,37 @@ struct CopilotBubble: View {
 
     private func draftCard(_ d: Deliverable) -> some View {
         HStack {
-            CodepetCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DraftCardMetrics.blockGap) {
+                    // Opening the deliverable is the card's largest target, and it was the ONLY
+                    // one with no pointer response: every small pill carried `hoverAffordance`
+                    // while the title and body — the thing you actually click to read the work —
+                    // had a bare `contentShape` and no cursor. The affordance was inverted
+                    // (founder, Aug 6), so the block now gets the same hover fill the pills get,
+                    // plus the pointing hand.
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 7) {
                             Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
                             Text(d.title)
-                                .font(.pixelSystem(size: 12, weight: .semibold))
+                                .font(.pixelSystem(size: DraftCardMetrics.title, weight: .semibold))
                                 .foregroundColor(CodepetTheme.primaryText)
                         }
-                        Text(d.body)
-                            .font(.pixelSystem(size: 11))
+                        // Markdown syntax used to reach the founder verbatim — see `DraftPreview`.
+                        Text(DraftPreview.plain(d.body, title: d.title))
+                            .font(.pixelSystem(size: DraftCardMetrics.body))
                             .foregroundColor(CodepetTheme.mutedText)
-                            .lineLimit(3)
+                            .lineSpacing(ChatRhythm.lineSpacing)
+                            .lineLimit(DraftCardMetrics.previewLines)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+                    .padding(.horizontal, 2)
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .cursorOnHover(.pointingHand)
                     .onTapGesture { showDetail = true }
+                    // Cancels the 6/2 inset above so the block's text stays optically flush with
+                    // the buttons below it while its hover fill still reads as a target.
+                    .padding(-6).padding(.horizontal, -2)
 
                     // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity
                     // (inline-run transparency): the live execute-log collapses onto the
@@ -942,49 +959,66 @@ struct CopilotBubble: View {
                             Image(systemName: "checkmark.circle.fill")
                             Text(lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library")
                         }
-                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentTeal)
                     } else {
-                        HStack(spacing: 8) {
+                        // DECIDE, then adjust. Approve/Redo settle the draft; the revise chips
+                        // only nudge it. They used to sit 8pt apart at 10pt and 9pt, so five
+                        // pills read as one undifferentiated cluster with no answer to "which of
+                        // these is the point?" (founder, Aug 6). The gap and the rule below carry
+                        // that hierarchy; Approve carries it in weight.
+                        HStack(spacing: 9) {
                             Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
                                 Text(lang == .vi ? "Duyệt" : "Approve")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
                                     .foregroundColor(.white)
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .padding(.horizontal, 16).padding(.vertical, 7)
                                     .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
                             }.buttonStyle(.plain)
                             Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
                                 Text(lang == .vi ? "Làm lại" : "Redo")
-                                    .font(.pixelSystem(size: 10, weight: .semibold))
+                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
                                     .foregroundColor(CodepetTheme.bodyText)
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .padding(.horizontal, 16).padding(.vertical, 7)
                                     .background(Capsule().stroke(CodepetTheme.hairline))
                                     .hoverAffordance(Capsule())
                             }.buttonStyle(.plain)
                         }
+                        .padding(.top, DraftCardMetrics.decideGap - DraftCardMetrics.blockGap)
+
                         // Revise chips: one-tap re-runs of THIS draft with a targeted
                         // instruction (vs. Redo's blind re-run). Same visibility gate as
                         // Redo — hidden once approved.
-                        HStack(spacing: 6) {
-                            ForEach(ReviseKind.allCases, id: \.self) { kind in
-                                Button {
-                                    Task { await companyStore.redoDraft(messageId: message.id, language: lang,
-                                                                         reviseNote: kind.note(lang)) }
-                                } label: {
-                                    Text(kind.label(lang))
-                                        .font(.pixelSystem(size: 9, weight: .semibold))
-                                        .foregroundColor(CodepetTheme.mutedText)
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .background(Capsule().stroke(CodepetTheme.hairline))
-                                        .hoverAffordance(Capsule())
-                                }.buttonStyle(.plain)
+                        VStack(alignment: .leading, spacing: 9) {
+                            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                            HStack(spacing: 7) {
+                                ForEach(ReviseKind.allCases, id: \.self) { kind in
+                                    Button {
+                                        Task { await companyStore.redoDraft(messageId: message.id, language: lang,
+                                                                             reviseNote: kind.note(lang)) }
+                                    } label: {
+                                        Text(kind.label(lang))
+                                            .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                                            .foregroundColor(CodepetTheme.mutedText)
+                                            .padding(.horizontal, 11).padding(.vertical, 5)
+                                            .background(Capsule().stroke(CodepetTheme.hairline))
+                                            .hoverAffordance(Capsule())
+                                    }.buttonStyle(.plain)
+                                }
                             }
                         }
+                        .padding(.top, 2)
                     }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(DraftCardMetrics.padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The house card chrome — a lifted fill AND a 1pt edge. `CodepetCard` draws fill +
+            // shadow only, and at `surface` (#221d17) on a near-black dock that is a ~3%
+            // lightness step with an invisible shadow: the card had no edge to hold its contents
+            // and everything inside read as loose floating text (founder, Aug 6, "the card is
+            // black"). Every Tasks-board card already uses this; the chat's draft card was the
+            // one card in the app without an edge.
+            .cardChrome(radius: 12, dark: scheme == .dark)
             Spacer(minLength: 24)
         }
         .sheet(isPresented: $showDetail) { DeliverableDetailView(deliverable: d) }
@@ -1097,6 +1131,38 @@ enum ChatColumn {
     static func margin(forBox box: CGFloat) -> CGFloat {
         max(0, (box - textWidth(forBox: box)) / 2)
     }
+}
+
+/// The draft card's scale and spacing, in one place so the card cannot drift from the prose it
+/// sits under again.
+///
+/// It had drifted badly. The message above the card is `inter(13.5)`; inside it the title was
+/// 12, the body 11, Approve/Redo 10 and the revise chips 9 — a card 11–33% smaller than the
+/// sentence introducing it, in which **the primary action was set smaller than the body text it
+/// approved**, with a ~22pt tap target under the 28pt macOS comfortable minimum. That is the
+/// measurable half of "the button and text appear a bit small" (founder, Aug 6).
+///
+/// The scale below is anchored to the 13.5pt prose rather than chosen: the title matches it, and
+/// each tier steps down by one point. Nothing here is smaller than 11.
+enum DraftCardMetrics {
+    /// Matches the transcript's body size — the card's headline is not a footnote to it.
+    static let title: CGFloat = 13.5
+    static let body: CGFloat = 12.5
+    /// Approve / Redo. At 12 with 16×7 padding the target clears 28pt.
+    static let action: CGFloat = 12
+    /// Revise chips and the run-log disclosure — the quietest tier, and still legible.
+    static let chip: CGFloat = 11
+    /// Inside the card. 12 was the same padding a Tasks-board lane card uses at roughly a third
+    /// of this card's width, so proportionally this card was the tighter of the two.
+    static let padding: CGFloat = 16
+    /// Between the card's stacked blocks.
+    static let blockGap: CGFloat = 10
+    /// Preview → the decision. Deliberately larger than `blockGap`: the buttons are a change of
+    /// register, not the next paragraph.
+    static let decideGap: CGFloat = 16
+    /// The body preview. 3 lines was set when markdown syntax ate two of them; with the syntax
+    /// gone, the dock's width supports a fourth line of actual prose.
+    static let previewLines: Int = 4
 }
 
 /// The chat's vertical rhythm. Measured off the founder's reference screenshots as RATIOS,

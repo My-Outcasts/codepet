@@ -54,7 +54,16 @@ struct CopilotMessage: Identifiable, Equatable {
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
     var vcRun: VirtualCompanyRunState?
 
-    init(id: String = UUID().uuidString, role: CopilotRole, text: String,
+    /// `createdAt` is injectable and defaults to now.
+    ///
+    /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
+    /// set it and every message stamped itself at construction. That made the timestamp
+    /// untestable — and since the synthesized `Equatable` compares it, it also made
+    /// `CopilotMessage` equality depend on the clock, which quietly broke
+    /// `CopilotMessageDraftTests` the day `createdAt` landed (`f0f9253`). Every existing call
+    /// site keeps its behaviour: omitting the argument still means now.
+    init(id: String = UUID().uuidString, role: CopilotRole, createdAt: Date = Date(),
+         text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
@@ -64,6 +73,7 @@ struct CopilotMessage: Identifiable, Equatable {
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil) {
         self.id = id
         self.role = role
+        self.createdAt = createdAt
         self.text = text
         self.draft = draft
         self.draftApproved = draftApproved

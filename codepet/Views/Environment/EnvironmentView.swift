@@ -51,7 +51,7 @@ struct EnvironmentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(lang == .vi ? "Môi trường Claude Code của bạn" : "Your Claude Code environment")
+            Text(lang == .vi ? "Môi trường của bạn" : "Your Environment")
                 .font(CodepetTheme.inter(28, weight: .semibold))
                 .tracking(-0.5)
                 .foregroundColor(CodepetTheme.primaryText)
@@ -107,12 +107,14 @@ struct EnvironmentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// What the page is, then what the companion makes of it — ONE flowing paragraph.
+    /// What the companion makes of this page — one paragraph, in its voice.
     ///
-    /// Three steps to get here, all founder calls on Aug 5: it began as an accent-tinted
+    /// Four steps to get here, all founder calls: it began as an accent-tinted
     /// full-width strip below the "Ask what to set up" button (web `.env-byte`), moved up
-    /// under the subtitle and lost its card, and now runs directly on from the subtitle
-    /// sentence instead of sitting on its own line.
+    /// under the subtitle and lost its card, then ran on directly from the subtitle
+    /// sentence (Aug 5). On Aug 6 the founder cut the subtitle — "Set up Codepet's
+    /// toolkit … work for you" restated the tab it sits in — leaving the companion's
+    /// read as the whole paragraph.
     ///
     /// No sprite. An inline `Text(Image("char-…"))` was tried and is a trap: inline
     /// sizing-to-the-line holds for SF Symbols, NOT for asset-catalog images, which
@@ -123,10 +125,7 @@ struct EnvironmentView: View {
     /// The voice still reads without a marker: "here's the toolkit **I'd** set up"
     /// is plainly the companion talking, not the product describing itself.
     private var introParagraph: some View {
-        let subtitle = lang == .vi
-            ? "Thiết lập bộ công cụ của Codepet — kỹ năng, kết nối và trợ lý — để nó có thể làm nhiều việc hơn cho bạn."
-            : "Set up Codepet's toolkit — skills, connectors, and agents — so it can do more of the work for you."
-        return (Text(subtitle) + Text("  ") + companionText)
+        companionText
             .font(CodepetTheme.inter(15))
             .foregroundColor(CodepetTheme.mutedText)
             .lineSpacing(15 * 0.42)

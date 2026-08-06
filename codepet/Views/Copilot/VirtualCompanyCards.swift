@@ -79,7 +79,18 @@ struct VCRunCards: View {
                 if let routing = state.routing { roomHeaderCard(routing) }
                 if state.agents.contains(where: { answered($0.agentId) }) { liveAgents }
                 if !state.conflicts.isEmpty { conflictCard }
-                ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+                // Behind a disclosure while the room is still running, matching what already
+                // happens once the brief lands. In flight these dumped inline, and a round is the
+                // longest thing the room produces — several screens of two departments arguing,
+                // above the answer the founder is waiting for (founder, Aug 6).
+                if !state.negotiationRounds.isEmpty {
+                    Disclosure(title: (lang == .vi ? "Họ thương lượng thế nào" : "How they negotiated")
+                                + " · \(state.negotiationRounds.count)") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+                        }
+                    }
+                }
                 if let verdict = state.verdict { verdictCard(verdict) }
             }
             if let stopped = state.stoppedReason { stoppedRow(stopped) }
@@ -319,15 +330,20 @@ struct VCRunCards: View {
                 if let position { confidenceDots(position.confidence) } else { statusPill(entry.status) }
             }
             if let position {
-                Text(position.position).font(CodepetTheme.inter(14)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let blocker = position.hardBlocker {
-                    Text("🔒 " + blocker)
-                        .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                // One line at rest, the whole thing on tap.
+                //
+                // Three departments each printed a full paragraph plus, for two of them, a bold
+                // 🔒 blocker paragraph — five paragraphs before the founder reached the conflict
+                // card, which then printed those same two blockers again VERBATIM (Aug 6:
+                // "displays too much information all at once"). Rule 2 forbids SUMMARISING the
+                // positions into one paragraph; it does not require every one of them open at
+                // once, and the text here is never rewritten — it is the same string, clamped
+                // until asked for. Post-brief `departmentsSaid` has always worked this way.
+                //
+                // The 🔒 line is gone from this row entirely: rule 4 pins the blocker to the
+                // CONFLICT card, which is where the founder can act on it, and printing it in
+                // both places is what made this card feel like a wall.
+                ExpandingPosition(text: position.position)
             } else if let error = state.agentErrors[entry.meta.agentId] {
                 Text(error).font(CodepetTheme.inter(13)).foregroundColor(Color.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -364,6 +380,30 @@ struct VCRunCards: View {
                     .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// A department's position: one line at rest, the full text on tap.
+    ///
+    /// The text is never altered — clamping is not summarising (rule 2). Expanding is the founder
+    /// asking for it, which is the same bargain `departmentsSaid` has always offered after the
+    /// brief lands; this brings the in-flight card in line with it.
+    private struct ExpandingPosition: View {
+        let text: String
+        @State private var open = false
+
+        var body: some View {
+            Button { withAnimation(.easeInOut(duration: 0.16)) { open.toggle() } } label: {
+                Text(text)
+                    .font(CodepetTheme.inter(14)).lineSpacing(6)
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .lineLimit(open ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: open)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .cursorOnHover(.pointingHand)
         }
     }
 
@@ -557,6 +597,17 @@ struct VCRunCards: View {
         // Every row is still shown either way — contract rule 2 forbids collapsing the
         // positions into one "we agree" paragraph.
         let allAligned = !state.conflicts.isEmpty && state.conflicts.allSatisfy { $0.kind == "ALIGNED" }
+        // A card headed WHERE THEY DISAGREE must not spend a paragraph on a pair that agrees.
+        //
+        // With three departments the classifier emits three pairs, and one of them was an ALIGNED
+        // row whose whole body read "Both product and sales are do_not_proceed with no hard
+        // blocker in play" — a full paragraph, under a heading claiming disagreement, saying
+        // nothing the stance chips above had not already said (founder, Aug 6). Agreements now
+        // collapse to a single naming line at the foot of the card. Nothing is dropped: the
+        // all-ALIGNED flow still prints every row in full under WHERE THEY AGREE, which is the
+        // contract's "nothing to debate" outcome and reads correctly there.
+        let disagreements = allAligned ? state.conflicts : state.conflicts.filter { $0.kind != "ALIGNED" }
+        let agreed = allAligned ? [] : state.conflicts.filter { $0.kind == "ALIGNED" }
         return MessageCard(hue: allAligned ? CodepetTheme.accentTeal : CodepetTheme.accentOrange) {
             VStack(alignment: .leading, spacing: 6) {
                 label(allAligned ? (lang == .vi ? "HỌ ĐỒNG Ý Ở ĐÂU" : "WHERE THEY AGREE")
@@ -564,7 +615,7 @@ struct VCRunCards: View {
                 // `id: \.offset`, not `\.reason`: the reason is free text the model
                 // writes, and two identical reasons (likely in the all-ALIGNED flow)
                 // silently collapsed into one row.
-                ForEach(Array(state.conflicts.enumerated()), id: \.offset) { _, conflict in
+                ForEach(Array(disagreements.enumerated()), id: \.offset) { _, conflict in
                     Text("\(displayName(agentId: conflict.a)) ↔ \(displayName(agentId: conflict.b))"
                          + " · \(kindLabel(conflict.kind))")
                         .font(CodepetTheme.inter(13, weight: .semibold))
@@ -572,8 +623,39 @@ struct VCRunCards: View {
                     Text(conflict.reason).font(CodepetTheme.inter(14)).lineSpacing(6)
                         .foregroundColor(CodepetTheme.bodyText)
                 }
+                if !agreed.isEmpty {
+                    Text(agreedLine(agreed))
+                        .font(CodepetTheme.inter(12.5))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
             }
         }
+    }
+
+    /// "Product and Sales agree." — the pairs that had nothing to argue about, named in one line
+    /// instead of a paragraph each.
+    private func agreedLine(_ agreed: [VCConflict]) -> String {
+        let pairs = agreed.map { "\(displayName(agentId: $0.a)) ↔ \(displayName(agentId: $0.b))" }
+        let joined = pairs.joined(separator: ", ")
+        return lang == .vi ? "\(joined) đồng ý." : "\(joined) agree."
+    }
+
+    /// The backend's marker for a turn it could not parse — `negotiation.ts:207` writes
+    /// `(unusable turn: …)` into `precise_disagreement` and leaves the rest empty. Matched on the
+    /// prefix rather than the whole string because the error text after it varies.
+    ///
+    /// Pure and `static` so it is testable without a view.
+    static func isUnusable(_ turn: VCNegotiationTurn) -> Bool {
+        turn.preciseDisagreement
+            .trimmingCharacters(in: CharacterSet.whitespaces)
+            .hasPrefix("(unusable turn:")
+    }
+
+    private func unusableLine(_ agentId: String) -> String {
+        let who = displayName(agentId: agentId)
+        return lang == .vi ? "\(who): lượt này không dùng được." : "\(who)'s turn was unusable."
     }
 
     private func roundCard(_ round: VCNegotiationRound) -> some View {
@@ -583,15 +665,33 @@ struct VCRunCards: View {
                 // `id: \.offset`, not `\.agent`: one agent can take two turns in a
                 // round, and the second one vanished.
                 ForEach(Array(round.turns.enumerated()), id: \.offset) { _, turn in
-                    Text("\(displayName(agentId: turn.agent)): \(turn.preciseDisagreement)")
-                        .font(CodepetTheme.inter(14)).lineSpacing(6).foregroundColor(CodepetTheme.bodyText)
-                    Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
-                        .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
-                    // Contract rule 4: show each side's what_would_change_my_mind —
-                    // it teaches that disagreement is settled by evidence, not authority.
-                    Text((lang == .vi ? "Điều gì sẽ đổi ý họ: " : "What would change their mind: ")
-                         + turn.whatWouldChangeMyMind)
-                        .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                    // A turn the backend could not use is an ERROR, not content.
+                    //
+                    // `negotiation.ts:207` puts `(unusable turn: <error>)` into
+                    // `preciseDisagreement` and leaves the other two fields empty, so a failed
+                    // turn rendered as a body paragraph followed by the headings "Proposes:" and
+                    // "What would change their mind:" with nothing after them — three lines of
+                    // furniture around an absence (founder screenshot, Aug 6). One muted line now.
+                    if Self.isUnusable(turn) {
+                        Text(unusableLine(turn.agent))
+                            .font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTokens.faint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("\(displayName(agentId: turn.agent)): \(turn.preciseDisagreement)")
+                            .font(CodepetTheme.inter(14)).lineSpacing(6).foregroundColor(CodepetTheme.bodyText)
+                        // Each field only earns its heading when it has something under it.
+                        if !turn.proposal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
+                                .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                        }
+                        // Contract rule 4: show each side's what_would_change_my_mind —
+                        // it teaches that disagreement is settled by evidence, not authority.
+                        if !turn.whatWouldChangeMyMind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text((lang == .vi ? "Điều gì sẽ đổi ý họ: " : "What would change their mind: ")
+                                 + turn.whatWouldChangeMyMind)
+                                .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                        }
+                    }
                 }
             }
         }

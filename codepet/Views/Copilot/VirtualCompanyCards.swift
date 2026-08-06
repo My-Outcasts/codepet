@@ -13,6 +13,8 @@ struct VCRunCards: View {
     let onLockIn: () -> Void
 
     @Environment(\.uiLanguage) private var lang
+    /// The call, opened in the reader every other document in the app opens into.
+    @State private var readingCall: Deliverable?
 
     /// TWO shapes, because a run in flight and a run that has landed are different reading
     /// tasks — and the contract binds them differently.
@@ -39,8 +41,9 @@ struct VCRunCards: View {
         VStack(alignment: .leading, spacing: 12) {
             if let brief = state.brief {
                 theCall(brief)
-                if !state.conflicts.isEmpty { conflictCard }
-                realDisagreement(brief)
+                // ONE card, not two — see `landedDisagreement`. `conflictCard` is now the
+                // in-flight rendering only, where there is no narrative to duplicate.
+                landedDisagreement(brief)
                 Disclosure(title: (lang == .vi ? "Từng phòng ban đã nói gì" : "What each department said")
                             + " · \(state.agents.count)") {
                     departmentsSaid
@@ -102,6 +105,7 @@ struct VCRunCards: View {
             // escape hatch and on a budget stop too, so this is the one place it belongs.
             if let cost = state.telemetry?.costEstimateUsd { costRow(cost) }
         }
+        .sheet(item: $readingCall) { DeliverableDetailView(deliverable: $0) }
     }
 
     private func costRow(_ cost: Double) -> some View {
@@ -372,13 +376,53 @@ struct VCRunCards: View {
     }
 
     /// Rule 3: `the_real_disagreement` verbatim, and never behind a disclosure.
-    private func realDisagreement(_ brief: VCBrief) -> some View {
-        MessageCard(hue: CodepetTheme.accentPurple) {
+    /// ONE disagreement card, once the brief has landed.
+    ///
+    /// It used to be two: a `WHERE THEY DISAGREE` card whose single pair's whole body was
+    /// "sales raised a hard blocker: Do not publish a public price list before…", sitting directly
+    /// above a `THE REAL DISAGREEMENT` card whose narrative said the same thing again in its own
+    /// words — and the recommendation above BOTH had already said it a third time. Founder, Aug 7:
+    /// "why are there so many separate cards?" Because one of them had nothing of its own to say.
+    ///
+    /// Merged: the pairs are compact heading lines (who, and how hard), and the narrative that
+    /// explains them follows verbatim — rule 3 forbids paraphrasing or softening it, and rule 4
+    /// wants each side's `what_would_change_my_mind`, which the narrative carries.
+    ///
+    /// The pair's `reason` is dropped from THIS card only: it is the blocker text, and it is inside
+    /// the narrative immediately below. While the room is still in flight there is no narrative
+    /// yet, so `conflictCard` keeps printing reasons — that is the only place they are not
+    /// duplicated.
+    private func landedDisagreement(_ brief: VCBrief) -> some View {
+        let real = brief.theRealDisagreement.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pairs = state.conflicts.filter { $0.kind != "ALIGNED" }
+        let agreed = state.conflicts.filter { $0.kind == "ALIGNED" }
+        return MessageCard(hue: pairs.isEmpty ? CodepetTheme.accentTeal : CodepetTheme.accentOrange) {
             VStack(alignment: .leading, spacing: 8) {
-                label(lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT")
-                Text(brief.theRealDisagreement).font(CodepetTheme.inter(14)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.bodyText)
-                    .fixedSize(horizontal: false, vertical: true)
+                label(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
+                                    : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
+                if !pairs.isEmpty {
+                    // One line per pair: who, and how hard. `id: \.offset` because `reason` is
+                    // free text and two identical reasons silently collapsed into one row.
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(pairs.enumerated()), id: \.offset) { _, c in
+                            Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b))"
+                                 + " · \(kindLabel(c.kind))")
+                                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                                .foregroundColor(CodepetTheme.mutedText)
+                        }
+                    }
+                }
+                if !real.isEmpty {
+                    Text(real).font(CodepetTheme.inter(14)).lineSpacing(6)
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !agreed.isEmpty {
+                    Text(agreedLine(agreed))
+                        .font(CodepetTheme.inter(12.5))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -746,41 +790,58 @@ struct VCRunCards: View {
         MessageCard(hue: CodepetTheme.accentPurple) {
             VStack(alignment: .leading, spacing: 8) {
                 label(lang == .vi ? "QUYẾT ĐỊNH" : "THE CALL")
-                Text(brief.recommendation).font(CodepetTheme.inter(14.5)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.bodyText)
-                HStack(spacing: 8) {
-                    // Contract rule 7: confidence as dots, not a number.
-                    confidenceDots(brief.confidence)
-                    Text(brief.confidenceReason).font(CodepetTheme.inter(13.5)).lineSpacing(5)
-                        .foregroundColor(CodepetTheme.mutedText)
-                }
-                Text((lang == .vi ? "Việc tiếp theo (\(brief.nextAction.owner)): "
-                                  : "Next action (\(brief.nextAction.owner)): ") + brief.nextAction.action)
-                    .font(CodepetTheme.inter(14, weight: .semibold))
+                // THE DECISION, in one line. `recommendation` runs ~200 words and the rest of the
+                // card added ~350 more, all unclamped in a 380pt column (founder, Aug 7). The
+                // first sentence IS the call; everything after it is reasoning, and reasoning
+                // belongs in the reader.
+                Text(BriefDocument.headline(brief.recommendation))
+                    .font(CodepetTheme.inter(16, weight: .semibold)).lineSpacing(4)
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                label(lang == .vi ? "DỪNG NẾU" : "STOP IF")
-                ForEach(brief.killCriteria, id: \.self) { criterion in
-                    Text("· " + criterion).font(CodepetTheme.inter(14)).lineSpacing(6)
-                        .foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
+                // Contract rule 7: confidence as dots, not a number. The REASON moves to the
+                // reader — it was 55 words of grey text indented under the dots.
+                confidenceDots(brief.confidence)
+                if brief.unresolved {
+                    // Contract rule 6: unresolved is a valid outcome, not an error —
+                    // present it as an honest answer, the trade-off is the founder's to make.
+                    Text(lang == .vi ? "CHƯA NGÃ NGŨ — BẠN QUYẾT" : "UNRESOLVED — YOUR CALL")
+                        .font(CodepetTheme.inter(10, weight: .bold)).tracking(0.8)
+                        .foregroundColor(CodepetTheme.accentGold)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(CodepetTheme.accentGold.opacity(0.14)))
                 }
-                // LAST of the reading content — rule 5.
+                // LAST of the reading content — rule 5, and IN FULL.
+                //
+                // Founder's call, Aug 7, when asked whether to clamp it: "Rule 5 says end on the
+                // either/or." A two-line clamp on a ~100-word trade-off cuts before the "or", and
+                // half a trade-off is not ending on the either/or — it is ending on one option,
+                // which is the "it's up to you" the rule exists to forbid. So the either/or is the
+                // one long thing that stays on the card.
                 label(lang == .vi ? "ĐÁNH ĐỔI CHỈ BẠN QUYẾT ĐƯỢC" : "THE TRADE-OFF ONLY YOU CAN MAKE")
                 Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
-                if brief.unresolved {
-                    // Contract rule 6: unresolved is a valid outcome, not an error —
-                    // present it as an honest answer, the trade-off is the founder's to make.
-                    Text(lang == .vi ? "Chưa ngã ngũ — đây là lựa chọn của bạn."
-                                     : "Unresolved — this is your call to make.")
-                        .font(CodepetTheme.inter(13, weight: .medium))
-                        .foregroundColor(CodepetTheme.primaryText)
+                // The recommendation in full, the next action, the kill criteria and what nobody
+                // knew — in the reader every other document in the app opens into (founder's
+                // call: "the call should read like every other document").
+                if BriefDocument.hasMore(brief) {
+                    Button { readingCall = BriefDocument.document(brief, language: lang) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text").font(.system(size: 11, weight: .semibold))
+                            Text(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call")
+                        }
+                        .font(CodepetTheme.inter(12.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(CodepetTheme.hairline, lineWidth: 1))
+                        .hoverAffordance(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .cursorOnHover(.pointingHand)
+                    .padding(.top, 2)
                 }
-                Text((lang == .vi ? "Vẫn chưa biết: " : "Still unknown: ") + brief.whatWeDontKnow)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
-                    .fixedSize(horizontal: false, vertical: true)
                 // The cost line is NOT here: a run that failed or was budget-stopped
                 // still cost the founder money and never reaches this card. It renders
                 // once, for every outcome, at the bottom of the stack (`costRow`).

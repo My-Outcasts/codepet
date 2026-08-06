@@ -12,7 +12,25 @@ enum AppView: String, CaseIterable, Identifiable {
     /// Usage and Support are NOT destinations at all — they are sections of the centered
     /// settings modal (`SettingsSection`), opened as an overlay over whatever view the
     /// founder is already on.
-    static let topTabs: [AppView] = [.roadmap, .company, .tasks, .library, .environment]
+    /// Overview is NOT here. It is the default destination, so a tab that is selected the moment
+    /// the app opens spent a permanent slot restating where you already are. The wordmark carries
+    /// it now — clicking Codepet goes home, the way a site's logo does (founder call, Aug 6) —
+    /// which is also why `navLabel(.roadmap)` still says "Overview": the tooltip on that wordmark
+    /// is the label's remaining reader.
+    static let topTabs: [AppView] = [.company, .tasks, .library, .environment]
+
+    /// Where the wordmark goes, and the destination the app opens on.
+    static let home: AppView = .roadmap
+
+    /// How the wordmark's shortcut is written in its tooltip chip. The binding itself lives in
+    /// `TopNavView` — this stays a Foundation-only model, so the SwiftUI key types don't belong
+    /// here.
+    ///
+    /// ⇧⌘H, not ⌘1: Safari's Home uses ⇧⌘H, and ⌘1-⌘7 are already bound in `CodePetApp`'s
+    /// Navigation menu — to the OLD game layer's tabs (home/skills/sessions/…), which still
+    /// register even though the company layer is the product. Reusing ⌘1 would have collided
+    /// with a live binding.
+    static let homeShortcutLabel = "⇧⌘H"
 
     /// Nav label — the Roadmap destination is titled "Overview" in the top nav (web parity).
     func navLabel(_ lang: AppLanguage) -> String {

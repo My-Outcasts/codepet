@@ -45,7 +45,12 @@ struct AppShellView: View {
             let base = manualDockWidth ?? ShellLayout.dockWidth(forWidth: geo.size.width)
             let dockWidth = ShellLayout.clampDockWidth(base, windowWidth: geo.size.width)
             VStack(spacing: 0) {
+                // Raised: the wordmark's hover tooltip hangs BELOW the bar, into the content's
+                // band. Siblings paint in declaration order, so without this the view underneath
+                // would draw straight over the plate and the tooltip would be invisible on every
+                // surface except an empty one.
                 TopNavView(accent: accent)
+                    .zIndex(1)
                 Divider()
                 HStack(spacing: 0) {
                     // Collapsed, the copilot is a circular floating button in the

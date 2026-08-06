@@ -20,10 +20,11 @@ final class ChatContextTests: XCTestCase {
         XCTAssertTrue(ctx.contains("No brief yet"))
     }
     func testCopilotMessageIdentityAndEquatable() {
-        let m = CopilotMessage(id: "1", role: .me, text: "hi")
+        let t = Date(timeIntervalSince1970: 0)
+        let m = CopilotMessage(id: "1", role: .me, createdAt: t, text: "hi")
         XCTAssertEqual(m.id, "1")
-        XCTAssertEqual(m, CopilotMessage(id: "1", role: .me, text: "hi"))
-        XCTAssertNotEqual(m, CopilotMessage(id: "2", role: .companion, text: "hi"))
+        XCTAssertEqual(m, CopilotMessage(id: "1", role: .me, createdAt: t, text: "hi"))
+        XCTAssertNotEqual(m, CopilotMessage(id: "2", role: .companion, createdAt: t, text: "hi"))
     }
 
     // MARK: - selectPriorWork

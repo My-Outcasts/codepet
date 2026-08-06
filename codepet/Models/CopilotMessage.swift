@@ -54,7 +54,8 @@ struct CopilotMessage: Identifiable, Equatable {
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
     var vcRun: VirtualCompanyRunState?
 
-    init(id: String = UUID().uuidString, role: CopilotRole, text: String,
+    init(id: String = UUID().uuidString, role: CopilotRole,
+         createdAt: Date = Date(), text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
@@ -64,6 +65,7 @@ struct CopilotMessage: Identifiable, Equatable {
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil) {
         self.id = id
         self.role = role
+        self.createdAt = createdAt
         self.text = text
         self.draft = draft
         self.draftApproved = draftApproved

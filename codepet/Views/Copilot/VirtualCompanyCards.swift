@@ -182,6 +182,15 @@ struct VCRunCards: View {
         let hue = CodepetTheme.accentPurple
         let roster = routing.agentMeta
         let done = roster.filter { answered($0.agentId) }.count
+        // The working chrome is for WHILE the room works.
+        //
+        // At "4 of 4 answered" the bar is entirely full and the footer is two static counts, so
+        // the card kept its full height while saying nothing it had not already said — the count
+        // alone carries "everyone answered" (founder, Aug 7: this card is for the build phase).
+        // Every department having answered is not the end of the room, though: the brief has not
+        // landed yet, so the card stays as the header the positions hang under, minus the parts
+        // that were only ever about waiting.
+        let working = done < roster.count
         return VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -210,12 +219,15 @@ struct VCRunCards: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 9)
-                    rosterBar(roster)
+                    if working { rosterBar(roster) }
                 }
-                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 13)
+                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, working ? 13 : 12)
 
                 // The recessed footer, split in two — reaches the card's edges, so it needs the
-                // card to own its padding (see the note above).
+                // card to own its padding (see the note above). Gone once everyone has answered:
+                // "4 departments / 5 sat out" is the same two numbers the disclosure below spells
+                // out in full, and it was earning its space only as context for the waiting.
+                if working {
                 HStack(spacing: 0) {
                     footCell(key: lang == .vi ? "TRONG PHÒNG" : "IN THE ROOM",
                              value: "\(roster.count)",
@@ -227,6 +239,7 @@ struct VCRunCards: View {
                 }
                 .background(Color.black.opacity(0.16))
                 .overlay(alignment: .top) { Rectangle().fill(CodepetTheme.hairline).frame(height: 1) }
+                }
 
                 // The thirteen paragraphs, behind one full-width control.
                 Disclosure(title: lang == .vi ? "Vì sao chọn những phòng ban này?"

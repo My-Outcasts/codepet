@@ -1043,6 +1043,11 @@ final class CompanyStore: ObservableObject {
             chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
                                                text: Self.handoffLine(language), vcRun: state),
                                 at: anchor + 1)
+            // The fast answer above is now the room's first take, not the answer. Marked at the
+            // moment the room actually lands — not when the fan-out starts — so a run the router
+            // discards (the escape hatch) never demotes a reply that turned out to be the whole
+            // answer.
+            chatMessages[anchor].supersededByRoom = true
         }
         // Behind every guard above, so a discarded run (escape hatch), a killed run
         // (503/429) or one that died before a brief can never trigger it.

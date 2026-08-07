@@ -6,6 +6,12 @@ import Combine
 /// Drives the Virtual Company fan-out through the injected `vcRunner`, so the
 /// handoff, the escape hatch, a failed run and a late-deciding run are exercised
 /// against the real `CompanyStore.sendMessage` with no network.
+/// Every send here passes `convenesRoom: true` — these tests are ABOUT the room, so they must ask
+/// for one. The gate landed on Aug 7 (`ChatMode.convenesRoom`, ~$0.20 a convened decision) with a
+/// default of false, and this suite kept calling the old two-argument `sendChat`. It still
+/// compiled, silently stopped convening, and every room assertion failed on an empty transcript —
+/// red for a commit before anyone looked, because I ran the suites I had changed rather than the
+/// suite that exercised the thing I changed.
 @MainActor
 final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
@@ -50,7 +56,7 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
     private func send(_ s: CompanyStore) async {
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
     }
 
     // MARK: - The room takes the turn
@@ -325,7 +331,8 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
                              })
         await s.hydrate(companyId: "u")
         let raw = "team seats or single player first?"
-        await s.sendChat(ChatMode.plan.shape(raw, language: .en), language: .en, founderAsk: raw)
+        await s.sendChat(ChatMode.plan.shape(raw, language: .en), language: .en, founderAsk: raw,
+                         convenesRoom: ChatMode.plan.convenesRoom)
         XCTAssertEqual(asked.requests, [raw])
     }
 
@@ -439,11 +446,11 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
                 }
             })
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
         let anchorId = try XCTUnwrap(s.chatMessages.last?.id)
 
         // A second, unrelated turn completes while the first run is still thinking.
-        await s.sendChat("how's my runway looking?", language: .en)
+        await s.sendChat("how's my runway looking?", language: .en, convenesRoom: true)
         XCTAssertEqual(s.chatMessages.count, 4)
 
         // Now the first run decides.

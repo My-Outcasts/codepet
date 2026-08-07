@@ -145,4 +145,33 @@ describe("needsNegotiation", () => {
     );
     expect(needsNegotiation([])).toBe(false);
   });
+
+  // Aug 7: four departments each answered `proceed_with_conditions` on "should we charge for the
+  // beta", so every pair classified ALIGNED and the client flipped to its "WHERE THEY AGREE"
+  // variant — over a synthesis that opened "the room split cleanly 2-2 on sequencing, and the
+  // conflict detector calling this ALIGNED is wrong". The model was right.
+  it("does not call two conditional yeses an agreement", () => {
+    const c = classifyPair("product", pos("proceed_with_conditions"),
+                           "finance", pos("proceed_with_conditions"));
+    expect(c.kind).toBe("TENSION");
+    expect(c.reason).toContain("conditions");
+  });
+
+  it("still calls two UNqualified yeses an agreement", () => {
+    expect(classifyPair("product", pos("proceed"),
+                        "finance", pos("proceed")).kind).toBe("ALIGNED");
+  });
+
+  it("still calls two refusals an agreement", () => {
+    expect(classifyPair("product", pos("do_not_proceed"),
+                        "finance", pos("do_not_proceed")).kind).toBe("ALIGNED");
+  });
+
+  // A blocker outranks the conditional rule — it says someone finds the outcome unacceptable,
+  // which is a stronger signal than "we both attached conditions".
+  it("a hard blocker still wins over two conditional yeses", () => {
+    expect(classifyPair("sales", pos("proceed_with_conditions", "no public price list"),
+                        "finance", pos("proceed_with_conditions")).kind).toBe("BLOCKER");
+  });
+
 });

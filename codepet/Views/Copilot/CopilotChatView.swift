@@ -449,6 +449,8 @@ struct CopilotBubble: View {
     @State private var showDetail = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
+    /// Expansion of the fast answer once a room has superseded it — see `firstTakeRow`.
+    @State private var showFirstTake = false
     /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
     @State private var hovering = false
     @State private var copied = false
@@ -849,6 +851,52 @@ struct CopilotBubble: View {
         }
     }
 
+    /// The fast answer, demoted once the room has landed.
+    ///
+    /// Both calls go out in parallel so ordinary chat keeps its latency, so this reply was written
+    /// before the router had decided anything. When a room lands, the founder has just read a
+    /// confident several-hundred-word answer immediately followed by "Actually — this one needs the
+    /// whole room": it reads as Codepet contradicting itself (founder, Aug 7).
+    ///
+    /// It is not wrong, it is EARLY, and the room's call is the better answer — on the founder's own
+    /// test the room proposed a cohort split the fast reply never considered. So it collapses to a
+    /// line that names it as the first take and keeps it one click away, rather than being deleted:
+    /// throwing away an answer she has already partly read would be its own kind of lie about what
+    /// happened.
+    @ViewBuilder private var firstTakeRow: some View {
+        VStack(alignment: .leading, spacing: ChatRhythm.nameToProse) {
+            Button { withAnimation(.easeInOut(duration: 0.16)) { showFirstTake.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showFirstTake ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(lang == .vi ? "Ý đầu tiên của Codepet" : "Codepet's first take")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                    Text(BriefDocument.headline(message.text))
+                        .font(CodepetTheme.inter(12))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .padding(.horizontal, 11).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(CodepetTheme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(CodepetTheme.hairline, lineWidth: 1))
+                .hoverAffordance(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .cursorOnHover(.pointingHand)
+            if showFirstTake {
+                Text(message.text)
+                    .font(CodepetTheme.inter(13.5))
+                    .lineSpacing(ChatRhythm.lineSpacing)
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder private var textBubble: some View {
         // A message shell can reach here with no text yet — while the companion is
         // still typing, or when the turn carried only a payload. `MessageCard` always
@@ -857,6 +905,8 @@ struct CopilotBubble: View {
         // beat, so render nothing rather than an empty card.
         if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             EmptyView()
+        } else if message.supersededByRoom && !isMe {
+            firstTakeRow
         } else if isMe {
             HStack {
                 Spacer(minLength: 24)

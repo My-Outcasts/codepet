@@ -506,8 +506,16 @@ final class CompanyStore: ObservableObject {
     /// it decides `request_type` and rewrites the question into `real_question`, so the
     /// mode's framing would bias both. Defaults to the shaped text for callers that do
     /// no shaping.
+    ///
+    /// `convenesRoom` gates the fan-out (founder's call, Aug 7 — see `ChatMode.convenesRoom`).
+    /// It defaults to FALSE, which is the safe default for a call that costs ~$0.20: a caller that
+    /// has not thought about the room does not get one. Every existing caller was reviewed rather
+    /// than left to the default — the typed composer passes the mode's answer, `retryReply` passes
+    /// what the original turn actually did, and the Environment seed ("What should I set up in my
+    /// environment?") deliberately does not convene, because a toolkit question is not a
+    /// cross-department trade-off and was quietly costing a room every time.
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
-                  founderAsk: String? = nil) async {
+                  founderAsk: String? = nil, convenesRoom: Bool = false) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -519,9 +527,10 @@ final class CompanyStore: ObservableObject {
         // `ask` does double duty: the room's question AND the founder's bubble. Both want her
         // words rather than the mode's framing, and both fall back to the shaped text for
         // callers that do no shaping (`walkThroughTask`, the Environment seed).
+        let words = ask.isEmpty ? text : ask
         await sendMessage(text, language: language, department: department,
-                          convene: ask.isEmpty ? text : ask,
-                          display: ask.isEmpty ? text : ask)
+                          convene: convenesRoom ? words : nil,
+                          display: words)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -1199,12 +1208,18 @@ final class CompanyStore: ObservableObject {
         else { return }
         let ask = chatMessages[askIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ask.isEmpty else { return }
+        // Whether the retry may convene depends on whether the ORIGINAL turn did. The mode is not
+        // stored on a message, so this is the one faithful signal available: retrying a turn that
+        // produced a room can produce one again, and retrying a turn that did not cannot suddenly
+        // cost ~$0.20 the founder never asked for.
+        var hadRoom = false
         for message in chatMessages[askIndex...] where message.vcRun != nil {
+            hadRoom = true
             vcTasks[message.id]?.cancel()
             vcTasks[message.id] = nil
         }
         chatMessages.removeSubrange(askIndex...)
-        await sendChat(ask, language: language, founderAsk: ask)
+        await sendChat(ask, language: language, founderAsk: ask, convenesRoom: hadRoom)
     }
 
     private func appendRunRefusal(_ text: String) {

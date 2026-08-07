@@ -296,7 +296,8 @@ struct CopilotChatView: View {
             // it decides `request_type` and rewrites the question into `real_question`.
             Task {
                 await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
-                                            department: selectedDept, founderAsk: text)
+                                            department: selectedDept, founderAsk: text,
+                                            convenesRoom: mode.convenesRoom)
             }
         case .build:
             companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked

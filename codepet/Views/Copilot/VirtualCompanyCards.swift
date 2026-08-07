@@ -37,7 +37,24 @@ struct VCRunCards: View {
     /// `the_real_disagreement` (rule 3, verbatim). THE CALL also ends on
     /// `tradeoff_founder_must_own`, which is rule 5 — an answer-first order must not lose the
     /// either/or, so the either/or moves INTO the leading card rather than trailing the stack.
+    /// The room's cards all end on the same vertical line.
+    ///
+    /// Two of the ten reserved their own 24pt trailing gutter and eight did not, so the header and
+    /// the answers card were visibly narrower than the disagreement card stacked against them
+    /// (founder screenshot, Aug 7: "the card size aren't uniform"). `MessageCard` fills its column
+    /// and leaves the gutter to callers — which is right for a shared helper and wrong as a rule
+    /// each card re-decides, because there is no way to notice two of them disagreeing except by
+    /// looking. Decided once, here, for every card the room draws.
     var body: some View {
+        HStack(spacing: 0) {
+            cards
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(item: $readingCall) { DeliverableDetailView(deliverable: $0) }
+    }
+
+    private var cards: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let brief = state.brief {
                 theCall(brief)
@@ -105,7 +122,6 @@ struct VCRunCards: View {
             // escape hatch and on a budget stop too, so this is the one place it belongs.
             if let cost = state.telemetry?.costEstimateUsd { costRow(cost) }
         }
-        .sheet(item: $readingCall) { DeliverableDetailView(deliverable: $0) }
     }
 
     private func costRow(_ cost: Double) -> some View {
@@ -166,8 +182,7 @@ struct VCRunCards: View {
         let hue = CodepetTheme.accentPurple
         let roster = routing.agentMeta
         let done = roster.filter { answered($0.agentId) }.count
-        return HStack {
-            VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         label(lang == .vi ? "PHÒNG HỌP" : "THE ROOM")
@@ -228,9 +243,6 @@ struct VCRunCards: View {
             )
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(hue.opacity(0.9), lineWidth: 1))
-            Spacer(minLength: 24)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// One segment per department, filled in that department's colour when its position lands.
@@ -284,8 +296,7 @@ struct VCRunCards: View {
     /// now, so this card no longer repeats them as titled rows.
     private var liveAgents: some View {
         let landed = state.agentStatuses.filter { hasLanded($0.meta.agentId) }
-        return HStack {
-            MessageCard(hue: CodepetTheme.accentPurple) {
+        return MessageCard(hue: CodepetTheme.accentPurple) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text((lang == .vi ? "Đã trả lời" : "Answered") + " · \(landed.count)")
                         .font(CodepetTheme.inter(10, weight: .semibold))
@@ -296,10 +307,7 @@ struct VCRunCards: View {
                         agentRow(entry)
                     }
                 }
-            }
-            Spacer(minLength: 24)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private func agentRow(_ entry: (meta: VCAgentMeta, status: AgentRunStatus)) -> some View {
@@ -656,16 +664,25 @@ struct VCRunCards: View {
             VStack(alignment: .leading, spacing: 6) {
                 label(allAligned ? (lang == .vi ? "HỌ ĐỒNG Ý Ở ĐÂU" : "WHERE THEY AGREE")
                                  : (lang == .vi ? "HỌ KHÔNG ĐỒNG Ý Ở ĐÂU" : "WHERE THEY DISAGREE"))
-                // `id: \.offset`, not `\.reason`: the reason is free text the model
-                // writes, and two identical reasons (likely in the all-ALIGNED flow)
-                // silently collapsed into one row.
-                ForEach(Array(disagreements.enumerated()), id: \.offset) { _, conflict in
-                    Text("\(displayName(agentId: conflict.a)) ↔ \(displayName(agentId: conflict.b))"
-                         + " · \(kindLabel(conflict.kind))")
-                        .font(CodepetTheme.inter(13, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                    Text(conflict.reason).font(CodepetTheme.inter(14)).lineSpacing(6)
+                // ONE blocker, however many pairs it bites.
+                //
+                // A department that raises a hard blocker conflicts with EVERY other department
+                // that wants to proceed, so `classifyPair` emits the same `reason` once per pair.
+                // With Sales blocking, the founder read the identical paragraph twice under
+                // "Product ↔ Sales" and "Finance ↔ Sales" (screenshot, Aug 7) — the classifier is
+                // right, the rendering was repeating it. Pairs that share a reason are now listed
+                // together above the one copy of it.
+                ForEach(Array(Self.groupedByReason(disagreements).enumerated()), id: \.offset) { _, group in
+                    ForEach(Array(group.pairs.enumerated()), id: \.offset) { _, c in
+                        Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b))"
+                             + " · \(kindLabel(c.kind))")
+                            .font(CodepetTheme.inter(13, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                    }
+                    Text(group.reason).font(CodepetTheme.inter(14)).lineSpacing(6)
                         .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 2)
                 }
                 if !agreed.isEmpty {
                     Text(agreedLine(agreed))
@@ -676,6 +693,20 @@ struct VCRunCards: View {
                 }
             }
         }
+    }
+
+    /// Pairs that share a reason, grouped under it — in first-seen order, so the card's reading
+    /// order still follows the classifier's stable output rather than a dictionary's.
+    ///
+    /// Pure and `static` so the grouping is testable without a view.
+    static func groupedByReason(_ conflicts: [VCConflict]) -> [(reason: String, pairs: [VCConflict])] {
+        var order: [String] = []
+        var byReason: [String: [VCConflict]] = [:]
+        for c in conflicts {
+            if byReason[c.reason] == nil { order.append(c.reason) }
+            byReason[c.reason, default: []].append(c)
+        }
+        return order.map { (reason: $0, pairs: byReason[$0] ?? []) }
     }
 
     /// "Product and Sales agree." — the pairs that had nothing to argue about, named in one line

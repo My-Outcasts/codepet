@@ -58,3 +58,52 @@ final class VirtualCompanyUnusableTurnTests: XCTestCase {
         XCTAssertFalse(VCRunCards.isUnusable(turn("")))
     }
 }
+
+/// Pairs that share one reason are rendered once, not once per pair.
+///
+/// A department raising a hard blocker conflicts with EVERY other department that wants to
+/// proceed, so `classifyPair` emits the same `reason` for each of those pairs. With Sales blocking,
+/// the founder read the identical paragraph twice — under "Product ↔ Sales" and "Finance ↔ Sales"
+/// (screenshot, Aug 7). The classifier is right; the card was repeating it.
+final class ConflictGroupingTests: XCTestCase {
+
+    private func c(_ a: String, _ b: String, _ kind: String, _ reason: String) -> VCConflict {
+        VCConflict(a: a, b: b, kind: kind, reason: reason)
+    }
+
+    func testPairsSharingAReasonAreGroupedUnderOneCopyOfIt() {
+        let blocker = "sales raised a hard blocker: Do not publish a public price list."
+        let groups = VCRunCards.groupedByReason([
+            c("product", "sales", "BLOCKER", blocker),
+            c("finance", "sales", "BLOCKER", blocker),
+        ])
+        XCTAssertEqual(groups.count, 1, "one blocker, one paragraph")
+        XCTAssertEqual(groups[0].reason, blocker)
+        XCTAssertEqual(groups[0].pairs.count, 2, "both pairs must still be named")
+    }
+
+    /// Distinct reasons stay distinct — grouping must not merge two different arguments.
+    func testDifferentReasonsStaySeparate() {
+        let groups = VCRunCards.groupedByReason([
+            c("product", "sales", "BLOCKER", "sales blocked the price list"),
+            c("finance", "sales", "CONFLICT", "directly opposed on sequencing"),
+        ])
+        XCTAssertEqual(groups.count, 2)
+    }
+
+    /// First-seen order, so the card follows the classifier's stable output rather than a
+    /// dictionary's iteration order — which would reshuffle the card on every redraw.
+    func testGroupsKeepFirstSeenOrder() {
+        let groups = VCRunCards.groupedByReason([
+            c("a", "b", "BLOCKER", "second-listed reason"),
+            c("c", "d", "BLOCKER", "first-listed reason"),
+            c("e", "f", "BLOCKER", "second-listed reason"),
+        ])
+        XCTAssertEqual(groups.map(\.reason), ["second-listed reason", "first-listed reason"])
+        XCTAssertEqual(groups[0].pairs.count, 2)
+    }
+
+    func testEmptyInputYieldsNoGroups() {
+        XCTAssertTrue(VCRunCards.groupedByReason([]).isEmpty)
+    }
+}

@@ -156,6 +156,24 @@ enum ChatContext {
         return lines.joined(separator: " ")
     }
 
+    /// What the companion cannot do to the roadmap, stated so it stops implying otherwise.
+    ///
+    /// Aug 7: after walking the founder through a step, Codepet said "You can consider this step
+    /// done." She replied "let's mark it done in the roadmap" and got "Sure — this takes you
+    /// there" plus a navigation chip. Nothing was marked. There is no mark-done verb in the chat
+    /// tool set and there is no plan to add one — completing a task is either approving a draft or
+    /// the founder's own tick on the board — so the honest answer is to say so, not to narrate
+    /// completion and then hand over a link.
+    ///
+    /// "Consider it done" is the exact phrasing to forbid: it is how a person says "I have done
+    /// it", and the founder read it that way.
+    private static let markDoneGate =
+        "You cannot mark a roadmap task done, complete or finished — you have no tool that changes"
+        + " a task's state, and approving a draft is the only thing that completes one. If they ask"
+        + " you to mark, tick, close or complete a step, say plainly that you cannot do it from"
+        + " here and tell them where to do it themselves. Never say \"consider it done\", \"you can"
+        + " consider this step done\", or anything else that implies the roadmap changed."
+
     /// `memoryEnabled` mirrors `FounderPrefs.memoryEnabled` and gates ONE of the two memory
     /// stores: the facts the founder's team was told (`decisions`). Off means the block is
     /// never composed, so nothing the founder asked to be forgotten leaks back in through
@@ -185,6 +203,7 @@ enum ChatContext {
         // founder can see, and this is what the companion may and may not promise about them.
         let gate = composeRunnableGate(tasks)
         if !gate.isEmpty { parts.append(gate) }
+        if !tasks.isEmpty { parts.append(markDoneGate) }
         let deptBlock = composeDepartments(DepartmentCatalog.summaries(tasks: tasks))
         if !deptBlock.isEmpty { parts.append(deptBlock) }
         let priorBlock = composePriorWork(selectPriorWork(library, query: query))

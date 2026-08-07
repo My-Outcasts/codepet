@@ -139,3 +139,69 @@ final class BriefDocumentTests: XCTestCase {
         XCTAssertEqual(doc.payload?.sections?.first?.h, "Việc tiếp theo · mona")
     }
 }
+
+/// Tool-call markup that leaked out of the model must never reach the founder.
+///
+/// Seen in the reader on Aug 7: "Do this next" opened with
+/// `<parameter name="action">Write the one-sentence value prop…`. The model emitted a fragment of
+/// its own tool syntax inside `next_action.action` and it was stored and rendered verbatim. The
+/// real fix is upstream — the Cloud Function should not persist a field still containing tool
+/// syntax — but the client is where it is seen.
+final class ModelTextTests: XCTestCase {
+
+    /// The exact leak, from the screenshot.
+    func testTheReportedParameterTagIsStripped() {
+        let leaked = "<parameter name=\"action\">Write the one-sentence value prop, then ship a "
+            + "static waitlist page."
+        XCTAssertEqual(ModelText.stripToolMarkup(leaked),
+                       "Write the one-sentence value prop, then ship a static waitlist page.")
+    }
+
+    func testClosingAndNamespacedTagsGoToo() {
+        XCTAssertEqual(ModelText.stripToolMarkup("<invoke name=\"x\">do it</invoke>"), "do it")
+        XCTAssertEqual(ModelText.stripToolMarkup("<parameter name=\"a\">do it"), "do it")
+        XCTAssertEqual(ModelText.stripToolMarkup("<function_calls>do it</function_calls>"), "do it")
+    }
+
+    /// The conservative half, and the one that matters more: an engineering deliverable is full of
+    /// angle brackets, and eating them would be a worse failure than leaving a stray tag.
+    func testRealAngleBracketsInProseSurvive() {
+        XCTAssertEqual(ModelText.stripToolMarkup("Ship it if x < y and y > z."),
+                       "Ship it if x < y and y > z.")
+        XCTAssertEqual(ModelText.stripToolMarkup("Wrap the copy in <html> and <p> tags."),
+                       "Wrap the copy in <html> and <p> tags.")
+    }
+
+    /// The match is anchored to the whole tag name — a tag that merely starts with the same letters
+    /// is someone else's content.
+    func testATagThatOnlyStartsWithAToolNameIsLeftAlone() {
+        XCTAssertEqual(ModelText.stripToolMarkup("Use <parameters> in the schema."),
+                       "Use <parameters> in the schema.")
+    }
+
+    /// Paragraph breaks carry the document's structure and must survive the sweep.
+    func testParagraphBreaksSurvive() {
+        XCTAssertEqual(ModelText.stripToolMarkup("First line.\n\nSecond line."),
+                       "First line.\n\nSecond line.")
+    }
+
+    func testCleanTextIsUnchanged() {
+        let prose = "Ship the waitlist tomorrow as a single static page."
+        XCTAssertEqual(ModelText.stripToolMarkup(prose), prose)
+    }
+
+    /// End to end: the leak must not survive into the document the reader draws.
+    func testTheDocumentIsSweptNotJustTheRawField() {
+        let b = VCBrief(recommendation: "Ship it. Then measure.", confidence: 3,
+                        confidenceReason: "", theRealDisagreement: "", tradeoffFounderMustOwn: "",
+                        killCriteria: ["<parameter name=\"k\">it exceeds a day"],
+                        nextAction: VCNextAction(action: "<parameter name=\"action\">Do the thing",
+                                                 owner: "mona"),
+                        whatWeDontKnow: "", unresolved: false)
+        let doc = BriefDocument.document(b, language: .en)
+        let all = (doc.payload?.sections ?? []).map { $0.h + $0.p }.joined()
+        XCTAssertFalse(all.contains("<parameter"))
+        XCTAssertTrue(all.contains("Do the thing"))
+        XCTAssertTrue(all.contains("it exceeds a day"))
+    }
+}

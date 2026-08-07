@@ -24,7 +24,7 @@ enum BriefDocument {
     /// ("Don't build a pricing plan this week — run a price test this week."). Everything after it
     /// is the reasoning, and the reasoning is what the document is for.
     static func headline(_ recommendation: String) -> String {
-        let text = recommendation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = ModelText.stripToolMarkup(recommendation)
         guard !text.isEmpty else { return "" }
         // An em-dash clause is part of the call, so only sentence enders split it. A decimal or an
         // abbreviation would split wrongly on ".", so the terminator must be followed by a space.
@@ -69,8 +69,10 @@ enum BriefDocument {
         let vi = language == .vi
         var sections: [DocSection] = []
 
-        let owner = brief.nextAction.owner.trimmingCharacters(in: .whitespacesAndNewlines)
-        let action = brief.nextAction.action.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Every field here is model-written and reaches the founder verbatim, so each one is
+        // swept for tool-call markup that leaked out of the model — see `ModelText`.
+        let owner = ModelText.stripToolMarkup(brief.nextAction.owner)
+        let action = ModelText.stripToolMarkup(brief.nextAction.action)
         if !action.isEmpty {
             sections.append(DocSection(
                 h: (vi ? "Việc tiếp theo" : "Do this next") + (owner.isEmpty ? "" : " · \(owner)"),
@@ -78,10 +80,10 @@ enum BriefDocument {
         }
         if !brief.killCriteria.isEmpty {
             sections.append(DocSection(h: vi ? "Dừng nếu" : "Stop if",
-                                       p: brief.killCriteria.map { "· \($0)" }
+                                       p: brief.killCriteria.map { "· " + ModelText.stripToolMarkup($0) }
                                            .joined(separator: "\n")))
         }
-        let unknown = brief.whatWeDontKnow.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unknown = ModelText.stripToolMarkup(brief.whatWeDontKnow)
         if !unknown.isEmpty {
             sections.append(DocSection(h: vi ? "Vẫn chưa biết" : "Still unknown", p: unknown))
         }
@@ -91,8 +93,9 @@ enum BriefDocument {
             title: vi ? "Quyết định" : "The call",
             // `body` is the plain-text fallback for anything that reads a deliverable without the
             // typed payload (search, a future export). It is not what the reader draws.
-            body: brief.recommendation,
-            payload: DeliverablePayload(call: brief.recommendation, sections: sections)
+            body: ModelText.stripToolMarkup(brief.recommendation),
+            payload: DeliverablePayload(call: ModelText.stripToolMarkup(brief.recommendation),
+                                        sections: sections)
         )
     }
 }

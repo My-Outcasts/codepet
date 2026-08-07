@@ -117,7 +117,7 @@ private struct DepartmentTaskCard: View {
         Button {
             if status == .needsApproval { previewTask = task }
             else if task.who == .you { Task { await companyStore.walkThroughTask(task, language: lang) } }
-            else { Task { await companyStore.runTask(task, language: lang) } }
+            else { companyStore.proposeRun(task, language: lang) }
         } label: {
             HStack(spacing: 5) {
                 if running { ProgressView().controlSize(.mini) }

@@ -53,17 +53,40 @@ struct CopilotMessage: Identifiable, Equatable {
     /// fat-struct/if-chain pattern rather than an enum refactor, per
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
     var vcRun: VirtualCompanyRunState?
+    /// True once a Virtual Company room landed for THIS turn, superseding this reply.
+    ///
+    /// Both calls go out in parallel so ordinary chat keeps its latency, which means the fast
+    /// answer is written before the router has decided anything. When a room then lands, the
+    /// founder has read a confident several-hundred-word answer immediately followed by "Actually
+    /// — this one needs the whole room", which reads as Codepet contradicting itself (founder,
+    /// Aug 7). It is not wrong, it is EARLY — and the room's call is the better answer, because
+    /// four departments arguing produced a cohort split the fast reply never considered.
+    var supersededByRoom: Bool = false
+    /// A run started from a surface and offered here before it happens — see `RunProposal`.
+    /// `actionConsumed` hides the button once pressed, the same way it does for `firstRunAction`.
+    var runProposal: RunProposal?
 
-    init(id: String = UUID().uuidString, role: CopilotRole, text: String,
+    /// `createdAt` is injectable and defaults to now.
+    ///
+    /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
+    /// set it and every message stamped itself at construction. That made the timestamp
+    /// untestable — and since the synthesized `Equatable` compares it, it also made
+    /// `CopilotMessage` equality depend on the clock, which quietly broke
+    /// `CopilotMessageDraftTests` the day `createdAt` landed (`f0f9253`). Every existing call
+    /// site keeps its behaviour: omitting the argument still means now.
+    init(id: String = UUID().uuidString, role: CopilotRole, createdAt: Date = Date(),
+         text: String,
          draft: Deliverable? = nil, draftApproved: Bool = false,
          firstRunAction: FirstRunAction? = nil, actionConsumed: Bool = false,
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
-         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil) {
+         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
+         runProposal: RunProposal? = nil) {
         self.id = id
         self.role = role
+        self.createdAt = createdAt
         self.text = text
         self.draft = draft
         self.draftApproved = draftApproved
@@ -79,5 +102,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.deptName = deptName
         self.execSteps = execSteps
         self.vcRun = vcRun
+        self.runProposal = runProposal
     }
 }

@@ -127,6 +127,17 @@ struct TaskNodePanel: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            footerButtons
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .background(CodepetTheme.surface)
+        .overlay(alignment: .top) {
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+        }
+    }
+
+    private var footerButtons: some View {
         HStack(spacing: 10) {
             if !primaryActionIsDeadEnd {
                 Button {
@@ -157,6 +168,11 @@ struct TaskNodePanel: View {
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(RoundedRectangle(cornerRadius: 9)
                             .stroke(CodepetTheme.hairline, lineWidth: 1))
+                        // `.stroke` fills the 1pt outline and nothing else, so the ring between
+                        // the label and the border was not hit-testable: a click 6pt inside the
+                        // border, right next to the word, did nothing. The primary button beside
+                        // it never had this problem because its background is a real `.fill`.
+                        .contentShape(RoundedRectangle(cornerRadius: 9))
                 }
                 .buttonStyle(.plain)
                 // Guards the same failure the primary button guards: an in-flight run can land
@@ -168,11 +184,6 @@ struct TaskNodePanel: View {
                 .opacity(isRunning ? 0.45 : 1)
             }
             Spacer()
-        }
-        .padding(.horizontal, 22).padding(.vertical, 16)
-        .background(CodepetTheme.surface)
-        .overlay(alignment: .top) {
-            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
         }
     }
 

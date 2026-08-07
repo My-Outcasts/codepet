@@ -83,6 +83,7 @@ final class CompanyStore: ObservableObject {
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
     /// the whole fan-out completes; each agent's draft lands in `chatMessages`.
     @Published var activeAgentRuns: [AgentRun] = []
+
     /// True while a fan-out is in flight — serializes it against a normal chat turn
     /// and disables the composer (same busy model as a single run).
     @Published private(set) var isFanningOut: Bool = false
@@ -505,8 +506,16 @@ final class CompanyStore: ObservableObject {
     /// it decides `request_type` and rewrites the question into `real_question`, so the
     /// mode's framing would bias both. Defaults to the shaped text for callers that do
     /// no shaping.
+    ///
+    /// `convenesRoom` gates the fan-out (founder's call, Aug 7 — see `ChatMode.convenesRoom`).
+    /// It defaults to FALSE, which is the safe default for a call that costs ~$0.20: a caller that
+    /// has not thought about the room does not get one. Every existing caller was reviewed rather
+    /// than left to the default — the typed composer passes the mode's answer, `retryReply` passes
+    /// what the original turn actually did, and the Environment seed ("What should I set up in my
+    /// environment?") deliberately does not convene, because a toolkit question is not a
+    /// cross-department trade-off and was quietly costing a room every time.
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
-                  founderAsk: String? = nil) async {
+                  founderAsk: String? = nil, convenesRoom: Bool = false) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -518,9 +527,10 @@ final class CompanyStore: ObservableObject {
         // `ask` does double duty: the room's question AND the founder's bubble. Both want her
         // words rather than the mode's framing, and both fall back to the shaped text for
         // callers that do no shaping (`walkThroughTask`, the Environment seed).
+        let words = ask.isEmpty ? text : ask
         await sendMessage(text, language: language, department: department,
-                          convene: ask.isEmpty ? text : ask,
-                          display: ask.isEmpty ? text : ask)
+                          convene: convenesRoom ? words : nil,
+                          display: words)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -1033,6 +1043,11 @@ final class CompanyStore: ObservableObject {
             chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
                                                text: Self.handoffLine(language), vcRun: state),
                                 at: anchor + 1)
+            // The fast answer above is now the room's first take, not the answer. Marked at the
+            // moment the room actually lands — not when the fan-out starts — so a run the router
+            // discards (the escape hatch) never demotes a reply that turned out to be the whole
+            // answer.
+            chatMessages[anchor].supersededByRoom = true
         }
         // Behind every guard above, so a discarded run (escape hatch), a killed run
         // (503/429) or one that died before a brief can never trigger it.
@@ -1131,10 +1146,16 @@ final class CompanyStore: ObservableObject {
 
     /// The specialist for a task's owning department, if it maps to a companion
     /// other than the host — used to attribute the run's producing row + draft.
+    /// The pet that runs this task, and the department it runs for.
+    ///
+    /// No "not if it is also the host" guard any more. That guard belongs to CHAT handoff, where
+    /// announcing a handoff to yourself is meaningless — but it was also stripping the department
+    /// character off RUNS: with Glitch as the founder's companion, every ops and legal task ran
+    /// with no pet at all, because Glitch is this map's ops/legal specialist. A run is always
+    /// performed BY a department, so it always shows that department's character.
     private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
         guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
-              let companionId = DepartmentCompanions.companionId(for: deptKey),
-              companionId != company.companionId else { return nil }
+              let companionId = DepartmentCompanions.companionId(for: deptKey) else { return nil }
         return (companionId, dept.name)
     }
 
@@ -1192,12 +1213,18 @@ final class CompanyStore: ObservableObject {
         else { return }
         let ask = chatMessages[askIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ask.isEmpty else { return }
+        // Whether the retry may convene depends on whether the ORIGINAL turn did. The mode is not
+        // stored on a message, so this is the one faithful signal available: retrying a turn that
+        // produced a room can produce one again, and retrying a turn that did not cannot suddenly
+        // cost ~$0.20 the founder never asked for.
+        var hadRoom = false
         for message in chatMessages[askIndex...] where message.vcRun != nil {
+            hadRoom = true
             vcTasks[message.id]?.cancel()
             vcTasks[message.id] = nil
         }
         chatMessages.removeSubrange(askIndex...)
-        await sendChat(ask, language: language, founderAsk: ask)
+        await sendChat(ask, language: language, founderAsk: ask, convenesRoom: hadRoom)
     }
 
     private func appendRunRefusal(_ text: String) {
@@ -1443,13 +1470,43 @@ final class CompanyStore: ObservableObject {
         await toggleTool(id: item.id)
     }
 
-    /// Approve a chat draft: append it to the library (approved) + persist.
+    /// Approve a chat draft — and COMPLETE the task it came from.
+    ///
+    /// This used to file the deliverable into the library and stop there, so the roadmap task it
+    /// came from stayed `drafted` forever: the card kept reading "Review", the phase never settled,
+    /// and every task behind it stayed blocked — permanently, since the chat card would not offer
+    /// Approve twice. Two Approve buttons, two different outcomes, and the founder's stated model
+    /// ("only after the user reviews and approves it is the task considered complete") held on the
+    /// board and not in chat, which is the surface she uses. Found Aug 6.
+    ///
+    /// The fix is not a second copy of `approveTask`'s body — that duplication is exactly how the
+    /// two drifted. Both paths now call `fileApproval`, and a test asserts they agree.
     func approveDraft(messageId: String) async {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
-        company.library.append(draft)
         chatMessages[i].draftApproved = true
-        if let cid = companyId { _ = await librarySaver(cid, company.library) }
+        await fileApproval(draft, taskId: draft.sourceTaskId)
+    }
+
+    /// The one approval path: file the deliverable in the library exactly once, complete its task,
+    /// persist both, and extract what the deliverable locks in.
+    ///
+    /// `taskId` nil (or absent from the roadmap) → library only. That is a real case: a deliverable
+    /// can be produced by a chat ask that no roadmap task owns, and it should still be keepable.
+    private func fileApproval(_ draft: Deliverable, taskId: String?) async {
+        company.library.append(draft)
+        var wroteTasks = false
+        if let taskId, let ti = company.tasks.firstIndex(where: { $0.id == taskId }),
+           !company.tasks[ti].done {
+            company.tasks[ti].done = true
+            company.tasks[ti].drafted = false
+            company.tasks[ti].draft = nil
+            wroteTasks = true
+        }
+        if let cid = companyId {
+            _ = await librarySaver(cid, company.library)
+            if wroteTasks { _ = await tasksSaver(cid, company.tasks) }
+        }
         Task { await rememberFromApproval(draft) }
     }
 
@@ -1546,7 +1603,7 @@ final class CompanyStore: ObservableObject {
             // "nothing left" — it can just as easily mean "nothing until you finish your own
             // step." Say which one it actually is: genuinely done vs. waiting on the founder.
             let text: String
-            if let blocker = RoadmapGating.founderStep(in: company.tasks) {
+            if let blocker = RoadmapGating.blockingDraft(in: company.tasks) {
                 if blocker.drafted {
                     text = language == .vi
                         ? "Mình chưa chạy được gì tiếp — đang chờ bạn duyệt \"\(blocker.title)\" trước đã."
@@ -1647,6 +1704,43 @@ final class CompanyStore: ObservableObject {
     /// library — the deliverable is copied there only on approve. Dedupe: a task already
     /// drafted & awaiting approval is not re-run (mirrors web's "you already have a
     /// draft"), so repeat taps never duplicate work. Fail-open + account-guarded.
+    /// Offer a surface-initiated run in chat, and wait for the founder to confirm it.
+    ///
+    /// Every `Start`/`Run` control routes here rather than to `runTask`. Web parity, verified
+    /// live Aug 6: clicking a roadmap card opens the copilot and PROPOSES the run; only the
+    /// proposal's own button spends anything. See `RunProposal` for why the step exists.
+    func proposeRun(_ task: RoadmapTask, language: AppLanguage) {
+        guard !runningTaskIds.contains(task.id) else { return }
+        if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
+           company.tasks[i].done || company.tasks[i].drafted { return }
+        // A second tap on the same card must not stack a second proposal — the founder would
+        // confirm one and be left with an orphan offering to run work that is already drafted.
+        guard !chatMessages.contains(where: {
+            $0.runProposal?.taskId == task.id && !$0.actionConsumed
+        }) else { dockCollapsed = false; return }
+        let specialist = taskSpecialist(for: task)
+        let proposal = RunProposal(taskId: task.id, title: task.title,
+                                   deptName: specialist?.deptName,
+                                   companionId: specialist?.companionId)
+        // The host proposes; the specialist does the work. Matches the web, where Null offers
+        // and Luna runs it — so no `companionId` here, deliberately.
+        chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
+                                           runProposal: proposal))
+        dockCollapsed = false
+        flushActiveThread()
+    }
+
+    /// Accept a proposal and run it. Consumes the button first, so a double-press cannot start
+    /// the same run twice even before `runningTaskIds` is set inside `runTask`.
+    func confirmRun(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let proposal = chatMessages[i].runProposal,
+              !chatMessages[i].actionConsumed,
+              let task = company.tasks.first(where: { $0.id == proposal.taskId }) else { return }
+        chatMessages[i].actionConsumed = true
+        await runTask(task, language: language)
+    }
+
     func runTask(_ task: RoadmapTask, language: AppLanguage) async {
         guard !runningTaskIds.contains(task.id) else { return }
         if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
@@ -1654,27 +1748,29 @@ final class CompanyStore: ObservableObject {
         runningTaskIds.insert(task.id)
         runError = nil
         let cid = companyId
-        let result = await taskRunner(runRequest(for: task, language: language))
+        // The run plays in the copilot, as the full execute-log — the same card a chat-initiated
+        // run has always shown (`produceDraftInline` → `ExecLogRow`), with the deliverable
+        // collapsing out of it into an Approve/Redo card.
+        //
+        // It used to publish a one-line `AgentRunStrip` onto whichever card was pressed instead.
+        // That was my call and it was wrong: the theater IS the feature the founder asked for,
+        // and shrinking it on four of the five run surfaces meant the feature mostly wasn't
+        // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
+        // answer to one question.
+        dockCollapsed = false
+        let produced = await produceDraftInline(for: task, cid: cid, language: language)
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
-        guard let deliverable = buildDeliverable(from: result, task: task) else {
+        // `produceDraftInline` owns the draft, the task write and its own honest failure bubble,
+        // so there is nothing left to build here. `runError` still fires for the surfaces that
+        // show it inline.
+        guard produced else {
             runError = language == .vi
                 ? "Không tạo được \"\(task.title)\" — thử lại nhé."
                 : "Couldn't generate \"\(task.title)\" — try again."
             return
         }
-        guard let i = company.tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        // The `runningTaskIds` guard above ran BEFORE the `taskRunner` await, so
-        // mark-complete ("I already did this") may have set `done = true` on this task
-        // while the run was in flight — `runningTaskIds` only blocks a second RUN from
-        // starting, not the panel's mark-done. Writing `drafted` onto a done task
-        // strands the draft forever: `RoadmapEngine.status` short-circuits to `.done`
-        // before ever consulting `drafted`, `approveTask` refuses (its own `!done`
-        // guard), and the library never receives it — so skip the write when done wins.
-        guard !company.tasks[i].done else { return }
-        company.tasks[i].draft = deliverable
-        company.tasks[i].drafted = true
-        if let cid { _ = await tasksSaver(cid, company.tasks) }
+        flushActiveThread()
     }
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,
@@ -1683,16 +1779,7 @@ final class CompanyStore: ObservableObject {
     func approveTask(id: String) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == id }),
               let draft = company.tasks[i].draft, !company.tasks[i].done else { return }
-        let approved = draft
-        company.library.append(draft)
-        company.tasks[i].done = true
-        company.tasks[i].drafted = false
-        company.tasks[i].draft = nil
-        if let cid = companyId {
-            _ = await librarySaver(cid, company.library)
-            _ = await tasksSaver(cid, company.tasks)
-        }
-        Task { await rememberFromApproval(approved) }
+        await fileApproval(draft, taskId: id)
     }
 
     /// Fire-and-forget after an approval: extract durable decisions the deliverable locks

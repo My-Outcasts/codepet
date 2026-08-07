@@ -76,7 +76,7 @@ struct RoadmapNodeDetail: Equatable {
         if status == .blocked,
            !RoadmapGating.openPhases(tasks).contains(task.phase),
            let blocking = RoadmapPhase.allCases.first(where: { !RoadmapGating.settled($0, in: tasks) }) {
-            let step = RoadmapGating.founderStep(in: tasks)
+            let step = RoadmapGating.blockingDraft(in: tasks)
             requirements.append(NodeRequirement(
                 kind: .phaseWindow(blocking),
                 label: RoadmapBoardCopy.phaseMustSettle(blocking, lang),

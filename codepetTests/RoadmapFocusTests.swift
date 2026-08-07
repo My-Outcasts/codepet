@@ -3,8 +3,9 @@ import XCTest
 
 final class RoadmapFocusTests: XCTestCase {
     private func t(_ id: String, _ phase: RoadmapPhase, who: TaskWho = .does,
-                   done: Bool = false) -> RoadmapTask {
-        RoadmapTask(id: id, title: id, detail: "", phase: phase, who: who, done: done, dept: "eng")
+                   done: Bool = false, drafted: Bool = false) -> RoadmapTask {
+        RoadmapTask(id: id, title: id, detail: "", phase: phase, who: who,
+                    done: done, drafted: drafted, dept: "eng")
     }
     /// Tasks in all six phases, with a founder-owned step holding FIND shut so the working
     /// phase is FIND and the preview is FOUNDATION.
@@ -83,11 +84,12 @@ final class RoadmapFocusTests: XCTestCase {
 
     /// Regression for the bug this fix removes: an open prefix spanning MORE than one
     /// populated phase must still keep the BEACON's card expanded, not the last open phase's.
-    /// FIND is settled (a Codepet-owned leftover, no founder step) but FOUNDATION holds a
-    /// founder step, so the prefix widens to {find, foundation} — exactly the shape that let
-    /// the beacon's card vanish behind a rail under the old anchor.
+    /// FIND is settled (a Codepet-owned leftover) but FOUNDATION holds an unapproved DRAFT, so
+    /// the prefix widens to {find, foundation} — exactly the shape that let the beacon's card
+    /// vanish behind a rail under the old anchor. The gate used to be founder-owned work; only
+    /// unreviewed output closes a phase since Aug 5.
     func testBeaconsCardSurvivesWhenTheOpenPrefixSpansTwoPopulatedPhases() {
-        let tasks = [t("f", .find), t("d", .foundation, who: .you)]
+        let tasks = [t("f", .find), t("d", .foundation, drafted: true)]
         XCTAssertEqual(RoadmapGating.openPhases(tasks), [.find, .foundation])
         XCTAssertEqual(RoadmapEngine.nextStep(tasks)?.phase, .find)
         let oneColumn = RoadmapGeometry.boardWidth(expanded: [.find])

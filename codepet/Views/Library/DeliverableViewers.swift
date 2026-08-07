@@ -86,45 +86,84 @@ struct DocViewer: View {
     let next: [String]
     @Environment(\.uiLanguage) private var lang
 
+    /// A document, set to be read.
+    ///
+    /// It was 13pt lead, 12pt body, no `lineSpacing` at all, 4pt between a heading and its own
+    /// paragraph and 16pt between unrelated sections — so a heading sat nearly as close to the
+    /// section above it as to the text it introduces, and nothing had room to breathe (founder,
+    /// Aug 7). This is the viewer EVERY deliverable in the app opens into, so the fix reaches the
+    /// Library and the Tasks preview too.
+    ///
+    /// Three rules: prose gets a reading measure (~1.6em leading, capped column), a heading binds
+    /// to what follows it and separates from what precedes it, and a rule between sections does the
+    /// separating so the gap does not have to be huge to read as a break.
+    private enum Doc {
+        static let lead: CGFloat = 15        // the call itself
+        static let body: CGFloat = 14
+        static let heading: CGFloat = 15
+        static let leading: CGFloat = 7      // ~1.6em on 14pt
+        /// ~68 characters at this size. Longer lines lose the eye on the return sweep, and this
+        /// sheet can be dragged much wider than its 460pt minimum.
+        static let measure: CGFloat = 620
+        static let headingToBody: CGFloat = 7
+        static let betweenSections: CGFloat = 26
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Doc.betweenSections) {
             Text(call)
-                .font(.pixelSystem(size: 13, weight: .medium))
+                .font(.pixelSystem(size: Doc.lead, weight: .medium))
+                .lineSpacing(Doc.leading)
                 .foregroundColor(CodepetTheme.primaryText)
-                .padding(12)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
                         .fill(CodepetTheme.accentPurple.opacity(0.1))
                 )
 
-            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(sections.enumerated()), id: \.offset) { idx, section in
+                VStack(alignment: .leading, spacing: Doc.headingToBody) {
+                    // A rule, not just a gap: it separates without needing the space to grow.
+                    if idx > 0 {
+                        Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                            .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
+                    }
                     Text(section.h)
-                        .font(.pixelSystem(size: 14, weight: .bold))
+                        .font(.pixelSystem(size: Doc.heading, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(section.p)
-                        .font(.pixelSystem(size: 12))
+                        .font(.pixelSystem(size: Doc.body))
+                        .lineSpacing(Doc.leading)
                         .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
             if !next.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Doc.headingToBody) {
+                    Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                        .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
                     Text(lang == .vi ? "Tiếp theo" : "Next")
-                        .font(.pixelSystem(size: 12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.mutedText)
+                        .font(.pixelSystem(size: Doc.heading, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
                     ForEach(Array(next.enumerated()), id: \.offset) { _, line in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("•").foregroundColor(CodepetTheme.mutedText)
+                        HStack(alignment: .top, spacing: 9) {
+                            Text("•").font(.pixelSystem(size: Doc.body))
+                                .foregroundColor(CodepetTheme.mutedText)
                             Text(line)
-                                .font(.pixelSystem(size: 12))
+                                .font(.pixelSystem(size: Doc.body))
+                                .lineSpacing(Doc.leading)
                                 .foregroundColor(CodepetTheme.bodyText)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
             }
         }
+        .frame(maxWidth: Doc.measure, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

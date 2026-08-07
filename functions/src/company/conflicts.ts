@@ -54,6 +54,31 @@ export function classifyPair(
     );
   }
 
+  // Two conditional yeses are NOT an agreement.
+  //
+  // `proceed_with_conditions` means "yes, but" — and the "but" is where the disagreement lives.
+  // This phase is deliberately LLM-free (spec §2.2 Phase 3), so it compares the stance enum and
+  // cannot read the conditions; treating two identical conditional stances as agreement asserts
+  // something it has no way to check.
+  //
+  // Observed Aug 7. Four departments each answered `proceed_with_conditions` on "should we charge
+  // for the beta", so all six pairs classified ALIGNED and the client flipped to its
+  // "WHERE THEY AGREE" variant — over a synthesis whose own first sentence read: "the room split
+  // cleanly 2-2 on sequencing, and the conflict detector calling this ALIGNED is wrong — it read
+  // stance labels, not content." The model was right and this function was wrong.
+  //
+  // TENSION rather than a new kind: it already means "same direction, unsettled", which is exactly
+  // what two sets of unread conditions are, and it needs no client change. ALIGNED is now reserved
+  // for stances that carry no conditions — an unqualified yes twice, or an unqualified no twice —
+  // where sameness really is agreement.
+  if (pa.stance === "proceed_with_conditions" && pb.stance === "proceed_with_conditions") {
+    return mk(
+      "TENSION",
+      `${a} and ${b} both proceed only with conditions — this phase compares stances, not the ` +
+        `conditions themselves, so treat it as unsettled rather than agreed.`
+    );
+  }
+
   return mk("ALIGNED", `Both ${a} and ${b} are ${pa.stance} with no hard blocker in play.`);
 }
 

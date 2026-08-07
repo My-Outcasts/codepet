@@ -319,16 +319,26 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertFalse(s.chatMessages.contains { $0.producing }, "the transient row must still be gone")
     }
 
-    /// A draft that never ran in chat — the board's own `runTask` path — carries no steps, so
-    /// the disclosure has nothing to draw and does not appear. Guards against the card
-    /// growing an empty "What it did · 0 steps" affordance.
-    func testABoardRunDraftHasNoLogToDisclose() async {
+    /// A surface run now lands the SAME draft-with-log a chat run does.
+    ///
+    /// This test used to assert the opposite — that a board run's draft carried no steps — which
+    /// was true only because `runTask` had its own separate path that showed a one-line strip and
+    /// wrote the draft directly. That split is gone as of Aug 6 (`runTask` → `produceDraftInline`),
+    /// so a run started from a card is indistinguishable from one started in chat: same theater,
+    /// same collapsed "What <Name> did · N steps" disclosure. Rewritten rather than deleted,
+    /// because the property worth protecting is that the two paths agree.
+    func testASurfaceRunLandsTheSameDraftWithLogAsAChatRun() async {
         let s = store(reply: nil, runner: { _ in RunTaskResponse(kind: "doc", title: "WTP", body: "# Q1") })
         await s.hydrate(companyId: "u")
         guard let task = s.company.tasks.first else { return XCTFail("no seeded task") }
         await s.runTask(task, language: .en)
-        let chatDrafts = s.chatMessages.filter { $0.draft != nil }
-        XCTAssertTrue(chatDrafts.allSatisfy { ($0.execSteps ?? []).isEmpty })
+        guard let draftMessage = s.chatMessages.last(where: { $0.draft != nil }) else {
+            return XCTFail("a surface run put no draft in the transcript")
+        }
+        let steps = draftMessage.execSteps ?? []
+        XCTAssertFalse(steps.isEmpty, "a surface run's deliverable has no log to disclose")
+        XCTAssertTrue(steps.allSatisfy(\.done), "a finished run's log must read as finished")
+        XCTAssertFalse(s.chatMessages.contains { $0.producing })
     }
 
     /// A lead-in is only a lead-in if it is on screen BEFORE the work it leads into.

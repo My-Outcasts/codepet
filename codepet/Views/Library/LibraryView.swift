@@ -427,7 +427,10 @@ struct DeliverableDetailView: View {
             .padding(16)
             Divider()
             ScrollView {
-                DeliverableBodyView(deliverable: deliverable).padding(16)
+                // Page margins, not padding. 16 on every side made the text start where the card's
+                // edge stopped; a document wants a margin you can see (founder, Aug 7).
+                DeliverableBodyView(deliverable: deliverable)
+                    .padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 34)
             }
         }
         .frame(minWidth: 460, minHeight: 420)

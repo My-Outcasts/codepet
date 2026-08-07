@@ -160,7 +160,9 @@ struct TasksView: View {
                                                 projectLinked: companyStore.activeProjectLink != nil)
             switch action {
             case .approve:         previewTask = t   // the board reviews via a preview sheet
-            case .run:             Task { await companyStore.runTask(t, language: lang) }
+            // Proposes rather than runs: the run plays in the copilot as the full execute-log,
+            // after the founder confirms it there. Web parity, Aug 6.
+            case .run:             companyStore.proposeRun(t, language: lang)
             case .walkThrough:     Task { await companyStore.walkThroughTask(t, language: lang) }
             case .openDeliverable: openDeliverable = RoadmapEngine.deliverable(for: t, in: companyStore.company.library)
             case .editCode:
@@ -189,6 +191,7 @@ struct TasksView: View {
     /// --t-3); native had the two reversed.
     private func cardBody(_ t: RoadmapTask, status: TaskStatus) -> some View {
         Group {
+            VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     if let d = DepartmentCatalog.find(t.dept)?.name {
@@ -212,6 +215,7 @@ struct TasksView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
                 }
+            }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)

@@ -128,9 +128,17 @@ struct OverviewChromeRow: View {
             Text(b.title).font(CodepetTheme.inter(13, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            // The verb has to match what the tap will DO. It was hardcoded "Start", but
+            // `suggestedNext` counts `needsApproval` as actionable, so the beacon can be a task
+            // that is already drafted — and `dispatch` correctly sends that to the review sheet.
+            // The button promised a run and opened a review (founder, Aug 6: the beacon offered
+            // "Start" on a card reading "Review"). `panelActionLabel` already covers every status;
+            // the beacon simply wasn't asking it.
             Button { onStart(b) } label: {
-                Text(lang == .vi ? "Bắt đầu" : "Start")
+                Text(RoadmapBoardCopy.panelActionLabel(
+                        for: RoadmapEngine.status(for: b, in: tasks), lang))
                     .font(CodepetTheme.inter(12.5, weight: .bold))
+                    .lineLimit(1).fixedSize()
                     .foregroundColor(CodepetTheme.onAccent(accent))
                     .padding(.horizontal, 18).padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 9).fill(accent))
@@ -154,6 +162,12 @@ struct OverviewChromeRow: View {
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Without this the row was clickable only across its WORDS. A stack's hit
+                    // area is the union of its children, not its own frame, and both labels are
+                    // `lineLimit(1)` — so the empty width to the right of a short title, which
+                    // is most of the row, missed. It reads as a full-width row and now behaves
+                    // like one.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(s.title)

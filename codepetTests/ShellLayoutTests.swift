@@ -91,11 +91,18 @@ final class ShellLayoutTests: XCTestCase {
         }
     }
 
-    /// Only Overview is a top-nav tab that keeps the copilot; the other four tabs
-    /// are full-width surfaces.
-    func test_onlyOverviewAmongTheTopTabsKeepsTheCopilot() {
-        let withCopilot = AppView.topTabs.filter { ShellLayout.showsCopilot(in: $0) }
-        XCTAssertEqual(withCopilot, [.roadmap])
+    /// Every top-nav tab is a full-width surface; the copilot belongs to home.
+    ///
+    /// This used to filter `topTabs` and assert it equalled `[.roadmap]`, which stopped saying
+    /// anything the moment Overview left the bar (Aug 6) — an empty list would have satisfied a
+    /// `.filter` that found nothing. Asserting the tabs are copilot-FREE, and that home is not,
+    /// survives the tab list changing again.
+    func test_noTopTabKeepsTheCopilot_andHomeDoes() {
+        for v in AppView.topTabs {
+            XCTAssertFalse(ShellLayout.showsCopilot(in: v),
+                           "\(v.rawValue) is a full-width surface")
+        }
+        XCTAssertTrue(ShellLayout.showsCopilot(in: AppView.home))
     }
 
     // MARK: Page header compaction

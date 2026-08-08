@@ -528,6 +528,8 @@ struct CopilotBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let proposal = message.runProposal {
             runProposalCard(proposal)
+        } else if let proposal = message.roadmapProposal {
+            roadmapProposalCard(proposal)
         } else if let gap = message.interview, !message.interviewAnswered {
             interviewCard(gap)
         } else {
@@ -572,6 +574,44 @@ struct CopilotBubble: View {
                 // pressable while another run or a chat turn is already in flight.
                 .disabled(companyStore.isStreaming || companyStore.isCompanionTyping
                           || companyStore.runningTaskIds.contains(proposal.taskId))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A roadmap change Codepet is offering to make.
+    ///
+    /// Same shape as `runProposalCard`, and for the same reason: the sentence stays a plain reply,
+    /// the only chrome is the confirm button, and once pressed the button retires to a record of
+    /// what happened rather than vanishing. The founder should be able to scroll back and see that
+    /// her roadmap changed, and on whose say-so.
+    @ViewBuilder private func roadmapProposalCard(_ proposal: RoadmapProposal) -> some View {
+        VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+            textBubble
+            if message.actionConsumed {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(proposal.doneLabel(lang))
+                }
+                .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            } else {
+                Button {
+                    Task { await companyStore.confirmRoadmapProposal(messageId: message.id, language: lang) }
+                } label: {
+                    Text(proposal.buttonLabel(lang))
+                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().fill(CodepetTheme.accentPurple))
+                        .hoverAffordance(Capsule())
+                }
+                .buttonStyle(.plain)
+                .cursorOnHover(.pointingHand)
+                .disabled(companyStore.isStreaming || companyStore.isCompanionTyping)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

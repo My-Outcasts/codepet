@@ -492,11 +492,14 @@ describe("handleCompanyChat", () => {
       expect(body.reply).toBe("On it — running that now.");
       expect(body.run_task_id).toBe("t1");
 
-      // tools were actually offered to the model this turn — run_task because
-      // runnable was non-empty, plus the always-on navigate + remember_fact.
+      // tools actually offered this turn — run_task because runnable was non-empty, plus the
+      // always-on add_task, navigate and remember_fact. `add_task` joined the always-on set on
+      // Aug 8: there is no precondition for creating a task, unlike run_task (needs something
+      // runnable) and complete_task (needs an open founder-owned task).
       const call = mockMessagesCreate.mock.calls[0][0] as any;
       expect((call.tools as any[]).map((t) => t.name)).toEqual([
         "run_task",
+        "add_task",
         "navigate",
         "remember_fact",
       ]);
@@ -519,7 +522,7 @@ describe("handleCompanyChat", () => {
       expect(body.run_task_id).toBeNull();
     });
 
-    test("only the always-on navigate + remember_fact tools are offered, and run_task_id is null, when runnable/env_setup are omitted (backward compat)", async () => {
+    test("only the always-on add_task + navigate + remember_fact tools are offered, and run_task_id is null, when runnable/env_setup/open_tasks are omitted (backward compat)", async () => {
       const req = makeReq(); // no `runnable`, no `env_setup` on the body at all
       const res = makeRes();
       await handleCompanyChat(req as any, res as any);
@@ -529,7 +532,7 @@ describe("handleCompanyChat", () => {
       // must see nothing new when nav/setup/remember never fired.
       expect(body).toEqual({ reply: "Hello founder.", run_task_id: null });
       const call = mockMessagesCreate.mock.calls[0][0] as any;
-      expect((call.tools as any[]).map((t) => t.name)).toEqual(["navigate", "remember_fact"]);
+      expect((call.tools as any[]).map((t) => t.name)).toEqual(["add_task", "navigate", "remember_fact"]);
     });
 
     // ── navigate tool (non-stream) ──────────────────────────────────────────

@@ -30,6 +30,16 @@ struct AppShellView: View {
     @State private var dragStartWidth: CGFloat?
     /// Hover state for the resize handle (brightens the divider on hover).
     @State private var handleHovered = false
+    /// Whether a resize drag is in flight. The pointer leaves the handle's strip the
+    /// instant the drag starts moving, so hover alone cannot carry the divider's
+    /// highlight or its resize cursor through the drag — this does.
+    ///
+    /// Cleared in `onEnded`. If a gesture is ever cancelled without ending (app
+    /// deactivated mid-drag), the resize cursor stays set — but only until the handle
+    /// leaves the hierarchy, which `CursorOnHover.onDisappear` catches, and which ⌘B or
+    /// any non-Overview destination does. Bounded, unlike the session-long leak that
+    /// modifier was written to fix.
+    @State private var handleDragging = false
     /// Message count as of the last time the dock was open — the baseline for the
     /// collapsed bar's unread dot, so reopening the dock always clears it.
     @State private var seenMessageCount = 0
@@ -116,22 +126,44 @@ struct AppShellView: View {
     /// resize cursor, a drag resizes the dock, a click collapses it (⌘B also
     /// toggles). Mirrors the "Click to collapse · Drag to resize" affordance.
     private func resizeHandle(windowWidth: CGFloat, currentWidth: CGFloat) -> some View {
-        Rectangle()
-            .fill(handleHovered ? accent.opacity(0.6) : CodepetTheme.hairline)
-            .frame(width: handleHovered ? 2 : 1)
-            .overlay(Color.clear.frame(width: 11).contentShape(Rectangle()))
+        let active = handleHovered || handleDragging
+        return Rectangle()
+            .fill(CodepetTheme.hairline)
+            // Fixed 1pt, always. This used to be `handleHovered ? 2 : 1`, which made the
+            // handle's own LAYOUT width part of the hover state: every hover in and out
+            // shoved the content pane sideways by a point, and during a drag — where hover
+            // flickers — it added a wobble on top of the one below. The highlight is an
+            // overlay now, so it costs no layout.
+            .frame(width: 1)
+            .overlay {
+                Rectangle().fill(accent.opacity(0.6)).frame(width: 2).opacity(active ? 1 : 0)
+            }
+            .overlay(Color.clear.frame(width: ShellLayout.dockResizeHitWidth).contentShape(Rectangle()))
             .help(uiLanguage == .vi ? "Nhấn để thu gọn (⌘B) · Kéo để đổi cỡ"
                                     : "Click to collapse (⌘B) · Drag to resize")
-            .cursorOnHover(.resizeLeftRight) { handleHovered = $0 }
+            .cursorOnHover(.resizeLeftRight, held: handleDragging) { handleHovered = $0 }
             .gesture(
-                DragGesture(minimumDistance: 3)
+                // `.global`, NOT the default `.local`. This gesture is attached to the
+                // divider, and dragging it MOVES the divider — so in local space the
+                // reported translation is (pointer moved − handle moved), and each frame's
+                // new width feeds straight back into the next frame's translation. Measured
+                // off a screen recording on Aug 10: the divider tracked at ~half the
+                // pointer's speed and alternated back and forth every frame (33 direction
+                // reversals in one drag, lag-1 autocorrelation of the per-frame step −0.52),
+                // ending up 90–115pt behind the pointer at speed. It reads as lag; it is a
+                // feedback loop. Global space is fixed while the handle moves through it.
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
                     .onChanged { v in
                         let start = dragStartWidth ?? currentWidth
                         if dragStartWidth == nil { dragStartWidth = start }
+                        handleDragging = true
                         // Divider sits left of the dock → dragging left grows the dock.
                         manualDockWidth = ShellLayout.clampDockWidth(start - v.translation.width, windowWidth: windowWidth)
                     }
-                    .onEnded { _ in dragStartWidth = nil }
+                    .onEnded { _ in
+                        dragStartWidth = nil
+                        handleDragging = false
+                    }
             )
             .onTapGesture { companyStore.dockCollapsed = true }
     }

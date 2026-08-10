@@ -217,31 +217,49 @@ extension View {
     ///
     /// `onChange` carries the hover state through for callers that also drive their
     /// own highlight from it.
-    func cursorOnHover(_ cursor: NSCursor, onChange: ((Bool) -> Void)? = nil) -> some View {
-        modifier(CursorOnHover(cursor: cursor, onChange: onChange))
+    ///
+    /// `held` keeps the cursor set even once the pointer is outside. A drag owns the
+    /// pointer until the mouse comes up, but `onHover(false)` still fires the moment
+    /// the pointer crosses the view's edge — so a handle you are actively dragging
+    /// reverted to the arrow mid-drag. Callers that start a drag hold it until they end it.
+    func cursorOnHover(_ cursor: NSCursor,
+                       held: Bool = false,
+                       onChange: ((Bool) -> Void)? = nil) -> some View {
+        modifier(CursorOnHover(cursor: cursor, held: held, onChange: onChange))
     }
 }
 
-/// Backing modifier for `cursorOnHover(_:onChange:)` — needs `@State` to remember
+/// Backing modifier for `cursorOnHover(_:held:onChange:)` — needs `@State` to remember
 /// whether this view owns a push, so it cannot live in the `View` extension.
 struct CursorOnHover: ViewModifier {
     let cursor: NSCursor
+    let held: Bool
     let onChange: ((Bool) -> Void)?
+    @State private var inside = false
     @State private var pushed = false
 
     func body(content: Content) -> some View {
         content
-            .onHover { inside in
-                onChange?(inside)
-                guard inside != pushed else { return }
-                pushed = inside
-                if inside { cursor.push() } else { NSCursor.pop() }
+            .onHover { hovering in
+                onChange?(hovering)
+                inside = hovering
+                sync()
             }
+            .onChange(of: held) { _, _ in sync() }
             .onDisappear {
                 guard pushed else { return }
                 pushed = false
                 NSCursor.pop()
             }
+    }
+
+    /// One place that decides push vs pop, so the stack stays balanced no matter
+    /// which of the two inputs changed.
+    private func sync() {
+        let wanted = inside || held
+        guard wanted != pushed else { return }
+        pushed = wanted
+        if wanted { cursor.push() } else { NSCursor.pop() }
     }
 }
 

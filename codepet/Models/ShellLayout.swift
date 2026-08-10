@@ -40,6 +40,16 @@ enum ShellLayout {
     /// Minimum usable dock width (the chat is dock-adapted for ~360pt+).
     static let dockMinWidth: CGFloat = 360
 
+    /// Grabbable width of the dock's resize divider. The divider itself paints 1pt; this
+    /// is the invisible strip around it that takes the hover and the drag.
+    ///
+    /// It was 11pt (±5.5pt of aim). Measured off a screen recording on Aug 10, the pointer
+    /// spent most of a resize OUTSIDE that strip, which is what made the divider stop
+    /// showing the resize cursor. 16pt is ±8pt, in line with what a comparable divider on
+    /// the web gives you. It buys aim only — it does NOT change the divider's layout width,
+    /// which must stay fixed or the content pane shifts every time you hover.
+    static let dockResizeHitWidth: CGFloat = 16
+
     /// Clamp a desired (e.g. drag-set) dock width so BOTH panes stay usable: never
     /// below `dockMinWidth`, never so wide the content pane drops under `contentFloor`.
     static func clampDockWidth(_ desired: CGFloat, windowWidth: CGFloat) -> CGFloat {

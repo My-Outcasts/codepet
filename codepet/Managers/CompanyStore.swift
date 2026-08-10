@@ -1263,6 +1263,10 @@ final class CompanyStore: ObservableObject {
                       : "This is the one to turn on for that."
         case .noted:
             return vi ? "Mình ghi lại rồi." : "Noted."
+        case .roadmap:
+            // Deliberately not "Done" or "Added" — nothing has happened yet. The card below
+            // carries the button, and the founder pressing it is what changes the roadmap.
+            return vi ? "Được — xác nhận giúp mình nhé." : "Sure — confirm below and I'll do it."
         case .nothing:
             // A well-formed reply with no words and nothing on offer is a failure, and the
             // founder is owed that rather than a promise. Says nothing about why, because

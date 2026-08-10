@@ -94,3 +94,55 @@ final class ChatTailActionTests: XCTestCase {
                                                 streamedText: "text", action: nil), .fallback)
     }
 }
+
+/// A turn that is ONLY a roadmap verb is a real turn, not an empty one.
+///
+/// Measured in the app on Aug 10, the first time the founder used `complete_task`:
+/// `response 200`, `frame done — 118 bytes`, `threw=false done=true chars=0`, `tail=fallback`,
+/// and she was shown "I can't reach my brain right now" over a completely healthy backend. The
+/// model had replied with no prose and only the tool call — a perfectly good turn — and
+/// `isEmpty`, checking four fields it knew about, called it nothing.
+final class ChatTailActionRoadmapVerbTests: XCTestCase {
+
+    private func decide(_ action: ChatDoneAction) -> ChatTailAction {
+        ChatTailAction.decide(streamThrew: false, receivedDone: true, streamedText: "", action: action)
+    }
+
+    /// The exact shape that broke: no text, only a completion.
+    func testATextFreeCompleteTaskIsNotAFallback() {
+        XCTAssertEqual(decide(ChatDoneAction(completeTaskId: "t1")), .leadIn(.roadmap))
+    }
+
+    func testATextFreeAddTaskIsNotAFallback() {
+        let add = AddTaskDTO(title: "Call the bakeries", detail: nil, dept: nil, owner: "founder")
+        XCTAssertEqual(decide(ChatDoneAction(addTask: add)), .leadIn(.roadmap))
+    }
+
+    /// A genuinely empty turn must STILL fall back — the guard this file exists for.
+    func testATrulyEmptyTurnStillFallsBack() {
+        XCTAssertEqual(decide(ChatDoneAction()), .fallback)
+    }
+
+    /// Precedence: producing a deliverable outranks offering a roadmap change, because the run is
+    /// the thing that takes time and the founder needs to know it started.
+    func testARunStillWinsTheLeadIn() {
+        XCTAssertEqual(decide(ChatDoneAction(runTaskId: "t1", completeTaskId: "t2")), .leadIn(.run))
+    }
+
+    /// `remember` rides along with anything, so a completion that also recorded a fact still reads
+    /// as a roadmap turn rather than a bare "Noted."
+    func testARoadmapVerbOutranksARememberThatRodeAlong() {
+        let fact = RememberedFact(topic: "traction", statement: "9 bakeries in beta")
+        XCTAssertEqual(decide(ChatDoneAction(remember: [fact], completeTaskId: "t1")),
+                       .leadIn(.roadmap))
+    }
+
+    /// Text present → no lead-in is needed at all; the reply speaks for itself.
+    func testATurnWithProseNeedsNoLeadIn() {
+        XCTAssertEqual(
+            ChatTailAction.decide(streamThrew: false, receivedDone: true,
+                                  streamedText: "Marking that off now.",
+                                  action: ChatDoneAction(completeTaskId: "t1")),
+            .none)
+    }
+}

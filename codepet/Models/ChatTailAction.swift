@@ -37,6 +37,9 @@ enum ChatTailAction: Equatable {
         case setup
         /// Nothing but facts to remember came back.
         case noted
+        /// A roadmap change is on offer — mark a task done, or add one. Nothing is being made
+        /// and nothing has changed: the founder presses the button in the card below.
+        case roadmap
         /// A well-formed reply that said nothing and offered nothing.
         case nothing
     }
@@ -65,11 +68,24 @@ enum ChatTailAction: Equatable {
         return .leadIn(leadIn(for: action))
     }
 
-    /// Nothing to show and nothing to do: no task, no destination, no toolkit item, no fact.
+    /// Nothing to show and nothing to do: no task, no destination, no toolkit item, no fact,
+    /// no roadmap change.
+    ///
+    /// The two roadmap verbs were added on Aug 8 and this function was NOT updated, which broke
+    /// them the first time the founder used one. Measured in the app, Aug 10: `response 200`,
+    /// `frame done — 118 bytes`, `threw=false done=true chars=0`, `tail=fallback`. The model had
+    /// replied with no prose and only a `complete_task` call — a perfectly good turn — and this
+    /// check, seeing four nil fields it knew about, called it empty, fell back to a second
+    /// generation, and printed "I can't reach my brain right now" over a working backend.
+    ///
+    /// EVERY new action field has to be added here and to `leadIn`. That is the third time this
+    /// week an action was added without updating everything that reasons about actions (the
+    /// non-streaming `ChatDoneAction` construction, then the mark-done grounding, now this).
     private static func isEmpty(_ action: ChatDoneAction?) -> Bool {
         guard let action else { return true }
         return action.runTaskId == nil && action.nav == nil && action.setup == nil
             && action.remember.isEmpty
+            && action.completeTaskId == nil && action.addTask == nil
     }
 
     /// Precedence mirrors the CF's own: `run_task`/`navigate`/`setup_capability` are
@@ -80,6 +96,7 @@ enum ChatTailAction: Equatable {
         if action.runTaskId != nil { return .run }
         if action.nav != nil { return .nav }
         if action.setup != nil { return .setup }
+        if action.completeTaskId != nil || action.addTask != nil { return .roadmap }
         if !action.remember.isEmpty { return .noted }
         return .nothing
     }

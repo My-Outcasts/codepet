@@ -58,6 +58,9 @@ struct CompanyChatRequest: Codable {
     let history: [ChatTurnDTO]
     let userMessage: String
     let runnable: [RunnableRef]
+    /// The founder's OWN open steps, which `complete_task` may offer to tick off. The opposite
+    /// set to `runnable`: that is what Codepet can do, this is what only she can.
+    let openTasks: [RunnableRef]
     /// The founder's currently-OFF toolkit items — lets the CF decide whether
     /// to suggest enabling one (`setup` in the reply).
     let envSetup: [SetupItemDTO]
@@ -82,6 +85,7 @@ struct CompanyChatRequest: Codable {
         case history
         case userMessage = "user_message"
         case runnable
+        case openTasks = "open_tasks"
         case envSetup = "env_setup"
         case styleFragment = "style_fragment"
         case enabledSkills = "enabled_skills"
@@ -93,6 +97,7 @@ struct CompanyChatRequest: Codable {
     /// to name them explicitly.
     init(companyId: String?, language: String, companionId: String, context: String,
          history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
+         openTasks: [RunnableRef] = [],
          envSetup: [SetupItemDTO] = [], styleFragment: String? = nil,
          enabledSkills: [String] = []) {
         self.companyId = companyId
@@ -102,10 +107,19 @@ struct CompanyChatRequest: Codable {
         self.history = history
         self.userMessage = userMessage
         self.runnable = runnable
+        self.openTasks = openTasks
         self.envSetup = envSetup
         self.styleFragment = styleFragment
         self.enabledSkills = enabledSkills
     }
+}
+
+/// The wire shape of `add_task` — mirrors `NewTaskIntent` in companyChatCore.ts.
+struct AddTaskDTO: Codable, Equatable {
+    let title: String
+    let detail: String?
+    let dept: String?
+    let owner: String?
 }
 
 /// Response body from the companyChat Cloud Function.
@@ -115,6 +129,8 @@ struct CompanyChatResponse: Codable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]?
+    let completeTaskId: String?
+    let addTask: AddTaskDTO?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -122,6 +138,8 @@ struct CompanyChatResponse: Codable {
         case nav
         case setup
         case remember
+        case completeTaskId = "complete_task_id"
+        case addTask = "add_task"
     }
 }
 
@@ -134,14 +152,19 @@ struct CompanyChatReply: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    let completeTaskId: String?
+    let addTask: AddTaskDTO?
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
-         setup: SetupAction? = nil, remember: [RememberedFact] = []) {
+         setup: SetupAction? = nil, remember: [RememberedFact] = [],
+         completeTaskId: String? = nil, addTask: AddTaskDTO? = nil) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.completeTaskId = completeTaskId
+        self.addTask = addTask
     }
 }
 
@@ -155,13 +178,20 @@ struct ChatDoneAction: Equatable {
     let nav: NavAction?
     let setup: SetupAction?
     let remember: [RememberedFact]
+    /// The two roadmap verbs. Independent of the run/nav/setup trio (like `remember`), because
+    /// "I finished that, now draft the next one" is one honest turn — but exclusive of each other.
+    let completeTaskId: String?
+    let addTask: AddTaskDTO?
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
-         remember: [RememberedFact] = []) {
+         remember: [RememberedFact] = [], completeTaskId: String? = nil,
+         addTask: AddTaskDTO? = nil) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
+        self.completeTaskId = completeTaskId
+        self.addTask = addTask
     }
 }
 
@@ -212,7 +242,8 @@ enum CompanyChatClient {
         let reply = decoded.reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return nil }
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
-                                 setup: decoded.setup, remember: decoded.remember ?? [])
+                                 setup: decoded.setup, remember: decoded.remember ?? [],
+                                 completeTaskId: decoded.completeTaskId, addTask: decoded.addTask)
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -355,14 +386,18 @@ enum CompanyChatClient {
                 let nav: NavAction?
                 let setup: SetupAction?
                 let remember: [RememberedFact]?
+                let completeTaskId: String?
+                let addTask: AddTaskDTO?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
+                    case completeTaskId = "complete_task_id"; case addTask = "add_task"
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
-                                             remember: d.remember ?? [])
+                                             remember: d.remember ?? [],
+                                             completeTaskId: d.completeTaskId, addTask: d.addTask)
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             } else {
                 // Worse than a dropped delta: with no `done` the store falls back to the

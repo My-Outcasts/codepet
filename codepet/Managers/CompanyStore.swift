@@ -775,6 +775,13 @@ final class CompanyStore: ObservableObject {
             .filter { RoadmapEngine.status(for: $0, in: company.tasks) == .codepetCanDo }
             .prefix(60)
             .map { RunnableRef(id: $0.id, title: $0.title) }
+        // The founder's OWN open steps — what `complete_task` may offer to tick off. The opposite
+        // set to `runnable`: a task Codepet can do is completed by approving its draft, never by
+        // the companion declaring it done, so those are deliberately excluded here.
+        let openTasks = company.tasks
+            .filter { !$0.done && !$0.drafted && $0.who == .you }
+            .prefix(60)
+            .map { RunnableRef(id: $0.id, title: $0.title) }
         // The currently-OFF toolkit items — lets the CF decide whether to
         // suggest turning one on (`setup` in the reply).
         let envSetup = Toolkit.catalog
@@ -790,7 +797,8 @@ final class CompanyStore: ObservableObject {
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text, focusDepartment: department,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
-            history: Array(history), userMessage: text, runnable: Array(runnable), envSetup: envSetup,
+            history: Array(history), userMessage: text, runnable: Array(runnable),
+            openTasks: Array(openTasks), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
             styleFragment: company.founderPrefs.style.promptFragment(),
@@ -898,8 +906,14 @@ final class CompanyStore: ObservableObject {
                                                         : Self.leadInCopy(.nothing, language: language)
                 }
             }
+            // Every field the reply can carry, or the non-streaming path silently drops half a
+            // turn. `complete_task`/`add_task` were added on Aug 8 and missed here first time:
+            // the streaming path decoded them and this one did not, so the founder would have
+            // seen roadmap offers only when the stream succeeded.
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
-                                         setup: reply?.setup, remember: reply?.remember ?? [])
+                                         setup: reply?.setup, remember: reply?.remember ?? [],
+                                         completeTaskId: reply?.completeTaskId,
+                                         addTask: reply?.addTask)
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
         case .leadIn(let kind):
@@ -1376,6 +1390,65 @@ final class CompanyStore: ObservableObject {
         await handleSetup(action.setup, cid: cid)
         guard companyId == cid else { return }
         await handleRemember(action.remember, cid: cid)
+        guard companyId == cid else { return }
+        handleRoadmapProposal(action, language: language)
+    }
+
+    /// Offer a roadmap change, never apply one.
+    ///
+    /// Founder, Aug 8: the chat is the central brain and the roadmap should follow it. Both verbs
+    /// land as a proposal she presses — a model that can silently rewrite a roadmap is worse than
+    /// one that cannot touch it, because one wrong completion turns her progress into fiction.
+    private func handleRoadmapProposal(_ action: ChatDoneAction, language: AppLanguage) {
+        let proposal: RoadmapProposal?
+        if let id = action.completeTaskId,
+           let task = company.tasks.first(where: { $0.id == id && !$0.done }) {
+            proposal = .complete(taskId: id, title: task.title)
+        } else if let add = action.addTask {
+            proposal = .add(RoadmapProposal.NewTask(
+                title: add.title,
+                detail: add.detail ?? "",
+                dept: add.dept,
+                codepetOwned: add.owner == "codepet"))
+        } else {
+            proposal = nil
+        }
+        guard let proposal else { return }
+        // A second identical offer would let the founder confirm one and leave an orphan that
+        // completes a task twice or adds a duplicate — the same guard `proposeRun` makes.
+        guard !chatMessages.contains(where: {
+            $0.roadmapProposal == proposal && !$0.actionConsumed
+        }) else { return }
+        chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
+                                            roadmapProposal: proposal))
+        flushActiveThread()
+    }
+
+    /// Apply a roadmap proposal the founder pressed. Consumes the button first, so a double-press
+    /// cannot complete a task twice or add the same task twice.
+    func confirmRoadmapProposal(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let proposal = chatMessages[i].roadmapProposal,
+              !chatMessages[i].actionConsumed else { return }
+        chatMessages[i].actionConsumed = true
+        switch proposal {
+        case .complete(let taskId, _):
+            await toggleTaskDone(id: taskId)
+        case .add(let task):
+            let new = RoadmapTask(
+                id: UUID().uuidString,
+                title: task.title,
+                detail: task.detail,
+                // The phase the founder is actually working in, so a new task lands where she can
+                // see it rather than at the end of the map.
+                phase: RoadmapEngine.nextStep(company.tasks)?.phase ?? .find,
+                who: task.codepetOwned ? .does : .you,
+                // No `dependsOn`, ever: founder's call, Aug 8 — a chat-created task is a LEAF.
+                // A model guessing at a dependency graph is how a roadmap becomes unusable.
+                dept: task.dept)
+            company.tasks.append(new)
+            if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
+        }
     }
 
     /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which

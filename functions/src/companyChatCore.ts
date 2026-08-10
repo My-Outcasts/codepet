@@ -510,3 +510,134 @@ export function buildMessages(history: ChatTurn[], userMessage: string): ClaudeM
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Roadmap verbs — "chat is the central brain" (founder, Aug 8)
+//
+// Before these, the chat could only RUN a task that already existed. It could not
+// create one, complete one, or reshape anything: the roadmap was written once by the
+// scaffold and edited only by hand. That split is what made the roadmap feel like a
+// separate app, and it is also why the companion said "you can consider this step done"
+// and then handed over a navigation chip — the capability was missing, so the honest
+// grounding had to forbid the sentence instead of the sentence being true.
+//
+// Both verbs PROPOSE. Neither mutates anything server-side: the CF validates and returns
+// an intent, exactly as `run_task` does, and the native client renders a confirmation the
+// founder presses. A model that can silently rewrite a roadmap is worse than one that
+// cannot touch it — one wrong completion and the founder's progress is fiction.
+
+/** A task the companion may offer to mark complete. Mirrors `RunnableTaskRef`. */
+export interface CompletableTaskRef {
+  id: string;
+  title: string;
+}
+
+export const COMPLETE_TASK_TOOL = {
+  name: "complete_task",
+  description:
+    "Offer to mark a roadmap task done, when the founder says they have finished it themselves — e.g. \"I did that\", \"that's done\", \"mark it complete\", \"I already talked to them\". Use the exact task_id from OPEN TASKS. This does NOT complete work for them and must never be used to claim you did something: it records that THEY finished a step they own. Do not call it for a task you drafted — that is completed by the founder approving the draft. If it is ambiguous which task they mean, ask a one-line question instead of guessing.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      task_id: {
+        type: "string",
+        description: "The exact id of the task the founder says they finished, copied from OPEN TASKS.",
+      },
+      task_title: {
+        type: "string",
+        description: "The task's title, copied from the same entry (optional; fallback match only).",
+      },
+    },
+    required: ["task_id"],
+  },
+} as const;
+
+export const ADD_TASK_TOOL = {
+  name: "add_task",
+  description:
+    "Offer to add a new task to the roadmap, when the founder describes work they want tracked that is not already on it — e.g. \"add a task to call the two bakeries\", \"we need to write a refund policy\". Write the title as an action the founder or a department can start, in their own words where possible. Do NOT call this for work already on the roadmap, for something you are about to do yourself in this chat, or to break an existing task into sub-steps.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: {
+        type: "string",
+        description: "A short, concrete action — what would be done, not a topic. Max ~80 characters.",
+      },
+      detail: {
+        type: "string",
+        description: "One sentence on what finishing it means. Optional; omit rather than padding.",
+      },
+      dept: {
+        type: "string",
+        description:
+          "The department that owns it: eng, design, mkt, sales, support, fin, ops, or legal. Omit if genuinely unclear.",
+      },
+      owner: {
+        type: "string",
+        enum: ["founder", "codepet"],
+        description:
+          "Who does it. \"founder\" for work only they can do (conversations, decisions, anything needing their judgement or their accounts); \"codepet\" for a deliverable you could draft.",
+      },
+    },
+    required: ["title", "owner"],
+  },
+} as const;
+
+/** The validated intent to complete a task. `null` when the model named a task that isn't open. */
+export function validateCompleteTaskToolUse(
+  input: unknown,
+  completable: CompletableTaskRef[]
+): string | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { task_id?: unknown; task_title?: unknown };
+  const id = typeof raw.task_id === "string" ? raw.task_id.trim() : "";
+  if (id && completable.some((t) => t.id === id)) return id;
+  // Same fallback as run_task: a title match rescues a turn where the model copied the
+  // human-readable field correctly and the id wrongly.
+  const title = typeof raw.task_title === "string" ? raw.task_title.trim().toLowerCase() : "";
+  if (!title) return null;
+  return completable.find((t) => t.title.trim().toLowerCase() === title)?.id ?? null;
+}
+
+export interface NewTaskIntent {
+  title: string;
+  detail: string;
+  dept: string | null;
+  owner: "founder" | "codepet";
+}
+
+const TASK_DEPTS = ["eng", "design", "mkt", "sales", "support", "fin", "ops", "legal"];
+const MAX_TASK_TITLE = 120;
+
+/** The validated intent to add a task. `null` when there is no usable title. */
+export function validateAddTaskToolUse(input: unknown): NewTaskIntent | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { title?: unknown; detail?: unknown; dept?: unknown; owner?: unknown };
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  if (!title) return null;
+  const detail = typeof raw.detail === "string" ? raw.detail.trim() : "";
+  const dept = typeof raw.dept === "string" && TASK_DEPTS.includes(raw.dept.trim())
+    ? raw.dept.trim()
+    : null;
+  // Anything but an explicit "codepet" is the founder's. Defaulting the OTHER way would
+  // let a malformed turn queue work the founder never asked Codepet to take on.
+  const owner = raw.owner === "codepet" ? "codepet" : "founder";
+  return { title: title.slice(0, MAX_TASK_TITLE), detail, dept, owner };
+}
+
+const MAX_OPEN_TASKS = 60;
+
+/** The OPEN TASKS grounding block — what `complete_task` may name. */
+export function buildOpenTasksBlock(open: CompletableTaskRef[]): string {
+  if (!open.length) return "";
+  const lines = open
+    .slice(0, MAX_OPEN_TASKS)
+    .map((t) => `- ${t.id} — ${t.title}`)
+    .join("\n");
+  return (
+    "\n\nOPEN TASKS (the founder's own steps, not yet done). To mark one complete when " +
+    "they say they finished it, call complete_task with the exact id:\n" + lines
+  );
+}

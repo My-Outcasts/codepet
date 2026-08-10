@@ -20,6 +20,13 @@ import {
   validateSetupToolUse,
   coerceRememberFacts,
   RUN_TASK_TOOL,
+  COMPLETE_TASK_TOOL,
+  ADD_TASK_TOOL,
+  validateCompleteTaskToolUse,
+  validateAddTaskToolUse,
+  buildOpenTasksBlock,
+  type CompletableTaskRef,
+  type NewTaskIntent,
   NAVIGATE_TOOL,
   SETUP_TOOL,
   REMEMBER_TOOL,
@@ -62,6 +69,10 @@ interface ChatRequestBody {
   // Backward-compatible: omitted entirely by older clients → treated as [] → no tool
   // offered → behavior is byte-for-byte identical to before this field existed.
   runnable?: RunnableTaskRef[];
+  // The founder's OWN open steps, which `complete_task` may offer to tick off. Separate
+  // from `runnable` because they are the opposite set: runnable is what Codepet can do,
+  // this is what only the founder can. Backward-compatible: omitted → [] → no tool.
+  open_tasks?: CompletableTaskRef[];
   // Currently-OFF toolkit items (skills/connectors/agents) byte may offer to turn on
   // via the setup_capability tool (see companyChatCore). Backward-compatible: omitted
   // entirely by older clients → treated as [] → no tool offered.
@@ -92,6 +103,19 @@ function parseRunnable(raw: unknown): RunnableTaskRef[] {
     })
     .filter((r): r is RunnableTaskRef => r !== null)
     .slice(0, MAX_RUNNABLE_TASKS);
+}
+
+function parseOpenTasks(raw: unknown): CompletableTaskRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id.trim() : "";
+      const title = typeof o.title === "string" ? o.title.trim() : "";
+      return id ? { id, title } : null;
+    })
+    .filter((r): r is CompletableTaskRef => r !== null)
+    .slice(0, 60);
 }
 
 function parseEnvSetup(raw: unknown): EnvSetupItem[] {
@@ -216,17 +240,22 @@ interface ResolvedActions {
   nav: NavAction | null;
   setup: SetupAction | null;
   remember: RememberedFact[];
+  completeTaskId: string | null;
+  addTask: NewTaskIntent | null;
 }
 
 function resolveActions(
   toolUses: Array<{ name: string; input: unknown }>,
   runnable: RunnableTaskRef[],
-  envSetup: EnvSetupItem[]
+  envSetup: EnvSetupItem[],
+  openTasks: CompletableTaskRef[]
 ): ResolvedActions {
   const runTaskUse = toolUses.find((t) => t.name === "run_task");
   const navUse = toolUses.find((t) => t.name === "navigate");
   const setupUse = toolUses.find((t) => t.name === "setup_capability");
   const rememberUse = toolUses.find((t) => t.name === "remember_fact");
+  const completeUse = toolUses.find((t) => t.name === "complete_task");
+  const addUse = toolUses.find((t) => t.name === "add_task");
 
   let runTaskId: string | null = null;
   let nav: NavAction | null = null;
@@ -238,7 +267,19 @@ function resolveActions(
 
   const remember = rememberUse ? coerceRememberFacts(rememberUse.input) : [];
 
-  return { runTaskId, nav, setup, remember };
+  // The two roadmap verbs are resolved INDEPENDENTLY of the run/nav/setup trio, like
+  // remember_fact — "I finished that, and now draft the next one" is one honest turn, and
+  // forcing it through the mutual-exclusion chain would silently drop half of it.
+  //
+  // They exclude EACH OTHER, though: completing and creating in one breath is far more
+  // likely a confused turn than a real intent, and the founder cannot review two roadmap
+  // mutations in one confirmation.
+  let completeTaskId: string | null = null;
+  let addTask: NewTaskIntent | null = null;
+  if (completeUse) completeTaskId = validateCompleteTaskToolUse(completeUse.input, openTasks);
+  if (!completeTaskId && addUse) addTask = validateAddTaskToolUse(addUse.input);
+
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask };
 }
 
 export async function handleCompanyChat(req: Request, res: Response): Promise<void> {
@@ -257,6 +298,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
   }
 
   const runnable = parseRunnable(body.runnable);
+  const openTasks = parseOpenTasks(body.open_tasks);
   const envSetup = parseEnvSetup(body.env_setup);
   const skills = parseEnabledSkills(body.enabled_skills);
 
@@ -273,6 +315,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     styleBlock(typeof body.style_fragment === "string" ? body.style_fragment : "") +
     buildContextBlock(typeof body.context === "string" ? body.context : "") +
     buildRunnableBlock(runnable) +
+    buildOpenTasksBlock(openTasks) +
     buildSetupBlock(envSetup) +
     buildSkillsBlock(skills);
   const messages = buildMessages(Array.isArray(body.history) ? body.history : [], userMessage);
@@ -305,6 +348,10 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
 
   const tools: unknown[] = [
     ...(runnable.length ? [RUN_TASK_TOOL] : []),
+    // Offered only when there is something to complete — same rule as run_task. With no
+    // open founder-owned task, a complete_task call could only ever name a hallucination.
+    ...(openTasks.length ? [COMPLETE_TASK_TOOL] : []),
+    ADD_TASK_TOOL,
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
     REMEMBER_TOOL,
@@ -347,13 +394,16 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       const toolUses = response.content
         .filter((b) => b.type === "tool_use")
         .map((b) => ({ name: (b as any).name as string, input: (b as any).input }));
-      const { runTaskId, nav, setup, remember } = resolveActions(toolUses, runnable, envSetup);
+      const { runTaskId, nav, setup, remember, completeTaskId, addTask } =
+        resolveActions(toolUses, runnable, envSetup, openTasks);
 
       // Additive, backward-compatible response shape: run_task_id is always
       // present (existing behavior); nav/setup/remember are only included when
       // the turn actually produced one — old clients that only look for
       // {reply, run_task_id} are unaffected, and unknown fields are ignored.
       const responseBody: Record<string, unknown> = { reply, run_task_id: runTaskId };
+      if (completeTaskId) responseBody.complete_task_id = completeTaskId;
+      if (addTask) responseBody.add_task = addTask;
       if (nav) responseBody.nav = nav;
       if (setup) responseBody.setup = setup;
       if (remember.length) responseBody.remember = remember;
@@ -428,7 +478,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         }
       } else if (event.type === "done") {
         const cacheHit = (event.usage?.cache_read_input_tokens ?? 0) > 0;
-        const { runTaskId, nav, setup, remember } = resolveActions(completedToolUses, runnable, envSetup);
+        const { runTaskId, nav, setup, remember, completeTaskId, addTask } =
+          resolveActions(completedToolUses, runnable, envSetup, openTasks);
         // Truncation was silent by construction: the API reports it, this function ignored it,
         // and the client rendered half a sentence as a finished answer.
         if (event.stopReason === "max_tokens") {
@@ -442,7 +493,9 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         const droppedTools = completedToolUses
           .filter((t) => (t.name === "run_task" && !runTaskId)
                       || (t.name === "navigate" && !nav)
-                      || (t.name === "setup_capability" && !setup))
+                      || (t.name === "setup_capability" && !setup)
+                      || (t.name === "complete_task" && !completeTaskId)
+                      || (t.name === "add_task" && !addTask))
           .map((t) => ({ name: t.name, input: t.input }));
         if (droppedTools.length) {
           logger.warn("companyChat dropped a tool call that failed validation", {
@@ -450,7 +503,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
           });
         }
         // The whole point of this pass: an empty turn is now attributable rather than a mystery.
-        if (textChars === 0 && !runTaskId && !nav && !setup && !remember.length) {
+        if (textChars === 0 && !runTaskId && !nav && !setup && !remember.length
+            && !completeTaskId && !addTask) {
           logger.warn("companyChat produced an EMPTY turn", {
             uid: auth.uid,
             stopReason: event.stopReason ?? null,
@@ -466,6 +520,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         // run_task_id} are unaffected; nav/setup/remember are only included
         // when the turn actually produced one.
         const doneFrame: Record<string, unknown> = { model: CHAT_MODEL, cache_hit: cacheHit, run_task_id: runTaskId };
+        if (completeTaskId) doneFrame.complete_task_id = completeTaskId;
+        if (addTask) doneFrame.add_task = addTask;
         if (nav) doneFrame.nav = nav;
         if (setup) doneFrame.setup = setup;
         if (remember.length) doneFrame.remember = remember;

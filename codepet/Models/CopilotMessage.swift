@@ -65,6 +65,8 @@ struct CopilotMessage: Identifiable, Equatable {
     /// A run started from a surface and offered here before it happens — see `RunProposal`.
     /// `actionConsumed` hides the button once pressed, the same way it does for `firstRunAction`.
     var runProposal: RunProposal?
+    /// A roadmap change offered for confirmation — see `RoadmapProposal`.
+    var roadmapProposal: RoadmapProposal?
 
     /// `createdAt` is injectable and defaults to now.
     ///
@@ -83,7 +85,7 @@ struct CopilotMessage: Identifiable, Equatable {
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
-         runProposal: RunProposal? = nil) {
+         runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -103,5 +105,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.execSteps = execSteps
         self.vcRun = vcRun
         self.runProposal = runProposal
+        self.roadmapProposal = roadmapProposal
     }
 }

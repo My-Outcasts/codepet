@@ -122,6 +122,35 @@ struct AddTaskDTO: Codable, Equatable {
     let owner: String?
 }
 
+/// The wire shape of one `draft_message` entry — mirrors `MessageDraftIntent` in
+/// companyChatCore.ts. A drafted message is CONTENT, not an action: there is nothing to
+/// confirm, so unlike the roadmap verbs it carries no intent/confirmation pair.
+struct MessageDraftDTO: Codable, Equatable {
+    let channel: String
+    let to: String?
+    let subject: String?
+    let body: String
+
+    /// The eyebrow the card shows. Falls back to a DM rather than an email, matching the
+    /// backend's own default for an unrecognised channel.
+    func eyebrow(_ lang: AppLanguage) -> String {
+        switch channel {
+        case "email": return lang == .vi ? "Email nháp" : "Email draft"
+        case "text":  return lang == .vi ? "Tin nhắn" : "Text message"
+        default:      return lang == .vi ? "Tin nhắn" : "Message"
+        }
+    }
+
+    /// What the card puts above the hairline: an email leads with its subject, everything
+    /// else with who it is for. Empty when the model gave neither, and the card then skips
+    /// the heading rather than showing a blank line.
+    var heading: String {
+        let subject = (subject ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if channel == "email", !subject.isEmpty { return subject }
+        return (to ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// Response body from the companyChat Cloud Function.
 struct CompanyChatResponse: Codable {
     let reply: String
@@ -131,6 +160,7 @@ struct CompanyChatResponse: Codable {
     let remember: [RememberedFact]?
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    let drafts: [MessageDraftDTO]?
 
     enum CodingKeys: String, CodingKey {
         case reply
@@ -140,6 +170,7 @@ struct CompanyChatResponse: Codable {
         case remember
         case completeTaskId = "complete_task_id"
         case addTask = "add_task"
+        case drafts
     }
 }
 
@@ -154,10 +185,12 @@ struct CompanyChatReply: Equatable {
     let remember: [RememberedFact]
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    let drafts: [MessageDraftDTO]
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
          setup: SetupAction? = nil, remember: [RememberedFact] = [],
-         completeTaskId: String? = nil, addTask: AddTaskDTO? = nil) {
+         completeTaskId: String? = nil, addTask: AddTaskDTO? = nil,
+         drafts: [MessageDraftDTO] = []) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
@@ -165,6 +198,7 @@ struct CompanyChatReply: Equatable {
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.drafts = drafts
     }
 }
 
@@ -182,16 +216,20 @@ struct ChatDoneAction: Equatable {
     /// "I finished that, now draft the next one" is one honest turn — but exclusive of each other.
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    /// The messages the companion wrote this turn. Independent of every verb above — content,
+    /// not an action — so a turn may carry drafts alongside any of them.
+    let drafts: [MessageDraftDTO]
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
          remember: [RememberedFact] = [], completeTaskId: String? = nil,
-         addTask: AddTaskDTO? = nil) {
+         addTask: AddTaskDTO? = nil, drafts: [MessageDraftDTO] = []) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.drafts = drafts
     }
 }
 
@@ -243,7 +281,8 @@ enum CompanyChatClient {
         guard !reply.isEmpty else { return nil }
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
                                  setup: decoded.setup, remember: decoded.remember ?? [],
-                                 completeTaskId: decoded.completeTaskId, addTask: decoded.addTask)
+                                 completeTaskId: decoded.completeTaskId, addTask: decoded.addTask,
+                                 drafts: decoded.drafts ?? [])
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -388,16 +427,19 @@ enum CompanyChatClient {
                 let remember: [RememberedFact]?
                 let completeTaskId: String?
                 let addTask: AddTaskDTO?
+                let drafts: [MessageDraftDTO]?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
                     case completeTaskId = "complete_task_id"; case addTask = "add_task"
+                    case drafts
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
                                              remember: d.remember ?? [],
-                                             completeTaskId: d.completeTaskId, addTask: d.addTask)
+                                             completeTaskId: d.completeTaskId, addTask: d.addTask,
+                                             drafts: d.drafts ?? [])
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             } else {
                 // Worse than a dropped delta: with no `done` the store falls back to the

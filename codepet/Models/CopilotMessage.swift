@@ -67,6 +67,13 @@ struct CopilotMessage: Identifiable, Equatable {
     var runProposal: RunProposal?
     /// A roadmap change offered for confirmation — see `RoadmapProposal`.
     var roadmapProposal: RoadmapProposal?
+    /// Messages the companion wrote for the founder to send — see `MessageDraftDTO`.
+    ///
+    /// Unlike every other payload here there is nothing to confirm and nothing to consume: a
+    /// draft is content, and the founder acts on it by copying it. It attaches to the reply
+    /// rather than arriving as its own bubble, for the same reason `roadmapProposal` does —
+    /// two avatars for one thought reads as Codepet talking to itself (founder, Aug 10).
+    var drafts: [MessageDraftDTO] = []
 
     /// `createdAt` is injectable and defaults to now.
     ///
@@ -85,7 +92,8 @@ struct CopilotMessage: Identifiable, Equatable {
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
-         runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil) {
+         runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
+         drafts: [MessageDraftDTO] = []) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -106,5 +114,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.vcRun = vcRun
         self.runProposal = runProposal
         self.roadmapProposal = roadmapProposal
+        self.drafts = drafts
     }
 }

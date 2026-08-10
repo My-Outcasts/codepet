@@ -896,11 +896,13 @@ final class CompanyStore: ObservableObject {
             // Every field the reply can carry, or the non-streaming path silently drops half a
             // turn. `complete_task`/`add_task` were added on Aug 8 and missed here first time:
             // the streaming path decoded them and this one did not, so the founder would have
-            // seen roadmap offers only when the stream succeeded.
+            // seen roadmap offers only when the stream succeeded. `drafts` (Aug 10) is on this
+            // list from the start for the same reason.
             let action = ChatDoneAction(runTaskId: reply?.runTaskId, nav: reply?.nav,
                                          setup: reply?.setup, remember: reply?.remember ?? [],
                                          completeTaskId: reply?.completeTaskId,
-                                         addTask: reply?.addTask)
+                                         addTask: reply?.addTask,
+                                         drafts: reply?.drafts ?? [])
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 // The retry can itself come back wordless (it is the same model on the same
                 // prompt). An empty bubble is worse than an honest one — but "wordless" is not
@@ -1269,6 +1271,12 @@ final class CompanyStore: ObservableObject {
             // Deliberately not "Done" or "Added" — nothing has happened yet. The card below
             // carries the button, and the founder pressing it is what changes the roadmap.
             return vi ? "Được — xác nhận giúp mình nhé." : "Sure — confirm below and I'll do it."
+        case .drafted:
+            // Not "I sent it" and not "here's a draft, want me to send it" — Codepet cannot
+            // send anything. The card below holds the message and a Copy button; this line
+            // only has to hand over to it.
+            return vi ? "Đây là bản mình viết — bạn xem rồi sao chép nhé."
+                      : "Here's what I'd send — copy it when you're happy with it."
         case .nothing:
             // A well-formed reply with no words and nothing on offer is a failure, and the
             // founder is owed that rather than a promise. Says nothing about why, because
@@ -1398,6 +1406,39 @@ final class CompanyStore: ObservableObject {
         await handleRemember(action.remember, cid: cid)
         guard companyId == cid else { return }
         handleRoadmapProposal(action, language: language)
+        handleMessageDrafts(action, language: language)
+    }
+
+    /// Attach the messages the companion wrote to its own reply.
+    ///
+    /// Founder, Aug 10, with a screenshot: asked for outreach copy and got two complete messages
+    /// typed as quoted prose in one bubble — no boundary between them, no Copy, nothing saved.
+    /// `draft_message` makes them objects; this puts them under the reply that introduced them.
+    ///
+    /// Nothing is confirmed, applied or sent here. A draft is content — the founder copies it and
+    /// sends it themselves — so unlike `handleRoadmapProposal` there is no button and no
+    /// `actionConsumed` guard. Re-attaching the same drafts to the same message is idempotent.
+    private func handleMessageDrafts(_ action: ChatDoneAction, language: AppLanguage) {
+        guard !action.drafts.isEmpty else { return }
+
+        // Same rule as the roadmap proposal: replace a generic lead-in, keep real prose. When the
+        // companion wrote framing of its own ("Here's two versions — one for the two who already
+        // asked"), that framing IS the reply and the cards belong under it.
+        let generic = Self.leadInCopy(.drafted, language: language)
+        if let i = chatMessages.lastIndex(where: { $0.role == .companion }),
+           chatMessages[i].drafts.isEmpty, !chatMessages[i].producing,
+           chatMessages[i].draft == nil, chatMessages[i].vcRun == nil,
+           chatMessages[i].interview == nil {
+            if chatMessages[i].text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                chatMessages[i].text = generic
+            }
+            chatMessages[i].drafts = action.drafts
+        } else {
+            // No reply to hang them on — the drafts still have to be reachable.
+            chatMessages.append(CopilotMessage(role: .companion, text: generic,
+                                                drafts: action.drafts))
+        }
+        flushActiveThread()
     }
 
     /// Offer a roadmap change, never apply one.

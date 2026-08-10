@@ -443,6 +443,7 @@ struct DeliverableDetailView: View {
 /// deliverable kind identically without duplicating the switch.
 struct DeliverableBodyView: View {
     let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
     var body: some View {
         Group {
             switch deliverable.kind {
@@ -470,6 +471,12 @@ struct DeliverableBodyView: View {
                 PostViewer(deliverable: deliverable)
             case .email:
                 EmailViewer(deliverable: deliverable)
+            // A `.dms` whose structured payload did not survive is still a message. Falling
+            // through to `MarkdownView` rendered it as undifferentiated prose — the Aug 10 report.
+            case .dms:
+                MessageDraftViewer(eyebrow: lang == .vi ? "Tin nhắn" : "Message",
+                                   heading: deliverable.title,
+                                   text: deliverable.body)
             default:
                 MarkdownView(markdown: deliverable.body)
             }

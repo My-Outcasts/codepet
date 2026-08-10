@@ -38,9 +38,13 @@ struct RunProposal: Equatable {
             : "Let's do \"\(title)\" — ready when you are."
     }
 
-    /// The confirm button's label — the verb plus the task, so the button says what it does even
-    /// when the sentence above it has scrolled away.
+    /// The confirm button.
+    ///
+    /// Short, matching `RoadmapProposal`: the sentence above already names the task, and repeating
+    /// it on the button put the same words on two adjacent lines. Aligned on Aug 10 rather than
+    /// left as a second pattern — the founder flagged the shape on the roadmap card, and this card
+    /// had exactly the same one.
     func buttonLabel(_ lang: AppLanguage) -> String {
-        (lang == .vi ? "Bắt đầu: " : "Start: ") + title
+        lang == .vi ? "Ừ, bắt đầu đi" : "Yes, start it"
     }
 }

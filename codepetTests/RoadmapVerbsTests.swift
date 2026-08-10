@@ -126,3 +126,65 @@ final class RoadmapVerbsTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.filter { $0.roadmapProposal != nil }.count, 1)
     }
 }
+
+/// One reply, one offer — not two bubbles saying the same thing.
+///
+/// Appending the proposal as its own message gave the founder two Codepet rows for one intent:
+/// "Sure — confirm below and I'll do it." directly above "Want me to mark X done?", each with its
+/// own avatar and name (screenshot, Aug 10: "the response is currently disjointed"). The lead-in
+/// exists only so a text-free turn is not a blank bubble; when the turn's whole content IS the
+/// offer, the offer's own sentence should be the reply.
+@MainActor
+final class RoadmapProposalPresentationTests: XCTestCase {
+
+    private static let deadStream: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+    }
+
+    private func store(_ reply: CompanyChatReply) -> CompanyStore {
+        CompanyStore(
+            loader: { _ in
+                CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                             companionId: "byte", onboardedAt: Date(),
+                             tasks: [RoadmapTask(id: "t1", title: "Scope the MVP to the core flow",
+                                                 detail: "", phase: .find, who: .you)])
+            },
+            saver: { _, _ in true }, tasksSaver: { _, _ in true },
+            chatSender: { _ in reply }, chatStreamer: Self.deadStream,
+            decisionExtractor: { _, _ in [] })
+    }
+
+    /// A text-free turn: ONE companion message, carrying the specific question and the button.
+    func testATextFreeOfferProducesOneMessageNotTwo() async {
+        let s = store(CompanyChatReply(text: "", completeTaskId: "t1"))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("yes mark it complete", language: .en)
+
+        let companion = s.chatMessages.filter { $0.role == .companion }
+        XCTAssertEqual(companion.count, 1, "two bubbles for one intent is the bug")
+        XCTAssertNotNil(companion.first?.roadmapProposal)
+        XCTAssertTrue(companion.first?.text.contains("Scope the MVP to the core flow") ?? false,
+                      "the specific question should replace the generic lead-in")
+        XCTAssertFalse(companion.first?.text.contains("confirm below") ?? true)
+    }
+
+    /// When the model wrote real prose, THAT is the better reply — keep it and hang the button
+    /// under it rather than overwriting it with the generic question.
+    func testProseIsKeptAndTheButtonRidesUnderIt() async {
+        let s = store(CompanyChatReply(text: "Good — that closes out scoping.", completeTaskId: "t1"))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("yes mark it complete", language: .en)
+
+        let companion = s.chatMessages.filter { $0.role == .companion }
+        XCTAssertEqual(companion.count, 1)
+        XCTAssertEqual(companion.first?.text, "Good — that closes out scoping.")
+        XCTAssertNotNil(companion.first?.roadmapProposal)
+    }
+
+    /// The button must not repeat the task name the sentence above it just gave.
+    func testTheButtonDoesNotRepeatTheTaskName() {
+        let p = RoadmapProposal.complete(taskId: "t1", title: "Scope the MVP to the core flow")
+        XCTAssertEqual(p.buttonLabel(.en), "Yes, mark it done")
+        XCTAssertTrue(p.line(.en).contains("Scope the MVP to the core flow"))
+    }
+}

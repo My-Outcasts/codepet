@@ -893,19 +893,6 @@ final class CompanyStore: ObservableObject {
             let offline = language == .vi
                 ? "Mình không kết nối được lúc này — thử lại sau nhé."
                 : "I can't reach my brain right now — try again in a bit."
-            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                // The retry can itself come back wordless (it is the same model on the same
-                // prompt). An empty bubble is worse than an honest one, so the admission that
-                // used to be printed instead of retrying is what fills it when the retry fails
-                // too — and only then.
-                let text = (reply?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    chatMessages[i].text = text
-                } else {
-                    chatMessages[i].text = reply == nil ? offline
-                                                        : Self.leadInCopy(.nothing, language: language)
-                }
-            }
             // Every field the reply can carry, or the non-streaming path silently drops half a
             // turn. `complete_task`/`add_task` were added on Aug 8 and missed here first time:
             // the streaming path decoded them and this one did not, so the founder would have
@@ -914,6 +901,21 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [],
                                          completeTaskId: reply?.completeTaskId,
                                          addTask: reply?.addTask)
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                // The retry can itself come back wordless (it is the same model on the same
+                // prompt). An empty bubble is worse than an honest one — but "wordless" is not
+                // "empty" when the turn carried an ACTION, so the line comes from the same rule
+                // the streaming path uses rather than being hardcoded to the failure copy.
+                let text = (reply?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    chatMessages[i].text = text
+                } else if reply == nil {
+                    chatMessages[i].text = offline
+                } else {
+                    chatMessages[i].text = Self.leadInCopy(ChatTailAction.leadIn(for: action),
+                                                            language: language)
+                }
+            }
             await handleDoneAction(action, cid: cid, language: language)
             guard companyId == cid else { return }
         case .leadIn(let kind):
@@ -1423,8 +1425,33 @@ final class CompanyStore: ObservableObject {
         guard !chatMessages.contains(where: {
             $0.roadmapProposal == proposal && !$0.actionConsumed
         }) else { return }
-        chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
-                                            roadmapProposal: proposal))
+
+        // ATTACH to the reply, never append a second bubble.
+        //
+        // Appending gave the founder two Codepet messages for one intent — "Sure — confirm below
+        // and I'll do it." immediately above "Want me to mark X done?" — two avatars, two name
+        // rows, one thought (screenshot, Aug 10: "the response is currently disjointed"). The
+        // lead-in exists only because a text-free turn would otherwise leave a blank bubble; when
+        // the turn's whole content IS this offer, the offer's own sentence should be the reply.
+        //
+        // So the generic lead-in is REPLACED by the specific question, which names the task, and
+        // kept when the model wrote real prose of its own — that prose is the better reply and the
+        // button simply rides under it.
+        let generic = Self.leadInCopy(.roadmap, language: language)
+        if let i = chatMessages.lastIndex(where: { $0.role == .companion }),
+           chatMessages[i].roadmapProposal == nil, chatMessages[i].runProposal == nil,
+           !chatMessages[i].producing, chatMessages[i].draft == nil,
+           chatMessages[i].vcRun == nil, chatMessages[i].interview == nil {
+            let existing = chatMessages[i].text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if existing.isEmpty || existing == generic {
+                chatMessages[i].text = proposal.line(language)
+            }
+            chatMessages[i].roadmapProposal = proposal
+        } else {
+            // No reply to hang it on — a proposal still has to be reachable.
+            chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
+                                                roadmapProposal: proposal))
+        }
         flushActiveThread()
     }
 

@@ -45,14 +45,18 @@ enum RoadmapProposal: Equatable {
         }
     }
 
-    /// The confirm button. Names the act and the subject, so it still reads correctly once the
-    /// sentence above it has scrolled away.
+    /// The confirm button.
+    ///
+    /// Short, and deliberately NOT repeating the task name. The sentence directly above it already
+    /// names the task, and printing it again on the button put the same words on two adjacent
+    /// lines — half of what read as disjointed (founder, Aug 10). The button sits under its own
+    /// question, so "Yes, mark it done" is unambiguous where it lives.
     func buttonLabel(_ lang: AppLanguage) -> String {
         switch self {
-        case .complete(_, let title):
-            return (lang == .vi ? "Đánh dấu xong: " : "Mark done: ") + title
-        case .add(let task):
-            return (lang == .vi ? "Thêm: " : "Add: ") + task.title
+        case .complete:
+            return lang == .vi ? "Ừ, đánh dấu xong" : "Yes, mark it done"
+        case .add:
+            return lang == .vi ? "Ừ, thêm vào" : "Yes, add it"
         }
     }
 

@@ -91,7 +91,11 @@ enum ChatTailAction: Equatable {
     /// Precedence mirrors the CF's own: `run_task`/`navigate`/`setup_capability` are
     /// mutually exclusive there (it sets at most one), and `remember` is orthogonal and
     /// can ride along with any of them — so it only decides the line when it arrived alone.
-    private static func leadIn(for action: ChatDoneAction?) -> LeadIn {
+    /// Internal, not private: the non-streaming fallback needs the SAME rule. It used to decide
+    /// "this reply is empty" on its own and hardcode `.nothing`, which meant a retry that came back
+    /// wordless but carrying a roadmap verb was shown the failure copy instead of the offer — the
+    /// same defect as `isEmpty`, in a second place.
+    static func leadIn(for action: ChatDoneAction?) -> LeadIn {
         guard let action else { return .nothing }
         if action.runTaskId != nil { return .run }
         if action.nav != nil { return .nav }

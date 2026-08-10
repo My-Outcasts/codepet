@@ -156,23 +156,27 @@ enum ChatContext {
         return lines.joined(separator: " ")
     }
 
-    /// What the companion cannot do to the roadmap, stated so it stops implying otherwise.
+    /// What completing a task actually means, now that the companion can offer to do it.
     ///
-    /// Aug 7: after walking the founder through a step, Codepet said "You can consider this step
-    /// done." She replied "let's mark it done in the roadmap" and got "Sure — this takes you
-    /// there" plus a navigation chip. Nothing was marked. There is no mark-done verb in the chat
-    /// tool set and there is no plan to add one — completing a task is either approving a draft or
-    /// the founder's own tick on the board — so the honest answer is to say so, not to narrate
-    /// completion and then hand over a link.
+    /// Aug 7 this block said "You cannot mark a roadmap task done — you have no tool that changes
+    /// a task's state", which was true and necessary: the companion had been saying "you can
+    /// consider this step done" and then handing over a navigation chip.
     ///
-    /// "Consider it done" is the exact phrasing to forbid: it is how a person says "I have done
-    /// it", and the founder read it that way.
+    /// Aug 8 `complete_task` shipped, and this block became a lie sitting next to the tool that
+    /// contradicts it — the model is handed a verb and told in the same prompt that it has no such
+    /// verb. Left alone it would either refuse to use the tool or produce a confused turn. Caught
+    /// before the founder tested it, by re-reading the grounding when adding the capability.
+    ///
+    /// What survives is the part that was never about capability: the companion must not narrate a
+    /// change that has not happened. `complete_task` OFFERS — the founder presses — so "consider it
+    /// done" is still wrong, because nothing is done until she confirms.
     private static let markDoneGate =
-        "You cannot mark a roadmap task done, complete or finished — you have no tool that changes"
-        + " a task's state, and approving a draft is the only thing that completes one. If they ask"
-        + " you to mark, tick, close or complete a step, say plainly that you cannot do it from"
-        + " here and tell them where to do it themselves. Never say \"consider it done\", \"you can"
-        + " consider this step done\", or anything else that implies the roadmap changed."
+        "You may OFFER to mark a task done with complete_task, but only for a step the founder says"
+        + " THEY finished, and only from OPEN TASKS. It is an offer: nothing changes until they"
+        + " press the button, so never speak as though the roadmap has already changed. Never say"
+        + " \"consider it done\", \"you can consider this step done\", or anything else implying it"
+        + " is already marked. A task YOU drafted is never completed this way — the founder"
+        + " approving the draft is the only thing that completes it."
 
     /// `memoryEnabled` mirrors `FounderPrefs.memoryEnabled` and gates ONE of the two memory
     /// stores: the facts the founder's team was told (`decisions`). Off means the block is

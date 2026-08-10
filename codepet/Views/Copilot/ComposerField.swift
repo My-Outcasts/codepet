@@ -71,39 +71,58 @@ struct ComposerField: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(font)
-                    .foregroundColor(foreground)
-                    // Unbounded on purpose: the ScrollView owns the cap now. Leaving a line
-                    // limit here would clip the content INSIDE the scroll view, so scrolling
-                    // would reveal nothing.
-                    .lineLimit(nil)
-                    .focused(focus)
-                    .onSubmit(onSend)
-                    .id(fieldID)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(key: ComposerTextHeight.self,
-                                                   value: geo.size.height)
-                        }
-                    )
-            }
-            .frame(height: ComposerMetrics.fieldHeight(forContent: contentHeight, cap: cap))
-            // No rubber-banding while the draft is short — a one-line composer that bounces
-            // reads as broken.
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollIndicators(overflows ? .automatic : .never)
-            .onPreferenceChange(ComposerTextHeight.self) { contentHeight = $0 }
-            .onChange(of: text) { old, new in
-                // Follow the caret while TYPING, but leave a scroll position alone otherwise —
-                // pasting a long message and reading back up through it is the whole point, and
-                // yanking to the bottom on every keystroke would fight that.
-                guard overflows, new.count > old.count else { return }
-                proxy.scrollTo(fieldID, anchor: .bottom)
+        // The width is measured OUTSIDE the scroll view and pinned onto the field inside it.
+        //
+        // Founder, Aug 11: after the scroll surface landed, the text began wrapping about
+        // two-thirds of the way across the card, leaving a wide empty gutter beside prose that
+        // was already wrapping — while the chip row below still ran the full width.
+        //
+        // A ScrollView proposes an UNSPECIFIED width to its content, and against a nil
+        // proposal `.frame(maxWidth: .infinity)` resolves to the content's IDEAL size — so the
+        // obvious fix is a no-op here, which is exactly what happened on the first attempt.
+        // `.frame(width:)` is unconditional, so the field wraps where the column ends.
+        //
+        // Measured rather than assumed: rendered offscreen with ImageRenderer, a bare
+        // TextField inks to x=399 of a 400pt column at every line limit, so the field itself
+        // was never the problem — and ImageRenderer draws nothing inside a ScrollView, which
+        // is why this had to be reasoned to rather than seen.
+        GeometryReader { outer in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    TextField(placeholder, text: $text, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(font)
+                        .foregroundColor(foreground)
+                        // Unbounded on purpose: the ScrollView owns the cap now. Leaving a line
+                        // limit here would clip the content INSIDE the scroll view, so
+                        // scrolling would reveal nothing.
+                        .lineLimit(nil)
+                        .frame(width: max(outer.size.width, 1), alignment: .leading)
+                        .focused(focus)
+                        .onSubmit(onSend)
+                        .id(fieldID)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: ComposerTextHeight.self,
+                                                       value: geo.size.height)
+                            }
+                        )
+                }
+                // No rubber-banding while the draft is short — a one-line composer that
+                // bounces reads as broken.
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(overflows ? .automatic : .never)
+                .onPreferenceChange(ComposerTextHeight.self) { contentHeight = $0 }
+                .onChange(of: text) { old, new in
+                    // Follow the caret while TYPING, but leave a scroll position alone
+                    // otherwise — pasting a long message and reading back up through it is the
+                    // whole point, and yanking to the bottom on every keystroke would fight it.
+                    guard overflows, new.count > old.count else { return }
+                    proxy.scrollTo(fieldID, anchor: .bottom)
+                }
             }
         }
+        // The GeometryReader is greedy, so the cap lives out here on the whole field.
+        .frame(height: ComposerMetrics.fieldHeight(forContent: contentHeight, cap: cap))
     }
 }

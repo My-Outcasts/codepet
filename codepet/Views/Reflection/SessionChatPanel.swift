@@ -266,19 +266,23 @@ struct SessionChatPanel: View {
 
     private var inputRow: some View {
         HStack(spacing: 8) {
-            TextField("Ask \(petName)...", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...8)
-                .focused($inputFocused)
-                .font(.pixelSystem(size: 12))
-                .foregroundColor(Color(hex: "#2D2B26"))
+            // Same fix as the chat composer (Aug 10): the cap moved off the text field and onto
+            // the scroll surface around it, so a long draft can be read back instead of running
+            // off the bottom. Padding and background stay OUT here — inside the scroll view they
+            // would scroll away with the text.
+            ComposerField(placeholder: "Ask \(petName)...",
+                          text: $draft,
+                          focus: $inputFocused,
+                          font: .pixelSystem(size: 12),
+                          foreground: Color(hex: "#2D2B26"),
+                          cap: ComposerMetrics.reflectionMaxTextHeight,
+                          onSend: { submit() })
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(petColor.opacity(0.08))
                 )
-                .onSubmit { submit() }
 
             Button(action: submit) {
                 Image(systemName: "arrow.up")

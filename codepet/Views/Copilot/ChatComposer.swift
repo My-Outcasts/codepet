@@ -31,12 +31,7 @@ struct ChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField(placeholder, text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(CodepetTheme.inter(15))
-                .lineLimit(1...6)
-                .focused(focus)
-                .onSubmit(onSend)
+            ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
 
             deptChips
 

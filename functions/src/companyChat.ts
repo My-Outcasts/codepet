@@ -22,11 +22,14 @@ import {
   RUN_TASK_TOOL,
   COMPLETE_TASK_TOOL,
   ADD_TASK_TOOL,
+  DRAFT_MESSAGE_TOOL,
+  validateDraftMessageToolUse,
   validateCompleteTaskToolUse,
   validateAddTaskToolUse,
   buildOpenTasksBlock,
   type CompletableTaskRef,
   type NewTaskIntent,
+  type MessageDraftIntent,
   NAVIGATE_TOOL,
   SETUP_TOOL,
   REMEMBER_TOOL,
@@ -242,6 +245,7 @@ interface ResolvedActions {
   remember: RememberedFact[];
   completeTaskId: string | null;
   addTask: NewTaskIntent | null;
+  drafts: MessageDraftIntent[] | null;
 }
 
 function resolveActions(
@@ -256,6 +260,7 @@ function resolveActions(
   const rememberUse = toolUses.find((t) => t.name === "remember_fact");
   const completeUse = toolUses.find((t) => t.name === "complete_task");
   const addUse = toolUses.find((t) => t.name === "add_task");
+  const draftUse = toolUses.find((t) => t.name === "draft_message");
 
   let runTaskId: string | null = null;
   let nav: NavAction | null = null;
@@ -279,7 +284,11 @@ function resolveActions(
   if (completeUse) completeTaskId = validateCompleteTaskToolUse(completeUse.input, openTasks);
   if (!completeTaskId && addUse) addTask = validateAddTaskToolUse(addUse.input);
 
-  return { runTaskId, nav, setup, remember, completeTaskId, addTask };
+  // Independent of everything above: a drafted message is CONTENT, not an action, so it
+  // neither excludes nor is excluded by a verb that mutates something.
+  const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
+
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts };
 }
 
 export async function handleCompanyChat(req: Request, res: Response): Promise<void> {
@@ -352,6 +361,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     // open founder-owned task, a complete_task call could only ever name a hallucination.
     ...(openTasks.length ? [COMPLETE_TASK_TOOL] : []),
     ADD_TASK_TOOL,
+    DRAFT_MESSAGE_TOOL,
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
     REMEMBER_TOOL,
@@ -394,7 +404,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       const toolUses = response.content
         .filter((b) => b.type === "tool_use")
         .map((b) => ({ name: (b as any).name as string, input: (b as any).input }));
-      const { runTaskId, nav, setup, remember, completeTaskId, addTask } =
+      const { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts } =
         resolveActions(toolUses, runnable, envSetup, openTasks);
 
       // Additive, backward-compatible response shape: run_task_id is always
@@ -404,6 +414,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       const responseBody: Record<string, unknown> = { reply, run_task_id: runTaskId };
       if (completeTaskId) responseBody.complete_task_id = completeTaskId;
       if (addTask) responseBody.add_task = addTask;
+      if (drafts) responseBody.drafts = drafts;
       if (nav) responseBody.nav = nav;
       if (setup) responseBody.setup = setup;
       if (remember.length) responseBody.remember = remember;
@@ -478,7 +489,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         }
       } else if (event.type === "done") {
         const cacheHit = (event.usage?.cache_read_input_tokens ?? 0) > 0;
-        const { runTaskId, nav, setup, remember, completeTaskId, addTask } =
+        const { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts } =
           resolveActions(completedToolUses, runnable, envSetup, openTasks);
         // Truncation was silent by construction: the API reports it, this function ignored it,
         // and the client rendered half a sentence as a finished answer.
@@ -495,7 +506,8 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
                       || (t.name === "navigate" && !nav)
                       || (t.name === "setup_capability" && !setup)
                       || (t.name === "complete_task" && !completeTaskId)
-                      || (t.name === "add_task" && !addTask))
+                      || (t.name === "add_task" && !addTask)
+                      || (t.name === "draft_message" && !drafts))
           .map((t) => ({ name: t.name, input: t.input }));
         if (droppedTools.length) {
           logger.warn("companyChat dropped a tool call that failed validation", {
@@ -504,7 +516,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         }
         // The whole point of this pass: an empty turn is now attributable rather than a mystery.
         if (textChars === 0 && !runTaskId && !nav && !setup && !remember.length
-            && !completeTaskId && !addTask) {
+            && !completeTaskId && !addTask && !drafts) {
           logger.warn("companyChat produced an EMPTY turn", {
             uid: auth.uid,
             stopReason: event.stopReason ?? null,
@@ -522,6 +534,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
         const doneFrame: Record<string, unknown> = { model: CHAT_MODEL, cache_hit: cacheHit, run_task_id: runTaskId };
         if (completeTaskId) doneFrame.complete_task_id = completeTaskId;
         if (addTask) doneFrame.add_task = addTask;
+        if (drafts) doneFrame.drafts = drafts;
         if (nav) doneFrame.nav = nav;
         if (setup) doneFrame.setup = setup;
         if (remember.length) doneFrame.remember = remember;

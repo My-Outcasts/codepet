@@ -68,7 +68,11 @@ export function buildSystemPrompt(args: { companionId: string; language: string 
   return (
     `You are ${c.name}, the AI building companion inside Codepet — a senior operator who helps a solo founder build and understand their whole company, department by department.\n\n` +
     `Voice: ${c.voice}\n\n` +
-    `You are in a chat with the founder. Be warm, plain-spoken, specific, and brief — usually 2-4 sentences, occasionally a short list when it genuinely helps. No hype, no filler, no emoji. Write plain text only — no markdown, asterisks, backticks, or arrows; the chat shows your words as-is. When they ask what to do next, ground your answer in their actual company and where they are.` +
+    `You are in a chat with the founder. Be warm, plain-spoken, specific, and brief — usually 2-4 sentences, occasionally a short list when it genuinely helps. No hype, no filler, no emoji. Write plain text only — no markdown, asterisks, backticks, or arrows; the chat shows your words as-is. When they ask what to do next, ground your answer in their actual company and where they are.\n\n` +
+    // Static, so it stays inside the cacheable prefix. It repeats the draft_message tool
+    // description on purpose: the failure this fixes is the model TYPING a message, and a
+    // tool description is only read when the model is already reaching for a tool.
+    `When you write an actual message for them to send to a person — an email, a DM, a text — put it in the draft_message tool instead of typing it into your reply. Your reply then carries only the framing and any question you have. The app renders each draft as its own card they can copy.` +
     vi
   );
 }
@@ -640,4 +644,135 @@ export function buildOpenTasksBlock(open: CompletableTaskRef[]): string {
     "\n\nOPEN TASKS (the founder's own steps, not yet done). To mark one complete when " +
     "they say they finished it, call complete_task with the exact id:\n" + lines
   );
+}
+
+// ---------------------------------------------------------------------------
+// draft_message — the messages the companion writes for a person, as OBJECTS
+// ---------------------------------------------------------------------------
+//
+// Founder report, Aug 10 2026, with a screenshot: asked for outreach copy, the companion
+// replied with two complete messages typed as quoted prose inside one chat bubble. Nothing
+// marked where one message ended and the next began, there was no Copy, nothing reached the
+// Library, and the `[name]` / `[date]` blanks sat invisible mid-sentence. The app already
+// had a message CARD — `.email`/`.dms` deliverables render one — but a message written
+// conversationally never became a deliverable, so no card could fire.
+//
+// This verb closes that: when the companion writes a message, it emits it instead of typing
+// it, and the native client renders each draft in the same card. The reply text keeps the
+// lead-in and the closing question, which is what prose is actually good for.
+//
+// It takes an ARRAY because the reported turn contained two drafts — one for the founders
+// who had already asked, one for everyone else. A single-draft shape would have forced that
+// turn back into prose, which is the bug.
+//
+// Like remember_fact, this resolves INDEPENDENTLY of the run/nav/setup trio and of the two
+// roadmap verbs: "here's the message, and I'll add a task to track replies" is one honest
+// turn. It mutates nothing — it is content, not an action, so there is nothing to confirm.
+
+export type MessageChannel = "email" | "dm" | "text";
+
+export interface MessageDraftIntent {
+  channel: MessageChannel;
+  to: string;
+  subject: string;
+  body: string;
+}
+
+const MAX_DRAFTS = 4;
+const MAX_DRAFT_BODY = 4000;
+const MAX_DRAFT_SUBJECT = 200;
+const MAX_DRAFT_TO = 120;
+
+export const DRAFT_MESSAGE_TOOL = {
+  name: "draft_message",
+  description:
+    "Use whenever you write an actual message for the founder to send to a person — a cold email, a reply, a DM, a text. Put the message text ONLY in this tool: do not also write it out in your reply, or the founder sees it twice. Your reply should carry just the framing (what the versions are, why) and any closing question. Call it once with every version you wrote — if you drafted one message for people who already asked and another for everyone else, that is one call with two entries, not two calls. Keep placeholders in square brackets, like [name] or [date], so the founder can see what they must fill in. If the founder is asking for a message that is already a task on their roadmap, prefer run_task so the draft is saved to their Library.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      messages: {
+        type: "array",
+        maxItems: MAX_DRAFTS,
+        description: "Every version you wrote this turn, in the order you would present them.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            channel: {
+              type: "string",
+              enum: ["email", "dm", "text"],
+              description: "How it would be sent. Use \"dm\" for a direct message and \"text\" for SMS/WhatsApp.",
+            },
+            to: {
+              type: "string",
+              description:
+                "Who it is for, in the founder's own words — \"the two who asked to pay\", \"Maria at Bluebird\". Not an address.",
+            },
+            subject: {
+              type: "string",
+              description: "Subject line. Email only — omit for a dm or a text.",
+            },
+            body: {
+              type: "string",
+              description: "The message itself, ready to paste. No surrounding quotation marks, no commentary.",
+            },
+          },
+          required: ["channel", "body"],
+        },
+      },
+    },
+    required: ["messages"],
+  },
+} as const;
+
+/**
+ * The validated drafts. `null` when nothing usable came through — the caller then leaves the
+ * turn as plain prose rather than rendering an empty card.
+ *
+ * A draft with no body is dropped rather than rescued: unlike a task id, there is no
+ * second field that could stand in for the message itself.
+ */
+export function validateDraftMessageToolUse(input: unknown): MessageDraftIntent[] | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = (input as { messages?: unknown }).messages;
+  if (!Array.isArray(raw)) return null;
+
+  const out: MessageDraftIntent[] = [];
+  for (const entry of raw.slice(0, MAX_DRAFTS)) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as { channel?: unknown; to?: unknown; subject?: unknown; body?: unknown };
+
+    // Models like to wrap a quoted message in the quotes they saw in the conversation.
+    // Those belong to the presentation, not to the message the founder pastes.
+    const body = typeof e.body === "string" ? stripWrappingQuotes(e.body.trim()) : "";
+    if (!body) continue;
+
+    const channel: MessageChannel =
+      e.channel === "email" || e.channel === "text" ? e.channel : "dm";
+    const to = typeof e.to === "string" ? e.to.trim().slice(0, MAX_DRAFT_TO) : "";
+    // A subject on a dm or a text is a mistake in the call, and rendering it would put an
+    // email header on something that has none.
+    const subject =
+      channel === "email" && typeof e.subject === "string"
+        ? e.subject.trim().slice(0, MAX_DRAFT_SUBJECT)
+        : "";
+
+    out.push({ channel, to, subject, body: body.slice(0, MAX_DRAFT_BODY) });
+  }
+  return out.length ? out : null;
+}
+
+/** Removes one matched pair of wrapping quotes — and only a pair that wraps the WHOLE body. */
+function stripWrappingQuotes(s: string): string {
+  const pairs: Array<[string, string]> = [['"', '"'], ["“", "”"], ["'", "'"]];
+  for (const [open, close] of pairs) {
+    if (s.length >= 2 && s.startsWith(open) && s.endsWith(close)) {
+      const inner = s.slice(1, -1);
+      // Only if the quotes were decoration. If the body contains its own closing quote
+      // earlier, these are real punctuation and stripping them would corrupt the text.
+      if (!inner.includes(close)) return inner.trim();
+    }
+  }
+  return s;
 }

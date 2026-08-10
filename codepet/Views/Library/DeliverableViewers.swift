@@ -7,7 +7,8 @@ import WebKit
 /// `DeliverableKind`. The first several read their slice of `DeliverablePayload`
 /// and render it natively — no markdown parsing. `.legal`/`.post`/`.email`
 /// carry no structured payload from the backend; they render `title` + `body`
-/// (via `MarkdownView` for the body) inside kind-appropriate chrome instead.
+/// inside kind-appropriate chrome instead — `.legal`/`.post` via `MarkdownView`,
+/// `.email` via the shared message card in `MessageDraftCard.swift`.
 /// All match the CodepetTheme house style used elsewhere in the Library.
 /// Callers wrap these in a `ScrollView` (see `DeliverableDetailView`);
 /// view-only interactions (toggling a checkbox, marking a DM "sent",
@@ -262,73 +263,78 @@ struct PlanViewer: View {
 
 // MARK: - DmsViewer
 
-/// Renders a dms payload: one card per message with a sender name, a `note`
-/// chip, the message body, a Copy-to-clipboard button, and a local
-/// "Mark sent" toggle (view-only).
+/// Renders a dms payload as one message card per recipient: the name as the heading with its
+/// `note` chip and Copy on the header row, the message at reading size with its blanks tinted,
+/// then the blanks note and a local "Mark sent" toggle (view-only).
+///
+/// Shares `MessageDraftCard.swift` with `EmailViewer` so both kinds of "something you will send"
+/// read the same — the founder's Aug 10 ask was to tell messages apart from documents, which
+/// only works if the two message kinds agree with each other.
 struct DmsViewer: View {
     let messages: [DmMessage]
     @State private var sent: Set<Int> = []
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(messages.enumerated()), id: \.offset) { i, message in
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text(message.name)
-                            .font(.pixelSystem(size: 13, weight: .semibold))
-                            .foregroundColor(CodepetTheme.primaryText)
-                        Text(message.note)
-                            .font(.pixelSystem(size: 10, weight: .medium))
-                            .foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
-                        Spacer()
-                    }
-                    Text(message.msg)
-                        .font(.pixelSystem(size: 12))
-                        .foregroundColor(CodepetTheme.bodyText)
-
-                    HStack(spacing: 10) {
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(message.msg, forType: .string)
-                        } label: {
-                            Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(CodepetPillButtonStyle(
-                            fill: CodepetTheme.surface,
-                            foreground: CodepetTheme.primaryText,
-                            paddingH: 12, paddingV: 6,
-                            font: .pixelSystem(size: 11, weight: .semibold)))
-
-                        Button {
-                            if sent.contains(i) { sent.remove(i) } else { sent.insert(i) }
-                        } label: {
-                            Label(sent.contains(i)
-                                  ? (lang == .vi ? "Đã gửi" : "Sent")
-                                  : (lang == .vi ? "Đánh dấu đã gửi" : "Mark sent"),
-                                  systemImage: sent.contains(i) ? "checkmark.circle.fill" : "circle")
-                        }
-                        .buttonStyle(CodepetPillButtonStyle(
-                            fill: sent.contains(i) ? CodepetTheme.accentTeal.opacity(0.15) : CodepetTheme.surface,
-                            foreground: sent.contains(i) ? CodepetTheme.accentTeal : CodepetTheme.primaryText,
-                            paddingH: 12, paddingV: 6,
-                            font: .pixelSystem(size: 11, weight: .semibold)))
-
-                        Spacer()
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                        .fill(CodepetTheme.surface)
-                )
-                .codepetShadow(CodepetTheme.cardShadow)
+                card(index: i, message: message)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func card(index i: Int, message: DmMessage) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                MessageDraftEyebrow(text: lang == .vi ? "Tin nhắn" : "Message")
+                Spacer(minLength: 12)
+                MessageDraftCopyButton(text: message.msg)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(message.name)
+                    .font(.pixelSystem(size: MessageDraftStyle.subject, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !message.note.isEmpty {
+                    Text(message.note)
+                        .font(.pixelSystem(size: 10, weight: .medium))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 8)
+
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                .padding(.vertical, 14)
+
+            MessageDraftBody(text: message.msg)
+
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                .padding(.vertical, 14)
+
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                MessageDraftBlanksNote(text: message.msg)
+                Button {
+                    if sent.contains(i) { sent.remove(i) } else { sent.insert(i) }
+                } label: {
+                    Label(sent.contains(i)
+                          ? (lang == .vi ? "Đã gửi" : "Sent")
+                          : (lang == .vi ? "Đánh dấu đã gửi" : "Mark sent"),
+                          systemImage: sent.contains(i) ? "checkmark.circle.fill" : "circle")
+                }
+                .buttonStyle(CodepetPillButtonStyle(
+                    fill: sent.contains(i) ? CodepetTheme.accentTeal.opacity(0.15) : CodepetTheme.surface,
+                    foreground: sent.contains(i) ? CodepetTheme.accentTeal : CodepetTheme.mutedText,
+                    paddingH: 11, paddingV: 5,
+                    font: .pixelSystem(size: 11, weight: .semibold)))
+            }
+        }
+        .messageDraftCardChrome()
     }
 }
 
@@ -685,67 +691,18 @@ struct SheetViewer: View {
 
 // MARK: - EmailViewer
 
-/// Renders an `.email` deliverable as an email-client chrome: a header bar
-/// (Subject/From/preheader) over the markdown `body` rendered as the email
-/// content.
+/// Renders an `.email` deliverable as a message card: an "Email draft" eyebrow and Copy on
+/// one row, the subject as a heading over a hairline, the body at reading size with its
+/// blanks tinted, and a footer naming what is still to fill in. See `MessageDraftCard.swift` for
+/// what was taken from the founder's Aug 10 reference and what was deliberately left out.
 struct EmailViewer: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(lang == .vi ? "Chủ đề:" : "Subject:")
-                            .font(.pixelSystem(size: 11, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                        Text(deliverable.title)
-                            .font(.pixelSystem(size: 13, weight: .bold))
-                            .foregroundColor(CodepetTheme.primaryText)
-                    }
-                    HStack(spacing: 6) {
-                        Text(lang == .vi ? "Từ:" : "From:")
-                            .font(.pixelSystem(size: 11, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                        Text("Codepet")
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.bodyText)
-                    }
-                    Text(lang == .vi ? "Email nháp do Codepet tạo" : "Draft email generated by Codepet")
-                        .font(.pixelSystem(size: 11))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.top, 2)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(CodepetTheme.accentPurple.opacity(0.06))
-
-                Divider()
-
-                MarkdownView(markdown: deliverable.body)
-                    .padding(12)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .fill(CodepetTheme.surface)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous))
-            .codepetShadow(CodepetTheme.cardShadow)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(deliverable.body, forType: .string)
-            } label: {
-                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(CodepetPillButtonStyle(
-                fill: CodepetTheme.surface,
-                foreground: CodepetTheme.primaryText,
-                paddingH: 12, paddingV: 6,
-                font: .pixelSystem(size: 11, weight: .semibold)))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
+                           heading: deliverable.title,
+                           text: deliverable.body)
     }
 }
 

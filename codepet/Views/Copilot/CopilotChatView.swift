@@ -714,6 +714,7 @@ struct CopilotBubble: View {
     /// container of its own, which is the same rule the standalone `setupCard` follows:
     /// an offer is an object, the sentence introducing it is not.
     @ViewBuilder private var inlineActions: some View {
+        if !message.drafts.isEmpty { draftedMessages }
         if let nav = message.navChip { navChipButton(nav) }
         if let setup = message.setupSuggestion {
             HStack {
@@ -722,6 +723,33 @@ struct CopilotBubble: View {
             }
         }
         if let facts = message.noted, !facts.isEmpty { notedInline(facts) }
+    }
+
+    /// The messages the companion wrote, each in the same card the Library uses for an
+    /// `.email`/`.dms` deliverable.
+    ///
+    /// The founder's Aug 10 report was that a message written in chat was indistinguishable
+    /// from ordinary prose. Sharing `MessageDraftViewer` with the deliverable viewers is the
+    /// point: wherever a message appears, it looks like a message. A `to` on an email — whose
+    /// heading is already its subject — is carried as its own small line so nothing is lost.
+    @ViewBuilder private var draftedMessages: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(message.drafts.enumerated()), id: \.offset) { _, draft in
+                VStack(alignment: .leading, spacing: 6) {
+                    MessageDraftViewer(eyebrow: draft.eyebrow(lang),
+                                       heading: draft.heading,
+                                       text: draft.body)
+                    if draft.channel == "email",
+                       let to = draft.to?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !to.isEmpty {
+                        Text((lang == .vi ? "Gửi tới: " : "To: ") + to)
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func navChipButton(_ nav: NavAction) -> some View {
@@ -982,7 +1010,13 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
-                    Text(message.text)
+                    // Blanks are tinted here as well as in the message viewers. When the
+                    // companion writes a message conversationally rather than producing a
+                    // deliverable, this prose IS the draft — and a `[name]` buried mid-sentence
+                    // is the one thing in it the founder has to act on before sending (Aug 10).
+                    Text(MessagePlaceholders.tinted(message.text,
+                                                    tint: MessageDraftStyle.blankTint,
+                                                    ink: MessageDraftStyle.blankInk))
                         .font(CodepetTheme.inter(13.5))
                         .lineSpacing(ChatRhythm.lineSpacing)
                         .foregroundColor(CodepetTheme.primaryText)

@@ -146,3 +146,78 @@ final class ChatTailActionRoadmapVerbTests: XCTestCase {
             .none)
     }
 }
+
+/// A turn that is ONLY drafted messages is a real turn — the loudest possible version of the
+/// `isEmpty` bug above.
+///
+/// `draft_message` (Aug 10) exists so the companion STOPS typing messages into its reply and
+/// emits them instead. A turn carrying nothing but drafts is therefore the tool working exactly
+/// as designed — and had `isEmpty` not learned about it, the fix for "messages look like prose"
+/// would have shipped as "I can't reach my brain right now". That is the fourth time in a week
+/// an action was added without updating everything that reasons about actions, so this suite
+/// asserts the whole list rather than only the new field.
+final class ChatTailActionDraftedMessageTests: XCTestCase {
+
+    private func decide(_ action: ChatDoneAction) -> ChatTailAction {
+        ChatTailAction.decide(streamThrew: false, receivedDone: true, streamedText: "", action: action)
+    }
+
+    private func draft(_ body: String = "Hey [name] — worth fifteen minutes?") -> MessageDraftDTO {
+        MessageDraftDTO(channel: "dm", to: "the two who asked", subject: nil, body: body)
+    }
+
+    /// The shape the feature produces on a good day: no prose, one card.
+    func testATextFreeDraftIsNotAFallback() {
+        XCTAssertEqual(decide(ChatDoneAction(drafts: [draft()])), .leadIn(.drafted))
+    }
+
+    /// The founder's reported turn carried TWO drafts.
+    func testSeveralDraftsInOneTurnAreOneTurn() {
+        XCTAssertEqual(decide(ChatDoneAction(drafts: [draft(), draft("Quick heads up — [date].")])),
+                       .leadIn(.drafted))
+    }
+
+    /// The lead-in must not promise work. Nothing is being produced and nothing is being sent —
+    /// the founder copies the card. `.run`'s "putting that together now" would be a lie here.
+    func testTheLeadInDoesNotPromiseWork() {
+        guard case .leadIn(let kind) = decide(ChatDoneAction(drafts: [draft()])) else {
+            return XCTFail("expected a lead-in")
+        }
+        XCTAssertNotEqual(kind, .run)
+        XCTAssertNotEqual(kind, .nothing)
+    }
+
+    /// A roadmap change needs a button pressed; a draft needs nothing. So when both arrive,
+    /// the line names the one with a pending decision — the cards still render underneath.
+    func testAPendingConfirmationOutranksADraft() {
+        XCTAssertEqual(decide(ChatDoneAction(completeTaskId: "t1", drafts: [draft()])),
+                       .leadIn(.roadmap))
+    }
+
+    /// A run outranks it for the same reason it outranks everything: it takes time and the
+    /// founder needs to know it started.
+    func testARunStillWinsOverADraft() {
+        XCTAssertEqual(decide(ChatDoneAction(runTaskId: "t1", drafts: [draft()])), .leadIn(.run))
+    }
+
+    /// `remember` only ever decides the line when it arrives alone.
+    func testADraftOutranksARememberThatRodeAlong() {
+        let fact = RememberedFact(topic: "pricing", statement: "$39/month")
+        XCTAssertEqual(decide(ChatDoneAction(remember: [fact], drafts: [draft()])),
+                       .leadIn(.drafted))
+    }
+
+    /// An empty drafts array is not a draft — it must not rescue a turn that produced nothing.
+    func testAnEmptyDraftsArrayStillFallsBack() {
+        XCTAssertEqual(decide(ChatDoneAction(drafts: [])), .fallback)
+    }
+
+    /// With prose, the framing the companion wrote IS the reply and no lead-in is needed.
+    func testProseWithDraftsNeedsNoLeadIn() {
+        XCTAssertEqual(
+            ChatTailAction.decide(streamThrew: false, receivedDone: true,
+                                  streamedText: "Here's two versions — one for each group.",
+                                  action: ChatDoneAction(drafts: [draft()])),
+            .none)
+    }
+}

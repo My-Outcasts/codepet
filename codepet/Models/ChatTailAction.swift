@@ -40,6 +40,9 @@ enum ChatTailAction: Equatable {
         /// A roadmap change is on offer — mark a task done, or add one. Nothing is being made
         /// and nothing has changed: the founder presses the button in the card below.
         case roadmap
+        /// The companion wrote a message and put it in the card below. Nothing is being made
+        /// and nothing is being sent — the founder copies it and sends it themselves.
+        case drafted
         /// A well-formed reply that said nothing and offered nothing.
         case nothing
     }
@@ -81,11 +84,18 @@ enum ChatTailAction: Equatable {
     /// EVERY new action field has to be added here and to `leadIn`. That is the third time this
     /// week an action was added without updating everything that reasons about actions (the
     /// non-streaming `ChatDoneAction` construction, then the mark-done grounding, now this).
+    ///
+    /// `drafts` (Aug 10) is the case that would have broken loudest: `draft_message` exists
+    /// precisely so the message stops being typed into the reply, so a turn carrying nothing
+    /// BUT drafts is the tool working as designed. Reading that as empty would have shown the
+    /// founder "I can't reach my brain right now" over the very feature that fixed the bug.
+    /// `ChatTailActionTests` covers every field in this list against exactly that.
     private static func isEmpty(_ action: ChatDoneAction?) -> Bool {
         guard let action else { return true }
         return action.runTaskId == nil && action.nav == nil && action.setup == nil
             && action.remember.isEmpty
             && action.completeTaskId == nil && action.addTask == nil
+            && action.drafts.isEmpty
     }
 
     /// Precedence mirrors the CF's own: `run_task`/`navigate`/`setup_capability` are
@@ -101,6 +111,9 @@ enum ChatTailAction: Equatable {
         if action.nav != nil { return .nav }
         if action.setup != nil { return .setup }
         if action.completeTaskId != nil || action.addTask != nil { return .roadmap }
+        // Below the roadmap verbs on purpose: those carry a button the founder must press,
+        // and a pending confirmation is the more urgent thing to name. The drafts still render.
+        if !action.drafts.isEmpty { return .drafted }
         if !action.remember.isEmpty { return .noted }
         return .nothing
     }

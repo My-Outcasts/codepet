@@ -49,4 +49,33 @@ final class DepartmentAddressingTests: XCTestCase {
         XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: ""))
         XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "how many loaves should we bake?"))
     }
+
+    /// The prefix list re-opened the bug it was written to close.
+    ///
+    /// `for`, `from`, `with`, `have` and `do` are ordinary English prepositions and auxiliaries,
+    /// not ways of addressing anybody — every sentence below MENTIONS a department while talking
+    /// to the host, and every one of them handed the turn to a pet. Measured against the shipped
+    /// heuristic on Aug 10; "our runway comes from sales, not funding" is the same shape as the
+    /// bakery paste in the test at the top of this file.
+    ///
+    /// These five words are what a founder types when describing their company, which is most of
+    /// what they type. The verbs that survive (`ask`, `tell`, `bring in`, `check with`, `loop in`,
+    /// `hand to`, `what does`) all take a person as their object, so a department following one of
+    /// them is genuinely being spoken to.
+    func testPrepositionsAreNotAddressing() {
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "I need a landing page for marketing purposes"))
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "we have support from two angel investors"))
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "I'm happy with design so far"))
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "the emails from support are piling up"))
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "our runway comes from sales, not funding"))
+        XCTAssertNil(DepartmentCompanions.mentionedDeptKey(in: "do design tokens matter here?"))
+    }
+
+    /// The direct question forms stay — dropping the prepositions must not cost these.
+    func testDirectQuestionsStillHandOff() {
+        XCTAssertEqual(DepartmentCompanions.mentionedDeptKey(in: "can engineering ship this by friday?"), "eng")
+        XCTAssertEqual(DepartmentCompanions.mentionedDeptKey(in: "should legal look at the terms?"), "legal")
+        XCTAssertEqual(DepartmentCompanions.mentionedDeptKey(in: "check with support before we reply"), "support")
+        XCTAssertEqual(DepartmentCompanions.mentionedDeptKey(in: "hand this to design"), "design")
+    }
 }

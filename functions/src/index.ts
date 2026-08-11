@@ -26,6 +26,7 @@ import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
 import { handleEngStartRun } from "./engineering/engStartRun";
 import { handleEngStream } from "./engineering/engStream";
+import { handleEngWebhook } from "./engineering/engWebhook";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -134,6 +135,17 @@ export const engStream = onRequest(
     timeoutSeconds: 3600
   },
   handleEngStream
+);
+
+// Reached by Anthropic, not by the app, so it is deliberately NOT
+// authenticated — the HMAC signature verified inside the handler is what
+// proves the caller. Mirrors githubOAuthCallback and revenueCatWebhook.
+export const engWebhook = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY", "ANTHROPIC_WEBHOOK_SIGNING_KEY"]
+  },
+  handleEngWebhook
 );
 
 export const generateRoadmap = onRequest(

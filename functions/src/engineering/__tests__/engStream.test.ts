@@ -13,10 +13,16 @@ jest.mock("../engClient", () => {
   return { ...actual, getEngClient: jest.fn() };
 });
 
+jest.mock("firebase-functions/logger", () => ({
+  error: jest.fn()
+}));
+
 import { dedupe, isTerminal, handleEngStream, writeFrame } from "../engStream";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../../auth";
 import { getEngClient } from "../engClient";
+import * as logger from "firebase-functions/logger";
+import * as util from "util";
 
 describe("dedupe", () => {
   it("passes an event the first time and blocks it after", () => {
@@ -243,6 +249,99 @@ describe("handleEngStream", () => {
     // None of those un-relayed events reached the client as "step" frames.
     const frames = framesWritten(res);
     expect(frames.filter((f) => f.startsWith("event: step")).length).toBeLessThanOrEqual(3);
+    expect(res.end).toHaveBeenCalledTimes(1);
+  });
+
+  it("never leaks the upstream error's content to the log or the client when the relay throws", async () => {
+    wireAuthAndRun();
+
+    // Mimics an Anthropic SDK error: its message AND its stringification both
+    // embed the request that produced it, header and all. safeErrorDetail
+    // exists specifically to stop this from reaching the log or the wire.
+    const SECRET = "sk-ant-SECRET";
+    class FakeSdkError extends Error {
+      request: unknown;
+      status = 500;
+      constructor() {
+        super(`upstream 500: x-api-key: ${SECRET}`);
+        this.name = "APIError";
+        this.request = { headers: { "x-api-key": SECRET } };
+      }
+      toString(): string {
+        return `APIError: ${this.message} request=${JSON.stringify(this.request)}`;
+      }
+    }
+
+    // The upstream call itself rejects — no history/live fixtures needed,
+    // this test's whole point is what happens in the catch block.
+    const streamMock = jest.fn().mockRejectedValue(new FakeSdkError());
+    const listMock = jest.fn();
+    (getEngClient as jest.Mock).mockReturnValue({
+      beta: { sessions: { events: { stream: streamMock, list: listMock } } }
+    });
+
+    const res = makeRes();
+    await handleEngStream(makeReq(), res as unknown as Parameters<typeof handleEngStream>[1]);
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    // util.inspect (not JSON.stringify) so a leak via .message/.stack — which
+    // JSON.stringify would silently skip, since Error#message is
+    // non-enumerable — is caught too, not just a leak via an enumerable
+    // property like the fake `request` field above.
+    const loggedSerialized = util.inspect((logger.error as jest.Mock).mock.calls, { depth: null });
+    expect(loggedSerialized).not.toContain(SECRET);
+    expect(loggedSerialized).not.toContain("x-api-key");
+
+    const frames = framesWritten(res);
+    const serializedFrames = frames.join("\n");
+    expect(serializedFrames).not.toContain(SECRET);
+    expect(serializedFrames).not.toContain("x-api-key");
+    // The client gets the one detail-free error frame — nothing else.
+    expect(frames).toEqual([`event: error\ndata: ${JSON.stringify({ error: "stream_failed" })}\n\n`]);
+    expect(res.end).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls abortIfPossible on the upstream stream when the client disconnects during history replay, before the live loop is ever reached", async () => {
+    wireAuthAndRun();
+
+    // This test's own guard, built from scratch: we capture whatever
+    // handler handleEngStream registers for "close" and fire it ourselves
+    // mid-history-replay, before the live tail loop is ever reached.
+    let closeHandler: (() => void) | undefined;
+    const res = makeRes();
+    res.on = jest.fn((eventName: string, handler: () => void) => {
+      if (eventName === "close") closeHandler = handler;
+    });
+
+    const abort = jest.fn();
+    // A stream fixture with an abortable controller but NO cleanup logic of
+    // its own — it yields nothing, so the for-await over it never executes
+    // its body and never breaks. If `abort` is ever called, it can only be
+    // because handleEngStream's own `abortIfPossible(stream)` called it
+    // explicitly in the finally block, not because of any behavior wired
+    // into this fixture's iteration.
+    async function* liveNeverReached(): AsyncGenerator<Record<string, unknown>> {
+      // yields nothing
+    }
+    const stream = Object.assign(liveNeverReached(), { controller: { abort } });
+
+    async function* history(): AsyncGenerator<Record<string, unknown>> {
+      // Disconnect mid-history-replay — the founder's app vanishing before
+      // the live loop is ever reached is exactly the case the explicit
+      // abortIfPossible call exists for, per the comment in engStream.ts.
+      closeHandler?.();
+      yield { id: "sevt_h1", type: "agent.tool_use", name: "bash", input: { command: "ls" } };
+    }
+
+    const streamMock = jest.fn().mockImplementation(async () => stream);
+    const listMock = jest.fn().mockImplementation(() => history());
+    (getEngClient as jest.Mock).mockReturnValue({
+      beta: { sessions: { events: { stream: streamMock, list: listMock } } }
+    });
+
+    await handleEngStream(makeReq(), res as unknown as Parameters<typeof handleEngStream>[1]);
+
+    expect(abort).toHaveBeenCalledTimes(1);
     expect(res.end).toHaveBeenCalledTimes(1);
   });
 });

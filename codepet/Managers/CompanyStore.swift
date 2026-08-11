@@ -1257,6 +1257,24 @@ final class CompanyStore: ObservableObject {
         _ = await produceDraftInline(for: task, cid: cid, language: language)
     }
 
+    /// Record the founder's thumb on a reply.
+    ///
+    /// `chatMessages` is `private(set)`, so this is the only way in. The Firestore write is
+    /// the caller's job (`MessageFeedbackService`) — this keeps the store free of Firebase
+    /// and keeps the vote's on-screen state testable without a configured `FirebaseApp`.
+    func recordVote(messageId: String, vote: MessageVote) {
+        guard let index = chatMessages.firstIndex(where: { $0.id == messageId }) else { return }
+        chatMessages[index].vote = vote
+    }
+
+    #if DEBUG
+    /// Seed the transcript directly. Tests only — `chatMessages` is `private(set)` and the
+    /// real paths all go through the network.
+    func seedChatMessagesForTesting(_ messages: [CopilotMessage]) {
+        chatMessages = messages
+    }
+    #endif
+
     /// Re-ask the question that produced `messageId`, replacing the reply.
     ///
     /// The whole turn goes — the question, the reply, and anything the reply spawned (a draft, a

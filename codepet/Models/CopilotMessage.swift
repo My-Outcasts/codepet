@@ -4,6 +4,10 @@ import Foundation
 /// Who authored a Copilot chat message.
 enum CopilotRole { case me, companion }
 
+/// The founder's verdict on one reply. Written straight to Firestore; the copy held
+/// here only keeps the chosen thumb filled while the transcript is on screen.
+enum MessageVote { case up, down }
+
 /// One Copilot chat message (session-only; not persisted this phase). Named to
 /// avoid the reflection `ChatMessage`.
 struct CopilotMessage: Identifiable, Equatable {
@@ -75,6 +79,14 @@ struct CopilotMessage: Identifiable, Equatable {
     /// two avatars for one thought reads as Codepet talking to itself (founder, Aug 10).
     var drafts: [MessageDraftDTO] = []
 
+    /// The founder's thumb on this reply, or nil until they give one.
+    ///
+    /// On the message rather than in `CopilotBubble`'s `@State` because SwiftUI drops view
+    /// state as rows recycle during scrolling, which would make the filled thumb vanish
+    /// mid-scroll. Session-only like the rest of the transcript — the vote itself is durable
+    /// in Firestore, this is only what the row draws.
+    var vote: MessageVote?
+
     /// `createdAt` is injectable and defaults to now.
     ///
     /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
@@ -93,7 +105,7 @@ struct CopilotMessage: Identifiable, Equatable {
          companionId: String? = nil, deptName: String? = nil,
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
-         drafts: [MessageDraftDTO] = []) {
+         drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -115,5 +127,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.runProposal = runProposal
         self.roadmapProposal = roadmapProposal
         self.drafts = drafts
+        self.vote = vote
     }
 }

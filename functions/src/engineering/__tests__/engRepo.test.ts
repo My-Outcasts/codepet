@@ -1,4 +1,9 @@
 jest.mock("firebase-admin", () => {
+  // Base template only: every test below overrides this per-call with
+  // mockResolvedValueOnce, so this default value itself is never read.
+  // Kept as a non-throwing shape so an accidental extra `.get()` call
+  // (one not stubbed by a test) fails on an assertion rather than on a
+  // missing mock implementation.
   const get = jest.fn().mockResolvedValue({
     exists: true,
     data: () => ({
@@ -71,10 +76,7 @@ describe("loadRepo", () => {
     // Per-test override, not a change to the shared module-level default
     // mock: this must clear EVERY earlier guard (url, sealed, AND
     // defaultBranch) so execution actually reaches `openToken` and throws
-    // into the catch. If a future guard is added to loadRepo and this
-    // fixture is not updated to satisfy it too, this test should fail
-    // loudly (result no longer reaching the catch) rather than keep
-    // passing for the wrong reason.
+    // into the catch.
     const admin = require("firebase-admin");
     admin.firestore().doc().get.mockResolvedValueOnce({
       exists: true,
@@ -85,6 +87,8 @@ describe("loadRepo", () => {
       })
     });
 
+    const { openToken } = require("../../oauth/githubOAuthCore");
+
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
@@ -93,6 +97,14 @@ describe("loadRepo", () => {
       const result = await loadRepo("some-uid", "some-enc-key");
 
       expect(result).toBeNull();
+      // The assertion this test exists for: proof that execution actually
+      // reached the try block and called openToken, rather than returning
+      // null from an earlier guard. Every guard also returns null and logs
+      // nothing, so without this the rest of the assertions here cannot
+      // tell "reached the catch" apart from "exited early" — a future
+      // guard added above the decrypt call would keep this test green
+      // while testing nothing.
+      expect(openToken).toHaveBeenCalled();
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
       expect(logSpy).not.toHaveBeenCalled();
@@ -121,9 +133,6 @@ describe("loadRepo", () => {
       })
     });
 
-    const { openToken } = require("../../oauth/githubOAuthCore");
-    openToken.mockReturnValueOnce("test-token");
-
     const result = await loadRepo("some-uid", "some-enc-key");
 
     expect(result).toBeNull();
@@ -140,12 +149,64 @@ describe("loadRepo", () => {
       })
     });
 
+    const result = await loadRepo("some-uid", "some-enc-key");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when defaultBranch is whitespace-only", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: "   "
+      })
+    });
+
+    const result = await loadRepo("some-uid", "some-enc-key");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null rather than throwing when url is not a string", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: 12345,
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: "main"
+      })
+    });
+
+    await expect(loadRepo("some-uid", "some-enc-key")).resolves.toBeNull();
+  });
+
+  it("trims padding from defaultBranch before returning it", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: " master "
+      })
+    });
+
     const { openToken } = require("../../oauth/githubOAuthCore");
     openToken.mockReturnValueOnce("test-token");
 
     const result = await loadRepo("some-uid", "some-enc-key");
 
-    expect(result).toBeNull();
+    expect(result).toEqual({
+      url: "https://github.com/owner/repo",
+      owner: "owner",
+      repo: "repo",
+      defaultBranch: "master",
+      token: "test-token"
+    });
   });
 
   it("returns a RepoLink with the exact defaultBranch value when present", async () => {

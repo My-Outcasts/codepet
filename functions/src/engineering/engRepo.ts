@@ -58,6 +58,7 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
 
   const data = snap.data() as RepoDoc;
   if (
+    typeof data.url !== "string" ||
     !data.url ||
     !data.sealed ||
     typeof data.defaultBranch !== "string" ||
@@ -82,7 +83,7 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
     url: data.url,
     owner: parsed.owner,
     repo: parsed.repo,
-    defaultBranch: data.defaultBranch,
+    defaultBranch: data.defaultBranch.trim(),
     token
   };
 }

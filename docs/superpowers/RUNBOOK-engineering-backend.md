@@ -185,7 +185,30 @@ under a guessed `"main"`, mount a `checkout: { branch: "main" }` that
 doesn't exist and die with an obscure git error *inside a paid run*. Read
 the real value from the GitHub API once, at seed time, rather than assuming.
 
-To get a `sealed` value without the (not-yet-built) connect UI: run the
+**Use `npm run seal:repo`** rather than assembling this by hand — it reads
+`default_branch` from the GitHub API, seals the token, round-trip-checks the
+seal against the same key, and prints all three fields as one JSON object to
+paste into the Firestore console:
+
+```bash
+cd ~/Developer/codepet-eng-backend/functions
+REPO_URL=https://github.com/<owner>/<repo> \
+GITHUB_TOKEN="$(awk -F= '/^SPIKE_GITHUB_TOKEN=/{sub(/^SPIKE_GITHUB_TOKEN=/,"");print}' local.env)" \
+CONNECTOR_ENC_KEY="$(firebase functions:secrets:access CONNECTOR_ENC_KEY)" \
+npm run -s seal:repo
+```
+
+`CONNECTOR_ENC_KEY` must be the **same** value the deployed functions read,
+which is why it comes from Secret Manager and not from a local file — seal
+under a different key and `loadRepo`'s decrypt fails silently, giving the
+same "connect a repo" 409 as a missing document.
+
+The `<uid>` must be the uid you will authenticate as in Step 5. `npm run
+token` prints it to stderr. Note that its default mode is anonymous
+sign-in, which is **disabled** in this project's Firebase console — pass
+`-- --email <you> --password <pw>` and use the uid that prints.
+
+The manual alternative, if you would rather not run the script: run the
 already-deployed `githubOAuthStart` / `githubOAuthCallback` flow for the
 scratch repo's account, which writes a sealed token to
 `companies/<uid>/connectors/github` — then either copy that document's

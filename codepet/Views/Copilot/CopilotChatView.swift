@@ -724,20 +724,18 @@ struct CopilotBubble: View {
                                                        isStreaming: companyStore.isStreaming,
                                                        isFanningOut: companyStore.isFanningOut)
         HStack(spacing: 2) {
-            actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
+            // The icon ITSELF becomes the acknowledgement — see `actionIcon`'s `tint`.
+            actionIcon(copied ? "checkmark" : "doc.on.doc",
+                       help: lang == .vi ? "Sao chép" : "Copy",
+                       tint: copied ? CodepetTheme.accentTeal : nil) {
                 copy(MessageTranscript.plain(message, lang: lang), setting: $copied)
-            }
-            .overlay(alignment: .leading) {
-                if copied { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
             }
             // Distinct from Copy: the founder's paste target for a draft or a room is
             // Notion or a PR, and plain text loses the headings and the per-seat structure.
-            actionIcon("square.and.arrow.up",
-                       help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown") {
+            actionIcon(copiedMarkdown ? "checkmark" : "square.and.arrow.up",
+                       help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown",
+                       tint: copiedMarkdown ? CodepetTheme.accentTeal : nil) {
                 copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang), setting: $copiedMarkdown)
-            }
-            .overlay(alignment: .leading) {
-                if copiedMarkdown { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
             }
             actionIcon("arrow.clockwise",
                        help: retryEnabled
@@ -774,12 +772,22 @@ struct CopilotBubble: View {
     /// `foregroundColor`, which overrides that and always looked the same either way). Without
     /// this parameter a disabled Try again on an older reply looked exactly as live as an
     /// enabled one — the founder tapped it and nothing happened, with no visual reason why.
+    ///
+    /// `tint` overrides the resting ink, which is how a copy acknowledges itself: the icon
+    /// swaps to a teal `checkmark` for 1.4s instead of floating a "Copied" label beside it.
+    /// The label was an `.overlay(alignment: .leading)` offset by exactly the icon's own 22pt
+    /// width, so it began at the icon's right edge and ran straight over the NEXT control —
+    /// on a five-icon row that meant it covered Copy as Markdown, and it was clipped to
+    /// "Cop.." besides, because an overlay does not expand its parent's bounds. Founder-
+    /// verified on screen, Aug 11. Swapping the icon is also the pattern this repo already
+    /// uses for a copy confirm (`MessageDraftCard.swift:144`).
     private func actionIcon(_ system: String, help: String, isEnabled: Bool = true,
+                            tint: Color? = nil,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(CodepetTheme.mutedText.opacity(isEnabled ? 1 : 0.35))
+                .foregroundColor(tint ?? CodepetTheme.mutedText.opacity(isEnabled ? 1 : 0.35))
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
@@ -789,11 +797,9 @@ struct CopilotBubble: View {
 
     /// Puts `string` on the pasteboard and shows `flag`'s acknowledgement for 1.4s.
     ///
-    /// Clears BOTH acknowledgement flags before setting the one requested: `copied` and
-    /// `copiedMarkdown` used to be fully independent, each on its own timer and its own
-    /// `.overlay`. Copy then Copy as Markdown inside 1.4s left both floating labels live at
-    /// once, each overrunning past its own 22pt icon into the next control's space. Showing
-    /// one now always clears the other, so at most one label is ever on screen.
+    /// Clears BOTH flags before setting the one requested, so only one checkmark is ever lit:
+    /// `copied` and `copiedMarkdown` were fully independent, each on its own timer, and Copy
+    /// then Copy as Markdown inside 1.4s showed two acknowledgements at once.
     private func copy(_ string: String, setting flag: Binding<Bool>) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
@@ -806,13 +812,6 @@ struct CopilotBubble: View {
         }
     }
 
-    private func copiedLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.pixelSystem(size: 9, weight: .semibold))
-            .foregroundColor(CodepetTheme.accentTeal)
-            .offset(x: 22)
-            .transition(.opacity)
-    }
 
     /// A thumb fills once given, and the other stays live so a misclick is correctable.
     ///

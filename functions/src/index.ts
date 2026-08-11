@@ -27,6 +27,7 @@ import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githu
 import { handleEngStartRun } from "./engineering/engStartRun";
 import { handleEngStream } from "./engineering/engStream";
 import { handleEngWebhook } from "./engineering/engWebhook";
+import { handleEngSendTurn } from "./engineering/engSendTurn";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -146,6 +147,16 @@ export const engWebhook = onRequest(
     secrets: ["ANTHROPIC_API_KEY", "ANTHROPIC_WEBHOOK_SIGNING_KEY"]
   },
   handleEngWebhook
+);
+
+// Everything the founder sends into a live session: a follow-up, a tool
+// approval, or a stop.
+export const engSendTurn = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleEngSendTurn
 );
 
 export const generateRoadmap = onRequest(

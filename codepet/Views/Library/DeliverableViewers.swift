@@ -390,7 +390,10 @@ struct DmsViewer: View {
                     font: .pixelSystem(size: 11, weight: .semibold)))
             }
         }
-        .deliverableCardChrome()
+        // FORCED on, unlike every other viewer: these are siblings, not one frame. A `.dms`
+        // deliverable is several messages to several people, and in a sheet with no edges they
+        // would run together into one wall with names in it.
+        .deliverableCardChrome(forced: true)
     }
 }
 

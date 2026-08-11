@@ -126,22 +126,68 @@ struct DeliverableFrame<Content: View>: View {
     }
 }
 
-extension View {
-    /// The card itself — a hairline border rather than a shadow, so a column of deliverables
-    /// reads as a stack of documents instead of a pile of floating chips.
-    func deliverableCardChrome(measured: Bool = true) -> some View {
-        self
-            .padding(DeliverableStyle.padding)
+// MARK: - Where the card is, and is not
+
+/// False when something ELSE already frames this deliverable — set by `DeliverableBodyView`,
+/// which only ever renders inside a sheet.
+///
+/// Founder call, Aug 5, already written down in `CopilotChatView`: *"A container earns its edges
+/// when it bounds an OBJECT (a draft, a room, an exec log); prose is not an object, and the name
+/// row above it already says where it came from."*
+///
+/// The card is RIGHT in the chat dock — a draft floats on a backdrop with loose prose around it,
+/// and without edges it is the undifferentiated prose the Aug 10 report was about. It is WRONG in
+/// the detail sheet, where the sheet is the container and its header bar already names the thing:
+/// there the card is a second frame around content that is already framed (founder screenshot,
+/// Aug 11 — sheet, then the PLAN card, then the Changes cards, three deep).
+///
+/// One component, two hosts, two answers. The first pass applied the chat answer to both.
+private struct DeliverableCardChromeKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var deliverableCardChrome: Bool {
+        get { self[DeliverableCardChromeKey.self] }
+        set { self[DeliverableCardChromeKey.self] = newValue }
+    }
+}
+
+private struct DeliverableCardChrome: ViewModifier {
+    let measured: Bool
+    /// Non-nil forces the answer regardless of host — see `DmsViewer`.
+    let forced: Bool?
+    @Environment(\.deliverableCardChrome) private var fromHost
+
+    private var carded: Bool { forced ?? fromHost }
+
+    func body(content: Content) -> some View {
+        content
+            // Bare content takes the host's own page margins; only a card pads itself.
+            .padding(carded ? DeliverableStyle.padding : 0)
             .frame(maxWidth: measured ? DeliverableStyle.measure : .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .fill(CodepetTheme.surface)
+                    .fill(carded ? CodepetTheme.surface : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
+                    .strokeBorder(carded ? CodepetTheme.hairline : Color.clear, lineWidth: 1)
             )
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    /// The card itself — a hairline border rather than a shadow, so a column of deliverables
+    /// reads as a stack of documents instead of a pile of floating chips.
+    ///
+    /// Drawn only where a container is not already doing the job; see `deliverableCardChrome`
+    /// in the environment. `forced: true` overrides that for the one case where the cards are
+    /// SIBLINGS rather than a single frame — `DmsViewer` draws one per recipient, and several
+    /// messages stacked in a sheet need edges to say where one ends and the next begins.
+    func deliverableCardChrome(measured: Bool = true, forced: Bool? = nil) -> some View {
+        modifier(DeliverableCardChrome(measured: measured, forced: forced))
     }
 }
 

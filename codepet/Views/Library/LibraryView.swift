@@ -433,7 +433,14 @@ struct DeliverableDetailView: View {
                     .padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 34)
             }
         }
-        .frame(minWidth: 460, minHeight: 420)
+        // An IDEAL, not just a floor. With minimums alone macOS opened this near 460pt — a narrow
+        // vertical slot in which a plan's steps wrapped every few words and the 620pt reading
+        // measure never got to apply at all, because the window was narrower than the measure
+        // (founder screenshot, Aug 11: "oriented vertically… looks a little small if the content
+        // is long"). 620 of text plus the 26pt page margins each side is 672, so 720 is the first
+        // width at which the measure is the thing deciding the line length rather than the frame.
+        // The 460 floor stays: it can still be dragged small.
+        .frame(minWidth: 460, idealWidth: 720, minHeight: 420, idealHeight: 700)
         .background(CodepetTheme.pageBackground)
     }
 }
@@ -444,7 +451,17 @@ struct DeliverableDetailView: View {
 struct DeliverableBodyView: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+
+    /// Both hosts of this dispatch are SHEETS — the Library's detail sheet and the Tasks draft
+    /// preview — and a sheet already frames what is inside it. So the card is switched off here,
+    /// once, rather than at each call site where a third host would forget it. The chat dock does
+    /// not go through this type: it renders `MessageDraftViewer` directly and keeps its card,
+    /// which is the whole point of the distinction.
     var body: some View {
+        dispatch.environment(\.deliverableCardChrome, false)
+    }
+
+    @ViewBuilder private var dispatch: some View {
         Group {
             switch deliverable.kind {
             case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):

@@ -19,36 +19,36 @@ struct DepartmentDetailView: View {
 
     var body: some View {
         guard let d = dept else { return AnyView(EmptyView()) }
-        return AnyView(ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                        Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
-                    }.foregroundColor(CodepetTheme.bodyText)
-                }.buttonStyle(.plain)
-
-                hero(d)
-                Text(d.rationale).font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .top, spacing: 8) {
-                    CharacterImage(companyStore.company.companionId, size: 28)
-                    Text(d.focus).font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
+        // The skeleton is CompanyView's, deliberately: fixed header with
+        // viewHeadPadding(), then a ScrollView whose content carries the shared
+        // page rhythm and pageColumn(). Before this the page used padding(20) on
+        // all four sides and never called pageColumn(), so its hero ran the full
+        // width of the window while the roster that links to it capped at 1280.
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            DepartmentHeader(name: d.name, rationale: d.rationale, onBack: onBack)
+                .viewHeadPadding()
+            ScrollView {
+                // spacing: 0 — every vertical gap comes from CodepetTokens.Space,
+                // so this page cannot drift off the house rhythm again.
+                VStack(alignment: .leading, spacing: 0) {
+                    hero(d)
+                    SectionEyebrow(Self.tasksLabel(left: left, total: tasks.count, lang: lang))
+                    if tasks.isEmpty {
+                        Text(lang == .vi ? "Chưa có việc trong phòng ban này." : "No tasks in this department yet.")
+                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    } else {
+                        VStack(spacing: CodepetTokens.Space.itemGap) {
+                            ForEach(tasks) { t in DepartmentTaskCard(task: t) }
+                        }
+                    }
                 }
-                Text(lang == .vi ? "Việc cần làm · còn \(left)/\(tasks.count)"
-                                 : "What needs doing · \(left) of \(tasks.count) left")
-                    .font(CodepetTheme.inter(13, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.top, 4)
-                if tasks.isEmpty {
-                    Text(lang == .vi ? "Chưa có việc trong phòng ban này." : "No tasks in this department yet.")
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                } else {
-                    ForEach(tasks) { t in DepartmentTaskCard(task: t) }
-                }
+                .padding(.top, CodepetTokens.Space.headToBody)
+                .padding(.horizontal, 26)
+                .padding(.bottom, CodepetTokens.Space.pageBottom)
+                .pageColumn()
             }
-            .padding(20)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }
 
     private func hero(_ d: Department) -> some View {
@@ -61,6 +61,46 @@ struct DepartmentDetailView: View {
             }.padding(12)
         }
         .frame(height: 140).cornerRadius(14).clipped()
+    }
+}
+
+/// The masthead. Plain values rather than the store, so it carries no Firebase
+/// dependency and can be rendered on its own.
+///
+/// The title/subtitle pair is CompanyView:51-59 exactly — 28pt semibold at
+/// -0.5 tracking over 15pt muted, four points apart. The back link sits ten
+/// points above it: it is a control, not decoration, so it survives the
+/// no-decorative-icons rule, and pinning it outside the ScrollView keeps the
+/// way out reachable on a six-task department.
+private struct DepartmentHeader: View {
+    let name: String
+    let rationale: String
+    let onBack: () -> Void
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onBack) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                    Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
+                }
+                .foregroundColor(CodepetTheme.bodyText)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(CodepetTheme.inter(28, weight: .semibold))
+                    .tracking(-0.5)
+                    .foregroundColor(CodepetTheme.primaryText)
+                Text(rationale)
+                    .font(CodepetTheme.inter(15))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

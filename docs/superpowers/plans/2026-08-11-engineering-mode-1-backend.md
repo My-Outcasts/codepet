@@ -1584,7 +1584,12 @@ import * as admin from "firebase-admin";
 import { listCostToCredits } from "./engBudget";
 import { getEngClient } from "./engClient";
 
-export type RunStatus = "running" | "reviewing" | "budgetReached" | "failed";
+// NOTE: `RunStatus` now lives in `engClient.ts`, not here — import it:
+//   import { type RunStatus } from "./engClient";
+// It is shared because two handlers write the same Firestore field. This task's
+// original local definition omitted `"starting"`, which engStartRun writes before
+// it creates the session, so the two vocabularies disagreed and nothing caught it.
+// The shared union is: "starting" | "running" | "reviewing" | "budgetReached" | "failed".
 
 /**
  * A session's stop reason → the run status the card renders.

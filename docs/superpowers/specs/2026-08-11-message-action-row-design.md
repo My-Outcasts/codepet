@@ -69,7 +69,7 @@ so that what it deletes is what it looks like it deletes.
 | Visibility | Hover-reveal, last reply pinned | Keeps the transcript quiet per the minimalist north-star, while the reply you are reading always shows its actions and teaches the affordance |
 | Coverage | Every assistant branch, not just `textBubble` | The card replies are the ones worth rating; a thumbs-down you cannot give on a bad draft is the gap |
 | Share | Copy as Markdown | No new OS surface, works offline, one code path, and the paste target is Notion or a PR |
-| Retry scope | Last reply only | Makes `removeSubrange(askIndex...)` drop exactly the last question and its answer. No store change, no confirm modal in a quiet row |
+| Retry scope | Last reply AND a non-blank `founderAsk` | "Newest message" is not the same claim as "answer to the founder's last ask" — roughly 15 store paths append a companion message with no ask before it. `isLast` alone makes `removeSubrange(askIndex...)` drop the wrong turn on those; gating on `founderAsk` too makes it drop exactly the last question and its answer, on every message where retry is offered. No store change, no confirm modal in a quiet row |
 | Vote storage | Existing `feedback` collection | Rule already permits the shape; a new `FeedbackFeature` case keeps thumbs out of the existing `companionChat` 5-face stats |
 
 ## Architecture
@@ -206,12 +206,29 @@ the transcript is out of scope.
 ### Retry
 
 ```swift
-.disabled(!isLast || companyStore.isCompanionTyping || companyStore.isStreaming)
+let retryEnabled = MessageActionRules.canRetry(isLast: isLast,
+                                               isTyping: companyStore.isCompanionTyping,
+                                               isStreaming: companyStore.isStreaming,
+                                               isFanningOut: companyStore.isFanningOut,
+                                               founderAsk: message.founderAsk)
+...
+.disabled(!retryEnabled)
 ```
 
-`CompanyStore.retryReply` is unchanged. With retry confined to the last reply,
+`isLast` alone is not "answers the founder's last ask" — that assumption is false whenever a
+store path appends a companion message with no ask before it (a Roadmap "Run" proposal, a
+finished run's draft, a fan-out row, byte's first-run greeting, ...): roughly 15 such paths
+exist, each becoming the newest message in turn. Retry offered on one of those deletes
+whatever question and answer actually preceded it, several turns back, then re-asks it and
+spends credits on a question nobody just asked.
+
+`canRetry` adds a fourth gate, `founderAsk` (`CopilotMessage.founderAsk`) — non-nil only on
+the reply `CompanyStore.sendChat` produced for a typed ask, stamped there and nowhere else.
+With retry confined to `isLast && isFanningOut == false && a non-blank founderAsk`,
 `removeSubrange(askIndex...)` removes exactly the founder's last question and its answer,
-which is what a retry button under the last answer visibly promises.
+which is what a retry button under the last answer visibly promises. `CompanyStore.retryReply`
+itself is otherwise unchanged; the added guard lives entirely in `canRetry` and in the
+`founderAsk` stamped by `sendMessage`.
 
 ## Testing
 

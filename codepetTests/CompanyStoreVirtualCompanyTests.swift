@@ -350,16 +350,39 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
     /// which aborts the XCTest HOST mid-suite with no failing assertion — worse than a
     /// missing test, because it discredits every other result in the run. A timeout here
     /// fails this test and nothing else.
-    private func awaitRoom(in store: CompanyStore) async throws -> CopilotMessage {
-        if let room = store.chatMessages.last(where: { $0.vcRun != nil }) { return room }
+    ///
+    /// `until` is the condition being waited FOR, and it must match what the caller then
+    /// asserts on. The default — the room's message merely EXISTS — is satisfied the moment
+    /// ROUTING lands, because that is the frame that appends the handoff message. That is right
+    /// for a caller that only cares where the message sits in the transcript. It is wrong for a
+    /// caller that reads the brief, which arrives on a later frame with nothing ordering the two.
+    ///
+    /// That gap made `testLockingInRecordsTheDecisionAndSaysSoOnce` flaky: on a fast machine the
+    /// stream drained before the assertion ran, on a loaded CI runner it did not, and
+    /// `canLockIn` came back false. Every later assertion then failed as a cascade — decisions
+    /// empty, saves 3 vs 4, `actionConsumed` false — which reads like a broad breakage of
+    /// lock-in rather than one early return. Seen red on Aug 11 2026, green on a re-run of the
+    /// identical commit.
+    ///
+    /// The window is ROUTING → BRIEF, and that is worth stating precisely because the first
+    /// diagnosis put it at `run_started` → routing and was wrong. A reproduction with the gap
+    /// there still passed: no room message exists until routing, so the wait simply blocked
+    /// until routing, by which point the brief had already followed. Only once the suspension
+    /// was moved between routing and the brief did the failure reproduce — with CI's exact
+    /// signature. See the `vcRunner` fixture in `roomWithABrief`, which now holds that gap open
+    /// on every machine.
+    private func awaitRoom(in store: CompanyStore,
+                           until isReady: @escaping (CopilotMessage) -> Bool = { $0.vcRun != nil })
+    async throws -> CopilotMessage {
+        if let room = store.chatMessages.last(where: isReady) { return room }
         let landed = expectation(description: "the room's message landed")
         landed.assertForOverFulfill = false
         let bag = store.$chatMessages.sink { messages in
-            if messages.contains(where: { $0.vcRun != nil }) { landed.fulfill() }
+            if messages.contains(where: isReady) { landed.fulfill() }
         }
         defer { bag.cancel() }
         await fulfillment(of: [landed], timeout: 5)
-        return try XCTUnwrap(store.chatMessages.last(where: { $0.vcRun != nil }),
+        return try XCTUnwrap(store.chatMessages.last(where: isReady),
                              "the room never landed")
     }
 
@@ -371,20 +394,45 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
                              chatStreamer: Self.failingStreamer,
+                             // The gap between ROUTING and BRIEF is held open on purpose, and it
+                             // is what turns this test from flaky into decisive.
+                             //
+                             // Routing is the frame that appends the room's message; the brief
+                             // follows later. Yielded back-to-back, the whole stream drains
+                             // before the caller looks, so a helper waiting on the wrong
+                             // condition still passes on a fast machine and fails only on a
+                             // loaded CI runner — which is exactly how this suite went red once
+                             // and green on a re-run of the identical commit (Aug 11 2026).
+                             //
+                             // 60ms is chosen to exceed the scheduling jitter that made this
+                             // intermittent, not to model anything real. Verified BOTH ways:
+                             // revert `until:` to the default and this test fails every time,
+                             // with CI's own signature (decisions empty, saves 3 vs 4). Without
+                             // this suspension it passes either way and proves nothing.
+                             //
+                             // The gap belongs HERE and not before routing: a first attempt put
+                             // it between `run_started` and routing and still passed, because no
+                             // room message exists until routing, so the wait simply blocked
+                             // until routing and the brief had already followed.
                              vcRunner: { _ in
-                                 AsyncThrowingStream {
-                                     $0.yield(.runStarted(runId: "r1"))
-                                     $0.yield(.routing(Self.routing("multi_agent")))
-                                     $0.yield(.brief(Self.aBrief(recommendation)))
-                                     $0.yield(.done(runId: "r1", unresolved: false, skipped: nil))
-                                     $0.finish()
+                                 AsyncThrowingStream { cont in
+                                     Task {
+                                         cont.yield(.runStarted(runId: "r1"))
+                                         cont.yield(.routing(Self.routing("multi_agent")))
+                                         try? await Task.sleep(nanoseconds: 60_000_000)
+                                         cont.yield(.brief(Self.aBrief(recommendation)))
+                                         cont.yield(.done(runId: "r1", unresolved: false, skipped: nil))
+                                         cont.finish()
+                                     }
                                  }
                              },
                              decisionsSaver: decisionsSaver)
         await send(s)
         // The run outlives the turn by design, so wait for the room rather than assuming
-        // it has landed by the time `sendChat` returns.
-        let room = try await awaitRoom(in: s)
+        // it has landed by the time `sendChat` returns — and wait for the BRIEF, not merely
+        // for the room's message. Delivering a brief is what this helper is for (see the name),
+        // and every caller reads `canLockIn`, which is false until the brief arrives.
+        let room = try await awaitRoom(in: s) { $0.vcRun?.brief != nil }
         return (s, room.id, try XCTUnwrap(room.vcRun))
     }
 

@@ -68,6 +68,23 @@ describe("MOUNT_PATH", () => {
 
 describe("loadRepo", () => {
   it("returns null and logs nothing when the sealed token fails to open", async () => {
+    // Per-test override, not a change to the shared module-level default
+    // mock: this must clear EVERY earlier guard (url, sealed, AND
+    // defaultBranch) so execution actually reaches `openToken` and throws
+    // into the catch. If a future guard is added to loadRepo and this
+    // fixture is not updated to satisfy it too, this test should fail
+    // loudly (result no longer reaching the catch) rather than keep
+    // passing for the wrong reason.
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: "main"
+      })
+    });
+
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
@@ -86,6 +103,13 @@ describe("loadRepo", () => {
     }
   });
 
+  // This is the tripwire against a reinstated `data.defaultBranch ?? "main"`
+  // fallback: a missing field only produces "main" under the old,
+  // guessing behaviour, so this test fails against it. The "exact value
+  // when present" test below cannot serve that role — nullish coalescing
+  // only substitutes on null/undefined, so a defined "master" passes
+  // through unchanged under the old code too, and that test would pass
+  // identically either way.
   it("returns null when defaultBranch is missing from the repo doc", async () => {
     const admin = require("firebase-admin");
     admin.firestore().doc().get.mockResolvedValueOnce({
@@ -94,6 +118,25 @@ describe("loadRepo", () => {
         url: "https://github.com/owner/repo",
         sealed: { iv: "iv", tag: "tag", ciphertext: "ct" }
         // NO defaultBranch
+      })
+    });
+
+    const { openToken } = require("../../oauth/githubOAuthCore");
+    openToken.mockReturnValueOnce("test-token");
+
+    const result = await loadRepo("some-uid", "some-enc-key");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when defaultBranch is an empty string", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: ""
       })
     });
 

@@ -57,7 +57,13 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
   if (!snap.exists) return null;
 
   const data = snap.data() as RepoDoc;
-  if (!data.url || !data.sealed || typeof data.defaultBranch !== "string") return null;
+  if (
+    !data.url ||
+    !data.sealed ||
+    typeof data.defaultBranch !== "string" ||
+    !data.defaultBranch.trim()
+  )
+    return null;
 
   const parsed = parseRepoUrl(data.url);
   if (!parsed) return null;

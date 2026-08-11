@@ -92,15 +92,24 @@ The deployed `engStartRun` needs `ENG_AGENT_ID` / `ENG_AGENT_VERSION` /
 `ENG_ENVIRONMENT_ID` from Step 1 already in `.env.devpet-8f4b1` before this
 deploy, or every run will 500 with `misconfigured`.
 
+`engWebhook` declares `secrets: ["ANTHROPIC_API_KEY",
+"ANTHROPIC_WEBHOOK_SIGNING_KEY"]`, and a declared secret must already exist
+in Secret Manager for the deploy to succeed — v2 resolves every name in
+`secrets:` at deploy time. The real `whsec_` value does not exist until Step
+3, so seed a placeholder first and let Step 3 add the real version:
+
 ```bash
 cd ~/Developer/codepet-eng-backend
+printf 'placeholder' | firebase functions:secrets:set ANTHROPIC_WEBHOOK_SIGNING_KEY --data-file -
 firebase functions:list      # confirm the export set below is a superset of this
 firebase deploy --only functions:engStartRun,functions:engStream,functions:engSendTurn,functions:engWebhook
 ```
 
 **Correct result:** the CLI reports all four functions deployed
-successfully. `engWebhook` is live at this point but has no signing key yet
-— that's fine, nothing calls it until Step 3 registers the endpoint.
+successfully. `engWebhook` is live at this point but its signing key is the
+placeholder, so it rejects every request with a 401 — that's fine and in
+fact correct, because nothing legitimate calls it until Step 3 registers the
+endpoint and replaces the value.
 
 ---
 
@@ -123,10 +132,21 @@ produces is shown exactly once.
 Set it for deployed functions and redeploy just the webhook handler:
 
 ```bash
-printf 'ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_...\n' >> functions/.env.devpet-8f4b1
+cd ~/Developer/codepet-eng-backend
+firebase functions:secrets:set ANTHROPIC_WEBHOOK_SIGNING_KEY   # paste whsec_..., then ⏎ and ⌃D
 firebase functions:list      # re-confirm before every deploy, scoped or not
 firebase deploy --only functions:engWebhook
 ```
+
+**Not `.env.devpet-8f4b1`.** An earlier version of this runbook said to
+append the key there, which is the exact collision Landmine #2 in
+`CLAUDE.md` describes: `firebase deploy` loads every `.env*` file as
+ordinary env vars, and a plain env var whose name matches a declared
+`secrets:` entry fails the deploy with a 400. The three `ENG_*` ids belong
+in `.env.devpet-8f4b1` precisely because they are *not* declared as secrets;
+this one is, so it belongs in Secret Manager. The redeploy is what makes
+`engWebhook` pick up the new secret version — setting the secret alone does
+not.
 
 **Correct result:** the console shows the endpoint as active. There is
 nothing to curl to confirm this in isolation — it proves itself in Step 5,

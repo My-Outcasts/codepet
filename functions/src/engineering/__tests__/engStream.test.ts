@@ -17,7 +17,14 @@ jest.mock("firebase-functions/logger", () => ({
   error: jest.fn()
 }));
 
-import { dedupe, isTerminal, handleEngStream, writeFrame } from "../engStream";
+import {
+  dedupe,
+  isTerminal,
+  handleEngStream,
+  writeFrame,
+  writeHeartbeat,
+  HEARTBEAT_INTERVAL_MS
+} from "../engStream";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../../auth";
 import { getEngClient } from "../engClient";
@@ -398,6 +405,136 @@ describe("handleEngStream", () => {
     expect(JSON.stringify(body)).not.toContain(SECRET);
     const loggedSerialized = util.inspect((logger.error as jest.Mock).mock.calls, { depth: null });
     expect(loggedSerialized).not.toContain(SECRET);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 8: nothing in this file writes while the agent is thinking or the
+  // run is idle waiting on an approval — potentially many minutes on a
+  // 3600-second connection, long enough for a proxy in front of this
+  // endpoint to drop an apparently-idle connection. A periodic `:`-prefixed
+  // SSE comment costs nothing and needs no client change (the spec, and
+  // this app's own parser, already ignore comment lines).
+  // -------------------------------------------------------------------------
+
+  it(
+    "writes a periodic heartbeat comment while the connection is otherwise idle, and stops the " +
+      "instant the client disconnects — not just eventually once the handler itself returns",
+    async () => {
+      jest.useFakeTimers();
+      try {
+        wireAuthAndRun();
+
+        // Parks the live tail in a single, never-(voluntarily)-resolving
+        // await — standing in for "the agent is thinking" or "idle waiting
+        // on an approval nobody has answered yet". Exactly the gap a
+        // heartbeat exists to fill, and exactly the shape that would
+        // otherwise let a proxy time out the connection.
+        let releaseLive: (() => void) | undefined;
+        async function* emptyHistory(): AsyncGenerator<Record<string, unknown>> {
+          // yields nothing
+        }
+        async function* live(): AsyncGenerator<Record<string, unknown>> {
+          await new Promise<void>((resolve) => {
+            releaseLive = resolve;
+          });
+        }
+
+        const streamMock = jest.fn().mockImplementation(async () => live());
+        const listMock = jest.fn().mockImplementation(() => emptyHistory());
+        (getEngClient as jest.Mock).mockReturnValue({
+          beta: { sessions: { events: { stream: streamMock, list: listMock } } }
+        });
+
+        let closeHandler: (() => void) | undefined;
+        const res = makeRes();
+        res.on = jest.fn((eventName: string, handler: () => void) => {
+          if (eventName === "close") closeHandler = handler;
+        });
+
+        const handlerPromise = handleEngStream(makeReq(), res as unknown as Parameters<typeof handleEngStream>[1]);
+        // Let the handler run up to the point where it is parked awaiting
+        // the live generator, without advancing any timers yet.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await jest.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 3);
+        const heartbeatsSoFar = res.write.mock.calls.filter((c) => c[0] === ": heartbeat\n\n").length;
+        // Comment lines only — never mistaken for a named SSE frame that
+        // would need client-side handling.
+        expect(res.write.mock.calls.every((c) => (c[0] as string).startsWith(": heartbeat"))).toBe(true);
+        expect(heartbeatsSoFar).toBeGreaterThanOrEqual(2);
+
+        // The founder's app disconnects while the handler is still parked
+        // in that same await — the exact case where a leaked timer would
+        // otherwise keep firing into a dead socket for however much longer
+        // the agent takes.
+        closeHandler?.();
+        const heartbeatsAtDisconnect = res.write.mock.calls.filter((c) => c[0] === ": heartbeat\n\n").length;
+
+        await jest.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 5);
+        const heartbeatsAfterDisconnect = res.write.mock.calls.filter(
+          (c) => c[0] === ": heartbeat\n\n"
+        ).length;
+        expect(heartbeatsAfterDisconnect).toBe(heartbeatsAtDisconnect);
+
+        releaseLive?.();
+        await handlerPromise;
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+  );
+});
+
+describe("writeHeartbeat", () => {
+  // Mirrors writeFrame's own tests below — same writability guard, same
+  // swallow-on-throw — but a `:`-prefixed comment line rather than a named
+  // `event:`/`data:` frame.
+
+  it("writes a comment line when the response is still writable", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: false, destroyed: false } as unknown as Parameters<
+      typeof writeHeartbeat
+    >[0];
+
+    writeHeartbeat(res);
+
+    expect(write).toHaveBeenCalledWith(": heartbeat\n\n");
+  });
+
+  it("is a no-op once writableEnded is true", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: true, destroyed: false } as unknown as Parameters<
+      typeof writeHeartbeat
+    >[0];
+
+    writeHeartbeat(res);
+
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op once the socket is destroyed", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: false, destroyed: true } as unknown as Parameters<
+      typeof writeHeartbeat
+    >[0];
+
+    writeHeartbeat(res);
+
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("swallows a synchronous write failure instead of throwing", () => {
+    const write = jest.fn(() => {
+      throw new Error("write after end");
+    });
+    const res = { write, writableEnded: false, destroyed: false } as unknown as Parameters<
+      typeof writeHeartbeat
+    >[0];
+
+    expect(() => writeHeartbeat(res)).not.toThrow();
+    expect(write).toHaveBeenCalledTimes(1);
   });
 });
 

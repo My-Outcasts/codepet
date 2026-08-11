@@ -34,6 +34,29 @@ export function writeFrame(res: Response, event: string, payload: unknown): void
   }
 }
 
+/** How often the keep-alive comment (below) goes out while the connection is
+ * otherwise idle. Short enough to stay well under the idle-connection
+ * timeouts common on proxies in front of a 3600-second connection (this
+ * file's own comments already note the connection can sit open that long
+ * with the agent thinking or waiting on an approval); long enough not to be
+ * pointless chatter. */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
+/**
+ * A `:`-prefixed SSE comment line — never a `event:`/`data:` frame — so it
+ * needs no client change: the spec (and this app's own SSE parser) ignores
+ * comment lines outright. Same writability guard and swallow-on-throw as
+ * `writeFrame`, since this can race a disconnect exactly the same way.
+ */
+export function writeHeartbeat(res: Response): void {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(": heartbeat\n\n");
+  } catch {
+    // Socket died between the writability check and the write itself.
+  }
+}
+
 /** True if `stream` exposes an abortable controller (the SDK's `Stream` does). Best-effort: a test double or a future SDK shape without one is a silent no-op, not a crash. */
 function abortIfPossible(stream: unknown): void {
   const controller = (stream as { controller?: { abort?: () => void } } | null | undefined)?.controller;
@@ -124,8 +147,23 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
   // exits at its next iteration instead of consuming the upstream SDK stream
   // and calling res.write() for up to the full 3600s timeout.
   let clientGone = false;
+
+  // Keep-alive: nothing else in this file writes while the agent is
+  // thinking or the run is idle waiting on an approval, which on a
+  // 3600-second connection can be many minutes — long enough for a proxy in
+  // front of this endpoint to decide the connection is dead and drop it. A
+  // periodic `:`-prefixed comment (ignored by any spec-compliant SSE parser,
+  // this app's included) costs nothing and needs no client change.
+  const heartbeat = setInterval(() => writeHeartbeat(res), HEARTBEAT_INTERVAL_MS);
+
   res.on("close", () => {
     clientGone = true;
+    // Stop immediately, not just eventually in the `finally` below: the
+    // handler can still be parked in an `await` on the upstream stream long
+    // after the client disconnects, and a timer that keeps firing into a
+    // closed socket for the rest of that wait is exactly the kind of leak
+    // this fix must not introduce.
+    clearInterval(heartbeat);
   });
   res.on("error", () => {
     // Node emits this asynchronously instead of throwing when a write hits a
@@ -133,6 +171,7 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
     // write; this listener exists only so the otherwise-unhandled "error"
     // event doesn't crash the function instance.
     clientGone = true;
+    clearInterval(heartbeat);
   });
 
   const client = getEngClient();
@@ -190,6 +229,14 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
     logger.error("engStream: relay failed", safeErrorDetail(err));
     writeFrame(res, "error", { error: "stream_failed" });
   } finally {
+    // Backstop for the ordinary, non-disconnect completion path — the
+    // `"close"`/`"error"` listeners above already cover a founder walking
+    // away mid-stream, but a run that finishes on its own never fires
+    // either, and this is what stops the heartbeat once there is nothing
+    // left to keep alive. `clearInterval` on an already-cleared timer is a
+    // safe no-op, so this runs unconditionally rather than only when the
+    // listeners above haven't already fired.
+    clearInterval(heartbeat);
     // Cancel the upstream SDK stream rather than leaving it iterating.
     // Breaking out of `for await (const live of stream)` above already does
     // this — the SDK's own generator aborts its request in a `finally` when

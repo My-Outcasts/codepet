@@ -14,6 +14,16 @@ export const ENG_AGENT_ID_ENV = "ENG_AGENT_ID";
 export const ENG_AGENT_VERSION_ENV = "ENG_AGENT_VERSION";
 export const ENG_ENVIRONMENT_ID_ENV = "ENG_ENVIRONMENT_ID";
 
+/**
+ * Every value any engineering handler writes to an `engRuns/{id}.status`
+ * field, in one place. `engStartRun` writes `starting`/`running`/`failed`;
+ * `engWebhook` (durable-outcome handler) additionally writes
+ * `reviewing`/`budgetReached`. Both handlers import this rather than each
+ * declaring their own string literals, so the two vocabularies cannot drift
+ * apart the way they would if each handler typed its own union.
+ */
+export type RunStatus = "starting" | "running" | "reviewing" | "budgetReached" | "failed";
+
 let client: Anthropic | null = null;
 
 export function getEngClient(): Anthropic {

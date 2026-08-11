@@ -303,13 +303,17 @@ describe("handleEngStartRun", () => {
     const runRef = makeRunRef("run_order_1");
     wireFirestore(runRef, 40);
 
+    // Captured here, asserted AFTER the handler returns (outside the mock).
+    // If the ordering regresses, the mock itself must stay a plain success
+    // so the handler's own try/catch never sees a thrown assertion — a
+    // regression must surface as a failed assertion below, not a misleading
+    // "expected 200, got 502" from the handler swallowing an exception that
+    // originated inside its own mocked dependency.
+    let setCallsAtCreateTime = -1;
+    let writtenAtCreateTime: { status?: string; sessionId?: string } | undefined;
     const sessionsCreate = jest.fn().mockImplementation(() => {
-      // The oracle: by the time session-create is invoked, the run doc
-      // write must already have happened, with the pre-billing shape.
-      expect(runRef.set).toHaveBeenCalledTimes(1);
-      const written = runRef.set.mock.calls[0][0];
-      expect(written.status).toBe("starting");
-      expect(written.sessionId).toBeUndefined();
+      setCallsAtCreateTime = runRef.set.mock.calls.length;
+      writtenAtCreateTime = runRef.set.mock.calls[0]?.[0];
       return Promise.resolve({ id: "sess_order_1" });
     });
     (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
@@ -321,6 +325,13 @@ describe("handleEngStartRun", () => {
 
     expect(sessionsCreate).toHaveBeenCalledTimes(1);
     expect(res.status).toHaveBeenCalledWith(200);
+
+    // The oracle, asserted outside the mock: by the time session-create was
+    // invoked, the run doc write had already happened, with the
+    // pre-billing shape.
+    expect(setCallsAtCreateTime).toBe(1);
+    expect(writtenAtCreateTime?.status).toBe("starting");
+    expect(writtenAtCreateTime?.sessionId).toBeUndefined();
   });
 
   it("still returns 200 with a runId (and does not hang) when the post-create Firestore update fails", async () => {
@@ -349,5 +360,89 @@ describe("handleEngStartRun", () => {
     expect(runRef.update).toHaveBeenCalledTimes(2);
     const secondCall = runRef.update.mock.calls[1][0];
     expect(JSON.stringify(secondCall)).toMatch(/reconcile/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // Every I/O call in this handler must fail into a defined HTTP response,
+  // never an unhandled rejection (that is exactly the hang this file's own
+  // comments describe as the thing to avoid). These three cover the reads
+  // and the initial write that ran unguarded before this fix.
+  // -------------------------------------------------------------------------
+
+  it("responds with a defined status (never a hang) when loadRepo throws, distinct from 409/402", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_repo_fail" });
+    (loadRepo as jest.Mock).mockRejectedValueOnce(new Error("firestore outage MARKER_REPO_LOOKUP"));
+    setConfigEnv();
+    const runRef = makeRunRef("run_repo_fail_1");
+    wireFirestore(runRef, 40);
+
+    const req = makeReq({ ask: "add checkout" });
+    const res = makeRes();
+
+    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+    expect(res.status).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalledWith(409);
+    expect(res.status).not.toHaveBeenCalledWith(402);
+    const statusCode = res.status.mock.calls[0][0];
+    expect(statusCode).toBeGreaterThanOrEqual(500);
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toContain("MARKER_REPO_LOOKUP");
+    // Nothing has been billed or recorded — the run doc must not exist.
+    expect(runRef.set).not.toHaveBeenCalled();
+  });
+
+  it("responds with a defined status (never a hang) when the company lookup throws, distinct from 409/402", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_company_fail" });
+    (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
+    setConfigEnv();
+    const runRef = makeRunRef("run_company_fail_1");
+    wireFirestore(runRef, 40);
+    const admin_ = admin as unknown as { firestore: jest.Mock };
+    const { doc } = admin_.firestore() as unknown as { doc: jest.Mock };
+    doc.mockReturnValue({
+      get: jest.fn().mockRejectedValue(new Error("firestore outage MARKER_COMPANY_LOOKUP"))
+    });
+
+    const req = makeReq({ ask: "add checkout" });
+    const res = makeRes();
+
+    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+    expect(res.status).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalledWith(409);
+    expect(res.status).not.toHaveBeenCalledWith(402);
+    const statusCode = res.status.mock.calls[0][0];
+    expect(statusCode).toBeGreaterThanOrEqual(500);
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toContain("MARKER_COMPANY_LOOKUP");
+    expect(runRef.set).not.toHaveBeenCalled();
+  });
+
+  it("responds with a defined status (never a hang) when the initial run-document write throws", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_write_fail" });
+    (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
+    setConfigEnv();
+    const runRef = makeRunRef("run_write_fail_1");
+    wireFirestore(runRef, 40);
+    runRef.set.mockRejectedValueOnce(new Error("firestore outage MARKER_INITIAL_WRITE"));
+
+    const sessionsCreate = jest.fn();
+    (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
+
+    const req = makeReq({ ask: "add checkout" });
+    const res = makeRes();
+
+    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+    expect(res.status).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalledWith(409);
+    expect(res.status).not.toHaveBeenCalledWith(402);
+    const statusCode = res.status.mock.calls[0][0];
+    expect(statusCode).toBeGreaterThanOrEqual(500);
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toContain("MARKER_INITIAL_WRITE");
+    // A run that failed to record itself must never bill a session.
+    expect(sessionsCreate).not.toHaveBeenCalled();
   });
 });

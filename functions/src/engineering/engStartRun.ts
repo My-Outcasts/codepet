@@ -15,7 +15,8 @@ import {
   ENG_AGENT_ID_ENV,
   ENG_AGENT_VERSION_ENV,
   ENG_ENVIRONMENT_ID_ENV,
-  ENG_MODEL
+  ENG_MODEL,
+  type RunStatus
 } from "./engClient";
 
 export interface SessionParams {
@@ -31,8 +32,15 @@ export interface SessionParams {
   resources: Array<Record<string, unknown>>;
   budget: SessionBudget;
   initial_events: Array<{ type: string; content: Array<{ type: "text"; text: string }> }>;
-  // Lets a reconciler find and heal this run from the session alone if the
-  // follow-up Firestore write (sessionId/status) never lands.
+  // Carries the run's identity on the session itself. When only the
+  // post-create Firestore update fails, the run doc still gets
+  // `reconcileNeeded: true` and `sessionId` (see handleEngStartRun below),
+  // and a reconciler can query Firestore for that. This session metadata
+  // is what would be left if BOTH follow-up writes fail: the doc stays at
+  // `status: "starting"` with no `sessionId` and no flag, and this field is
+  // the only surviving pointer to the run. No component in this codebase
+  // currently reads session metadata to reconcile from it — that is a real,
+  // known gap, not something this field closes by existing.
   metadata: { runId: string; uid: string };
 }
 
@@ -124,7 +132,19 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     return;
   }
 
-  const repo = await loadRepo(auth.uid, encKey);
+  let repo: RepoLink | null;
+  try {
+    repo = await loadRepo(auth.uid, encKey);
+  } catch {
+    // A Firestore (or decrypt) failure reading the repo link. This must not
+    // be mistakable for 409 (no repo linked) or 402 (no credits) — the
+    // client renders both of those as an offer to connect or upgrade, and a
+    // storage outage is neither. Never echo the error: whatever it carries
+    // (Firestore internals, decrypt failure detail) has no business in a
+    // client response or a log line.
+    res.status(503).json({ error: "repo_lookup_failed" });
+    return;
+  }
   if (!repo) {
     // Not an error — the client renders connect-or-create from this.
     res.status(409).json({ error: "no_repo_linked" });
@@ -132,8 +152,16 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   }
 
   const db = admin.firestore();
-  const companySnap = await db.doc(`companies/${auth.uid}`).get();
-  const company = companySnap.data() ?? {};
+  let company: FirebaseFirestore.DocumentData;
+  try {
+    const companySnap = await db.doc(`companies/${auth.uid}`).get();
+    company = companySnap.data() ?? {};
+  } catch {
+    // Same reasoning as the repo-lookup catch above: distinct from 409/402,
+    // and the error itself never leaves this scope.
+    res.status(503).json({ error: "company_lookup_failed" });
+    return;
+  }
   // `Number.isFinite`, not `typeof === "number"`: `typeof NaN === "number"` is
   // true, and `NaN <= 0` is false, so a corrupted balance field would sail past
   // a naive check and start a run. engBudget guards this too — the belt here is
@@ -159,17 +187,28 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   // orphan a billing session with nothing pointing at it, and because the
   // original code never awaited/handled that write, the rejection would go
   // unhandled and the client would simply hang. Creating the record first
-  // means a founder can never see credits spent on a run that isn't tracked.
+  // means a founder can never see credits spent on a run that isn't tracked
+  // — and because this write is itself guarded below, a failure here is
+  // caught before any session (and any billing) exists at all.
   const runRef = db.collection(`companies/${auth.uid}/engRuns`).doc();
-  await runRef.set({
-    ask,
-    repo: repo.url,
-    branch: branchName(runRef.id),
-    baseBranch: repo.defaultBranch,
-    status: "starting",
-    creditsSpent: 0,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
+  try {
+    await runRef.set({
+      ask,
+      repo: repo.url,
+      branch: branchName(runRef.id),
+      baseBranch: repo.defaultBranch,
+      status: "starting" as RunStatus,
+      creditsSpent: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  } catch {
+    // Nothing has been created or billed yet, so there is nothing to roll
+    // back — just fail into a defined response instead of an unhandled
+    // rejection (the hang this file exists to avoid), distinct from 409/402
+    // for the same reason as the read guards above.
+    res.status(503).json({ error: "run_create_failed" });
+    return;
+  }
 
   const params = buildSessionParams({
     agentId,
@@ -179,8 +218,8 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     credits,
     ask,
     brief: typeof company.brief === "string" ? company.brief : "",
-    // Carried on the session itself, so a reconciler can find and heal this
-    // run even if every Firestore write below fails.
+    // See the `metadata` field doc on SessionParams above for what this
+    // does and does not cover.
     metadata: { runId: runRef.id, uid: auth.uid }
   });
 
@@ -199,7 +238,7 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     // otherwise, because there is no field we can name here that isn't part
     // of the object that might carry the token.
     try {
-      await runRef.update({ status: "failed" });
+      await runRef.update({ status: "failed" as RunStatus });
     } catch {
       // Best-effort: if this also fails, the doc is stuck at "starting",
       // which is the pre-existing (and separately understood) failure mode
@@ -210,16 +249,27 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   }
 
   try {
-    await runRef.update({ sessionId, status: "running" });
+    await runRef.update({ sessionId, status: "running" as RunStatus });
   } catch {
     // The session exists and is billing; this write just didn't land. Don't
-    // hang the request over it — the client still gets its runId, and the
-    // session's own metadata (runId/uid) makes the run recoverable. Record
+    // hang the request over it — the client still gets its runId. Record
     // the failure as a field a reconciler can query for, not a log line.
+    //
+    // This IS recoverable, but only up to here: if the fallback write below
+    // also succeeds, the doc carries `reconcileNeeded: true` and
+    // `sessionId`, and a reconciler can query Firestore for exactly that.
     try {
       await runRef.update({ reconcileNeeded: true, sessionId });
     } catch {
-      // Nothing more we can do; the session's metadata is the last resort.
+      // Both updates failed. The doc is left at status:"starting" with no
+      // sessionId and no reconcileNeeded flag — nothing on the document
+      // points a reconciler at this run. The session's own metadata
+      // (runId/uid, see SessionParams above) is the only surviving pointer,
+      // but no component in this codebase reads session metadata to
+      // reconcile from it today. That is a known, unclosed gap: whoever
+      // builds the reconciler needs a path that lists/queries sessions
+      // directly, not just Firestore documents, or this case is silently
+      // unrecoverable.
     }
   }
 

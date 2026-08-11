@@ -1,10 +1,14 @@
 jest.mock("firebase-admin", () => {
-  // Base template only: every test wires its own doc/collectionGroup mocks
-  // from scratch (per-test, not shared) so a guard added earlier in the
-  // handler cannot silently keep a later test green for the wrong reason.
+  // Base template only: every test wires its own doc()/runTransaction()
+  // fixtures from scratch (per-test, not shared) so a guard added earlier in
+  // the handler cannot silently keep a later test green for the wrong
+  // reason. `collectionGroup` stays on the mock purely so a test can assert
+  // it is never called — the handler itself must never invoke it (Finding 3:
+  // no collectionGroup scan).
   const doc = jest.fn();
   const collectionGroup = jest.fn();
-  const firestoreFn: unknown = jest.fn(() => ({ doc, collectionGroup }));
+  const runTransaction = jest.fn();
+  const firestoreFn: unknown = jest.fn(() => ({ doc, collectionGroup, runTransaction }));
   (firestoreFn as { FieldValue?: unknown }).FieldValue = {
     serverTimestamp: jest.fn(() => "SERVER_TIMESTAMP"),
     increment: jest.fn((n: number) => ({ __increment: n }))
@@ -47,21 +51,28 @@ describe("statusFor", () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleEngWebhook — the dedupe guard
+// handleEngWebhook
 //
-// Deliveries retry, and the same event id can arrive more than once. A
-// create-if-absent write on the event id (`webhookEvents/{event.id}`) is the
-// only thing standing between a retried delivery and a second debit against
-// the founder's credits. This cannot be exercised through a pure function —
-// the guard IS the Firestore write failing — so it is reached here through
-// `jest.mock("firebase-admin")`, the same technique `engRepo.test.ts` uses
-// to drive `loadRepo`'s internal catch.
+// Deliveries retry, and the same event id can arrive more than once. The
+// dedupe check, the run write, and the credit debit all happen inside one
+// Firestore transaction (`db.runTransaction`) so a mid-flight failure can
+// never leave the marker recorded without the debit, or the debit applied
+// without the marker (Finding 1). Duplicate detection is a plain read of the
+// marker *inside* that transaction, not a caught error (Finding 2) — so a
+// transaction that throws for any other reason must never be mistaken for a
+// duplicate. The run is addressed directly at
+// `companies/{uid}/engRuns/{runId}` using the `runId`/`uid` the session
+// carries in its own metadata (Finding 3) — no collectionGroup scan.
 //
-// Every fixture below is built fresh, per test, from scratch: doc(),
-// collectionGroup(), and the Anthropic client are all wired inside the test
-// body rather than in a shared beforeEach, so a guard added above this path
-// later must break these loudly (call counts change) rather than pass
-// silently for the wrong reason.
+// This cannot be exercised through a pure function — the guard IS the
+// Firestore transaction succeeding, failing, or finding a duplicate — so it
+// is reached here through `jest.mock("firebase-admin")`, the same technique
+// `engRepo.test.ts` uses to drive `loadRepo`'s internal catch.
+//
+// Every fixture below is built fresh, per test, from scratch via
+// `makeFirestoreDouble` (never a shared beforeEach), so a guard added above
+// this path later must break these loudly (call counts, committed state)
+// rather than pass silently for the wrong reason.
 // ---------------------------------------------------------------------------
 
 type MockRes = { status: jest.Mock; json: jest.Mock; send: jest.Mock };
@@ -82,49 +93,85 @@ function makeReq(rawBody: string, headers: Record<string, string> = { "webhook-s
   } as unknown as Parameters<typeof handleEngWebhook>[0];
 }
 
-/** A run doc ref (engRuns/{id}) whose `.parent.parent` is the company doc ref. */
-function makeRunRef() {
-  const companyRef = { set: jest.fn().mockResolvedValue(undefined) };
-  const runRef = {
-    set: jest.fn().mockResolvedValue(undefined),
-    parent: { parent: companyRef }
-  };
-  return { runRef, companyRef };
+const UID = "uid_1";
+const RUN_ID = "run_1";
+const RUN_PATH = `companies/${UID}/engRuns/${RUN_ID}`;
+const COMPANY_PATH = `companies/${UID}`;
+
+function seenPath(eventId: string) {
+  return `webhookEvents/${eventId}`;
 }
 
-/** Wires `db.collectionGroup("engRuns").where(...).limit(...).get()` to resolve to one match. */
-function wireCollectionGroup(runRef: ReturnType<typeof makeRunRef>["runRef"]) {
+type SetCall = { path: string; data: unknown; options?: unknown };
+
+/**
+ * A minimal in-memory Firestore double, not a per-call script. `store`
+ * tracks which paths "exist"; a transaction's writes only land in `store`
+ * and `setCalls` if its callback runs to completion — a rejected callback
+ * commits nothing, matching real Firestore atomicity. This is what makes
+ * the exactly-once tests below actually load-bearing: whether a retry sees
+ * the marker depends on what the *previous attempt actually committed*, not
+ * on a hardcoded "this is delivery 2, say true" fixture.
+ *
+ * `doc()` refs also expose bare `get`/`create`, unused by the fixed
+ * handler (which only reads/writes through `tx`), kept only so the
+ * Finding-1 load-bearing proof can temporarily reintroduce a
+ * non-transactional marker write — the pre-fix shape — without touching
+ * this file at all.
+ */
+function makeFirestoreDouble(initialExists: Record<string, boolean> = {}) {
   const admin_ = admin as unknown as { firestore: jest.Mock };
-  const { collectionGroup } = admin_.firestore() as unknown as { collectionGroup: jest.Mock };
+  const { doc, collectionGroup, runTransaction } = admin_.firestore() as unknown as {
+    doc: jest.Mock;
+    collectionGroup: jest.Mock;
+    runTransaction: jest.Mock;
+  };
+  doc.mockReset();
   collectionGroup.mockReset();
-  collectionGroup.mockReturnValue({
-    where: jest.fn().mockReturnValue({
-      limit: jest.fn().mockReturnValue({
-        get: jest.fn().mockResolvedValue({ empty: false, docs: [{ ref: runRef }] })
-      })
+  runTransaction.mockReset();
+
+  const store = new Map<string, boolean>(Object.entries(initialExists));
+  const setCalls: SetCall[] = [];
+
+  doc.mockImplementation((path: string) => ({
+    path,
+    get: jest.fn(async () => ({ exists: Boolean(store.get(path)) })),
+    create: jest.fn(async () => {
+      if (store.get(path)) {
+        throw Object.assign(new Error("ALREADY_EXISTS"), { code: 6 });
+      }
+      store.set(path, true);
     })
+  }));
+
+  runTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+    const pending: SetCall[] = [];
+    const tx = {
+      get: jest.fn(async (ref: { path: string }) => ({ exists: Boolean(store.get(ref.path)) })),
+      set: jest.fn((ref: { path: string }, data: unknown, options?: unknown) => {
+        pending.push({ path: ref.path, data, options });
+      })
+    };
+    const result = await fn(tx);
+    // Only reached if `fn` resolved without throwing — commit.
+    for (const w of pending) {
+      store.set(w.path, true);
+      setCalls.push(w);
+    }
+    return result;
   });
+
+  return { doc, collectionGroup, runTransaction, store, setCalls };
 }
 
 /**
- * Wires `db.doc("webhookEvents/{id}").create(...)` — the dedupe write
- * itself. `outcomes` is consumed in order across successive calls to
- * `handleEngWebhook`, one outcome per delivery.
+ * Forces the *next* `db.runTransaction` call to reject before its callback
+ * ever runs — an infra fault mid-flight. Nothing it would have written
+ * commits, because `makeFirestoreDouble`'s `runTransaction` only applies
+ * pending writes after the callback resolves.
  */
-function wireDedupeDoc(outcomes: Array<"created" | "already-exists">) {
-  const admin_ = admin as unknown as { firestore: jest.Mock };
-  const { doc } = admin_.firestore() as unknown as { doc: jest.Mock };
-  doc.mockReset();
-  const create = jest.fn();
-  for (const outcome of outcomes) {
-    if (outcome === "created") {
-      create.mockImplementationOnce(() => Promise.resolve(undefined));
-    } else {
-      create.mockImplementationOnce(() => Promise.reject(new Error("ALREADY_EXISTS")));
-    }
-  }
-  doc.mockReturnValue({ create });
-  return create;
+function failNextTransaction(runTransaction: jest.Mock, err: unknown) {
+  runTransaction.mockImplementationOnce(() => Promise.reject(err));
 }
 
 function makeEngClient(overrides?: {
@@ -133,12 +180,19 @@ function makeEngClient(overrides?: {
   sessionId?: string;
   amountCents?: string;
   stopReasonType?: string;
+  uid?: string | null;
+  runId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }) {
   const eventId = overrides?.eventId ?? "evt_1";
   const eventType = overrides?.eventType ?? "session.status_idled";
   const sessionId = overrides?.sessionId ?? "sess_1";
   const amountCents = overrides?.amountCents ?? "25";
   const stopReasonType = overrides?.stopReasonType ?? "end_turn";
+  const metadata =
+    overrides?.metadata !== undefined
+      ? overrides.metadata
+      : { runId: overrides?.runId ?? RUN_ID, uid: overrides?.uid ?? UID };
 
   return {
     beta: {
@@ -149,7 +203,10 @@ function makeEngClient(overrides?: {
         })
       },
       sessions: {
-        retrieve: jest.fn().mockResolvedValue({ usage: { list_cost: { amount: amountCents } } }),
+        retrieve: jest.fn().mockResolvedValue({
+          usage: { list_cost: { amount: amountCents } },
+          metadata
+        }),
         events: {
           list: jest.fn().mockResolvedValue({
             data: [{ type: "session.status_idle", stop_reason: { type: stopReasonType } }]
@@ -167,12 +224,7 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
     async () => {
       const client = makeEngClient();
       (getEngClient as jest.Mock).mockReturnValue(client);
-
-      const { runRef, companyRef } = makeRunRef();
-      wireCollectionGroup(runRef);
-      // First delivery's create-if-absent write lands; the replay's loses
-      // the race against the doc the first delivery just created.
-      wireDedupeDoc(["created", "already-exists"]);
+      const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
 
       const res1 = makeRes();
       await handleEngWebhook(makeReq('{"event":"one"}'), res1 as unknown as Parameters<typeof handleEngWebhook>[1]);
@@ -180,17 +232,22 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
       const res2 = makeRes();
       await handleEngWebhook(makeReq('{"event":"one"}'), res2 as unknown as Parameters<typeof handleEngWebhook>[1]);
 
-      // The oracle: proves the guarded code (session fetch, run write, credit
-      // debit) ran exactly once, not that the second call merely "did
-      // something else". A version of the handler with the dedupe write
-      // deleted reaches this code twice and this assertion fails.
-      expect(client.beta.sessions.retrieve).toHaveBeenCalledTimes(1);
-      expect(runRef.set).toHaveBeenCalledTimes(1);
-      expect(companyRef.set).toHaveBeenCalledTimes(1);
-      expect(companyRef.set).toHaveBeenCalledWith(
-        { credits: { __increment: -5 } },
-        { merge: true }
-      );
+      // The oracle: the transaction (marker + run write + debit) ran to
+      // completion exactly once, not that the second call merely "did
+      // something else". A version of the handler that dedupes outside the
+      // transaction, or with the marker written before the work, reaches
+      // this code twice and this assertion fails.
+      expect(runTransaction).toHaveBeenCalledTimes(2);
+      expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(1);
+      expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(1);
+      expect(setCalls.filter((c) => c.path === COMPANY_PATH)[0].data).toEqual({
+        credits: { __increment: -5 }
+      });
+      expect(setCalls.filter((c) => c.path === seenPath("evt_1"))).toHaveLength(1);
+
+      // The reads that feed the write are idempotent and safe to repeat on
+      // every delivery — only the transactional writes are guarded.
+      expect(client.beta.sessions.retrieve).toHaveBeenCalledTimes(2);
 
       // Both deliveries still get acknowledged so Anthropic does not keep
       // retrying a delivery we have already (or intentionally haven't) acted on.
@@ -198,15 +255,88 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
       expect(res2.status).toHaveBeenCalledWith(204);
     }
   );
+
+  it(
+    "recovers from a mid-flight failure: a delivery that fails during the " +
+      "transactional write is retried and completes exactly once, never twice " +
+      "— the run doc ends in the correct final state",
+    async () => {
+      const client = makeEngClient();
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { runTransaction, setCalls, store } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+      // The reads (session retrieve, events list) always succeed — they're
+      // idempotent — but the transaction itself fails partway through the
+      // write/debit. Because it is one atomic transaction, NOTHING commits:
+      // not the marker, not the run write, not the debit.
+      failNextTransaction(runTransaction, Object.assign(new Error("boom"), { code: 13 }));
+
+      const res1 = makeRes();
+      await handleEngWebhook(makeReq('{"event":"one"}'), res1 as unknown as Parameters<typeof handleEngWebhook>[1]);
+      expect(res1.status).toHaveBeenCalledWith(503); // retryable, not swallowed as 204
+      expect(store.get(seenPath("evt_1"))).toBeFalsy();
+
+      // Retry: the marker is still absent (the failed attempt committed
+      // nothing), the run still exists, so this attempt does the full work.
+      const res2 = makeRes();
+      await handleEngWebhook(makeReq('{"event":"one"}'), res2 as unknown as Parameters<typeof handleEngWebhook>[1]);
+      expect(res2.status).toHaveBeenCalledWith(204);
+
+      // The debit landed exactly once overall, not zero (lost) and not
+      // twice (double-charged).
+      const companySets = setCalls.filter((c) => c.path === COMPANY_PATH);
+      expect(companySets).toHaveLength(1);
+      expect(companySets[0].data).toEqual({ credits: { __increment: -5 } });
+
+      // The run document's final recorded state is the real outcome
+      // (reviewing, from end_turn), not left stuck at whatever it was
+      // before the retry succeeded.
+      const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+      expect(runSets).toHaveLength(1);
+      expect(runSets[0].data).toEqual(expect.objectContaining({ status: "reviewing", creditsSpent: 5 }));
+    }
+  );
+
+  it("does not acknowledge (204) an infrastructure fault on the marker/transaction — it is not a duplicate", async () => {
+    const client = makeEngClient();
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+    // A generic failure, unrelated to the marker already existing. Nothing
+    // in this fixture says "duplicate" — the transaction just throws.
+    failNextTransaction(runTransaction, new Error("firestore unavailable"));
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    expect(res.status).not.toHaveBeenCalledWith(204);
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(setCalls).toHaveLength(0);
+  });
+});
+
+describe("handleEngWebhook — direct addressing (no collectionGroup scan)", () => {
+  it("reads the run via the session's own metadata and never issues a collectionGroup query", async () => {
+    const client = makeEngClient({ uid: "founder_42", runId: "run_99" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { collectionGroup, setCalls } = makeFirestoreDouble({
+      "companies/founder_42/engRuns/run_99": true
+    });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    expect(collectionGroup).not.toHaveBeenCalled();
+    expect(setCalls.some((c) => c.path === "companies/founder_42/engRuns/run_99")).toBe(true);
+    expect(setCalls.some((c) => c.path === "companies/founder_42")).toBe(true);
+    expect(res.status).toHaveBeenCalledWith(204);
+  });
 });
 
 describe("handleEngWebhook — other behaviour", () => {
   it("rejects a non-POST request without touching Firestore or the client", async () => {
     const client = makeEngClient();
     (getEngClient as jest.Mock).mockReturnValue(client);
-    const { runRef } = makeRunRef();
-    wireCollectionGroup(runRef);
-    wireDedupeDoc(["created"]);
+    makeFirestoreDouble();
 
     const req = { method: "GET", headers: {}, rawBody: Buffer.from("") } as unknown as Parameters<
       typeof handleEngWebhook
@@ -222,9 +352,7 @@ describe("handleEngWebhook — other behaviour", () => {
   it("verifies against req.rawBody, not a re-serialised body", async () => {
     const client = makeEngClient();
     (getEngClient as jest.Mock).mockReturnValue(client);
-    const { runRef, companyRef } = makeRunRef();
-    wireCollectionGroup(runRef);
-    wireDedupeDoc(["created"]);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
 
     // Deliberately not valid JSON — proves the exact raw bytes are what get
     // handed to unwrap, not something reconstructed from a parsed body.
@@ -237,7 +365,7 @@ describe("handleEngWebhook — other behaviour", () => {
       rawBody,
       expect.objectContaining({ headers: expect.anything() })
     );
-    expect(companyRef.set).toHaveBeenCalledTimes(1);
+    expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(1);
   });
 
   it("responds 400 without echoing the upstream error when signature verification fails", async () => {
@@ -247,6 +375,7 @@ describe("handleEngWebhook — other behaviour", () => {
       .fn()
       .mockRejectedValue(new Error(`invalid signature for key ${SECRET_MARKER}`));
     (getEngClient as jest.Mock).mockReturnValue(client);
+    makeFirestoreDouble();
 
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -278,7 +407,7 @@ describe("handleEngWebhook — other behaviour", () => {
       data: { type: "session.created", id: "sess_1" }
     });
     (getEngClient as jest.Mock).mockReturnValue(client);
-    wireDedupeDoc(["created"]);
+    makeFirestoreDouble();
 
     const res = makeRes();
     await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
@@ -287,39 +416,45 @@ describe("handleEngWebhook — other behaviour", () => {
     expect(client.beta.sessions.retrieve).not.toHaveBeenCalled();
   });
 
-  it("acknowledges (204) without debiting when no run matches the session id", async () => {
+  it("acknowledges (204) without debiting when the session's metadata points at a run that does not exist", async () => {
     const client = makeEngClient();
     (getEngClient as jest.Mock).mockReturnValue(client);
-    wireDedupeDoc(["created"]);
-    const admin_ = admin as unknown as { firestore: jest.Mock };
-    const { collectionGroup } = admin_.firestore() as unknown as { collectionGroup: jest.Mock };
-    collectionGroup.mockReset();
-    collectionGroup.mockReturnValue({
-      where: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnValue({ get: jest.fn().mockResolvedValue({ empty: true, docs: [] }) })
-      })
-    });
+    // The run doc itself is missing — deleted, or metadata pointing nowhere
+    // real. Reads still happen (Finding 1: reads are unconditional), but no
+    // scan is issued to try to find it another way (Finding 3).
+    const { setCalls } = makeFirestoreDouble({});
 
     const res = makeRes();
     await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
     expect(res.status).toHaveBeenCalledWith(204);
-    expect(client.beta.sessions.retrieve).not.toHaveBeenCalled();
+    expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(0);
+    expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(0);
+  });
+
+  it("does not fall back to a scan and retries instead when the session has no runId/uid metadata", async () => {
+    const client = makeEngClient({ metadata: null });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { runTransaction, collectionGroup } = makeFirestoreDouble();
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    expect(res.status).not.toHaveBeenCalledWith(204);
+    expect(collectionGroup).not.toHaveBeenCalled();
+    expect(runTransaction).not.toHaveBeenCalled();
   });
 
   it("writes budgetReached, not failed, when the session paused on its budget", async () => {
     const client = makeEngClient({ stopReasonType: "budget_reached" });
     (getEngClient as jest.Mock).mockReturnValue(client);
-    const { runRef } = makeRunRef();
-    wireCollectionGroup(runRef);
-    wireDedupeDoc(["created"]);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
 
     const res = makeRes();
     await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
-    expect(runRef.set).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "budgetReached" }),
-      { merge: true }
-    );
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets).toHaveLength(1);
+    expect(runSets[0].data).toEqual(expect.objectContaining({ status: "budgetReached" }));
   });
 });

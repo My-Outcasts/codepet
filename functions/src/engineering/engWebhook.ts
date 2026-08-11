@@ -58,40 +58,32 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
       headers: req.headers as Record<string, string>
     })) as typeof event;
   } catch {
+    // Content-free: a rotated signing key and a forged request look
+    // identical from here, but the SDK's rejection can carry the raw
+    // request/headers it was given, so nothing about it is logged.
+    console.error("engWebhook: signature verification failed");
     res.status(400).send("invalid signature");
     return;
   }
 
-  const db = admin.firestore();
-
-  // Deliveries retry, and the same event id arrives more than once. A
-  // create-if-absent write is the dedupe: the second delivery loses the race
-  // and returns early rather than debiting the founder twice.
-  const seenRef = db.doc(`webhookEvents/${event.id}`);
-  try {
-    await seenRef.create({ at: admin.firestore.FieldValue.serverTimestamp() });
-  } catch {
-    res.status(204).send("");
-    return;
-  }
-
   if (event.data.type !== "session.status_idled" && event.data.type !== "session.status_terminated") {
+    // Nothing to dedupe: an event type we never act on has no side effect to
+    // protect, in either delivery.
     res.status(204).send("");
     return;
   }
 
   const sessionId = event.data.id;
-  const matches = await db.collectionGroup("engRuns").where("sessionId", "==", sessionId).limit(1).get();
-  if (matches.empty) {
-    // Not ours, or the run record was deleted. Acknowledge — retrying will
-    // not make it exist.
-    res.status(204).send("");
-    return;
-  }
-  const runRef = matches.docs[0].ref;
 
+  // These two calls hit Anthropic's API, not Firestore — they cannot live
+  // inside a Firestore transaction, so they happen first, unconditionally,
+  // on every delivery including retries. That is safe only because they are
+  // pure reads: repeating them costs a round trip, nothing else. Everything
+  // that must not repeat (the run write, the debit) happens below, inside
+  // one transaction.
   const session = (await client.beta.sessions.retrieve(sessionId)) as unknown as {
     usage?: { list_cost?: { amount?: string } };
+    metadata?: { runId?: unknown; uid?: unknown };
   };
   const events = await client.beta.sessions.events.list(sessionId);
   const lastIdle = [...events.data]
@@ -100,22 +92,91 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
     | { stop_reason?: { type?: string } }
     | undefined;
 
+  // Direct addressing, not a collectionGroup(sessionId) scan: `engStartRun`
+  // stamps `metadata: { runId, uid }` on the session the moment it creates
+  // it, and we already have the session in hand above. A collectionGroup
+  // query on `sessionId` would need a COLLECTION_GROUP index this repo does
+  // not declare anywhere, so the first real delivery would throw
+  // FAILED_PRECONDITION — and if that happened after a dedupe marker were
+  // recorded, every retry after it would be silently swallowed. No scan
+  // fallback if the metadata is missing or malformed: that means a session
+  // was created by something that did not stamp it, which is worth
+  // surfacing, not papering over with a guess.
+  const runId = session.metadata?.runId;
+  const uid = session.metadata?.uid;
+  if (typeof runId !== "string" || runId === "" || typeof uid !== "string" || uid === "") {
+    console.error("engWebhook: session missing runId/uid metadata", { sessionId });
+    res.status(500).send("");
+    return;
+  }
+
   const cents = Number(session.usage?.list_cost?.amount ?? "0");
   const creditsSpent = listCostToCredits(Number.isFinite(cents) ? cents : 0);
+  const status = statusFor(lastIdle?.stop_reason?.type);
 
-  await runRef.set(
-    {
-      status: statusFor(lastIdle?.stop_reason?.type),
-      creditsSpent,
-      endedAt: admin.firestore.FieldValue.serverTimestamp()
-    },
-    { merge: true }
-  );
+  const db = admin.firestore();
+  const seenRef = db.doc(`webhookEvents/${event.id}`);
+  const runRef = db.doc(`companies/${uid}/engRuns/${runId}`);
+  const companyRef = db.doc(`companies/${uid}`);
 
-  await runRef.parent.parent!.set(
-    { credits: admin.firestore.FieldValue.increment(-creditsSpent) },
-    { merge: true }
-  );
+  // Everything that must happen exactly once — the dedupe check, the run
+  // write, and the credit debit — lives in one transaction. A delivery that
+  // fails partway through (anywhere after this point) commits nothing: the
+  // marker is not recorded unless the debit is too, so a retry finds the
+  // work either fully done (marker present, short-circuits below) or fully
+  // undone (marker absent, redoes it). At-most-once — writing the marker
+  // before the work — is what let a mid-flight failure permanently skip a
+  // billed run; this is the fix.
+  let outcome: "processed" | "duplicate" | "unmatched";
+  try {
+    outcome = await db.runTransaction(async (tx) => {
+      const seenSnap = await tx.get(seenRef);
+      if (seenSnap.exists) {
+        return "duplicate";
+      }
+
+      const runSnap = await tx.get(runRef);
+      if (!runSnap.exists) {
+        // The session pointed at a run that isn't there — deleted, or the
+        // metadata refers to something that never existed. Retrying will
+        // not make it exist, so this event is "handled" (marker recorded)
+        // without ever touching the debit.
+        tx.set(seenRef, { at: admin.firestore.FieldValue.serverTimestamp() });
+        return "unmatched";
+      }
+
+      tx.set(seenRef, { at: admin.firestore.FieldValue.serverTimestamp() });
+      tx.set(
+        runRef,
+        {
+          status,
+          creditsSpent,
+          endedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+      tx.set(companyRef, { credits: admin.firestore.FieldValue.increment(-creditsSpent) }, { merge: true });
+      return "processed";
+    });
+  } catch (err) {
+    // A duplicate is detected above by reading the marker inside the
+    // transaction, never by catching an error — so anything that lands here
+    // is a genuine infrastructure fault on a delivery we have not yet acted
+    // on (first or otherwise). Acknowledging it with 204 would tell
+    // Anthropic not to retry a run whose outcome we never recorded and
+    // never billed. Never log `err` itself: it can carry the request that
+    // produced it.
+    console.error("engWebhook: outcome transaction failed", {
+      code: (err as { code?: unknown })?.code,
+      name: (err as { name?: unknown })?.name
+    });
+    res.status(503).send("");
+    return;
+  }
+
+  if (outcome === "unmatched") {
+    console.error("engWebhook: no run found at the session's metadata address", { runId, uid });
+  }
 
   res.status(204).send("");
 }

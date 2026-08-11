@@ -21,9 +21,22 @@ jest.mock("../engClient", () => {
   return { ...actual, getEngClient: jest.fn() };
 });
 
-import { statusFor, handleEngWebhook } from "../engWebhook";
+// The real module's exports are non-configurable getters (a rolldown/esbuild
+// bundling detail) — `jest.spyOn` cannot redefine those, so `spyOnLogs`
+// (which spies on both console AND this module) needs it replaced with
+// plain, spy-able `jest.fn()`s, same as `engStream.test.ts` already does.
+// This handler does not call it today, but the shared helper always spies
+// on both channels, so this keeps that spy from throwing.
+jest.mock("firebase-functions/logger", () => ({
+  error: jest.fn(),
+  warn: jest.fn(),
+  log: jest.fn()
+}));
+
+import { statusFor, statusForDelivery, handleEngWebhook } from "../engWebhook";
 import * as admin from "firebase-admin";
 import { getEngClient } from "../engClient";
+import { spyOnLogs, callsContainMarker } from "./logLeakTestHelpers";
 
 describe("statusFor", () => {
   it("maps a completed turn to reviewing — the diff is what comes next", () => {
@@ -47,6 +60,34 @@ describe("statusFor", () => {
   it("treats an unknown stop reason as failed rather than silently reviewing", () => {
     expect(statusFor("something_new")).toBe("failed");
     expect(statusFor(undefined)).toBe("failed");
+  });
+});
+
+describe("statusForDelivery (Fix 1)", () => {
+  it("keeps requires_action as running on an idled delivery — the agent really is idle, waiting on the founder", () => {
+    expect(statusForDelivery("session.status_idled", "requires_action")).toBe("running");
+  });
+
+  it(
+    "never reports running on a terminated delivery, even when the last idle event's stop " +
+      "reason is requires_action — the shape a founder's Stop (engSendTurn's interrupt) produces",
+    () => {
+      expect(statusForDelivery("session.status_terminated", "requires_action")).not.toBe("running");
+    }
+  );
+
+  it("still honours end_turn on a terminated delivery — a session that finished normally and was torn down afterward really did finish normally", () => {
+    expect(statusForDelivery("session.status_terminated", "end_turn")).toBe("reviewing");
+  });
+
+  it("still honours budget_reached on a terminated delivery", () => {
+    expect(statusForDelivery("session.status_terminated", "budget_reached")).toBe("budgetReached");
+  });
+
+  it("maps an idled delivery exactly like statusFor, unaffected by the terminated-only override", () => {
+    expect(statusForDelivery("session.status_idled", "end_turn")).toBe("reviewing");
+    expect(statusForDelivery("session.status_idled", "budget_reached")).toBe("budgetReached");
+    expect(statusForDelivery("session.status_idled", undefined)).toBe("failed");
   });
 });
 
@@ -253,49 +294,12 @@ function makeEngClient(overrides?: {
   };
 }
 
-/** Spies on all three console sinks and hands back a combined-calls getter. */
-function spyOnConsole() {
-  const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-  const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-  const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
-  return {
-    allCalls: () => [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls],
-    restore: () => {
-      errorSpy.mockRestore();
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
-    }
-  };
-}
-
-/**
- * Whether `marker` shows up anywhere in a logged console call — including
- * inside an `Error`'s `message`/`stack`. `JSON.stringify` alone is not
- * enough here: `message` and `stack` are non-enumerable on `Error`, so
- * `JSON.stringify(new Error("secret"))` is `"{}"` and would hide a leaked
- * secret carried on a raw error object, which is exactly the regression
- * shape Finding 2 is guarding against (passing raw `err` to console instead
- * of a picked-field object). Real `console.error(err)` prints the message
- * and stack via `util.inspect`, so this check has to look there too or the
- * assertion is not load-bearing against that regression.
- */
-function callsContainMarker(calls: unknown[][], marker: string): boolean {
-  const seen = new Set<unknown>();
-  const valueContains = (value: unknown): boolean => {
-    if (value == null) return false;
-    if (typeof value === "string") return value.includes(marker);
-    if (value instanceof Error) {
-      return value.message.includes(marker) || (value.stack ?? "").includes(marker);
-    }
-    if (typeof value === "object") {
-      if (seen.has(value)) return false;
-      seen.add(value);
-      return Object.values(value as Record<string, unknown>).some(valueContains);
-    }
-    return false;
-  };
-  return calls.some((call) => call.some(valueContains));
-}
+// `spyOnConsole`/`callsContainMarker` used to be defined here. Both now live
+// in `./logLeakTestHelpers` as `spyOnLogs`/`callsContainMarker`, shared with
+// `engStartRun.test.ts`, `engSendTurn.test.ts`, and `engStream.test.ts` —
+// `spyOnLogs` additionally covers `firebase-functions/logger`, the channel
+// `engStream.ts` (and `engStartRun.ts`, per Finding 5) log through, which a
+// console-only spy would go blind to.
 
 describe("handleEngWebhook — replayed delivery (dedupe)", () => {
   it(
@@ -399,7 +403,7 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
         })
       );
 
-      const consoleSpy = spyOnConsole();
+      const consoleSpy = spyOnLogs();
       try {
         const res = makeRes();
         await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
@@ -479,9 +483,10 @@ describe("handleEngWebhook — other behaviour", () => {
     (getEngClient as jest.Mock).mockReturnValue(client);
     makeFirestoreDouble();
 
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    // `callsContainMarker`, not bare `JSON.stringify(call)`: the latter is
+    // "{}"` for a raw `Error` (message/stack are non-enumerable) and would
+    // pass while a secret carried on one leaked straight through.
+    const logs = spyOnLogs();
 
     try {
       const res = makeRes();
@@ -491,14 +496,9 @@ describe("handleEngWebhook — other behaviour", () => {
       const sendBody = res.send.mock.calls[0]?.[0];
       expect(JSON.stringify(sendBody)).not.toContain(SECRET_MARKER);
 
-      const allConsoleCalls = [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls];
-      for (const call of allConsoleCalls) {
-        expect(JSON.stringify(call)).not.toContain(SECRET_MARKER);
-      }
+      expect(logs.containsMarker(SECRET_MARKER)).toBe(false);
     } finally {
-      errorSpy.mockRestore();
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
+      logs.restore();
     }
   });
 
@@ -530,7 +530,7 @@ describe("handleEngWebhook — other behaviour", () => {
       // scan is issued to try to find it another way (Finding 3).
       const { setCalls } = makeFirestoreDouble({});
 
-      const consoleSpy = spyOnConsole();
+      const consoleSpy = spyOnLogs();
       try {
         const res = makeRes();
         await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
@@ -546,23 +546,72 @@ describe("handleEngWebhook — other behaviour", () => {
     }
   );
 
-  it(
-    "does not fall back to a scan and retries instead when the session has no runId/uid metadata, " +
-      "and never logs more than the session id (Finding 2: `{ sessionId }`, not the raw session)",
-    async () => {
-      const SECRET_MARKER = "sk-ant-missing-metadata-secret-marker";
-      const client = makeEngClient({ metadata: null, secretMarker: SECRET_MARKER });
+  // -------------------------------------------------------------------------
+  // Fix 4: this endpoint is registered org-wide and receives deliveries for
+  // sessions it did not create — no `runId`/`uid` metadata at all, because
+  // nothing ever stamped any. Before this fix that was indistinguishable
+  // from "one of ours whose metadata is broken": both produced a 500 with a
+  // log, and Anthropic retries a 5xx forever — an org-wide webhook plus a
+  // "retry forever" 500 is an unbounded, permanently-firing cost. A session
+  // with NO metadata at all is not ours (acknowledge quietly); a session
+  // WITH metadata that is missing/malformed runId or uid IS ours (a real
+  // problem, kept retryable and logged) — only `engStartRun` ever stamps
+  // this field, so any non-empty metadata came from us.
+  // -------------------------------------------------------------------------
+
+  it.each([
+    ["metadata is entirely absent (null)", null],
+    ["metadata is the empty object the API returns for an untouched session", {}]
+  ])(
+    "acknowledges (204) and logs nothing alarming for a foreign session — %s — never falling back to a scan or a retry",
+    async (_label, metadata) => {
+      const SECRET_MARKER = "sk-ant-foreign-session-secret-marker";
+      const client = makeEngClient({ metadata, secretMarker: SECRET_MARKER });
       (getEngClient as jest.Mock).mockReturnValue(client);
       const { runTransaction, collectionGroup, setCalls } = makeFirestoreDouble();
 
-      const consoleSpy = spyOnConsole();
+      const consoleSpy = spyOnLogs();
       try {
         const res = makeRes();
         await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
-        // Pinned to the exact value (Finding 3) — a regression that returned
-        // 200 here would silently swallow a fault that must force a retry,
-        // and asserting only "not 204" would let it through.
+        // Not one of ours — acknowledged so Anthropic never retries a
+        // non-match forever, never a fault status.
+        expect(res.status).toHaveBeenCalledWith(204);
+        expect(collectionGroup).not.toHaveBeenCalled();
+        expect(runTransaction).not.toHaveBeenCalled();
+        expect(setCalls).toHaveLength(0);
+
+        // "Log nothing alarming": this is an expected, routine shape of
+        // delivery for an org-wide webhook, not a fault — nothing at all is
+        // logged for it, not even a content-free line.
+        expect(consoleSpy.allCalls()).toHaveLength(0);
+        expect(callsContainMarker(consoleSpy.allCalls(), SECRET_MARKER)).toBe(false);
+      } finally {
+        consoleSpy.restore();
+      }
+    }
+  );
+
+  it(
+    "treats metadata that EXISTS but is missing runId/uid as ours and a real problem — retryable " +
+      "status, logged, never more than the session id (Finding 4 + Finding 2: `{ sessionId }`, not the raw session)",
+    async () => {
+      const SECRET_MARKER = "sk-ant-malformed-metadata-secret-marker";
+      // Non-empty, but neither `runId` nor `uid` — the shape a broken stamp
+      // (not "no stamp at all") would leave behind.
+      const client = makeEngClient({ metadata: { foo: "bar" }, secretMarker: SECRET_MARKER });
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { runTransaction, collectionGroup, setCalls } = makeFirestoreDouble();
+
+      const consoleSpy = spyOnLogs();
+      try {
+        const res = makeRes();
+        await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+        // Pinned to the exact value — a regression that returned 200 here
+        // would silently swallow a fault that must force a retry, and
+        // asserting only "not 204" would let it through.
         expect(res.status).toHaveBeenCalledWith(500);
         expect(collectionGroup).not.toHaveBeenCalled();
         expect(runTransaction).not.toHaveBeenCalled();
@@ -753,4 +802,175 @@ describe("handleEngWebhook — delta debit across multiple deliveries (Fix 3)", 
       );
     }
   );
+});
+
+// ---------------------------------------------------------------------------
+// Fix 1: a stopped run must not say "running" forever. `engSendTurn`'s
+// interrupt produces a `session.status_terminated` delivery whose last idle
+// event is typically the approval pause (`requires_action`) — trusting that
+// stop reason unconditionally is what let a founder's Stop press leave the
+// card reading "running" with nothing left to ever change it.
+// ---------------------------------------------------------------------------
+
+describe("handleEngWebhook — status derived from delivery type, not blindly from the last idle (Fix 1)", () => {
+  it(
+    "never records running on a terminated delivery, even though the last idle event's stop reason " +
+      "is requires_action — the exact shape a founder's Stop produces",
+    async () => {
+      const client = makeEngClient({
+        eventType: "session.status_terminated",
+        stopReasonType: "requires_action"
+      });
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+      const res = makeRes();
+      await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(204);
+      const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+      expect(runSets).toHaveLength(1);
+      const written = runSets[0].data as { status?: string };
+      expect(written.status).not.toBe("running");
+    }
+  );
+
+  it("still records reviewing on a terminated delivery whose last idle really was end_turn", async () => {
+    const client = makeEngClient({ eventType: "session.status_terminated", stopReasonType: "end_turn" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets[0].data).toEqual(expect.objectContaining({ status: "reviewing" }));
+  });
+
+  it("keeps requires_action mapped to running on an ordinary idled delivery — this is not the bug", async () => {
+    const client = makeEngClient({ eventType: "session.status_idled", stopReasonType: "requires_action" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets[0].data).toEqual(expect.objectContaining({ status: "running" }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 2: `endedAt` must mean the run actually ended. The transaction used to
+// stamp it unconditionally, including on the `requires_action` path that
+// deliberately keeps `status: "running"` — telling any client that treats
+// `endedAt` as "finished" the opposite of the truth on every run that ever
+// paused for approval.
+// ---------------------------------------------------------------------------
+
+describe("handleEngWebhook — endedAt stamped only when the run actually ended (Fix 2)", () => {
+  it("omits endedAt entirely when the delivery leaves the run running", async () => {
+    const client = makeEngClient({ eventType: "session.status_idled", stopReasonType: "requires_action" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets).toHaveLength(1);
+    expect(runSets[0].data).toEqual(expect.objectContaining({ status: "running" }));
+    // Not `endedAt: undefined` — the key must not exist at all. Firestore's
+    // Admin SDK rejects an explicit `undefined` field value outright, so
+    // "set to undefined" was never actually an option here.
+    expect(runSets[0].data).not.toHaveProperty("endedAt");
+  });
+
+  it("stamps endedAt when the delivery actually ends the run (end_turn)", async () => {
+    const client = makeEngClient({ eventType: "session.status_idled", stopReasonType: "end_turn" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets[0].data).toHaveProperty("endedAt");
+  });
+
+  it("stamps endedAt when a terminated delivery forces a non-running status even though the last idle said requires_action", async () => {
+    const client = makeEngClient({
+      eventType: "session.status_terminated",
+      stopReasonType: "requires_action"
+    });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runSets[0].data).toHaveProperty("endedAt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3: the two Anthropic reads (`sessions.retrieve`, `events.list`) sat
+// outside any try/catch. A routine 429/529/timeout there escaped to the
+// framework's own handler, which returns a 500 AND logs the raw error
+// object — the exact thing the rest of this file is careful never to do.
+// ---------------------------------------------------------------------------
+
+describe("handleEngWebhook — the two unguarded Anthropic reads now fail like the transaction does (Fix 3)", () => {
+  it("responds 503 (not the framework's own 500) and logs only content-free fields when sessions.retrieve rejects", async () => {
+    const SECRET_MARKER = "sk-ant-retrieve-fault-secret-marker";
+    const client = makeEngClient();
+    client.beta.sessions.retrieve = jest.fn().mockRejectedValue(
+      Object.assign(new Error(`upstream 429 (auth: Bearer ${SECRET_MARKER})`), {
+        code: 8,
+        name: "RateLimitError"
+      })
+    );
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const logs = spyOnLogs();
+    try {
+      const res = makeRes();
+      await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(runTransaction).not.toHaveBeenCalled();
+      expect(setCalls).toHaveLength(0);
+      expect(logs.containsMarker(SECRET_MARKER)).toBe(false);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it("responds 503 and logs only content-free fields when events.list rejects", async () => {
+    const SECRET_MARKER = "sk-ant-eventslist-fault-secret-marker";
+    const client = makeEngClient();
+    client.beta.sessions.events.list = jest.fn().mockRejectedValue(
+      Object.assign(new Error(`upstream 529 (auth: Bearer ${SECRET_MARKER})`), {
+        code: 4,
+        name: "OverloadedError"
+      })
+    );
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const logs = spyOnLogs();
+    try {
+      const res = makeRes();
+      await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(runTransaction).not.toHaveBeenCalled();
+      expect(setCalls).toHaveLength(0);
+      expect(logs.containsMarker(SECRET_MARKER)).toBe(false);
+    } finally {
+      logs.restore();
+    }
+  });
 });

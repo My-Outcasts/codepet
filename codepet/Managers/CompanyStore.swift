@@ -758,6 +758,8 @@ final class CompanyStore: ObservableObject {
         }
     }
 
+    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
+
     /// Core of a chat send: append the founder's message, stream a grounded companion
     /// reply (fallback to the non-streaming client), and handle any `run_task_id` the
     /// reply carries. Shared by `sendChat` (typed founder text) and `walkThroughTask`
@@ -803,8 +805,6 @@ final class CompanyStore: ObservableObject {
     /// `convene`: `walkThroughTask`'s ask is composed on the founder's behalf, not typed by
     /// her, so its reply must not become retryable by a rule that means "answers what she
     /// asked."
-    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
-
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
                              founderAsk: String? = nil) async {

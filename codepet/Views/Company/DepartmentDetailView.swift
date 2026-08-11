@@ -51,16 +51,25 @@ struct DepartmentDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }
 
+    /// A plain image band. The name, the two-letter badge and the accent
+    /// gradient all came out when the masthead took over: the gradient existed
+    /// only to make white text legible over the art, and with no text on the art
+    /// it was tinting the image for nothing. The badge earns its place on the
+    /// roster cover, where it marks otherwise unlabelled art — beside a
+    /// spelled-out "Engineering" it is decoration.
+    ///
+    /// 104 rather than 140 because the band no longer holds a text block, and
+    /// the shorter one keeps the first task card above the fold on a 900pt
+    /// window. `.interpolation(.high)` matches the roster cover (CompanyView:133).
     private func hero(_ d: Department) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            Image(d.coverAsset).resizable().scaledToFill().frame(height: 140).clipped()
-            LinearGradient(colors: [.clear, d.accent.opacity(0.55)], startPoint: .top, endPoint: .bottom)
-            HStack(spacing: 8) {
-                Text(d.ab).font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.white)
-                Text(d.name).font(CodepetTheme.inter(21, weight: .semibold)).foregroundColor(.white)
-            }.padding(12)
-        }
-        .frame(height: 140).cornerRadius(14).clipped()
+        Image(d.coverAsset)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(height: 104)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .cornerRadius(14)
     }
 }
 

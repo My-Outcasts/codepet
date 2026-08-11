@@ -13,9 +13,17 @@ on:
 
 # One run per branch. A force-push (this repo rebases rather than merges when main moves)
 # should cancel the run for the commit it replaced instead of paying for both.
+#
+# But NOT on `main`. This was an unconditional `true`, and on Aug 11 it cancelled #95's own
+# verification run when #93 merged moments later — so that commit on `main` was never checked.
+# Nothing was broken (the next run covered the same change), but it makes "every push to main
+# runs the suite" false exactly when the day is busiest, which is when a break is most likely
+# and hardest to attribute. A PR's superseded run is worth cancelling because its commit no
+# longer exists; a `main` commit is permanent and stays in the history whether it was checked
+# or not.
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The Cloud Functions half of the product. Added Aug 11, a day after the Swift job, because

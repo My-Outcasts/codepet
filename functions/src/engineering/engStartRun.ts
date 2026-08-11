@@ -136,12 +136,15 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   try {
     repo = await loadRepo(auth.uid, encKey);
   } catch {
-    // A Firestore (or decrypt) failure reading the repo link. This must not
-    // be mistakable for 409 (no repo linked) or 402 (no credits) — the
-    // client renders both of those as an offer to connect or upgrade, and a
-    // storage outage is neither. Never echo the error: whatever it carries
-    // (Firestore internals, decrypt failure detail) has no business in a
-    // client response or a log line.
+    // Only a Firestore read fault reaches here. `loadRepo` swallows a decrypt
+    // failure and returns null, so a corrupted token surfaces as 409 below —
+    // "connect a repo" — which is the right outcome, since no retry will fix
+    // it. Don't widen this catch to cover decryption; that case never arrives.
+    //
+    // 503 must not be mistakable for 409 (no repo linked) or 402 (no credits):
+    // the client renders both of those as an offer to connect or upgrade, and a
+    // storage outage is neither — it is ours, and it is retryable. Never echo
+    // the error; Firestore internals have no business in a client response.
     res.status(503).json({ error: "repo_lookup_failed" });
     return;
   }

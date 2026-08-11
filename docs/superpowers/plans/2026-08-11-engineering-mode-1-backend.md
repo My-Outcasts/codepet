@@ -1446,7 +1446,10 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
       }
     }
   } catch (err) {
-    writeFrame(res, "error", { error: "stream_failed", detail: String(err) });
+    // Never echo the upstream error. An SDK error can carry the request that
+    // produced it, and that request carries our API key header. The founder
+    // cannot act on the detail anyway; the server-side trace is where it belongs.
+    writeFrame(res, "error", { error: "stream_failed" });
   } finally {
     res.end();
   }
@@ -1899,12 +1902,15 @@ export async function handleEngSendTurn(req: Request, res: Response): Promise<vo
     // A session paused at its budget rejects anything that starts new work.
     // Surface that as its own state rather than a generic upstream failure —
     // the client turns it into "raise the cap", not "something broke".
+    // Inspecting the error server-side is fine; echoing it to the client is not.
+    // An SDK error can carry the request that produced it, including our API key
+    // header, so `detail` stays on this side of the wire.
     const detail = String(err);
     if (detail.includes("budget")) {
       res.status(409).json({ error: "budget_reached" });
       return;
     }
-    res.status(502).json({ error: "send_failed", detail });
+    res.status(502).json({ error: "send_failed" });
     return;
   }
 

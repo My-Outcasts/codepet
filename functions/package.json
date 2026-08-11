@@ -16,7 +16,8 @@
     "provision:eng": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/provision-eng-agent.ts",
     "verify:eng": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/verify-eng-run.ts",
     "serve": "npm run build && firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "seal:repo": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/seal-repo-doc.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

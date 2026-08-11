@@ -71,6 +71,20 @@ final class MessageFeedbackPayloadTests: XCTestCase {
         XCTAssertNil(data["deptName"])
     }
 
+    /// `activeThreadId` stays nil until the first `flushActiveThread()`, and the first-run
+    /// greeting is appended without flushing (`CompanyStore.swift:315-320`), so a thumb on
+    /// that greeting reaches `build` with `threadId: ""`. The rule denies `update`
+    /// (`firestore.rules:42`), so a written `""` could never be corrected — it must be
+    /// omitted rather than written, the same as a nil companion/dept.
+    func testEmptyThreadIdIsOmittedRatherThanWrittenAsEmptyString() {
+        let data = MessageFeedbackPayload.build(vote: .up, messageId: "m1", threadId: "",
+                                                companionId: "glitch", deptName: "Engineering",
+                                                userId: "u1", authMethod: "guest",
+                                                displayName: "Mona", pet: "byte",
+                                                appVersion: "1.2", build: "42")
+        XCTAssertNil(data["threadId"])
+    }
+
     func testChatMessageFeatureExists() {
         XCTAssertEqual(FeedbackFeature.chatMessage.rawValue, "chatMessage")
     }

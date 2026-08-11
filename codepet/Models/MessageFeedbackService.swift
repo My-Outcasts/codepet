@@ -21,7 +21,6 @@ enum MessageFeedbackPayload {
             // relaxed without a deploy.
             "rating": vote == .up ? 5 : 1,
             "messageId": messageId,
-            "threadId": threadId,
             "userId": userId,
             "authMethod": authMethod,
             "displayName": displayName,
@@ -31,6 +30,13 @@ enum MessageFeedbackPayload {
             "platform": "macos",
             "timestamp": FieldValue.serverTimestamp()
         ]
+        // `companyStore.activeThreadId` stays nil until the first `flushActiveThread()`
+        // (`CompanyStore.swift:614-617`), and `seedFirstRunGreeting` appends byte's first-run
+        // greeting without flushing (`CompanyStore.swift:315-320`) — so a thumb on that very
+        // first message can reach here with `threadId == ""`. The rule denies `update`
+        // (`firestore.rules:42`), so a written `""` could never be corrected. Omit the key
+        // instead: a missing field honestly means "unknown", where `""` looks like data.
+        if !threadId.isEmpty { data["threadId"] = threadId }
         if let companionId, !companionId.isEmpty { data["companionId"] = companionId }
         if let deptName, !deptName.isEmpty { data["deptName"] = deptName }
         return data
@@ -44,8 +50,9 @@ enum MessageFeedbackPayload {
 /// same identity fields, same opt-out gate.
 ///
 /// The rule denies `update`, so correcting a misclicked thumb writes a SECOND document with
-/// the same `messageId`. That is deliberate and the reader resolves it by latest `timestamp`;
-/// duplicate messageIds are not a bug.
+/// the same `messageId`. That is deliberate: `firestore.rules:42` denies clients `read` too,
+/// so no reader IN THIS APP can resolve the duplicate — an external/admin consumer resolves
+/// it by latest `timestamp`. Duplicate messageIds are not a bug.
 @MainActor
 enum MessageFeedbackService {
     static func submit(vote: MessageVote, message: CopilotMessage, threadId: String,

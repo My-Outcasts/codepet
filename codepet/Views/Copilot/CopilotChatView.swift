@@ -17,6 +17,17 @@ struct CopilotChatView: View {
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
+    /// Bumped by every autoscroll trigger in `messageList` — new messages, the fan-out row,
+    /// a growing Virtual Company room, the typing indicator — so `CopilotBubble` can reset a
+    /// stranded `hovering` regardless of which of the four caused the scroll. Not wired to the
+    /// individual signals (`chatMessages.count`, `activeAgentRuns.count`, `vcRunCardCount`,
+    /// `isCompanionTyping`) because those four share nothing except "this scrolled the list" —
+    /// `activeAgentRuns` and the VC room both move the scroll position without touching
+    /// `chatMessages.count` (`CompanyStore.swift:1841`; the room mutates `vcRun` by id), which
+    /// is exactly the gap that let a hovered older reply get scrolled out from under the
+    /// pointer with its action row stuck lit (`.onHover(false)` never firing —
+    /// `CodepetTokens.swift:211-214`).
+    @State private var scrollGeneration = 0
     /// Composer mode (Ask/Plan/Build) — pure client-side message shaping; `.build`
     /// is the streamlined replacement for the old full-width "Let's build" button.
     @State private var mode: ChatMode = .ask
@@ -210,7 +221,8 @@ struct CopilotChatView: View {
                     ForEach(Array(companyStore.chatMessages.enumerated()), id: \.element.id) { idx, m in
                         let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
                         CopilotBubble(message: m,
-                                      isLast: idx == companyStore.chatMessages.count - 1)
+                                      isLast: idx == companyStore.chatMessages.count - 1,
+                                      scrollGeneration: scrollGeneration)
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
                         if companyStore.codingRun.run != nil,
@@ -239,12 +251,15 @@ struct CopilotChatView: View {
                 .padding(.bottom, ChatRhythm.transcriptBottom)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
+                scrollGeneration &+= 1
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
+                scrollGeneration &+= 1
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
+                scrollGeneration &+= 1
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
             // A Virtual Company run is ONE message that then grows for 30–60s, so
@@ -255,6 +270,7 @@ struct CopilotChatView: View {
             // ROOM's id, not to the transcript bottom: the room is inserted under its own
             // question, so the bottom may be an unrelated later turn.
             .onChange(of: vcRunCardCount) { _, count in
+                scrollGeneration &+= 1
                 guard count > 0, let id = vcRunMessage?.id else { return }
                 withAnimation { proxy.scrollTo(id, anchor: .bottom) }
             }
@@ -457,6 +473,9 @@ struct CopilotBubble: View {
     /// being read always shows its affordances) and gates retry, whose store method deletes
     /// every turn after the ask.
     let isLast: Bool
+    /// Bumped by `messageList` on every one of its four autoscroll triggers. Watched only to
+    /// reset a stranded `hovering` — see the comment on `body`'s `.onChange` below.
+    let scrollGeneration: Int
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
@@ -471,8 +490,10 @@ struct CopilotBubble: View {
     @State private var showFirstTake = false
     /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
     @State private var hovering = false
+    /// Two separate flags (rather than one "which copy" enum) because `copy(_:setting:)`
+    /// clears both before setting either — see that helper's comment for why they must be
+    /// mutually exclusive rather than independent, which is how this pair started.
     @State private var copied = false
-    /// Separate from `copied` so the two acknowledgements never overwrite each other's label.
     @State private var copiedMarkdown = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
@@ -522,14 +543,18 @@ struct CopilotBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .onHover { hovering = $0 }
             // `.onHover(false)` does not fire when a view disappears from under the pointer
-            // (`CodepetTokens.swift:211-214`), and the transcript autoscrolls on every new
-            // message (`messageList`'s `.onChange(of: companyStore.chatMessages.count)` above).
-            // So: the founder reads a reply with the pointer resting on it, types the next
-            // question, the transcript scrolls the old reply out from under the cursor with
+            // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on FOUR separate
+            // triggers, only two of which change `chatMessages.count` — the fan-out row
+            // (`activeAgentRuns.count`) and a growing Virtual Company room (`vcRunCardCount`)
+            // both move the scroll position while leaving the message array untouched. So: the
+            // founder reads an older reply with the pointer resting on it, any of the four
+            // fires, the transcript scrolls that reply out from under the cursor with
             // `hovering` stuck true — its row stays lit next to the newly pinned one until the
-            // pointer happens to re-enter and leave it. Resetting on the same signal that causes
-            // the scroll clears it before it can be seen.
-            .onChange(of: companyStore.chatMessages.count) { _, _ in hovering = false }
+            // pointer happens to re-enter and leave it. `scrollGeneration` is bumped by all
+            // four in `messageList`, with no signal in common besides "this scrolled the
+            // list" — watching it here (rather than each of the four individually) clears
+            // `hovering` before it can be seen, no matter which one fired.
+            .onChange(of: scrollGeneration) { _, _ in hovering = false }
         } else {
             content
         }
@@ -694,15 +719,13 @@ struct CopilotBubble: View {
     /// reach for them. Pinned on the last reply because hover alone taught nobody the row was
     /// there — the target was this row itself, held at `opacity(0)`.
     @ViewBuilder private var messageActions: some View {
+        let retryEnabled = MessageActionRules.canRetry(isLast: isLast,
+                                                       isTyping: companyStore.isCompanionTyping,
+                                                       isStreaming: companyStore.isStreaming,
+                                                       isFanningOut: companyStore.isFanningOut)
         HStack(spacing: 2) {
             actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
-                copy(MessageTranscript.plain(message, lang: lang)) {
-                    copied = true
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_400_000_000)
-                        copied = false
-                    }
-                }
+                copy(MessageTranscript.plain(message, lang: lang), setting: $copied)
             }
             .overlay(alignment: .leading) {
                 if copied { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
@@ -711,24 +734,22 @@ struct CopilotBubble: View {
             // Notion or a PR, and plain text loses the headings and the per-seat structure.
             actionIcon("square.and.arrow.up",
                        help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown") {
-                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang)) {
-                    copiedMarkdown = true
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_400_000_000)
-                        copiedMarkdown = false
-                    }
-                }
+                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang), setting: $copiedMarkdown)
             }
             .overlay(alignment: .leading) {
                 if copiedMarkdown { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
             }
-            actionIcon("arrow.clockwise", help: lang == .vi ? "Hỏi lại" : "Try again") {
+            actionIcon("arrow.clockwise",
+                       help: retryEnabled
+                           ? (lang == .vi ? "Hỏi lại" : "Try again")
+                           // Only the newest reply retries — an older one looked equally live
+                           // (finding 4) with no way to tell it was inert until tapped.
+                           : (lang == .vi ? "Chỉ hỏi lại được câu trả lời mới nhất"
+                                          : "Try again only applies to the newest reply"),
+                       isEnabled: retryEnabled) {
                 Task { await companyStore.retryReply(messageId: message.id, language: lang) }
             }
-            .disabled(!MessageActionRules.canRetry(isLast: isLast,
-                                                   isTyping: companyStore.isCompanionTyping,
-                                                   isStreaming: companyStore.isStreaming,
-                                                   isFanningOut: companyStore.isFanningOut))
+            .disabled(!retryEnabled)
             thumb(.up, icon: "hand.thumbsup", help: lang == .vi ? "Hữu ích" : "Good reply")
             thumb(.down, icon: "hand.thumbsdown", help: lang == .vi ? "Chưa tốt" : "Bad reply")
             Text(Self.age(of: message.createdAt, lang: lang))
@@ -748,12 +769,17 @@ struct CopilotBubble: View {
         .animation(.easeInOut(duration: 0.12), value: isLast)
     }
 
-    private func actionIcon(_ system: String, help: String,
+    /// `isEnabled` is separate from the caller's `.disabled(...)`: `.disabled` only changes
+    /// behaviour (SwiftUI dims a `Button`'s default styling, but this icon paints its own
+    /// `foregroundColor`, which overrides that and always looked the same either way). Without
+    /// this parameter a disabled Try again on an older reply looked exactly as live as an
+    /// enabled one — the founder tapped it and nothing happened, with no visual reason why.
+    private func actionIcon(_ system: String, help: String, isEnabled: Bool = true,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(CodepetTheme.mutedText)
+                .foregroundColor(CodepetTheme.mutedText.opacity(isEnabled ? 1 : 0.35))
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
@@ -761,10 +787,23 @@ struct CopilotBubble: View {
         .help(help)
     }
 
-    private func copy(_ string: String, then acknowledge: @escaping () -> Void) {
+    /// Puts `string` on the pasteboard and shows `flag`'s acknowledgement for 1.4s.
+    ///
+    /// Clears BOTH acknowledgement flags before setting the one requested: `copied` and
+    /// `copiedMarkdown` used to be fully independent, each on its own timer and its own
+    /// `.overlay`. Copy then Copy as Markdown inside 1.4s left both floating labels live at
+    /// once, each overrunning past its own 22pt icon into the next control's space. Showing
+    /// one now always clears the other, so at most one label is ever on screen.
+    private func copy(_ string: String, setting flag: Binding<Bool>) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
-        acknowledge()
+        copied = false
+        copiedMarkdown = false
+        flag.wrappedValue = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            flag.wrappedValue = false
+        }
     }
 
     private func copiedLabel(_ text: String) -> some View {
@@ -782,11 +821,14 @@ struct CopilotBubble: View {
     /// is a no-op rather than a duplicate write.
     ///
     /// Gated on `isCompanionTyping`/`isStreaming` — the same busy state as retry, minus
-    /// `isFanningOut` — because the row is pinned to the newest reply, which is exactly the
-    /// one still streaming when either flag is set; rating a half-written answer is
-    /// meaningless. A fan-out does not make the reply already on screen incomplete, so
-    /// voting on it stays valid — that is a different question from what `retryReply` will
-    /// accept, which is why `canRetry` above still checks all four.
+    /// `isFanningOut` — AND on `isLast`, because those two flags are global store state: without
+    /// `isLast` a thumb on a complete reply from five turns ago went dead the moment any new
+    /// turn started streaming, disabling the whole transcript's history over one in-flight
+    /// reply. The only half-written reply is the pinned/newest one, so only it needs to gate —
+    /// same scoping as `canRetry` above. A fan-out does not make the reply already on screen
+    /// incomplete, so voting on it stays valid even while `isLast` — that is a different
+    /// question from what `retryReply` will accept, which is why `canRetry` still checks
+    /// `isFanningOut` too and this does not.
     @ViewBuilder private func thumb(_ vote: MessageVote, icon: String, help: String) -> some View {
         let chosen = message.vote == vote
         Button {
@@ -804,7 +846,7 @@ struct CopilotBubble: View {
         }
         .buttonStyle(.plain)
         .help(help)
-        .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+        .disabled(isLast && (companyStore.isCompanionTyping || companyStore.isStreaming))
     }
 
     /// "just now" until a minute has passed, then minutes, then hours — the reference's

@@ -25,9 +25,19 @@ enum LibraryFixtures {
     /// it came from.
     static let idPrefix = "seed-fixture-"
 
+    /// Twelve of the thirteen kinds.
+    ///
+    /// `.other` is the deliberate omission: it routes through the SAME `default` branch of
+    /// `DeliverableBodyView` as `.text`, so seeding it would add a second identical-looking row
+    /// and no coverage. Every other kind reaches a viewer nothing else reaches.
+    ///
+    /// `.email` and `.dms` were missing from the first version of this file, which was a real
+    /// hole: they are the two kinds the whole reading-standard pass was derived from, and `.dms`
+    /// is the ONE viewer that overrides the no-card-in-a-sheet rule (its cards are siblings, one
+    /// per recipient). The harness could not show the thing most likely to be wrong.
     static var all: [Deliverable] {
         [
-            doc, plan, checklist, post, legal, calendar, sheet, site, screens, text
+            doc, plan, checklist, post, legal, calendar, sheet, site, screens, text, email, dms
         ]
     }
 
@@ -116,6 +126,30 @@ enum LibraryFixtures {
           {"name":"Codepet","time":"9:41","kick":"Step 1","title":"What are you building?","sub":"One paragraph is enough. You can change it later.","art":"connect","cta":"Continue","note":"Takes about a minute"},
           {"name":"Codepet","time":"9:42","kick":"Step 2","title":"Meet your team","sub":"Nine departments. You will not need all of them at once.","art":"session","cta":"Pick a companion","note":"You can change this any time"},
           {"name":"Codepet","time":"9:43","kick":"Step 3","title":"Your first deliverable","sub":"Codepet already started on it while you were reading.","art":"recap","cta":"Open it","note":"Nothing to configure"}]}
+        """)
+    }
+
+    /// The REFERENCE card — everything else in this pass was derived from it. Blanks in the body
+    /// and in the subject, so the tint and the "fill in N blanks" footer are both exercised.
+    private static var email: Deliverable {
+        make(.email, "Quick question about [company]'s morning bake", body: """
+        Hi [name] — saw you shipped [product] last week and wanted to reach out.
+
+        We're building the thing you complained about on [date]: a way to see what selling out actually cost you, without setting up an account.
+
+        Worth 15 minutes this week?
+        """)
+    }
+
+    /// The ONE viewer that keeps its card inside a sheet, because these are siblings rather than
+    /// one frame — three messages to three people. Seeded with three deliberately, since the
+    /// whole question is whether they read as separate objects; with one it would prove nothing.
+    private static var dms: Deliverable {
+        make(.dms, "Beta outreach — three bakers", """
+        {"messages":[
+          {"name":"Marta (Rye & Co)","note":"already asked","msg":"Hi Marta — you said you'd try this the moment it existed. It exists. Here's the link: [url]. It takes about two minutes and needs no account."},
+          {"name":"Tom (Corner Bakehouse)","note":"cold","msg":"Hi Tom — I'm building something for bakers who sell out before noon and want to know what that cost them. Would you try it on one bake and tell me if the number looks right?"},
+          {"name":"Priya (Flour & Salt)","note":"referred by [name]","msg":"Hi Priya — [name] suggested I get in touch. I've built a way to estimate the money left on the shelf when you sell out. Can I send it over?"}]}
         """)
     }
 

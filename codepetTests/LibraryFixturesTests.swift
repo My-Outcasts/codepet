@@ -15,7 +15,27 @@ import XCTest
 final class LibraryFixturesTests: XCTestCase {
 
     func testEveryFixtureBuildsWithoutTrapping() {
-        XCTAssertEqual(LibraryFixtures.all.count, 10)
+        XCTAssertEqual(LibraryFixtures.all.count, 12)
+    }
+
+    /// Every kind that reaches a viewer of its own must be seeded, or the harness silently fails
+    /// to cover it — which is exactly what happened first time round: `.email` and `.dms` were
+    /// omitted, and `.dms` is the one viewer that overrides the no-card-in-a-sheet rule.
+    ///
+    /// `.other` is the single allowed omission: it shares `DeliverableBodyView`'s `default`
+    /// branch with `.text`, so it would be a duplicate row rather than new coverage.
+    func testEveryKindWithItsOwnViewerIsSeeded() {
+        let seeded = Set(LibraryFixtures.all.map(\.kind))
+        let missing = DeliverableKind.allCases.filter { $0 != .other && !seeded.contains($0) }
+        XCTAssertTrue(missing.isEmpty,
+                      "not seeded, so unauditable: \(missing.map(\.rawValue).joined(separator: ", "))")
+    }
+
+    /// `.dms` renders one card per recipient, and the question its fixture exists to answer is
+    /// whether several read as separate objects. One message would not ask it.
+    func testTheDmsFixtureHasEnoughRecipientsToJudgeSeparation() {
+        let messages = LibraryFixtures.all.first { $0.kind == .dms }?.payload?.messages
+        XCTAssertGreaterThanOrEqual(messages?.count ?? 0, 2)
     }
 
     func testIdsAreUniqueAndPrefixed() {
@@ -31,8 +51,10 @@ final class LibraryFixturesTests: XCTestCase {
     /// the row order arbitrary between launches.
     func testTimestampsAreDistinct() {
         let stamps = LibraryFixtures.all.compactMap(\.createdAt)
-        XCTAssertEqual(stamps.count, 10)
-        XCTAssertEqual(Set(stamps).count, 10)
+        XCTAssertEqual(stamps.count, LibraryFixtures.all.count)
+        XCTAssertEqual(Set(stamps).count, LibraryFixtures.all.count,
+                       "two fixtures share a timestamp — the Library sorts on it, so their order "
+                       + "would shuffle between launches")
     }
 
     /// The important one. Each structured kind must carry the slice its viewer switches on,

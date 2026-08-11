@@ -80,7 +80,9 @@ struct DepartmentDetailView: View {
 /// points above it: it is a control, not decoration, so it survives the
 /// no-decorative-icons rule, and pinning it outside the ScrollView keeps the
 /// way out reachable on a six-task department.
-private struct DepartmentHeader: View {
+/// `internal` rather than `private` because DepartmentHeaderLayoutTests renders it
+/// directly — `@testable import` promotes internal, but not private.
+struct DepartmentHeader: View {
     let name: String
     let rationale: String
     let onBack: () -> Void

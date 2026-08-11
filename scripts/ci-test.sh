@@ -73,16 +73,31 @@ if [ ! -d "$RESULT_BUNDLE" ]; then
   exit "${xcodebuild_status:-1}"
 fi
 
-summary=$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" 2>/dev/null)
-if [ -z "$summary" ]; then
-  echo "::error::Could not read $RESULT_BUNDLE. Treating as failure rather than guessing."
-  exit "${xcodebuild_status:-1}"
+summary=$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" 2>&1)
+if [ -z "$summary" ] || ! printf '%s' "$summary" | head -c1 | grep -q '{'; then
+  # Says "treating as failure" and now actually does. This used to
+  # `exit "${xcodebuild_status:-1}"`, which is 0 whenever the tests themselves passed — so
+  # the branch that exists to refuse to guess was reporting green while announcing it
+  # could not verify anything. If the bundle is unreadable, the run is unverified, and
+  # unverified is not a pass.
+  echo "::error::Could not read a summary from $RESULT_BUNDLE — the run is unverified."
+  printf '%s\n' "$summary" | head -5
+  exit 1
 fi
 
-python3 - "$xcodebuild_status" <<'PY' <<<"$summary"
-import json, sys
+# The summary travels in the ENVIRONMENT, not on stdin, and that is load-bearing.
+#
+# This was `python3 - "$status" <<'PY' ... PY <<<"$summary"`, which has TWO stdin
+# redirections. The here-string wins, so python read its PROGRAM from the JSON — and a JSON
+# object is a valid Python dict literal, so it evaluated cleanly, printed nothing, and
+# exited 0. Every check below was dead code, and three green CI runs said nothing beyond
+# "xcodebuild exited 0". A crash would have been kinder; this failed silently in the exact
+# direction that looks like success. Found by asking why the summary line never appeared in
+# the logs.
+SUMMARY_JSON="$summary" python3 - "$xcodebuild_status" <<'PY'
+import json, os, sys
 status = int(sys.argv[1])
-d = json.load(sys.stdin)
+d = json.loads(os.environ["SUMMARY_JSON"])
 total   = d.get("totalTestCount") or 0
 passed  = d.get("passedTests") or 0
 failed  = d.get("failedTests") or 0

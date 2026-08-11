@@ -17,6 +17,15 @@ final class CompanyStore: ObservableObject {
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
     @Published private(set) var company: CompanyState = .empty
+
+    #if DEBUG
+    /// True once `-seedLibrary YES` has injected `LibraryFixtures` into `company.library`.
+    ///
+    /// It exists to BLOCK cloud writes, not to record a preference — see `persistLibrary`. The
+    /// fixtures are an in-memory audit aid for the deliverable viewers (there is no way to ask
+    /// the product for a specific kind), and they must never reach Firestore.
+    private(set) var libraryIsSeeded = false
+    #endif
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
     /// `chatMessages` is the ACTIVE thread's live working buffer — the view keeps
@@ -282,6 +291,9 @@ final class CompanyStore: ObservableObject {
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
         company = loaded
+        #if DEBUG
+        seedLibraryIfRequested()
+        #endif
         // An in-flight prefs write belongs to the OUTGOING account (its own post-await guard
         // drops its commit); leaving its intent here would compose the previous founder's
         // half-written preferences onto this one's next settings change.
@@ -1684,10 +1696,28 @@ final class CompanyStore: ObservableObject {
             wroteTasks = true
         }
         if let cid = companyId {
-            _ = await librarySaver(cid, company.library)
+            await persistLibrary(cid)
             if wroteTasks { _ = await tasksSaver(cid, company.tasks) }
         }
         Task { await rememberFromApproval(draft) }
+    }
+
+    /// The one cloud write for the library — and, in DEBUG, the one place the seeded-fixture
+    /// guard can live.
+    ///
+    /// `fileApproval` persists the WHOLE `company.library`, not the appended draft. With
+    /// `-seedLibrary YES` active that array holds ten fixtures, so a single Approve would file
+    /// them into the founder's real Firestore document, where nothing would ever remove them.
+    /// Seeding is an in-memory audit aid; this keeps it that way.
+    private func persistLibrary(_ cid: String) async {
+        #if DEBUG
+        if libraryIsSeeded {
+            NSLog("[seedLibrary] BLOCKED a library write — %d fixture(s) are in memory",
+                  company.library.filter { $0.id.hasPrefix(LibraryFixtures.idPrefix) }.count)
+            return
+        }
+        #endif
+        _ = await librarySaver(cid, company.library)
     }
 
     /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
@@ -2269,3 +2299,37 @@ final class CompanyStore: ObservableObject {
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
     }
 }
+
+#if DEBUG
+extension CompanyStore {
+    /// Inject one deliverable of every kind when launched with `-seedLibrary YES`.
+    ///
+    /// There is no way to ask the product for a specific deliverable kind — `runTaskCore` lets
+    /// the model pick whichever fits what it wrote — so auditing all ten viewers otherwise means
+    /// running tasks until each kind happens to come up, at a run's cost each. This puts them in
+    /// the REAL Library, opening the REAL detail sheet, which is the only place the reading
+    /// measure can be judged at a width the founder chooses.
+    ///
+    /// PREPENDED, never replacing: a founder auditing on their own account keeps their real
+    /// deliverables visible alongside the fixtures, so a regression that only shows on real
+    /// content is still findable. Idempotent — a re-hydrate (token refresh, reconnect) must not
+    /// stack a second copy.
+    ///
+    /// `libraryIsSeeded` is what stops any of this reaching Firestore; see `persistLibrary`.
+    func seedLibraryIfRequested() {
+        guard let i = CommandLine.arguments.firstIndex(of: "-seedLibrary"),
+              i + 1 < CommandLine.arguments.count,
+              CommandLine.arguments[i + 1].uppercased() == "YES" else { return }
+
+        let fixtures = LibraryFixtures.all
+        let existing = Set(company.library.map(\.id))
+        let fresh = fixtures.filter { !existing.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+
+        company.library.insert(contentsOf: fresh, at: 0)
+        libraryIsSeeded = true
+        NSLog("[seedLibrary] seeded %d fixture(s); library writes are now BLOCKED for this launch",
+              fresh.count)
+    }
+}
+#endif

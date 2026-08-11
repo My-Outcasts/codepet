@@ -32,18 +32,14 @@ PROJECT="${PROJECT:-CodePet.xcodeproj}"
 #   was confirmed pre-existing by stashing a day's work and re-running against a clean
 #   tree. Nobody has owned it since.
 #
-# RoadmapEngineSuggestedNextTests (1) — testConfinedToTheOpenWindow: this one deserves a
-#   look before it is written off as a stale test. It asserts that a task in a CLOSED
-#   phase is not suggested, and `suggestedNext` is returning ["y", "b"] where the test
-#   wants ["y"] — i.e. "b" leaks out of the open phase window. The sibling test directly
-#   below it documents the ONE intended exception (a DRAFTED task in a closed phase stays
-#   reachable so a finished draft can still be approved); "b" here is not drafted, so the
-#   exception should not apply. Either the gate regressed or the exception widened — and
-#   if it is the former, founders are being pointed at work their roadmap has not opened
-#   yet. Skipped only so CI can start; it is a product question, not a CI one.
+# RoadmapEngineSuggestedNextTests was the second entry here and is NOW GUARDED AGAIN. It was
+#   never a product bug: `testConfinedToTheOpenWindow` asserted the pre-Aug-5 phase-window rule,
+#   which `d8e9b64` deliberately changed (a founder-owned step stopped gating; only an unapproved
+#   draft does). The comment that used to sit here called it a possible leak sending founders at
+#   work their roadmap had not opened — that was wrong, and the answer was already written in a
+#   doc comment in RoadmapGating.swift. Test rewritten to the current rule, skip removed.
 SKIP_SUITES=(
   "codepetTests/VirtualCompanyInterviewTests"
-  "codepetTests/RoadmapEngineSuggestedNextTests"
 )
 
 skip_args=()

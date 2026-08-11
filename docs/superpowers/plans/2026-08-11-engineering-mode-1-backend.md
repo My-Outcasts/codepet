@@ -1011,7 +1011,11 @@ export function getEngClient(): Anthropic {
 // and record it. Returns as soon as the session exists — the transcript
 // arrives over engStream, and the outcome is durable via engWebhook even if
 // nobody connects.
-import type { Request, Response } from "firebase-functions/v2/https";
+// `firebase-functions/v2/https` exports Request but NOT Response — importing both
+// from it is a TS2305. Every existing handler in this repo (runTask.ts and ~10
+// others) takes Response from express; match that.
+import { Request } from "firebase-functions/v2/https";
+import { Response } from "express";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../auth";
 import { creditsToBudget, type SessionBudget } from "./engBudget";
@@ -1326,7 +1330,11 @@ Expected: FAIL — `Cannot find module '../engStream'`
 // in the gap. On every connect we open the live stream FIRST (it buffers
 // from that moment), then read the full history, then tail — deduping by
 // event id where the two overlap.
-import type { Request, Response } from "firebase-functions/v2/https";
+// `firebase-functions/v2/https` exports Request but NOT Response — importing both
+// from it is a TS2305. Every existing handler in this repo (runTask.ts and ~10
+// others) takes Response from express; match that.
+import { Request } from "firebase-functions/v2/https";
+import { Response } from "express";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../auth";
 import { toExecStep } from "./engEvents";
@@ -1564,7 +1572,11 @@ Expected: FAIL — `Cannot find module '../engWebhook'`
 // the credits it actually spent, and write the outcome. Unauthenticated by
 // necessity — Anthropic is the caller — so the HMAC signature is the only
 // thing standing between this and a forged run record.
-import type { Request, Response } from "firebase-functions/v2/https";
+// `firebase-functions/v2/https` exports Request but NOT Response — importing both
+// from it is a TS2305. Every existing handler in this repo (runTask.ts and ~10
+// others) takes Response from express; match that.
+import { Request } from "firebase-functions/v2/https";
+import { Response } from "express";
 import * as admin from "firebase-admin";
 import { listCostToCredits } from "./engBudget";
 import { getEngClient } from "./engClient";
@@ -1812,7 +1824,11 @@ Expected: FAIL — `Cannot find module '../engSendTurn'`
 // approval, or a stop. One endpoint rather than three, because they are the
 // same call with a different event body and the client's state machine is
 // simpler for it.
-import type { Request, Response } from "firebase-functions/v2/https";
+// `firebase-functions/v2/https` exports Request but NOT Response — importing both
+// from it is a TS2305. Every existing handler in this repo (runTask.ts and ~10
+// others) takes Response from express; match that.
+import { Request } from "firebase-functions/v2/https";
+import { Response } from "express";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../auth";
 import { getEngClient } from "./engClient";

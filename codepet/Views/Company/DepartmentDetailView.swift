@@ -119,6 +119,7 @@ private struct DepartmentTaskCard: View {
     let task: RoadmapTask
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @Environment(\.colorScheme) private var scheme
     @State private var openDeliverable: Deliverable?
     /// Set when tapping "Review & approve" — opens the draft-preview sheet (shared with
     /// the Tasks board) instead of approving blindly.
@@ -161,8 +162,7 @@ private struct DepartmentTaskCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+        .cardChrome(radius: 12, dark: scheme == .dark)
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
         .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
     }

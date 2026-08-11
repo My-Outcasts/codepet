@@ -209,7 +209,8 @@ struct CopilotChatView: View {
                     // the transcript read as one undivided block.
                     ForEach(Array(companyStore.chatMessages.enumerated()), id: \.element.id) { idx, m in
                         let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
-                        CopilotBubble(message: m)
+                        CopilotBubble(message: m,
+                                      isLast: idx == companyStore.chatMessages.count - 1)
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
                         if companyStore.codingRun.run != nil,
@@ -452,6 +453,10 @@ struct ThreadListView: View {
 /// deliverable card (Approve/Redo) when the message carries a draft.
 struct CopilotBubble: View {
     let message: CopilotMessage
+    /// True for the newest message in the transcript. Pins the action row (so the reply
+    /// being read always shows its affordances) and gates retry, whose store method deletes
+    /// every turn after the ask.
+    let isLast: Bool
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
@@ -495,7 +500,42 @@ struct CopilotBubble: View {
         return PetCharacter.all[id]?.color ?? companionAccent
     }
 
+    /// The action row belongs to the MESSAGE, not to one branch of this chain. It used to be
+    /// called from inside `textBubble`, so a draft, exec log, room or proposal reply — the
+    /// replies most worth copying and rating — had no actions at all. Wrapping `content` is
+    /// what makes the row universal without touching a single payload branch.
+    ///
+    /// `.onHover` sits here rather than on the row (where it used to, at `messageActions`),
+    /// because the row is held at `opacity(0)`: the target was a blank 22x20 strip below the
+    /// prose, which is why the founder read the actions as missing entirely.
     var body: some View {
+        if isMe || message.producing || !hasActionableContent {
+            // Your own words need no copy/retry/thumb, and a reply still being produced has
+            // nothing to act on yet. `hasActionableContent` also catches the streaming shell:
+            // a message with no text yet renders EmptyView() from `textBubble` (see its own
+            // comment below), and without this guard the pinned row on the newest message
+            // would draw floating with nothing above it.
+            content
+        } else {
+            VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+                content
+                messageActions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onHover { hovering = $0 }
+        }
+    }
+
+    /// A message shell can reach `textBubble` with no text yet — while the companion is
+    /// still typing (see its own comment there). `MessageTranscript.plain` is the emptiness
+    /// oracle: if there is nothing to copy, there is nothing to rate or retry either, and a
+    /// standalone chip (`navChip` / `setupSuggestion` / `noted`) has nothing worth acting on
+    /// regardless — this also suppresses the row on those.
+    private var hasActionableContent: Bool {
+        !MessageTranscript.plain(message, lang: lang).isEmpty
+    }
+
+    @ViewBuilder private var content: some View {
         if message.producing {
             if let steps = message.execSteps, !steps.isEmpty {
                 ExecLogRow(taskTitle: message.text, deptName: message.deptName, steps: steps,
@@ -627,15 +667,13 @@ struct CopilotBubble: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Per-message actions, revealed on hover — the row both references put under an answer
-    /// (copy · retry · a timestamp). Deliberately only two buttons: thumbs would need a
-    /// `feedback` collection and a Firestore rule that do not exist natively yet, and a control
-    /// that silently drops the founder's opinion is worse than no control. Speak and share are
-    /// the same judgement — offered when they do something.
+    /// Per-message actions, revealed on hover and pinned on the newest reply — the row both
+    /// references put under an answer. Copy, copy as Markdown, try again, a thumb either way,
+    /// and the age of the turn.
     ///
-    /// Hover-only because an answer is for reading; the affordances belong to the moment you
-    /// reach for them, not to the reading. `opacity` rather than a conditional so the row's
-    /// height never changes under the cursor.
+    /// Hover-reveal because an answer is for reading; the affordances belong to the moment you
+    /// reach for them. Pinned on the last reply because hover alone taught nobody the row was
+    /// there — the target was this row itself, held at `opacity(0)`.
     @ViewBuilder private var messageActions: some View {
         HStack(spacing: 2) {
             actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
@@ -665,9 +703,11 @@ struct CopilotBubble: View {
                 .foregroundColor(CodepetTheme.mutedText)
                 .padding(.leading, 4)
         }
-        .opacity(hovering ? 1 : 0)
+        // Pinned on the newest reply so the affordance is discoverable at all — hover alone
+        // taught nobody it existed. Still `opacity` rather than a conditional, so the row's
+        // height never changes under the cursor.
+        .opacity(hovering || isLast ? 1 : 0)
         .animation(.easeInOut(duration: 0.12), value: hovering)
-        .onHover { hovering = $0 }
     }
 
     private func actionIcon(_ system: String, help: String,
@@ -1032,7 +1072,6 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     inlineActions
-                    messageActions
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

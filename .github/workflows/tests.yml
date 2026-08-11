@@ -1,0 +1,62 @@
+name: Tests
+
+# The gap this closes: before it, `.github/workflows/` held only pages.yml, so no PR in
+# this repo had anything to pass. `main` shipped a red test twice without anyone noticing
+# — once for three days — and every "N/N green" in a PR description was somebody's local
+# machine and their word for it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run per branch. A force-push (this repo rebases rather than merges when main moves)
+# should cancel the run for the commit it replaced instead of paying for both.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # macOS runners bill at 10x Linux minutes, so this is deliberately ONE job that runs
+    # the whole suite rather than a matrix. It is also why there is no scheduled trigger:
+    # tests run when code changes, not on a timer.
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest installed Xcode
+        # Not pinned to an exact version: the deployment target is macOS 26.2, so the
+        # runner image must be new enough regardless, and pinning to a version the image
+        # later drops turns every PR red for a reason unrelated to the PR.
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $latest"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
+
+      - name: Cache SwiftPM dependencies
+        # 16 resolved packages, Firebase among them — resolution is minutes on a cold
+        # runner. Keyed on Package.resolved so a dependency bump busts the cache.
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('CodePet.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Run tests
+        run: ./scripts/ci-test.sh
+
+      - name: Upload the result bundle
+        # Only on failure, and only the bundle — it is the thing that answers "which test,
+        # and what did it actually say", which the log alone does not.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: build/ci.xcresult
+          retention-days: 7

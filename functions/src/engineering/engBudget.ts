@@ -6,6 +6,7 @@
 // reaches the cap, so a bug here is not "we mis-report usage" — it is
 // "a founder's run can outspend their balance". Hence: round the grant
 // DOWN and the charge UP, and cap every run regardless of balance.
+import type Anthropic from "@anthropic-ai/sdk";
 
 /** One credit, in cents. Matches the $0.05/credit overage rate. */
 export const CREDIT_CENTS = 5;
@@ -18,10 +19,11 @@ export const CREDIT_CENTS = 5;
  */
 export const DEFAULT_RUN_CREDITS = 40;
 
-export interface SessionBudget {
-  type: "limit";
-  max_list_cost: { amount: string; currency: "USD" };
-}
+// Aliased to the SDK's own type rather than hand-rolled: this is exactly the
+// shape `sessions.create`'s `budget` field checks against, so the compiler —
+// not a cast — is what confirms `creditsToBudget`'s cents-as-minor-units
+// encoding still matches what the SDK defines. See @anthropic-ai/sdk >=0.116.0.
+export type SessionBudget = Anthropic.Beta.Sessions.BetaManagedAgentsBudgetLimit;
 
 /**
  * The budget to attach to a session, given the founder's remaining credits.

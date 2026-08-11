@@ -99,7 +99,7 @@ export async function handleEngSendTurn(req: Request, res: Response): Promise<vo
   }
 
   try {
-    await getEngClient().beta.sessions.events.send(sessionId, { events: events as never });
+    await getEngClient().beta.sessions.events.send(sessionId, { events });
   } catch (err) {
     // A session paused at its budget rejects anything that starts new work.
     // Surface that as its own state rather than a generic upstream failure —

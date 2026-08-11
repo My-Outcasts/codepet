@@ -7,6 +7,7 @@
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
+import type Anthropic from "@anthropic-ai/sdk";
 import { verifyAuth } from "../auth";
 import { creditsToBudget, type SessionBudget } from "./engBudget";
 import { loadRepo, branchName, MOUNT_PATH, type RepoLink } from "./engRepo";
@@ -19,19 +20,22 @@ import {
   type RunStatus
 } from "./engClient";
 
+// Aliased to the exact SDK param shapes `sessions.create` checks `SessionParams`
+// against below (no cast) — narrower than the SDK's own field types where we
+// only ever send one variant (a single GitHub-repo resource, a single
+// user.message initial event), so a future change that drifts from what the
+// API accepts fails to compile here instead of failing at Anthropic's edge.
+type AgentWithOverrides = Anthropic.Beta.Sessions.BetaManagedAgentsAgentWithOverridesParams;
+type GitHubRepoResource = Anthropic.Beta.Sessions.BetaManagedAgentsGitHubRepositoryResourceParams;
+type UserMessageEventParams = Anthropic.Beta.Sessions.BetaManagedAgentsUserMessageEventParams;
+
 export interface SessionParams {
-  agent: {
-    type: "agent_with_overrides";
-    id: string;
-    version: number;
-    system: string;
-    model: string;
-  };
+  agent: AgentWithOverrides;
   environment_id: string;
   title: string;
-  resources: Array<Record<string, unknown>>;
+  resources: GitHubRepoResource[];
   budget: SessionBudget;
-  initial_events: Array<{ type: string; content: Array<{ type: "text"; text: string }> }>;
+  initial_events: UserMessageEventParams[];
   // Carries the run's identity on the session itself. When only the
   // post-create Firestore update fails, the run doc still gets
   // `reconcileNeeded: true` and `sessionId` (see handleEngStartRun below),
@@ -228,7 +232,7 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
 
   let sessionId: string;
   try {
-    const session = await getEngClient().beta.sessions.create(params as never);
+    const session = await getEngClient().beta.sessions.create(params);
     sessionId = session.id;
   } catch (err) {
     // Never put `err` — or String(err), or its .message — anywhere the

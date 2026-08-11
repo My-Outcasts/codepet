@@ -337,7 +337,16 @@ EOF
 
 ### Task 2: `MessageActionRules` — when retry is allowed
 
-`CompanyStore.retryReply` calls `chatMessages.removeSubrange(askIndex...)` (`CompanyStore.swift:1273`) — it drops the founder's question and every turn after it. That is safe today only because the button is effectively unreachable. Confining retry to the last reply makes the deletion equal to what the button visibly promises. The rule lives in a pure type so a test goes red if it is deleted, per the repo's working agreement.
+`CompanyStore.retryReply` calls `chatMessages.removeSubrange(askIndex...)` (`CompanyStore.swift:1279`) — it drops the founder's question and every turn after it. That is safe today only because the button is effectively unreachable. Confining retry to the last reply makes the deletion equal to what the button visibly promises. The rule lives in a pure type so a test goes red if it is deleted, per the repo's working agreement.
+
+> **CORRECTED DURING EXECUTION.** The signature below omitted `isFanningOut`, but `retryReply`'s
+> entry guard is `!isCompanionTyping, !isStreaming, !isFanningOut` — three conditions
+> (`CompanyStore.swift:1263`). `isFanningOut` is an independent `@Published` flag (`:89`) set
+> by `fanOutNextMoves` (`:1812`) without touching typing or streaming, so a two-condition rule
+> would light the button during a fan-out and the store would silently refuse the click. The
+> shipped signature is `canRetry(isLast:isTyping:isStreaming:isFanningOut:)`; every test below
+> takes the fourth argument, and `testRetryIsRefusedOnAnOlderReplyEvenWhenIdle` was deleted as
+> inert (its two busy flags forced `false` regardless of `isLast`).
 
 **Files:**
 - Create: `codepet/Models/MessageActionRules.swift`
@@ -1070,7 +1079,7 @@ EOF
 - Modify: `codepet/Views/Copilot/CopilotChatView.swift` (`:453-467`, `:639-684`)
 
 **Interfaces:**
-- Consumes: `MessageTranscript.plain(_:lang:)` / `.markdown(_:speaker:lang:)` (Task 1), `MessageActionRules.canRetry(isLast:isTyping:isStreaming:)` (Task 2), `CompanyStore.recordVote(messageId:vote:)` and `CopilotMessage.vote` (Task 3), `MessageFeedbackService.submit(vote:message:threadId:authManager:appState:)` (Task 4), `CompanyStore.activeThreadId` (`:71`), `headerName` (`:486`).
+- Consumes: `MessageTranscript.plain(_:lang:)` / `.markdown(_:speaker:lang:)` (Task 1), `MessageActionRules.canRetry(isLast:isTyping:isStreaming:isFanningOut:)` (Task 2), `CompanyStore.recordVote(messageId:vote:)` and `CopilotMessage.vote` (Task 3), `MessageFeedbackService.submit(vote:message:threadId:authManager:appState:)` (Task 4), `CompanyStore.activeThreadId` (`:71`), `headerName` (`:486`).
 - Produces: nothing downstream.
 
 - [ ] **Step 1: Add the environment objects and the Markdown-copy state**
@@ -1128,7 +1137,8 @@ Replace lines `:640-667` (the `HStack` contents, from `HStack(spacing: 2) {` thr
             }
             .disabled(!MessageActionRules.canRetry(isLast: isLast,
                                                    isTyping: companyStore.isCompanionTyping,
-                                                   isStreaming: companyStore.isStreaming))
+                                                   isStreaming: companyStore.isStreaming,
+                                                   isFanningOut: companyStore.isFanningOut))
             thumb(.up, icon: "hand.thumbsup", help: lang == .vi ? "Hữu ích" : "Good reply")
             thumb(.down, icon: "hand.thumbsdown", help: lang == .vi ? "Chưa tốt" : "Bad reply")
             Text(Self.age(of: message.createdAt, lang: lang))
@@ -1334,4 +1344,4 @@ Two spec details are deliberately not implemented as written: the spec's `plain`
 
 **Placeholder scan:** none — every step carries its code or its exact command.
 
-**Type consistency:** `MessageVote` (Task 3) is used by Tasks 4 and 6 with the same case names. `MessageTranscript.plain(_:lang:)` / `.markdown(_:speaker:lang:)` are defined in Task 1 and called with those labels in Task 6. `MessageActionRules.canRetry(isLast:isTyping:isStreaming:)` matches between Tasks 2 and 6. `MessageFeedbackPayload.build` and `MessageFeedbackService.submit` match between Tasks 4 and 6. `seedChatMessagesForTesting` is defined in Task 3 Step 4 and used in Task 3 Step 1.
+**Type consistency:** `MessageVote` (Task 3) is used by Tasks 4 and 6 with the same case names. `MessageTranscript.plain(_:lang:)` / `.markdown(_:speaker:lang:)` are defined in Task 1 and called with those labels in Task 6. `MessageActionRules.canRetry(isLast:isTyping:isStreaming:isFanningOut:)` matches between Tasks 2 and 6. `MessageFeedbackPayload.build` and `MessageFeedbackService.submit` match between Tasks 4 and 6. `seedChatMessagesForTesting` is defined in Task 3 Step 4 and used in Task 3 Step 1.

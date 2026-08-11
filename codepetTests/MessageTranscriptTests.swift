@@ -183,6 +183,18 @@ final class MessageTranscriptTests: XCTestCase {
         XCTAssertTrue(out.contains("Pricing update"))
         XCTAssertTrue(out.contains("To: founder@x.com"))
         XCTAssertTrue(out.contains("Here's the new pricing."))
+        // Order matters as much as presence. The view draws the card (heading, then body)
+        // and puts "To:" BELOW it, so a recipient emitted above the body pastes as a header
+        // stranded inside the message. `.contains` alone cannot see that.
+        let subject = out.range(of: "Pricing update")
+        let body = out.range(of: "Here's the new pricing.")
+        let recipient = out.range(of: "To: founder@x.com")
+        XCTAssertNotNil(subject)
+        XCTAssertNotNil(body)
+        XCTAssertNotNil(recipient)
+        XCTAssertTrue(subject!.lowerBound < body!.lowerBound, "subject leads the body")
+        XCTAssertTrue(body!.lowerBound < recipient!.lowerBound,
+                      "the recipient sits under the body, where the view puts it")
     }
 
     /// The recipient label must be localised to Vietnamese when requested.

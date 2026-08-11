@@ -15,8 +15,8 @@ import Foundation
 /// (`.line(lang)`, or the interview question) is a FALLBACK, emitted only when `text` is
 /// blank. At every real construction site (`CompanyStore.proposeRun`, `handleRoadmapProposal`,
 /// `askInterviewGap`) that sentence already IS `m.text` — appending it again would put the
-/// same sentence on the clipboard twice. The fallback only fires for a message the store
-/// built with no reply to carry the sentence.
+/// same sentence on the clipboard twice. The fallback is a defensive guard and does not imply
+/// a real path — no production call site currently produces that shape.
 ///
 /// `drafts` — the messages the companion wrote — are serialized in full: heading (when
 /// non-empty) then body, right after the prose, matching where `inlineActions` draws
@@ -51,6 +51,14 @@ enum MessageTranscript {
         for drafted in m.drafts {
             let heading = drafted.heading.trimmingCharacters(in: .whitespacesAndNewlines)
             if !heading.isEmpty { out.append(markdown ? "### \(heading)" : heading) }
+            // An email's heading is its subject; the recipient is carried as its own line
+            // to match what the view renders (CopilotChatView:752-758), so nothing is lost.
+            if drafted.channel == "email",
+               let to = drafted.to?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !to.isEmpty {
+                let label = lang == .vi ? "Gửi tới: " : "To: "
+                out.append(label + to)
+            }
             let body = drafted.body.trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty { out.append(body) }
         }

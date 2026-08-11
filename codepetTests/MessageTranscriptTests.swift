@@ -172,6 +172,41 @@ final class MessageTranscriptTests: XCTestCase {
         XCTAssertTrue(out.contains("Here's the new pricing."))
     }
 
+    /// Email drafts that have both a subject and a recipient must carry both — the subject
+    /// in the heading and the recipient as its own line, matching where the view renders them
+    /// (CopilotChatView:752-758), so nothing is lost to the clipboard.
+    func testPlainOnAnEmailDraftIncludesSubjectAndRecipient() {
+        var m = reply("Here's the draft.")
+        m.drafts = [MessageDraftDTO(channel: "email", to: "founder@x.com",
+                                    subject: "Pricing update", body: "Here's the new pricing.")]
+        let out = MessageTranscript.plain(m, lang: .en)
+        XCTAssertTrue(out.contains("Pricing update"))
+        XCTAssertTrue(out.contains("To: founder@x.com"))
+        XCTAssertTrue(out.contains("Here's the new pricing."))
+    }
+
+    /// The recipient label must be localised to Vietnamese when requested.
+    func testPlainOnAnEmailDraftUsesVietnameseLabelForRecipient() {
+        var m = reply("Đây là bản nháp.")
+        m.drafts = [MessageDraftDTO(channel: "email", to: "founder@x.com",
+                                    subject: "Cập nhật giá", body: "Giá mới là...")]
+        let out = MessageTranscript.plain(m, lang: .vi)
+        XCTAssertTrue(out.contains("Cập nhật giá"))
+        XCTAssertTrue(out.contains("Gửi tới: founder@x.com"))
+        XCTAssertTrue(out.contains("Giá mới là..."))
+    }
+
+    /// An email draft with a subject but no recipient must not emit a stray "To: " label.
+    func testPlainOnAnEmailDraftWithoutRecipientSkipsTheLabel() {
+        var m = reply("Draft without a recipient.")
+        m.drafts = [MessageDraftDTO(channel: "email", to: nil,
+                                    subject: "Subject only", body: "Body text.")]
+        let out = MessageTranscript.plain(m, lang: .en)
+        XCTAssertTrue(out.contains("Subject only"))
+        XCTAssertTrue(out.contains("Body text."))
+        XCTAssertFalse(out.contains("To: "))
+    }
+
     /// A draft with neither a subject nor a recipient has an empty `heading` — the transcript
     /// must skip it rather than emit a blank block, matching the card's own behaviour.
     func testPlainOnADraftedMessageWithEmptyHeadingSkipsIt() {

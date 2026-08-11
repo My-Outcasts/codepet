@@ -53,7 +53,7 @@ This change is almost entirely layout constants on a platform where the agent ca
 - Consumes: `CodepetTheme.inter(_:weight:)`, `CodepetTokens.faint`, `CodepetTokens.Space.sectionAbove`, `CodepetTokens.Space.sectionBelow` — all existing.
 - Produces:
   - `SectionEyebrow(_ text: String)` — a `View`. Uppercases its argument at render time.
-  - `DepartmentDetailView.tasksLabel(left: Int, total: Int, lang: UILanguage) -> String` — a `static func`, sentence-case. `SectionEyebrow` does the uppercasing, so this returns `"What needs doing · 4 of 6 left"`, not the shouted form. Task 2 renders it.
+  - `DepartmentDetailView.tasksLabel(left: Int, total: Int, lang: AppLanguage) -> String` — a `static func`, sentence-case. (The enum is `AppLanguage`, defined at `codepet/Models/AppLanguage.swift:10`. `UILanguage` is not a type — only `UILanguageKey`, the environment key, carries that name.) `SectionEyebrow` does the uppercasing, so this returns `"What needs doing · 4 of 6 left"`, not the shouted form. Task 2 renders it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -186,7 +186,7 @@ In `codepet/Views/Company/DepartmentDetailView.swift`, add this `static func` in
 
 ```swift
     /// Sentence case on purpose — `SectionEyebrow` uppercases at render time.
-    static func tasksLabel(left: Int, total: Int, lang: UILanguage) -> String {
+    static func tasksLabel(left: Int, total: Int, lang: AppLanguage) -> String {
         lang == .vi ? "Việc cần làm · còn \(left)/\(total)"
                     : "What needs doing · \(left) of \(total) left"
     }

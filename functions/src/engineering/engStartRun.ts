@@ -31,6 +31,9 @@ export interface SessionParams {
   resources: Array<Record<string, unknown>>;
   budget: SessionBudget;
   initial_events: Array<{ type: string; content: Array<{ type: "text"; text: string }> }>;
+  // Lets a reconciler find and heal this run from the session alone if the
+  // follow-up Firestore write (sessionId/status) never lands.
+  metadata: { runId: string; uid: string };
 }
 
 function systemFor(repo: RepoLink, brief: string): string {
@@ -64,6 +67,7 @@ export function buildSessionParams(args: {
   credits: number;
   ask: string;
   brief: string;
+  metadata: { runId: string; uid: string };
 }): SessionParams {
   return {
     // Overrides, not a bare id: the brief is per-founder, and versioning an
@@ -92,7 +96,8 @@ export function buildSessionParams(args: {
     // Seeding the kickoff here means the session is created already running.
     // Creating it idle and then sending would be two round trips and a window
     // where a founder sees a run that exists but is doing nothing.
-    initial_events: [{ type: "user.message", content: [{ type: "text", text: args.ask }] }]
+    initial_events: [{ type: "user.message", content: [{ type: "text", text: args.ask }] }],
+    metadata: args.metadata
   };
 }
 
@@ -148,7 +153,24 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     return;
   }
 
+  // The run record is created BEFORE the remote call, not after. The remote
+  // session starts billing against its budget the moment it exists; if we
+  // created it first and wrote the record second, a failed write would
+  // orphan a billing session with nothing pointing at it, and because the
+  // original code never awaited/handled that write, the rejection would go
+  // unhandled and the client would simply hang. Creating the record first
+  // means a founder can never see credits spent on a run that isn't tracked.
   const runRef = db.collection(`companies/${auth.uid}/engRuns`).doc();
+  await runRef.set({
+    ask,
+    repo: repo.url,
+    branch: branchName(runRef.id),
+    baseBranch: repo.defaultBranch,
+    status: "starting",
+    creditsSpent: 0,
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+
   const params = buildSessionParams({
     agentId,
     agentVersion,
@@ -156,7 +178,10 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     repo,
     credits,
     ask,
-    brief: typeof company.brief === "string" ? company.brief : ""
+    brief: typeof company.brief === "string" ? company.brief : "",
+    // Carried on the session itself, so a reconciler can find and heal this
+    // run even if every Firestore write below fails.
+    metadata: { runId: runRef.id, uid: auth.uid }
   });
 
   let sessionId: string;
@@ -164,20 +189,39 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     const session = await getEngClient().beta.sessions.create(params as never);
     sessionId = session.id;
   } catch (err) {
-    res.status(502).json({ error: "session_create_failed", detail: String(err) });
+    // Never put `err` — or String(err), or its .message — anywhere the
+    // client or a log can see it. The Anthropic SDK's HTTP-client errors
+    // commonly carry the request configuration that produced them, and the
+    // request we just made embeds the repo resource, which carries the
+    // founder's decrypted GitHub token. Serialising the error at all risks
+    // serialising that token into a response body or a log line. The body
+    // stays a fixed, generic shape; nothing about `err` is logged, named or
+    // otherwise, because there is no field we can name here that isn't part
+    // of the object that might carry the token.
+    try {
+      await runRef.update({ status: "failed" });
+    } catch {
+      // Best-effort: if this also fails, the doc is stuck at "starting",
+      // which is the pre-existing (and separately understood) failure mode
+      // for a Firestore outage, not something this fix needs to solve.
+    }
+    res.status(502).json({ error: "session_create_failed" });
     return;
   }
 
-  await runRef.set({
-    sessionId,
-    ask,
-    repo: repo.url,
-    branch: branchName(runRef.id),
-    baseBranch: repo.defaultBranch,
-    status: "running",
-    creditsSpent: 0,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
+  try {
+    await runRef.update({ sessionId, status: "running" });
+  } catch {
+    // The session exists and is billing; this write just didn't land. Don't
+    // hang the request over it — the client still gets its runId, and the
+    // session's own metadata (runId/uid) makes the run recoverable. Record
+    // the failure as a field a reconciler can query for, not a log line.
+    try {
+      await runRef.update({ reconcileNeeded: true, sessionId });
+    } catch {
+      // Nothing more we can do; the session's metadata is the last resort.
+    }
+  }
 
   res.status(200).json({ runId: runRef.id, sessionId });
 }

@@ -25,7 +25,7 @@ interface RepoDoc {
   sealed?: SealedToken;
 }
 
-const GITHUB_URL = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/;
+const GITHUB_URL = /^https:\/\/github\.com\/([^/\s?#]+)\/([^/\s?#]+?)(?:\.git)?\/?$/;
 
 export function parseRepoUrl(url: string): { owner: string; repo: string } | null {
   const m = GITHUB_URL.exec(url.trim());

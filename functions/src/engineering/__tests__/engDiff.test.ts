@@ -21,7 +21,7 @@ describe("parseCompare", () => {
 
   it("keeps a binary file with a null patch rather than dropping it", () => {
     const binary = parseCompare(compare).files.find((f) => f.path === "assets/logo.png");
-    expect(binary).toEqual({ path: "assets/logo.png", additions: 0, deletions: 0, status: "added", patch: null });
+    expect(binary).toEqual({ file: "assets/logo.png", path: "assets/logo.png", additions: 0, deletions: 0, status: "added", patch: null });
   });
 
   it("flags a truncated compare so the UI can say so", () => {
@@ -51,7 +51,7 @@ describe("parseCompare", () => {
     const secondResult = parseCompare({ files: [{}] });
 
     // Mutate the first result's files array.
-    firstResult.files.push({ path: "mutated.ts", additions: 0, deletions: 0, status: "added", patch: null });
+    firstResult.files.push({ file: "mutated.ts", path: "mutated.ts", additions: 0, deletions: 0, status: "added", patch: null });
 
     // The second call's files must still be empty — not corrupted by the first call.
     expect(secondResult.files).toHaveLength(0);
@@ -71,5 +71,25 @@ describe("parseCompare", () => {
 
     expect(result.files).toHaveLength(299);
     expect(result.truncated).toBe(true);
+  });
+
+  it("yields file: current name for a renamed file, while path shows the arrow form", () => {
+    const renamed = { files: [{ filename: "b.ts", previous_filename: "a.ts", additions: 0, deletions: 0, status: "renamed" }] };
+    const file = parseCompare(renamed).files[0];
+    expect(file.path).toBe("a.ts → b.ts");
+    expect(file.file).toBe("b.ts");
+  });
+
+  it("yields file equal to path for a non-renamed file", () => {
+    const result = parseCompare(compare);
+    for (const file of result.files) {
+      expect(file.file).toBe(file.path);
+    }
+  });
+
+  it("yields a correct file for a binary with no patch", () => {
+    const binary = parseCompare(compare).files.find((f) => f.path === "assets/logo.png");
+    expect(binary?.file).toBe("assets/logo.png");
+    expect(binary?.patch).toBe(null);
   });
 });

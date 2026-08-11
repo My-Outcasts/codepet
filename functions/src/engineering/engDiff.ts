@@ -10,6 +10,10 @@
 const COMPARE_FILE_CAP = 300;
 
 export interface FileDiff {
+  /** The file's current name — what consumers key off when fetching contents.
+   * For a rename, `file` is the new name; `path` is the display label. */
+  file: string;
+  /** Display label. For a rename, shows "old → new"; for other changes, equals `file`. */
   path: string;
   additions: number;
   deletions: number;
@@ -64,6 +68,7 @@ export function parseCompare(payload: unknown): DiffSummary {
     deletions += del;
 
     files.push({
+      file: typeof f.filename === "string" ? f.filename : "",
       path,
       additions: add,
       deletions: del,

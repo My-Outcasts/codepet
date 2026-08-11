@@ -18,6 +18,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The Cloud Functions half of the product. Added Aug 11, a day after the Swift job, because
+  # PR #89 changed `companyChat` and `runTask` — the two functions a founder's every chat turn
+  # and every task run go through — and its 502 tests were run on one laptop and reported in
+  # the PR body. That is the same "somebody's word for it" this workflow exists to end; the
+  # Swift job just happened to be written first.
+  #
+  # Its own job rather than steps on the macOS one: this needs Node, not Xcode, and an ubuntu
+  # runner bills at 1x against macOS's 10x. It also means a Swift failure and a functions
+  # failure are separately legible instead of one red X covering both.
+  functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: functions
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches `engines.node` in functions/package.json, which matches the deployed
+          # runtime (nodejs22). A CI runtime that drifts from production tests the wrong thing.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install
+        # `ci`, not `install`: it installs exactly the lockfile and fails if package.json and
+        # the lock disagree, which is a real signal rather than something to auto-resolve.
+        run: npm ci
+
+      - name: Typecheck
+        # Worth its own step. Deploys compile TS, so a type error here is a BROKEN DEPLOY
+        # waiting to happen — and it is invisible to Jest, which runs through ts-jest with
+        # its own leniency. This is exactly how the dept_key work first failed locally: tests
+        # green, `tsc` red, because the request-body interfaces had not learned the new field.
+        run: npx tsc --noEmit
+
+      - name: Test
+        # 34 suites / 502 tests as of a134421. JEST here, not vitest — the web app used vitest
+        # and confusing the two has cost time before.
+        run: npm test -- --ci
+
   test:
     # macOS runners bill at 10x Linux minutes, so this is deliberately ONE job that runs
     # the whole suite rather than a matrix. It is also why there is no scheduled trigger:

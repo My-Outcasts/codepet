@@ -17,11 +17,19 @@ and already draws copy, retry, and a relative timestamp. Two things make it unre
    is attached to the same view held at `.opacity(hovering ? 1 : 0)` (`:668`). Hovering the
    message does nothing; you have to find a blank 22×20pt strip below the prose. Nothing is
    pinned, so there is no first sighting that teaches the strip exists.
-2. **The row renders on plain-text replies only.** `messageActions` appears exactly once, at
-   `:1035`, inside the assistant branch of `textBubble`. Every card-bearing reply — a
-   deliverable draft, an exec log, a Virtual Company room, a run proposal, a roadmap
-   proposal, an interview — dispatches to a different branch of `body` (`:498-548`) and gets
-   no actions at all. These are the replies most worth rating and copying.
+2. **The row is scattered, not universal, and mostly buried mid-card.** `messageActions`
+   appears exactly once, at `:1035`, inside the assistant branch of `textBubble`. Four
+   card-bearing branches of `body` (`:498-548`) — a Virtual Company room, a first-run
+   greeting action, a run proposal, a roadmap proposal — render `textBubble` INSIDE their
+   own card, so each already gets a row wherever `text` is non-blank, which it always is at
+   their construction sites. It is just nested under that card's own button rather than at
+   the reply's own top level. Only three branches (verified against `git show
+   9b2783d:codepet/Views/Copilot/CopilotChatView.swift`) truly render no row at all: a
+   deliverable draft, the producing exec log, and an interview — plus the standalone
+   nav/setup/noted chips, which render only when `text` is blank and so never reach
+   `textBubble`. These are the replies most worth rating and copying either way: a row
+   nested one card deep is still gated by problem 1's invisible strip, and still isn't the
+   universal, pinned row the founder is asking for.
 
 Two adjacent facts, both established by reading the current tree rather than inferred:
 
@@ -33,8 +41,11 @@ Two adjacent facts, both established by reading the current tree rather than inf
   and no deploy.
 - **Retry is destructive.** `CompanyStore.retryReply` (`Managers/CompanyStore.swift:1262-1281`)
   walks back to the preceding `.me` message and calls `chatMessages.removeSubrange(askIndex...)`
-  — it drops the question and every turn after it. Harmless while nobody can find the button;
-  a data-loss footgun the moment it is pinned and discoverable.
+  — it drops the question and every turn after it. Harmless everywhere it already rendered —
+  not just on "plain-text replies," but on the four card branches above too — because the row
+  was `.opacity(0)` with a blank 22×20 hover target on every one of them alike; pinning it and
+  widening the hover target is what turns that latent risk live across all seven branches at
+  once, not something introduced fresh by extending coverage to the three that had nothing.
 
 ## What we are building
 
@@ -58,7 +69,7 @@ so that what it deletes is what it looks like it deletes.
 | Visibility | Hover-reveal, last reply pinned | Keeps the transcript quiet per the minimalist north-star, while the reply you are reading always shows its actions and teaches the affordance |
 | Coverage | Every assistant branch, not just `textBubble` | The card replies are the ones worth rating; a thumbs-down you cannot give on a bad draft is the gap |
 | Share | Copy as Markdown | No new OS surface, works offline, one code path, and the paste target is Notion or a PR |
-| Retry scope | Last reply only | Makes `removeSubrange(askIndex...)` drop exactly the last question and its answer. No store change, no confirm modal in a quiet row |
+| Retry scope | Last reply AND a non-blank `founderAsk` | "Newest message" is not the same claim as "answer to the founder's last ask" — roughly 15 store paths append a companion message with no ask before it. `isLast` alone makes `removeSubrange(askIndex...)` drop the wrong turn on those; gating on `founderAsk` too makes it drop exactly the last question and its answer, on every message where retry is offered. No store change, no confirm modal in a quiet row |
 | Vote storage | Existing `feedback` collection | Rule already permits the shape; a new `FeedbackFeature` case keeps thumbs out of the existing `companionChat` 5-face stats |
 
 ## Architecture
@@ -102,8 +113,8 @@ existing `doc.on.doc` and `arrow.clockwise`.
 
 ```swift
 enum MessageTranscript {
-    static func plain(_ m: CopilotMessage) -> String
-    static func markdown(_ m: CopilotMessage, speaker: String) -> String
+    static func plain(_ m: CopilotMessage, lang: AppLanguage) -> String
+    static func markdown(_ m: CopilotMessage, speaker: String, lang: AppLanguage) -> String
 }
 ```
 
@@ -114,17 +125,34 @@ reads the payload the branch actually rendered, in the same precedence order as 
 
 | Payload | `plain` yields | `markdown` adds |
 |---|---|---|
-| `draft` | title, then body | `## title`, body fenced if it is code or structured |
-| `vcRun` | the synthesis | `## title`, then per-seat `**dept** — position` |
-| `runProposal` / `roadmapProposal` | the sentence | nothing beyond the speaker line |
-| `interview` | the question | nothing beyond the speaker line |
-| `execSteps` | title, then the step list | steps as `- [x]` items |
+| `drafts` | each draft's heading, then its body | heading as `### heading` |
+| `draft` | title, then body | `## title` |
+| `vcRun` | the recommendation | per-seat `**dept** — position` |
+| `execSteps` | the step list | steps as `- [x]` items |
+| `runProposal` / `roadmapProposal` | the sentence, **only when `text` is blank** | nothing beyond the speaker line |
+| `interview` | the question, **only when `text` is blank** | nothing beyond the speaker line |
 | otherwise | `text` | `text` |
 
 `markdown` prefixes a `**speaker**` line using the bubble's existing `headerName` (`:486-492`),
 so a specialist reply pastes as `**Glitch · Engineering**`. Where a branch carries both text and
 a payload (the `vcRun` and `firstRunAction` branches render `textBubble` plus a card), both are
 serialized, text first, matching what is on screen.
+
+**The last three rows are fallbacks, not additions,** and that distinction is the difference
+between a correct clipboard and a doubled one. At every site that builds those three messages
+the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1940`)
+constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1550`) assigns
+`chatMessages[i].text = proposal.line(language)`, and `askInterviewGap` (`:346`) constructs
+`text: q.ask`. Appending the line unconditionally therefore prints it twice. Worse for
+`roadmapProposal`: when the model wrote its own prose, `text` keeps that prose and the card
+shows only the prose, so an unconditional append would inject a sentence that was never on
+screen at all. `draft` and `vcRun` do **not** take the fallback rule — they are built with
+`text: ""` or with genuinely additional prose, and their payload really is separate content.
+
+Two rows deliberately claim less than an earlier draft of this table did. A draft body is
+**not** fenced: `DeliverableKind` cannot distinguish prose from code, and guessing would
+corrupt prose. A room has **no** `## title`: no title field exists on `VCBrief` or
+`VirtualCompanyRunState`.
 
 Plain `Copy` switches from raw `message.text` to `MessageTranscript.plain(message)`. The
 existing 1.4s "Copied" / "Đã sao chép" acknowledgement (`:650-658`) is reused for both copy
@@ -178,12 +206,29 @@ the transcript is out of scope.
 ### Retry
 
 ```swift
-.disabled(!isLast || companyStore.isCompanionTyping || companyStore.isStreaming)
+let retryEnabled = MessageActionRules.canRetry(isLast: isLast,
+                                               isTyping: companyStore.isCompanionTyping,
+                                               isStreaming: companyStore.isStreaming,
+                                               isFanningOut: companyStore.isFanningOut,
+                                               founderAsk: message.founderAsk)
+...
+.disabled(!retryEnabled)
 ```
 
-`CompanyStore.retryReply` is unchanged. With retry confined to the last reply,
+`isLast` alone is not "answers the founder's last ask" — that assumption is false whenever a
+store path appends a companion message with no ask before it (a Roadmap "Run" proposal, a
+finished run's draft, a fan-out row, byte's first-run greeting, ...): roughly 15 such paths
+exist, each becoming the newest message in turn. Retry offered on one of those deletes
+whatever question and answer actually preceded it, several turns back, then re-asks it and
+spends credits on a question nobody just asked.
+
+`canRetry` adds a fourth gate, `founderAsk` (`CopilotMessage.founderAsk`) — non-nil only on
+the reply `CompanyStore.sendChat` produced for a typed ask, stamped there and nowhere else.
+With retry confined to `isLast && isFanningOut == false && a non-blank founderAsk`,
 `removeSubrange(askIndex...)` removes exactly the founder's last question and its answer,
-which is what a retry button under the last answer visibly promises.
+which is what a retry button under the last answer visibly promises. `CompanyStore.retryReply`
+itself is otherwise unchanged; the added guard lives entirely in `canRetry` and in the
+`founderAsk` stamped by `sendMessage`.
 
 ## Testing
 

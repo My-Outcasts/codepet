@@ -542,7 +542,8 @@ final class CompanyStore: ObservableObject {
         let words = ask.isEmpty ? text : ask
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
-                          display: words)
+                          display: words,
+                          founderAsk: words)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -757,6 +758,8 @@ final class CompanyStore: ObservableObject {
         }
     }
 
+    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
+
     /// Core of a chat send: append the founder's message, stream a grounded companion
     /// reply (fallback to the non-streaming client), and handle any `run_task_id` the
     /// reply carries. Shared by `sendChat` (typed founder text) and `walkThroughTask`
@@ -796,10 +799,15 @@ final class CompanyStore: ObservableObject {
     /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
     /// The model still receives the shaped text — the mode is a real instruction — but the
     /// transcript, the history built from it, and the thread title derived from it are hers.
-    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
-
+    ///
+    /// `founderAsk` is stamped onto the reply's own `CopilotMessage.founderAsk` — see that
+    /// property's doc for why. Only `sendChat` passes it, for the same reason it alone passes
+    /// `convene`: `walkThroughTask`'s ask is composed on the founder's behalf, not typed by
+    /// her, so its reply must not become retryable by a rule that means "answers what she
+    /// asked."
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
-                             convene: String? = nil, display: String? = nil) async {
+                             convene: String? = nil, display: String? = nil,
+                             founderAsk: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
@@ -858,7 +866,8 @@ final class CompanyStore: ObservableObject {
         // from, so the "Name · Dept" header now names whoever actually wrote the words.
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
-                                            companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                            companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                            founderAsk: founderAsk))
         isStreaming = true
 
         // Fan-out: the room is convened by the router's escape hatch, not by a
@@ -1256,6 +1265,24 @@ final class CompanyStore: ObservableObject {
         }
         _ = await produceDraftInline(for: task, cid: cid, language: language)
     }
+
+    /// Record the founder's thumb on a reply.
+    ///
+    /// `chatMessages` is `private(set)`, so this is the only way in. The Firestore write is
+    /// the caller's job (`MessageFeedbackService`) — this keeps the store free of Firebase
+    /// and keeps the vote's on-screen state testable without a configured `FirebaseApp`.
+    func recordVote(messageId: String, vote: MessageVote) {
+        guard let index = chatMessages.firstIndex(where: { $0.id == messageId }) else { return }
+        chatMessages[index].vote = vote
+    }
+
+    #if DEBUG
+    /// Seed the transcript directly. Tests only — `chatMessages` is `private(set)` and the
+    /// real paths all go through the network.
+    func seedChatMessagesForTesting(_ messages: [CopilotMessage]) {
+        chatMessages = messages
+    }
+    #endif
 
     /// Re-ask the question that produced `messageId`, replacing the reply.
     ///

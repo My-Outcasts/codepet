@@ -17,6 +17,20 @@ struct CopilotChatView: View {
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
+    /// Bumped by every autoscroll trigger in `messageList` — new messages, the fan-out row,
+    /// a growing Virtual Company room, the typing indicator, and the coding run's own start
+    /// and step stream — so `CopilotBubble` can reset a stranded `hovering` regardless of
+    /// which of the six caused the scroll. Not wired to the individual signals
+    /// (`chatMessages.count`, `activeAgentRuns.count`, `vcRunCardCount`, `isCompanionTyping`,
+    /// `CodingRunCoordinator.$run`/`.$steps`) because those six share nothing except "this
+    /// scrolled the list" — `activeAgentRuns`, the VC room, and the coding run all move the
+    /// scroll position without touching `chatMessages.count` (the fan-out's own append —
+    /// `CompanyStore.swift:1855`; the room mutates `vcRun` by id; the coding run renders
+    /// inline next to its anchor message and its step stream fires on every step), which is
+    /// exactly the gap that let a hovered older reply get scrolled out from under the pointer
+    /// with its action row stuck lit (`.onHover(false)` never firing —
+    /// `CodepetTokens.swift:211-214`).
+    @State private var scrollGeneration = 0
     /// Composer mode (Ask/Plan/Build) — pure client-side message shaping; `.build`
     /// is the streamlined replacement for the old full-width "Let's build" button.
     @State private var mode: ChatMode = .ask
@@ -209,7 +223,9 @@ struct CopilotChatView: View {
                     // the transcript read as one undivided block.
                     ForEach(Array(companyStore.chatMessages.enumerated()), id: \.element.id) { idx, m in
                         let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
-                        CopilotBubble(message: m)
+                        CopilotBubble(message: m,
+                                      isLast: idx == companyStore.chatMessages.count - 1,
+                                      scrollGeneration: scrollGeneration)
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
                         if companyStore.codingRun.run != nil,
@@ -238,12 +254,15 @@ struct CopilotChatView: View {
                 .padding(.bottom, ChatRhythm.transcriptBottom)
             }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
+                scrollGeneration &+= 1
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
             }
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
+                scrollGeneration &+= 1
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
             }
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
+                scrollGeneration &+= 1
                 if count > 0 { withAnimation { proxy.scrollTo("agents", anchor: .bottom) } }
             }
             // A Virtual Company run is ONE message that then grows for 30–60s, so
@@ -254,6 +273,7 @@ struct CopilotChatView: View {
             // ROOM's id, not to the transcript bottom: the room is inserted under its own
             // question, so the bottom may be an unrelated later turn.
             .onChange(of: vcRunCardCount) { _, count in
+                scrollGeneration &+= 1
                 guard count > 0, let id = vcRunMessage?.id else { return }
                 withAnimation { proxy.scrollTo(id, anchor: .bottom) }
             }
@@ -264,6 +284,7 @@ struct CopilotChatView: View {
                 DispatchQueue.main.async {
                     codingRunTick &+= 1
                     if companyStore.codingRun.run != nil {
+                        scrollGeneration &+= 1
                         withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
                     }
                 }
@@ -272,6 +293,13 @@ struct CopilotChatView: View {
                 DispatchQueue.main.async {
                     codingRunTick &+= 1
                     if companyStore.codingRun.run != nil {
+                        // `$steps` fires on every step of a coding run, and `CodeRunCardView`
+                        // renders inline right after its anchor message, so the transcript
+                        // really does reflow here — this bridge used to scroll without
+                        // bumping `scrollGeneration`, which left a hovered older reply's
+                        // action row stuck lit for the rest of the session (finding 3, the
+                        // 2026-08-11 whole-branch review).
+                        scrollGeneration &+= 1
                         withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
                     }
                 }
@@ -452,10 +480,20 @@ struct ThreadListView: View {
 /// deliverable card (Approve/Redo) when the message carries a draft.
 struct CopilotBubble: View {
     let message: CopilotMessage
+    /// True for the newest message in the transcript. Pins the action row (so the reply
+    /// being read always shows its affordances) and gates retry, whose store method deletes
+    /// every turn after the ask.
+    let isLast: Bool
+    /// Bumped by `messageList` on every one of its six autoscroll triggers. Watched only to
+    /// reset a stranded `hovering` — see the comment on `body`'s `.onChange` below.
+    let scrollGeneration: Int
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
     @Environment(\.colorScheme) private var scheme
+    /// For the identity fields on a thumb — the same ones `FeatureFeedbackManager` sends.
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var appState: AppState
     @State private var showDetail = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
@@ -463,7 +501,11 @@ struct CopilotBubble: View {
     @State private var showFirstTake = false
     /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
     @State private var hovering = false
+    /// Two separate flags (rather than one "which copy" enum) because `copy(_:setting:)`
+    /// clears both before setting either — see that helper's comment for why they must be
+    /// mutually exclusive rather than independent, which is how this pair started.
     @State private var copied = false
+    @State private var copiedMarkdown = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
@@ -495,7 +537,64 @@ struct CopilotBubble: View {
         return PetCharacter.all[id]?.color ?? companionAccent
     }
 
+    /// The action row belongs to the MESSAGE, not to one branch of this chain. It used to be
+    /// called from inside `textBubble`, so a draft, exec log, room or proposal reply — the
+    /// replies most worth copying and rating — had no actions at all. Wrapping `content` is
+    /// what makes the row universal without touching a single payload branch.
+    ///
+    /// `.onHover` sits here rather than on the row (where it used to, at `messageActions`),
+    /// because the row is held at `opacity(0)`: the target was a blank 22x20 strip below the
+    /// prose, which is why the founder read the actions as missing entirely.
     var body: some View {
+        if showsActions {
+            VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+                content
+                messageActions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onHover { hovering = $0 }
+            // `.onHover(false)` does not fire when a view disappears from under the pointer
+            // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on SIX separate
+            // triggers, only one of which (`chatMessages.count` itself) is a change to the
+            // message array — the other five (the typing indicator, the fan-out row via
+            // `activeAgentRuns.count`, a growing Virtual Company room via `vcRunCardCount`,
+            // and the coding run's own start and step stream) move the scroll position while
+            // leaving `chatMessages` untouched. So: the founder reads an older reply with the
+            // pointer resting on it, any of the six fires, the transcript scrolls that reply
+            // out from under the cursor with `hovering` stuck true — its row stays lit next to
+            // the newly pinned one until the pointer happens to re-enter and leave it.
+            // `scrollGeneration` is bumped by all six in `messageList`, with no signal in
+            // common besides "this scrolled the list" — watching it here (rather than each of
+            // the six individually) clears `hovering` before it can be seen, no matter which
+            // one fired. The coding run's step bridge used to scroll WITHOUT bumping this,
+            // even though `CodeRunCardView` renders inline right after its anchor message and
+            // every step really does reflow the transcript (finding 3, 2026-08-11 review).
+            .onChange(of: scrollGeneration) { _, _ in hovering = false }
+        } else {
+            content
+        }
+    }
+
+    /// Whether this message gets an action row at all: not the founder's own words (nothing
+    /// to copy/retry/thumb on those), not still being produced (a reply mid-stream has
+    /// nothing to act on yet), and not empty once rendered. `hasActionableContent` also
+    /// catches the streaming shell: a message with no text yet renders `EmptyView()` from
+    /// `textBubble` (see its own comment below), and without this guard the pinned row on
+    /// the newest message would draw floating with nothing above it.
+    private var showsActions: Bool {
+        !isMe && !message.producing && hasActionableContent
+    }
+
+    /// A message shell can reach `textBubble` with no text yet — while the companion is
+    /// still typing (see its own comment there). `MessageTranscript.plain` is the emptiness
+    /// oracle: if there is nothing to copy, there is nothing to rate or retry either, and a
+    /// standalone chip (`navChip` / `setupSuggestion` / `noted`) has nothing worth acting on
+    /// regardless — this also suppresses the row on those.
+    private var hasActionableContent: Bool {
+        !MessageTranscript.plain(message, lang: lang).isEmpty
+    }
+
+    @ViewBuilder private var content: some View {
         if message.producing {
             if let steps = message.execSteps, !steps.isEmpty {
                 ExecLogRow(taskTitle: message.text, deptName: message.deptName, steps: steps,
@@ -627,60 +726,211 @@ struct CopilotBubble: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Per-message actions, revealed on hover — the row both references put under an answer
-    /// (copy · retry · a timestamp). Deliberately only two buttons: thumbs would need a
-    /// `feedback` collection and a Firestore rule that do not exist natively yet, and a control
-    /// that silently drops the founder's opinion is worse than no control. Speak and share are
-    /// the same judgement — offered when they do something.
+    /// Per-message actions, revealed on hover and pinned on the newest reply — the row both
+    /// references put under an answer. Copy, copy as Markdown, try again, a thumb either way,
+    /// and the age of the turn.
     ///
-    /// Hover-only because an answer is for reading; the affordances belong to the moment you
-    /// reach for them, not to the reading. `opacity` rather than a conditional so the row's
-    /// height never changes under the cursor.
+    /// Hover-reveal because an answer is for reading; the affordances belong to the moment you
+    /// reach for them. Pinned on the last reply because hover alone taught nobody the row was
+    /// there — the target was this row itself, held at `opacity(0)`.
     @ViewBuilder private var messageActions: some View {
+        let retryEnabled = MessageActionRules.canRetry(isLast: isLast,
+                                                       isTyping: companyStore.isCompanionTyping,
+                                                       isStreaming: companyStore.isStreaming,
+                                                       isFanningOut: companyStore.isFanningOut,
+                                                       founderAsk: message.founderAsk)
+        // For the disabled tooltip only — which of `canRetry`'s conditions is the reason.
+        // A blank/nil `founderAsk` is the COMMONEST disabled case now that retry pins to the
+        // newest message: the first-run greeting, a run proposal, a room card, a draft card
+        // are all `isLast` with no ask before them, so "only applies to the newest reply" is
+        // something the founder can see is false on the very message she's looking at.
+        let hasFounderAsk = !(message.founderAsk ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         HStack(spacing: 2) {
-            actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(message.text, forType: .string)
-                copied = true
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_400_000_000)
-                    copied = false
-                }
+            // The icon ITSELF becomes the acknowledgement — see `actionIcon`'s `tint`.
+            actionIcon(copied ? "checkmark" : "doc.on.doc",
+                       help: lang == .vi ? "Sao chép" : "Copy",
+                       tint: copied ? CodepetTheme.accentTeal : nil) {
+                copy(MessageTranscript.plain(message, lang: lang), setting: $copied)
             }
-            .overlay(alignment: .leading) {
-                if copied {
-                    Text(lang == .vi ? "Đã sao chép" : "Copied")
-                        .font(.pixelSystem(size: 9, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentTeal)
-                        .offset(x: 22)
-                        .transition(.opacity)
-                }
+            // Distinct from Copy: the founder's paste target for a draft or a room is
+            // Notion or a PR, and plain text loses the headings and the per-seat structure.
+            actionIcon(copiedMarkdown ? "checkmark" : "square.and.arrow.up",
+                       help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown",
+                       tint: copiedMarkdown ? CodepetTheme.accentTeal : nil) {
+                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang), setting: $copiedMarkdown)
             }
-            actionIcon("arrow.clockwise", help: lang == .vi ? "Hỏi lại" : "Try again") {
+            actionIcon("arrow.clockwise",
+                       help: retryEnabled
+                           ? (lang == .vi ? "Hỏi lại" : "Try again")
+                           : !hasFounderAsk
+                               // No founder ask precedes this reply at all — true regardless of
+                               // `isLast`, and the common case (see the `let` above).
+                               ? (lang == .vi ? "Chỉ áp dụng cho câu trả lời cho điều bạn đã hỏi"
+                                              : "Try again only applies to a reply to something you asked")
+                               : !isLast
+                                   // Has an ask, just isn't the newest reply — an older one
+                                   // looked equally live (finding 4) with no way to tell it was
+                                   // inert until tapped.
+                                   ? (lang == .vi ? "Chỉ hỏi lại được câu trả lời mới nhất"
+                                                  : "Try again only applies to the newest reply")
+                                   // Newest, has an ask, just still busy (typing/streaming/
+                                   // fanning out) — neither of the above is true, so neither
+                                   // wording is.
+                                   : (lang == .vi ? "Đợi xong rồi hỏi lại"
+                                                  : "Wait for this to finish before trying again"),
+                       isEnabled: retryEnabled) {
                 Task { await companyStore.retryReply(messageId: message.id, language: lang) }
             }
-            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            .disabled(!retryEnabled)
+            thumb(.up, icon: "hand.thumbsup", help: lang == .vi ? "Hữu ích" : "Good reply")
+            thumb(.down, icon: "hand.thumbsdown", help: lang == .vi ? "Chưa tốt" : "Bad reply")
             Text(Self.age(of: message.createdAt, lang: lang))
                 .font(.pixelSystem(size: 9))
                 .foregroundColor(CodepetTheme.mutedText)
                 .padding(.leading, 4)
         }
-        .opacity(hovering ? 1 : 0)
+        // Pinned on the newest reply so the affordance is discoverable at all — hover alone
+        // taught nobody it existed. Still `opacity` rather than a conditional, so the row's
+        // height never changes under the cursor.
+        .opacity(hovering || isLast ? 1 : 0)
+        // `.opacity(0)` does NOT stop hit-testing — the row stays clickable while invisible.
+        // `scrollGeneration`'s `.onChange` (above) forces `hovering` false WHILE the pointer is
+        // still resting on the row (any of the six scroll bumps, including a coding run's
+        // per-step bridge, can fire mid-read), so without this the founder can click exactly
+        // where she believes there is nothing. Copy/Copy as Markdown landing on the wrong
+        // reply is a shrug; a thumb is not — it is a PERMANENT `feedback` write, and
+        // `firestore.rules:42` denies both read and update, so a vote recorded against the
+        // wrong reply this way can never be corrected.
+        .allowsHitTesting(hovering || isLast)
+        // Two `.animation` modifiers, not one value: `isLast` flips (1 → 0) the instant a new
+        // reply lands and becomes the pinned one, on a row `hovering` never touched, so without
+        // observing `isLast` too that un-pin snapped in a single frame while everything else on
+        // screen eased.
         .animation(.easeInOut(duration: 0.12), value: hovering)
-        .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isLast)
     }
 
-    private func actionIcon(_ system: String, help: String,
+    /// `isEnabled` is separate from the caller's `.disabled(...)`: `.disabled` only changes
+    /// behaviour (SwiftUI dims a `Button`'s default styling, but this icon paints its own
+    /// `foregroundColor`, which overrides that and always looked the same either way). Without
+    /// this parameter a disabled Try again on an older reply looked exactly as live as an
+    /// enabled one — the founder tapped it and nothing happened, with no visual reason why.
+    ///
+    /// `tint` overrides the resting ink, which is how a copy acknowledges itself: the icon
+    /// swaps to a teal `checkmark` for 1.4s instead of floating a "Copied" label beside it.
+    /// The label was an `.overlay(alignment: .leading)` offset by exactly the icon's own 22pt
+    /// width, so it began at the icon's right edge and ran straight over the NEXT control —
+    /// on a five-icon row that meant it covered Copy as Markdown, and it was clipped to
+    /// "Cop.." besides, because an overlay does not expand its parent's bounds. Founder-
+    /// verified on screen, Aug 11. Swapping the icon is also the pattern this repo already
+    /// uses for a copy confirm (`MessageDraftCard.swift:144`).
+    private func actionIcon(_ system: String, help: String, isEnabled: Bool = true,
+                            tint: Color? = nil,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(CodepetTheme.mutedText)
+                .foregroundColor(tint ?? CodepetTheme.mutedText.opacity(isEnabled ? 1 : 0.35))
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+
+    /// Puts `string` on the pasteboard and shows `flag`'s acknowledgement for 1.4s.
+    ///
+    /// Clears BOTH flags before setting the one requested, so only one checkmark is ever lit:
+    /// `copied` and `copiedMarkdown` were fully independent, each on its own timer, and Copy
+    /// then Copy as Markdown inside 1.4s showed two acknowledgements at once.
+    private func copy(_ string: String, setting flag: Binding<Bool>) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        copied = false
+        copiedMarkdown = false
+        flag.wrappedValue = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            flag.wrappedValue = false
+        }
+    }
+
+
+    /// A thumb fills once given, and the other stays live so a misclick is correctable.
+    ///
+    /// The correction writes a SECOND `feedback` document — `firestore.rules:42` denies
+    /// `update` — which the reader resolves by latest `timestamp`. Voting the same way twice
+    /// is a no-op rather than a duplicate write.
+    ///
+    /// Gated on `isCompanionTyping`/`isStreaming` — the same busy state as retry, minus
+    /// `isFanningOut` — AND on `isLast`, because those two flags are global store state: without
+    /// `isLast` a thumb on a complete reply from five turns ago went dead the moment any new
+    /// turn started streaming, disabling the whole transcript's history over one in-flight
+    /// reply. The only half-written reply is the pinned/newest one, so only it needs to gate —
+    /// same scoping as `canRetry` above. A fan-out does not make the reply already on screen
+    /// incomplete, so voting on it stays valid even while `isLast` — that is a different
+    /// question from what `retryReply` will accept, which is why `canRetry` still checks
+    /// `isFanningOut` too and this does not.
+    ///
+    /// Also gated on `ownRoomStillRunning`, independently of the two global flags above:
+    /// a Virtual Company room runs inside `startVirtualCompanyRun`'s own `Task {}`, which
+    /// INHERITS that call's `@MainActor` isolation (`CompanyStore.swift:1016-1021`) rather than
+    /// running detached — only `vcRunner`'s own I/O is `Task.detached`. Both `isCompanionTyping`
+    /// and `isStreaming` still clear while the room keeps filling for 30–60s (the composer is
+    /// deliberately free during that window). The
+    /// room lands as its OWN message (inserted under its question, not appended), carrying
+    /// a non-blank handoff line, so its row is pinned and votable from the very first
+    /// routing card — before the verdict a thumbs-down there rates a room that hasn't
+    /// spoken yet. Read straight off `message.vcRun.phase`, so a room convening elsewhere
+    /// in the transcript never blocks voting on an unrelated reply.
+    @ViewBuilder private func thumb(_ vote: MessageVote, icon: String, help: String) -> some View {
+        let chosen = message.vote == vote
+        // Computed ONCE and reused for the dim, the tooltip, AND `.disabled` below, rather than
+        // repeating the expression three times. Same drift `actionIcon`'s own note warns about
+        // (`.disabled` alone does not dim a `foregroundColor`-painted icon), but on this row
+        // specifically: `ownRoomStillRunning` opens the app's LONGEST disabled window (a whole
+        // room convening, 30–60s), long enough that a founder who sees no dimming and no
+        // explanation clicks it more than once believing nothing happened.
+        let disabled = (isLast && (companyStore.isCompanionTyping || companyStore.isStreaming)) || ownRoomStillRunning
+        Button {
+            guard !chosen else { return }
+            companyStore.recordVote(messageId: message.id, vote: vote)
+            MessageFeedbackService.submit(vote: vote, message: message,
+                                          threadId: companyStore.activeThreadId ?? "",
+                                          authManager: authManager, appState: appState)
+        } label: {
+            Image(systemName: chosen ? "\(icon).fill" : icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(chosen ? CodepetTheme.accentTeal
+                                         : CodepetTheme.mutedText.opacity(disabled ? 0.35 : 1))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(disabled ? waitHelp(forRoom: ownRoomStillRunning) : help)
+        .disabled(disabled)
+    }
+
+    /// The tooltip a disabled thumb shows instead of "Good reply"/"Bad reply" — that wording
+    /// promised an action that a click, right then, does nothing. `forRoom` distinguishes the
+    /// 30–60s room window (`ownRoomStillRunning`) from the few-second one (this reply itself
+    /// still typing/streaming), because "the room" is only true of the former.
+    private func waitHelp(forRoom: Bool) -> String {
+        if forRoom {
+            return lang == .vi ? "Đợi phòng họp này hoàn tất trước khi đánh giá"
+                               : "Wait for the room to finish before rating"
+        }
+        return lang == .vi ? "Đợi câu trả lời này hoàn tất trước khi đánh giá"
+                           : "Wait for this reply to finish before rating"
+    }
+
+    /// True while THIS message's own Virtual Company room is still convening — see
+    /// `thumb`'s doc for why the two global chat flags don't cover this window. `vcRun` is
+    /// only non-nil on the room's own message (`publishRunProgress` inserts it separately
+    /// from byte's fast answer), so this never reads another message's run.
+    private var ownRoomStillRunning: Bool {
+        guard let phase = message.vcRun?.phase else { return false }
+        return phase != .finished && phase != .failed
     }
 
     /// "just now" until a minute has passed, then minutes, then hours — the reference's
@@ -1032,7 +1282,6 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     inlineActions
-                    messageActions
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

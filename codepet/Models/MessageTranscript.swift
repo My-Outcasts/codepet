@@ -4,11 +4,25 @@ import Foundation
 /// Serializes one chat message for the clipboard.
 ///
 /// Copy used to send `message.text` straight to the pasteboard. That is correct only for
-/// a plain-text reply: a draft-card, exec-log, room or proposal reply carries its content
-/// in a payload and frequently has a blank `text` — `textBubble` renders `EmptyView()` for
-/// exactly that case. Once the action row appears on those branches, copying `text` would
-/// return "". So this reads the payloads in the same precedence order `CopilotBubble.content`
-/// renders them, and text (when present) always leads, because that is what is on screen.
+/// a plain-text reply: a draft-card, exec-log, room, drafted-message or proposal reply
+/// carries its content in a payload and frequently has a blank `text` — `textBubble` renders
+/// `EmptyView()` for exactly that case. Once the action row appears on those branches, copying
+/// `text` would return "". So this reads the payloads in the same precedence order
+/// `CopilotBubble.body` renders them, and text (when present) always leads, because that is
+/// what is on screen.
+///
+/// `runProposal`, `roadmapProposal` and `interview` are the exception: their payload sentence
+/// (`.line(lang)`, or the interview question) is a FALLBACK, emitted only when `text` is
+/// blank. At every real construction site (`CompanyStore.proposeRun`, `handleRoadmapProposal`,
+/// `askInterviewGap`) that sentence already IS `m.text` — appending it again would put the
+/// same sentence on the clipboard twice. The fallback only fires for a message the store
+/// built with no reply to carry the sentence.
+///
+/// `drafts` — the messages the companion wrote — are serialized in full: heading (when
+/// non-empty) then body, right after the prose, matching where `inlineActions` draws
+/// `draftedMessages` on screen. `draft` and `vcRun` are unaffected by the fallback rule: they
+/// are always constructed with blank or genuinely additional prose, so their content is
+/// separate from `text` and always appended.
 ///
 /// Pure by design: no SwiftUI, no Firebase, no `CompanyStore`. It is the half of the action
 /// row that can be tested without the XCTest host that crashes on `@MainActor` deallocation.
@@ -33,6 +47,13 @@ enum MessageTranscript {
 
         let text = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { out.append(text) }
+
+        for drafted in m.drafts {
+            let heading = drafted.heading.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !heading.isEmpty { out.append(markdown ? "### \(heading)" : heading) }
+            let body = drafted.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty { out.append(body) }
+        }
 
         if let draft = m.draft {
             out.append(markdown ? "## \(draft.title)" : draft.title)
@@ -63,9 +84,13 @@ enum MessageTranscript {
             }.joined(separator: "\n"))
         }
 
-        if let proposal = m.runProposal { out.append(proposal.line(lang)) }
-        if let proposal = m.roadmapProposal { out.append(proposal.line(lang)) }
-        if let gap = m.interview {
+        // Fallback only: at every real construction site this sentence already IS `m.text`
+        // (`CompanyStore.proposeRun`, `handleRoadmapProposal`, `askInterviewGap`), so emitting
+        // it here too would duplicate what's already on screen. This only fires for a message
+        // the store built with no reply to carry the sentence.
+        if text.isEmpty, let proposal = m.runProposal { out.append(proposal.line(lang)) }
+        if text.isEmpty, let proposal = m.roadmapProposal { out.append(proposal.line(lang)) }
+        if text.isEmpty, let gap = m.interview {
             out.append(EnrichInterview.question(for: gap, language: lang).ask)
         }
 

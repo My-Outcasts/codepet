@@ -534,7 +534,7 @@ EOF
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `parseCompare(payload: unknown): DiffSummary`, `type FileDiff = { path: string; additions: number; deletions: number; status: string; patch: string | null }`, `type DiffSummary = { files: FileDiff[]; additions: number; deletions: number; truncated: boolean }`
+- Produces: `parseCompare(payload: unknown): DiffSummary`, `type FileDiff = { file: string; path: string; additions: number; deletions: number; status: string; patch: string | null }`, `type DiffSummary = { files: FileDiff[]; additions: number; deletions: number; truncated: boolean }`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -610,6 +610,10 @@ Expected: FAIL — `Cannot find module '../engDiff'`
 const COMPARE_FILE_CAP = 300;
 
 export interface FileDiff {
+  /** The file's current name — what consumers key off when fetching contents.
+   * For a rename, `file` is the new name; `path` is the display label. */
+  file: string;
+  /** Display label. For a rename, shows "old → new"; otherwise equals `file`. */
   path: string;
   additions: number;
   deletions: number;
@@ -626,20 +630,32 @@ export interface DiffSummary {
   truncated: boolean;
 }
 
-const EMPTY: DiffSummary = { files: [], additions: 0, deletions: 0, truncated: false };
+// A function, not a shared `const EMPTY` returned via `{ ...EMPTY }`. A spread is
+// a SHALLOW copy, so every empty result would hand out the same `files` array
+// instance — one caller doing `result.files.push(...)` would corrupt the constant
+// for the life of the warm process, including later calls with good payloads.
+function emptyDiffSummary(): DiffSummary {
+  return { files: [], additions: 0, deletions: 0, truncated: false };
+}
 
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 export function parseCompare(payload: unknown): DiffSummary {
-  if (typeof payload !== "object" || payload === null) return { ...EMPTY };
+  if (typeof payload !== "object" || payload === null) return emptyDiffSummary();
   const raw = (payload as Record<string, unknown>).files;
-  if (!Array.isArray(raw)) return { ...EMPTY };
+  if (!Array.isArray(raw)) return emptyDiffSummary();
 
   const files: FileDiff[] = [];
   let additions = 0;
   let deletions = 0;
+
+  // Derived from the RAW length, before filtering. Deriving it from the output
+  // array instead means a genuinely capped 300-file response containing one
+  // malformed entry reports `truncated: false` — the UI then tells the founder
+  // it is showing the whole change while hiding part of it.
+  const truncated = raw.length >= COMPARE_FILE_CAP;
 
   for (const entry of raw) {
     if (typeof entry !== "object" || entry === null) continue;
@@ -658,6 +674,10 @@ export function parseCompare(payload: unknown): DiffSummary {
     deletions += del;
 
     files.push({
+      // The identity, separate from the label above. A consumer fetching the
+      // file or anchoring a review comment to file:line needs a real path;
+      // for a rename, `path` names no file that exists.
+      file: typeof f.filename === "string" ? f.filename : "",
       path,
       additions: add,
       deletions: del,
@@ -668,7 +688,7 @@ export function parseCompare(payload: unknown): DiffSummary {
     });
   }
 
-  return { files, additions, deletions, truncated: files.length >= COMPARE_FILE_CAP };
+  return { files, additions, deletions, truncated };
 }
 ```
 
@@ -1115,7 +1135,12 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   const db = admin.firestore();
   const companySnap = await db.doc(`companies/${auth.uid}`).get();
   const company = companySnap.data() ?? {};
-  const credits = typeof company.credits === "number" ? company.credits : 0;
+  // `Number.isFinite`, not `typeof === "number"`: `typeof NaN === "number"` is
+  // true, and `NaN <= 0` is false, so a corrupted balance field would sail past
+  // a naive check and start a run. engBudget guards this too — the belt here is
+  // so a founder with a broken balance gets an honest 402 rather than a one-cent
+  // run that dies at its budget a second later.
+  const credits = Number.isFinite(company.credits) ? (company.credits as number) : 0;
   if (credits <= 0) {
     res.status(402).json({ error: "no_credits" });
     return;

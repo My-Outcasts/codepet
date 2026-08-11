@@ -17,6 +17,15 @@ final class CompanyStore: ObservableObject {
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
     @Published private(set) var company: CompanyState = .empty
+
+    #if DEBUG
+    /// True once `-seedLibrary YES` has injected `LibraryFixtures` into `company.library`.
+    ///
+    /// It exists to BLOCK cloud writes, not to record a preference — see `persistLibrary`. The
+    /// fixtures are an in-memory audit aid for the deliverable viewers (there is no way to ask
+    /// the product for a specific kind), and they must never reach Firestore.
+    private(set) var libraryIsSeeded = false
+    #endif
     @Published private(set) var isHydrating: Bool = false
     @Published private(set) var isOnboarding: Bool = false
     /// `chatMessages` is the ACTIVE thread's live working buffer — the view keeps
@@ -282,6 +291,9 @@ final class CompanyStore: ObservableObject {
         let loaded = await loader(companyId)
         guard token == hydrationToken else { return }  // a newer hydrate/reset superseded us
         company = loaded
+        #if DEBUG
+        seedLibraryIfRequested()
+        #endif
         // An in-flight prefs write belongs to the OUTGOING account (its own post-await guard
         // drops its commit); leaving its intent here would compose the previous founder's
         // half-written preferences onto this one's next settings change.
@@ -530,7 +542,8 @@ final class CompanyStore: ObservableObject {
         let words = ask.isEmpty ? text : ask
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
-                          display: words)
+                          display: words,
+                          founderAsk: words)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -570,12 +583,26 @@ final class CompanyStore: ObservableObject {
     /// nil when no department applies, it has no mapped companion, or it maps to the
     /// current host companion (no visible handoff needed).
     private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
-        let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
-        guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
+        guard let deptKey = actingDeptKey(text: text, department: department),
+              let dept = DepartmentCatalog.find(deptKey),
               let companionId = DepartmentCompanions.specialistId(for: deptKey,
                                                                   host: company.companionId)
         else { return nil }
         return (companionId, dept.name)
+    }
+
+    /// Which department this turn belongs to — the chip if one is set, else a department the
+    /// founder addressed in the text. Split out of `actingSpecialist` because the two
+    /// questions had been fused, and the fusion cost the answer.
+    ///
+    /// `actingSpecialist` returns nil in two very different situations: no department applies
+    /// at all, and a department applies but its pet happens to BE the founder's own companion
+    /// (nothing to announce). Reading the department off that nil meant a founder whose
+    /// companion is Nova asked Marketing a question and the model was told nothing about
+    /// marketing — the one founder for whom the handoff is invisible was also the one whose
+    /// answer got no expertise. Who speaks and what they know are now resolved separately.
+    private func actingDeptKey(text: String, department: Department?) -> String? {
+        department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
     }
 
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
@@ -731,6 +758,8 @@ final class CompanyStore: ObservableObject {
         }
     }
 
+    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
+
     /// Core of a chat send: append the founder's message, stream a grounded companion
     /// reply (fallback to the non-streaming client), and handle any `run_task_id` the
     /// reply carries. Shared by `sendChat` (typed founder text) and `walkThroughTask`
@@ -770,10 +799,15 @@ final class CompanyStore: ObservableObject {
     /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
     /// The model still receives the shaped text — the mode is a real instruction — but the
     /// transcript, the history built from it, and the thread title derived from it are hers.
-    static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
-
+    ///
+    /// `founderAsk` is stamped onto the reply's own `CopilotMessage.founderAsk` — see that
+    /// property's doc for why. Only `sendChat` passes it, for the same reason it alone passes
+    /// `convene`: `walkThroughTask`'s ask is composed on the founder's behalf, not typed by
+    /// her, so its reply must not become retryable by a rule that means "answers what she
+    /// asked."
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
-                             convene: String? = nil, display: String? = nil) async {
+                             convene: String? = nil, display: String? = nil,
+                             founderAsk: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
@@ -803,8 +837,19 @@ final class CompanyStore: ObservableObject {
         // The other half: the skills that are ON. Without this the CF could only
         // ever be told what to offer, never what the founder already chose.
         let enabledSkills = Toolkit.enabledSkillIds(in: company.enabledTools)
+        // Resolved BEFORE the request rather than after it, which is the whole fix. The
+        // specialist used to be computed below, purely to dress the reply bubble — the
+        // request had already gone out under the host's identity, so "Nova · Marketing"
+        // was Byte writing in Nova's name. Whoever leads the turn now leads it on the wire
+        // too, and the department rides along so the CF can ground the answer in that
+        // department's expertise.
+        let specialist = actingSpecialist(text: text, department: department)
+        let deptKey = actingDeptKey(text: text, department: department)
         let req = CompanyChatRequest(
-            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            companyId: companyId, language: language.rawValue,
+            // The specialist when one leads, else the founder's own companion. Falling back
+            // to the host is not a default — it is the correct answer for an ordinary turn.
+            companionId: specialist?.companionId ?? company.companionId,
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
@@ -815,16 +860,14 @@ final class CompanyStore: ObservableObject {
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
             styleFragment: company.founderPrefs.style.promptFragment(),
-            enabledSkills: enabledSkills)
+            enabledSkills: enabledSkills, deptKey: deptKey)
 
-        // Department handoff: if a specialist leads this turn (chip focus or a
-        // department named in the text), the reply is spoken by that specialist
-        // directly — its "Name · Dept" header conveys the handoff.
-        let specialist = actingSpecialist(text: text, department: department)
-
+        // The reply bubble's identity — the same `specialist` the request above was built
+        // from, so the "Name · Dept" header now names whoever actually wrote the words.
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
-                                            companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                            companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                            founderAsk: founderAsk))
         isStreaming = true
 
         // Fan-out: the room is convened by the router's escape hatch, not by a
@@ -1222,6 +1265,24 @@ final class CompanyStore: ObservableObject {
         }
         _ = await produceDraftInline(for: task, cid: cid, language: language)
     }
+
+    /// Record the founder's thumb on a reply.
+    ///
+    /// `chatMessages` is `private(set)`, so this is the only way in. The Firestore write is
+    /// the caller's job (`MessageFeedbackService`) — this keeps the store free of Firebase
+    /// and keeps the vote's on-screen state testable without a configured `FirebaseApp`.
+    func recordVote(messageId: String, vote: MessageVote) {
+        guard let index = chatMessages.firstIndex(where: { $0.id == messageId }) else { return }
+        chatMessages[index].vote = vote
+    }
+
+    #if DEBUG
+    /// Seed the transcript directly. Tests only — `chatMessages` is `private(set)` and the
+    /// real paths all go through the network.
+    func seedChatMessagesForTesting(_ messages: [CopilotMessage]) {
+        chatMessages = messages
+    }
+    #endif
 
     /// Re-ask the question that produced `messageId`, replacing the reply.
     ///
@@ -1662,10 +1723,28 @@ final class CompanyStore: ObservableObject {
             wroteTasks = true
         }
         if let cid = companyId {
-            _ = await librarySaver(cid, company.library)
+            await persistLibrary(cid)
             if wroteTasks { _ = await tasksSaver(cid, company.tasks) }
         }
         Task { await rememberFromApproval(draft) }
+    }
+
+    /// The one cloud write for the library — and, in DEBUG, the one place the seeded-fixture
+    /// guard can live.
+    ///
+    /// `fileApproval` persists the WHOLE `company.library`, not the appended draft. With
+    /// `-seedLibrary YES` active that array holds ten fixtures, so a single Approve would file
+    /// them into the founder's real Firestore document, where nothing would ever remove them.
+    /// Seeding is an in-memory audit aid; this keeps it that way.
+    private func persistLibrary(_ cid: String) async {
+        #if DEBUG
+        if libraryIsSeeded {
+            NSLog("[seedLibrary] BLOCKED a library write — %d fixture(s) are in memory",
+                  company.library.filter { $0.id.hasPrefix(LibraryFixtures.idPrefix) }.count)
+            return
+        }
+        #endif
+        _ = await librarySaver(cid, company.library)
     }
 
     /// Redo a chat draft: re-run its source task and replace the draft (fail-soft).
@@ -1714,12 +1793,18 @@ final class CompanyStore: ObservableObject {
     /// wire shape); only a revise chip tap sets both.
     private func runRequest(for task: RoadmapTask, language: AppLanguage,
                              reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
-        RunTaskRequest(
-            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+        // The pet the execute log and the draft card have always credited for this run — now
+        // it is also the one generating it. `taskSpecialist` deliberately keeps the host case
+        // (a run is performed BY a department, so it always shows that department's
+        // character), which is exactly the behaviour wanted here too.
+        let specialist = taskSpecialist(for: task)
+        return RunTaskRequest(
+            companyId: companyId, language: language.rawValue,
+            companionId: specialist?.companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
-            reviseNote: reviseNote, current: current)
+            reviseNote: reviseNote, current: current, deptKey: task.dept)
     }
 
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,
@@ -2241,3 +2326,37 @@ final class CompanyStore: ObservableObject {
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
     }
 }
+
+#if DEBUG
+extension CompanyStore {
+    /// Inject one deliverable of every kind when launched with `-seedLibrary YES`.
+    ///
+    /// There is no way to ask the product for a specific deliverable kind — `runTaskCore` lets
+    /// the model pick whichever fits what it wrote — so auditing all ten viewers otherwise means
+    /// running tasks until each kind happens to come up, at a run's cost each. This puts them in
+    /// the REAL Library, opening the REAL detail sheet, which is the only place the reading
+    /// measure can be judged at a width the founder chooses.
+    ///
+    /// PREPENDED, never replacing: a founder auditing on their own account keeps their real
+    /// deliverables visible alongside the fixtures, so a regression that only shows on real
+    /// content is still findable. Idempotent — a re-hydrate (token refresh, reconnect) must not
+    /// stack a second copy.
+    ///
+    /// `libraryIsSeeded` is what stops any of this reaching Firestore; see `persistLibrary`.
+    func seedLibraryIfRequested() {
+        guard let i = CommandLine.arguments.firstIndex(of: "-seedLibrary"),
+              i + 1 < CommandLine.arguments.count,
+              CommandLine.arguments[i + 1].uppercased() == "YES" else { return }
+
+        let fixtures = LibraryFixtures.all
+        let existing = Set(company.library.map(\.id))
+        let fresh = fixtures.filter { !existing.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+
+        company.library.insert(contentsOf: fresh, at: 0)
+        libraryIsSeeded = true
+        NSLog("[seedLibrary] seeded %d fixture(s); library writes are now BLOCKED for this launch",
+              fresh.count)
+    }
+}
+#endif

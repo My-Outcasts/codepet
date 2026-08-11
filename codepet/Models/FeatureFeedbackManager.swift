@@ -16,6 +16,10 @@ enum FeedbackFeature: String, CaseIterable, Identifiable {
     case skillMastered
     case projectHealth
     case dictionary
+    /// A thumb on one chat reply. Unlike every other case this is NOT a once-ever
+    /// first-experience prompt — it never appears in `FeatureFeedbackToast`, and exists so
+    /// per-message votes are separable from the `companionChat` 5-face ratings.
+    case chatMessage
 
     var id: String { rawValue }
 
@@ -32,6 +36,7 @@ enum FeedbackFeature: String, CaseIterable, Identifiable {
         case .skillMastered: return "trophy.fill"
         case .projectHealth: return "heart.text.square.fill"
         case .dictionary:    return "character.book.closed.fill"
+        case .chatMessage:   return "hand.thumbsup"
         }
     }
 
@@ -57,6 +62,8 @@ enum FeedbackFeature: String, CaseIterable, Identifiable {
             return language == .vi ? "Phần Sức khoẻ dự án có hữu ích không?" : "How useful was the project health check?"
         case .dictionary:
             return language == .vi ? "Từ điển có dễ hiểu không?" : "Was the dictionary helpful?"
+        case .chatMessage:
+            return language == .vi ? "Câu trả lời này thế nào?" : "How was this reply?"
         }
     }
 }

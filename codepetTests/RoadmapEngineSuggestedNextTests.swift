@@ -78,10 +78,32 @@ final class RoadmapEngineSuggestedNextTests: XCTestCase {
     }
 
     /// Confined to the open phase window, exactly like the beacon.
-    func testConfinedToTheOpenWindow() {
-        let gate = t("y", .find, dept: "mkt", who: .you)   // holds FIND shut
-        let later = t("b", .build, dept: "eng")            // would otherwise be suggestible
-        XCTAssertEqual(RoadmapEngine.suggestedNext([gate, later], limit: 3).map(\.id), ["y"])
+    /// The window still confines suggestions — but what HOLDS it is an unapproved draft, not the
+    /// founder's own step.
+    ///
+    /// This test used to gate with `who: .you` and assert `["y"]`, and it had been RED on `main`
+    /// since Aug 5. It was not a leak: `d8e9b64` deliberately changed `RoadmapGating.settled` to
+    /// ask whether a phase holds unreviewed OUTPUT rather than whether it holds anything needing
+    /// the founder — because one parked founder step ("Talk to 5 potential users" in `.find`) was
+    /// switching the whole AI team off, measured four times in one evening. The test kept
+    /// asserting the pre-Aug-5 rule, so it failed for being out of date while the code was right.
+    ///
+    /// Rewritten to gate with a DRAFT, which is what still shuts the window, so the assertion
+    /// tests the confinement that actually exists.
+    func testAnUnapprovedDraftConfinesSuggestionsToTheOpenWindow() {
+        let gate = t("d", .find, dept: "mkt", drafted: true)   // unreviewed output holds FIND
+        let later = t("b", .build, dept: "eng")                // .build stays closed behind it
+        XCTAssertEqual(RoadmapEngine.suggestedNext([gate, later], limit: 3).map(\.id), ["d"])
+    }
+
+    /// The other half of the same rule, pinned so it cannot silently revert: a founder-owned step
+    /// does NOT shut the phases behind it, so Codepet's work in a later phase stays suggestible
+    /// while she is out doing her own. This is the Aug 5 founder call (`d8e9b64`); if `settled`
+    /// ever goes back to counting `who: .you`, this goes red and names why.
+    func testAFounderOwnedStepDoesNotShutThePhasesBehindIt() {
+        let gate = t("y", .find, dept: "mkt", who: .you)
+        let later = t("b", .build, dept: "eng")
+        XCTAssertEqual(RoadmapEngine.suggestedNext([gate, later], limit: 3).map(\.id), ["y", "b"])
     }
 
     /// Legacy dept-less tasks are eligible and don't collapse into one shared slot.

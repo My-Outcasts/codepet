@@ -40,9 +40,51 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.first?.role, .me)
     }
 
-    /// A caller that does no shaping passes no `founderAsk` — `walkThroughTask` and the
-    /// Environment seed both synthesise the ask they want shown — so the bubble must still
-    /// carry the text it was given rather than falling back to empty.
+    /// The `founderAsk` provenance boundary, safe direction: `sendChat` must stamp the
+    /// founder's own words (pre-`ChatMode` shaping) onto the COMPANION REPLY's own
+    /// `founderAsk`, not just the founder's bubble — `MessageActionRulesTests` only ever
+    /// hand-passes a `founderAsk` value into the pure rule, so nothing before this asserted
+    /// that `sendMessage` (`CompanyStore.swift` around :858) actually does the stamping.
+    /// Red if that `founderAsk: founderAsk` argument is dropped, or if `sendChat` stops
+    /// forwarding `words` into it (confirmed by deleting each in turn locally).
+    func testSendChatStampsFounderAskOntoTheCompanionReply() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in CompanyChatReply(text: "answer", runTaskId: nil) },
+                             chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("Help me plan this — give me the concrete next steps: fix onboarding",
+                         language: .en, founderAsk: "fix onboarding")
+        XCTAssertEqual(s.chatMessages.last?.role, .companion)
+        XCTAssertEqual(s.chatMessages.last?.founderAsk, "fix onboarding")
+    }
+
+    /// The `founderAsk` provenance boundary, UNSAFE direction: a store-initiated append must
+    /// leave `founderAsk` nil, or `MessageActionRules.canRetry`'s `founderAsk` guard is
+    /// enforcing nothing — the Critical this branch fixed would be silently revived by any
+    /// future store path that started passing `founderAsk:` into an append it composed itself.
+    /// `walkThroughTask` composes its own ask (the founder never typed it) and calls
+    /// `sendMessage` directly with no `founderAsk` argument — the one caller besides `sendChat`
+    /// that reaches this reply path. Red if `walkThroughTask` starts threading a `founderAsk`
+    /// through to `sendMessage` (confirmed by adding `founderAsk: Self.walkThroughMessage(...)`
+    /// locally and watching this go red).
+    func testWalkThroughTaskLeavesFounderAskNilOnItsReply() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Here's how"]))
+        await s.hydrate(companyId: "u")
+        await s.walkThroughTask(Self.task(), language: .en)
+        XCTAssertEqual(s.chatMessages.last?.role, .companion)
+        XCTAssertNil(s.chatMessages.last?.founderAsk)
+    }
+
+    /// A caller that passes no `founderAsk` at all still shows its own text in the bubble
+    /// rather than falling back to empty — the fallback this asserts is `sendChat`'s `ask =
+    /// (founderAsk ?? text)`. `walkThroughTask` is the real caller in this shape: it calls
+    /// `sendMessage` directly with no `founderAsk` (correctly — its ask is composed on the
+    /// founder's behalf, not typed by her, so the reply must not become retryable; see
+    /// `testWalkThroughTaskLeavesFounderAskNil` below). The Environment seed is NOT an example
+    /// of this — `EnvironmentView.swift:95` passes `founderAsk: seed`, equal to its own text,
+    /// so it exercises the non-fallback path with a value that happens to match `text`.
     func testUnshapedSendStillShowsItsOwnText() async {
         let s = store { _ in CompanyChatReply(text: "ok", runTaskId: nil) }
         await s.hydrate(companyId: "u")

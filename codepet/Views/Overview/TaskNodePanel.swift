@@ -88,6 +88,7 @@ struct TaskNodePanel: View {
                 }
                 Spacer()
                 statusPill
+                closeButton
             }
             Text(detail.title)
                 .font(CodepetTheme.inter(19, weight: .semibold))
@@ -95,6 +96,39 @@ struct TaskNodePanel: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 14)
+    }
+
+    /// The way out that does nothing else.
+    ///
+    /// Until this existed there wasn't one. The panel is a `.sheet`, so on macOS Esc does not
+    /// dismiss it and there is no backdrop to click; the only exits were the two footer buttons,
+    /// and both COMMIT — one starts the task, the other marks it done. Opening a node to read
+    /// what it wants and then backing out was not a thing the panel allowed. Founder report,
+    /// Aug 11, with a screenshot of a panel she could not close.
+    ///
+    /// Worse, the footer can be empty. The primary button hides itself when it would be a dead
+    /// end (`done` with no library deliverable) and mark-done hides on a `drafted` task — a task
+    /// that is both shows a panel with NO buttons at all. That state was unescapable, and it is
+    /// the reason this carries `.cancelAction` as well: Esc works even if the footer is bare.
+    ///
+    /// Placed after the status pill rather than in the footer deliberately — every control in
+    /// that row changes the founder's roadmap, and a control that changes nothing does not
+    /// belong among them.
+    private var closeButton: some View {
+        Button(action: { dismiss() }) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: 22, height: 22)
+                // The tappable area is the 22pt square, not the glyph: an 10pt "×" is a
+                // frustrating target, and the same `.stroke`-isn't-hit-testable lesson the
+                // mark-done button records below applies to a bare Image too.
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.cancelAction)
+        .help(lang == .vi ? "Đóng" : "Close")
+        .accessibilityLabel(lang == .vi ? "Đóng" : "Close")
     }
 
     private var statusPill: some View {
@@ -200,3 +234,50 @@ struct TaskNodePanel: View {
         }
     }
 }
+
+#if DEBUG
+/// Hosts the panel against a store seeded with one task, so both states below are the real view
+/// rather than a mock of it.
+private struct TaskNodePanelPreviewHost: View {
+    let task: RoadmapTask
+    @StateObject private var store: CompanyStore
+
+    init(task: RoadmapTask) {
+        self.task = task
+        // Seeded through the LOADER rather than by assigning `company` (its setter is
+        // private(set) — the store owns its state and only hydrate/mutators may write it),
+        // which is also how the test suites build a store.
+        let seeded = CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                                  stage: .idea, companionId: "byte", onboardedAt: Date(),
+                                  tasks: [task])
+        _store = StateObject(wrappedValue: CompanyStore(loader: { _ in seeded },
+                                                        saver: { _, _ in true }))
+    }
+
+    var body: some View {
+        TaskNodePanel(task: task, accent: CodepetTheme.accentPurple,
+                      onAction: { _ in }, onMarkDoneToggle: { _ in })
+            .environmentObject(store)
+            .task { await store.hydrate(companyId: "preview") }
+    }
+}
+
+#Preview("Task panel — ordinary") {
+    TaskNodePanelPreviewHost(task: RoadmapTask(
+        id: "t1", title: "Test willingness to pay",
+        detail: "Run a real price conversation, pre-order, or fake door with target users.",
+        phase: .foundation, who: .you, dept: "fin"))
+}
+
+/// THE TRAP STATE, kept as a preview because it is the reason Esc is wired and it cannot be
+/// reached by clicking around: `done` with no library deliverable hides the primary button
+/// (it would be a dead end), and `drafted` hides mark-done. The footer renders EMPTY. Before
+/// the close button this panel had no exit at all — check that the × is present and that Esc
+/// dismisses it.
+#Preview("Task panel — empty footer (the trap)") {
+    TaskNodePanelPreviewHost(task: RoadmapTask(
+        id: "t2", title: "A task with nothing left to press",
+        detail: "Done, drafted, and holding no deliverable to open.",
+        phase: .foundation, who: .does, done: true, drafted: true, dept: "eng"))
+}
+#endif

@@ -149,11 +149,37 @@ final class VirtualCompanyInterviewTests: XCTestCase {
          .brief(Self.aBrief), .done(runId: "r1", unresolved: false, skipped: nil)]
     }
 
+    /// The Aug 7 rule itself, pinned — because its absence is what made this whole suite red.
+    ///
+    /// `b42bc10` gated convening behind Plan mode: every typed message used to fan out to
+    /// `virtualCompanyRun`, and a convened decision costs ~$0.20 against ~$0.005 for an ordinary
+    /// turn, so a casual Ask could cost forty times what it looked like. Every test here was
+    /// written before that and called `sendChat` without `convenesRoom`, so no room convened, no
+    /// brief arrived, and eight tests failed for asserting a rule the product had deliberately
+    /// changed. They were skipped in CI for a day on the strength of that.
+    ///
+    /// This test is the one that would have said so out loud: it asserts the DEFAULT is not to
+    /// convene. If the gate is ever removed, this goes red and names the cost.
+    func testAskDoesNotConveneTheRoomAtAll() async {
+        let probe = SaveProbe()
+        var runnerCalled = false
+        let s = store(probe, vcRunner: { req in
+            runnerCalled = true
+            return self.runnerYielding(self.briefedRunEvents())(req)
+        })
+        await s.hydrate(companyId: "u")
+        // No `convenesRoom:` — exactly how Ask mode calls it.
+        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        XCTAssertFalse(runnerCalled, "an Ask turn must not convene the room \u{2014} that is the Aug 7 cost gate")
+        XCTAssertNil(s.chatMessages.last?.interview, "and with no brief there is nothing to interview about")
+        XCTAssertFalse(s.vcInterviewAsked)
+    }
+
     func testStoreAsksRunwayRightAfterTheRoomDelivers() async {
         let probe = SaveProbe()
         let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
 
         XCTAssertEqual(s.chatMessages.last?.interview, .runway)
         XCTAssertEqual(s.chatMessages.last?.text,
@@ -167,7 +193,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let probe = SaveProbe()
         let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
 
         let runwayId = s.chatMessages.last!.id
         await s.answerInterview(messageId: runwayId, gap: .runway, answer: "6 months", language: .en)
@@ -199,7 +225,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let probe = SaveProbe()
         let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
 
         await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .runway,
                                 answer: "6 months", language: .en)
@@ -221,7 +247,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let probe = SaveProbe()
         let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
 
         await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .runway,
                                 answer: nil, language: .en)
@@ -240,14 +266,14 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let probe = SaveProbe()
         let s = store(probe, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("first trade-off", language: .en)
+        await s.sendChat("first trade-off", language: .en, convenesRoom: true)
         let runwayId = s.chatMessages.last!.id
         await s.answerInterview(messageId: runwayId, gap: .runway, answer: "6 months", language: .en)
         await s.answerInterview(messageId: s.chatMessages.last!.id, gap: .constraints,
                                 answer: "No hiring", language: .en)
         let countAfterFirst = s.chatMessages.count
 
-        await s.sendChat("second trade-off", language: .en)
+        await s.sendChat("second trade-off", language: .en, convenesRoom: true)
         XCTAssertNil(s.chatMessages.last?.interview)
         XCTAssertNotNil(s.chatMessages.last?.vcRun, "the second run still convenes")
         // me + byte's own answer + the room's message. No third question.
@@ -261,7 +287,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let s = store(probe, vcRunner: runnerYielding(
             [.routing(Self.routing("multi_agent")), .error("upstream_failure", nil)]))
         await s.hydrate(companyId: "u")
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
         XCTAssertNil(s.chatMessages.last?.interview)
         XCTAssertFalse(s.vcInterviewAsked)
     }
@@ -276,7 +302,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let probe = SaveProbe()
         let first = store(probe, disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
         await first.hydrate(companyId: "u")
-        await first.sendChat("first trade-off", language: .en)
+        await first.sendChat("first trade-off", language: .en, convenesRoom: true)
         // Skip both: nil answer → no brief write, so `constraints` stays nil and only
         // the persisted flag can stop the re-ask.
         await first.answerInterview(messageId: first.chatMessages.last!.id, gap: .runway,
@@ -290,7 +316,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let relaunched = store(SaveProbe(), disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
         await relaunched.hydrate(companyId: "u")
         XCTAssertTrue(relaunched.vcInterviewAsked, "hydrate must re-derive it from this company's flag")
-        await relaunched.sendChat("second trade-off", language: .en)
+        await relaunched.sendChat("second trade-off", language: .en, convenesRoom: true)
         XCTAssertNil(relaunched.chatMessages.last?.interview)
     }
 
@@ -300,14 +326,14 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let disk = FlagDisk()
         let s = store(SaveProbe(), disk: disk, vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("first trade-off", language: .en)
+        await s.sendChat("first trade-off", language: .en, convenesRoom: true)
         XCTAssertEqual(s.chatMessages.last?.interview, .runway)
 
         s.reset()
         XCTAssertFalse(s.vcInterviewAsked, "reset() must not carry one founder's asked-ness over")
 
         await s.hydrate(companyId: "v")
-        await s.sendChat("B's first trade-off", language: .en)
+        await s.sendChat("B's first trade-off", language: .en, convenesRoom: true)
         XCTAssertEqual(s.chatMessages.last?.interview, .runway, "founder B was never asked")
         XCTAssertEqual(disk.asked, ["u", "v"], "each founder gets their own key")
     }
@@ -324,7 +350,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         let s = store(SaveProbe(), disk: disk, loader: { _ in seeded },
                       vcRunner: runnerYielding(briefedRunEvents()))
         await s.hydrate(companyId: "u")
-        await s.sendChat("a trade-off", language: .en)
+        await s.sendChat("a trade-off", language: .en, convenesRoom: true)
         XCTAssertNil(s.chatMessages.last?.interview)
         XCTAssertTrue(disk.asked.isEmpty)
     }
@@ -344,7 +370,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         XCTAssertTrue(s.startEnrichInterviewIfNeeded(language: .en))
         XCTAssertEqual(s.chatMessages.last?.interview, .goal)
 
-        await s.sendChat("free with ads or $9.99 once?", language: .en)
+        await s.sendChat("free with ads or $9.99 once?", language: .en, convenesRoom: true)
 
         // The run really happened — otherwise this test would pass against a fan-out
         // that never ran.
@@ -379,7 +405,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
             [.routing(Self.routing("single_agent")), .brief(Self.aBrief),
              .done(runId: "r1", unresolved: false, skipped: nil)]))
         await s.hydrate(companyId: "u")
-        await s.sendChat("name the 4th tab Insights or Progress?", language: .en)
+        await s.sendChat("name the 4th tab Insights or Progress?", language: .en, convenesRoom: true)
         XCTAssertNil(s.chatMessages.last?.interview)
         XCTAssertFalse(s.vcInterviewAsked)
     }

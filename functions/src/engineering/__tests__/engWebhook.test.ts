@@ -183,6 +183,13 @@ function makeEngClient(overrides?: {
   uid?: string | null;
   runId?: string | null;
   metadata?: Record<string, unknown> | null;
+  // Stashed on the mocked session under a field nothing in the handler is
+  // supposed to log wholesale (`session._debugRequest`). Planting a secret
+  // here — rather than in `runId`/`uid`/`sessionId` themselves, which the
+  // handler legitimately logs — proves the leak-safety tests below are
+  // actually exercising "only the safe fields are logged", not "nothing at
+  // this call site happens to contain the marker".
+  secretMarker?: string;
 }) {
   const eventId = overrides?.eventId ?? "evt_1";
   const eventType = overrides?.eventType ?? "session.status_idled";
@@ -205,7 +212,10 @@ function makeEngClient(overrides?: {
       sessions: {
         retrieve: jest.fn().mockResolvedValue({
           usage: { list_cost: { amount: amountCents } },
-          metadata
+          metadata,
+          ...(overrides?.secretMarker
+            ? { _debugRequest: { authorization: `Bearer ${overrides.secretMarker}` } }
+            : {})
         }),
         events: {
           list: jest.fn().mockResolvedValue({
@@ -215,6 +225,50 @@ function makeEngClient(overrides?: {
       }
     }
   };
+}
+
+/** Spies on all three console sinks and hands back a combined-calls getter. */
+function spyOnConsole() {
+  const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+  const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+  const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+  return {
+    allCalls: () => [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls],
+    restore: () => {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  };
+}
+
+/**
+ * Whether `marker` shows up anywhere in a logged console call — including
+ * inside an `Error`'s `message`/`stack`. `JSON.stringify` alone is not
+ * enough here: `message` and `stack` are non-enumerable on `Error`, so
+ * `JSON.stringify(new Error("secret"))` is `"{}"` and would hide a leaked
+ * secret carried on a raw error object, which is exactly the regression
+ * shape Finding 2 is guarding against (passing raw `err` to console instead
+ * of a picked-field object). Real `console.error(err)` prints the message
+ * and stack via `util.inspect`, so this check has to look there too or the
+ * assertion is not load-bearing against that regression.
+ */
+function callsContainMarker(calls: unknown[][], marker: string): boolean {
+  const seen = new Set<unknown>();
+  const valueContains = (value: unknown): boolean => {
+    if (value == null) return false;
+    if (typeof value === "string") return value.includes(marker);
+    if (value instanceof Error) {
+      return value.message.includes(marker) || (value.stack ?? "").includes(marker);
+    }
+    if (typeof value === "object") {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return Object.values(value as Record<string, unknown>).some(valueContains);
+    }
+    return false;
+  };
+  return calls.some((call) => call.some(valueContains));
 }
 
 describe("handleEngWebhook — replayed delivery (dedupe)", () => {
@@ -297,21 +351,43 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
     }
   );
 
-  it("does not acknowledge (204) an infrastructure fault on the marker/transaction — it is not a duplicate", async () => {
-    const client = makeEngClient();
-    (getEngClient as jest.Mock).mockReturnValue(client);
-    const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
-    // A generic failure, unrelated to the marker already existing. Nothing
-    // in this fixture says "duplicate" — the transaction just throws.
-    failNextTransaction(runTransaction, new Error("firestore unavailable"));
+  it(
+    "does not acknowledge (204) an infrastructure fault on the marker/transaction — it is not a " +
+      "duplicate — and never logs the raw error (Finding 2: `{ code, name }`, not `err`, at this site)",
+    async () => {
+      const SECRET_MARKER = "sk-ant-txn-fault-secret-marker";
+      const client = makeEngClient();
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { runTransaction, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+      // A generic failure, unrelated to the marker already existing. Nothing
+      // in this fixture says "duplicate" — the transaction just throws. The
+      // message carries a secret marker, standing in for the credential an
+      // SDK/Firestore error's `err` object can carry on its `request` — this
+      // is what a future edit swapping `{ code, name }` for raw `err` would
+      // leak, and the only reason this test can catch that regression.
+      failNextTransaction(
+        runTransaction,
+        Object.assign(new Error(`firestore unavailable (auth: Bearer ${SECRET_MARKER})`), {
+          code: 13,
+          name: "FirestoreError"
+        })
+      );
 
-    const res = makeRes();
-    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+      const consoleSpy = spyOnConsole();
+      try {
+        const res = makeRes();
+        await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
-    expect(res.status).not.toHaveBeenCalledWith(204);
-    expect(res.status).toHaveBeenCalledWith(503);
-    expect(setCalls).toHaveLength(0);
-  });
+        expect(res.status).not.toHaveBeenCalledWith(204);
+        expect(res.status).toHaveBeenCalledWith(503);
+        expect(setCalls).toHaveLength(0);
+
+        expect(callsContainMarker(consoleSpy.allCalls(), SECRET_MARKER)).toBe(false);
+      } finally {
+        consoleSpy.restore();
+      }
+    }
+  );
 });
 
 describe("handleEngWebhook — direct addressing (no collectionGroup scan)", () => {
@@ -416,34 +492,87 @@ describe("handleEngWebhook — other behaviour", () => {
     expect(client.beta.sessions.retrieve).not.toHaveBeenCalled();
   });
 
-  it("acknowledges (204) without debiting when the session's metadata points at a run that does not exist", async () => {
-    const client = makeEngClient();
-    (getEngClient as jest.Mock).mockReturnValue(client);
-    // The run doc itself is missing — deleted, or metadata pointing nowhere
-    // real. Reads still happen (Finding 1: reads are unconditional), but no
-    // scan is issued to try to find it another way (Finding 3).
-    const { setCalls } = makeFirestoreDouble({});
+  it(
+    "acknowledges (204) without debiting when the session's metadata points at a run that does not " +
+      "exist, and never logs more than runId/uid (Finding 2: `{ runId, uid }`, not the raw session)",
+    async () => {
+      const SECRET_MARKER = "sk-ant-unmatched-run-secret-marker";
+      const client = makeEngClient({ secretMarker: SECRET_MARKER });
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      // The run doc itself is missing — deleted, or metadata pointing nowhere
+      // real. Reads still happen (Finding 1: reads are unconditional), but no
+      // scan is issued to try to find it another way (Finding 3).
+      const { setCalls } = makeFirestoreDouble({});
 
-    const res = makeRes();
-    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+      const consoleSpy = spyOnConsole();
+      try {
+        const res = makeRes();
+        await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
-    expect(res.status).toHaveBeenCalledWith(204);
-    expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(0);
-    expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(0);
-  });
+        expect(res.status).toHaveBeenCalledWith(204);
+        expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(0);
+        expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(0);
 
-  it("does not fall back to a scan and retries instead when the session has no runId/uid metadata", async () => {
-    const client = makeEngClient({ metadata: null });
-    (getEngClient as jest.Mock).mockReturnValue(client);
-    const { runTransaction, collectionGroup } = makeFirestoreDouble();
+        expect(callsContainMarker(consoleSpy.allCalls(), SECRET_MARKER)).toBe(false);
+      } finally {
+        consoleSpy.restore();
+      }
+    }
+  );
 
-    const res = makeRes();
-    await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+  it(
+    "does not fall back to a scan and retries instead when the session has no runId/uid metadata, " +
+      "and never logs more than the session id (Finding 2: `{ sessionId }`, not the raw session)",
+    async () => {
+      const SECRET_MARKER = "sk-ant-missing-metadata-secret-marker";
+      const client = makeEngClient({ metadata: null, secretMarker: SECRET_MARKER });
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { runTransaction, collectionGroup, setCalls } = makeFirestoreDouble();
 
-    expect(res.status).not.toHaveBeenCalledWith(204);
-    expect(collectionGroup).not.toHaveBeenCalled();
-    expect(runTransaction).not.toHaveBeenCalled();
-  });
+      const consoleSpy = spyOnConsole();
+      try {
+        const res = makeRes();
+        await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+        // Pinned to the exact value (Finding 3) — a regression that returned
+        // 200 here would silently swallow a fault that must force a retry,
+        // and asserting only "not 204" would let it through.
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(collectionGroup).not.toHaveBeenCalled();
+        expect(runTransaction).not.toHaveBeenCalled();
+        expect(setCalls).toHaveLength(0);
+
+        expect(callsContainMarker(consoleSpy.allCalls(), SECRET_MARKER)).toBe(false);
+      } finally {
+        consoleSpy.restore();
+      }
+    }
+  );
+
+  it.each([
+    ["a slash-bearing uid", { uid: "founder/../other" }],
+    ["a slash-bearing runId", { runId: "run/../other" }],
+    ["a reserved-form uid", { uid: "__reserved__" }],
+    ["a reserved-form runId", { runId: "__reserved__" }]
+  ])(
+    "rejects %s before it is ever used to build a Firestore path — retryable status, no write of any kind",
+    async (_label, override) => {
+      const client = makeEngClient(override);
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { runTransaction, collectionGroup, setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+      const res = makeRes();
+      await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+      // Same status as any other malformed-metadata rejection (Finding 3:
+      // pinned, not "not 204") — retryable, but never a construction throw
+      // escaping unhandled and never a silent redirect to some other path.
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(collectionGroup).not.toHaveBeenCalled();
+      expect(runTransaction).not.toHaveBeenCalled();
+      expect(setCalls).toHaveLength(0);
+    }
+  );
 
   it("writes budgetReached, not failed, when the session paused on its budget", async () => {
     const client = makeEngClient({ stopReasonType: "budget_reached" });

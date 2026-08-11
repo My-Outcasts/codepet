@@ -41,6 +41,23 @@ export function statusFor(stopReason: string | undefined): RunStatus {
   }
 }
 
+/**
+ * `runId` and `uid` come from a remote session's caller-supplied metadata —
+ * not from anything this process mints — and get interpolated straight into
+ * a Firestore document path (`companies/{uid}/engRuns/{runId}`). A segment
+ * containing "/" either makes `db.doc(...)` throw synchronously (an odd
+ * resulting segment count) or silently redirects a transactional write —
+ * including the credit debit — to a different, caller-influenced document
+ * within the same project (an even segment count, no throw at all). Neither
+ * failure mode is acceptable on an HMAC-only endpoint that moves money, so
+ * both values are checked before they are used for anything. Firestore's own
+ * reserved `__…__` document-id form is rejected too: it addresses metadata
+ * Firestore treats specially, never an ordinary run or company document.
+ */
+function isSafePathSegment(value: string): boolean {
+  return value.length > 0 && !value.includes("/") && !/^__.*__$/.test(value);
+}
+
 export async function handleEngWebhook(req: Request, res: Response): Promise<void> {
   if (req.method !== "POST") {
     res.status(405).json({ error: "method_not_allowed" });
@@ -104,8 +121,21 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
   // surfacing, not papering over with a guess.
   const runId = session.metadata?.runId;
   const uid = session.metadata?.uid;
-  if (typeof runId !== "string" || runId === "" || typeof uid !== "string" || uid === "") {
-    console.error("engWebhook: session missing runId/uid metadata", { sessionId });
+  if (
+    typeof runId !== "string" ||
+    typeof uid !== "string" ||
+    !isSafePathSegment(runId) ||
+    !isSafePathSegment(uid)
+  ) {
+    // Malformed or unsafe caller metadata, not a Firestore fault — nothing
+    // above this point has touched Firestore, so 500 rather than the 503 the
+    // transactional region below returns on a genuine infrastructure fault.
+    // A 503 there means "our infrastructure faulted, a blind retry might
+    // help"; a 500 here means "the data itself is bad", and retrying the
+    // identical bytes cannot fix that. Anthropic retries either 5xx the same
+    // way, so the split is diagnostic rather than behavioural — but
+    // conflating them would send an operator to the wrong runbook.
+    console.error("engWebhook: session has missing or unsafe runId/uid metadata", { sessionId });
     res.status(500).send("");
     return;
   }
@@ -116,8 +146,6 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
 
   const db = admin.firestore();
   const seenRef = db.doc(`webhookEvents/${event.id}`);
-  const runRef = db.doc(`companies/${uid}/engRuns/${runId}`);
-  const companyRef = db.doc(`companies/${uid}`);
 
   // Everything that must happen exactly once — the dedupe check, the run
   // write, and the credit debit — lives in one transaction. A delivery that
@@ -127,8 +155,17 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
   // undone (marker absent, redoes it). At-most-once — writing the marker
   // before the work — is what let a mid-flight failure permanently skip a
   // billed run; this is the fix.
+  //
+  // `runRef`/`companyRef` are constructed in here too, not above: `uid` and
+  // `runId` are validated by `isSafePathSegment` before this point, but
+  // building the path from them is kept inside this protected region as a
+  // second line of defence — if some case that validation missed still made
+  // `db.doc(...)` throw, that throw lands in the `catch` below and produces
+  // the same clean 503 as any other fault, instead of escaping unhandled.
   let outcome: "processed" | "duplicate" | "unmatched";
   try {
+    const runRef = db.doc(`companies/${uid}/engRuns/${runId}`);
+    const companyRef = db.doc(`companies/${uid}`);
     outcome = await db.runTransaction(async (tx) => {
       const seenSnap = await tx.get(seenRef);
       if (seenSnap.exists) {

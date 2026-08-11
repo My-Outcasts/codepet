@@ -48,4 +48,28 @@ describe("listCostToCredits", () => {
   it("round-trips against CREDIT_CENTS", () => {
     expect(listCostToCredits(CREDIT_CENTS * 12)).toBe(12);
   });
+
+  it("charges nothing when cost is NaN, leaving the anomaly visible", () => {
+    expect(listCostToCredits(NaN)).toBe(0);
+  });
+
+  it("charges nothing when cost is Infinity, protecting the balance", () => {
+    expect(listCostToCredits(Infinity)).toBe(0);
+  });
+});
+
+describe("creditsToBudget with non-finite input", () => {
+  it("emits minimum budget (one cent) when credits is NaN, avoiding over-grant on corrupted balance", () => {
+    const result = creditsToBudget(NaN);
+    expect(result.max_list_cost.amount).toBe("1");
+    // Verify the amount is a valid integer string
+    expect(result.max_list_cost.amount).toMatch(/^[1-9][0-9]*$/);
+  });
+
+  it("emits minimum budget (one cent) when credits is Infinity, capping runaway grants", () => {
+    const result = creditsToBudget(Infinity);
+    expect(result.max_list_cost.amount).toBe("1");
+    // Verify the amount is a valid integer string
+    expect(result.max_list_cost.amount).toMatch(/^[1-9][0-9]*$/);
+  });
 });

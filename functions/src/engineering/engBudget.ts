@@ -34,6 +34,12 @@ export interface SessionBudget {
  * check with a clear message, not by a 400 from Anthropic.
  */
 export function creditsToBudget(credits: number): SessionBudget {
+  // Reject non-finite input (NaN or Infinity) by emitting minimum budget: granting a
+  // large cap on a corrupted balance is the expensive mistake, so we deny the run.
+  if (!Number.isFinite(credits)) {
+    return { type: "limit", max_list_cost: { amount: "1", currency: "USD" } };
+  }
+
   const grantable = Math.min(Math.floor(credits * CREDIT_CENTS), DEFAULT_RUN_CREDITS * CREDIT_CENTS);
   const amount = Math.max(1, grantable);
   return { type: "limit", max_list_cost: { amount: String(amount), currency: "USD" } };
@@ -41,6 +47,9 @@ export function creditsToBudget(credits: number): SessionBudget {
 
 /** What to debit once a session reports its final list cost, in cents. */
 export function listCostToCredits(cents: number): number {
-  if (cents <= 0) return 0;
+  // Reject non-finite input (NaN or Infinity) by charging zero: corrupting the ledger
+  // is worse than under-charging one run, and a zero charge leaves the anomaly visible
+  // for human review rather than silently destroying the balance.
+  if (!Number.isFinite(cents) || cents <= 0) return 0;
   return Math.ceil(cents / CREDIT_CENTS);
 }

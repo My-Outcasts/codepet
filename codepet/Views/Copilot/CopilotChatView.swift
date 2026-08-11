@@ -461,6 +461,9 @@ struct CopilotBubble: View {
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
     @Environment(\.colorScheme) private var scheme
+    /// For the identity fields on a thumb — the same ones `FeatureFeedbackManager` sends.
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var appState: AppState
     @State private var showDetail = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
@@ -469,6 +472,8 @@ struct CopilotBubble: View {
     /// Hover state for the per-message action row, and the transient "Copied" acknowledgement.
     @State private var hovering = false
     @State private var copied = false
+    /// Separate from `copied` so the two acknowledgements never overwrite each other's label.
+    @State private var copiedMarkdown = false
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
@@ -509,21 +514,35 @@ struct CopilotBubble: View {
     /// because the row is held at `opacity(0)`: the target was a blank 22x20 strip below the
     /// prose, which is why the founder read the actions as missing entirely.
     var body: some View {
-        if isMe || message.producing || !hasActionableContent {
-            // Your own words need no copy/retry/thumb, and a reply still being produced has
-            // nothing to act on yet. `hasActionableContent` also catches the streaming shell:
-            // a message with no text yet renders EmptyView() from `textBubble` (see its own
-            // comment below), and without this guard the pinned row on the newest message
-            // would draw floating with nothing above it.
-            content
-        } else {
+        if showsActions {
             VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
                 content
                 messageActions
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .onHover { hovering = $0 }
+            // `.onHover(false)` does not fire when a view disappears from under the pointer
+            // (`CodepetTokens.swift:211-214`), and the transcript autoscrolls on every new
+            // message (`messageList`'s `.onChange(of: companyStore.chatMessages.count)` above).
+            // So: the founder reads a reply with the pointer resting on it, types the next
+            // question, the transcript scrolls the old reply out from under the cursor with
+            // `hovering` stuck true — its row stays lit next to the newly pinned one until the
+            // pointer happens to re-enter and leave it. Resetting on the same signal that causes
+            // the scroll clears it before it can be seen.
+            .onChange(of: companyStore.chatMessages.count) { _, _ in hovering = false }
+        } else {
+            content
         }
+    }
+
+    /// Whether this message gets an action row at all: not the founder's own words (nothing
+    /// to copy/retry/thumb on those), not still being produced (a reply mid-stream has
+    /// nothing to act on yet), and not empty once rendered. `hasActionableContent` also
+    /// catches the streaming shell: a message with no text yet renders `EmptyView()` from
+    /// `textBubble` (see its own comment below), and without this guard the pinned row on
+    /// the newest message would draw floating with nothing above it.
+    private var showsActions: Bool {
+        !isMe && !message.producing && hasActionableContent
     }
 
     /// A message shell can reach `textBubble` with no text yet — while the companion is
@@ -677,27 +696,41 @@ struct CopilotBubble: View {
     @ViewBuilder private var messageActions: some View {
         HStack(spacing: 2) {
             actionIcon("doc.on.doc", help: lang == .vi ? "Sao chép" : "Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(message.text, forType: .string)
-                copied = true
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_400_000_000)
-                    copied = false
+                copy(MessageTranscript.plain(message, lang: lang)) {
+                    copied = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_400_000_000)
+                        copied = false
+                    }
                 }
             }
             .overlay(alignment: .leading) {
-                if copied {
-                    Text(lang == .vi ? "Đã sao chép" : "Copied")
-                        .font(.pixelSystem(size: 9, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentTeal)
-                        .offset(x: 22)
-                        .transition(.opacity)
+                if copied { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
+            }
+            // Distinct from Copy: the founder's paste target for a draft or a room is
+            // Notion or a PR, and plain text loses the headings and the per-seat structure.
+            actionIcon("square.and.arrow.up",
+                       help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown") {
+                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang)) {
+                    copiedMarkdown = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_400_000_000)
+                        copiedMarkdown = false
+                    }
                 }
+            }
+            .overlay(alignment: .leading) {
+                if copiedMarkdown { copiedLabel(lang == .vi ? "Đã sao chép" : "Copied") }
             }
             actionIcon("arrow.clockwise", help: lang == .vi ? "Hỏi lại" : "Try again") {
                 Task { await companyStore.retryReply(messageId: message.id, language: lang) }
             }
-            .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
+            .disabled(!MessageActionRules.canRetry(isLast: isLast,
+                                                   isTyping: companyStore.isCompanionTyping,
+                                                   isStreaming: companyStore.isStreaming,
+                                                   isFanningOut: companyStore.isFanningOut))
+            thumb(.up, icon: "hand.thumbsup", help: lang == .vi ? "Hữu ích" : "Good reply")
+            thumb(.down, icon: "hand.thumbsdown", help: lang == .vi ? "Chưa tốt" : "Bad reply")
             Text(Self.age(of: message.createdAt, lang: lang))
                 .font(.pixelSystem(size: 9))
                 .foregroundColor(CodepetTheme.mutedText)
@@ -707,7 +740,12 @@ struct CopilotBubble: View {
         // taught nobody it existed. Still `opacity` rather than a conditional, so the row's
         // height never changes under the cursor.
         .opacity(hovering || isLast ? 1 : 0)
+        // Two `.animation` modifiers, not one value: `isLast` flips (1 → 0) the instant a new
+        // reply lands and becomes the pinned one, on a row `hovering` never touched, so without
+        // observing `isLast` too that un-pin snapped in a single frame while everything else on
+        // screen eased.
         .animation(.easeInOut(duration: 0.12), value: hovering)
+        .animation(.easeInOut(duration: 0.12), value: isLast)
     }
 
     private func actionIcon(_ system: String, help: String,
@@ -721,6 +759,52 @@ struct CopilotBubble: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+
+    private func copy(_ string: String, then acknowledge: @escaping () -> Void) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        acknowledge()
+    }
+
+    private func copiedLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.pixelSystem(size: 9, weight: .semibold))
+            .foregroundColor(CodepetTheme.accentTeal)
+            .offset(x: 22)
+            .transition(.opacity)
+    }
+
+    /// A thumb fills once given, and the other stays live so a misclick is correctable.
+    ///
+    /// The correction writes a SECOND `feedback` document — `firestore.rules:42` denies
+    /// `update` — which the reader resolves by latest `timestamp`. Voting the same way twice
+    /// is a no-op rather than a duplicate write.
+    ///
+    /// Gated on `isCompanionTyping`/`isStreaming` — the same busy state as retry, minus
+    /// `isFanningOut` — because the row is pinned to the newest reply, which is exactly the
+    /// one still streaming when either flag is set; rating a half-written answer is
+    /// meaningless. A fan-out does not make the reply already on screen incomplete, so
+    /// voting on it stays valid — that is a different question from what `retryReply` will
+    /// accept, which is why `canRetry` above still checks all four.
+    @ViewBuilder private func thumb(_ vote: MessageVote, icon: String, help: String) -> some View {
+        let chosen = message.vote == vote
+        Button {
+            guard !chosen else { return }
+            companyStore.recordVote(messageId: message.id, vote: vote)
+            MessageFeedbackService.submit(vote: vote, message: message,
+                                          threadId: companyStore.activeThreadId ?? "",
+                                          authManager: authManager, appState: appState)
+        } label: {
+            Image(systemName: chosen ? "\(icon).fill" : icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(chosen ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .disabled(companyStore.isCompanionTyping || companyStore.isStreaming)
     }
 
     /// "just now" until a minute has passed, then minutes, then hours — the reference's

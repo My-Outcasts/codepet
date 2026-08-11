@@ -344,6 +344,61 @@ describe("handleEngStream", () => {
     expect(abort).toHaveBeenCalledTimes(1);
     expect(res.end).toHaveBeenCalledTimes(1);
   });
+
+  // -------------------------------------------------------------------------
+  // Fix 4: `runId` reaches `db.doc(...)` with no validation, and the read
+  // itself is unwrapped — a slash-bearing value throws synchronously (odd
+  // segment count) and, unhandled, becomes a 500 that also logs the raw
+  // error. `engSendTurn`/`engWebhook` both gate on `isSafePathSegment`; this
+  // handler must too, and the read must be wrapped like its siblings.
+  // -------------------------------------------------------------------------
+
+  it("rejects a slash-bearing runId as a malformed request, before it ever reaches Firestore", async () => {
+    (verifyAuth as jest.Mock).mockReset().mockResolvedValue({ uid: "uid_1" });
+    const admin_ = admin as unknown as { firestore: jest.Mock };
+    const { doc } = admin_.firestore() as unknown as { doc: jest.Mock };
+    doc.mockReset();
+    const get = jest.fn();
+    doc.mockReturnValue({ get });
+
+    const res = makeRes();
+    await handleEngStream(
+      makeReq("run/../other"),
+      res as unknown as Parameters<typeof handleEngStream>[1]
+    );
+
+    // The caller's mistake, not ours — same status family as the existing
+    // empty-runId guard, and never a 500 (which the framework's own
+    // unhandled-throw path would produce, along with logging the raw error).
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(get).not.toHaveBeenCalled();
+    expect(res.write).not.toHaveBeenCalled();
+  });
+
+  it("responds with a defined, retryable status — never a hang, a 404, or the raw error — when the run lookup itself faults", async () => {
+    (verifyAuth as jest.Mock).mockReset().mockResolvedValue({ uid: "uid_1" });
+    const admin_ = admin as unknown as { firestore: jest.Mock };
+    const { doc } = admin_.firestore() as unknown as { doc: jest.Mock };
+    doc.mockReset();
+    const SECRET = "sk-ant-engstream-lookup-fault-secret";
+    doc.mockReturnValue({
+      get: jest.fn().mockRejectedValue(new Error(`firestore unavailable: ${SECRET}`))
+    });
+
+    const res = makeRes();
+    await handleEngStream(makeReq(), res as unknown as Parameters<typeof handleEngStream>[1]);
+
+    // Ours, retryable — and must never be mistaken for "no such run" (404)
+    // or a malformed request (400/401).
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.status).not.toHaveBeenCalledWith(404);
+    expect(res.write).not.toHaveBeenCalled();
+
+    const body = res.json.mock.calls[0]?.[0];
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    const loggedSerialized = util.inspect((logger.error as jest.Mock).mock.calls, { depth: null });
+    expect(loggedSerialized).not.toContain(SECRET);
+  });
 });
 
 describe("writeFrame", () => {

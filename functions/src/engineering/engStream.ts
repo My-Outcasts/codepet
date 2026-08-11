@@ -15,7 +15,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { toExecStep } from "./engEvents";
-import { getEngClient } from "./engClient";
+import { getEngClient, isSafePathSegment } from "./engClient";
 
 /**
  * A no-op once the response can no longer take writes — either because we
@@ -87,14 +87,33 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
     return;
   }
 
+  // `runId` is caller-supplied and gets interpolated straight into a
+  // Firestore document path below. Unvalidated, a slash-bearing value makes
+  // `db.doc(...)` throw synchronously on an odd resulting segment count —
+  // and, this being the one Firestore read in this file that was never
+  // wrapped, that throw escaped unhandled: the framework turned it into a
+  // 500 AND logged the raw error. `engSendTurn`/`engWebhook` both gate on
+  // this same `isSafePathSegment` rule from `./engClient`; match them here,
+  // before anything touches Firestore.
   const runId = typeof req.query.runId === "string" ? req.query.runId : "";
-  if (!runId) {
+  if (!runId || !isSafePathSegment(runId)) {
     res.status(400).json({ error: "invalid_payload", detail: "runId required" });
     return;
   }
 
-  const runRef = admin.firestore().doc(`companies/${auth.uid}/engRuns/${runId}`);
-  const runSnap = await runRef.get();
+  let runSnap: FirebaseFirestore.DocumentSnapshot;
+  try {
+    runSnap = await admin.firestore().doc(`companies/${auth.uid}/engRuns/${runId}`).get();
+  } catch (err) {
+    // A transient Firestore fault, not a malformed request or a missing run —
+    // ours to retry, so it must not collapse into 404 (already means "no such
+    // run") or 400/401 (the caller's mistake to fix). Content-free log only:
+    // reused from the relay's own error handling below, since a Firestore/SDK
+    // error's raw form can carry request internals this file must never log.
+    logger.error("engStream: run lookup failed", safeErrorDetail(err));
+    res.status(503).json({ error: "lookup_failed" });
+    return;
+  }
   if (!runSnap.exists) {
     res.status(404).json({ error: "run_not_found" });
     return;

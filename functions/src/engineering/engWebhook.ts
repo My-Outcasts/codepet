@@ -13,8 +13,24 @@
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
+import type Anthropic from "@anthropic-ai/sdk";
 import { listCostToCredits } from "./engBudget";
 import { getEngClient, isSafePathSegment, type RunStatus } from "./engClient";
+
+/**
+ * True when a session event is the idle-status kind, narrowing the response
+ * to one this file can safely read `.stop_reason` off. A type predicate
+ * rather than a cast: `events.list`'s return type is the full ~30-member
+ * session-event union regardless of the `types` query filter passed at the
+ * call site (the SDK can't statically know a runtime string narrowed the
+ * response), so this is what lets the compiler — not an assertion — confirm
+ * the narrowing is correct.
+ */
+function isStatusIdleEvent(
+  event: Anthropic.Beta.Sessions.BetaManagedAgentsSessionEvent
+): event is Anthropic.Beta.Sessions.BetaManagedAgentsSessionStatusIdleEvent {
+  return event.type === "session.status_idle";
+}
 
 /**
  * A session's stop reason → the run status the card renders.
@@ -88,16 +104,22 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
   // pure reads: repeating them costs a round trip, nothing else. Everything
   // that must not repeat (the run write, the debit) happens below, inside
   // one transaction.
-  const session = (await client.beta.sessions.retrieve(sessionId)) as unknown as {
-    usage?: { list_cost?: { amount?: string } };
-    metadata?: { runId?: unknown; uid?: unknown };
-  };
-  const events = await client.beta.sessions.events.list(sessionId);
-  const lastIdle = [...events.data]
-    .reverse()
-    .find((e) => (e as unknown as { type?: string }).type === "session.status_idle") as
-    | { stop_reason?: { type?: string } }
-    | undefined;
+  const session = await client.beta.sessions.retrieve(sessionId);
+
+  // `events.list` is paginated and, unfiltered, returns ONE page in
+  // chronological order — the terminal idle event is the last event of the
+  // LAST page, so a plain `list(sessionId)` call (or iterating every page
+  // just to find one event) is either wrong or wasteful. Ask the API for
+  // exactly the event this file needs instead: newest first, filtered to the
+  // idle type, one result. `engStream.ts` has a separate, correct reason to
+  // iterate every page — it relays the whole transcript — so the two
+  // handlers are not meant to share this call shape.
+  const idlePage = await client.beta.sessions.events.list(sessionId, {
+    order: "desc",
+    types: ["session.status_idle"],
+    limit: 1
+  });
+  const lastIdle = idlePage.data.find(isStatusIdleEvent);
 
   // Direct addressing, not a collectionGroup(sessionId) scan: `engStartRun`
   // stamps `metadata: { runId, uid }` on the session the moment it creates
@@ -172,6 +194,23 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
         return "unmatched";
       }
 
+      // `creditsSpent` (just computed above) is cumulative for the WHOLE
+      // session, but the dedupe marker above only protects a retry of THIS
+      // event id. Every distinct terminal delivery — and a session with the
+      // agent's `bash: always_ask` policy pauses for approval on nearly every
+      // run, producing one — reaches this line with its own fresh cumulative
+      // reading. Debiting `creditsSpent` directly would re-charge the running
+      // total on every delivery; debiting the DELTA against what the
+      // previous delivery persisted here charges each delivery only for the
+      // spend that happened since. `Math.max(0, ...)` guards the direction
+      // that can never be allowed to happen silently: if a reading ever came
+      // back lower than what is already on record, the honest response is
+      // "charge nothing this delivery", not "credit the founder back".
+      const previousCreditsSpent = typeof runSnap.data()?.creditsSpent === "number"
+        ? (runSnap.data()!.creditsSpent as number)
+        : 0;
+      const delta = Math.max(0, creditsSpent - previousCreditsSpent);
+
       tx.set(seenRef, { at: admin.firestore.FieldValue.serverTimestamp() });
       tx.set(
         runRef,
@@ -182,7 +221,9 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
         },
         { merge: true }
       );
-      tx.set(companyRef, { credits: admin.firestore.FieldValue.increment(-creditsSpent) }, { merge: true });
+      if (delta > 0) {
+        tx.set(companyRef, { credits: admin.firestore.FieldValue.increment(-delta) }, { merge: true });
+      }
       return "processed";
     });
   } catch (err) {

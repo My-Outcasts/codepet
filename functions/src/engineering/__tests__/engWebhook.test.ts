@@ -119,7 +119,20 @@ type SetCall = { path: string; data: unknown; options?: unknown };
  * non-transactional marker write — the pre-fix shape — without touching
  * this file at all.
  */
-function makeFirestoreDouble(initialExists: Record<string, boolean> = {}) {
+/**
+ * `initialData` seeds what `.data()` returns for a path that "exists" — used
+ * by the Finding-3-delta tests to plant a run doc's previously-recorded
+ * `creditsSpent` before a delivery runs. Kept as a SEPARATE map from `store`,
+ * not merged into it, because `store`'s boolean values are asserted directly
+ * by existing tests (e.g. `expect(store.get(seenPath(...))).toBeFalsy()`) —
+ * widening those to `{ exists, data }` objects would make every one of those
+ * assertions vacuously truthy (an object is always truthy) and silently stop
+ * protecting anything.
+ */
+function makeFirestoreDouble(
+  initialExists: Record<string, boolean> = {},
+  initialData: Record<string, Record<string, unknown>> = {}
+) {
   const admin_ = admin as unknown as { firestore: jest.Mock };
   const { doc, collectionGroup, runTransaction } = admin_.firestore() as unknown as {
     doc: jest.Mock;
@@ -131,11 +144,12 @@ function makeFirestoreDouble(initialExists: Record<string, boolean> = {}) {
   runTransaction.mockReset();
 
   const store = new Map<string, boolean>(Object.entries(initialExists));
+  const dataStore = new Map<string, Record<string, unknown>>(Object.entries(initialData));
   const setCalls: SetCall[] = [];
 
   doc.mockImplementation((path: string) => ({
     path,
-    get: jest.fn(async () => ({ exists: Boolean(store.get(path)) })),
+    get: jest.fn(async () => ({ exists: Boolean(store.get(path)), data: () => dataStore.get(path) })),
     create: jest.fn(async () => {
       if (store.get(path)) {
         throw Object.assign(new Error("ALREADY_EXISTS"), { code: 6 });
@@ -147,7 +161,10 @@ function makeFirestoreDouble(initialExists: Record<string, boolean> = {}) {
   runTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
     const pending: SetCall[] = [];
     const tx = {
-      get: jest.fn(async (ref: { path: string }) => ({ exists: Boolean(store.get(ref.path)) })),
+      get: jest.fn(async (ref: { path: string }) => ({
+        exists: Boolean(store.get(ref.path)),
+        data: () => dataStore.get(ref.path)
+      })),
       set: jest.fn((ref: { path: string }, data: unknown, options?: unknown) => {
         pending.push({ path: ref.path, data, options });
       })
@@ -156,12 +173,21 @@ function makeFirestoreDouble(initialExists: Record<string, boolean> = {}) {
     // Only reached if `fn` resolved without throwing — commit.
     for (const w of pending) {
       store.set(w.path, true);
+      // Merge plain fields into dataStore so the NEXT transaction's tx.get(...).data()
+      // sees what this one committed — this is what makes the three-delivery
+      // delta test load-bearing across calls, not a fixed per-test fixture.
+      // FieldValue sentinels (e.g. `{ __increment: n }` from `admin.firestore.FieldValue.increment`)
+      // are opaque wrapper objects in this double; nothing under test reads a
+      // company doc's `credits` back via `.data()`, only the run doc's plain
+      // `creditsSpent` number, so no sentinel-resolution logic is needed here.
+      const existing = dataStore.get(w.path) ?? {};
+      dataStore.set(w.path, { ...existing, ...(w.data as Record<string, unknown>) });
       setCalls.push(w);
     }
     return result;
   });
 
-  return { doc, collectionGroup, runTransaction, store, setCalls };
+  return { doc, collectionGroup, runTransaction, store, dataStore, setCalls };
 }
 
 /**
@@ -586,4 +612,145 @@ describe("handleEngWebhook — other behaviour", () => {
     expect(runSets).toHaveLength(1);
     expect(runSets[0].data).toEqual(expect.objectContaining({ status: "budgetReached" }));
   });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 2: the terminal idle event must be found even when it is not on the
+// first page. `events.list(sessionId)` with no params returns ONE page,
+// chronological order — the old code searched only that page for the last
+// `session.status_idle`. A run producing more than one page of events found
+// no idle at all and was recorded `failed` even though it finished cleanly.
+// ---------------------------------------------------------------------------
+
+describe("handleEngWebhook — terminal event addressed directly, not by scanning one page (Fix 2)", () => {
+  it(
+    "still finds the terminal idle event and records the correct status when it is not on the first, " +
+      "unfiltered page a plain `events.list(sessionId)` call would see",
+    async () => {
+      const client = makeEngClient({ stopReasonType: "end_turn" });
+      // Replaces the generic fixture's `events.list` with one that only
+      // "sees" the terminal idle event when queried directly (desc order,
+      // filtered to the idle type, limited to 1) — exactly the shape Fix 2
+      // asks for. Any other call shape — including the old bug's bare
+      // `events.list(sessionId)` — gets back a page that does NOT contain the
+      // idle event, standing in for "it's on a later page this call never
+      // reaches."
+      client.beta.sessions.events.list = jest.fn((_sessionId: string, params?: Record<string, unknown>) => {
+        const isDirectIdleQuery =
+          params?.order === "desc" &&
+          Array.isArray(params?.types) &&
+          (params.types as unknown[]).includes("session.status_idle") &&
+          params?.limit === 1;
+        if (isDirectIdleQuery) {
+          return Promise.resolve({
+            data: [{ type: "session.status_idle", stop_reason: { type: "end_turn" } }]
+          });
+        }
+        return Promise.resolve({ data: [{ type: "session.status_running" }] });
+      });
+      (getEngClient as jest.Mock).mockReturnValue(client);
+      const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+      const res = makeRes();
+      await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(204);
+      const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+      expect(runSets).toHaveLength(1);
+      // The load-bearing assertion: a version that reads only the first,
+      // unfiltered page finds no idle event and falls through to the
+      // `failed` default — telling the founder a successful run failed.
+      expect(runSets[0].data).toEqual(expect.objectContaining({ status: "reviewing" }));
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3: `creditsSpent` is cumulative for the whole session, but the dedupe
+// marker only protects against a RETRY of the same event id. Every distinct
+// terminal delivery (e.g. one per approval pause) re-reads the session's
+// running total and, pre-fix, re-debited that ENTIRE total — so a run with
+// two approvals billed roughly three times. The fix debits the delta between
+// this delivery's cumulative cost and the cumulative cost the previous
+// delivery persisted on the run doc.
+// ---------------------------------------------------------------------------
+
+/** One delivery's client fixture: a distinct event id, a fixed cumulative usage reading. */
+function clientForDelivery(opts: { eventId: string; amountCents: string; stopReasonType: string }) {
+  return {
+    beta: {
+      webhooks: {
+        unwrap: jest.fn().mockResolvedValue({
+          id: opts.eventId,
+          data: { type: "session.status_idled", id: "sess_delta_1" }
+        })
+      },
+      sessions: {
+        retrieve: jest.fn().mockResolvedValue({
+          usage: { list_cost: { amount: opts.amountCents } },
+          metadata: { runId: RUN_ID, uid: UID }
+        }),
+        events: {
+          list: jest.fn().mockResolvedValue({
+            data: [{ type: "session.status_idle", stop_reason: { type: opts.stopReasonType } }]
+          })
+        }
+      }
+    }
+  };
+}
+
+describe("handleEngWebhook — delta debit across multiple deliveries (Fix 3)", () => {
+  it(
+    "debits the DELTA per delivery, so the total charged across three deliveries of one session " +
+      "equals the FINAL cumulative cost, not the sum of the three cumulative readings",
+    async () => {
+      const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+      // Delivery 1: cumulative cost 25c -> 5 credits. Delta from a fresh run
+      // (creditsSpent starts at 0, per engStartRun.ts) is 5.
+      (getEngClient as jest.Mock).mockReturnValue(
+        clientForDelivery({ eventId: "evt_delta_a", amountCents: "25", stopReasonType: "requires_action" })
+      );
+      await handleEngWebhook(
+        makeReq('{"e":"a"}'),
+        makeRes() as unknown as Parameters<typeof handleEngWebhook>[1]
+      );
+
+      // Delivery 2: cumulative cost 60c -> 12 credits. Delta from 5 is 7.
+      (getEngClient as jest.Mock).mockReturnValue(
+        clientForDelivery({ eventId: "evt_delta_b", amountCents: "60", stopReasonType: "requires_action" })
+      );
+      await handleEngWebhook(
+        makeReq('{"e":"b"}'),
+        makeRes() as unknown as Parameters<typeof handleEngWebhook>[1]
+      );
+
+      // Delivery 3: cumulative cost 95c -> 19 credits. Delta from 12 is 7.
+      (getEngClient as jest.Mock).mockReturnValue(
+        clientForDelivery({ eventId: "evt_delta_c", amountCents: "95", stopReasonType: "end_turn" })
+      );
+      await handleEngWebhook(
+        makeReq('{"e":"c"}'),
+        makeRes() as unknown as Parameters<typeof handleEngWebhook>[1]
+      );
+
+      const companySets = setCalls.filter((c) => c.path === COMPANY_PATH);
+      expect(companySets).toHaveLength(3);
+      const totalDebited = companySets.reduce(
+        (sum, c) => sum + -(c.data as { credits: { __increment: number } }).credits.__increment,
+        0
+      );
+      // The oracle: total debited is the FINAL cumulative cost (5+7+7=19),
+      // not the sum of the three raw cumulative readings a re-debit-the-total
+      // bug would produce (5+12+19=36).
+      expect(totalDebited).toBe(19);
+
+      const runSets = setCalls.filter((c) => c.path === RUN_PATH);
+      expect(runSets).toHaveLength(3);
+      expect(runSets[runSets.length - 1].data).toEqual(
+        expect.objectContaining({ status: "reviewing", creditsSpent: 19 })
+      );
+    }
+  );
 });

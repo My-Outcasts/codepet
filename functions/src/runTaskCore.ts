@@ -3,6 +3,7 @@
 // The IO handler lives in runTask.ts and imports from here.
 
 import { companionFor } from "./companyChatCore";
+import { departmentBrief, DEPARTMENT_NAMES } from "./departments";
 
 // Mirrors native `DeliverableKind`. Keep in sync with codepet/Models — this is the
 // contract the Swift client decodes `kind` against.
@@ -34,6 +35,9 @@ export interface RunTaskArgs {
   reviseNote?: string;
   /** The current draft's body being revised. Required alongside reviseNote for a revise pass. */
   current?: string;
+  /** Owning department key of the task, so the deliverable comes from that function's
+   *  expertise rather than generic company context. Unknown/absent → no department block. */
+  deptKey?: string | null;
 }
 
 /** Build the companion-voiced generation prompt for a single roadmap task. */
@@ -53,9 +57,21 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
       ? `\n\nYou are REVISING an existing deliverable. Current version:\n${current}\n\nApply this change: ${reviseNote}. Keep the same kind and intent; return the full revised deliverable (not a diff).`
       : "";
 
+  // The department this task belongs to, as expertise. A run has always been performed BY a
+  // department — its pet is credited on the execute log and on the draft card — but the
+  // prompt was never told which one, so a marketing deliverable was written with no
+  // marketing knowledge behind it. Empty for a dept-less (legacy) task.
+  const deptBrief = departmentBrief(args.deptKey);
+  const deptName = args.deptKey ? DEPARTMENT_NAMES[args.deptKey] : undefined;
+  const deptBlock = deptBrief && deptName
+    ? `You are doing this work as the ${deptName} function of the founder's company:\n${deptBrief}\n` +
+      `Produce what that function would actually produce, at the level of specificity it would use.\n\n`
+    : "";
+
   return (
     `You are ${c.name}, the AI building companion inside Codepet — a senior operator who does real work for a solo founder, department by department.\n\n` +
     `Voice: ${c.voice}\n\n` +
+    deptBlock +
     `The founder's company:\n${context || "The founder hasn't filled in much of a brief yet — keep the deliverable general but still genuinely useful."}\n\n` +
     `Task to complete: ${taskTitle || "(untitled task)"}\n` +
     (taskDetail ? `Task detail: ${taskDetail}\n` : "") +

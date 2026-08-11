@@ -85,4 +85,48 @@ describe("loadRepo", () => {
       logSpy.mockRestore();
     }
   });
+
+  it("returns null when defaultBranch is missing from the repo doc", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" }
+        // NO defaultBranch
+      })
+    });
+
+    const { openToken } = require("../../oauth/githubOAuthCore");
+    openToken.mockReturnValueOnce("test-token");
+
+    const result = await loadRepo("some-uid", "some-enc-key");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns a RepoLink with the exact defaultBranch value when present", async () => {
+    const admin = require("firebase-admin");
+    admin.firestore().doc().get.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        url: "https://github.com/owner/repo",
+        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
+        defaultBranch: "master"
+      })
+    });
+
+    const { openToken } = require("../../oauth/githubOAuthCore");
+    openToken.mockReturnValueOnce("test-token");
+
+    const result = await loadRepo("some-uid", "some-enc-key");
+
+    expect(result).toEqual({
+      url: "https://github.com/owner/repo",
+      owner: "owner",
+      repo: "repo",
+      defaultBranch: "master",
+      token: "test-token"
+    });
+  });
 });

@@ -48,14 +48,16 @@ export function branchName(runId: string): string {
  * Unlike `loadConnectors`, this does NOT fail open. A chat turn without a
  * connector is a slightly worse answer; an engineering run without a repo
  * has nothing to work on, and starting one anyway would burn credits to
- * produce nothing. The caller turns null into the connect-or-create prompt.
+ * produce nothing. Missing defaultBranch is unresolved, not guessed; a wrong
+ * branch name in a run wastes credits on an obscure git error. The caller
+ * turns null into the connect-or-create prompt.
  */
 export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | null> {
   const snap = await admin.firestore().doc(`companies/${uid}/engineering/repo`).get();
   if (!snap.exists) return null;
 
   const data = snap.data() as RepoDoc;
-  if (!data.url || !data.sealed) return null;
+  if (!data.url || !data.sealed || typeof data.defaultBranch !== "string") return null;
 
   const parsed = parseRepoUrl(data.url);
   if (!parsed) return null;
@@ -74,7 +76,7 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
     url: data.url,
     owner: parsed.owner,
     repo: parsed.repo,
-    defaultBranch: data.defaultBranch ?? "main",
+    defaultBranch: data.defaultBranch,
     token
   };
 }

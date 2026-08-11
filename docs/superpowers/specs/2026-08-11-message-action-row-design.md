@@ -140,8 +140,8 @@ serialized, text first, matching what is on screen.
 
 **The last three rows are fallbacks, not additions,** and that distinction is the difference
 between a correct clipboard and a doubled one. At every site that builds those three messages
-the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1925`)
-constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1511`) assigns
+the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1940`)
+constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1550`) assigns
 `chatMessages[i].text = proposal.line(language)`, and `askInterviewGap` (`:346`) constructs
 `text: q.ask`. Appending the line unconditionally therefore prints it twice. Worse for
 `roadmapProposal`: when the model wrote its own prose, `text` keeps that prose and the card

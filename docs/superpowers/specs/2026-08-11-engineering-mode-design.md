@@ -278,6 +278,25 @@ That is the same shape as the go/no-go the launch plan already carries for the b
 
 ## 11. Open questions
 
+**RESOLVED 2026-08-11 — Managed Agents access confirmed.** The blocking question
+("does our account have CMA access at closed-beta volume?") is answered yes for
+access; volume is untested. Evidence from the spike, so nobody re-runs it:
+
+- The pinned `@anthropic-ai/sdk` already exposes `client.beta.{agents, sessions,
+  environments, webhooks}` — **no SDK upgrade was needed**, `package.json` untouched.
+- A cloud environment, an agent on `claude-opus-5`, and a session with a private
+  GitHub repo mounted at `/workspace/repo` all created successfully.
+- The event stream delivered `session.status_running` → `span.model_request_start`
+  → `agent.tool_use` → `agent.tool_result` → `agent.message` → `session.usage` →
+  `session.status_idle`, and the agent correctly read the repo tree. The stream
+  shapes this plan's `engEvents` mapping targets are real.
+- Spike resources, left behind and safe to archive from the Console once Task 10
+  provisions the production pair: `env_01XwpiRn4tzZeP1ejpKJQdN4`,
+  `agent_01FZf9TJEjZHiFwVccj2gApS` (v1).
+
+Still unknown: whether rate limits hold at 10–20 concurrent beta founders. That is
+a load question, not an access question, and it belongs in the closed beta.
+
 - Model tier for engineering runs (§6) — Opus 5 vs. Sonnet 5. Margin decision.
 - Credit conversion rate for engineering runs (§6) — needs closed-beta calibration.
 - What Codepet scaffolds into a created repo: an empty repo with a README, or a stack chosen from the brief. The latter makes the first preview meaningful; the former is faster to build and harder to get wrong.

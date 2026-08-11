@@ -93,7 +93,7 @@ The deployed `engStartRun` needs `ENG_AGENT_ID` / `ENG_AGENT_VERSION` /
 deploy, or every run will 500 with `misconfigured`.
 
 ```bash
-cd ~/Developer/codepet
+cd ~/Developer/codepet-eng-backend
 firebase functions:list      # confirm the export set below is a superset of this
 firebase deploy --only functions:engStartRun,functions:engStream,functions:engSendTurn,functions:engWebhook
 ```

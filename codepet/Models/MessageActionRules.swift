@@ -18,8 +18,21 @@ import Foundation
 /// condition. All three are independent `@Published` flags; none implies another. A button
 /// this rule offers that the store then refuses is worse than a disabled button: a disabled
 /// button tells the founder to wait, a dead click tells them nothing.
+///
+/// `isLast` alone is not enough, either. It assumes the newest message is the answer to the
+/// founder's last question — false whenever a store path appends a companion message with no
+/// ask before it (a Roadmap "Run" proposal, a finished run's draft, a fan-out row, ...): each
+/// becomes the newest message in turn, and retry offered there deletes whatever question and
+/// answer actually preceded it, several turns back, then re-asks it and spends credits on a
+/// question nobody just asked. `founderAsk` (`CopilotMessage.founderAsk`) is the one faithful
+/// signal — non-nil only on the reply `sendChat` produced for a typed ask — so a blank/nil
+/// value refuses retry even when the message is last. It also catches the brand-new-install
+/// case: byte's first-run greeting is the only message, `isLast` is true, and it has no
+/// founder ask at all.
 enum MessageActionRules {
-    static func canRetry(isLast: Bool, isTyping: Bool, isStreaming: Bool, isFanningOut: Bool) -> Bool {
-        isLast && !isTyping && !isStreaming && !isFanningOut
+    static func canRetry(isLast: Bool, isTyping: Bool, isStreaming: Bool, isFanningOut: Bool,
+                         founderAsk: String?) -> Bool {
+        let hasAsk = (founderAsk ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return isLast && !isTyping && !isStreaming && !isFanningOut && hasAsk
     }
 }

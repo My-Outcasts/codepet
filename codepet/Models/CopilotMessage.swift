@@ -87,6 +87,21 @@ struct CopilotMessage: Identifiable, Equatable {
     /// in Firestore, this is only what the row draws.
     var vote: MessageVote?
 
+    /// The founder's own typed ask this reply answers, when it was produced by one — nil for
+    /// every store-initiated append (a run proposal, a finished draft, a fan-out row, an
+    /// interview question, the first-run greeting, ...).
+    ///
+    /// NOT inferable from array position: `CompanyStore.retryReply` assumes the newest message
+    /// is the answer to the founder's LAST question, walks back to the preceding `.me`, and
+    /// deletes everything from there forward. Many companion messages land with no founder ask
+    /// immediately before them — a Roadmap "Run" proposal, a finished run's draft, a fan-out
+    /// summary — and each becomes the newest message in turn. Gating retry on `isLast` alone
+    /// offered it there too: tapping it deleted whatever question and answer preceded it (often
+    /// several turns back), not the proposal on screen. This field is the one faithful signal —
+    /// set only on the reply `sendChat` produces for a typed ask, left nil everywhere else — so
+    /// `MessageActionRules.canRetry` can refuse retry on a reply that isn't answering anything.
+    var founderAsk: String?
+
     /// `createdAt` is injectable and defaults to now.
     ///
     /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
@@ -105,7 +120,8 @@ struct CopilotMessage: Identifiable, Equatable {
          companionId: String? = nil, deptName: String? = nil,
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
-         drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil) {
+         drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil,
+         founderAsk: String? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -128,5 +144,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.roadmapProposal = roadmapProposal
         self.drafts = drafts
         self.vote = vote
+        self.founderAsk = founderAsk
     }
 }

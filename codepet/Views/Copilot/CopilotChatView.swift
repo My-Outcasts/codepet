@@ -722,7 +722,8 @@ struct CopilotBubble: View {
         let retryEnabled = MessageActionRules.canRetry(isLast: isLast,
                                                        isTyping: companyStore.isCompanionTyping,
                                                        isStreaming: companyStore.isStreaming,
-                                                       isFanningOut: companyStore.isFanningOut)
+                                                       isFanningOut: companyStore.isFanningOut,
+                                                       founderAsk: message.founderAsk)
         HStack(spacing: 2) {
             // The icon ITSELF becomes the acknowledgement — see `actionIcon`'s `tint`.
             actionIcon(copied ? "checkmark" : "doc.on.doc",

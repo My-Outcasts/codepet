@@ -542,7 +542,8 @@ final class CompanyStore: ObservableObject {
         let words = ask.isEmpty ? text : ask
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
-                          display: words)
+                          display: words,
+                          founderAsk: words)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -796,10 +797,17 @@ final class CompanyStore: ObservableObject {
     /// carrying that same sentence read as if the app had said it twice (observed Aug 5).
     /// The model still receives the shaped text — the mode is a real instruction — but the
     /// transcript, the history built from it, and the thread title derived from it are hers.
+    ///
+    /// `founderAsk` is stamped onto the reply's own `CopilotMessage.founderAsk` — see that
+    /// property's doc for why. Only `sendChat` passes it, for the same reason it alone passes
+    /// `convene`: `walkThroughTask`'s ask is composed on the founder's behalf, not typed by
+    /// her, so its reply must not become retryable by a rule that means "answers what she
+    /// asked."
     static let chatLog = Logger(subsystem: "app.murror.codepet", category: "ChatTurn")
 
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
-                             convene: String? = nil, display: String? = nil) async {
+                             convene: String? = nil, display: String? = nil,
+                             founderAsk: String? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
@@ -858,7 +866,8 @@ final class CompanyStore: ObservableObject {
         // from, so the "Name · Dept" header now names whoever actually wrote the words.
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
-                                            companionId: specialist?.companionId, deptName: specialist?.deptName))
+                                            companionId: specialist?.companionId, deptName: specialist?.deptName,
+                                            founderAsk: founderAsk))
         isStreaming = true
 
         // Fan-out: the room is convened by the router's escape hatch, not by a

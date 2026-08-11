@@ -13,6 +13,8 @@
     "verify:company": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/verify-company-run.ts",
     "try:company": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/try-company-run.ts",
     "token": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/get-id-token.ts",
+    "provision:eng": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/provision-eng-agent.ts",
+    "verify:eng": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/verify-eng-run.ts",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },

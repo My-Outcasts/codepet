@@ -102,8 +102,8 @@ existing `doc.on.doc` and `arrow.clockwise`.
 
 ```swift
 enum MessageTranscript {
-    static func plain(_ m: CopilotMessage) -> String
-    static func markdown(_ m: CopilotMessage, speaker: String) -> String
+    static func plain(_ m: CopilotMessage, lang: AppLanguage) -> String
+    static func markdown(_ m: CopilotMessage, speaker: String, lang: AppLanguage) -> String
 }
 ```
 
@@ -114,17 +114,34 @@ reads the payload the branch actually rendered, in the same precedence order as 
 
 | Payload | `plain` yields | `markdown` adds |
 |---|---|---|
-| `draft` | title, then body | `## title`, body fenced if it is code or structured |
-| `vcRun` | the synthesis | `## title`, then per-seat `**dept** — position` |
-| `runProposal` / `roadmapProposal` | the sentence | nothing beyond the speaker line |
-| `interview` | the question | nothing beyond the speaker line |
-| `execSteps` | title, then the step list | steps as `- [x]` items |
+| `drafts` | each draft's heading, then its body | heading as `### heading` |
+| `draft` | title, then body | `## title` |
+| `vcRun` | the recommendation | per-seat `**dept** — position` |
+| `execSteps` | the step list | steps as `- [x]` items |
+| `runProposal` / `roadmapProposal` | the sentence, **only when `text` is blank** | nothing beyond the speaker line |
+| `interview` | the question, **only when `text` is blank** | nothing beyond the speaker line |
 | otherwise | `text` | `text` |
 
 `markdown` prefixes a `**speaker**` line using the bubble's existing `headerName` (`:486-492`),
 so a specialist reply pastes as `**Glitch · Engineering**`. Where a branch carries both text and
 a payload (the `vcRun` and `firstRunAction` branches render `textBubble` plus a card), both are
 serialized, text first, matching what is on screen.
+
+**The last three rows are fallbacks, not additions,** and that distinction is the difference
+between a correct clipboard and a doubled one. At every site that builds those three messages
+the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1913`)
+constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1521`) assigns
+`chatMessages[i].text = proposal.line(language)`, and `askInterviewGap` (`:346`) constructs
+`text: q.ask`. Appending the line unconditionally therefore prints it twice. Worse for
+`roadmapProposal`: when the model wrote its own prose, `text` keeps that prose and the card
+shows only the prose, so an unconditional append would inject a sentence that was never on
+screen at all. `draft` and `vcRun` do **not** take the fallback rule — they are built with
+`text: ""` or with genuinely additional prose, and their payload really is separate content.
+
+Two rows deliberately claim less than an earlier draft of this table did. A draft body is
+**not** fenced: `DeliverableKind` cannot distinguish prose from code, and guessing would
+corrupt prose. A room has **no** `## title`: no title field exists on `VCBrief` or
+`VirtualCompanyRunState`.
 
 Plain `Copy` switches from raw `message.text` to `MessageTranscript.plain(message)`. The
 existing 1.4s "Copied" / "Đã sao chép" acknowledgement (`:650-658`) is reused for both copy

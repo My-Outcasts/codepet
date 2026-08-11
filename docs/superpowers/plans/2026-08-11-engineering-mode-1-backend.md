@@ -2143,5 +2143,22 @@ EOF
 Three further plans follow, each producing working software on its own:
 
 - **Plan 2 — Repo onboarding.** Connect-or-create, repo scaffolding from the brief, the Vercel GitHub app install, and writing `companies/{uid}/engineering/repo`. Task 10 Step 7 seeds that document by hand precisely because this plan does not build it.
+
+  **Hard contract inherited from Plan 1, Task 5 — do not lose this.** The repo
+  document MUST carry `defaultBranch`, read from the GitHub API at link time
+  (`GET /repos/{owner}/{repo}` → `default_branch`). `loadRepo` fails closed when the
+  field is absent: it returns `null` and the founder is asked to connect a repo.
+  It does **not** guess `"main"`.
+
+  Why the guess was removed: a repo whose real default is `master` would mount
+  `checkout: { branch: "main" }`, a branch that does not exist, and the founder
+  would meet an obscure git error *inside a paid run* rather than a clean prompt
+  before one started. Reading the field once at link time costs a single API call;
+  guessing costs a wasted run and a support conversation.
+
+  Consequence to handle in Plan 2: any repo document written before this field
+  existed resolves to `null`, so the founder is prompted to re-link. That is the
+  intended behaviour, not a regression — but the copy should say "reconnect your
+  repo", not "no repo linked", when a document exists and only the field is missing.
 - **Plan 3 — Native Engineering mode.** `ChatMode.engineering`, `EngineeringClient`, `EngineeringRunStore`, the collapsed result bar, live streaming into the dock.
 - **Plan 4 — Review pane and ship.** The expanded workspace, scope tabs, diff rendering, the PR and preview actions.

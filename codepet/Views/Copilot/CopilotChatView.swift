@@ -844,6 +844,16 @@ struct CopilotBubble: View {
     /// incomplete, so voting on it stays valid even while `isLast` — that is a different
     /// question from what `retryReply` will accept, which is why `canRetry` still checks
     /// `isFanningOut` too and this does not.
+    ///
+    /// Also gated on `ownRoomStillRunning`, independently of the two global flags above:
+    /// a Virtual Company room runs in a detached task, and both `isCompanionTyping` and
+    /// `isStreaming` clear while it keeps filling for 30–60s (`CompanyStore.swift` around
+    /// `publishRunProgress` — the composer is deliberately free during that window). The
+    /// room lands as its OWN message (inserted under its question, not appended), carrying
+    /// a non-blank handoff line, so its row is pinned and votable from the very first
+    /// routing card — before the verdict a thumbs-down there rates a room that hasn't
+    /// spoken yet. Read straight off `message.vcRun.phase`, so a room convening elsewhere
+    /// in the transcript never blocks voting on an unrelated reply.
     @ViewBuilder private func thumb(_ vote: MessageVote, icon: String, help: String) -> some View {
         let chosen = message.vote == vote
         Button {
@@ -861,7 +871,16 @@ struct CopilotBubble: View {
         }
         .buttonStyle(.plain)
         .help(help)
-        .disabled(isLast && (companyStore.isCompanionTyping || companyStore.isStreaming))
+        .disabled((isLast && (companyStore.isCompanionTyping || companyStore.isStreaming)) || ownRoomStillRunning)
+    }
+
+    /// True while THIS message's own Virtual Company room is still convening — see
+    /// `thumb`'s doc for why the two global chat flags don't cover this window. `vcRun` is
+    /// only non-nil on the room's own message (`publishRunProgress` inserts it separately
+    /// from byte's fast answer), so this never reads another message's run.
+    private var ownRoomStillRunning: Bool {
+        guard let phase = message.vcRun?.phase else { return false }
+        return phase != .finished && phase != .failed
     }
 
     /// "just now" until a minute has passed, then minutes, then hours — the reference's

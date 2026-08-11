@@ -11,50 +11,106 @@ struct DepartmentDetailView: View {
     private var tasks: [RoadmapTask] { companyStore.company.tasks.filter { $0.dept == deptKey } }
     private var left: Int { tasks.filter { !$0.done }.count }
 
-    var body: some View {
-        guard let d = dept else { return AnyView(EmptyView()) }
-        return AnyView(ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                        Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
-                    }.foregroundColor(CodepetTheme.bodyText)
-                }.buttonStyle(.plain)
-
-                hero(d)
-                Text(d.rationale).font(CodepetTheme.inter(15)).foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .top, spacing: 8) {
-                    CharacterImage(companyStore.company.companionId, size: 28)
-                    Text(d.focus).font(CodepetTheme.inter(13)).foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(lang == .vi ? "Việc cần làm · còn \(left)/\(tasks.count)"
-                                 : "What needs doing · \(left) of \(tasks.count) left")
-                    .font(CodepetTheme.inter(13, weight: .semibold)).foregroundColor(CodepetTheme.mutedText)
-                    .padding(.top, 4)
-                if tasks.isEmpty {
-                    Text(lang == .vi ? "Chưa có việc trong phòng ban này." : "No tasks in this department yet.")
-                        .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
-                } else {
-                    ForEach(tasks) { t in DepartmentTaskCard(task: t) }
-                }
-            }
-            .padding(20)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity))
+    /// Sentence case on purpose — `SectionEyebrow` uppercases at render time.
+    static func tasksLabel(left: Int, total: Int, lang: AppLanguage) -> String {
+        lang == .vi ? "Việc cần làm · còn \(left)/\(total)"
+                    : "What needs doing · \(left) of \(total) left"
     }
 
-    private func hero(_ d: Department) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            Image(d.coverAsset).resizable().scaledToFill().frame(height: 140).clipped()
-            LinearGradient(colors: [.clear, d.accent.opacity(0.55)], startPoint: .top, endPoint: .bottom)
-            HStack(spacing: 8) {
-                Text(d.ab).font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.white)
-                Text(d.name).font(CodepetTheme.inter(21, weight: .semibold)).foregroundColor(.white)
-            }.padding(12)
+    var body: some View {
+        guard let d = dept else { return AnyView(EmptyView()) }
+        // The skeleton is CompanyView's, deliberately: fixed header with
+        // viewHeadPadding(), then a ScrollView whose content carries the shared
+        // page rhythm and pageColumn(). Before this the page used padding(20) on
+        // all four sides and never called pageColumn(), so its hero ran the full
+        // width of the window while the roster that links to it capped at 1280.
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            DepartmentHeader(name: d.name, rationale: d.rationale, onBack: onBack)
+                .viewHeadPadding()
+            ScrollView {
+                // spacing: 0 — every vertical gap comes from CodepetTokens.Space,
+                // so this page cannot drift off the house rhythm again.
+                VStack(alignment: .leading, spacing: 0) {
+                    hero(d)
+                    SectionEyebrow(Self.tasksLabel(left: left, total: tasks.count, lang: lang))
+                    if tasks.isEmpty {
+                        Text(lang == .vi ? "Chưa có việc trong phòng ban này." : "No tasks in this department yet.")
+                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
+                    } else {
+                        VStack(spacing: CodepetTokens.Space.itemGap) {
+                            ForEach(tasks) { t in DepartmentTaskCard(task: t) }
+                        }
+                    }
+                }
+                .padding(.top, CodepetTokens.Space.headToBody)
+                .padding(.horizontal, 26)
+                .padding(.bottom, CodepetTokens.Space.pageBottom)
+                .pageColumn()
+            }
         }
-        .frame(height: 140).cornerRadius(14).clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+    }
+
+    /// A plain image band. The name, the two-letter badge and the accent
+    /// gradient all came out when the masthead took over: the gradient existed
+    /// only to make white text legible over the art, and with no text on the art
+    /// it was tinting the image for nothing. The badge earns its place on the
+    /// roster cover, where it marks otherwise unlabelled art — beside a
+    /// spelled-out "Engineering" it is decoration.
+    ///
+    /// 104 rather than 140 because the band no longer holds a text block, and
+    /// the shorter one keeps the first task card above the fold on a 900pt
+    /// window. `.interpolation(.high)` matches the roster cover (CompanyView:133).
+    private func hero(_ d: Department) -> some View {
+        Image(d.coverAsset)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(maxWidth: .infinity, minHeight: 104, maxHeight: 104)
+            .clipped()
+            .cornerRadius(14)
+    }
+}
+
+/// The masthead. Plain values rather than the store, so it carries no Firebase
+/// dependency and can be rendered on its own.
+///
+/// The title/subtitle pair is CompanyView:51-59 exactly — 28pt semibold at
+/// -0.5 tracking over 15pt muted, four points apart. The back link sits ten
+/// points above it: it is a control, not decoration, so it survives the
+/// no-decorative-icons rule, and pinning it outside the ScrollView keeps the
+/// way out reachable on a six-task department.
+/// `internal` rather than `private` because DepartmentHeaderLayoutTests renders it
+/// directly — `@testable import` promotes internal, but not private.
+struct DepartmentHeader: View {
+    let name: String
+    let rationale: String
+    let onBack: () -> Void
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onBack) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                    Text(lang == .vi ? "Công ty" : "Company").font(CodepetTheme.inter(13))
+                }
+                .foregroundColor(CodepetTheme.bodyText)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(CodepetTheme.inter(28, weight: .semibold))
+                    .tracking(-0.5)
+                    .foregroundColor(CodepetTheme.primaryText)
+                Text(rationale)
+                    .font(CodepetTheme.inter(15))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -64,6 +120,7 @@ private struct DepartmentTaskCard: View {
     let task: RoadmapTask
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    @Environment(\.colorScheme) private var scheme
     @State private var openDeliverable: Deliverable?
     /// Set when tapping "Review & approve" — opens the draft-preview sheet (shared with
     /// the Tasks board) instead of approving blindly.
@@ -106,8 +163,7 @@ private struct DepartmentTaskCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(CodepetTheme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CodepetTheme.hairline, lineWidth: 1))
+        .cardChrome(radius: 12, dark: scheme == .dark)
         .sheet(item: $openDeliverable) { DeliverableDetailView(deliverable: $0) }
         .sheet(item: $previewTask) { TaskDraftPreview(taskId: $0.id) }
     }

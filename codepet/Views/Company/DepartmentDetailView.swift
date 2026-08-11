@@ -11,6 +11,12 @@ struct DepartmentDetailView: View {
     private var tasks: [RoadmapTask] { companyStore.company.tasks.filter { $0.dept == deptKey } }
     private var left: Int { tasks.filter { !$0.done }.count }
 
+    /// Sentence case on purpose — `SectionEyebrow` uppercases at render time.
+    static func tasksLabel(left: Int, total: Int, lang: AppLanguage) -> String {
+        lang == .vi ? "Việc cần làm · còn \(left)/\(total)"
+                    : "What needs doing · \(left) of \(total) left"
+    }
+
     var body: some View {
         guard let d = dept else { return AnyView(EmptyView()) }
         return AnyView(ScrollView {

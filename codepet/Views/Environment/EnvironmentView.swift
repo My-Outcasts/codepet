@@ -33,9 +33,9 @@ struct EnvironmentView: View {
                 // numbers — one rhythm across every tab.
                 VStack(alignment: .leading, spacing: 0) {
                     linkedProjectSection
-                    sectionEyebrow(lang == .vi ? "Đề xuất cho dự án của bạn" : "Recommended for your project")
+                    SectionEyebrow(lang == .vi ? "Đề xuất cho dự án của bạn" : "Recommended for your project")
                     recommendationGrid
-                    sectionEyebrow(lang == .vi ? "Xem tất cả" : "Browse all")
+                    SectionEyebrow(lang == .vi ? "Xem tất cả" : "Browse all")
                     browseAll
                 }
                 .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26).padding(.bottom, CodepetTokens.Space.pageBottom)
@@ -93,18 +93,6 @@ struct EnvironmentView: View {
         companyStore.dockCollapsed = false
         companyStore.select(.chat)
         Task { await companyStore.sendChat(seed, language: lang, founderAsk: seed) }
-    }
-
-    /// web `.env-sech` — 10px, 1px tracking, uppercase, --t-4. Spacing is the shared
-    /// section rhythm: a large gap above, a small one below, so the label reads as
-    /// belonging to the group it introduces.
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(CodepetTheme.inter(10, weight: .regular))
-            .tracking(1)
-            .foregroundColor(CodepetTokens.faint)
-            .padding(.top, CodepetTokens.Space.sectionAbove).padding(.horizontal, 2).padding(.bottom, CodepetTokens.Space.sectionBelow)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// What the companion makes of this page — one paragraph, in its voice.

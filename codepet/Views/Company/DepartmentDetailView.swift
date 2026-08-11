@@ -66,8 +66,7 @@ struct DepartmentDetailView: View {
             .resizable()
             .interpolation(.high)
             .scaledToFill()
-            .frame(height: 104)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 104, maxHeight: 104)
             .clipped()
             .cornerRadius(14)
     }

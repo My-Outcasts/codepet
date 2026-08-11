@@ -26,20 +26,26 @@ export interface DiffSummary {
   truncated: boolean;
 }
 
-const EMPTY: DiffSummary = { files: [], additions: 0, deletions: 0, truncated: false };
+function emptyDiffSummary(): DiffSummary {
+  return { files: [], additions: 0, deletions: 0, truncated: false };
+}
 
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 export function parseCompare(payload: unknown): DiffSummary {
-  if (typeof payload !== "object" || payload === null) return { ...EMPTY };
+  if (typeof payload !== "object" || payload === null) return emptyDiffSummary();
   const raw = (payload as Record<string, unknown>).files;
-  if (!Array.isArray(raw)) return { ...EMPTY };
+  if (!Array.isArray(raw)) return emptyDiffSummary();
 
   const files: FileDiff[] = [];
   let additions = 0;
   let deletions = 0;
+
+  // Derive truncated from the RAW input length, before filtering. If GitHub hit
+  // the cap, we must report it even if some entries are malformed and filtered out.
+  const truncated = raw.length >= COMPARE_FILE_CAP;
 
   for (const entry of raw) {
     if (typeof entry !== "object" || entry === null) continue;
@@ -68,5 +74,5 @@ export function parseCompare(payload: unknown): DiffSummary {
     });
   }
 
-  return { files, additions, deletions, truncated: files.length >= COMPARE_FILE_CAP };
+  return { files, additions, deletions, truncated };
 }

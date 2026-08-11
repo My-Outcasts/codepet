@@ -44,4 +44,32 @@ describe("parseCompare", () => {
     expect(parseCompare(null)).toEqual({ files: [], additions: 0, deletions: 0, truncated: false });
     expect(parseCompare({ files: "nope" })).toEqual({ files: [], additions: 0, deletions: 0, truncated: false });
   });
+
+  it("does not leak a shared mutable array between calls", () => {
+    // A caller that pushes onto the result would corrupt a module constant.
+    const firstResult = parseCompare({ files: [{}] });
+    const secondResult = parseCompare({ files: [{}] });
+
+    // Mutate the first result's files array.
+    firstResult.files.push({ path: "mutated.ts", additions: 0, deletions: 0, status: "added", patch: null });
+
+    // The second call's files must still be empty — not corrupted by the first call.
+    expect(secondResult.files).toHaveLength(0);
+
+    // They must also be different array objects, not aliases.
+    expect(firstResult.files).not.toBe(secondResult.files);
+  });
+
+  it("reports truncated=true even when a malformed entry is filtered out", () => {
+    // GitHub caps at 300 files. If we filter out one malformed entry, we have 299
+    // valid files, but the input WAS capped, so we must report truncated: true.
+    const entries: unknown[] = Array.from({ length: 299 }, (_, i) => ({ filename: `f${i}.ts`, additions: 1, deletions: 0, status: "added", patch: "@@" }));
+    // Add one malformed entry (missing filename) to reach 300 total.
+    entries.push({ additions: 1, deletions: 0, status: "added", patch: "@@" });
+
+    const result = parseCompare({ files: entries });
+
+    expect(result.files).toHaveLength(299);
+    expect(result.truncated).toBe(true);
+  });
 });

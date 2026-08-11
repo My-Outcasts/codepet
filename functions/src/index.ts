@@ -24,6 +24,7 @@ import { handleRunTask } from "./runTask";
 import { handleGenerateRoadmap } from "./generateRoadmap";
 import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
+import { handleEngStartRun } from "./engineering/engStartRun";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -110,6 +111,17 @@ export const runTask = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleRunTask
+);
+
+// The engineering coding agent. CONNECTOR_ENC_KEY opens the founder's stored
+// GitHub token so the session can mount their repo; the token is handed to the
+// session resource and never enters the container.
+export const engStartRun = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY", "CONNECTOR_ENC_KEY"]
+  },
+  handleEngStartRun
 );
 
 export const generateRoadmap = onRequest(

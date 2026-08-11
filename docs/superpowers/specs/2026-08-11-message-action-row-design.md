@@ -17,11 +17,19 @@ and already draws copy, retry, and a relative timestamp. Two things make it unre
    is attached to the same view held at `.opacity(hovering ? 1 : 0)` (`:668`). Hovering the
    message does nothing; you have to find a blank 22×20pt strip below the prose. Nothing is
    pinned, so there is no first sighting that teaches the strip exists.
-2. **The row renders on plain-text replies only.** `messageActions` appears exactly once, at
-   `:1035`, inside the assistant branch of `textBubble`. Every card-bearing reply — a
-   deliverable draft, an exec log, a Virtual Company room, a run proposal, a roadmap
-   proposal, an interview — dispatches to a different branch of `body` (`:498-548`) and gets
-   no actions at all. These are the replies most worth rating and copying.
+2. **The row is scattered, not universal, and mostly buried mid-card.** `messageActions`
+   appears exactly once, at `:1035`, inside the assistant branch of `textBubble`. Four
+   card-bearing branches of `body` (`:498-548`) — a Virtual Company room, a first-run
+   greeting action, a run proposal, a roadmap proposal — render `textBubble` INSIDE their
+   own card, so each already gets a row wherever `text` is non-blank, which it always is at
+   their construction sites. It is just nested under that card's own button rather than at
+   the reply's own top level. Only three branches (verified against `git show
+   9b2783d:codepet/Views/Copilot/CopilotChatView.swift`) truly render no row at all: a
+   deliverable draft, the producing exec log, and an interview — plus the standalone
+   nav/setup/noted chips, which render only when `text` is blank and so never reach
+   `textBubble`. These are the replies most worth rating and copying either way: a row
+   nested one card deep is still gated by problem 1's invisible strip, and still isn't the
+   universal, pinned row the founder is asking for.
 
 Two adjacent facts, both established by reading the current tree rather than inferred:
 
@@ -33,8 +41,11 @@ Two adjacent facts, both established by reading the current tree rather than inf
   and no deploy.
 - **Retry is destructive.** `CompanyStore.retryReply` (`Managers/CompanyStore.swift:1262-1281`)
   walks back to the preceding `.me` message and calls `chatMessages.removeSubrange(askIndex...)`
-  — it drops the question and every turn after it. Harmless while nobody can find the button;
-  a data-loss footgun the moment it is pinned and discoverable.
+  — it drops the question and every turn after it. Harmless everywhere it already rendered —
+  not just on "plain-text replies," but on the four card branches above too — because the row
+  was `.opacity(0)` with a blank 22×20 hover target on every one of them alike; pinning it and
+  widening the hover target is what turns that latent risk live across all seven branches at
+  once, not something introduced fresh by extending coverage to the three that had nothing.
 
 ## What we are building
 
@@ -129,8 +140,8 @@ serialized, text first, matching what is on screen.
 
 **The last three rows are fallbacks, not additions,** and that distinction is the difference
 between a correct clipboard and a doubled one. At every site that builds those three messages
-the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1913`)
-constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1521`) assigns
+the payload's own sentence already IS `message.text` — `CompanyStore.proposeRun` (`:1925`)
+constructs `text: proposal.line(language)`, `handleRoadmapProposal` (`:1511`) assigns
 `chatMessages[i].text = proposal.line(language)`, and `askInterviewGap` (`:346`) constructs
 `text: q.ask`. Appending the line unconditionally therefore prints it twice. Worse for
 `roadmapProposal`: when the model wrote its own prose, `text` keeps that prose and the card

@@ -56,7 +56,7 @@ enum MessageTranscript {
             // An email's heading is its subject, so the recipient has no other carrier and
             // rides as its own line — AFTER the body, because that is where the view puts it
             // (`MessageDraftViewer` draws heading + body, then the "To:" line below the card,
-            // CopilotChatView:749-758). Emitted before the body it pastes as a header stranded
+            // CopilotChatView:949-958). Emitted before the body it pastes as a header stranded
             // inside the message.
             if drafted.channel == "email",
                let to = drafted.to?.trimmingCharacters(in: .whitespacesAndNewlines),

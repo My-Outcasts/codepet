@@ -112,22 +112,48 @@ struct ChatComposer: View {
         }
     }
 
+    /// A department chip. Selecting one summons that department's PET — and until the reply
+    /// landed, nothing said so: the chip named a department, the answer arrived signed "Nova ·
+    /// Marketing", and the founder had to send a message to find out who she had picked. The
+    /// sprite rides the selected chip so the handoff is legible at the moment of choosing.
+    ///
+    /// Only the ON state carries it. A sprite on every chip would put four portraits in a row
+    /// under the composer competing with the send button, and the pet is only a fact once the
+    /// chip is armed. A department with no mapped companion (or one that IS the host — the same
+    /// case `actingSpecialist` declines to hand off) shows the name alone, so the chip never
+    /// promises a pet that won't appear.
     private func chip(_ dep: Department) -> some View {
         let on = selectedDept?.key == dep.key
         return Button {
             selectedDept = on ? nil : dep
         } label: {
-            Text(dep.name).font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(on ? dep.accent : CodepetTheme.bodyText)
-                .padding(.horizontal, 10).frame(height: 26)
-                // Off used to be `Color.clear`, which made the chip hard to select and
-                // easy to deselect — the interior only existed once it was already on.
-                // `surface` is what the composer sits on, so this reads identically at
-                // rest while giving the off state a real interior.
-                .background(Capsule().fill(on ? dep.accent.opacity(0.15) : CodepetTheme.surface))
-                .overlay(Capsule().stroke(on ? dep.accent : CodepetTheme.hairline))
-                .hoverAffordance(Capsule(), accent: dep.accent)
+            HStack(spacing: 5) {
+                if on, let pet = chipPet(dep) {
+                    // 18pt, not the 20-28pt used in the transcript: the chip row is 26pt tall,
+                    // and these sprites are tall portraits fitted into a square frame, so the
+                    // sprite reads as ~13pt wide. It is an identity cue next to the name it
+                    // belongs to, not a thing to be recognised on its own.
+                    CharacterImage(pet, size: 18)
+                }
+                Text(dep.name).font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(on ? dep.accent : CodepetTheme.bodyText)
+            }
+            .padding(.horizontal, 10).frame(height: 26)
+            // Off used to be `Color.clear`, which made the chip hard to select and
+            // easy to deselect — the interior only existed once it was already on.
+            // `surface` is what the composer sits on, so this reads identically at
+            // rest while giving the off state a real interior.
+            .background(Capsule().fill(on ? dep.accent.opacity(0.15) : CodepetTheme.surface))
+            .overlay(Capsule().stroke(on ? dep.accent : CodepetTheme.hairline))
+            .hoverAffordance(Capsule(), accent: dep.accent)
         }.buttonStyle(.plain)
+    }
+
+    /// The pet this chip summons, or nil when the turn would stay with the host. Goes through the
+    /// SAME `specialistId` the send does (`CompanyStore.actingSpecialist`), so the chip can never
+    /// promise a pet the reply then doesn't sign — see that function for why the rule has one home.
+    private func chipPet(_ dep: Department) -> String? {
+        DepartmentCompanions.specialistId(for: dep.key, host: companyStore.company.companionId)
     }
 
     private var quickActionsMenu: some View {
@@ -210,6 +236,8 @@ struct ChatComposer: View {
 
 #if DEBUG
 private struct ChatComposerPreviewHost: View {
+    /// Preselect a department to see the armed chip (sprite + accent) without running the app.
+    var selected: Department? = nil
     @State private var draft = ""
     @State private var mode: ChatMode = .ask
     @FocusState private var focused: Bool
@@ -232,8 +260,17 @@ private struct ChatComposerPreviewHost: View {
         .frame(width: 380)
         .padding()
         .environmentObject(CompanyStore())
+        .onAppear { if dept == nil { dept = selected } }
     }
 }
 
 #Preview("ChatComposer (dock, 380pt)") { ChatComposerPreviewHost() }
+
+/// Marketing armed: the chip carries Nova's sprite and Marketing's accent, and — because it came
+/// from the ••• overflow rather than the two visible chips — it appears as its own chip beside
+/// them. The two states to compare are this and the preview above, at the same 380pt dock width:
+/// the row must not wrap or crowd the active-project chip once a sprite is in it.
+#Preview("ChatComposer (Marketing armed)") {
+    ChatComposerPreviewHost(selected: DepartmentCatalog.find("mkt"))
+}
 #endif

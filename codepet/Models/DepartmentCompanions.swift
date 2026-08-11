@@ -19,6 +19,23 @@ enum DepartmentCompanions {
 
     static func companionId(for deptKey: String) -> String? { map[deptKey] }
 
+    /// The pet that visibly takes over a chat turn for `deptKey`, or nil when the turn stays
+    /// with the host — an unmapped department, or one cast to the founder's OWN companion, where
+    /// announcing a handoff to yourself says nothing.
+    ///
+    /// One home for that rule because two surfaces now state it: `CompanyStore.actingSpecialist`
+    /// decides who signs the reply, and the composer's department chip shows who is about to be
+    /// summoned. A chip promising a pet that the send then declines to hand off to is a lie the
+    /// founder can see in one tap, and the second condition is exactly the one a second copy
+    /// would forget — a founder whose companion is Nova gets no handoff on Marketing or Sales.
+    ///
+    /// NOT used by runs: `taskSpecialist` deliberately keeps the host case, because a run is
+    /// performed BY a department and always shows that department's character (see its comment).
+    static func specialistId(for deptKey: String, host: String) -> String? {
+        guard let id = companionId(for: deptKey), id != host else { return nil }
+        return id
+    }
+
     /// The first department whose NAME appears in `text` (case-insensitive) AND has a
     /// companion to bring in, so a free-text mention ("help me with marketing") gets the
     /// right pet. Matches on the human name only (not the short key) to avoid substring
@@ -28,10 +45,15 @@ enum DepartmentCompanions {
     /// `product` to the catalog (for the Virtual Company's `department_key`) put an
     /// entry with no companion at index 1, and because the caller
     /// (`CompanyStore.actingSpecialist`) resolves the single returned key and gives up if
-    /// it maps to nothing, "what should the design of my product page be?" silently lost
-    /// luna · Design. Skipping here keeps the next match reachable. The alternative —
-    /// mapping a companion to the word "product" — would hijack one of the most common
-    /// words a founder types.
+    /// it maps to nothing, "ask design about my product page" silently lost luna · Design.
+    /// Skipping here keeps the next match reachable. The alternative — mapping a companion to
+    /// the word "product" — would hijack one of the most common words a founder types.
+    ///
+    /// That example used to read "what should the design of my product page be?", and the
+    /// addressing rule below (added later, Aug 7) declines that sentence on its own — it names
+    /// design without addressing it. The comment outlived the behaviour it described, and so did
+    /// the test under it, which had been red on `main` since. Both now use an addressed phrasing,
+    /// which is the only kind that reaches the shadowing this paragraph is about.
     /// A department has to be ADDRESSED, not merely mentioned.
     ///
     /// This used to be `lower.contains(dept.name.lowercased())` over the whole message, and on
@@ -57,10 +79,38 @@ enum DepartmentCompanions {
     }
 
     /// Verbs and forms that mean the founder is talking TO a department rather than about a word.
+    ///
+    /// Every entry here takes a PERSON as its object ("ask marketing", "check with support") or
+    /// makes the department the subject of a question ("can engineering ship this?"). That is the
+    /// closest a word-level heuristic gets to intent, and it is the whole guard — so a word that
+    /// merely tends to sit next to a department name does not belong in this list.
+    ///
+    /// Five did, and they re-opened the bug the addressing rule was written to close. `for`,
+    /// `from`, `with` and `have` are ordinary prepositions and `do` an ordinary auxiliary; they
+    /// govern the department name as a plain NOUN, which is how a founder describing their company
+    /// uses those words. Measured Aug 10 against real-shaped messages: "we have support from two
+    /// angel investors" handed the turn to Sage · Support, "our runway comes from sales, not
+    /// funding" to Nova · Sales, "I need a landing page for marketing purposes" to Nova ·
+    /// Marketing, and "I'm happy with design so far" to Luna · Design. Six of twelve sentences
+    /// summoned a pet nobody asked for — the same failure as the Aug 7 bakery paste, arriving
+    /// through the fix for it. `does`/`do` go too; `what does`/`what do` already carry the
+    /// addressed form and bare `do` only ever led false positives ("do design tokens matter?").
+    ///
+    /// The residual is deliberate and lands the safe way: "can design be simpler?" still summons
+    /// Luna, because the topic IS design. A pet answering a question inside its own department is
+    /// not the failure this guards against; a pet answering because the founder pasted a sentence
+    /// containing its name is. DepartmentCompanionsTests + DepartmentAddressingTests hold both
+    /// directions — the false positives above and the forms that must keep working.
+    ///
+    /// `help me with` / `help with` are here because bare `with` is not. "help me with marketing"
+    /// is this function's original motivating example (see the doc comment above) and it IS a
+    /// request aimed at a department — it just happens to reach it through the same preposition
+    /// that "I'm happy with design so far" reaches a plain noun through. The verb is what carries
+    /// the intent, so the verb is what's matched.
     private static let addressingPrefixes = [
-        "ask", "asking", "tell", "get", "have", "bring in", "bring", "check with", "loop in",
-        "hand to", "hand this to", "for", "from", "with", "what does", "what do", "what would",
-        "can", "could", "should", "does", "do",
+        "ask", "asking", "tell", "bring in", "bring", "check with", "loop in",
+        "hand to", "hand this to", "help me with", "help with",
+        "what does", "what do", "what would", "can", "could", "should",
     ]
 
     private static func isAddressed(_ name: String, in text: String) -> Bool {

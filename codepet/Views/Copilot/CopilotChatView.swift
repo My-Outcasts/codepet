@@ -289,6 +289,16 @@ struct CopilotChatView: View {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
+        // One message, one handoff. The chip used to survive the send — and `newChat()` and a
+        // thread switch too, since it lives here rather than in the store — so a founder who
+        // asked Marketing one question had Nova answering every later question in the session,
+        // including the ones about pricing. Nothing on screen said why: the chip sits under the
+        // composer, out of the eyeline of someone reading replies. A selection consumed by the
+        // message it was made for can't go stale, so the sticky-focus problem stops existing
+        // rather than needing to be signposted. Cleared for `.build` too — that send doesn't read
+        // the department, and leaving one armed chip behind is the exact state this removes.
+        let dept = selectedDept
+        selectedDept = nil
         switch mode {
         case .ask, .plan:
             // `founderAsk` is the unshaped text: byte should see the mode's framing
@@ -296,7 +306,7 @@ struct CopilotChatView: View {
             // it decides `request_type` and rewrites the question into `real_question`.
             Task {
                 await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
-                                            department: selectedDept, founderAsk: text,
+                                            department: dept, founderAsk: text,
                                             convenesRoom: mode.convenesRoom)
             }
         case .build:

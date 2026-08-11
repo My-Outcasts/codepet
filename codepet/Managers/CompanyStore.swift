@@ -572,8 +572,9 @@ final class CompanyStore: ObservableObject {
     private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
         let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
         guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
-              let companionId = DepartmentCompanions.companionId(for: deptKey),
-              companionId != company.companionId else { return nil }
+              let companionId = DepartmentCompanions.specialistId(for: deptKey,
+                                                                  host: company.companionId)
+        else { return nil }
         return (companionId, dept.name)
     }
 
@@ -698,8 +699,20 @@ final class CompanyStore: ObservableObject {
     /// grounded chat-send path as a typed message: the reply is streamed and grounded
     /// on the department summary + prior work (via `ChatContext.compose`), so the
     /// guidance is specific to this task, not generic. `taskRunner` is never touched.
+    /// Passes the task's own department, so the founder-owned half of a department's work is
+    /// grounded and attributed exactly like the half Codepet runs.
+    ///
+    /// Without it the two buttons on one task card behaved differently: "Have Codepet do it"
+    /// produced a run grounded in the department and signed by its specialist, while "Walk me
+    /// through it" fell through to the host with no department in context — the founder doing
+    /// Engineering's work herself was the one case that got no engineering framing. The department
+    /// is a property of the TASK either way; who executes it isn't what decides that.
+    ///
+    /// nil `dept` (legacy boards predate the field) resolves to no department and no specialist,
+    /// which is the pre-existing host behaviour.
     func walkThroughTask(_ task: RoadmapTask, language: AppLanguage) async {
-        await sendMessage(Self.walkThroughMessage(for: task, language: language), language: language)
+        await sendMessage(Self.walkThroughMessage(for: task, language: language), language: language,
+                          department: DepartmentCatalog.find(task.dept))
     }
 
     /// Compose the founder's ask for `walkThroughTask` — mirrors how a founder would

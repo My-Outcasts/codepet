@@ -13,7 +13,7 @@ jest.mock("../engClient", () => {
   return { ...actual, getEngClient: jest.fn() };
 });
 
-import { dedupe, isTerminal, handleEngStream } from "../engStream";
+import { dedupe, isTerminal, handleEngStream, writeFrame } from "../engStream";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../../auth";
 import { getEngClient } from "../engClient";
@@ -72,8 +72,17 @@ type MockRes = {
   write: jest.Mock;
   end: jest.Mock;
   json: jest.Mock;
+  on: jest.Mock;
+  writableEnded: boolean;
+  destroyed: boolean;
 };
 
+// Plumbing only — `on`/`writableEnded`/`destroyed` exist so handleEngStream
+// can call `res.on(...)` and check writability without crashing the mock.
+// They default to "connected and writable" and are never the thing a given
+// test is asserting on; a disconnect test overrides them explicitly (see
+// below), per the project rule that a guard's own test can't lean on a
+// shared default to pass.
 function makeRes(): MockRes {
   const res: Partial<MockRes> = {};
   res.setHeader = jest.fn();
@@ -81,6 +90,9 @@ function makeRes(): MockRes {
   res.write = jest.fn();
   res.end = jest.fn();
   res.json = jest.fn().mockReturnValue(res);
+  res.on = jest.fn();
+  res.writableEnded = false;
+  res.destroyed = false;
   return res as MockRes;
 }
 
@@ -177,5 +189,103 @@ describe("handleEngStream", () => {
     // Never a second "step"/"message" frame for the replayed event — dedupe
     // still gated the relay, only not the terminal check.
     expect(frames.filter((f) => f.startsWith("event: step")).length).toBe(0);
+  });
+
+  it("stops pulling live events at its next iteration once the client disconnects mid-stream", async () => {
+    wireAuthAndRun();
+
+    // This test's own guard, built from scratch rather than borrowed from
+    // makeRes()'s default: we capture whatever handler the implementation
+    // registers for "close" and fire it ourselves, mid-stream, to simulate
+    // the founder's app dropping the connection.
+    let closeHandler: (() => void) | undefined;
+    const res = makeRes();
+    res.on = jest.fn((eventName: string, handler: () => void) => {
+      if (eventName === "close") closeHandler = handler;
+    });
+
+    let disconnected = false;
+    let pullsAfterDisconnect = 0;
+    const TOTAL_EVENTS = 1000;
+
+    async function* emptyHistory(): AsyncGenerator<Record<string, unknown>> {
+      // yields nothing — the disconnect happens on the live tail
+    }
+
+    // A long-running live tail. At event index 2 we flip the connection to
+    // "closed" — simulating the founder's app dropping mid-run — via the
+    // exact close handler handleEngStream registered on res. The oracle:
+    // the generator must not be pulled more than once more after that (the
+    // one in-flight pull the for-await protocol can't avoid). A regression
+    // that never checks the disconnect flag would instead drain all 1000.
+    async function* live(): AsyncGenerator<Record<string, unknown>> {
+      for (let i = 0; i < TOTAL_EVENTS; i++) {
+        if (disconnected) pullsAfterDisconnect++;
+        yield { id: `sevt_${i}`, type: "agent.tool_use", name: "bash", input: { command: `step ${i}` } };
+        if (i === 2) {
+          disconnected = true;
+          closeHandler?.();
+        }
+      }
+    }
+
+    const streamMock = jest.fn().mockImplementation(async () => live());
+    const listMock = jest.fn().mockImplementation(() => emptyHistory());
+    (getEngClient as jest.Mock).mockReturnValue({
+      beta: { sessions: { events: { stream: streamMock, list: listMock } } }
+    });
+
+    await handleEngStream(makeReq(), res as unknown as Parameters<typeof handleEngStream>[1]);
+
+    // The loop noticed the disconnect at its very next iteration — not after
+    // draining the remaining ~997 events waiting in the mock generator.
+    expect(pullsAfterDisconnect).toBe(1);
+    // None of those un-relayed events reached the client as "step" frames.
+    const frames = framesWritten(res);
+    expect(frames.filter((f) => f.startsWith("event: step")).length).toBeLessThanOrEqual(3);
+    expect(res.end).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("writeFrame", () => {
+  // Each test builds its own bare response object — no shared "connected and
+  // writable" default from makeRes() — so a future guard that changes what
+  // "writable" means breaks these loudly instead of passing by accident.
+
+  it("writes when the response is still writable", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: false, destroyed: false } as unknown as Parameters<typeof writeFrame>[0];
+
+    writeFrame(res, "step", { id: "sevt_1", label: "ran a command", done: false });
+
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op once writableEnded is true", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: true, destroyed: false } as unknown as Parameters<typeof writeFrame>[0];
+
+    writeFrame(res, "step", { id: "sevt_1", label: "ran a command", done: false });
+
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op once the socket is destroyed", () => {
+    const write = jest.fn();
+    const res = { write, writableEnded: false, destroyed: true } as unknown as Parameters<typeof writeFrame>[0];
+
+    writeFrame(res, "step", { id: "sevt_1", label: "ran a command", done: false });
+
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("swallows a synchronous write failure instead of throwing", () => {
+    const write = jest.fn(() => {
+      throw new Error("write after end");
+    });
+    const res = { write, writableEnded: false, destroyed: false } as unknown as Parameters<typeof writeFrame>[0];
+
+    expect(() => writeFrame(res, "error", { error: "stream_failed" })).not.toThrow();
+    expect(write).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,12 +12,46 @@
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
+import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { toExecStep } from "./engEvents";
 import { getEngClient } from "./engClient";
 
-function writeFrame(res: Response, event: string, payload: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+/**
+ * A no-op once the response can no longer take writes — either because we
+ * already ended it, or because the client dropped and Node marked the
+ * socket destroyed. Also swallows a synchronous write failure: `res.write`
+ * can throw on an already-broken socket, and the catch block below calls
+ * this for its own "error" frame with nothing above it to catch a throw.
+ */
+export function writeFrame(res: Response, event: string, payload: unknown): void {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+  } catch {
+    // Socket died between the writability check and the write itself.
+    // Nothing to do — the client is gone either way.
+  }
+}
+
+/**
+ * Content-free fields only: an error's constructor name, and an HTTP status
+ * if the SDK error exposes one (Anthropic's `APIError.status`). Never the
+ * error object, its `message`, or a stringification — an SDK error can carry
+ * the request that produced it, including our API key header.
+ */
+function safeErrorDetail(err: unknown): { name?: string; status?: number } {
+  const detail: { name?: string; status?: number } = {};
+  if (err instanceof Error) detail.name = err.name;
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status === "number") detail.status = status;
+  return detail;
+}
+
+/** True if `stream` exposes an abortable controller (the SDK's `Stream` does). Best-effort: a test double or a future SDK shape without one is a silent no-op, not a crash. */
+function abortIfPossible(stream: unknown): void {
+  const controller = (stream as { controller?: { abort?: () => void } } | null | undefined)?.controller;
+  if (typeof controller?.abort === "function") controller.abort();
 }
 
 /** True the first time an id is seen. Id-less events always pass. */
@@ -79,6 +113,22 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
     (res as unknown as { flushHeaders: () => void }).flushHeaders();
   }
 
+  // True once the client is gone — closed the app, lost network, or the
+  // socket itself errored. Checked at the top of both loops below so each
+  // exits at its next iteration instead of consuming the upstream SDK stream
+  // and calling res.write() for up to the full 3600s timeout.
+  let clientGone = false;
+  res.on("close", () => {
+    clientGone = true;
+  });
+  res.on("error", () => {
+    // Node emits this asynchronously instead of throwing when a write hits a
+    // destroyed socket. `writeFrame` already checks writability before every
+    // write; this listener exists only so the otherwise-unhandled "error"
+    // event doesn't crash the function instance.
+    clientGone = true;
+  });
+
   const client = getEngClient();
   const seen = new Set<string>();
 
@@ -99,18 +149,21 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
     }
   };
 
+  let stream: Awaited<ReturnType<typeof client.beta.sessions.events.stream>> | undefined;
   try {
     // Order matters. Open the stream before listing history: the stream only
     // carries events emitted after it opens, so listing first leaves a gap
     // between the last history page and the first live event.
-    const stream = await client.beta.sessions.events.stream(sessionId);
+    stream = await client.beta.sessions.events.stream(sessionId);
 
     for await (const past of client.beta.sessions.events.list(sessionId)) {
+      if (clientGone) break;
       const e = past as unknown as Record<string, unknown>;
       if (dedupe(seen, e)) relay(e);
     }
 
     for await (const live of stream) {
+      if (clientGone) break;
       const e = live as unknown as Record<string, unknown>;
       // Dedupe gates the relay only. The terminal check must run even for an
       // event we already saw in history, or a run that finished before the
@@ -124,9 +177,18 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
   } catch (err) {
     // Never echo the upstream error. An SDK error can carry the request that
     // produced it, and that request carries our API key header. The founder
-    // cannot act on the detail anyway; the server-side trace is where it belongs.
+    // cannot act on the detail anyway, and writeFrame below can't produce an
+    // unhandled rejection (it never throws) — but we do want SOME record of
+    // the failure, so log a couple of content-free fields.
+    logger.error("engStream: relay failed", safeErrorDetail(err));
     writeFrame(res, "error", { error: "stream_failed" });
   } finally {
+    // Cancel the upstream SDK stream rather than leaving it iterating.
+    // Breaking out of `for await (const live of stream)` above already does
+    // this — the SDK's own generator aborts its request in a `finally` when
+    // the consumer exits early — but that path never runs if the client was
+    // already gone before we reached the live loop. Idempotent either way.
+    abortIfPossible(stream);
     res.end();
   }
 }

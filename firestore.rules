@@ -114,12 +114,23 @@ service cloud.firestore {
       //                    connected?". Readable by the owner, but write-denied so the
       //                    UI cannot be made to claim a connection that has no token
       //                    behind it. Only the OAuth callback writes it.
+      //
+      //   engineering/     sealed GitHub token for an engineering run's repo
+      //                    (companies/{uid}/engineering/repo — see engRepo.ts's
+      //                    `loadRepo`), same shape and same risk as connectors/: written
+      //                    and read solely by the Cloud Functions via the admin SDK.
+      //                    Denied to clients for read AND write. Write matters most: a
+      //                    client that could overwrite `url`/`sealed` here could redirect
+      //                    an engineering run at a repo of its choosing, or replace the
+      //                    sealed token with one it can decrypt.
       match /{sub}/{document=**} {
         allow read: if (ownsByConvention(companyId) || isMember(companyId))
-          && sub != 'connectors';
+          && sub != 'connectors'
+          && sub != 'engineering';
         allow write: if (ownsByConvention(companyId) || isMember(companyId))
           && sub != 'connectors'
-          && sub != 'connectorStatus';
+          && sub != 'connectorStatus'
+          && sub != 'engineering';
       }
     }
 

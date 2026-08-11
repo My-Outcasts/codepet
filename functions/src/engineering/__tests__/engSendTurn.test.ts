@@ -17,10 +17,23 @@ jest.mock("../engClient", () => {
   return { ...actual, getEngClient: jest.fn() };
 });
 
+// The real module's exports are non-configurable getters (a rolldown/esbuild
+// bundling detail) — `jest.spyOn` cannot redefine those, so `spyOnLogs`
+// (which spies on both console AND this module) needs it replaced with
+// plain, spy-able `jest.fn()`s, same as `engStream.test.ts` already does.
+// This handler does not call it today, but the shared helper always spies
+// on both channels, so this keeps that spy from throwing.
+jest.mock("firebase-functions/logger", () => ({
+  error: jest.fn(),
+  warn: jest.fn(),
+  log: jest.fn()
+}));
+
 import { buildTurnEvents, handleEngSendTurn } from "../engSendTurn";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../../auth";
 import { getEngClient } from "../engClient";
+import { spyOnLogs, callsContainMarker } from "./logLeakTestHelpers";
 
 describe("buildTurnEvents", () => {
   it("builds a plain follow-up message", () => {
@@ -90,31 +103,10 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-/**
- * A leak assertion must not run bare `JSON.stringify` over a value that
- * could be an `Error` — `JSON.stringify(new Error("secret"))` is `"{}"`
- * because `message`/`stack` are non-enumerable, so the assertion would pass
- * while the secret still leaked. Walks call arguments (including nested
- * plain objects and `Error` instances) looking for the marker directly,
- * mirroring `callsContainMarker` in `engWebhook.test.ts`.
- */
-function callsContainMarker(calls: unknown[][], marker: string): boolean {
-  const seen = new Set<unknown>();
-  const valueContains = (value: unknown): boolean => {
-    if (value == null) return false;
-    if (typeof value === "string") return value.includes(marker);
-    if (value instanceof Error) {
-      return value.message.includes(marker) || (value.stack ?? "").includes(marker);
-    }
-    if (typeof value === "object") {
-      if (seen.has(value)) return false;
-      seen.add(value);
-      return Object.values(value as Record<string, unknown>).some(valueContains);
-    }
-    return false;
-  };
-  return calls.some((call) => call.some(valueContains));
-}
+// `callsContainMarker` (leak-checking that also inspects an Error's
+// message/stack, unlike bare `JSON.stringify`) now lives in
+// `./logLeakTestHelpers`, shared with `engWebhook.test.ts`, `engStartRun.test.ts`,
+// and `engStream.test.ts` rather than redefined per file.
 
 describe("handleEngSendTurn", () => {
   it("rejects a non-POST request without checking auth, firestore, or the session client", async () => {
@@ -303,9 +295,9 @@ describe("handleEngSendTurn", () => {
       const send = jest.fn();
       (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { events: { send } } } });
 
-      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      // Covers both log channels this codebase uses (console AND
+      // firebase-functions/logger) — see `./logLeakTestHelpers`.
+      const logs = spyOnLogs();
       try {
         const res = makeRes();
         await handleEngSendTurn(
@@ -321,12 +313,9 @@ describe("handleEngSendTurn", () => {
         expect(callsContainMarker(res.json.mock.calls, SECRET_MARKER)).toBe(false);
         expect(body).not.toHaveProperty("detail");
 
-        const allCalls = [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls];
-        expect(callsContainMarker(allCalls, SECRET_MARKER)).toBe(false);
+        expect(logs.containsMarker(SECRET_MARKER)).toBe(false);
       } finally {
-        errorSpy.mockRestore();
-        warnSpy.mockRestore();
-        logSpy.mockRestore();
+        logs.restore();
       }
     }
   );

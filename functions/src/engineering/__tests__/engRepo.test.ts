@@ -88,6 +88,14 @@ describe("loadRepo", () => {
     });
 
     const { openToken } = require("../../oauth/githubOAuthCore");
+    // jest.config.js sets neither clearMocks nor resetMocks, and this file
+    // has no beforeEach clearing — so without this, `openToken`'s call
+    // count accumulates across every earlier test in the file, and the
+    // exact-count assertion below would pass vacuously the moment a test
+    // that also calls `openToken` is inserted above this one. Clearing
+    // immediately before the call under test, not in a shared beforeEach,
+    // is what keeps the oracle below meaningful regardless of file order.
+    (openToken as jest.Mock).mockClear();
 
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -103,8 +111,10 @@ describe("loadRepo", () => {
       // nothing, so without this the rest of the assertions here cannot
       // tell "reached the catch" apart from "exited early" — a future
       // guard added above the decrypt call would keep this test green
-      // while testing nothing.
-      expect(openToken).toHaveBeenCalled();
+      // while testing nothing. Pinned to an exact count (not just
+      // "called") now that the mock is cleared right above: a stray extra
+      // call would otherwise slip through unnoticed.
+      expect(openToken).toHaveBeenCalledTimes(1);
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
       expect(logSpy).not.toHaveBeenCalled();

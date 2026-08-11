@@ -83,8 +83,12 @@ export async function handleEngSendTurn(req: Request, res: Response): Promise<vo
     // not the caller's mistake to fix. Must not collapse into 404
     // (`run_not_found` already means "no such run" and the client renders it
     // as an offer to start a new one) or hang the caller until their own
-    // timeout. Content-free log only: an SDK/Firestore error's `err` object
-    // can carry the request that produced it, including our API key header.
+    // timeout. Content-free log only: not because the SDK/Firestore error's
+    // `err` object carries the request that produced it (it doesn't — see
+    // `safeErrorDetail`'s doc comment in `engClient.ts`), but because there
+    // is no diagnostic value in logging more than these two named fields,
+    // and picking them explicitly is what keeps a future edit from reaching
+    // for the raw object instead.
     console.error("engSendTurn: run lookup failed", {
       code: (err as { code?: unknown })?.code,
       name: (err as { name?: unknown })?.name
@@ -104,9 +108,11 @@ export async function handleEngSendTurn(req: Request, res: Response): Promise<vo
     // A session paused at its budget rejects anything that starts new work.
     // Surface that as its own state rather than a generic upstream failure —
     // the client turns it into "raise the cap", not "something broke".
-    // Inspecting the error server-side is fine; echoing it to the client is not.
-    // An SDK error can carry the request that produced it, including our API key
-    // header, so `detail` stays on this side of the wire.
+    // Inspecting the error server-side is fine; echoing it to the client is
+    // not. Not because the SDK error carries the request we made (it
+    // doesn't — see `safeErrorDetail`'s doc comment in `engClient.ts`), but
+    // because its response body is not something a founder needs or should
+    // see verbatim, so `detail` stays on this side of the wire regardless.
     const detail = String(err);
     if (detail.includes("budget")) {
       res.status(409).json({ error: "budget_reached" });

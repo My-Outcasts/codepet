@@ -22,11 +22,22 @@ jest.mock("../engClient", () => {
   return { ...actual, getEngClient: jest.fn() };
 });
 
+// The real module's exports are non-configurable getters (a rolldown/esbuild
+// `__export` bundling detail) — `jest.spyOn` cannot redefine those, so this
+// handler's tests need the module replaced with plain, spy-able `jest.fn()`s,
+// same as `engStream.test.ts` already does.
+jest.mock("firebase-functions/logger", () => ({
+  error: jest.fn(),
+  warn: jest.fn(),
+  log: jest.fn()
+}));
+
 import { buildSessionParams, handleEngStartRun } from "../engStartRun";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../../auth";
 import { loadRepo } from "../engRepo";
 import { getEngClient } from "../engClient";
+import { spyOnLogs } from "./logLeakTestHelpers";
 
 const repo = {
   url: "https://github.com/acme/widget",
@@ -250,9 +261,13 @@ describe("handleEngStartRun", () => {
       const sessionsCreate = jest.fn().mockRejectedValueOnce(leakyError);
       (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
 
-      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      // Covers BOTH log channels this codebase uses (console AND
+      // firebase-functions/logger) — Finding 5 gives this handler its first
+      // logger calls, and a leak assertion that only spied on console would
+      // go blind to them the moment they exist. `containsMarker` also looks
+      // inside an Error's message/stack, not just enumerable fields — plain
+      // `JSON.stringify(call)` would miss a marker carried there.
+      const logs = spyOnLogs();
 
       try {
         const req = makeReq({ ask: "add checkout" });
@@ -264,37 +279,52 @@ describe("handleEngStartRun", () => {
         const body = res.json.mock.calls[0][0];
         expect(JSON.stringify(body)).not.toContain(GITHUB_TOKEN);
 
-        const allConsoleCalls = [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls];
-        for (const call of allConsoleCalls) {
-          expect(JSON.stringify(call)).not.toContain(GITHUB_TOKEN);
-        }
+        expect(logs.containsMarker(GITHUB_TOKEN)).toBe(false);
       } finally {
-        errorSpy.mockRestore();
-        warnSpy.mockRestore();
-        logSpy.mockRestore();
+        logs.restore();
       }
     }
   );
 
-  it("marks the run document failed and responds 502 when session-create fails", async () => {
-    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_2" });
-    (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
-    setConfigEnv();
-    const runRef = makeRunRef("run_fail_1");
-    wireFirestore(runRef, 40);
+  it(
+    "marks the run document failed, responds 502, and logs a content-free diagnostic " +
+      "(Finding 5) when session-create fails",
+    async () => {
+      (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_2" });
+      (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
+      setConfigEnv();
+      const runRef = makeRunRef("run_fail_1");
+      wireFirestore(runRef, 40);
 
-    const sessionsCreate = jest.fn().mockRejectedValueOnce(new Error("upstream exploded"));
-    (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
+      const upstreamError = Object.assign(new Error("upstream exploded"), { name: "APIError", status: 502 });
+      const sessionsCreate = jest.fn().mockRejectedValueOnce(upstreamError);
+      (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
 
-    const req = makeReq({ ask: "add checkout" });
-    const res = makeRes();
+      const logs = spyOnLogs();
+      try {
+        const req = makeReq({ ask: "add checkout" });
+        const res = makeRes();
 
-    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+        await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
 
-    expect(res.status).toHaveBeenCalledWith(502);
-    expect(res.json).toHaveBeenCalledWith({ error: "session_create_failed" });
-    expect(runRef.update).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
-  });
+        expect(res.status).toHaveBeenCalledWith(502);
+        expect(res.json).toHaveBeenCalledWith({ error: "session_create_failed" });
+        expect(runRef.update).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+
+        // Before this fix, this handler had zero diagnostic signal on any of
+        // its six failure exits — a deploy misconfiguration surfacing here
+        // left nothing anywhere to explain the 502. Now it logs a fixed
+        // message plus the two content-free fields `safeErrorDetail` allows.
+        const messages = logs.allCalls().map((call) => call[0]);
+        expect(messages.some((m) => typeof m === "string" && /session.create failed/i.test(m))).toBe(
+          true
+        );
+        expect(logs.containsMarker("upstream exploded")).toBe(false);
+      } finally {
+        logs.restore();
+      }
+    }
+  );
 
   it("creates the run document (status starting, no sessionId) before calling session-create", async () => {
     (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_3" });
@@ -369,30 +399,39 @@ describe("handleEngStartRun", () => {
   // and the initial write that ran unguarded before this fix.
   // -------------------------------------------------------------------------
 
-  it("responds with a defined status (never a hang) when loadRepo throws, distinct from 409/402", async () => {
+  it("responds with a defined status (never a hang), distinct from 409/402, and logs a content-free diagnostic when loadRepo throws", async () => {
     (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_repo_fail" });
     (loadRepo as jest.Mock).mockRejectedValueOnce(new Error("firestore outage MARKER_REPO_LOOKUP"));
     setConfigEnv();
     const runRef = makeRunRef("run_repo_fail_1");
     wireFirestore(runRef, 40);
 
-    const req = makeReq({ ask: "add checkout" });
-    const res = makeRes();
+    const logs = spyOnLogs();
+    try {
+      const req = makeReq({ ask: "add checkout" });
+      const res = makeRes();
 
-    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+      await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
 
-    expect(res.status).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalledWith(409);
-    expect(res.status).not.toHaveBeenCalledWith(402);
-    const statusCode = res.status.mock.calls[0][0];
-    expect(statusCode).toBeGreaterThanOrEqual(500);
-    const body = res.json.mock.calls[0][0];
-    expect(JSON.stringify(body)).not.toContain("MARKER_REPO_LOOKUP");
-    // Nothing has been billed or recorded — the run doc must not exist.
-    expect(runRef.set).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalledWith(409);
+      expect(res.status).not.toHaveBeenCalledWith(402);
+      const statusCode = res.status.mock.calls[0][0];
+      expect(statusCode).toBeGreaterThanOrEqual(500);
+      const body = res.json.mock.calls[0][0];
+      expect(JSON.stringify(body)).not.toContain("MARKER_REPO_LOOKUP");
+      // Nothing has been billed or recorded — the run doc must not exist.
+      expect(runRef.set).not.toHaveBeenCalled();
+
+      const messages = logs.allCalls().map((call) => call[0]);
+      expect(messages.some((m) => typeof m === "string" && /repo lookup failed/i.test(m))).toBe(true);
+      expect(logs.containsMarker("MARKER_REPO_LOOKUP")).toBe(false);
+    } finally {
+      logs.restore();
+    }
   });
 
-  it("responds with a defined status (never a hang) when the company lookup throws, distinct from 409/402", async () => {
+  it("responds with a defined status (never a hang), distinct from 409/402, and logs a content-free diagnostic when the company lookup throws", async () => {
     (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_company_fail" });
     (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
     setConfigEnv();
@@ -404,22 +443,31 @@ describe("handleEngStartRun", () => {
       get: jest.fn().mockRejectedValue(new Error("firestore outage MARKER_COMPANY_LOOKUP"))
     });
 
-    const req = makeReq({ ask: "add checkout" });
-    const res = makeRes();
+    const logs = spyOnLogs();
+    try {
+      const req = makeReq({ ask: "add checkout" });
+      const res = makeRes();
 
-    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+      await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
 
-    expect(res.status).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalledWith(409);
-    expect(res.status).not.toHaveBeenCalledWith(402);
-    const statusCode = res.status.mock.calls[0][0];
-    expect(statusCode).toBeGreaterThanOrEqual(500);
-    const body = res.json.mock.calls[0][0];
-    expect(JSON.stringify(body)).not.toContain("MARKER_COMPANY_LOOKUP");
-    expect(runRef.set).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalledWith(409);
+      expect(res.status).not.toHaveBeenCalledWith(402);
+      const statusCode = res.status.mock.calls[0][0];
+      expect(statusCode).toBeGreaterThanOrEqual(500);
+      const body = res.json.mock.calls[0][0];
+      expect(JSON.stringify(body)).not.toContain("MARKER_COMPANY_LOOKUP");
+      expect(runRef.set).not.toHaveBeenCalled();
+
+      const messages = logs.allCalls().map((call) => call[0]);
+      expect(messages.some((m) => typeof m === "string" && /company lookup failed/i.test(m))).toBe(true);
+      expect(logs.containsMarker("MARKER_COMPANY_LOOKUP")).toBe(false);
+    } finally {
+      logs.restore();
+    }
   });
 
-  it("responds with a defined status (never a hang) when the initial run-document write throws", async () => {
+  it("responds with a defined status (never a hang) and logs a content-free diagnostic when the initial run-document write throws", async () => {
     (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_write_fail" });
     (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
     setConfigEnv();
@@ -430,19 +478,78 @@ describe("handleEngStartRun", () => {
     const sessionsCreate = jest.fn();
     (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
 
-    const req = makeReq({ ask: "add checkout" });
-    const res = makeRes();
+    const logs = spyOnLogs();
+    try {
+      const req = makeReq({ ask: "add checkout" });
+      const res = makeRes();
 
-    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+      await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
 
-    expect(res.status).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalledWith(409);
-    expect(res.status).not.toHaveBeenCalledWith(402);
-    const statusCode = res.status.mock.calls[0][0];
-    expect(statusCode).toBeGreaterThanOrEqual(500);
-    const body = res.json.mock.calls[0][0];
-    expect(JSON.stringify(body)).not.toContain("MARKER_INITIAL_WRITE");
-    // A run that failed to record itself must never bill a session.
-    expect(sessionsCreate).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalledWith(409);
+      expect(res.status).not.toHaveBeenCalledWith(402);
+      const statusCode = res.status.mock.calls[0][0];
+      expect(statusCode).toBeGreaterThanOrEqual(500);
+      const body = res.json.mock.calls[0][0];
+      expect(JSON.stringify(body)).not.toContain("MARKER_INITIAL_WRITE");
+      // A run that failed to record itself must never bill a session.
+      expect(sessionsCreate).not.toHaveBeenCalled();
+
+      const messages = logs.allCalls().map((call) => call[0]);
+      expect(messages.some((m) => typeof m === "string" && /run create failed/i.test(m))).toBe(true);
+      expect(logs.containsMarker("MARKER_INITIAL_WRITE")).toBe(false);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Finding 5: the two config-guard exits also had zero diagnostic signal.
+  // Neither carries an upstream `err` — there is nothing to leak — so these
+  // just confirm a fixed, named message is logged for whichever variable is
+  // absent, which is what turns "502 with nothing anywhere to explain it"
+  // into an actionable deploy-misconfiguration signal.
+  // -------------------------------------------------------------------------
+
+  it("logs a content-free diagnostic when CONNECTOR_ENC_KEY is absent", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_no_enc_key" });
+    clearConfigEnv();
+
+    const logs = spyOnLogs();
+    try {
+      const req = makeReq({ ask: "add checkout" });
+      const res = makeRes();
+
+      await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      const messages = logs.allCalls().map((call) => call[0]);
+      expect(messages.some((m) => typeof m === "string" && /CONNECTOR_ENC_KEY/.test(m))).toBe(true);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it("logs a content-free diagnostic when the engineering agent is not provisioned", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_no_agent" });
+    (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
+    const runRef = makeRunRef("run_no_agent_1");
+    wireFirestore(runRef, 40);
+    process.env.CONNECTOR_ENC_KEY = "enc-key";
+    // Deliberately leave ENG_AGENT_ID/ENG_AGENT_VERSION/ENG_ENVIRONMENT_ID unset.
+
+    const logs = spyOnLogs();
+    try {
+      const req = makeReq({ ask: "add checkout" });
+      const res = makeRes();
+
+      await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      const messages = logs.allCalls().map((call) => call[0]);
+      expect(messages.some((m) => typeof m === "string" && /agent not provisioned/i.test(m))).toBe(true);
+    } finally {
+      logs.restore();
+    }
   });
 });

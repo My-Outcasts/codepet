@@ -15,7 +15,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { toExecStep } from "./engEvents";
-import { getEngClient, isSafePathSegment } from "./engClient";
+import { getEngClient, isSafePathSegment, safeErrorDetail } from "./engClient";
 
 /**
  * A no-op once the response can no longer take writes — either because we
@@ -32,20 +32,6 @@ export function writeFrame(res: Response, event: string, payload: unknown): void
     // Socket died between the writability check and the write itself.
     // Nothing to do — the client is gone either way.
   }
-}
-
-/**
- * Content-free fields only: an error's constructor name, and an HTTP status
- * if the SDK error exposes one (Anthropic's `APIError.status`). Never the
- * error object, its `message`, or a stringification — an SDK error can carry
- * the request that produced it, including our API key header.
- */
-function safeErrorDetail(err: unknown): { name?: string; status?: number } {
-  const detail: { name?: string; status?: number } = {};
-  if (err instanceof Error) detail.name = err.name;
-  const status = (err as { status?: unknown } | null)?.status;
-  if (typeof status === "number") detail.status = status;
-  return detail;
 }
 
 /** True if `stream` exposes an abortable controller (the SDK's `Stream` does). Best-effort: a test double or a future SDK shape without one is a silent no-op, not a crash. */
@@ -107,9 +93,10 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
   } catch (err) {
     // A transient Firestore fault, not a malformed request or a missing run —
     // ours to retry, so it must not collapse into 404 (already means "no such
-    // run") or 400/401 (the caller's mistake to fix). Content-free log only:
-    // reused from the relay's own error handling below, since a Firestore/SDK
-    // error's raw form can carry request internals this file must never log.
+    // run") or 400/401 (the caller's mistake to fix). Content-free log only,
+    // via the same `safeErrorDetail` the relay's own error handling below
+    // uses — see its doc comment in `engClient.ts` for what a Firestore/SDK
+    // error can and cannot carry, and why only two named fields are logged.
     logger.error("engStream: run lookup failed", safeErrorDetail(err));
     res.status(503).json({ error: "lookup_failed" });
     return;
@@ -194,11 +181,12 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
       }
     }
   } catch (err) {
-    // Never echo the upstream error. An SDK error can carry the request that
-    // produced it, and that request carries our API key header. The founder
-    // cannot act on the detail anyway, and writeFrame below can't produce an
-    // unhandled rejection (it never throws) — but we do want SOME record of
-    // the failure, so log a couple of content-free fields.
+    // Never echo the upstream error. Not because the SDK error carries our
+    // request (it doesn't — see `safeErrorDetail` in `engClient.ts`), but
+    // because its response BODY can echo back whatever we sent, and the
+    // founder cannot act on the detail anyway. writeFrame below can't
+    // produce an unhandled rejection (it never throws) — but we do want
+    // SOME record of the failure, so log a couple of content-free fields.
     logger.error("engStream: relay failed", safeErrorDetail(err));
     writeFrame(res, "error", { error: "stream_failed" });
   } finally {

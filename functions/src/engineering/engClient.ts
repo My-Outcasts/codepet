@@ -48,3 +48,34 @@ export function getEngClient(): Anthropic {
 export function isSafePathSegment(value: string): boolean {
   return value.length > 0 && !value.includes("/") && !/^__.*__$/.test(value);
 }
+
+/**
+ * Content-free fields only: an error's constructor name, and an HTTP status
+ * if the SDK error exposes one (Anthropic's `APIError.status`). Never the
+ * error object, its `message`, or a stringification.
+ *
+ * This is deliberately narrower than it needs to be for the actual SDK error
+ * shape (see below), not because the shape is dangerous but because naming
+ * exactly two fields is what keeps every call site honest — there is no
+ * broader "safe subset" to reach for when a future field looks tempting to
+ * add. `APIError` exposes `status`, the RESPONSE headers, the response body
+ * (`error`), and `requestID` — never the request or its headers, so this is
+ * not about hiding a bearer token the SDK's own error type might carry
+ * (it doesn't carry one). The real risk lives in the response BODY: a 400
+ * from `sessions.create` can echo back the invalid resource it rejected,
+ * and that resource is where this codebase's own GitHub token lives
+ * (`authorization_token`, set in `engStartRun.ts`). Never log the error
+ * object itself, or any field pulled from `.error`/`.message`/a
+ * stringification of it — only the two named fields below.
+ *
+ * Lives here, not in whichever handler defined it first (`engStream.ts`),
+ * because `engStartRun.ts` needs it too and this module is the one every
+ * engineering handler already imports.
+ */
+export function safeErrorDetail(err: unknown): { name?: string; status?: number } {
+  const detail: { name?: string; status?: number } = {};
+  if (err instanceof Error) detail.name = err.name;
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status === "number") detail.status = status;
+  return detail;
+}

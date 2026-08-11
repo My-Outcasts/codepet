@@ -7,12 +7,14 @@
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
+import * as logger from "firebase-functions/logger";
 import type Anthropic from "@anthropic-ai/sdk";
 import { verifyAuth } from "../auth";
 import { creditsToBudget, type SessionBudget } from "./engBudget";
 import { loadRepo, branchName, MOUNT_PATH, type RepoLink } from "./engRepo";
 import {
   getEngClient,
+  safeErrorDetail,
   ENG_AGENT_ID_ENV,
   ENG_AGENT_VERSION_ENV,
   ENG_ENVIRONMENT_ID_ENV,
@@ -132,6 +134,12 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
 
   const encKey = process.env.CONNECTOR_ENC_KEY;
   if (!encKey) {
+    // A deploy misconfiguration, not a per-request fault — no `err` to
+    // inspect, so this is just a fixed, named message rather than
+    // `safeErrorDetail`. Before Finding 5, every exit in this file logged
+    // nothing at all, so a run that failed for exactly this reason produced
+    // a 500 with nothing anywhere pointing at the missing env var.
+    logger.error("engStartRun: CONNECTOR_ENC_KEY absent");
     res.status(500).json({ error: "misconfigured", detail: "CONNECTOR_ENC_KEY absent" });
     return;
   }
@@ -139,7 +147,7 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   let repo: RepoLink | null;
   try {
     repo = await loadRepo(auth.uid, encKey);
-  } catch {
+  } catch (err) {
     // Only a Firestore read fault reaches here. `loadRepo` swallows a decrypt
     // failure and returns null, so a corrupted token surfaces as 409 below —
     // "connect a repo" — which is the right outcome, since no retry will fix
@@ -148,7 +156,9 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     // 503 must not be mistakable for 409 (no repo linked) or 402 (no credits):
     // the client renders both of those as an offer to connect or upgrade, and a
     // storage outage is neither — it is ours, and it is retryable. Never echo
-    // the error; Firestore internals have no business in a client response.
+    // the error to the client; `safeErrorDetail` (see `engClient.ts`) is what
+    // keeps the log itself content-free too.
+    logger.error("engStartRun: repo lookup failed", safeErrorDetail(err));
     res.status(503).json({ error: "repo_lookup_failed" });
     return;
   }
@@ -163,9 +173,11 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   try {
     const companySnap = await db.doc(`companies/${auth.uid}`).get();
     company = companySnap.data() ?? {};
-  } catch {
+  } catch (err) {
     // Same reasoning as the repo-lookup catch above: distinct from 409/402,
-    // and the error itself never leaves this scope.
+    // and the error itself never leaves this scope — only the two
+    // content-free fields `safeErrorDetail` allows.
+    logger.error("engStartRun: company lookup failed", safeErrorDetail(err));
     res.status(503).json({ error: "company_lookup_failed" });
     return;
   }
@@ -184,6 +196,15 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
   const agentVersion = Number(process.env[ENG_AGENT_VERSION_ENV]);
   const environmentId = process.env[ENG_ENVIRONMENT_ID_ENV];
   if (!agentId || !environmentId || !Number.isFinite(agentVersion)) {
+    // Another deploy misconfiguration, no `err` involved — naming which of
+    // the three env vars is missing/malformed is itself content-free (it's
+    // our own config shape, not anything a founder supplied) and is exactly
+    // the diagnostic signal that was absent before Finding 5.
+    logger.error("engStartRun: engineering agent not provisioned", {
+      hasAgentId: Boolean(agentId),
+      hasEnvironmentId: Boolean(environmentId),
+      agentVersionIsFinite: Number.isFinite(agentVersion)
+    });
     res.status(500).json({ error: "misconfigured", detail: "engineering agent not provisioned" });
     return;
   }
@@ -208,11 +229,12 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
       creditsSpent: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
-  } catch {
+  } catch (err) {
     // Nothing has been created or billed yet, so there is nothing to roll
     // back — just fail into a defined response instead of an unhandled
     // rejection (the hang this file exists to avoid), distinct from 409/402
     // for the same reason as the read guards above.
+    logger.error("engStartRun: run create failed", safeErrorDetail(err));
     res.status(503).json({ error: "run_create_failed" });
     return;
   }
@@ -235,15 +257,19 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     const session = await getEngClient().beta.sessions.create(params);
     sessionId = session.id;
   } catch (err) {
-    // Never put `err` — or String(err), or its .message — anywhere the
-    // client or a log can see it. The Anthropic SDK's HTTP-client errors
-    // commonly carry the request configuration that produced them, and the
-    // request we just made embeds the repo resource, which carries the
-    // founder's decrypted GitHub token. Serialising the error at all risks
-    // serialising that token into a response body or a log line. The body
-    // stays a fixed, generic shape; nothing about `err` is logged, named or
-    // otherwise, because there is no field we can name here that isn't part
-    // of the object that might carry the token.
+    // Never put `err` itself — or String(err), or a stringification of it —
+    // anywhere the client or a log can see it. Not because the SDK's error
+    // carries the request we made (`APIError` exposes `status`, RESPONSE
+    // headers, the response body, and `requestID` — never the request or
+    // its headers; see `safeErrorDetail`'s doc comment in `engClient.ts`).
+    // The real risk is the response BODY: a 400 from `sessions.create` can
+    // echo back the resource it rejected, and the resource we just sent
+    // embeds the founder's decrypted GitHub token
+    // (`authorization_token`). `safeErrorDetail` is the one place allowed
+    // to look at `err` at all, and it only ever returns two named,
+    // content-free fields — never `.error`, `.message`, or the object
+    // itself.
+    logger.error("engStartRun: session create failed", safeErrorDetail(err));
     try {
       await runRef.update({ status: "failed" as RunStatus });
     } catch {

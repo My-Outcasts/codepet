@@ -477,8 +477,15 @@ struct DeliverableBodyView: View {
                 MessageDraftViewer(eyebrow: lang == .vi ? "Tin nhắn" : "Message",
                                    heading: deliverable.title,
                                    text: deliverable.body)
+            // Everything else — `.text`, `.other`, and any kind that lost its payload. It still
+            // gets the card, the eyebrow naming what it is, and Copy: a deliverable with no
+            // structured shape is not a deliverable with no identity, and bare prose on the page
+            // was the Aug 10 report's exact complaint about messages.
             default:
-                MarkdownView(markdown: deliverable.body)
+                DeliverableFrame(eyebrow: deliverable.kind.label(lang),
+                                 action: .copy(deliverable.body)) {
+                    MarkdownView(markdown: deliverable.body)
+                }
             }
         }
     }

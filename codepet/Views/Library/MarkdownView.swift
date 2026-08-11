@@ -3,12 +3,22 @@ import SwiftUI
 
 /// Renders markdown (via MarkdownBlocks.parse) as CodepetTheme-styled blocks — one
 /// viewer for every deliverable kind. Inline emphasis via AttributedString(markdown:).
+///
+/// This is the LAST-RESORT renderer, and it was the worst-set surface in the app: 12pt, zero
+/// `lineSpacing`, headings only 1–4pt larger than the body they introduced. It catches `.text`,
+/// `.other`, any kind whose structured payload did not survive, AND the whole body of every
+/// `.legal` and `.post` — so the deliverables with the least structure were the hardest to read,
+/// which is backwards.
+///
+/// It now sets prose at `DeliverableStyle`'s reading size with real leading, and gives headings
+/// a step big enough to see. Blanks are tinted here too: an unstructured department output is
+/// exactly where a stray `[name]` is easiest to miss.
 struct MarkdownView: View {
     let markdown: String
     private var blocks: [MarkdownBlock] { MarkdownBlocks.parse(markdown) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
                     .fixedSize(horizontal: false, vertical: true)
@@ -23,28 +33,38 @@ struct MarkdownView: View {
         switch block {
         case let .heading(level, text):
             inline(text)
-                .font(.pixelSystem(size: level == 1 ? 16 : level == 2 ? 14 : 13, weight: .bold))
+                .font(.pixelSystem(size: level == 1 ? 19 : level == 2 ? 17 : DeliverableStyle.heading,
+                                   weight: .bold))
                 .foregroundColor(CodepetTheme.primaryText)
+                .padding(.top, 4)
         case let .bullet(text):
-            HStack(alignment: .top, spacing: 8) {
-                Text("•").foregroundColor(CodepetTheme.mutedText)
-                inline(text).foregroundColor(CodepetTheme.bodyText)
+            HStack(alignment: .top, spacing: 9) {
+                Text("•")
+                    .font(.pixelSystem(size: DeliverableStyle.body))
+                    .foregroundColor(CodepetTheme.mutedText)
+                inline(text)
+                    .font(.pixelSystem(size: DeliverableStyle.body))
+                    .lineSpacing(DeliverableStyle.leading)
+                    .foregroundColor(CodepetTheme.bodyText)
             }
-            .font(.pixelSystem(size: 12))
         case let .paragraph(text):
             inline(text)
-                .font(.pixelSystem(size: 12))
+                .font(.pixelSystem(size: DeliverableStyle.body))
+                .lineSpacing(DeliverableStyle.leading)
                 .foregroundColor(CodepetTheme.bodyText)
         }
     }
 
-    /// Inline emphasis via AttributedString(markdown:), plain fallback. Block
-    /// structure is already handled by MarkdownBlocks, so interpret INLINE syntax
+    /// Inline emphasis via AttributedString(markdown:), plain fallback, then the blanks tinted.
+    /// Block structure is already handled by MarkdownBlocks, so interpret INLINE syntax
     /// only and preserve whitespace (avoids block re-grouping within a block).
+    ///
+    /// The tint runs on the PARSED string, never the source: parsing removes `**` and `_`
+    /// markers, and every offset computed against the raw markdown would be shifted past them.
+    /// `MessagePlaceholders.attributed` already does both in that order.
     private func inline(_ text: String) -> Text {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        if let attr = try? AttributedString(markdown: text, options: options) { return Text(attr) }
-        return Text(text)
+        Text(MessagePlaceholders.attributed(text,
+                                            tint: DeliverableStyle.blankTint,
+                                            ink: DeliverableStyle.blankInk))
     }
 }

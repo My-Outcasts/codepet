@@ -739,6 +739,12 @@ struct CopilotBubble: View {
                                                        isStreaming: companyStore.isStreaming,
                                                        isFanningOut: companyStore.isFanningOut,
                                                        founderAsk: message.founderAsk)
+        // For the disabled tooltip only — which of `canRetry`'s conditions is the reason.
+        // A blank/nil `founderAsk` is the COMMONEST disabled case now that retry pins to the
+        // newest message: the first-run greeting, a run proposal, a room card, a draft card
+        // are all `isLast` with no ask before them, so "only applies to the newest reply" is
+        // something the founder can see is false on the very message she's looking at.
+        let hasFounderAsk = !(message.founderAsk ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         HStack(spacing: 2) {
             // The icon ITSELF becomes the acknowledgement — see `actionIcon`'s `tint`.
             actionIcon(copied ? "checkmark" : "doc.on.doc",
@@ -756,10 +762,22 @@ struct CopilotBubble: View {
             actionIcon("arrow.clockwise",
                        help: retryEnabled
                            ? (lang == .vi ? "Hỏi lại" : "Try again")
-                           // Only the newest reply retries — an older one looked equally live
-                           // (finding 4) with no way to tell it was inert until tapped.
-                           : (lang == .vi ? "Chỉ hỏi lại được câu trả lời mới nhất"
-                                          : "Try again only applies to the newest reply"),
+                           : !hasFounderAsk
+                               // No founder ask precedes this reply at all — true regardless of
+                               // `isLast`, and the common case (see the `let` above).
+                               ? (lang == .vi ? "Chỉ áp dụng cho câu trả lời cho điều bạn đã hỏi"
+                                              : "Try again only applies to a reply to something you asked")
+                               : !isLast
+                                   // Has an ask, just isn't the newest reply — an older one
+                                   // looked equally live (finding 4) with no way to tell it was
+                                   // inert until tapped.
+                                   ? (lang == .vi ? "Chỉ hỏi lại được câu trả lời mới nhất"
+                                                  : "Try again only applies to the newest reply")
+                                   // Newest, has an ask, just still busy (typing/streaming/
+                                   // fanning out) — neither of the above is true, so neither
+                                   // wording is.
+                                   : (lang == .vi ? "Đợi xong rồi hỏi lại"
+                                                  : "Wait for this to finish before trying again"),
                        isEnabled: retryEnabled) {
                 Task { await companyStore.retryReply(messageId: message.id, language: lang) }
             }
@@ -775,6 +793,15 @@ struct CopilotBubble: View {
         // taught nobody it existed. Still `opacity` rather than a conditional, so the row's
         // height never changes under the cursor.
         .opacity(hovering || isLast ? 1 : 0)
+        // `.opacity(0)` does NOT stop hit-testing — the row stays clickable while invisible.
+        // `scrollGeneration`'s `.onChange` (above) forces `hovering` false WHILE the pointer is
+        // still resting on the row (any of the six scroll bumps, including a coding run's
+        // per-step bridge, can fire mid-read), so without this the founder can click exactly
+        // where she believes there is nothing. Copy/Copy as Markdown landing on the wrong
+        // reply is a shrug; a thumb is not — it is a PERMANENT `feedback` write, and
+        // `firestore.rules:42` denies both read and update, so a vote recorded against the
+        // wrong reply this way can never be corrected.
+        .allowsHitTesting(hovering || isLast)
         // Two `.animation` modifiers, not one value: `isLast` flips (1 → 0) the instant a new
         // reply lands and becomes the pinned one, on a row `hovering` never touched, so without
         // observing `isLast` too that un-pin snapped in a single frame while everything else on
@@ -846,9 +873,11 @@ struct CopilotBubble: View {
     /// `isFanningOut` too and this does not.
     ///
     /// Also gated on `ownRoomStillRunning`, independently of the two global flags above:
-    /// a Virtual Company room runs in a detached task, and both `isCompanionTyping` and
-    /// `isStreaming` clear while it keeps filling for 30–60s (`CompanyStore.swift` around
-    /// `publishRunProgress` — the composer is deliberately free during that window). The
+    /// a Virtual Company room runs inside `startVirtualCompanyRun`'s own `Task {}`, which
+    /// INHERITS that call's `@MainActor` isolation (`CompanyStore.swift:1016-1021`) rather than
+    /// running detached — only `vcRunner`'s own I/O is `Task.detached`. Both `isCompanionTyping`
+    /// and `isStreaming` still clear while the room keeps filling for 30–60s (the composer is
+    /// deliberately free during that window). The
     /// room lands as its OWN message (inserted under its question, not appended), carrying
     /// a non-blank handoff line, so its row is pinned and votable from the very first
     /// routing card — before the verdict a thumbs-down there rates a room that hasn't
@@ -856,6 +885,13 @@ struct CopilotBubble: View {
     /// in the transcript never blocks voting on an unrelated reply.
     @ViewBuilder private func thumb(_ vote: MessageVote, icon: String, help: String) -> some View {
         let chosen = message.vote == vote
+        // Computed ONCE and reused for the dim, the tooltip, AND `.disabled` below, rather than
+        // repeating the expression three times. Same drift `actionIcon`'s own note warns about
+        // (`.disabled` alone does not dim a `foregroundColor`-painted icon), but on this row
+        // specifically: `ownRoomStillRunning` opens the app's LONGEST disabled window (a whole
+        // room convening, 30–60s), long enough that a founder who sees no dimming and no
+        // explanation clicks it more than once believing nothing happened.
+        let disabled = (isLast && (companyStore.isCompanionTyping || companyStore.isStreaming)) || ownRoomStillRunning
         Button {
             guard !chosen else { return }
             companyStore.recordVote(messageId: message.id, vote: vote)
@@ -865,13 +901,27 @@ struct CopilotBubble: View {
         } label: {
             Image(systemName: chosen ? "\(icon).fill" : icon)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(chosen ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
+                .foregroundColor(chosen ? CodepetTheme.accentTeal
+                                         : CodepetTheme.mutedText.opacity(disabled ? 0.35 : 1))
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
-        .disabled((isLast && (companyStore.isCompanionTyping || companyStore.isStreaming)) || ownRoomStillRunning)
+        .help(disabled ? waitHelp(forRoom: ownRoomStillRunning) : help)
+        .disabled(disabled)
+    }
+
+    /// The tooltip a disabled thumb shows instead of "Good reply"/"Bad reply" — that wording
+    /// promised an action that a click, right then, does nothing. `forRoom` distinguishes the
+    /// 30–60s room window (`ownRoomStillRunning`) from the few-second one (this reply itself
+    /// still typing/streaming), because "the room" is only true of the former.
+    private func waitHelp(forRoom: Bool) -> String {
+        if forRoom {
+            return lang == .vi ? "Đợi phòng họp này hoàn tất trước khi đánh giá"
+                               : "Wait for the room to finish before rating"
+        }
+        return lang == .vi ? "Đợi câu trả lời này hoàn tất trước khi đánh giá"
+                           : "Wait for this reply to finish before rating"
     }
 
     /// True while THIS message's own Virtual Company room is still convening — see

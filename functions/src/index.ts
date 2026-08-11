@@ -25,6 +25,7 @@ import { handleGenerateRoadmap } from "./generateRoadmap";
 import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
 import { handleEngStartRun } from "./engineering/engStartRun";
+import { handleEngStream } from "./engineering/engStream";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -122,6 +123,17 @@ export const engStartRun = onRequest(
     secrets: ["ANTHROPIC_API_KEY", "CONNECTOR_ENC_KEY"]
   },
   handleEngStartRun
+);
+
+// Long-lived SSE. timeoutSeconds is the v2 maximum (60 min); a run longer
+// than that survives because engWebhook records the outcome independently.
+export const engStream = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"],
+    timeoutSeconds: 3600
+  },
+  handleEngStream
 );
 
 export const generateRoadmap = onRequest(

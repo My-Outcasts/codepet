@@ -2,6 +2,10 @@
 // be unit-tested (and verified) without loading the heavy Cloud-Functions module tree.
 // The IO handler lives in companyChat.ts and imports from here.
 
+// departments.ts is static curated data with no imports of its own, so it stays inside the
+// "pure logic, unit-testable" boundary this file is built on.
+import { departmentBrief, DEPARTMENT_NAMES } from "./departments";
+
 export interface Companion {
   name: string;
   voice: string;
@@ -60,14 +64,36 @@ const clip = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(
 // language, so it stays stable across a conversation's turns and can be prompt-cached.
 // The volatile per-request company context is a SEPARATE (uncached) block — see
 // buildContextBlock — assembled by the handler AFTER this one, outside the cached prefix.
-export function buildSystemPrompt(args: { companionId: string; language: string }): string {
+export function buildSystemPrompt(args: { companionId: string; language: string; deptKey?: string | null }): string {
   const c = companionFor(args.companionId);
   const vi = args.language === "vi"
     ? "\n\nReply in natural, fluent Vietnamese."
     : "";
+  // The department this turn belongs to, as real expertise rather than a role label.
+  //
+  // `DEPARTMENT_FOUNDATIONS` has existed since Jul 15 and, until now, only the ROADMAP
+  // generator read it — so a founder asking Marketing a question got a marketing NAME on
+  // the reply and a generalist behind it. `departmentBrief` returns '' for a null or
+  // unknown key, so an ordinary chat turn is byte-identical to what it was before.
+  //
+  // It sits in the CACHED static block deliberately. That block previously varied only by
+  // companion × language (14 shapes shared across every founder, which is what makes the
+  // cache hit); adding the department takes it to at most 14 × 9. That is more shapes but
+  // they are still SHARED — every founder asking Marketing hits the same prefix — and the
+  // expertise text is long enough that paying for it uncached on every marketing turn
+  // would cost far more than the extra shapes do. The per-founder volatile block stays
+  // where it is, after the breakpoint.
+  const dept = departmentBrief(args.deptKey);
+  const deptName = args.deptKey ? DEPARTMENT_NAMES[args.deptKey] : undefined;
+  const deptBlock = dept && deptName
+    ? `\n\nYou are answering as the ${deptName} function of the founder's company. This is what that function owns:\n${dept}\n` +
+      `Answer from that expertise — the specifics this function would actually know — not as a generalist who has been told the topic.\n`
+    : "";
   return (
     `You are ${c.name}, the AI building companion inside Codepet — a senior operator who helps a solo founder build and understand their whole company, department by department.\n\n` +
-    `Voice: ${c.voice}\n\n` +
+    `Voice: ${c.voice}\n` +
+    deptBlock +
+    `\n` +
     `You are in a chat with the founder. Be warm, plain-spoken, specific, and brief — usually 2-4 sentences, occasionally a short list when it genuinely helps. No hype, no filler, no emoji. Write plain text only — no markdown, asterisks, backticks, or arrows; the chat shows your words as-is. When they ask what to do next, ground your answer in their actual company and where they are.\n\n` +
     // Static, so it stays inside the cacheable prefix. It repeats the draft_message tool
     // description on purpose: the failure this fixes is the model TYPING a message, and a

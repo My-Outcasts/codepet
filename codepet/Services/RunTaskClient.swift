@@ -17,6 +17,14 @@ struct RunTaskRequest: Codable {
     /// The current draft body, sent alongside `reviseNote` so the CF revises in
     /// place instead of regenerating from scratch. `nil` on a blind redo/first run.
     var current: String? = nil
+    /// The owning department of the task being run (a `DepartmentCatalog` key), so the
+    /// deliverable is produced with that department's expertise rather than generic
+    /// company context. nil for a legacy dept-less task, which omits the key entirely.
+    ///
+    /// A run has always been performed BY a department — `taskSpecialist` shows its pet on
+    /// the execute log and on the draft — and until now that was the only thing the
+    /// department affected. The prompt never learned which department it was writing for.
+    var deptKey: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -28,6 +36,7 @@ struct RunTaskRequest: Codable {
         case taskDetail = "task_detail"
         case reviseNote = "revise_note"
         case current
+        case deptKey = "dept_key"
     }
 }
 

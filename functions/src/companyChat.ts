@@ -65,6 +65,11 @@ function client(): Anthropic {
 interface ChatRequestBody {
   language?: string;
   companion_id?: string;
+  // The department this turn belongs to. Deliberately separate from `companion_id`:
+  // that is who speaks, this is what they know. They come apart when a department's pet
+  // IS the founder's own companion — no handoff to announce, but still a question that
+  // needs that department's expertise. Backward-compatible: omitted → no department block.
+  dept_key?: string;
   context?: string;
   history?: ChatTurn[];
   user_message?: string;
@@ -314,6 +319,10 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
   const staticSystem = buildSystemPrompt({
     companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
     language: body.language === "vi" ? "vi" : "en",
+    // Which department's expertise to answer from. Absent on an ordinary turn and on every
+    // older client, and `buildSystemPrompt` treats an unknown key as none — so this cannot
+    // break a turn, only enrich one.
+    deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
   });
   // The founder's tone preferences, runnable-task grounding and setup-toolkit
   // grounding all live in the volatile context block (not the cached static one)

@@ -103,6 +103,10 @@ interface RunTaskRequestBody {
   task_detail?: string;
   revise_note?: string;
   current?: string;
+  // Owning department of the task, so the deliverable is written with that function's
+  // expertise. Backward-compatible: omitted by older clients and by legacy dept-less
+  // tasks → no department block → byte-for-byte identical to before this field existed.
+  dept_key?: string;
 }
 
 export async function handleRunTask(req: Request, res: Response): Promise<void> {
@@ -128,6 +132,9 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
     taskDetail: typeof body.task_detail === "string" ? body.task_detail : "",
     reviseNote: typeof body.revise_note === "string" ? body.revise_note : undefined,
     current: typeof body.current === "string" ? body.current : undefined,
+    // The owning department of the task, so the deliverable is written with that function's
+    // expertise. Absent for a legacy dept-less task; unknown keys resolve to no brief.
+    deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
   });
 
   try {

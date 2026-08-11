@@ -76,6 +76,21 @@ struct CompanyChatRequest: Codable {
     /// makes a toggle mean something. Sent whole; the CF ignores any id it has
     /// not implemented, so the app never has to track which are real.
     let enabledSkills: [String]
+    /// The department this turn belongs to (a `DepartmentCatalog` key), so the CF can put
+    /// that department's real expertise in front of the model.
+    ///
+    /// Deliberately SEPARATE from `companionId`, because the two answer different questions
+    /// and one of them used to answer neither. `companionId` is who speaks; this is what they
+    /// know. They come apart in the case that proves they are not the same field: when the
+    /// department's pet IS the founder's own companion, there is no visible handoff to
+    /// announce — `actingSpecialist` returns nil, and it should — but the marketing question
+    /// is still a marketing question and must still be answered with marketing expertise.
+    /// Keying the expertise off the handoff would have silently dropped it for exactly those
+    /// founders.
+    ///
+    /// nil when no department is in focus, which omits `dept_key` from the JSON entirely
+    /// (Optional + synthesised `encodeIfPresent`) — an ordinary chat turn costs nothing.
+    let deptKey: String?
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -89,6 +104,7 @@ struct CompanyChatRequest: Codable {
         case envSetup = "env_setup"
         case styleFragment = "style_fragment"
         case enabledSkills = "enabled_skills"
+        case deptKey = "dept_key"
     }
 
     /// `runnable`/`envSetup`/`enabledSkills` default to empty and
@@ -99,7 +115,7 @@ struct CompanyChatRequest: Codable {
          history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
          openTasks: [RunnableRef] = [],
          envSetup: [SetupItemDTO] = [], styleFragment: String? = nil,
-         enabledSkills: [String] = []) {
+         enabledSkills: [String] = [], deptKey: String? = nil) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -111,6 +127,7 @@ struct CompanyChatRequest: Codable {
         self.envSetup = envSetup
         self.styleFragment = styleFragment
         self.enabledSkills = enabledSkills
+        self.deptKey = deptKey
     }
 }
 

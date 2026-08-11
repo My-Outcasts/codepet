@@ -570,12 +570,26 @@ final class CompanyStore: ObservableObject {
     /// nil when no department applies, it has no mapped companion, or it maps to the
     /// current host companion (no visible handoff needed).
     private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
-        let deptKey = department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
-        guard let deptKey, let dept = DepartmentCatalog.find(deptKey),
+        guard let deptKey = actingDeptKey(text: text, department: department),
+              let dept = DepartmentCatalog.find(deptKey),
               let companionId = DepartmentCompanions.specialistId(for: deptKey,
                                                                   host: company.companionId)
         else { return nil }
         return (companionId, dept.name)
+    }
+
+    /// Which department this turn belongs to — the chip if one is set, else a department the
+    /// founder addressed in the text. Split out of `actingSpecialist` because the two
+    /// questions had been fused, and the fusion cost the answer.
+    ///
+    /// `actingSpecialist` returns nil in two very different situations: no department applies
+    /// at all, and a department applies but its pet happens to BE the founder's own companion
+    /// (nothing to announce). Reading the department off that nil meant a founder whose
+    /// companion is Nova asked Marketing a question and the model was told nothing about
+    /// marketing — the one founder for whom the handoff is invisible was also the one whose
+    /// answer got no expertise. Who speaks and what they know are now resolved separately.
+    private func actingDeptKey(text: String, department: Department?) -> String? {
+        department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
     }
 
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
@@ -803,8 +817,19 @@ final class CompanyStore: ObservableObject {
         // The other half: the skills that are ON. Without this the CF could only
         // ever be told what to offer, never what the founder already chose.
         let enabledSkills = Toolkit.enabledSkillIds(in: company.enabledTools)
+        // Resolved BEFORE the request rather than after it, which is the whole fix. The
+        // specialist used to be computed below, purely to dress the reply bubble — the
+        // request had already gone out under the host's identity, so "Nova · Marketing"
+        // was Byte writing in Nova's name. Whoever leads the turn now leads it on the wire
+        // too, and the department rides along so the CF can ground the answer in that
+        // department's expertise.
+        let specialist = actingSpecialist(text: text, department: department)
+        let deptKey = actingDeptKey(text: text, department: department)
         let req = CompanyChatRequest(
-            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+            companyId: companyId, language: language.rawValue,
+            // The specialist when one leads, else the founder's own companion. Falling back
+            // to the host is not a default — it is the correct answer for an ordinary turn.
+            companionId: specialist?.companionId ?? company.companionId,
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
@@ -815,13 +840,10 @@ final class CompanyStore: ObservableObject {
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
             styleFragment: company.founderPrefs.style.promptFragment(),
-            enabledSkills: enabledSkills)
+            enabledSkills: enabledSkills, deptKey: deptKey)
 
-        // Department handoff: if a specialist leads this turn (chip focus or a
-        // department named in the text), the reply is spoken by that specialist
-        // directly — its "Name · Dept" header conveys the handoff.
-        let specialist = actingSpecialist(text: text, department: department)
-
+        // The reply bubble's identity — the same `specialist` the request above was built
+        // from, so the "Name · Dept" header now names whoever actually wrote the words.
         let placeholderId = UUID().uuidString
         chatMessages.append(CopilotMessage(id: placeholderId, role: .companion, text: "",
                                             companionId: specialist?.companionId, deptName: specialist?.deptName))
@@ -1714,12 +1736,18 @@ final class CompanyStore: ObservableObject {
     /// wire shape); only a revise chip tap sets both.
     private func runRequest(for task: RoadmapTask, language: AppLanguage,
                              reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
-        RunTaskRequest(
-            companyId: companyId, language: language.rawValue, companionId: company.companionId,
+        // The pet the execute log and the draft card have always credited for this run — now
+        // it is also the one generating it. `taskSpecialist` deliberately keeps the host case
+        // (a run is performed BY a department, so it always shows that department's
+        // character), which is exactly the behaviour wanted here too.
+        let specialist = taskSpecialist(for: task)
+        return RunTaskRequest(
+            companyId: companyId, language: language.rawValue,
+            companionId: specialist?.companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
-            reviseNote: reviseNote, current: current)
+            reviseNote: reviseNote, current: current, deptKey: task.dept)
     }
 
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,

@@ -20,6 +20,15 @@ import WebKit
 /// Renders a checklist payload: a progress bar over done/total, then one row
 /// per item. Rows are tappable to toggle `done` — purely a local visual
 /// state, not written back to the store.
+///
+/// Items are a founder's to-do list, so they are read at `DeliverableStyle.body` like every
+/// other deliverable's prose. They were 13pt with no leading; a two-line item ran its own lines
+/// together and read as one block of grey.
+///
+/// The row's fill is `surface` and so is the sheet behind it, which on the dark theme is a ~3%
+/// lightness step — the same "the card is black" edgeless nesting the chat's draft card was
+/// fixed for on Aug 6. The rows get the hairline they were missing rather than a heavier fill,
+/// because a checklist is a list, not a stack of cards.
 struct ChecklistViewer: View {
     @State private var items: [ChecklistItem]
     @Environment(\.uiLanguage) private var lang
@@ -33,47 +42,66 @@ struct ChecklistViewer: View {
         items.isEmpty ? 0 : Double(doneCount) / Double(items.count)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(lang == .vi ? "Tiến độ" : "Progress")
-                        .font(.pixelSystem(size: 12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.mutedText)
-                    Spacer()
-                    Text("\(doneCount)/\(items.count)")
-                        .font(.pixelSystem(size: 12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                }
-                ProgressView(value: progress)
-                    .tint(CodepetTheme.accentPurple)
-            }
+    /// The list as pasteable markdown — a checklist is something a founder moves into their own
+    /// tracker, and before this the only way out of the app was retyping it.
+    private var copyText: String {
+        items.map { "- [\($0.done ? "x" : " ")] \($0.t)" }.joined(separator: "\n")
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(items.indices, id: \.self) { i in
-                    Button {
-                        items[i].done.toggle()
-                    } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: items[i].done ? "checkmark.square.fill" : "square")
-                                .foregroundColor(items[i].done ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-                            Text(items[i].t)
-                                .font(.pixelSystem(size: 13))
-                                .foregroundColor(items[i].done ? CodepetTheme.mutedText : CodepetTheme.bodyText)
-                                .strikethrough(items[i].done, color: CodepetTheme.mutedText)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
-                                .fill(CodepetTheme.surface)
-                        )
+    var body: some View {
+        DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
+                         action: .copy(copyText)) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(lang == .vi ? "Tiến độ" : "Progress")
+                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                        Spacer()
+                        Text("\(doneCount)/\(items.count)")
+                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundColor(CodepetTheme.primaryText)
                     }
-                    .buttonStyle(.plain)
+                    ProgressView(value: progress)
+                        .tint(CodepetTheme.accentPurple)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(items.indices, id: \.self) { i in
+                        Button {
+                            items[i].done.toggle()
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: items[i].done ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(items[i].done ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                                Text(items[i].t)
+                                    .font(.pixelSystem(size: DeliverableStyle.body))
+                                    .lineSpacing(DeliverableStyle.leading)
+                                    .foregroundColor(items[i].done ? CodepetTheme.mutedText : CodepetTheme.bodyText)
+                                    .strikethrough(items[i].done, color: CodepetTheme.mutedText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .fill(CodepetTheme.surface)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
+                            )
+                            .hoverAffordance(RoundedRectangle(cornerRadius: CodepetTheme.inputRadius,
+                                                              style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .cursorOnHover(.pointingHand)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -98,74 +126,70 @@ struct DocViewer: View {
     /// Three rules: prose gets a reading measure (~1.6em leading, capped column), a heading binds
     /// to what follows it and separates from what precedes it, and a rule between sections does the
     /// separating so the gap does not have to be huge to read as a break.
-    private enum Doc {
-        static let lead: CGFloat = 15        // the call itself
-        static let body: CGFloat = 14
-        static let heading: CGFloat = 15
-        static let leading: CGFloat = 7      // ~1.6em on 14pt
-        /// ~68 characters at this size. Longer lines lose the eye on the return sweep, and this
-        /// sheet can be dragged much wider than its 460pt minimum.
-        static let measure: CGFloat = 620
-        static let headingToBody: CGFloat = 7
-        static let betweenSections: CGFloat = 26
+    ///
+    /// Those three rules and their five numbers now live in `DeliverableStyle`, because they were
+    /// never specific to a doc — the nine viewers that could not see this private enum are what
+    /// this pass is about. The `Doc` alias is kept so the reasoning above still reads against the
+    /// names it was written for.
+    private typealias Doc = DeliverableStyle
+
+    /// The document as pasteable prose. The lead, then each section under its own heading, then
+    /// the next-steps as bullets — the same order the eye reads it in.
+    private var copyText: String {
+        var out = [call]
+        for s in sections { out.append("\(s.h)\n\(s.p)") }
+        if !next.isEmpty {
+            out.append(((lang == .vi ? "Tiếp theo" : "Next")) + "\n"
+                       + next.map { "• \($0)" }.joined(separator: "\n"))
+        }
+        return out.joined(separator: "\n\n")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Doc.betweenSections) {
-            Text(call)
-                .font(.pixelSystem(size: Doc.lead, weight: .medium))
-                .lineSpacing(Doc.leading)
-                .foregroundColor(CodepetTheme.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
-                        .fill(CodepetTheme.accentPurple.opacity(0.1))
-                )
+        DeliverableFrame(eyebrow: lang == .vi ? "Tài liệu" : "Document",
+                         action: .copy(copyText)) {
+            VStack(alignment: .leading, spacing: Doc.betweenSections) {
+                Text(call)
+                    .font(.pixelSystem(size: Doc.lead, weight: .medium))
+                    .lineSpacing(Doc.leading)
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                            .fill(CodepetTheme.accentPurple.opacity(0.1))
+                    )
 
-            ForEach(Array(sections.enumerated()), id: \.offset) { idx, section in
-                VStack(alignment: .leading, spacing: Doc.headingToBody) {
-                    // A rule, not just a gap: it separates without needing the space to grow.
-                    if idx > 0 {
-                        Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-                            .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
+                ForEach(Array(sections.enumerated()), id: \.offset) { idx, section in
+                    VStack(alignment: .leading, spacing: Doc.headingToBody) {
+                        // A rule, not just a gap: it separates without needing the space to grow.
+                        if idx > 0 {
+                            DeliverableRule()
+                                .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
+                        }
+                        DeliverableHeading(text: section.h)
+                        DeliverableProse(text: section.p)
                     }
-                    Text(section.h)
-                        .font(.pixelSystem(size: Doc.heading, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(section.p)
-                        .font(.pixelSystem(size: Doc.body))
-                        .lineSpacing(Doc.leading)
-                        .foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
 
-            if !next.isEmpty {
-                VStack(alignment: .leading, spacing: Doc.headingToBody) {
-                    Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-                        .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
-                    Text(lang == .vi ? "Tiếp theo" : "Next")
-                        .font(.pixelSystem(size: Doc.heading, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                    ForEach(Array(next.enumerated()), id: \.offset) { _, line in
-                        HStack(alignment: .top, spacing: 9) {
-                            Text("•").font(.pixelSystem(size: Doc.body))
-                                .foregroundColor(CodepetTheme.mutedText)
-                            Text(line)
-                                .font(.pixelSystem(size: Doc.body))
-                                .lineSpacing(Doc.leading)
-                                .foregroundColor(CodepetTheme.bodyText)
-                                .fixedSize(horizontal: false, vertical: true)
+                if !next.isEmpty {
+                    VStack(alignment: .leading, spacing: Doc.headingToBody) {
+                        DeliverableRule()
+                            .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
+                        DeliverableHeading(text: lang == .vi ? "Tiếp theo" : "Next")
+                        ForEach(Array(next.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .top, spacing: 9) {
+                                Text("•").font(.pixelSystem(size: Doc.body))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                DeliverableProse(text: line)
+                            }
                         }
                     }
                 }
             }
         }
-        .frame(maxWidth: Doc.measure, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -174,90 +198,124 @@ struct DocViewer: View {
 /// Renders a plan payload: Goal, numbered Steps, Changes (area → edit),
 /// Verify, and Risks. Every field is optional — sections that are nil or
 /// empty are skipped.
+///
+/// The worst-set surface of the nine: every one of its five sections ran at 12pt with no leading
+/// and no measure, under a 12pt grey label that was the same size as the content it introduced —
+/// so a heading did not read as a heading, and the whole plan read as one grey block. Steps and
+/// changes are prose a founder has to follow, so they are now set like prose; the section names
+/// become eyebrows, which is what they were always trying to be.
 struct PlanViewer: View {
     let payload: DeliverablePayload
     @Environment(\.uiLanguage) private var lang
 
+    /// A section name. An eyebrow, not a same-size grey label — the point of a heading is that
+    /// it does not look like the body. The SECOND rank, so it does not compete with the card's
+    /// own "PLAN".
     private func label(_ en: String, _ vi: String) -> some View {
-        Text(lang == .vi ? vi : en)
-            .font(.pixelSystem(size: 12, weight: .semibold))
-            .foregroundColor(CodepetTheme.mutedText)
+        DeliverableEyebrow.section(lang == .vi ? vi : en)
+    }
+
+    /// The plan as pasteable prose, in the order it reads.
+    private var copyText: String {
+        var out: [String] = []
+        if let goal = payload.goal, !goal.isEmpty {
+            out.append((lang == .vi ? "Mục tiêu" : "Goal") + "\n" + goal)
+        }
+        if let steps = payload.steps, !steps.isEmpty {
+            out.append((lang == .vi ? "Các bước" : "Steps") + "\n"
+                       + steps.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
+        }
+        if let changes = payload.changes, !changes.isEmpty {
+            out.append((lang == .vi ? "Thay đổi" : "Changes") + "\n"
+                       + changes.map { "\($0.area): \($0.edit)" }.joined(separator: "\n"))
+        }
+        if let verify = payload.verify, !verify.isEmpty {
+            out.append((lang == .vi ? "Kiểm chứng" : "Verify") + "\n"
+                       + verify.map { "• \($0)" }.joined(separator: "\n"))
+        }
+        if let risks = payload.risks, !risks.isEmpty {
+            out.append((lang == .vi ? "Rủi ro" : "Risks") + "\n" + risks)
+        }
+        return out.joined(separator: "\n\n")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let goal = payload.goal, !goal.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    label("Goal", "Mục tiêu")
-                    Text(goal)
-                        .font(.pixelSystem(size: 13))
-                        .foregroundColor(CodepetTheme.primaryText)
+        DeliverableFrame(eyebrow: lang == .vi ? "Kế hoạch" : "Plan",
+                         action: .copy(copyText)) {
+            VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
+                if let goal = payload.goal, !goal.isEmpty {
+                    VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                        label("Goal", "Mục tiêu")
+                        DeliverableProse(text: goal, color: CodepetTheme.primaryText)
+                    }
                 }
-            }
 
-            if let steps = payload.steps, !steps.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    label("Steps", "Các bước")
-                    ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("\(i + 1).")
-                                .font(.pixelSystem(size: 12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.accentPurple)
-                                .frame(width: 18, alignment: .leading)
-                            Text(step)
-                                .font(.pixelSystem(size: 12))
-                                .foregroundColor(CodepetTheme.bodyText)
+                if let steps = payload.steps, !steps.isEmpty {
+                    VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                        label("Steps", "Các bước")
+                        ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+                            HStack(alignment: .top, spacing: 9) {
+                                Text("\(i + 1).")
+                                    .font(.pixelSystem(size: DeliverableStyle.body, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(CodepetTheme.accentPurple)
+                                    .frame(width: 20, alignment: .leading)
+                                DeliverableProse(text: step)
+                            }
                         }
                     }
                 }
-            }
 
-            if let changes = payload.changes, !changes.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    label("Changes", "Thay đổi")
-                    ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(change.area)
-                                .font(.pixelSystem(size: 12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.primaryText)
-                            Text(change.edit)
-                                .font(.pixelSystem(size: 12))
-                                .foregroundColor(CodepetTheme.bodyText)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
-                                .fill(CodepetTheme.surface)
-                        )
-                    }
-                }
-            }
-
-            if let verify = payload.verify, !verify.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    label("Verify", "Kiểm chứng")
-                    ForEach(Array(verify.enumerated()), id: \.offset) { _, check in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "checkmark.circle").foregroundColor(CodepetTheme.accentTeal)
-                            Text(check)
-                                .font(.pixelSystem(size: 12))
-                                .foregroundColor(CodepetTheme.bodyText)
+                if let changes = payload.changes, !changes.isEmpty {
+                    VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                        label("Changes", "Thay đổi")
+                        ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(change.area)
+                                    .font(.pixelSystem(size: DeliverableStyle.body, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.primaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                DeliverableProse(text: change.edit)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .fill(CodepetTheme.surface)
+                            )
+                            // The edge the nested card never had — `surface` on `surface` is a ~3%
+                            // step on the dark theme, which is no edge at all (Aug 6).
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
+                            )
                         }
                     }
                 }
-            }
 
-            if let risks = payload.risks, !risks.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    label("Risks", "Rủi ro")
-                    Text(risks)
-                        .font(.pixelSystem(size: 12))
-                        .foregroundColor(CodepetTheme.bodyText)
+                if let verify = payload.verify, !verify.isEmpty {
+                    VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                        label("Verify", "Kiểm chứng")
+                        ForEach(Array(verify.enumerated()), id: \.offset) { _, check in
+                            HStack(alignment: .top, spacing: 9) {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(CodepetTheme.accentTeal)
+                                    .padding(.top, 2)
+                                DeliverableProse(text: check)
+                            }
+                        }
+                    }
+                }
+
+                if let risks = payload.risks, !risks.isEmpty {
+                    VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                        label("Risks", "Rủi ro")
+                        DeliverableProse(text: risks)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -288,14 +346,14 @@ struct DmsViewer: View {
     private func card(index i: Int, message: DmMessage) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                MessageDraftEyebrow(text: lang == .vi ? "Tin nhắn" : "Message")
+                DeliverableEyebrow(text: lang == .vi ? "Tin nhắn" : "Message")
                 Spacer(minLength: 12)
-                MessageDraftCopyButton(text: message.msg)
+                DeliverableCopyButton(text: message.msg)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(message.name)
-                    .font(.pixelSystem(size: MessageDraftStyle.subject, weight: .semibold))
+                    .font(.pixelSystem(size: DeliverableStyle.heading, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if !message.note.isEmpty {
@@ -309,16 +367,14 @@ struct DmsViewer: View {
             }
             .padding(.top, 8)
 
-            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-                .padding(.vertical, 14)
+            DeliverableRule().padding(.vertical, 14)
 
-            MessageDraftBody(text: message.msg)
+            DeliverableProse(text: message.msg)
 
-            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-                .padding(.vertical, 14)
+            DeliverableRule().padding(.vertical, 14)
 
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                MessageDraftBlanksNote(text: message.msg)
+                DeliverableBlanksNote(text: message.msg, verb: .send)
                 Button {
                     if sent.contains(i) { sent.remove(i) } else { sent.insert(i) }
                 } label: {
@@ -334,142 +390,74 @@ struct DmsViewer: View {
                     font: .pixelSystem(size: 11, weight: .semibold)))
             }
         }
-        .messageDraftCardChrome()
+        // FORCED on, unlike every other viewer: these are siblings, not one frame. A `.dms`
+        // deliverable is several messages to several people, and in a sheet with no edges they
+        // would run together into one wall with names in it.
+        .deliverableCardChrome(forced: true)
     }
 }
 
 // MARK: - LegalViewer
 
-/// Renders a `.legal` deliverable as a formal document "sheet": a heading, a
-/// static "Draft" subline, the markdown `body`, and a disclaimer footer. This
-/// kind carries no structured payload — content comes straight from `title` +
-/// `body`.
+/// Renders a `.legal` deliverable as a formal document: a "Legal draft" eyebrow with Copy, the
+/// markdown `body` at reading size, and the not-legal-advice line as the card's footer. This kind
+/// carries no structured payload — content comes straight from `title` + `body`.
+///
+/// Three things moved. **Copy came into the card**: it used to trail underneath as a loose pill,
+/// which is the page furniture the Aug 10 message pass diagnosed and fixed — for messages only,
+/// because the fix lived inside `MessageDraftCard`. **The disclaimer became the footer** instead of
+/// a third loose line under the card, so the card ends where the document ends. **The "Draft"
+/// subline is gone**: the eyebrow already says LEGAL DRAFT, and the footer says it again with the
+/// part that matters.
 struct LegalViewer: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(deliverable.title)
-                        .font(.pixelSystem(size: 15, weight: .bold))
-                        .foregroundColor(CodepetTheme.primaryText)
-                    Text(lang == .vi ? "Bản nháp" : "Draft")
-                        .font(.pixelSystem(size: 11, weight: .medium))
-                        .foregroundColor(CodepetTheme.mutedText)
-                }
-
-                Divider()
-
-                MarkdownView(markdown: deliverable.body)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .fill(CodepetTheme.surface)
-            )
-            .codepetShadow(CodepetTheme.cardShadow)
-
-            Text(lang == .vi
-                 ? "Bản nháp — không phải tư vấn pháp lý."
-                 : "Draft — not legal advice.")
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(deliverable.body, forType: .string)
-            } label: {
-                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(CodepetPillButtonStyle(
-                fill: CodepetTheme.surface,
-                foreground: CodepetTheme.primaryText,
-                paddingH: 12, paddingV: 6,
-                font: .pixelSystem(size: 11, weight: .semibold)))
+        DeliverableFrame(
+            eyebrow: lang == .vi ? "Bản nháp pháp lý" : "Legal draft",
+            action: .copy(deliverable.body),
+            footer: lang == .vi ? "Bản nháp — không phải tư vấn pháp lý."
+                                : "Draft — not legal advice."
+        ) {
+            MarkdownView(markdown: deliverable.body)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 // MARK: - PostViewer
 
-/// Renders a `.post` deliverable as a social-post card: a round avatar with
-/// the title's initial, the `body` as post text, and a muted, clearly
-/// decorative stats row (no live counts are tracked natively).
+/// Renders a `.post` deliverable as something you are about to publish: a "Social post" eyebrow
+/// with Copy, the `body` as post text at reading size, and a footer naming what is still to fill
+/// in before it goes out.
+///
+/// TWO INVENTIONS REMOVED, both of which stated things the app does not know.
+///
+/// **The engagement counts.** The card printed "12 Replies · 8 Reposts · 46 Likes" — hardcoded
+/// integers, on a post the founder has not published, for an account the app has no connection
+/// to. The old doc-comment called them "purely visual flavor", which is the whole problem: they
+/// are indistinguishable from data, and the founder cannot tell by looking that the app is
+/// making them up. This is the same rule the Virtual Company holds as rule 8 — never render
+/// invented progress — and it is not weaker here because the numbers are prettier.
+///
+/// **The avatar.** A purple circle holding the first letter of the deliverable's TITLE, which is
+/// not a person, not the founder, and not the company — an initials badge for an identity that
+/// does not exist. The room cards deleted their `"Fi"`/`"Pr"` badges for exactly this reason:
+/// an abbreviation earns its place only when there is no room for the word.
+///
+/// What is left is the post itself, which is what the founder came to read and is going to paste.
 struct PostViewer: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
-    private var initial: String {
-        String(deliverable.title.trimmingCharacters(in: .whitespaces).first ?? "C").uppercased()
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    Text(initial)
-                        .font(.pixelSystem(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(CodepetTheme.accentPurple))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(deliverable.title)
-                            .font(.pixelSystem(size: 13, weight: .semibold))
-                            .foregroundColor(CodepetTheme.primaryText)
-                        Text(lang == .vi ? "vừa xong" : "now")
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    Spacer()
-                }
-
-                MarkdownView(markdown: deliverable.body)
-
-                HStack(spacing: 18) {
-                    statItem(icon: "bubble.right", count: 12, label: lang == .vi ? "Trả lời" : "Replies")
-                    statItem(icon: "arrow.2.squarepath", count: 8, label: lang == .vi ? "Chia sẻ lại" : "Reposts")
-                    statItem(icon: "heart", count: 46, label: lang == .vi ? "Thích" : "Likes")
-                    Spacer()
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .fill(CodepetTheme.surface)
-            )
-            .codepetShadow(CodepetTheme.cardShadow)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(deliverable.body, forType: .string)
-            } label: {
-                Label(lang == .vi ? "Sao chép" : "Copy", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(CodepetPillButtonStyle(
-                fill: CodepetTheme.surface,
-                foreground: CodepetTheme.primaryText,
-                paddingH: 12, paddingV: 6,
-                font: .pixelSystem(size: 11, weight: .semibold)))
+        DeliverableFrame(
+            eyebrow: lang == .vi ? "Bài đăng" : "Social post",
+            action: .copy(deliverable.body),
+            footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang)
+        ) {
+            MarkdownView(markdown: deliverable.body)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Decorative stat chip — icon + placeholder count + label. Purely
-    /// visual flavor; no real engagement data is tracked natively.
-    private func statItem(icon: String, count: Int, label: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text("\(count)")
-                .font(.pixelSystem(size: 11, weight: .semibold))
-            Text(label)
-        }
-        .font(.pixelSystem(size: 11))
-        .foregroundColor(CodepetTheme.mutedText)
     }
 }
 
@@ -483,52 +471,72 @@ struct CalendarViewer: View {
     let payload: CalendarPayload
     @Environment(\.uiLanguage) private var lang
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)]
+    /// Widened from 150. A post's `body` is a sentence, and at reading size a 150pt column broke
+    /// it across four or five lines — the grid was sized for the 11pt setting it used to be in.
+    private let columns = [GridItem(.adaptive(minimum: 210), spacing: 10, alignment: .top)]
+
+    /// The calendar as pasteable prose — a founder schedules these somewhere else.
+    private var copyText: String {
+        payload.weeks.map { week in
+            week.label + "\n"
+            + week.items.map { "\($0.day) · \($0.kind) — \($0.body)" }.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
 
     var body: some View {
-        Group {
+        DeliverableFrame(eyebrow: lang == .vi ? "Lịch nội dung" : "Content calendar",
+                         action: payload.weeks.isEmpty ? .none : .copy(copyText),
+                         measured: false) {
             if payload.weeks.isEmpty {
-                Text(lang == .vi ? "Chưa có mục nào." : "No entries yet.")
-                    .font(.pixelSystem(size: 12))
-                    .foregroundColor(CodepetTheme.mutedText)
+                // An empty state is a sentence addressed to the founder, not a caption. It was
+                // 12pt muted, smaller than anything around it, in a card whose whole content it is.
+                DeliverableProse(text: lang == .vi ? "Chưa có mục nào." : "No entries yet.",
+                                 tintBlanks: false,
+                                 color: CodepetTheme.mutedText)
             } else {
                 weeksList
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var weeksList: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ForEach(Array(payload.weeks.enumerated()), id: \.offset) { _, week in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(week.label)
-                        .font(.pixelSystem(size: 13, weight: .bold))
-                        .foregroundColor(CodepetTheme.primaryText)
+        VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
+            ForEach(Array(payload.weeks.enumerated()), id: \.offset) { idx, week in
+                VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                    if idx > 0 {
+                        DeliverableRule()
+                            .padding(.bottom, DeliverableStyle.betweenSections
+                                              - DeliverableStyle.headingToBody - 8)
+                    }
+                    DeliverableHeading(text: week.label)
 
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                         ForEach(Array(week.items.enumerated()), id: \.offset) { _, item in
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 HStack(spacing: 6) {
                                     Text(item.day)
-                                        .font(.pixelSystem(size: 11, weight: .semibold))
+                                        .font(.pixelSystem(size: DeliverableStyle.footnote,
+                                                           weight: .semibold))
                                         .foregroundColor(CodepetTheme.mutedText)
-                                    Spacer()
+                                    Spacer(minLength: 4)
                                     Text(item.kind)
                                         .font(.pixelSystem(size: 9, weight: .medium))
                                         .foregroundColor(CodepetTheme.accentPurple)
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
                                 }
-                                Text(item.body)
-                                    .font(.pixelSystem(size: 11))
-                                    .foregroundColor(CodepetTheme.bodyText)
+                                DeliverableProse(text: item.body)
                             }
-                            .padding(10)
+                            .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
                                     .fill(CodepetTheme.surface)
+                            )
+                            // `surface` inside `surface` had no edge to hold it (Aug 6).
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                                    .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
                             )
                         }
                     }
@@ -594,52 +602,75 @@ struct SheetViewer: View {
         SheetModel.compute(price: price, waitlist: waitlist, conversion: conversion, churn: churn)
     }
 
+    /// The model's OUTPUTS, pasteable. The sliders are the founder's to move; the six figures are
+    /// what they take away, and there was no way to get them out of the app.
+    private var copyText: String {
+        var lines = [
+            "\(lang == .vi ? "Người dùng trả phí" : "Paid users"): \(model.paid)",
+            "\(lang == .vi ? "MRR khởi điểm" : "Seed MRR"): \(fmtCurrency(model.mrr))",
+            "\(lang == .vi ? "ARR ước tính" : "Run-rate ARR"): \(fmtCurrency(model.arr))",
+            "\(lang == .vi ? "LTV / người dùng" : "LTV / user"): \(fmtCurrency(Double(model.ltv)))",
+            "\(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life"): \(model.life)mo",
+            "\(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users"): \(model.breakeven)",
+        ]
+        if let summary, !summary.isEmpty { lines.append("\n" + summary) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Not financial advice — the card's footer, not a loose third line under it.
+    private var disclaimer: String {
+        lang == .vi
+            ? "Dự báo do Codepet soạn từ dữ liệu bạn nhập — không phải tư vấn tài chính. Hãy kiểm chứng trước khi dựa vào."
+            : "Projections Codepet drafted from your inputs — not financial advice. Verify the figures before you rely on them."
+    }
+
+    /// `measured: false` — the sliders and the six-cell grid lay themselves out, and a 620pt cap
+    /// would squeeze an interactive model into a prose column it is not.
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                sliderRow(lang == .vi ? "Giá gói Pro / tháng" : "Pro price / mo",
-                          value: $price, range: priceRange, step: priceStep,
-                          display: "$\(Int(price.rounded()))")
-                sliderRow(lang == .vi ? "Danh sách chờ" : "Waitlist size",
-                          value: $waitlist, range: waitlistRange, step: waitlistStep,
-                          display: "\(Int(waitlist.rounded()))")
-                sliderRow(lang == .vi ? "Chờ → trả phí" : "Waitlist → paid",
-                          value: $conversion, range: conversionRange, step: conversionStep,
-                          display: "\(Int(conversion.rounded()))%")
-                sliderRow(lang == .vi ? "Rời bỏ hàng tháng" : "Monthly churn",
-                          value: $churn, range: churnRange, step: churnStep,
-                          display: "\(Int(churn.rounded()))%")
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .fill(CodepetTheme.surface)
-            )
-            .codepetShadow(CodepetTheme.cardShadow)
+        DeliverableFrame(eyebrow: lang == .vi ? "Mô hình tài chính" : "Financial model",
+                         action: .copy(copyText),
+                         footer: disclaimer,
+                         measured: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    sliderRow(lang == .vi ? "Giá gói Pro / tháng" : "Pro price / mo",
+                              value: $price, range: priceRange, step: priceStep,
+                              display: "$\(Int(price.rounded()))")
+                    sliderRow(lang == .vi ? "Danh sách chờ" : "Waitlist size",
+                              value: $waitlist, range: waitlistRange, step: waitlistStep,
+                              display: "\(Int(waitlist.rounded()))")
+                    sliderRow(lang == .vi ? "Chờ → trả phí" : "Waitlist → paid",
+                              value: $conversion, range: conversionRange, step: conversionStep,
+                              display: "\(Int(conversion.rounded()))%")
+                    sliderRow(lang == .vi ? "Rời bỏ hàng tháng" : "Monthly churn",
+                              value: $churn, range: churnRange, step: churnStep,
+                              display: "\(Int(churn.rounded()))%")
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                        .fill(CodepetTheme.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                        .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
+                )
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
-                outCell(lang == .vi ? "Người dùng trả phí" : "Paid users", value: "\(model.paid)")
-                outCell(lang == .vi ? "MRR khởi điểm" : "Seed MRR", value: fmtCurrency(model.mrr), hero: true)
-                outCell(lang == .vi ? "ARR ước tính" : "Run-rate ARR", value: fmtCurrency(model.arr))
-                outCell(lang == .vi ? "LTV / người dùng" : "LTV / user", value: fmtCurrency(Double(model.ltv)))
-                outCell(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life", value: "\(model.life)mo")
-                outCell(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users", value: "\(model.breakeven)")
-            }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                    outCell(lang == .vi ? "Người dùng trả phí" : "Paid users", value: "\(model.paid)")
+                    outCell(lang == .vi ? "MRR khởi điểm" : "Seed MRR", value: fmtCurrency(model.mrr), hero: true)
+                    outCell(lang == .vi ? "ARR ước tính" : "Run-rate ARR", value: fmtCurrency(model.arr))
+                    outCell(lang == .vi ? "LTV / người dùng" : "LTV / user", value: fmtCurrency(Double(model.ltv)))
+                    outCell(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life", value: "\(model.life)mo")
+                    outCell(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users", value: "\(model.breakeven)")
+                }
 
-            if let summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.pixelSystem(size: 12))
-                    .foregroundColor(CodepetTheme.bodyText)
+                if let summary, !summary.isEmpty {
+                    DeliverableProse(text: summary)
+                }
             }
-
-            Text(lang == .vi
-                 ? "Dự báo do Codepet soạn từ dữ liệu bạn nhập — không phải tư vấn tài chính. Hãy kiểm chứng trước khi dựa vào."
-                 : "Projections Codepet drafted from your inputs — not financial advice. Verify the figures before you rely on them.")
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
@@ -673,6 +704,10 @@ struct SheetViewer: View {
         .background(
             RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
                 .fill(CodepetTheme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
         )
     }
 
@@ -725,58 +760,55 @@ struct SiteViewer: View {
 
     private var html: String { SiteViewer.buildHTML(payload) }
 
+    /// `measured: false` — a rendered landing page is laid out by its own CSS at 1080pt, and a
+    /// 620pt prose cap would show it in a column narrower than any browser it will ever load in.
+    ///
+    /// Copy keeps its own label. This card's action puts MARKUP on the pasteboard, not words, and
+    /// a bare "Copy" next to a rendered page reads as "copy the page's text" — the one thing it
+    /// does not do.
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(lang == .vi ? "Xem trước trang web" : "Landing page preview")
-                    .font(.pixelSystem(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.mutedText)
-                Spacer()
-                Picker("", selection: $tab) {
-                    Text(lang == .vi ? "Xem trước" : "Preview").tag(Tab.preview)
-                    Text(lang == .vi ? "Mã" : "Code").tag(Tab.code)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 160)
-            }
-
-            Group {
-                if tab == .preview {
-                    SiteHTMLWebView(html: html)
-                } else {
-                    ScrollView {
-                        Text(html)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(CodepetTheme.bodyText)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
+        DeliverableFrame(
+            eyebrow: lang == .vi ? "Trang giới thiệu" : "Landing page",
+            action: .copyLabelled(html,
+                                  label: lang == .vi ? "Sao chép HTML" : "Copy HTML",
+                                  done: lang == .vi ? "Đã sao chép" : "Copied"),
+            measured: false
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Spacer()
+                    Picker("", selection: $tab) {
+                        Text(lang == .vi ? "Xem trước" : "Preview").tag(Tab.preview)
+                        Text(lang == .vi ? "Mã" : "Code").tag(Tab.code)
                     }
-                    .background(CodepetTheme.surface)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 160)
                 }
-            }
-            .frame(minHeight: 420)
-            .clipShape(RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                    .stroke(CodepetTheme.hairline, lineWidth: 1)
-            )
-            .codepetShadow(CodepetTheme.cardShadow)
 
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(html, forType: .string)
-            } label: {
-                Label(lang == .vi ? "Sao chép HTML" : "Copy HTML", systemImage: "doc.on.doc")
+                Group {
+                    if tab == .preview {
+                        SiteHTMLWebView(html: html)
+                    } else {
+                        ScrollView {
+                            Text(html)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(CodepetTheme.bodyText)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                        }
+                        .background(CodepetTheme.surface)
+                    }
+                }
+                .frame(minHeight: 420)
+                .clipShape(RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
+                        .stroke(CodepetTheme.hairline, lineWidth: 1)
+                )
             }
-            .buttonStyle(CodepetPillButtonStyle(
-                fill: CodepetTheme.surface,
-                foreground: CodepetTheme.primaryText,
-                paddingH: 12, paddingV: 6,
-                font: .pixelSystem(size: 11, weight: .semibold)))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: HTML template
@@ -967,12 +999,21 @@ struct ScreensViewer: View {
 
     private var screens: [Screen] { payload.screens }
 
+    /// `measured: false`, and the phone's own internals are left ALONE.
+    ///
+    /// Everything inside the 220×440 frame is a simulated phone UI: 9pt kickers, an 11pt subtitle,
+    /// a 12pt CTA. Those sizes are not the app failing to set type for reading — they are the
+    /// mockup being a mockup, and raising them to `DeliverableStyle.body` would make the phone
+    /// stop looking like a phone. The reading standard governs what the founder READS; this card's
+    /// content is a picture of something else. Only the card's own chrome and the caption below
+    /// the mockup are brought into line.
     var body: some View {
-        Group {
+        DeliverableFrame(eyebrow: lang == .vi ? "Màn hình" : "Screens",
+                         measured: false) {
             if screens.isEmpty {
-                Text(lang == .vi ? "Không có màn hình nào" : "No screens")
-                    .font(.pixelSystem(size: 12))
-                    .foregroundColor(CodepetTheme.mutedText)
+                DeliverableProse(text: lang == .vi ? "Không có màn hình nào" : "No screens",
+                                 tintBlanks: false,
+                                 color: CodepetTheme.mutedText)
             } else {
                 VStack(spacing: 16) {
                     phoneFrame(screens[idx])
@@ -1013,7 +1054,6 @@ struct ScreensViewer: View {
                 .onAppear { idx = min(max(idx, 0), screens.count - 1) }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

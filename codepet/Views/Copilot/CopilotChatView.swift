@@ -18,14 +18,17 @@ struct CopilotChatView: View {
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
     /// Bumped by every autoscroll trigger in `messageList` — new messages, the fan-out row,
-    /// a growing Virtual Company room, the typing indicator — so `CopilotBubble` can reset a
-    /// stranded `hovering` regardless of which of the four caused the scroll. Not wired to the
-    /// individual signals (`chatMessages.count`, `activeAgentRuns.count`, `vcRunCardCount`,
-    /// `isCompanionTyping`) because those four share nothing except "this scrolled the list" —
-    /// `activeAgentRuns` and the VC room both move the scroll position without touching
-    /// `chatMessages.count` (`CompanyStore.swift:1841`; the room mutates `vcRun` by id), which
-    /// is exactly the gap that let a hovered older reply get scrolled out from under the
-    /// pointer with its action row stuck lit (`.onHover(false)` never firing —
+    /// a growing Virtual Company room, the typing indicator, and the coding run's own start
+    /// and step stream — so `CopilotBubble` can reset a stranded `hovering` regardless of
+    /// which of the six caused the scroll. Not wired to the individual signals
+    /// (`chatMessages.count`, `activeAgentRuns.count`, `vcRunCardCount`, `isCompanionTyping`,
+    /// `CodingRunCoordinator.$run`/`.$steps`) because those six share nothing except "this
+    /// scrolled the list" — `activeAgentRuns`, the VC room, and the coding run all move the
+    /// scroll position without touching `chatMessages.count` (the fan-out's own append —
+    /// `CompanyStore.swift:1855`; the room mutates `vcRun` by id; the coding run renders
+    /// inline next to its anchor message and its step stream fires on every step), which is
+    /// exactly the gap that let a hovered older reply get scrolled out from under the pointer
+    /// with its action row stuck lit (`.onHover(false)` never firing —
     /// `CodepetTokens.swift:211-214`).
     @State private var scrollGeneration = 0
     /// Composer mode (Ask/Plan/Build) — pure client-side message shaping; `.build`
@@ -281,6 +284,7 @@ struct CopilotChatView: View {
                 DispatchQueue.main.async {
                     codingRunTick &+= 1
                     if companyStore.codingRun.run != nil {
+                        scrollGeneration &+= 1
                         withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
                     }
                 }
@@ -289,6 +293,13 @@ struct CopilotChatView: View {
                 DispatchQueue.main.async {
                     codingRunTick &+= 1
                     if companyStore.codingRun.run != nil {
+                        // `$steps` fires on every step of a coding run, and `CodeRunCardView`
+                        // renders inline right after its anchor message, so the transcript
+                        // really does reflow here — this bridge used to scroll without
+                        // bumping `scrollGeneration`, which left a hovered older reply's
+                        // action row stuck lit for the rest of the session (finding 3, the
+                        // 2026-08-11 whole-branch review).
+                        scrollGeneration &+= 1
                         withAnimation { proxy.scrollTo("coding-run", anchor: .bottom) }
                     }
                 }
@@ -473,7 +484,7 @@ struct CopilotBubble: View {
     /// being read always shows its affordances) and gates retry, whose store method deletes
     /// every turn after the ask.
     let isLast: Bool
-    /// Bumped by `messageList` on every one of its four autoscroll triggers. Watched only to
+    /// Bumped by `messageList` on every one of its six autoscroll triggers. Watched only to
     /// reset a stranded `hovering` — see the comment on `body`'s `.onChange` below.
     let scrollGeneration: Int
     @EnvironmentObject var companyStore: CompanyStore
@@ -543,17 +554,21 @@ struct CopilotBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .onHover { hovering = $0 }
             // `.onHover(false)` does not fire when a view disappears from under the pointer
-            // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on FOUR separate
-            // triggers, only two of which change `chatMessages.count` — the fan-out row
-            // (`activeAgentRuns.count`) and a growing Virtual Company room (`vcRunCardCount`)
-            // both move the scroll position while leaving the message array untouched. So: the
-            // founder reads an older reply with the pointer resting on it, any of the four
-            // fires, the transcript scrolls that reply out from under the cursor with
-            // `hovering` stuck true — its row stays lit next to the newly pinned one until the
-            // pointer happens to re-enter and leave it. `scrollGeneration` is bumped by all
-            // four in `messageList`, with no signal in common besides "this scrolled the
-            // list" — watching it here (rather than each of the four individually) clears
-            // `hovering` before it can be seen, no matter which one fired.
+            // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on SIX separate
+            // triggers, only one of which (`chatMessages.count` itself) is a change to the
+            // message array — the other five (the typing indicator, the fan-out row via
+            // `activeAgentRuns.count`, a growing Virtual Company room via `vcRunCardCount`,
+            // and the coding run's own start and step stream) move the scroll position while
+            // leaving `chatMessages` untouched. So: the founder reads an older reply with the
+            // pointer resting on it, any of the six fires, the transcript scrolls that reply
+            // out from under the cursor with `hovering` stuck true — its row stays lit next to
+            // the newly pinned one until the pointer happens to re-enter and leave it.
+            // `scrollGeneration` is bumped by all six in `messageList`, with no signal in
+            // common besides "this scrolled the list" — watching it here (rather than each of
+            // the six individually) clears `hovering` before it can be seen, no matter which
+            // one fired. The coding run's step bridge used to scroll WITHOUT bumping this,
+            // even though `CodeRunCardView` renders inline right after its anchor message and
+            // every step really does reflow the transcript (finding 3, 2026-08-11 review).
             .onChange(of: scrollGeneration) { _, _ in hovering = false }
         } else {
             content

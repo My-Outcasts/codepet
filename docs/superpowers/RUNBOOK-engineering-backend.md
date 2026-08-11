@@ -34,7 +34,7 @@ every function that exists in production but not in the branch's export set.
 Before every deploy in this runbook:
 
 ```bash
-cd ~/Developer/codepet/functions   # or this worktree's functions/
+cd ~/Developer/codepet-eng-backend/functions
 firebase functions:list
 ```
 
@@ -52,7 +52,7 @@ real `ANTHROPIC_API_KEY` and its output has to be pasted into two files by
 hand.
 
 ```bash
-cd ~/Developer/codepet/functions
+cd ~/Developer/codepet-eng-backend/functions
 ANTHROPIC_API_KEY="$(grep ANTHROPIC_API_KEY local.env | cut -d= -f2-)" npm run provision:eng
 ```
 
@@ -188,7 +188,7 @@ Scriptable, already committed as `functions/scripts/verify-eng-run.ts`
 credits against the real deployed backend and a real repo.
 
 ```bash
-cd ~/Developer/codepet/functions
+cd ~/Developer/codepet-eng-backend/functions
 npm run token                      # prints an ID_TOKEN to stdout
 ID_TOKEN=<paste> npm run verify:eng
 ```

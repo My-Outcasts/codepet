@@ -30,3 +30,21 @@ export function getEngClient(): Anthropic {
   if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return client;
 }
+
+/**
+ * A path segment is safe to interpolate into a Firestore document path only
+ * when it cannot contain a "/" — which either makes `db.doc(...)` throw
+ * synchronously (an odd resulting segment count) or silently redirects the
+ * operation to a different, caller-influenced document within the same
+ * project (an even segment count, no throw at all) — and is not Firestore's
+ * own reserved `__…__` document-id form, which addresses metadata Firestore
+ * treats specially, never an ordinary application document.
+ *
+ * Lives here, rather than being exported from whichever engineering handler
+ * defined it first, because this module is the one every handler already
+ * imports (`getEngClient`) — so no handler needs to import a sibling
+ * handler just to reuse this rule.
+ */
+export function isSafePathSegment(value: string): boolean {
+  return value.length > 0 && !value.includes("/") && !/^__.*__$/.test(value);
+}

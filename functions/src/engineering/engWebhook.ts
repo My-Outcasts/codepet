@@ -14,7 +14,7 @@ import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
 import { listCostToCredits } from "./engBudget";
-import { getEngClient, type RunStatus } from "./engClient";
+import { getEngClient, isSafePathSegment, type RunStatus } from "./engClient";
 
 /**
  * A session's stop reason → the run status the card renders.
@@ -41,22 +41,12 @@ export function statusFor(stopReason: string | undefined): RunStatus {
   }
 }
 
-/**
- * `runId` and `uid` come from a remote session's caller-supplied metadata —
- * not from anything this process mints — and get interpolated straight into
- * a Firestore document path (`companies/{uid}/engRuns/{runId}`). A segment
- * containing "/" either makes `db.doc(...)` throw synchronously (an odd
- * resulting segment count) or silently redirects a transactional write —
- * including the credit debit — to a different, caller-influenced document
- * within the same project (an even segment count, no throw at all). Neither
- * failure mode is acceptable on an HMAC-only endpoint that moves money, so
- * both values are checked before they are used for anything. Firestore's own
- * reserved `__…__` document-id form is rejected too: it addresses metadata
- * Firestore treats specially, never an ordinary run or company document.
- */
-function isSafePathSegment(value: string): boolean {
-  return value.length > 0 && !value.includes("/") && !/^__.*__$/.test(value);
-}
+// `runId` and `uid` come from a remote session's caller-supplied metadata —
+// not from anything this process mints — and get interpolated straight into
+// a Firestore document path (`companies/{uid}/engRuns/{runId}`). Neither
+// failure mode `isSafePathSegment` (in `./engClient`) guards against is
+// acceptable on an HMAC-only endpoint that moves money, so both values are
+// checked before they are used for anything.
 
 export async function handleEngWebhook(req: Request, res: Response): Promise<void> {
   if (req.method !== "POST") {

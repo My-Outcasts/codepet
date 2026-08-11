@@ -10,7 +10,7 @@ import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import * as admin from "firebase-admin";
 import { verifyAuth } from "../auth";
-import { getEngClient } from "./engClient";
+import { getEngClient, isSafePathSegment } from "./engClient";
 
 export type TurnEvent =
   | { type: "user.message"; content: Array<{ type: "text"; text: string }> }
@@ -60,12 +60,38 @@ export async function handleEngSendTurn(req: Request, res: Response): Promise<vo
 
   const runId = typeof req.body?.runId === "string" ? req.body.runId : "";
   const events = buildTurnEvents(req.body);
-  if (!runId || !events) {
+  // `runId` is caller-supplied and gets interpolated straight into a
+  // Firestore document path below. A value containing "/" makes
+  // `db.doc(...)` throw synchronously on an odd resulting segment count (and
+  // on an even count is still a same-tenant path-confusion, never a
+  // cross-tenant read — this subtree is already scoped to the authenticated
+  // founder's own `auth.uid`). Firestore's reserved `__…__` document-id form
+  // is rejected the same way `engWebhook.ts` rejects it, via the same
+  // `isSafePathSegment` rule from `./engClient`. Either shape is the
+  // caller's fault, so it joins the other payload-shape checks at 400,
+  // before anything touches Firestore.
+  if (!runId || !events || !isSafePathSegment(runId)) {
     res.status(400).json({ error: "invalid_payload", detail: "runId and one of text/approve/interrupt required" });
     return;
   }
 
-  const runSnap = await admin.firestore().doc(`companies/${auth.uid}/engRuns/${runId}`).get();
+  let runSnap: FirebaseFirestore.DocumentSnapshot;
+  try {
+    runSnap = await admin.firestore().doc(`companies/${auth.uid}/engRuns/${runId}`).get();
+  } catch (err) {
+    // A transient Firestore fault, not a malformed request — ours to retry,
+    // not the caller's mistake to fix. Must not collapse into 404
+    // (`run_not_found` already means "no such run" and the client renders it
+    // as an offer to start a new one) or hang the caller until their own
+    // timeout. Content-free log only: an SDK/Firestore error's `err` object
+    // can carry the request that produced it, including our API key header.
+    console.error("engSendTurn: run lookup failed", {
+      code: (err as { code?: unknown })?.code,
+      name: (err as { name?: unknown })?.name
+    });
+    res.status(503).json({ error: "lookup_failed" });
+    return;
+  }
   const sessionId = runSnap.data()?.sessionId as string | undefined;
   if (!runSnap.exists || !sessionId) {
     res.status(404).json({ error: "run_not_found" });

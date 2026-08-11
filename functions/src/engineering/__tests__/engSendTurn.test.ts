@@ -90,6 +90,32 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+/**
+ * A leak assertion must not run bare `JSON.stringify` over a value that
+ * could be an `Error` — `JSON.stringify(new Error("secret"))` is `"{}"`
+ * because `message`/`stack` are non-enumerable, so the assertion would pass
+ * while the secret still leaked. Walks call arguments (including nested
+ * plain objects and `Error` instances) looking for the marker directly,
+ * mirroring `callsContainMarker` in `engWebhook.test.ts`.
+ */
+function callsContainMarker(calls: unknown[][], marker: string): boolean {
+  const seen = new Set<unknown>();
+  const valueContains = (value: unknown): boolean => {
+    if (value == null) return false;
+    if (typeof value === "string") return value.includes(marker);
+    if (value instanceof Error) {
+      return value.message.includes(marker) || (value.stack ?? "").includes(marker);
+    }
+    if (typeof value === "object") {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return Object.values(value as Record<string, unknown>).some(valueContains);
+    }
+    return false;
+  };
+  return calls.some((call) => call.some(valueContains));
+}
+
 describe("handleEngSendTurn", () => {
   it("rejects a non-POST request without checking auth, firestore, or the session client", async () => {
     const doc = firestoreDoc();
@@ -228,6 +254,80 @@ describe("handleEngSendTurn", () => {
       const body = res.json.mock.calls[0][0];
       expect(JSON.stringify(body)).not.toContain(SECRET_MARKER);
       expect(body).not.toHaveProperty("detail");
+    }
+  );
+
+  it("rejects a slash-bearing runId as a client error and never reaches firestore", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_1" });
+    const doc = firestoreDoc();
+
+    const res = makeRes();
+    await handleEngSendTurn(
+      makeReq({ runId: "run_1/../other", text: "hi" }),
+      res as unknown as Parameters<typeof handleEngSendTurn>[1]
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(doc).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Firestore-reserved (__…__) runId as a client error and never reaches firestore", async () => {
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_1" });
+    const doc = firestoreDoc();
+
+    const res = makeRes();
+    await handleEngSendTurn(
+      makeReq({ runId: "__reserved__", text: "hi" }),
+      res as unknown as Parameters<typeof handleEngSendTurn>[1]
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(doc).not.toHaveBeenCalled();
+  });
+
+  it(
+    "maps a Firestore fault on the run lookup to a defined, retryable status — never a hang, never " +
+      "404, and never a log or response containing the upstream error's content",
+    async () => {
+      const SECRET_MARKER = "sk-ant-lookup-fault-secret-marker";
+      (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_1" });
+      const doc = firestoreDoc();
+      doc.mockReturnValue({
+        get: jest.fn().mockRejectedValue(
+          Object.assign(new Error(`firestore unavailable (auth: Bearer ${SECRET_MARKER})`), {
+            code: 14,
+            name: "FirestoreError"
+          })
+        )
+      });
+      const send = jest.fn();
+      (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { events: { send } } } });
+
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      try {
+        const res = makeRes();
+        await handleEngSendTurn(
+          makeReq({ runId: "run_1", text: "hi" }),
+          res as unknown as Parameters<typeof handleEngSendTurn>[1]
+        );
+
+        expect(send).not.toHaveBeenCalled();
+        expect(res.status).not.toHaveBeenCalledWith(404);
+        expect(res.status).toHaveBeenCalledWith(503);
+
+        const body = res.json.mock.calls[0]?.[0];
+        expect(callsContainMarker(res.json.mock.calls, SECRET_MARKER)).toBe(false);
+        expect(body).not.toHaveProperty("detail");
+
+        const allCalls = [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls];
+        expect(callsContainMarker(allCalls, SECRET_MARKER)).toBe(false);
+      } finally {
+        errorSpy.mockRestore();
+        warnSpy.mockRestore();
+        logSpy.mockRestore();
+      }
     }
   );
 

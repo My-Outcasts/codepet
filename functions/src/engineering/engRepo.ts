@@ -61,6 +61,44 @@ export function branchName(runId: string): string {
  * branch name in a run wastes credits on an obscure git error. The caller
  * turns null into the connect-or-create prompt.
  */
+/**
+ * The founder's GitHub token, or null when they have not connected GitHub.
+ *
+ * Exported because the repo-onboarding handlers need a token BEFORE a repo is
+ * linked — listing and creating repos are exactly what happens when
+ * `loadRepo` would still return null. Read from `connectors/github`, the one
+ * document the OAuth callback writes.
+ *
+ * A tampered or unreadable blob resolves to null, never a thrown error: the
+ * founder should be asked to reconnect, not shown a decryption failure. The
+ * error is never logged — it can echo ciphertext.
+ */
+export async function loadGitHubToken(uid: string, encKey: string): Promise<string | null> {
+  const snap = await admin.firestore().doc(`companies/${uid}/connectors/github`).get();
+  const sealed = (snap.data() as { sealed?: SealedToken } | undefined)?.sealed;
+  if (!sealed) return null;
+  try {
+    return openToken(sealed, encKey);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write the repo link. No credential goes in this document — see `RepoDoc`.
+ *
+ * `merge: false`: a link that replaces an earlier one must not inherit fields
+ * from it, and in particular must not keep a stale `sealed` copy written by
+ * the pre-Plan-2 shape.
+ */
+export async function writeRepoLink(
+  uid: string,
+  url: string,
+  defaultBranch: string
+): Promise<void> {
+  await admin.firestore().doc(`companies/${uid}/engineering/repo`).set({ url, defaultBranch });
+}
+
 export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | null> {
   const db = admin.firestore();
   const snap = await db.doc(`companies/${uid}/engineering/repo`).get();
@@ -81,19 +119,10 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
   // The token comes from the connector the OAuth callback writes, and from
   // nowhere else. A linked repo with no connected GitHub account is "connect
   // a repo", not a run against whatever credential happens to be lying around.
-  const connectorSnap = await db.doc(`companies/${uid}/connectors/github`).get();
-  const sealed = (connectorSnap.data() as { sealed?: SealedToken } | undefined)?.sealed;
-  if (!sealed) return null;
-
-  let token: string;
-  try {
-    token = openToken(sealed, encKey);
-  } catch {
-    // A tampered or unreadable blob. Never log the error — it can echo
-    // ciphertext. Treat it as "no repo linked" so the founder is asked to
-    // reconnect rather than shown a decryption failure.
-    return null;
-  }
+  // A tampered blob resolves to null inside `loadGitHubToken` for the same
+  // reason: the founder reconnects, rather than reading a decryption failure.
+  const token = await loadGitHubToken(uid, encKey);
+  if (!token) return null;
 
   return {
     url: data.url,

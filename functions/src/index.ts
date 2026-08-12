@@ -26,6 +26,7 @@ import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
 import { handleEngStartRun } from "./engineering/engStartRun";
 import { handleEngStream } from "./engineering/engStream";
+import { handleEngListRepos, handleEngLinkRepo } from "./engineering/engRepoHandlers";
 import { handleEngWebhook } from "./engineering/engWebhook";
 import { handleEngSendTurn } from "./engineering/engSendTurn";
 
@@ -151,6 +152,25 @@ export const engWebhook = onRequest(
 
 // Everything the founder sends into a live session: a follow-up, a tool
 // approval, or a stop.
+// Repo onboarding: what a founder hits before their first run. Both need
+// CONNECTOR_ENC_KEY to open the GitHub token the OAuth callback sealed; they
+// do not touch Anthropic, so they do not declare ANTHROPIC_API_KEY.
+export const engListRepos = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngListRepos
+);
+
+export const engLinkRepo = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngLinkRepo
+);
+
 export const engSendTurn = onRequest(
   {
     cors: false,

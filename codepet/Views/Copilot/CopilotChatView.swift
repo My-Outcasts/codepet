@@ -340,14 +340,10 @@ struct CopilotChatView: View {
         case .build:
             companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
         case .engineering:
-            // Unreachable today: `.engineering` is deliberately absent from
-            // `ChatMode.composerCases`, so it cannot be selected. The case
-            // exists because the enum is exhaustive and the model layer needs
-            // the mode — not because this path works. Task 10 replaces this
-            // with the workspace hand-off; until then, doing nothing here is
-            // correct BECAUSE nothing can get here, and an `assertionFailure`
-            // would be the honest alternative if it ever could.
-            assertionFailure("engineering mode was selected before its workspace existed")
+            // `mode.shape` is identity here, so the founder's text reaches
+            // engStartRun's `ask` verbatim — it becomes the agent's instruction
+            // and the session title, and framing copy would end up in both.
+            companyStore.startEngineeringRun(ask: text)
         }
     }
 }

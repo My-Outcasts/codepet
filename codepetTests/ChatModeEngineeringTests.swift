@@ -12,18 +12,15 @@ final class ChatModeEngineeringTests: XCTestCase {
         XCTAssertEqual(ChatMode.allCases.count, 4)
     }
 
-    func testEngineeringIsNotYetOfferedInTheComposer() {
-        // The mode exists in the model but its workspace does not. ChatComposer
-        // renders `composerCases`, so listing it there would put a control in
-        // front of a founder whose send goes nowhere — the dead affordance this
-        // codebase already removed once (`6982df0`).
-        //
-        // When EngineeringWorkspaceView lands, add `.engineering` to
-        // `composerCases`; THIS TEST WILL FAIL, and that failure is the
-        // reminder to delete it.
-        XCTAssertFalse(ChatMode.composerCases.contains(.engineering),
-                       "if this failed, the workspace shipped — delete this test")
-        XCTAssertEqual(ChatMode.composerCases, [.ask, .plan, .build])
+    func testEngineeringIsNowOfferedInTheComposer() {
+        // Replaced its own predecessor. Until Task 10 this test asserted the
+        // OPPOSITE — that `.engineering` was absent — and was written to fail the
+        // moment the workspace shipped, which is exactly what happened. Kept
+        // rather than deleted because the property is still worth pinning: the
+        // composer must offer every mode whose send has somewhere to go.
+        XCTAssertTrue(ChatMode.composerCases.contains(.engineering))
+        XCTAssertEqual(Set(ChatMode.composerCases), Set(ChatMode.allCases),
+                       "a mode with a working send is missing from the composer")
     }
 
     func testEngineeringDoesNotConveneTheRoom() {

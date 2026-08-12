@@ -16,6 +16,20 @@ final class CompanyStore: ObservableObject {
     /// overlay rather than an `AppView`, so opening it never changes `view` and closing
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
+    /// The engineering run whose diff is under review, or `nil`.
+    ///
+    /// Deliberately NOT an `AppView` case, for the same reason `settingsSection`
+    /// is not one: it does not change `view`, so closing it needs no route to
+    /// restore. `ShellLayout.contentSurface` turns this plus the destination into
+    /// which surface the content area renders.
+    @Published var engineeringReviewRunId: String?
+    /// The store driving the engineering run the dock is showing, or `nil` when no
+    /// run is in flight.
+    ///
+    /// Held here rather than constructed by a view so one run survives a view
+    /// rebuild, and injected rather than created so the whole flow is drivable
+    /// from `MockEngineeringRunner` with no credits and no network.
+    @Published var engineeringRunStore: EngineeringRunStore?
     @Published private(set) var company: CompanyState = .empty
 
     #if DEBUG
@@ -615,6 +629,56 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(msg)
         codingRunAnchorId = msg.id
         codingRun.propose(ask: trimmed, plannedFiles: 2, needsBash: false, link: activeProjectLink)
+    }
+
+    // MARK: - Engineering runs (the cloud agent)
+
+    /// Re-publishes the nested engineering store's changes, same reason
+    /// `codingRunBag` exists: a view observing only `CompanyStore` would not
+    /// re-render as frames arrive, and the result bar would visibly stick.
+    private var engineeringRunBag: AnyCancellable?
+
+    /// Start an engineering run for `ask`, and put its store on the dock.
+    ///
+    /// Mirrors `startCodeRun` — the founder's message lands in the transcript
+    /// first, so the ask is visible whether or not the run ever starts.
+    ///
+    /// The runner is INJECTED off the same `CODEPET_MOCK_CHAT` flag `codingRun`
+    /// uses, which is what makes the whole flow walkable with no Anthropic
+    /// credits, no repo and no network. That is not only a test affordance right
+    /// now: it is the only way to see this feature at all until the account has
+    /// balance.
+    func startEngineeringRun(ask: String) {
+        let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        chatMessages.append(CopilotMessage(role: .me, text: trimmed))
+
+        #if DEBUG
+        let mock = MockChat.enabled
+        #else
+        let mock = false
+        #endif
+        let runner: EngineeringRunning = mock ? MockEngineeringRunner(stepDelay: .milliseconds(700))
+                                             : EngineeringClient()
+        let store = EngineeringRunStore(runner: runner)
+        engineeringRunBag = store.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        engineeringRunStore = store
+        // A fresh run closes any pane left open on the previous one — reviewing a
+        // diff while a different run streams behind it is two runs' state on one
+        // screen with nothing saying which is which.
+        engineeringReviewRunId = nil
+        Task { await store.start(ask: trimmed) }
+    }
+
+    /// Open the Review pane on the run currently in flight.
+    ///
+    /// Reads the id off the store rather than taking one, so the pane can never
+    /// be opened on a run this store is not driving.
+    func openEngineeringReview() {
+        guard let runId = engineeringRunStore?.runId, !runId.isEmpty else { return }
+        engineeringReviewRunId = runId
     }
 
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)

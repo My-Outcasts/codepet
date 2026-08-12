@@ -74,6 +74,40 @@ enum ShellLayout {
         }
     }
 
+    // MARK: - the engineering workspace
+
+    /// What the content pane should show.
+    ///
+    /// `review` is NOT a nav destination and NOT a sheet. The design's §5.3 calls
+    /// for "same thread, more room": Review takes over the content area beside the
+    /// dock the founder is already reading, so the transcript stays where it is.
+    enum ContentSurface: Equatable {
+        /// The ordinary destination router — roadmap, company, tasks, and so on.
+        case destination(AppView)
+        /// The engineering Review pane, for this run.
+        case engineeringReview(runId: String)
+    }
+
+    /// Which surface to render, given the current destination and whether a run is
+    /// under review.
+    ///
+    /// The destination is passed through UNCHANGED while reviewing, which is the
+    /// whole mechanism behind "leaving review restores where you were": nothing was
+    /// ever navigated away from, so there is nothing to restore. A `view` case
+    /// would have had to remember and put back the previous destination, and that
+    /// is exactly the kind of state that goes wrong when a founder collapses the
+    /// dock or switches threads mid-review.
+    static func contentSurface(destination: AppView, reviewingRunId: String?) -> ContentSurface {
+        // Review only exists beside the dock. On a destination with no copilot
+        // there is no transcript to sit next to, so the pane would be a
+        // full-window diff viewer nobody asked for — and a founder who navigated
+        // to Library mid-run would find their map replaced by a diff.
+        guard let runId = reviewingRunId, !runId.isEmpty, showsCopilot(in: destination) else {
+            return .destination(destination)
+        }
+        return .engineeringReview(runId: runId)
+    }
+
     /// Content-pane width below which a page header must abbreviate its controls —
     /// the "How to read this map" button drops to its bare "?" — so the title and the
     /// controls still share ONE row. Above it everything shows its full label.

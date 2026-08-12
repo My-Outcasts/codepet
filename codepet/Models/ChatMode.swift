@@ -11,17 +11,18 @@ enum ChatMode: CaseIterable, Identifiable {
 
     /// The modes the composer actually offers.
     ///
-    /// NOT `allCases`. `.engineering` exists in the model — the run store, the
-    /// client and their tests all need it — but its workspace is not built yet,
-    /// and `ChatComposer` renders whatever this returns. Adding the case to the
-    /// menu before there is anywhere for a send to go would put a control in
-    /// front of a founder that silently does nothing; a dead affordance was
-    /// already removed from this codebase once (`6982df0`) and is not worth
-    /// re-adding for the sake of one fewer property.
+    /// Currently every case, but kept as its own property rather than collapsed
+    /// into `allCases`, because the rule it encodes outlives today's contents:
+    /// **a mode belongs here only once a send in that mode goes somewhere.**
     ///
-    /// Flip `.engineering` in here when `EngineeringWorkspaceView` lands. The
-    /// test named for this will fail when you do, which is the reminder.
-    static var composerCases: [ChatMode] { [.ask, .plan, .build] }
+    /// `.engineering` was deliberately held out of this list from the moment the
+    /// case existed until `EngineeringWorkspaceView` landed (Plan 3 Task 10).
+    /// `ChatComposer` renders whatever this returns, so listing it earlier would
+    /// have put a control in front of a founder whose send silently did nothing —
+    /// the dead affordance this codebase already removed once (`6982df0`).
+    /// Selecting it now starts a real run through
+    /// `CompanyStore.startEngineeringRun`, and the dock renders its result bar.
+    static var composerCases: [ChatMode] { allCases }
 
     /// Short control label — matches the terse pill style used elsewhere in chat.
     func label(_ lang: AppLanguage) -> String {

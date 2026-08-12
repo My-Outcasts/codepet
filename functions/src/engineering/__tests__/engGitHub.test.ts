@@ -169,7 +169,7 @@ describe("latestPreview", () => {
       state: "success"
     });
     expect(calls).toHaveLength(2);
-    expect(calls[0].url).toContain("/deployments?sha=sha");
+    expect(calls[0].url).toContain("/deployments?ref=sha");
     expect(calls[1].url).toContain("/deployments/1/statuses");
   });
 

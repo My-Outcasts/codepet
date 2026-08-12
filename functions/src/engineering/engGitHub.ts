@@ -188,7 +188,7 @@ export async function latestPreview(
   const deployments = await call(
     "listDeployments",
     token,
-    `/repos/${owner}/${repo}/deployments?sha=${encodeURIComponent(ref)}&environment=Preview&per_page=${PREVIEW_LOOKBACK}`
+    `/repos/${owner}/${repo}/deployments?ref=${encodeURIComponent(ref)}&environment=Preview&per_page=${PREVIEW_LOOKBACK}`
   );
   if (!Array.isArray(deployments) || deployments.length === 0) return null;
 
@@ -226,7 +226,7 @@ export async function hasDeployTarget(
   const deployments = await call(
     "listDeployments",
     token,
-    `/repos/${owner}/${repo}/deployments?sha=${encodeURIComponent(ref)}&per_page=1`
+    `/repos/${owner}/${repo}/deployments?ref=${encodeURIComponent(ref)}&per_page=1`
   );
   return Array.isArray(deployments) && deployments.length > 0;
 }

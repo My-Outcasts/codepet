@@ -31,6 +31,7 @@ import {
   handleEngLinkRepo,
   handleEngCreateRepo
 } from "./engineering/engRepoHandlers";
+import { handleEngShip, handleEngPreview } from "./engineering/engShip";
 import { handleEngWebhook } from "./engineering/engWebhook";
 import { handleEngSendTurn } from "./engineering/engSendTurn";
 
@@ -181,6 +182,24 @@ export const engCreateRepo = onRequest(
     secrets: ["CONNECTOR_ENC_KEY"]
   },
   handleEngCreateRepo
+);
+
+// What happens after the diff. engShip opens a PULL REQUEST — it does not
+// merge; see the header of engShip.ts for why the label and the action differ.
+export const engShip = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngShip
+);
+
+export const engPreview = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngPreview
 );
 
 export const engSendTurn = onRequest(

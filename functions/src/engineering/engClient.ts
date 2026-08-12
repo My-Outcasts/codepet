@@ -50,13 +50,15 @@ export function isSafePathSegment(value: string): boolean {
 }
 
 /**
- * Content-free fields only: an error's constructor name, and an HTTP status
- * if the SDK error exposes one (Anthropic's `APIError.status`). Never the
- * error object, its `message`, or a stringification.
+ * Content-free fields only: an error's constructor name, an HTTP status if
+ * the SDK error exposes one (Anthropic's `APIError.status`), and — since Aug
+ * 12 2026 — the envelope's `error.type`, but ONLY when it matches
+ * `KNOWN_ERROR_TYPES` below. Never the error object, its `message`, or a
+ * stringification.
  *
  * This is deliberately narrower than it needs to be for the actual SDK error
  * shape (see below), not because the shape is dangerous but because naming
- * exactly two fields is what keeps every call site honest — there is no
+ * exactly these fields is what keeps every call site honest — there is no
  * broader "safe subset" to reach for when a future field looks tempting to
  * add. `APIError` exposes `status`, the RESPONSE headers, the response body
  * (`error`), and `requestID` — never the request or its headers, so this is
@@ -72,10 +74,54 @@ export function isSafePathSegment(value: string): boolean {
  * because `engStartRun.ts` needs it too and this module is the one every
  * engineering handler already imports.
  */
-export function safeErrorDetail(err: unknown): { name?: string; status?: number } {
-  const detail: { name?: string; status?: number } = {};
+/**
+ * The only values `safeErrorDetail` will ever emit for `errorType`.
+ *
+ * An ALLOWLIST, not a shape check, and that distinction is the whole point.
+ * `error.type` is a closed enum in Anthropic's error envelope today, but the
+ * field sits inside the response BODY — the same body the doc comment above
+ * explains can echo back the rejected resource, GitHub token included. A
+ * passthrough would be one API change away from logging free text from
+ * inside that body. Matching against a fixed list means an unrecognised
+ * value is dropped, not logged, whatever it contains.
+ */
+const KNOWN_ERROR_TYPES = new Set([
+  "invalid_request_error",
+  "authentication_error",
+  "billing_error",
+  "permission_error",
+  "not_found_error",
+  "request_too_large",
+  "rate_limit_error",
+  "api_error",
+  "overloaded_error",
+  "timeout_error"
+]);
+
+/**
+ * Content-free fields only: an error's constructor name, an HTTP status if
+ * the SDK error exposes one (Anthropic's `APIError.status`), and the
+ * envelope's error type when it is one this codebase already knows.
+ *
+ * The type earns its place because status alone is not actionable. A 400
+ * from `sessions.create` is "you are out of credits", "the agent id is
+ * wrong", and "the repo could not be mounted" all at once, and the founder
+ * sees a bare 502 either way — the operator needs to know which. `400` plus
+ * `billing_error` is a fix; `400` alone cost an hour of reproducing the call
+ * against the live API to find out it was billing.
+ */
+export function safeErrorDetail(err: unknown): {
+  name?: string;
+  status?: number;
+  errorType?: string;
+} {
+  const detail: { name?: string; status?: number; errorType?: string } = {};
   if (err instanceof Error) detail.name = err.name;
   const status = (err as { status?: unknown } | null)?.status;
   if (typeof status === "number") detail.status = status;
+  const errorType = (err as { error?: { error?: { type?: unknown } } } | null)?.error?.error?.type;
+  if (typeof errorType === "string" && KNOWN_ERROR_TYPES.has(errorType)) {
+    detail.errorType = errorType;
+  }
   return detail;
 }

@@ -26,7 +26,11 @@ import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
 import { handleEngStartRun } from "./engineering/engStartRun";
 import { handleEngStream } from "./engineering/engStream";
-import { handleEngListRepos, handleEngLinkRepo } from "./engineering/engRepoHandlers";
+import {
+  handleEngListRepos,
+  handleEngLinkRepo,
+  handleEngCreateRepo
+} from "./engineering/engRepoHandlers";
 import { handleEngWebhook } from "./engineering/engWebhook";
 import { handleEngSendTurn } from "./engineering/engSendTurn";
 
@@ -169,6 +173,14 @@ export const engLinkRepo = onRequest(
     secrets: ["CONNECTOR_ENC_KEY"]
   },
   handleEngLinkRepo
+);
+
+export const engCreateRepo = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngCreateRepo
 );
 
 export const engSendTurn = onRequest(

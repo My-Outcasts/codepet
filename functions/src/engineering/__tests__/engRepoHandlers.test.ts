@@ -1,3 +1,11 @@
+jest.mock("firebase-admin", () => {
+  const get = jest.fn(async () => ({ data: () => ({ name: "Acme", brief: "we sell widgets" }) }));
+  const doc = jest.fn(() => ({ get }));
+  const firestore: unknown = jest.fn(() => ({ doc }));
+  (firestore as { __get?: unknown }).__get = get;
+  return { firestore };
+});
+
 jest.mock("../../auth", () => ({ verifyAuth: jest.fn() }));
 
 jest.mock("../engRepo", () => {
@@ -7,7 +15,7 @@ jest.mock("../engRepo", () => {
 
 jest.mock("../engGitHub", () => {
   const actual = jest.requireActual("../engGitHub");
-  return { ...actual, listRepos: jest.fn(), getDefaultBranch: jest.fn() };
+  return { ...actual, listRepos: jest.fn(), getDefaultBranch: jest.fn(), createRepo: jest.fn() };
 });
 
 // The real module's exports are non-configurable getters (a bundling detail),
@@ -21,12 +29,15 @@ jest.mock("firebase-functions/logger", () => ({
 
 import {
   parseFullName,
+  repoSlug,
+  vercelSetupUrl,
   handleEngListRepos,
-  handleEngLinkRepo
+  handleEngLinkRepo,
+  handleEngCreateRepo
 } from "../engRepoHandlers";
 import { verifyAuth } from "../../auth";
 import { loadGitHubToken, writeRepoLink } from "../engRepo";
-import { listRepos, getDefaultBranch, GitHubError } from "../engGitHub";
+import { listRepos, getDefaultBranch, createRepo, GitHubError } from "../engGitHub";
 import { spyOnLogs, callsContainMarker } from "./logLeakTestHelpers";
 
 type MockRes = { status: jest.Mock; json: jest.Mock };
@@ -204,5 +215,121 @@ describe("handleEngLinkRepo", () => {
     } finally {
       spy.restore();
     }
+  });
+});
+
+describe("repoSlug", () => {
+  it("turns a company name into something GitHub accepts", () => {
+    expect(repoSlug("Acme Widgets")).toBe("acme-widgets");
+  });
+
+  it("keeps an accented name readable rather than deleting the letter", () => {
+    // "Café" must not become "caf".
+    expect(repoSlug("Mona's Café")).toBe("mona-s-cafe");
+  });
+
+  it("never emits a character GitHub rejects", () => {
+    for (const name of ["Mona's Café ☕", "a/b", "  spaced  ", "emoji 🚀 co", "sym#bol$"]) {
+      expect(repoSlug(name)).toMatch(/^[A-Za-z0-9._-]+$/);
+    }
+  });
+
+  it("never starts or ends with a dash or dot", () => {
+    // A leading dot is how a repo ends up looking hidden.
+    expect(repoSlug("  -weird-  ")).toBe("weird");
+    expect(repoSlug(".hidden.")).toBe("hidden");
+  });
+
+  it("falls back to a usable name when nothing survives", () => {
+    // An all-emoji company name is a real thing, and POSTing "" 422s with
+    // nothing the founder can act on.
+    expect(repoSlug("🚀🚀🚀")).toBe("codepet-project");
+    expect(repoSlug("")).toBe("codepet-project");
+    expect(repoSlug(undefined)).toBe("codepet-project");
+  });
+
+  it("bounds the length", () => {
+    expect(repoSlug("x".repeat(300)).length).toBeLessThanOrEqual(90);
+  });
+});
+
+describe("vercelSetupUrl", () => {
+  it("points at the import flow for that specific repo", () => {
+    expect(vercelSetupUrl("o", "r")).toBe("https://vercel.com/new/git/github/o/r");
+  });
+});
+
+describe("handleEngCreateRepo", () => {
+  const createdRepo = {
+    fullName: "o/acme",
+    url: "https://github.com/o/acme",
+    defaultBranch: "main",
+    isPrivate: true,
+    pushedAt: "2026-08-12T00:00:00Z"
+  };
+
+  it("creates a private repo with an initial commit", async () => {
+    // auto_init is load-bearing, not tidiness: a repo with no commits has no
+    // default branch, and loadRepo fails closed on a blank one — so the link
+    // we write next would resolve to "connect a repo" immediately.
+    (createRepo as jest.Mock).mockResolvedValueOnce(createdRepo);
+    await handleEngCreateRepo(makeReq({}), makeRes() as never);
+    // The private/auto_init flags live in engGitHub.createRepo, which has its
+    // own tests; what this asserts is that this handler goes through it.
+    expect(createRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("derives the repo name from the company and never sends an invalid one", async () => {
+    (createRepo as jest.Mock).mockResolvedValueOnce(createdRepo);
+    await handleEngCreateRepo(makeReq({}), makeRes() as never);
+    const [, name] = (createRepo as jest.Mock).mock.calls[0];
+    expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(name).toBe("acme");
+  });
+
+  it("links the new repo and returns the Vercel setup link", async () => {
+    (createRepo as jest.Mock).mockResolvedValueOnce(createdRepo);
+    const res = makeRes();
+    await handleEngCreateRepo(makeReq({}), res as never);
+    expect(writeRepoLink).toHaveBeenCalledWith("uid_1", createdRepo.url, "main");
+    expect(body(res).vercelSetupUrl).toBe("https://vercel.com/new/git/github/o/acme");
+  });
+
+  it("hands back the repo URL when creation succeeded but the link write failed", async () => {
+    // The repo EXISTS on GitHub now. A bare 503 leaves the founder to press
+    // "Create one for me" again and end up with a second empty repo.
+    (createRepo as jest.Mock).mockResolvedValueOnce(createdRepo);
+    (writeRepoLink as jest.Mock).mockRejectedValueOnce(new Error("firestore down"));
+    const res = makeRes();
+    await handleEngCreateRepo(makeReq({}), res as never);
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(body(res).createdRepoUrl).toBe(createdRepo.url);
+  });
+
+  it("still creates a repo when the company document cannot be read", async () => {
+    // Losing the founder's company name is worth far less than losing the run.
+    const admin = require("firebase-admin");
+    (admin.firestore as unknown as { __get: jest.Mock }).__get.mockRejectedValueOnce(
+      new Error("firestore down")
+    );
+    (createRepo as jest.Mock).mockResolvedValueOnce(createdRepo);
+    const res = makeRes();
+    await handleEngCreateRepo(makeReq({}), res as never);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect((createRepo as jest.Mock).mock.calls[0][1]).toBe("codepet-project");
+  });
+
+  it("409s when GitHub is not connected, before creating anything", async () => {
+    (loadGitHubToken as jest.Mock).mockResolvedValueOnce(null);
+    const res = makeRes();
+    await handleEngCreateRepo(makeReq({}), res as never);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(createRepo).not.toHaveBeenCalled();
+  });
+
+  it("405s a non-POST", async () => {
+    const res = makeRes();
+    await handleEngCreateRepo(makeReq({}, "GET"), res as never);
+    expect(res.status).toHaveBeenCalledWith(405);
   });
 });

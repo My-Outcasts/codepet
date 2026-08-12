@@ -13,8 +13,9 @@ import { Response } from "express";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { safeErrorDetail } from "./engClient";
+import * as admin from "firebase-admin";
 import { loadGitHubToken, writeRepoLink, parseRepoUrl } from "./engRepo";
-import { listRepos, getDefaultBranch } from "./engGitHub";
+import { listRepos, getDefaultBranch, createRepo } from "./engGitHub";
 
 /**
  * `owner/repo`, and nothing that could be anything else.
@@ -31,6 +32,40 @@ export function parseFullName(value: unknown): { owner: string; repo: string } |
   if (value.includes("..")) return null;
   const [owner, repo] = value.split("/");
   return { owner, repo };
+}
+
+/**
+ * A company name → a repo name GitHub will accept.
+ *
+ * GitHub allows only `A-Za-z0-9._-`; anything else in a name — an apostrophe,
+ * an accent, an emoji, a space — is replaced rather than dropped, so
+ * "Mona's Café" becomes `mona-s-cafe` instead of `monascafe`, which is
+ * still readable as the company it came from.
+ *
+ * Falls back to `codepet-project` rather than to an empty string: a name made
+ * entirely of characters GitHub rejects (an all-emoji company name is a real
+ * thing) would otherwise POST an empty name and 422 with nothing useful to
+ * show the founder.
+ */
+export function repoSlug(companyName: unknown): string {
+  const raw = typeof companyName === "string" ? companyName : "";
+  const slug = raw
+    .normalize("NFKD")
+    // Strip combining marks so "é" contributes "e" rather than "e" + a mark
+    // that the next step would turn into a dash.
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    // Leading and trailing dashes are legal but ugly, and a leading dot or
+    // dash is how you get a name GitHub silently treats as hidden.
+    .replace(/^[-._]+|[-._]+$/g, "")
+    .slice(0, 90);
+  return slug || "codepet-project";
+}
+
+/** Where the founder installs the Vercel GitHub app for a repo. */
+export function vercelSetupUrl(owner: string, repo: string): string {
+  return `https://vercel.com/new/git/github/${owner}/${repo}`;
 }
 
 /** The token, or the response that says why there isn't one. Null means handled. */
@@ -134,4 +169,81 @@ export async function handleEngLinkRepo(req: Request, res: Response): Promise<vo
   }
 
   res.status(200).json({ url, defaultBranch });
+}
+
+export async function handleEngCreateRepo(req: Request, res: Response): Promise<void> {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "method_not_allowed" });
+    return;
+  }
+  const auth = await verifyAuth(req.headers.authorization);
+  if (!auth) {
+    res.status(401).json({ error: "invalid_token" });
+    return;
+  }
+
+  const token = await requireToken(auth.uid, res);
+  if (!token) return;
+
+  // A caller-supplied name is still slugged. GitHub would reject most of what
+  // a founder might type, and a 422 from GitHub is not something they can act
+  // on; the same normalisation that handles a company name handles this.
+  let name = typeof req.body?.name === "string" && req.body.name.trim()
+    ? repoSlug(req.body.name)
+    : "";
+  let description = "Built with Codepet";
+  if (!name) {
+    let company: FirebaseFirestore.DocumentData = {};
+    try {
+      company = (await admin.firestore().doc(`companies/${auth.uid}`).get()).data() ?? {};
+    } catch (err) {
+      // Not fatal: the fallback slug is a usable repo name. Losing the
+      // founder's company name is worth far less than losing the run.
+      logger.warn("engCreateRepo: company lookup failed", safeErrorDetail(err));
+    }
+    name = repoSlug(company.name);
+    if (typeof company.brief === "string" && company.brief.trim()) {
+      description = company.brief.trim().slice(0, 200);
+    }
+  }
+
+  let created: Awaited<ReturnType<typeof createRepo>>;
+  try {
+    created = await createRepo(token, name, description);
+  } catch (err) {
+    logger.error("engCreateRepo: github call failed", safeErrorDetail(err));
+    res.status(503).json({ error: "github_unavailable" });
+    return;
+  }
+
+  const parsed = parseRepoUrl(created.url);
+  if (!parsed) {
+    // GitHub returned a URL our own parser rejects. Report the repo — it
+    // exists now — rather than swallowing it.
+    logger.error("engCreateRepo: created repo has an unparseable url");
+    res.status(502).json({ error: "unexpected_repo_url", createdRepoUrl: created.url });
+    return;
+  }
+
+  try {
+    await writeRepoLink(auth.uid, created.url, created.defaultBranch);
+  } catch (err) {
+    // The repo EXISTS on GitHub and is not linked here. Returning a bare 503
+    // would leave the founder to click "Create one for me" again and end up
+    // with a second empty repo. Hand back the URL so the client can offer to
+    // link the one that was just made.
+    logger.error("engCreateRepo: link write failed", safeErrorDetail(err));
+    res.status(503).json({ error: "link_write_failed", createdRepoUrl: created.url });
+    return;
+  }
+
+  res.status(200).json({
+    url: created.url,
+    defaultBranch: created.defaultBranch,
+    // Returned, not opened for them: installing the Vercel app is the
+    // founder's decision on their own account, and Codepet holds no Vercel
+    // credential. Without it there is simply no preview, which the Review
+    // pane says plainly rather than hiding.
+    vercelSetupUrl: vercelSetupUrl(parsed.owner, parsed.repo)
+  });
 }

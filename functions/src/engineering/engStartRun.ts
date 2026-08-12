@@ -11,6 +11,7 @@ import * as logger from "firebase-functions/logger";
 import type Anthropic from "@anthropic-ai/sdk";
 import { verifyAuth } from "../auth";
 import { creditsToBudget, type SessionBudget } from "./engBudget";
+import { readBalance } from "./engBalance";
 import { loadRepo, branchName, MOUNT_PATH, type RepoLink } from "./engRepo";
 import {
   getEngClient,
@@ -170,9 +171,18 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
 
   const db = admin.firestore();
   let company: FirebaseFirestore.DocumentData;
+  let credits: number;
   try {
+    // Two documents now, and only `brief` still comes from the company doc.
+    // The balance moved to a write-denied subcollection: `companies/{uid}`'s
+    // `allow update` guards ownership and nothing else, so a founder could
+    // edit `credits` there — and this number becomes the session's
+    // platform-enforced spend cap. See `engBalance.ts`.
     const companySnap = await db.doc(`companies/${auth.uid}`).get();
     company = companySnap.data() ?? {};
+    // Inside the same try: a balance read that throws must produce this
+    // handler's 503, not an unhandled rejection.
+    credits = await readBalance(auth.uid);
   } catch (err) {
     // Same reasoning as the repo-lookup catch above: distinct from 409/402,
     // and the error itself never leaves this scope — only the two
@@ -181,12 +191,10 @@ export async function handleEngStartRun(req: Request, res: Response): Promise<vo
     res.status(503).json({ error: "company_lookup_failed" });
     return;
   }
-  // `Number.isFinite`, not `typeof === "number"`: `typeof NaN === "number"` is
-  // true, and `NaN <= 0` is false, so a corrupted balance field would sail past
-  // a naive check and start a run. engBudget guards this too — the belt here is
-  // so a founder with a broken balance gets an honest 402 rather than a one-cent
-  // run that dies at its budget a second later.
-  const credits = Number.isFinite(company.credits) ? (company.credits as number) : 0;
+  // `readBalance` already collapses a missing document, NaN, Infinity and a
+  // string to 0 — this is the honest 402 for a founder who is genuinely out,
+  // and the belt against a corrupted balance starting a one-cent run that
+  // dies at its budget a second later. engBudget guards the same thing again.
   if (credits <= 0) {
     res.status(402).json({ error: "no_credits" });
     return;

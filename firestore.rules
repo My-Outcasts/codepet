@@ -138,6 +138,17 @@ service cloud.firestore {
       //                        choose which Managed Agents session to drive. A forged
       //                        document aims those handlers at a session the caller does
       //                        not own.
+      //
+      //   engBalance/      the founder's spendable engineering credits
+      //                    (companies/{uid}/engBalance/current — see engBalance.ts).
+      //                    READ allowed, WRITE denied, the same shape connectorStatus
+      //                    uses: the founder must be able to see their balance, and
+      //                    must not be able to set it. engStartRun turns this number
+      //                    into `budget.max_list_cost` on the Managed Agents session,
+      //                    so a client that could write it would be choosing its own
+      //                    spend cap. It lives here rather than under engineering/
+      //                    precisely because engineering/ is read-denied and this value
+      //                    is displayed.
       match /{sub}/{document=**} {
         allow read: if (ownsByConvention(companyId) || isMember(companyId))
           && sub != 'connectors'
@@ -146,7 +157,8 @@ service cloud.firestore {
           && sub != 'connectors'
           && sub != 'connectorStatus'
           && sub != 'engineering'
-          && sub != 'engRuns';
+          && sub != 'engRuns'
+          && sub != 'engBalance';
       }
     }
 

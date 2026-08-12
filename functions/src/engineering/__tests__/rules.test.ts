@@ -122,3 +122,30 @@ describe("companies/{uid}/engRuns", () => {
     );
   });
 });
+
+describe("companies/{uid}/engBalance", () => {
+  // The spendable balance cannot live under `engineering/`, which is
+  // read-denied — the founder has to see their own credits. It follows
+  // `connectorStatus`: read allowed, write denied.
+  it("lets the founder read their own balance, which the app displays", async () => {
+    await seed(`companies/${UID}/engBalance/current`, { credits: 20 });
+    await assertSucceeds(getDoc(doc(asFounder(), `companies/${UID}/engBalance/current`)));
+  });
+
+  it("denies the founder topping up their own balance", async () => {
+    // engStartRun turns this number into the session's platform-enforced
+    // spend cap, so a client that can write it sets its own budget.
+    await assertFails(
+      setDoc(doc(asFounder(), `companies/${UID}/engBalance/current`), { credits: 999999 })
+    );
+  });
+
+  it("denies the founder creating the balance document when none exists", async () => {
+    // Deleting it and re-creating it is the same attack as raising it, and
+    // `setDoc` on a missing document is a create, not an update — a rule that
+    // only covered update would miss this.
+    await assertFails(
+      setDoc(doc(asFounder(), `companies/${UID}/engBalance/current`), { credits: 500 })
+    );
+  });
+});

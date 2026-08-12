@@ -221,14 +221,32 @@ function makeRunRef(id = "run_generated_1") {
   };
 }
 
-function wireFirestore(runRef: ReturnType<typeof makeRunRef>, credits = 40) {
+/**
+ * Wire Firestore PER PATH, not one object for every `doc()` call.
+ *
+ * A path-agnostic mock made this fixture useless the moment the balance moved
+ * out of `companies/{uid}`: `readBalance` looked up a different document, got
+ * the same `{ credits }` back, and all sixteen tests stayed green whether or
+ * not the move had happened. Keying on the path is what makes them able to
+ * fail — `balanceCredits` is only reachable at `engBalance/current`, and a
+ * regression that reads credits off the company document again finds
+ * `undefined` there and gets a 402.
+ */
+function wireFirestore(
+  runRef: ReturnType<typeof makeRunRef>,
+  balanceCredits = 40,
+  company: Record<string, unknown> = {}
+) {
   const admin_ = admin as unknown as {
     firestore: jest.Mock & { FieldValue: { serverTimestamp: jest.Mock } };
   };
   const { doc, collection } = admin_.firestore() as unknown as { doc: jest.Mock; collection: jest.Mock };
   doc.mockReset();
   collection.mockReset();
-  doc.mockReturnValue({ get: jest.fn().mockResolvedValue({ data: () => ({ credits }) }) });
+  doc.mockImplementation((path: string) => {
+    const data = path.endsWith("/engBalance/current") ? { credits: balanceCredits } : company;
+    return { get: jest.fn().mockResolvedValue({ data: () => data }) };
+  });
   collection.mockReturnValue({ doc: jest.fn(() => runRef) });
 }
 
@@ -325,6 +343,31 @@ describe("handleEngStartRun", () => {
       }
     }
   );
+
+  it("402s a founder whose credits sit only on the company document", async () => {
+    // The regression this guards is silent and expensive in the wrong
+    // direction: if the handler ever reads `companies/{uid}.credits` again,
+    // it is reading a field the founder can write, and that number becomes
+    // the session's platform spend cap. Here the company document claims a
+    // large balance and the balance document has none — the only correct
+    // outcome is 402, no session, no run.
+    (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_stale_credits" });
+    (loadRepo as jest.Mock).mockResolvedValueOnce(repoFixture());
+    setConfigEnv();
+    const runRef = makeRunRef("run_should_not_exist");
+    wireFirestore(runRef, 0, { credits: 999999, brief: "" });
+    const sessionsCreate = jest.fn();
+    (getEngClient as jest.Mock).mockReturnValue({ beta: { sessions: { create: sessionsCreate } } });
+
+    const req = makeReq({ ask: "add checkout" });
+    const res = makeRes();
+
+    await handleEngStartRun(req, res as unknown as Parameters<typeof handleEngStartRun>[1]);
+
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(sessionsCreate).not.toHaveBeenCalled();
+    expect(runRef.set).not.toHaveBeenCalled();
+  });
 
   it("creates the run document (status starting, no sessionId) before calling session-create", async () => {
     (verifyAuth as jest.Mock).mockResolvedValueOnce({ uid: "uid_3" });

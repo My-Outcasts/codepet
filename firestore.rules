@@ -123,6 +123,21 @@ service cloud.firestore {
       //                    client that could overwrite `url`/`sealed` here could redirect
       //                    an engineering run at a repo of its choosing, or replace the
       //                    sealed token with one it can decrypt.
+      //
+      //   engRuns/         one document per engineering run — status, sessionId,
+      //                    creditsSpent. READ stays allowed: the app renders run state
+      //                    from it. WRITE is denied, and both reasons are money or
+      //                    authorization:
+      //                      · engWebhook charges max(0, creditsSpent -
+      //                        previousCreditsSpent) and takes the baseline from this
+      //                        document (engWebhook.ts). A client that could raise
+      //                        `creditsSpent` once would compute every later delta to 0
+      //                        and never be charged again. Nothing surfaces that — the
+      //                        debit silently becomes a no-op.
+      //                      · engSendTurn and engStream both read `sessionId` here to
+      //                        choose which Managed Agents session to drive. A forged
+      //                        document aims those handlers at a session the caller does
+      //                        not own.
       match /{sub}/{document=**} {
         allow read: if (ownsByConvention(companyId) || isMember(companyId))
           && sub != 'connectors'
@@ -130,7 +145,8 @@ service cloud.firestore {
         allow write: if (ownsByConvention(companyId) || isMember(companyId))
           && sub != 'connectors'
           && sub != 'connectorStatus'
-          && sub != 'engineering';
+          && sub != 'engineering'
+          && sub != 'engRuns';
       }
     }
 

@@ -90,3 +90,35 @@ describe("companies/{uid}/engineering", () => {
     );
   });
 });
+
+describe("companies/{uid}/engRuns", () => {
+  it("lets the founder read their own run, which the app needs to render it", async () => {
+    await seed(`companies/${UID}/engRuns/run_1`, { status: "running", creditsSpent: 3 });
+    await assertSucceeds(getDoc(doc(asFounder(), `companies/${UID}/engRuns/run_1`)));
+  });
+
+  it("denies the founder raising creditsSpent, which is the debit baseline", async () => {
+    // engWebhook charges max(0, creditsSpent - previousCreditsSpent) and reads
+    // the baseline from this document. A founder who can set it high once
+    // computes every later delta to 0 and is never charged again.
+    await seed(`companies/${UID}/engRuns/run_1`, { status: "running", creditsSpent: 0 });
+    await assertFails(
+      setDoc(doc(asFounder(), `companies/${UID}/engRuns/run_1`), {
+        status: "running",
+        creditsSpent: 999999
+      })
+    );
+  });
+
+  it("denies the founder creating a run that points at someone else's session", async () => {
+    // engSendTurn and engStream both take `sessionId` from this document to
+    // decide which Managed Agents session to drive. A forged run document
+    // aims those handlers at a session the caller does not own.
+    await assertFails(
+      setDoc(doc(asFounder(), `companies/${UID}/engRuns/forged`), {
+        sessionId: "sesn_belongs_to_someone_else",
+        status: "running"
+      })
+    );
+  });
+});

@@ -18,7 +18,8 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "seal:repo": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/seal-repo-doc.ts",
-    "test:rules": "PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" firebase emulators:exec --only firestore --project devpet-8f4b1 \"npx jest --config jest.rules.config.js\""
+    "test:rules": "PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" firebase emulators:exec --only firestore --project devpet-8f4b1 \"npx jest --config jest.rules.config.js\"",
+    "migrate:balance": "ts-node --compilerOptions '{\"module\":\"commonjs\"}' scripts/migrate-eng-balance.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

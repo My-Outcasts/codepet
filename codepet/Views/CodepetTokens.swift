@@ -159,7 +159,35 @@ extension View {
     func viewHeadPadding() -> some View {
         self.padding(.top, 32).padding(.horizontal, 26).pageColumn()
     }
+}
 
+/// The one section label. Uppercase, 10pt, 1px tracking, `--t-4`, with a large
+/// gap above and a small one below so the label reads as belonging to the group
+/// it introduces rather than the group above it.
+///
+/// This was `private func sectionEyebrow` inside `EnvironmentView`. The
+/// department page needed the same label and a third hand-rolled variant was
+/// the alternative. It is a `View` struct rather than a free function so it
+/// cannot be shadowed by the unrelated `sectionEyebrow(icon:label:)` that the
+/// older game layer's `LearnTabView` keeps for itself.
+struct SectionEyebrow: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(CodepetTheme.inter(10, weight: .regular))
+            .tracking(1)
+            .foregroundColor(CodepetTokens.faint)
+            .padding(.top, CodepetTokens.Space.sectionAbove)
+            .padding(.horizontal, 2)
+            .padding(.bottom, CodepetTokens.Space.sectionBelow)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
     /// The reading column: capped, content left-aligned inside it, column centred in
     /// the window.
     ///

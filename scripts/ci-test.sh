@@ -27,27 +27,28 @@ PROJECT="${PROJECT:-CodePet.xcodeproj}"
 # red anyone sees is a real regression rather than inherited debt; the debt is named here
 # instead of being hidden.
 #
-# VirtualCompanyInterviewTests (8): the room never delivers a brief, so every gap the
-#   interview should ask about comes back nil. Known red since at least Aug 10, when it
-#   was confirmed pre-existing by stashing a day's work and re-running against a clean
-#   tree. Nobody has owned it since.
+# THE LIST IS NOW EMPTY, and it should stay that way. Both former entries turned out to be
+# stale TESTS rather than broken code, each asserting a product rule the founder had changed:
+#   - RoadmapEngineSuggestedNextTests — the pre-Aug-5 phase window (d8e9b64). Fixed in #95.
+#   - VirtualCompanyInterviewTests — convening from every message rather than from Plan only
+#     (b42bc10, Aug 7, a ~$0.20-vs-~$0.005 cost gate). Its 8 failures were all one missing
+#     `convenesRoom: true`. Fixed here.
+# Both were reported as possible product bugs first. The pattern is worth naming: a red test
+# whose subject is a RULE is stale until the rule's own file and history have been read.
 #
-# RoadmapEngineSuggestedNextTests (1) — testConfinedToTheOpenWindow: this one deserves a
-#   look before it is written off as a stale test. It asserts that a task in a CLOSED
-#   phase is not suggested, and `suggestedNext` is returning ["y", "b"] where the test
-#   wants ["y"] — i.e. "b" leaks out of the open phase window. The sibling test directly
-#   below it documents the ONE intended exception (a DRAFTED task in a closed phase stays
-#   reachable so a finished draft can still be approved); "b" here is not drafted, so the
-#   exception should not apply. Either the gate regressed or the exception widened — and
-#   if it is the former, founders are being pointed at work their roadmap has not opened
-#   yet. Skipped only so CI can start; it is a product question, not a CI one.
-SKIP_SUITES=(
-  "codepetTests/VirtualCompanyInterviewTests"
-  "codepetTests/RoadmapEngineSuggestedNextTests"
-)
+# RoadmapEngineSuggestedNextTests was the second entry here and is NOW GUARDED AGAIN. It was
+#   never a product bug: `testConfinedToTheOpenWindow` asserted the pre-Aug-5 phase-window rule,
+#   which `d8e9b64` deliberately changed (a founder-owned step stopped gating; only an unapproved
+#   draft does). The comment that used to sit here called it a possible leak sending founders at
+#   work their roadmap had not opened — that was wrong, and the answer was already written in a
+#   doc comment in RoadmapGating.swift. Test rewritten to the current rule, skip removed.
+SKIP_SUITES=()
 
+# `${arr[@]+...}` because macOS ships bash 3.2, where `"${arr[@]}"` on an EMPTY array trips
+# `set -u` with "unbound variable" — so emptying the skip list would otherwise break the run
+# it is meant to widen.
 skip_args=()
-for suite in "${SKIP_SUITES[@]}"; do
+for suite in ${SKIP_SUITES[@]+"${SKIP_SUITES[@]}"}; do
   skip_args+=("-skip-testing:${suite}")
 done
 
@@ -62,7 +63,7 @@ xcodebuild test \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -destination 'platform=macOS' \
-  "${skip_args[@]}" \
+  ${skip_args[@]+"${skip_args[@]}"} \
   CODE_SIGNING_ALLOWED=NO \
   -resultBundlePath "$RESULT_BUNDLE"
 xcodebuild_status=$?

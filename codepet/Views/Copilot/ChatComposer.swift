@@ -183,11 +183,16 @@ struct ChatComposer: View {
     }
 
     /// The mode control — the "streamline Let's build in" change: a `Menu` over
-    /// `ChatMode.allCases` (Ask/Plan/Build) bound to `$mode`. The composer only
-    /// owns the selected mode; Build *routing* lives in the parent's `onSend`.
+    /// `ChatMode.composerCases` (Ask/Plan/Build) bound to `$mode`. The composer
+    /// only owns the selected mode; Build *routing* lives in the parent's
+    /// `onSend`.
+    ///
+    /// `composerCases`, NOT `allCases`: `.engineering` exists in the model but
+    /// has no workspace yet, and this menu is the whole reason a mode is
+    /// reachable. See the doc comment on `ChatMode.composerCases`.
     private var modeMenu: some View {
         Menu {
-            ForEach(ChatMode.allCases) { m in
+            ForEach(ChatMode.composerCases) { m in
                 Button(m.label(lang)) { mode = m }
             }
         } label: {

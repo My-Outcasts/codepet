@@ -24,6 +24,17 @@ import { handleRunTask } from "./runTask";
 import { handleGenerateRoadmap } from "./generateRoadmap";
 import { handleExtractDecisions } from "./extractDecisions";
 import { handleGithubOAuthStart, handleGithubOAuthCallback } from "./oauth/githubOAuth";
+import { handleEngStartRun } from "./engineering/engStartRun";
+import { handleEngStream } from "./engineering/engStream";
+import {
+  handleEngListRepos,
+  handleEngLinkRepo,
+  handleEngCreateRepo
+} from "./engineering/engRepoHandlers";
+import { handleEngShip, handleEngPreview } from "./engineering/engShip";
+import { handleEngDiff } from "./engineering/engDiff";
+import { handleEngWebhook } from "./engineering/engWebhook";
+import { handleEngSendTurn } from "./engineering/engSendTurn";
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -110,6 +121,104 @@ export const runTask = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleRunTask
+);
+
+// The engineering coding agent. CONNECTOR_ENC_KEY opens the founder's stored
+// GitHub token so the session can mount their repo; the token is handed to the
+// session resource and never enters the container.
+export const engStartRun = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY", "CONNECTOR_ENC_KEY"]
+  },
+  handleEngStartRun
+);
+
+// Long-lived SSE. timeoutSeconds is the v2 maximum (60 min); a run longer
+// than that survives because engWebhook records the outcome independently.
+export const engStream = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"],
+    timeoutSeconds: 3600
+  },
+  handleEngStream
+);
+
+// Reached by Anthropic, not by the app, so it is deliberately NOT
+// authenticated — the HMAC signature verified inside the handler is what
+// proves the caller. Mirrors githubOAuthCallback and revenueCatWebhook.
+export const engWebhook = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY", "ANTHROPIC_WEBHOOK_SIGNING_KEY"]
+  },
+  handleEngWebhook
+);
+
+// Everything the founder sends into a live session: a follow-up, a tool
+// approval, or a stop.
+// Repo onboarding: what a founder hits before their first run. Both need
+// CONNECTOR_ENC_KEY to open the GitHub token the OAuth callback sealed; they
+// do not touch Anthropic, so they do not declare ANTHROPIC_API_KEY.
+export const engListRepos = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngListRepos
+);
+
+export const engLinkRepo = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngLinkRepo
+);
+
+export const engCreateRepo = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngCreateRepo
+);
+
+// What happens after the diff. engShip opens a PULL REQUEST — it does not
+// merge; see the header of engShip.ts for why the label and the action differ.
+export const engShip = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngShip
+);
+
+export const engPreview = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngPreview
+);
+
+// The diff the Review pane renders. base...head from GitHub, because the
+// agent's narration is a claim and the compare is the fact.
+export const engDiff = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngDiff
+);
+
+export const engSendTurn = onRequest(
+  {
+    cors: false,
+    secrets: ["ANTHROPIC_API_KEY"]
+  },
+  handleEngSendTurn
 );
 
 export const generateRoadmap = onRequest(

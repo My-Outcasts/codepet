@@ -15,6 +15,7 @@ import { Response } from "express";
 import * as admin from "firebase-admin";
 import type Anthropic from "@anthropic-ai/sdk";
 import { listCostToCredits } from "./engBudget";
+import { debit } from "./engBalance";
 import { getEngClient, isSafePathSegment, safeErrorDetail, type RunStatus } from "./engClient";
 
 /**
@@ -252,7 +253,13 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
   let outcome: "processed" | "duplicate" | "unmatched";
   try {
     const runRef = db.doc(`companies/${uid}/engRuns/${runId}`);
-    const companyRef = db.doc(`companies/${uid}`);
+    // What this run has already been charged. Deliberately NOT the run
+    // document: `firestore.rules` denies clients writing `engRuns` now, but
+    // rules are one careless deploy from regressing and what regresses here
+    // is money — silently, because a forged baseline just makes the delta 0
+    // and nobody is charged. Under `engineering/` the value is unreachable by
+    // any client for read or write, so a lost carve-out cannot reopen it.
+    const ledgerRef = db.doc(`companies/${uid}/engineering/debits/${runId}`);
     outcome = await db.runTransaction(async (tx) => {
       const seenSnap = await tx.get(seenRef);
       if (seenSnap.exists) {
@@ -281,9 +288,13 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
       // that can never be allowed to happen silently: if a reading ever came
       // back lower than what is already on record, the honest response is
       // "charge nothing this delivery", not "credit the founder back".
-      const previousCreditsSpent = typeof runSnap.data()?.creditsSpent === "number"
-        ? (runSnap.data()!.creditsSpent as number)
-        : 0;
+      const ledgerSnap = await tx.get(ledgerRef);
+      const recorded = ledgerSnap.data()?.creditsSpent;
+      // `Number.isFinite`, not `typeof === "number"`: NaN is a number and
+      // `creditsSpent - NaN` is NaN, which `Math.max(0, NaN)` returns as NaN,
+      // and `debit` would then refuse the write — a corrupted ledger entry
+      // would silently stop charging this run forever.
+      const previousCreditsSpent = Number.isFinite(recorded) ? (recorded as number) : 0;
       const delta = Math.max(0, creditsSpent - previousCreditsSpent);
 
       tx.set(seenRef, { at: admin.firestore.FieldValue.serverTimestamp() });
@@ -308,9 +319,11 @@ export async function handleEngWebhook(req: Request, res: Response): Promise<voi
         },
         { merge: true }
       );
-      if (delta > 0) {
-        tx.set(companyRef, { credits: admin.firestore.FieldValue.increment(-delta) }, { merge: true });
-      }
+      // The ledger advances with the debit, in the same transaction: a commit
+      // that charged but did not advance the baseline would charge the same
+      // spend again on the next delivery.
+      tx.set(ledgerRef, { creditsSpent }, { merge: true });
+      debit(tx, uid, delta);
       return "processed";
     });
   } catch (err) {

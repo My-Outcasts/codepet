@@ -138,6 +138,10 @@ const UID = "uid_1";
 const RUN_ID = "run_1";
 const RUN_PATH = `companies/${UID}/engRuns/${RUN_ID}`;
 const COMPANY_PATH = `companies/${UID}`;
+// Where the debit lands, and where its baseline is kept. Both moved off
+// documents the founder can write — see engBalance.ts and firestore.rules.
+const BALANCE_PATH = `companies/${UID}/engBalance/current`;
+const LEDGER_PATH = `companies/${UID}/engineering/debits/${RUN_ID}`;
 
 function seenPath(eventId: string) {
   return `webhookEvents/${eventId}`;
@@ -301,6 +305,74 @@ function makeEngClient(overrides?: {
 // `engStream.ts` (and `engStartRun.ts`, per Finding 5) log through, which a
 // console-only spy would go blind to.
 
+describe("handleEngWebhook — where the debit and its baseline live", () => {
+  it("takes the delta baseline from the server-only ledger, not the run document", async () => {
+    // The run document is client-writable no longer (firestore.rules), but
+    // this is the belt: a founder who could raise `creditsSpent` there would
+    // make every later delta compute to 0 and never be charged again, and
+    // nothing would surface it — the debit silently becomes a no-op. Here the
+    // run doc claims a huge prior spend and the ledger says 4; a handler
+    // trusting the run doc charges max(0, 6 - 999999) = 0.
+    const client = makeEngClient({ amountCents: "30" }); // 30c -> 6 credits cumulative
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble(
+      { [RUN_PATH]: true, [LEDGER_PATH]: true },
+      { [RUN_PATH]: { creditsSpent: 999999 }, [LEDGER_PATH]: { creditsSpent: 4 } }
+    );
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const debits = setCalls.filter((c) => c.path === BALANCE_PATH);
+    expect(debits).toHaveLength(1);
+    expect(debits[0].data).toEqual({ credits: { __increment: -2 } });
+  });
+
+  it("writes the new cumulative total to the ledger, so the next delivery has a baseline", async () => {
+    const client = makeEngClient({ amountCents: "30" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble(
+      { [RUN_PATH]: true, [LEDGER_PATH]: true },
+      { [LEDGER_PATH]: { creditsSpent: 4 } }
+    );
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const ledgerWrites = setCalls.filter((c) => c.path === LEDGER_PATH);
+    expect(ledgerWrites).toHaveLength(1);
+    expect(ledgerWrites[0].data).toEqual({ creditsSpent: 6 });
+  });
+
+  it("debits the balance document, never the company document", async () => {
+    // companies/{uid} is writable by the founder; the balance document is not.
+    const client = makeEngClient();
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    expect(setCalls.filter((c) => c.path === BALANCE_PATH)).toHaveLength(1);
+    expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(0);
+  });
+
+  it("still records creditsSpent on the run document, which the app displays", async () => {
+    // Moving the arithmetic off this field does not stop it being written —
+    // it stops it being trusted.
+    const client = makeEngClient({ amountCents: "30" });
+    (getEngClient as jest.Mock).mockReturnValue(client);
+    const { setCalls } = makeFirestoreDouble({ [RUN_PATH]: true });
+
+    const res = makeRes();
+    await handleEngWebhook(makeReq('{"event":"one"}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
+
+    const runWrites = setCalls.filter((c) => c.path === RUN_PATH);
+    expect(runWrites).toHaveLength(1);
+    expect((runWrites[0].data as { creditsSpent?: number }).creditsSpent).toBe(6);
+  });
+});
+
 describe("handleEngWebhook — replayed delivery (dedupe)", () => {
   it(
     "debits credits exactly once and writes the run outcome exactly once " +
@@ -323,8 +395,8 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
       // this code twice and this assertion fails.
       expect(runTransaction).toHaveBeenCalledTimes(2);
       expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(1);
-      expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(1);
-      expect(setCalls.filter((c) => c.path === COMPANY_PATH)[0].data).toEqual({
+      expect(setCalls.filter((c) => c.path === BALANCE_PATH)).toHaveLength(1);
+      expect(setCalls.filter((c) => c.path === BALANCE_PATH)[0].data).toEqual({
         credits: { __increment: -5 }
       });
       expect(setCalls.filter((c) => c.path === seenPath("evt_1"))).toHaveLength(1);
@@ -368,9 +440,9 @@ describe("handleEngWebhook — replayed delivery (dedupe)", () => {
 
       // The debit landed exactly once overall, not zero (lost) and not
       // twice (double-charged).
-      const companySets = setCalls.filter((c) => c.path === COMPANY_PATH);
-      expect(companySets).toHaveLength(1);
-      expect(companySets[0].data).toEqual({ credits: { __increment: -5 } });
+      const balanceSets = setCalls.filter((c) => c.path === BALANCE_PATH);
+      expect(balanceSets).toHaveLength(1);
+      expect(balanceSets[0].data).toEqual({ credits: { __increment: -5 } });
 
       // The run document's final recorded state is the real outcome
       // (reviewing, from end_turn), not left stuck at whatever it was
@@ -433,7 +505,7 @@ describe("handleEngWebhook — direct addressing (no collectionGroup scan)", () 
 
     expect(collectionGroup).not.toHaveBeenCalled();
     expect(setCalls.some((c) => c.path === "companies/founder_42/engRuns/run_99")).toBe(true);
-    expect(setCalls.some((c) => c.path === "companies/founder_42")).toBe(true);
+    expect(setCalls.some((c) => c.path === "companies/founder_42/engBalance/current")).toBe(true);
     expect(res.status).toHaveBeenCalledWith(204);
   });
 });
@@ -471,7 +543,7 @@ describe("handleEngWebhook — other behaviour", () => {
       rawBody,
       expect.objectContaining({ headers: expect.anything() })
     );
-    expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(1);
+    expect(setCalls.filter((c) => c.path === BALANCE_PATH)).toHaveLength(1);
   });
 
   it("responds 400 without echoing the upstream error when signature verification fails", async () => {
@@ -536,7 +608,7 @@ describe("handleEngWebhook — other behaviour", () => {
         await handleEngWebhook(makeReq('{"x":1}'), res as unknown as Parameters<typeof handleEngWebhook>[1]);
 
         expect(res.status).toHaveBeenCalledWith(204);
-        expect(setCalls.filter((c) => c.path === COMPANY_PATH)).toHaveLength(0);
+        expect(setCalls.filter((c) => c.path === BALANCE_PATH)).toHaveLength(0);
         expect(setCalls.filter((c) => c.path === RUN_PATH)).toHaveLength(0);
 
         expect(callsContainMarker(consoleSpy.allCalls(), SECRET_MARKER)).toBe(false);
@@ -784,9 +856,9 @@ describe("handleEngWebhook — delta debit across multiple deliveries (Fix 3)", 
         makeRes() as unknown as Parameters<typeof handleEngWebhook>[1]
       );
 
-      const companySets = setCalls.filter((c) => c.path === COMPANY_PATH);
-      expect(companySets).toHaveLength(3);
-      const totalDebited = companySets.reduce(
+      const balanceSets = setCalls.filter((c) => c.path === BALANCE_PATH);
+      expect(balanceSets).toHaveLength(3);
+      const totalDebited = balanceSets.reduce(
         (sum, c) => sum + -(c.data as { credits: { __increment: number } }).credits.__increment,
         0
       );

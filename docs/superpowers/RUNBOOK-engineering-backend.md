@@ -124,6 +124,24 @@ produces is shown exactly once.
    only — `engWebhook` (`functions/src/engineering/engWebhook.ts`) ignores
    every other event type with a 204, so subscribing to more just adds noise
    the handler discards.
+
+   **⚠ Tick them under the "Session lifecycle" group, not "Threads".** The
+   console lists two groups whose entries are both labelled exactly "Idled"
+   and "Terminated"; only the greyed monospace id beside each one
+   distinguishes `session.status_idled` from `session.thread_idled`. Getting
+   this wrong on Aug 11 2026 cost a day: the endpoint showed **Enabled**, the
+   signing key was correct, the function was deployed and healthy, and a
+   complete run still never finalised — because the only two events the
+   handler acts on were never subscribed. There is no error anywhere in that
+   failure; the run simply stays `running` forever and the credits are never
+   debited. Before leaving the page, confirm the counts read **`Session
+   lifecycle 2 of 4`** and **`Threads 0 of 3`**.
+
+   Note also that a webhook DELIVERY type and a session EVENT type are
+   different vocabularies for the same moment: the delivery is
+   `session.status_idled`, while the event inside `events.list` is
+   `session.status_idle`. Both spellings are correct in their own place —
+   see the comment above `deliveryStatusFor` in `engWebhook.ts`.
 3. Copy the `whsec_...` signing secret shown on the creation screen. **It is
    shown once.** If you navigate away without copying it, the only recovery
    is deleting the endpoint and creating a new one — there is no "reveal

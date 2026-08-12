@@ -19,10 +19,19 @@ export interface RepoLink {
   token: string;
 }
 
+/**
+ * The repo link. Deliberately holds NO credential.
+ *
+ * It used to carry its own `sealed` copy of the GitHub token, which meant the
+ * token lived in two documents: here and `connectors/github`. Two copies is
+ * two things to rotate and two things to leak — and worse, a founder who
+ * disconnected GitHub would keep running against the stale copy, with nothing
+ * anywhere indicating why. A `sealed` field left here by the old shape is
+ * ignored, not preferred.
+ */
 interface RepoDoc {
   url?: string;
   defaultBranch?: string;
-  sealed?: SealedToken;
 }
 
 const GITHUB_URL = /^https:\/\/github\.com\/([^/\s?#]+)\/([^/\s?#]+?)(?:\.git)?\/?$/;
@@ -53,14 +62,14 @@ export function branchName(runId: string): string {
  * turns null into the connect-or-create prompt.
  */
 export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | null> {
-  const snap = await admin.firestore().doc(`companies/${uid}/engineering/repo`).get();
+  const db = admin.firestore();
+  const snap = await db.doc(`companies/${uid}/engineering/repo`).get();
   if (!snap.exists) return null;
 
   const data = snap.data() as RepoDoc;
   if (
     typeof data.url !== "string" ||
     !data.url ||
-    !data.sealed ||
     typeof data.defaultBranch !== "string" ||
     !data.defaultBranch.trim()
   )
@@ -69,9 +78,16 @@ export async function loadRepo(uid: string, encKey: string): Promise<RepoLink | 
   const parsed = parseRepoUrl(data.url);
   if (!parsed) return null;
 
+  // The token comes from the connector the OAuth callback writes, and from
+  // nowhere else. A linked repo with no connected GitHub account is "connect
+  // a repo", not a run against whatever credential happens to be lying around.
+  const connectorSnap = await db.doc(`companies/${uid}/connectors/github`).get();
+  const sealed = (connectorSnap.data() as { sealed?: SealedToken } | undefined)?.sealed;
+  if (!sealed) return null;
+
   let token: string;
   try {
-    token = openToken(data.sealed, encKey);
+    token = openToken(sealed, encKey);
   } catch {
     // A tampered or unreadable blob. Never log the error — it can echo
     // ciphertext. Treat it as "no repo linked" so the founder is asked to

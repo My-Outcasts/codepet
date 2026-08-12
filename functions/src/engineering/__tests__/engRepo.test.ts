@@ -1,18 +1,28 @@
+/**
+ * A PATH-AWARE Firestore double, and it has to be.
+ *
+ * `loadRepo` reads TWO documents now — the repo link and the connector that
+ * holds the token. The previous fixture was a single shared `get` sequenced
+ * with `mockResolvedValueOnce`, which cannot express "this document has a
+ * token and that one does not": both reads would take the same stub, and a
+ * test could not tell which document the token actually came from. That is
+ * the whole behaviour being changed here, so the fixture has to be able to
+ * see it.
+ *
+ * The store lives inside the factory because `jest.mock` is hoisted above
+ * every outer binding; tests reach it through `seed`/`clearStore` below.
+ */
 jest.mock("firebase-admin", () => {
-  // Base template only: every test below overrides this per-call with
-  // mockResolvedValueOnce, so this default value itself is never read.
-  // Kept as a non-throwing shape so an accidental extra `.get()` call
-  // (one not stubbed by a test) fails on an assertion rather than on a
-  // missing mock implementation.
-  const get = jest.fn().mockResolvedValue({
-    exists: true,
-    data: () => ({
-      url: "https://github.com/owner/repo",
-      sealed: { iv: "iv", tag: "tag", ciphertext: "ct" }
-    })
-  });
-  const doc = jest.fn().mockReturnValue({ get });
-  const firestore = jest.fn().mockReturnValue({ doc });
+  const store = new Map<string, Record<string, unknown>>();
+  const doc = jest.fn((path: string) => ({
+    path,
+    get: jest.fn(async () => ({
+      exists: store.has(path),
+      data: () => store.get(path)
+    }))
+  }));
+  const firestore: unknown = jest.fn(() => ({ doc }));
+  (firestore as { __store?: unknown }).__store = store;
   return { firestore };
 });
 
@@ -23,6 +33,31 @@ jest.mock("../../oauth/githubOAuthCore", () => ({
 }));
 
 import { parseRepoUrl, branchName, MOUNT_PATH, loadRepo } from "../engRepo";
+
+const UID = "some-uid";
+const KEY = "some-enc-key";
+const REPO_PATH = `companies/${UID}/engineering/repo`;
+const CONNECTOR_PATH = `companies/${UID}/connectors/github`;
+const SEALED = { iv: "iv", tag: "tag", ciphertext: "ct" };
+
+function store(): Map<string, Record<string, unknown>> {
+  const admin = require("firebase-admin");
+  return (admin.firestore as unknown as { __store: Map<string, Record<string, unknown>> }).__store;
+}
+
+function seed(path: string, data: Record<string, unknown>): void {
+  store().set(path, data);
+}
+
+function clearStore(): void {
+  store().clear();
+}
+
+/** The ordinary state: a linked repo and a connected GitHub account. */
+function seedLinkedAndConnected(repo: Record<string, unknown> = {}): void {
+  seed(REPO_PATH, { url: "https://github.com/owner/repo", defaultBranch: "main", ...repo });
+  seed(CONNECTOR_PATH, { sealed: SEALED });
+}
 
 describe("parseRepoUrl", () => {
   it("reads owner and repo from an https URL", () => {
@@ -72,29 +107,63 @@ describe("MOUNT_PATH", () => {
 });
 
 describe("loadRepo", () => {
-  it("returns null and logs nothing when the sealed token fails to open", async () => {
-    // Per-test override, not a change to the shared module-level default
-    // mock: this must clear EVERY earlier guard (url, sealed, AND
-    // defaultBranch) so execution actually reaches `openToken` and throws
-    // into the catch.
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: "main"
-      })
-    });
-
+  beforeEach(() => {
+    clearStore();
     const { openToken } = require("../../oauth/githubOAuthCore");
-    // jest.config.js sets neither clearMocks nor resetMocks, and this file
-    // has no beforeEach clearing — so without this, `openToken`'s call
-    // count accumulates across every earlier test in the file, and the
-    // exact-count assertion below would pass vacuously the moment a test
-    // that also calls `openToken` is inserted above this one. Clearing
-    // immediately before the call under test, not in a shared beforeEach,
-    // is what keeps the oracle below meaningful regardless of file order.
+    (openToken as jest.Mock).mockReset();
+    (openToken as jest.Mock).mockImplementation(() => {
+      throw new Error("bad auth tag");
+    });
+  });
+
+  // ---- where the token comes from ---------------------------------------
+
+  it("takes the token from the connector, not from the repo document", async () => {
+    // One credential, one home. The OAuth callback writes connectors/github;
+    // nothing else should hold a copy.
+    seed(REPO_PATH, { url: "https://github.com/owner/repo", defaultBranch: "main" });
+    seed(CONNECTOR_PATH, { sealed: SEALED });
+    const { openToken } = require("../../oauth/githubOAuthCore");
+    (openToken as jest.Mock).mockReturnValueOnce("tok_from_connector");
+
+    const result = await loadRepo(UID, KEY);
+
+    expect(result?.token).toBe("tok_from_connector");
+    expect(openToken).toHaveBeenCalledWith(SEALED, KEY);
+  });
+
+  it("returns null when the repo is linked but GitHub is not connected", async () => {
+    // Disconnecting GitHub must STOP runs, not run them from a stale copy.
+    seed(REPO_PATH, { url: "https://github.com/owner/repo", defaultBranch: "main" });
+
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
+  });
+
+  it("ignores a sealed token left on the repo document by the old shape", async () => {
+    // Migration safety. Before this change the token lived on the repo doc;
+    // preferring that copy would mean a founder who reconnected GitHub kept
+    // running against the revoked token, with nothing to indicate why.
+    const stale = { iv: "stale", tag: "stale", ciphertext: "stale" };
+    seed(REPO_PATH, { url: "https://github.com/owner/repo", defaultBranch: "main", sealed: stale });
+    seed(CONNECTOR_PATH, { sealed: SEALED });
+    const { openToken } = require("../../oauth/githubOAuthCore");
+    (openToken as jest.Mock).mockReturnValueOnce("current");
+
+    const result = await loadRepo(UID, KEY);
+
+    expect(result?.token).toBe("current");
+    expect(openToken).toHaveBeenCalledWith(SEALED, KEY);
+    expect(openToken).not.toHaveBeenCalledWith(stale, KEY);
+  });
+
+  // ---- the guards, all of which fail closed ------------------------------
+
+  it("returns null and logs nothing when the sealed token fails to open", async () => {
+    // Every guard must be cleared so execution actually REACHES openToken and
+    // throws into the catch — otherwise this test passes from an early return
+    // and protects nothing.
+    seedLinkedAndConnected();
+    const { openToken } = require("../../oauth/githubOAuthCore");
     (openToken as jest.Mock).mockClear();
 
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
@@ -102,18 +171,12 @@ describe("loadRepo", () => {
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
 
     try {
-      const result = await loadRepo("some-uid", "some-enc-key");
+      const result = await loadRepo(UID, KEY);
 
       expect(result).toBeNull();
-      // The assertion this test exists for: proof that execution actually
-      // reached the try block and called openToken, rather than returning
-      // null from an earlier guard. Every guard also returns null and logs
-      // nothing, so without this the rest of the assertions here cannot
-      // tell "reached the catch" apart from "exited early" — a future
-      // guard added above the decrypt call would keep this test green
-      // while testing nothing. Pinned to an exact count (not just
-      // "called") now that the mock is cleared right above: a stray extra
-      // call would otherwise slip through unnoticed.
+      // Proof the catch was reached rather than an earlier guard returning
+      // null: every guard also returns null and logs nothing, so without this
+      // the assertions below cannot tell the two apart.
       expect(openToken).toHaveBeenCalledTimes(1);
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
@@ -125,92 +188,40 @@ describe("loadRepo", () => {
     }
   });
 
-  // This is the tripwire against a reinstated `data.defaultBranch ?? "main"`
-  // fallback: a missing field only produces "main" under the old,
-  // guessing behaviour, so this test fails against it. The "exact value
-  // when present" test below cannot serve that role — nullish coalescing
-  // only substitutes on null/undefined, so a defined "master" passes
-  // through unchanged under the old code too, and that test would pass
-  // identically either way.
+  it("returns null when the repo document does not exist at all", async () => {
+    seed(CONNECTOR_PATH, { sealed: SEALED });
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
+  });
+
   it("returns null when defaultBranch is missing from the repo doc", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" }
-        // NO defaultBranch
-      })
-    });
-
-    const result = await loadRepo("some-uid", "some-enc-key");
-
-    expect(result).toBeNull();
+    seed(REPO_PATH, { url: "https://github.com/owner/repo" });
+    seed(CONNECTOR_PATH, { sealed: SEALED });
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
   });
 
   it("returns null when defaultBranch is an empty string", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: ""
-      })
-    });
-
-    const result = await loadRepo("some-uid", "some-enc-key");
-
-    expect(result).toBeNull();
+    seedLinkedAndConnected({ defaultBranch: "" });
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
   });
 
   it("returns null when defaultBranch is whitespace-only", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: "   "
-      })
-    });
-
-    const result = await loadRepo("some-uid", "some-enc-key");
-
-    expect(result).toBeNull();
+    seedLinkedAndConnected({ defaultBranch: "   " });
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
   });
 
   it("returns null rather than throwing when url is not a string", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: 12345,
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: "main"
-      })
-    });
-
-    await expect(loadRepo("some-uid", "some-enc-key")).resolves.toBeNull();
+    seedLinkedAndConnected({ url: 42 });
+    await expect(loadRepo(UID, KEY)).resolves.toBeNull();
   });
 
+  // ---- the success path --------------------------------------------------
+
   it("trims padding from defaultBranch before returning it", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: " master "
-      })
-    });
-
+    seedLinkedAndConnected({ defaultBranch: " master " });
     const { openToken } = require("../../oauth/githubOAuthCore");
-    openToken.mockReturnValueOnce("test-token");
+    (openToken as jest.Mock).mockReturnValueOnce("test-token");
 
-    const result = await loadRepo("some-uid", "some-enc-key");
-
-    expect(result).toEqual({
+    await expect(loadRepo(UID, KEY)).resolves.toEqual({
       url: "https://github.com/owner/repo",
       owner: "owner",
       repo: "repo",
@@ -220,22 +231,11 @@ describe("loadRepo", () => {
   });
 
   it("returns a RepoLink with the exact defaultBranch value when present", async () => {
-    const admin = require("firebase-admin");
-    admin.firestore().doc().get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({
-        url: "https://github.com/owner/repo",
-        sealed: { iv: "iv", tag: "tag", ciphertext: "ct" },
-        defaultBranch: "master"
-      })
-    });
-
+    seedLinkedAndConnected({ defaultBranch: "master" });
     const { openToken } = require("../../oauth/githubOAuthCore");
-    openToken.mockReturnValueOnce("test-token");
+    (openToken as jest.Mock).mockReturnValueOnce("test-token");
 
-    const result = await loadRepo("some-uid", "some-enc-key");
-
-    expect(result).toEqual({
+    await expect(loadRepo(UID, KEY)).resolves.toEqual({
       url: "https://github.com/owner/repo",
       owner: "owner",
       repo: "repo",

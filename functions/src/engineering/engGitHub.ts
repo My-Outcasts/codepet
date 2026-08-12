@@ -230,3 +230,23 @@ export async function hasDeployTarget(
   );
   return Array.isArray(deployments) && deployments.length > 0;
 }
+
+/**
+ * The raw `base...head` compare payload, for `parseCompare` to shape.
+ *
+ * The diff comes from GitHub rather than from parsing what the agent said it
+ * did: the narration is a claim, `base...head` is the fact. It also yields all
+ * three review scopes from one call, because each is just a different base.
+ */
+export async function compare(
+  token: string,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string
+): Promise<unknown> {
+  // Encoded per segment: a branch name legitimately contains `/`
+  // (`codepet/run-x`), and the `...` between the two must stay literal.
+  const range = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  return call("compare", token, `/repos/${owner}/${repo}/compare/${range}`);
+}

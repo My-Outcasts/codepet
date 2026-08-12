@@ -32,6 +32,7 @@ import {
   handleEngCreateRepo
 } from "./engineering/engRepoHandlers";
 import { handleEngShip, handleEngPreview } from "./engineering/engShip";
+import { handleEngDiff } from "./engineering/engDiff";
 import { handleEngWebhook } from "./engineering/engWebhook";
 import { handleEngSendTurn } from "./engineering/engSendTurn";
 
@@ -200,6 +201,16 @@ export const engPreview = onRequest(
     secrets: ["CONNECTOR_ENC_KEY"]
   },
   handleEngPreview
+);
+
+// The diff the Review pane renders. base...head from GitHub, because the
+// agent's narration is a claim and the compare is the fact.
+export const engDiff = onRequest(
+  {
+    cors: false,
+    secrets: ["CONNECTOR_ENC_KEY"]
+  },
+  handleEngDiff
 );
 
 export const engSendTurn = onRequest(

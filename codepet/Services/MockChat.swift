@@ -26,9 +26,31 @@ import Foundation
 /// below are kept for router coverage but resolve to a plain `ChatDoneAction()`
 /// (text-only reply, no special action) so they compile against main's shapes.
 ///
-/// Toggle from the CLI (or just relaunch with the launch arg):
-///   defaults write app.murror.codepet CODEPET_MOCK_CHAT -bool YES   # on
-///   defaults write app.murror.codepet CODEPET_MOCK_CHAT -bool NO    # off
+/// Toggle by RELAUNCHING WITH THE LAUNCH ARG. This is not a style preference:
+///
+///   open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES
+///
+/// **`defaults write app.murror.codepet CODEPET_MOCK_CHAT -bool YES` does not
+/// work, and fails silently.** This file said it did until Aug 13, and it cost
+/// an hour of debugging a feature that was fine.
+///
+/// A sandboxed container was left behind at
+/// `~/Library/Containers/app.murror.codepet` from when this app WAS sandboxed
+/// (`codepet.entitlements` now sets `app-sandbox` to false). `defaults`
+/// resolves a bundle id THROUGH its container when one exists, so the write
+/// lands in the container's plist — measured: a probe key written by
+/// `defaults` appears in the container copy and not in the other one. The app,
+/// unsandboxed at runtime, reads `~/Library/Preferences/app.murror.codepet.plist`
+/// instead, which is also where it writes its own window frames.
+///
+/// So the two ends read different files, and BOTH look right in isolation:
+/// `defaults read` returns 1 (it follows the same redirect it wrote through)
+/// while the app sees nothing at all. Deleting the stale container would fix
+/// it — it still holds an old Firestore cache and two `.codepet` jsonl files,
+/// so that is a decision to make deliberately, not a cleanup to slip in.
+///
+/// `-CODEPET_MOCK_CHAT YES` sidesteps all of it: `NSArgumentDomain` outranks
+/// every preference file and touches no disk.
 enum MockChat {
     static var enabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") }
 

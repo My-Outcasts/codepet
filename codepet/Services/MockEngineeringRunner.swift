@@ -27,10 +27,14 @@ final class MockEngineeringRunner: EngineeringRunning {
 
     /// Which ending a mock run in the RUNNING APP takes.
     ///
-    ///   defaults write app.murror.codepet CODEPET_MOCK_ENG_ENDING budget
+    ///   open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES \
+    ///                                  -CODEPET_MOCK_ENG_ENDING budget
     ///
-    /// or the launch arg `-CODEPET_MOCK_ENG_ENDING budget`, which
-    /// `NSArgumentDomain` picks up without a relaunch dance.
+    /// The launch arg, NOT `defaults write` — that writes into a stale
+    /// sandbox container this app no longer reads, and fails silently while
+    /// `defaults read` reports success. See `MockChat` for the measurement.
+    /// This doc comment recommended `defaults write` for about two hours on
+    /// Aug 13 and was wrong the whole time.
     ///
     /// This exists because `.finishes` was the only ending the app could reach:
     /// the two endings worth looking at — a run that pauses a second time, and

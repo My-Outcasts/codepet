@@ -20,6 +20,13 @@ describe("buildRunTaskPrompt", () => {
     expect(p).toContain("Three tiers, monthly billing.");
   });
 
+  it("bounds the deliverable length", () => {
+    // `body` is the only unbounded field in RECORD_TOOL and it is the part the
+    // founder reads. runTask also runs on a model that writes longer by
+    // default, so without this the deliverable grows with no ceiling.
+    expect(buildRunTaskPrompt(base)).toContain("LENGTH:");
+  });
+
   it("falls back to byte for an unknown companion", () => {
     expect(buildRunTaskPrompt({ ...base, companionId: "zzz" })).toContain("Byte");
   });

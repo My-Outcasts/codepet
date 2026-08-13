@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { MODEL, PetPersonaInput, renderPersonaBlock, renderMemoryBlock } from "./anthropic";
+import { MODEL, PetPersonaInput, renderPersonaBlock, renderMemoryBlock, cacheableSystemBlock } from "./anthropic";
 
 // MARK: - Guidance-specific types
 
@@ -298,7 +298,7 @@ export async function handleGenerateGuidance(
     const response = await anthropicClient().messages.create({
       model: MODEL,
       max_tokens: 800,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      system: [cacheableSystemBlock({ model: MODEL, text: system, tools: GUIDANCE_TOOL })],
       tools: [GUIDANCE_TOOL as any],
       tool_choice: { type: "tool", name: "record_guidance" },
       messages: [{ role: "user", content: user }]

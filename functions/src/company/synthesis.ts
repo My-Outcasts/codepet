@@ -342,7 +342,13 @@ export async function runSynthesis(args: {
   const system = composeAgentSystem({
     agent: "chief_of_staff",
     founder: args.founder,
-    rawRequest: args.rawRequest
+    rawRequest: args.rawRequest,
+    // The red team runs on the same top-tier model, immediately before this,
+    // with this exact prefix. When it ran, it already wrote the entry and this
+    // call is a 0.1x read — keep the breakpoint. When it did not, synthesis is
+    // the only call of its model in the run, so a breakpoint here writes an
+    // entry nothing will read and bills 1.25x for the privilege.
+    cache: args.devilsAdvocate !== null
   });
   const baseMessage = SYNTHESIS_INSTRUCTION.replace("<real_question>", args.realQuestion.trim())
     .replace("<positions>", renderPositions(args.positions))

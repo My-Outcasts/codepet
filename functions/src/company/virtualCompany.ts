@@ -75,6 +75,9 @@ const defaultAgentCaller: AgentCaller = async (args) => {
   const response = await anthropicClient().messages.create({
     model: args.model,
     max_tokens: args.maxTokens ?? POSITION_MAX_TOKENS,
+    // Spread rather than always-present: an `effort` of undefined is still a
+    // key on the wire, and ROUTER_MODEL (Haiku 4.5) errors on the field at all.
+    ...(args.effort ? { output_config: { effort: args.effort } } : {}),
     system: args.system as any,
     tools: [args.tool as any],
     tool_choice: { type: "tool", name: args.toolName },

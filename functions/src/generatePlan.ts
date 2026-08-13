@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { PLAN_MODEL } from "./anthropic";
+import { PLAN_MODEL, cacheableSystemBlock } from "./anthropic";
 import { NarrativeSummaryInput } from "./generateGuidance";
 import { resolvePlanTier, PlanTier } from "./entitlements";
 
@@ -275,8 +275,11 @@ export async function handleGeneratePlan(
   try {
     const response = await anthropicClient().messages.create({
       model: PLAN_MODEL,
-      max_tokens: 1500,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      // Was 1500 against a model that did not think by default. PLAN_MODEL is
+      // Sonnet 5 now, where this cap covers thinking and plan together.
+      max_tokens: 4000,
+      output_config: { effort: "medium" },
+      system: [cacheableSystemBlock({ model: PLAN_MODEL, text: system, tools: PLAN_TOOL })],
       tools: [PLAN_TOOL as any],
       tool_choice: { type: "tool", name: "record_plan" },
       messages: [{ role: "user", content: user }]

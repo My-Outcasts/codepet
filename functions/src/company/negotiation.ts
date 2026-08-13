@@ -1,5 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "./registry";
-import { AgentCaller } from "./router";
+import { AgentCaller, POSITION_EFFORT } from "./router";
 import {
   AgentId,
   AgentPosition,
@@ -194,7 +194,8 @@ export async function runNegotiation(args: {
             .replace("<opposing>", renderOpposing(agent, participants, args.positions))
             .replace("<prior>", prior),
           tool: NEGOTIATION_TOOL,
-          toolName: NEGOTIATION_TOOL.name
+          toolName: NEGOTIATION_TOOL.name,
+          effort: POSITION_EFFORT
         });
         usages.push({ agent, model, usage });
 

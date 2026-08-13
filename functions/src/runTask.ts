@@ -1,3 +1,4 @@
+import { Effort } from "./anthropic";
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
@@ -6,7 +7,20 @@ import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
 import { buildRunTaskPrompt, coerceDeliverable } from "./runTaskCore";
 
-const RUN_MODEL = "claude-opus-4-8";
+// Sonnet 5 rather than Opus 4.8: this is schema-forced generation, the shape
+// Sonnet 5 is closest to Opus on, at 40% less per token ($3/$15 vs $5/$25).
+// Sonnet 5 runs adaptive thinking when `thinking` is omitted, so `effort` and a
+// larger `max_tokens` below are load-bearing, not tuning — see RUN_MAX_TOKENS.
+const RUN_MODEL = "claude-sonnet-5";
+// `medium`, not the `high` default: the deliverable is the product, but a
+// forced tool call with a fixed schema does not need the deepest reasoning
+// tier. Raise this before reaching for a bigger model if quality regresses.
+const RUN_EFFORT: Effort = "medium";
+// `max_tokens` caps thinking AND answer together. The old 3000 was sized for a
+// model that did not think by default; a deliverable that used all of it would
+// now be truncated mid-JSON by the thinking that precedes it. Unused headroom
+// is not billed, so this is insurance, not spend.
+const RUN_MAX_TOKENS = 8000;
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -140,7 +154,8 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
   try {
     const response = await client().messages.create({
       model: RUN_MODEL,
-      max_tokens: 3000,
+      max_tokens: RUN_MAX_TOKENS,
+      output_config: { effort: RUN_EFFORT },
       system: "You produce real, finished work product for a solo founder's company — never a plan to do the work, the work itself.",
       tools: [RECORD_TOOL as any],
       tool_choice: { type: "tool", name: "record_deliverable" },

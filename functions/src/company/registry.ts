@@ -474,16 +474,27 @@ export function composeAgentSystem(args: {
   agent: AgentId;
   founder: FounderContext;
   rawRequest: string;
+  /**
+   * Whether to place the cache breakpoint. Default true.
+   *
+   * A breakpoint is worth placing only when some LATER call on the SAME model
+   * will read what this one writes — caches are model-scoped, so the department
+   * phases (AGENT_MODEL) and the top-tier phases (SYNTHESIS_MODEL) cache
+   * separately even though the prefix bytes are identical. A write nobody reads
+   * is not free: it bills at 1.25x instead of 1x. Pass false when this call is
+   * known to be the last one of its model in the run.
+   */
+  cache?: boolean;
 }): SystemBlock[] {
+  const prefix: SystemBlock = {
+    type: "text",
+    text: buildSharedPrefix({
+      founder: args.founder,
+      rawRequest: args.rawRequest
+    })
+  };
   return [
-    {
-      type: "text",
-      text: buildSharedPrefix({
-        founder: args.founder,
-        rawRequest: args.rawRequest
-      }),
-      cache_control: { type: "ephemeral" }
-    },
+    args.cache === false ? prefix : { ...prefix, cache_control: { type: "ephemeral" } },
     { type: "text", text: AGENT_DEFS[args.agent].role.trim() }
   ];
 }

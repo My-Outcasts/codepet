@@ -231,43 +231,27 @@ describe("runSynthesis", () => {
     expect(seen[0].model).toBe(SYNTHESIS_MODEL);
   });
 
-  test("omits the cache breakpoint when the red team did not run", async () => {
-    // Caches are model-scoped. With no red team, synthesis is the only call of
-    // its model in the run, so a breakpoint here writes an entry nothing reads
-    // and bills 1.25x instead of 1x.
-    const seen: any[] = [];
-    await runSynthesis({
-      ...baseArgs,
-      devilsAdvocate: null,
-      call: async (args) => {
-        seen.push(args);
-        return { input: briefInput(), usage: zeroUsage };
-      }
-    });
-    expect(seen[0].system[0].cache_control).toBeUndefined();
-  });
-
-  test("keeps the cache breakpoint when the red team ran before it", async () => {
-    // The red team runs on the same model with this exact prefix, so it already
-    // wrote the entry — this call is a 0.1x read and must keep the marker.
-    const seen: any[] = [];
-    await runSynthesis({
-      ...baseArgs,
-      devilsAdvocate: {
-        load_bearing_assumption: "a",
-        how_it_could_be_false: "b",
-        cheapest_test: "c",
-        failure_post_mortem: "d",
-        who_is_not_in_the_room: "e",
-        objections: ["o"],
-        plan_is_sound: true
-      },
-      call: async (args) => {
-        seen.push(args);
-        return { input: briefInput(), usage: zeroUsage };
-      }
-    });
-    expect(seen[0].system[0].cache_control).toEqual({ type: "ephemeral" });
+  test("keeps the cache breakpoint whether or not the red team ran", async () => {
+    // Corrected premise. The red team sends submit_red_team and this sends
+    // record_decision_brief; the tool is part of the cached prefix, so neither
+    // could ever read the other's entry. The reader here is this phase's own
+    // retry, which is unaffected by whether the red team ran.
+    for (const devilsAdvocate of [null, {
+      load_bearing_assumption: "a", how_it_could_be_false: "b", cheapest_test: "c",
+      failure_post_mortem: "d", who_is_not_in_the_room: "e", objections: ["o"],
+      plan_is_sound: true
+    }]) {
+      const seen: any[] = [];
+      await runSynthesis({
+        ...baseArgs,
+        devilsAdvocate: devilsAdvocate as any,
+        call: async (args) => {
+          seen.push(args);
+          return { input: briefInput(), usage: zeroUsage };
+        }
+      });
+      expect(seen[0].system[0].cache_control).toEqual({ type: "ephemeral" });
+    }
   });
 
   test("does not lower effort — synthesis keeps the top tier default", async () => {

@@ -100,6 +100,14 @@ const defaultAgentCaller: AgentCaller = async (args) => {
   throw new Error(`${args.agent} did not call ${args.toolName}`);
 };
 
+/**
+ * Exposed for the wire-shape test only. Every other test in this feature
+ * injects its own AgentCaller, which means the translation done HERE — phase
+ * arguments into SDK request fields — is the one link in the chain that nothing
+ * exercised. A dropped `effort` would have made the whole tiering silently dead.
+ */
+export const __defaultAgentCallerForTests = (): AgentCaller => defaultAgentCaller;
+
 let _agentCaller: AgentCaller | null = null;
 export function __setAgentCallerForTests(caller: AgentCaller): void {
   _agentCaller = caller;

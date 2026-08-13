@@ -343,12 +343,13 @@ export async function runSynthesis(args: {
     agent: "chief_of_staff",
     founder: args.founder,
     rawRequest: args.rawRequest,
-    // The red team runs on the same top-tier model, immediately before this,
-    // with this exact prefix. When it ran, it already wrote the entry and this
-    // call is a 0.1x read — keep the breakpoint. When it did not, synthesis is
-    // the only call of its model in the run, so a breakpoint here writes an
-    // entry nothing will read and bills 1.25x for the privilege.
-    cache: args.devilsAdvocate !== null
+    // Kept, but NOT because the red team ran first: it sends submit_red_team
+    // and this sends record_decision_brief, and the tool is part of the cached
+    // prefix, so one could never read the other's entry. The reader here is
+    // this phase's OWN retry — a brief that comes back missing fields, or with
+    // the dissent smoothed away, is asked for again with the same tool and the
+    // same system. See composeAgentSystem's `cache` doc for the break-even.
+    cache: true
   });
   const baseMessage = SYNTHESIS_INSTRUCTION.replace("<real_question>", args.realQuestion.trim())
     .replace("<positions>", renderPositions(args.positions))

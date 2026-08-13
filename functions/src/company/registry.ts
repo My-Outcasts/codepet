@@ -477,12 +477,25 @@ export function composeAgentSystem(args: {
   /**
    * Whether to place the cache breakpoint. Default true.
    *
-   * A breakpoint is worth placing only when some LATER call on the SAME model
-   * will read what this one writes — caches are model-scoped, so the department
-   * phases (AGENT_MODEL) and the top-tier phases (SYNTHESIS_MODEL) cache
-   * separately even though the prefix bytes are identical. A write nobody reads
-   * is not free: it bills at 1.25x instead of 1x. Pass false when this call is
-   * known to be the last one of its model in the run.
+   * Read this before changing a phase: the breakpoint buys much less than it
+   * looks like it does.
+   *
+   * The API hashes an exact byte prefix, and the render order is
+   * tools -> system -> messages. This breakpoint sits on the FIRST system
+   * block, so the cached prefix is `tools + shared prefix`, not the shared
+   * prefix alone. Every phase sends a different tool — submit_position,
+   * submit_negotiation_turn, submit_red_team, record_decision_brief — so no
+   * phase can ever read another phase's entry, however identical their system
+   * blocks look. companyCachePrefix.test.ts pins exactly that.
+   *
+   * Within a phase, departments are dispatched concurrently and an entry is
+   * only readable once one has finished writing it, so siblings cannot read
+   * each other either. That leaves exactly one reader: a RETRY of the same
+   * agent in the same phase, which sends the same tool and the same system.
+   *
+   * So the breakpoint pays off only where retries are common enough. With a
+   * retry probability p, it costs 1.25 + 0.1p against 1 + p without it, which
+   * breaks even at p = 0.28. Phases that never retry should pass false.
    */
   cache?: boolean;
 }): SystemBlock[] {

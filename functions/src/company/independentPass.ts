@@ -199,14 +199,16 @@ export async function runIndependentPass(args: {
   // later prompt. See the concurrency test in companyIndependentPass.test.ts.
   //
   // It does cost money. Every agent here sends a byte-identical cached prefix,
-  // and a cache entry is only readable once some request has finished writing
-  // it — so N concurrent agents each WRITE the prefix at 1.25x and none reads.
-  // Round 2 (negotiation) does read those entries, which is what keeps the
-  // breakpoint net-positive overall (1.35x per copy across both rounds, against
-  // 2.0x with no caching at all). Running one department to completion first
-  // would take the two rounds to ~0.2x per copy, at the price of one call's
-  // latency and of weakening the guarantee above. That trade is deliberately
-  // not taken here.
+  // and an entry is only readable once one request has finished writing it — so
+  // N concurrent agents each WRITE and none reads. The breakpoint is kept anyway
+  // because THIS phase retries: a rejected position is asked again with the same
+  // tool and the same system, which is a 0.1x read. At the measured ~1-in-3
+  // retry rate that clears the p = 0.28 break-even in composeAgentSystem's docs.
+  //
+  // It does NOT get read by the negotiation phase, which is what an earlier
+  // version of this comment claimed. Negotiation sends submit_negotiation_turn
+  // where this sends submit_position, tools render before system, so the two
+  // prefixes differ from byte 0. companyCachePrefix.test.ts pins that.
   //
   // allSettled, not all: one department failing must not take down the room
   // (spec §5.5 graceful degradation).

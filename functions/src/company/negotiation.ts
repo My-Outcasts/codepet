@@ -187,7 +187,11 @@ export async function runNegotiation(args: {
           system: composeAgentSystem({
             agent,
             founder: args.founder,
-            rawRequest: args.rawRequest
+            rawRequest: args.rawRequest,
+            // This phase has no retry path, and it cannot read the positions
+            // phase's entry because it sends a different tool. Every copy would
+            // be a write nobody reads — a flat 25% surcharge on the prefix.
+            cache: false
           }),
           userMessage: NEGOTIATION_INSTRUCTION.replace("<round>", String(round))
             .replace("<real_question>", args.realQuestion.trim())

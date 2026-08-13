@@ -61,6 +61,14 @@ final class CompanyStore: ObservableObject {
     /// those fall back to the transcript bottom.
     @Published var codingRunAnchorId: String?
 
+    /// The chat message an engineering run anchors to, so its result bar and
+    /// approval cards render inline right after that ask.
+    ///
+    /// Always set, unlike `codingRunAnchorId` — an engineering run can only be
+    /// started from the composer, so there is no anchorless case to fall back
+    /// to the transcript bottom for.
+    @Published var engineeringRunAnchorId: String?
+
     /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
     /// The `-CODEPET_MOCK_CHAT` launch arg (via `MockChat.enabled`, same flag chat/task
     /// runs key off) swaps in `MockCodeRunner` (no `claude`, no cost) while keeping the
@@ -651,7 +659,9 @@ final class CompanyStore: ObservableObject {
     func startEngineeringRun(ask: String) {
         let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        chatMessages.append(CopilotMessage(role: .me, text: trimmed))
+        let msg = CopilotMessage(role: .me, text: trimmed)
+        chatMessages.append(msg)
+        engineeringRunAnchorId = msg.id
 
         #if DEBUG
         let mock = MockChat.enabled
@@ -685,6 +695,24 @@ final class CompanyStore: ObservableObject {
     func openEngineeringReview() {
         guard let runId = engineeringRunStore?.runId, !runId.isEmpty else { return }
         engineeringReviewRunId = runId
+    }
+
+    /// Drop an engineering run when the conversation it belongs to goes away.
+    ///
+    /// Same rule `codingRunAnchorId`/`codingRun.cancel()` already follow at all
+    /// four of these sites, for the same reason: a bar anchored in the outgoing
+    /// thread would otherwise render against a message the incoming thread does
+    /// not contain, and the Review pane would stay open on a run the founder
+    /// can no longer see the ask for.
+    ///
+    /// The run itself keeps going on Anthropic's side and its branch survives —
+    /// this drops Codepet's handle on it, which is all a client can honestly
+    /// do while no endpoint cancels a session.
+    private func clearEngineeringRun() {
+        engineeringRunAnchorId = nil
+        engineeringRunStore = nil
+        engineeringReviewRunId = nil
+        engineeringRunBag = nil
     }
 
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
@@ -732,6 +760,7 @@ final class CompanyStore: ObservableObject {
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
+        clearEngineeringRun()
     }
 
     /// Switch the working buffer to a different thread: flush the outgoing one,
@@ -750,6 +779,7 @@ final class CompanyStore: ObservableObject {
         // the incoming one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
+        clearEngineeringRun()
     }
 
     /// Rename a thread. A blank/whitespace-only title clears back to nil — the
@@ -783,6 +813,7 @@ final class CompanyStore: ObservableObject {
             // the bottom of the fallback one — clear it (no-op while running).
             codingRunAnchorId = nil
             codingRun.cancel()
+            clearEngineeringRun()
         } else {
             chatMessages = []
             newChat()   // newChat() already clears codingRunAnchorId/codingRun
@@ -2394,6 +2425,7 @@ final class CompanyStore: ObservableObject {
         activeProjectLink = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
+        clearEngineeringRun()
     }
 }
 

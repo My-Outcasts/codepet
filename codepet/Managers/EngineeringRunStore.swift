@@ -26,6 +26,13 @@ final class EngineeringRunStore: ObservableObject {
     /// perfectly healthy while a diff fetch fails.
     @Published private(set) var failure: EngineeringError?
 
+    /// Where shipping stands. Its own state rather than a phase: a run is
+    /// finished whether or not a PR exists, and a ship that failed does not
+    /// undo the work on the branch.
+    @Published private(set) var ship: ShipState = .idle
+    /// Where the preview stands, or nil while it has not been asked.
+    @Published private(set) var preview: EngPreviewState?
+
     private let runner: EngineeringRunning
     /// tool_use_ids already answered. The relay replays history on reconnect,
     /// so an ask can arrive again after it was dealt with — and a card that
@@ -120,6 +127,55 @@ final class EngineeringRunStore: ObservableObject {
                 await self?.loadDiff(scope: scope)
             }
         }
+    }
+
+    // MARK: - shipping
+
+    /// Open the PR for this run.
+    ///
+    /// Guarded on `.shipping` rather than on a view's disabled state: the
+    /// button is disabled too, but a disabled button is a rendering detail and
+    /// this is the thing that must not run twice. `engShip` is idempotent, so
+    /// the worst case is a wasted round trip rather than two PRs — but a
+    /// second in-flight call would also race two `ship` assignments, and the
+    /// loser could overwrite a real PR number with a stale one.
+    func shipRun() async {
+        guard let runId, canShip else { return }
+        ship = .shipping
+        do {
+            let result = try await runner.ship(runId: runId)
+            ship = .shipped(result)
+        } catch let error as EngineeringError {
+            ship = .shipFailed(error)
+        } catch {
+            ship = .shipFailed(.unknown(0))
+        }
+    }
+
+    /// Only from a standing start or after a failure.
+    ///
+    /// `.shipping` is the obvious half. `.shipped` is the half the test found:
+    /// guarding on in-flight ALONE let a second call through the moment the
+    /// first finished, because the state was no longer `.shipping`. `engShip`
+    /// is idempotent so no second PR could open — but it is a round trip for
+    /// nothing, and it reassigns `ship` from a fresh response over one the
+    /// founder is already looking at.
+    private var canShip: Bool {
+        switch ship {
+        case .idle, .shipFailed: return true
+        case .shipping, .shipped: return false
+        }
+    }
+
+    /// Ask where the preview stands. Silent on failure, deliberately.
+    ///
+    /// A preview is an extra: the diff and the PR are the deliverable, and a
+    /// GitHub hiccup while looking for a deploy must not put a red message
+    /// over a run that succeeded. `nil` renders as no chip and no claim, which
+    /// is the honest reading of "we do not know".
+    func loadPreview() async {
+        guard let runId else { return }
+        preview = try? await runner.preview(runId: runId)
     }
 
     /// One place a failure, its phase, and the way to repeat it are recorded

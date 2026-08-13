@@ -365,6 +365,14 @@ struct EngineeringResultBar: View {
             return lang == .vi
                 ? "Repo đó chưa có commit nào nên chưa có nhánh để làm việc. Chọn repo khác, hoặc để Codepet tạo một cái mới."
                 : "That repo has no commits yet, so there's no branch to build on. Pick another, or let Codepet make you one."
+        case .nothingToShip:
+            // The run recorded no repo or no branch, so there is nothing to
+            // open a PR from. Ours to explain, not theirs to fix — and never
+            // worded as "your repo is broken", which is what sharing a 422
+            // with `repoUnusable` used to make it say.
+            return lang == .vi
+                ? "Lần chạy này chưa có nhánh nào để mở PR."
+                : "This run has no branch to open a pull request from."
         case .misconfigured:
             // Ours. Never worded as something the founder did or can fix.
             return lang == .vi

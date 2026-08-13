@@ -131,6 +131,24 @@ final class MockEngineeringRunner: EngineeringRunning {
         )
     }
 
+    /// Every ship call, so a test can prove two taps did not open two PRs.
+    private(set) var shipCalls = 0
+
+    func ship(runId: String) async throws -> EngShipResult {
+        shipCalls += 1
+        // Always the same number, mirroring `engShip`'s idempotence: it
+        // returns the EXISTING pr when the run already has one, so a mock that
+        // incremented would model a backend we do not have.
+        return EngShipResult(prNumber: 42, prUrl: "https://github.com/monatruong/codepet/pull/42")
+    }
+
+    /// Which preview answer the script gives. `.noDeployTarget` by default —
+    /// it is the state a founder connecting their own repo will actually hit,
+    /// and the one whose handling (words, no chip) is easiest to get wrong.
+    var previewState: EngPreviewState = .noDeployTarget
+
+    func preview(runId: String) async throws -> EngPreviewState { previewState }
+
     // MARK: - the script
 
     private func playOpening(ask: String) async {

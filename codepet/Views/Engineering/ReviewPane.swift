@@ -30,7 +30,13 @@ struct ReviewPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task { await load(.branch) }
+        .task {
+            await load(.branch)
+            // After the diff, not with it. The preview is an extra, and asking
+            // for it first would put a GitHub round trip in front of the thing
+            // the founder actually opened this pane to read.
+            await store.loadPreview()
+        }
     }
 
     // MARK: - head: scope + totals, never scrolled away
@@ -170,14 +176,133 @@ struct ReviewPane: View {
     // MARK: - foot: the file count, never scrolled away
 
     @ViewBuilder private func foot(_ diff: EngDiffSummary) -> some View {
-        HStack(spacing: 8) {
-            Text(Self.fileCountLabel(diff.files.count, lang: lang))
-                .font(CodepetTheme.inter(11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(Self.fileCountLabel(diff.files.count, lang: lang))
+                    .font(CodepetTheme.inter(11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                Spacer(minLength: 0)
+                previewChip
+                shipControl
+            }
+            // Under the row, not in it: the reason there is no preview is a
+            // sentence, and a sentence in a control row makes the controls
+            // reflow every time the deploy state changes.
+            if let note = Self.previewNote(store.preview, lang: lang) {
+                Text(note)
+                    .font(CodepetTheme.inter(11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if case .shipFailed(let error) = store.ship {
+                Text(EngineeringResultBar.message(for: error, lang: lang))
+                    .font(CodepetTheme.inter(11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder private var previewChip: some View {
+        // Drawn ONLY for a URL that exists. `pending` and `noDeployTarget`
+        // both get words instead — the spec's rule is that a repo with no
+        // deploy target degrades honestly to diff + PR, and a chip that never
+        // resolves is worse than no chip.
+        if case .ready(let url) = store.preview, let link = URL(string: url) {
+            Link(destination: link) {
+                Text(Self.previewChipLabel(lang: lang))
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentTeal)
+            }
+        }
+    }
+
+    @ViewBuilder private var shipControl: some View {
+        switch store.ship {
+        case .shipped(let result):
+            // The PR itself, not a success message. "Shipped" with nothing to
+            // click asks the founder to go find it.
+            if let link = URL(string: result.prUrl), !result.prUrl.isEmpty {
+                Link(destination: link) {
+                    Text(Self.shippedLabel(result.prNumber, lang: lang))
+                        .font(CodepetTheme.inter(11, weight: .semibold))
+                        .foregroundColor(hue)
+                }
+            } else {
+                Text(Self.shippedLabel(result.prNumber, lang: lang))
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+        default:
+            Button(Self.shipLabel(shipping: Self.isShipping(store.ship), lang: lang)) {
+                Task { await store.shipRun() }
+            }
+            .font(CodepetTheme.inter(11, weight: .semibold))
+            .foregroundColor(Self.isShipping(store.ship) ? CodepetTheme.mutedText : hue)
+            .buttonStyle(.plain)
+            // Two taps must not try to open two pull requests. The store
+            // guards it too — this is the half the founder can see.
+            .disabled(Self.isShipping(store.ship))
+        }
+    }
+
+    // MARK: - ship + preview, as pure values
+
+    static func isShipping(_ state: ShipState) -> Bool {
+        if case .shipping = state { return true }
+        return false
+    }
+
+    /// Whether a preview chip may be drawn at all.
+    ///
+    /// A pure function for the same reason `warnings` is one: a chip rendered
+    /// in a `View` is pixels, and deleting it would leave every test green.
+    /// This is the rule that keeps a dead chip off the screen.
+    static func showsPreviewChip(_ state: EngPreviewState?) -> Bool {
+        if case .ready = state { return true }
+        return false
+    }
+
+    /// The sentence shown when there is no chip, or nil when there is one.
+    ///
+    /// `nil` for `ready` (the chip speaks) and for an unasked preview — we do
+    /// not know yet, and saying anything would be inventing a state.
+    static func previewNote(_ state: EngPreviewState?, lang: AppLanguage) -> String? {
+        switch state {
+        case .ready, .none:
+            return nil
+        case .pending:
+            return lang == .vi
+                ? "Bản xem thử đang được dựng."
+                : "A preview is still building."
+        case .noDeployTarget:
+            // Says it will NOT appear, rather than leaving them waiting for
+            // something that is never coming.
+            return lang == .vi
+                ? "Repo này chưa nối với dịch vụ deploy nào, nên sẽ không có bản xem thử. Diff và PR vẫn đầy đủ."
+                : "This repo isn't wired to a deploy service, so there won't be a preview. The diff and the PR are unaffected."
+        }
+    }
+
+    static func previewChipLabel(lang: AppLanguage) -> String {
+        lang == .vi ? "Xem thử ↗" : "Preview ↗"
+    }
+
+    /// "Ship this" opens a pull request. It does NOT merge.
+    static func shipLabel(shipping: Bool, lang: AppLanguage) -> String {
+        if shipping { return lang == .vi ? "Đang mở PR…" : "Opening a PR…" }
+        return lang == .vi ? "Gửi đi" : "Ship this"
+    }
+
+    /// Names the PR number, and never the word "merged".
+    ///
+    /// `engShip` opens a pull request and stops there — nothing in this
+    /// codebase merges anything. A founder who reads "merged" believes their
+    /// default branch changed, and the next thing they do is based on that.
+    static func shippedLabel(_ number: Int, lang: AppLanguage) -> String {
+        lang == .vi ? "Đã mở PR #\(number) ↗" : "Opened PR #\(number) ↗"
     }
 
     // MARK: - what the pane must admit

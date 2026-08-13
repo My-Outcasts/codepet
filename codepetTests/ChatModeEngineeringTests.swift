@@ -63,12 +63,41 @@ final class ChatModeEngineeringTests: XCTestCase {
     }
 
     func testEngineeringsVietnameseLabelIsAKnownPlaceholder() {
-        // NOT an assertion that the label is right — it is deliberately the
-        // English word until Mona picks one, and this test exists to make that
-        // visible rather than let a placeholder pass as a decision. When she
-        // supplies a translation, this test SHOULD fail, and the failure is the
-        // reminder to delete it.
-        XCTAssertEqual(ChatMode.engineering.label(.vi), "Engineering",
+        // NOT an assertion that the label is right. The English word is
+        // deliberately standing in until Mona picks a translation, and this
+        // test exists to make that visible rather than let a placeholder pass
+        // as a decision. When she supplies one, this test SHOULD fail, and the
+        // failure is the reminder to delete it.
+        //
+        // The word changed from "Engineering" to "Developer" on Aug 13 — a
+        // decision about the ENGLISH label (see `testNoModeLabelCollidesWithADepartmentName`).
+        // The Vietnamese one is still open.
+        XCTAssertEqual(ChatMode.engineering.label(.vi), "Developer",
                        "if this failed, the Vietnamese label was chosen — delete this test")
+    }
+
+    func testNoModeLabelCollidesWithADepartmentName() {
+        // The bug this catches shipped, and Mona found it by looking at the
+        // composer: the mode picker said "Engineering" eight points below a
+        // department chip that also said "Engineering". Behind the two words
+        // are two DIFFERENT coding agents — the chip routes to the local one
+        // when a project folder is linked (`EditCodeRouting`), editing files on
+        // her own machine for the price of an ordinary turn; the mode starts
+        // the cloud run that opens a GitHub branch and can spend 40 credits.
+        //
+        // So this is not a style rule about duplicate strings. Picking the
+        // wrong one of two identically-named controls means the wrong machine
+        // and the wrong bill, and nothing on screen distinguishes them.
+        for mode in ChatMode.composerCases {
+            for dept in DepartmentCatalog.all {
+                for lang: AppLanguage in [.en, .vi] {
+                    XCTAssertNotEqual(
+                        mode.label(lang).lowercased(), dept.name.lowercased(),
+                        "the \(mode) mode and the \(dept.key) department are both called "
+                        + "\"\(dept.name)\" in \(lang) — they sit in the same composer"
+                    )
+                }
+            }
+        }
     }
 }

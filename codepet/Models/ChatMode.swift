@@ -33,13 +33,30 @@ enum ChatMode: CaseIterable, Identifiable {
         case (.plan, _):    return "Plan"
         case (.build, .vi): return "Bắt tay làm"
         case (.build, _):   return "Build"
-        // The Vietnamese label is PENDING Mona's call. Every other mode here
-        // has a considered translation — "Bắt tay làm" for Build, not a literal
-        // rendering — and inventing one for a fourth mode would be the one part
-        // of this feature written by someone who does not speak the language.
-        // The English word stands in until she picks; it is a recognisable
-        // loanword rather than a wrong translation.
-        case (.engineering, _): return "Engineering"
+        // "Developer", NOT "Engineering" — Mona's call, Aug 13, and it fixes a
+        // real collision rather than a matter of taste.
+        //
+        // The composer already had an "Engineering" control: the DEPARTMENT
+        // chip (`DepartmentCatalog` key `eng`), eight points above this picker.
+        // Two identical words, and behind them two different coding agents —
+        // the chip routes to the LOCAL agent when a project folder is linked
+        // (`EditCodeRouting`), editing files on the founder's own machine for
+        // the price of an ordinary turn, while this mode starts the CLOUD run
+        // that opens a branch on GitHub and can spend 40 credits. Confusing
+        // them is not a cosmetic error; it is picking the wrong machine and the
+        // wrong bill. `ChatModeEngineeringTests` now fails if any mode label
+        // ever collides with a department name again.
+        //
+        // The case, the store, the endpoints and the docs all stay
+        // "engineering": that is the feature's name in the code and on the
+        // backend. This is the founder-facing word only.
+        //
+        // Still one word for both languages, and still not a translation — see
+        // the placeholder test. Every other mode has a considered Vietnamese
+        // rendering ("Bắt tay làm" for Build, not a literal one), and inventing
+        // a fourth would be the one part of this feature written by someone who
+        // does not speak the language.
+        case (.engineering, _): return "Developer"
         }
     }
 

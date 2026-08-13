@@ -658,8 +658,14 @@ final class CompanyStore: ObservableObject {
         #else
         let mock = false
         #endif
-        let runner: EngineeringRunning = mock ? MockEngineeringRunner(stepDelay: .milliseconds(700))
-                                             : EngineeringClient()
+        // `CODEPET_MOCK_ENG_ENDING` picks how the scripted run ends, because
+        // the default ending finishes cleanly and the states worth reviewing
+        // (a second pause, a stop at the spend cap) were otherwise reachable
+        // only from the Xcode preview canvas.
+        let runner: EngineeringRunning = mock
+            ? MockEngineeringRunner(ending: MockEngineeringRunner.endingFromDefaults(),
+                                    stepDelay: .milliseconds(700))
+            : EngineeringClient()
         let store = EngineeringRunStore(runner: runner)
         engineeringRunBag = store.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()

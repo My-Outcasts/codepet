@@ -120,6 +120,43 @@ final class EngineeringDegradationMappingTests: XCTestCase {
         XCTAssertFalse(chip.lowercased().contains("didn't"), "phase chip contradicts the message")
         XCTAssertTrue(chip.lowercased().contains("paused"), "phase chip: \(chip)")
     }
+
+    // MARK: - which explanation the bar draws
+
+    func test_aRunThatStopsAtItsCapExplainsItselfWithNo409() {
+        // THE THIRD BUG ON THIS PATH. A run that simply exhausts its budget
+        // while the founder watches never produces a 409 — the stream just
+        // ends with `budget_reached`, which sets the phase and leaves
+        // `failure` nil. The bar rendered its explanation off `failure` alone,
+        // so the commonest way to reach a budget pause drew the chip and not
+        // one word about the work being safe on the branch.
+        let note = EngineeringResultBar.note(phase: .budgetReached, failure: nil, lang: .en)
+        XCTAssertNotNil(note, "a run stopped at its cap says nothing at all")
+        XCTAssertTrue(note?.lowercased().contains("branch") == true,
+                      "the note never says where the work is: \(note ?? "nil")")
+    }
+
+    func test_theBudgetNoteSurvivesAFailedDiffFetch() {
+        // A diff that would not load is the lesser news. If it displaced the
+        // budget note, the founder is told to connect a repo — and told
+        // nothing about the run sitting there intact, which is the sentence
+        // that stops them starting over and paying twice.
+        let note = EngineeringResultBar.note(phase: .budgetReached,
+                                             failure: .noRepoLinked, lang: .en)
+        XCTAssertEqual(note, EngineeringResultBar.message(for: .budgetReached, lang: .en))
+    }
+
+    func test_anOrdinaryRefusalStillGetsItsOwnWords() {
+        let note = EngineeringResultBar.note(phase: .running, failure: .unavailable, lang: .en)
+        XCTAssertEqual(note, EngineeringResultBar.message(for: .unavailable, lang: .en))
+    }
+
+    func test_aHealthyRunSaysNothingRatherThanReassuringTheFounder() {
+        // An empty state is an empty state. A line under every run trains the
+        // founder to stop reading the one that matters.
+        XCTAssertNil(EngineeringResultBar.note(phase: .running, failure: nil, lang: .en))
+        XCTAssertNil(EngineeringResultBar.note(phase: .reviewing, failure: nil, lang: .en))
+    }
 }
 
 /// The store half: a refusal has to reach the founder, and the retry has to

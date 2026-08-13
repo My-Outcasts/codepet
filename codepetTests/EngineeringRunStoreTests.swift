@@ -143,6 +143,13 @@ final class EngineeringRunStoreTests: XCTestCase {
         let (store, _) = makeStore()
         store.handle(.done(stopReason: "budget_reached"))
         XCTAssertEqual(store.phase, .budgetReached)
+        // No refusal came over the wire — the stream just ended — and this is
+        // the exact state that left the bar silent: it drew its explanation
+        // off `failure` alone, so the commonest budget pause said nothing.
+        XCTAssertNil(store.failure)
+        XCTAssertNotNil(EngineeringResultBar.note(phase: store.phase,
+                                                  failure: store.failure, lang: .en),
+                        "a run stopped at its cap explains nothing to the founder")
     }
 
     func testAStreamErrorIsRetryableRatherThanUnknown() {

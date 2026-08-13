@@ -50,7 +50,7 @@ struct EngineeringResultBar: View {
                     workedRow
                     if stepsExpanded { stepList }
                     if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
-                    if let failure = store.failure { failureRow(failure) }
+                    noteRow
                 }
                 .padding(14)
             }
@@ -230,27 +230,53 @@ struct EngineeringResultBar: View {
         }
     }
 
-    // MARK: - failure
+    // MARK: - the one explanatory line
 
-    @ViewBuilder private func failureRow(_ failure: EngineeringError) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(Self.message(for: failure, lang: lang))
-                .font(CodepetTheme.inter(12))
-                .foregroundColor(CodepetTheme.bodyText)
-                .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder private var noteRow: some View {
+        if let text = Self.note(phase: store.phase, failure: store.failure, lang: lang) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(text)
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            // Drawn only when repeating the operation could actually answer
-            // differently AND the store still knows what to repeat. Everything
-            // else gets the message alone — see `EngineeringError.isRetryable`.
-            if store.canRetry {
-                Button(lang == .vi ? "Thử lại" : "Try again") {
-                    Task { await store.retry() }
+                // Drawn only when repeating the operation could actually answer
+                // differently AND the store still knows what to repeat. Everything
+                // else gets the message alone — see `EngineeringError.isRetryable`.
+                if store.canRetry {
+                    Button(lang == .vi ? "Thử lại" : "Try again") {
+                        Task { await store.retry() }
+                    }
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(hue)
+                    .buttonStyle(.plain)
                 }
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(hue)
-                .buttonStyle(.plain)
             }
         }
+    }
+
+    /// The single line of explanation under the summary, and the one place that
+    /// decides which line it is.
+    ///
+    /// Two paths reach a budget pause and they leave DIFFERENT state behind.
+    /// The stream ending with `budget_reached` sets only `phase`; answering a
+    /// card on an already-paused run comes back 409 and sets `failure` too. So
+    /// rendering off `failure` alone — which this bar did until now — meant the
+    /// commonest path, a run that simply exhausts its budget while the founder
+    /// watches, drew the "Paused at its limit" chip and NOTHING that said the
+    /// work was safe on the branch. Rendering off both would print the same
+    /// sentence twice on the other path. The phase decides first; the failure
+    /// fills in every case the phase has no opinion about.
+    ///
+    /// The phase also WINS over a failure, so a diff fetch that happened to
+    /// fail cannot displace the one sentence telling the founder their work
+    /// survived — the sentence that stops them re-running and paying twice.
+    static func note(phase: EngineeringPhase,
+                     failure: EngineeringError?,
+                     lang: AppLanguage) -> String? {
+        if case .budgetReached = phase { return message(for: .budgetReached, lang: lang) }
+        guard let failure else { return nil }
+        return message(for: failure, lang: lang)
     }
 
     /// Every refusal in the founder's words, and never blaming them for ours.

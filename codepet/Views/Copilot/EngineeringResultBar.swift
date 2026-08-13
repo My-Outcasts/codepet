@@ -51,6 +51,7 @@ struct EngineeringResultBar: View {
                     if stepsExpanded { stepList }
                     if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
                     noteRow
+                    approvalRows
                 }
                 .padding(14)
             }
@@ -226,6 +227,33 @@ struct EngineeringResultBar: View {
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - the agent's outstanding questions
+
+    /// Inside this card, not stacked beneath it.
+    ///
+    /// They were separate siblings in the transcript until Aug 13, which put
+    /// two different container idioms on top of each other: this card carries
+    /// `CodepetCard`'s opaque surface, shadow and `cardRadius` behind a 24pt
+    /// right gutter, while the ask drew its own tinted rect at radius 10 across
+    /// the FULL width. Visibly misaligned, and in a column this narrow the
+    /// second set of chrome costs roughly 40pt of vertical furniture to say
+    /// nothing — the run and its question are one event, not two.
+    ///
+    /// Salience is why they were separated, and that concern was right: an ask
+    /// the founder must ACT on cannot read as part of a summary they have
+    /// already skimmed. It is answered here by the tint and stroke against this
+    /// card's surface — the same device `changeSummary` uses — rather than by a
+    /// second border. Answering collapses the section and the card simply gets
+    /// shorter, where before a whole sibling card vanished from under the
+    /// cursor.
+    @ViewBuilder private var approvalRows: some View {
+        ForEach(store.approvals) { approval in
+            EngineeringApprovalCard(approval: approval) { allow, reason in
+                await store.answer(toolUseId: approval.id, allow: allow, reason: reason)
             }
         }
     }

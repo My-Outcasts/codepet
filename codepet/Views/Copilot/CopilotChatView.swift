@@ -238,22 +238,16 @@ struct CopilotChatView: View {
                         // the next run.
                         if let eng = companyStore.engineeringRunStore,
                            companyStore.engineeringRunAnchorId == m.id {
+                            // Permission asks render INSIDE the bar — see
+                            // `EngineeringResultBar.approvalRows`. They were
+                            // siblings here until Aug 13 and the two cards did
+                            // not line up.
                             EngineeringResultBar(
                                 store: eng,
                                 ask: m.text,
                                 onReview: { companyStore.openEngineeringReview() }
                             )
                             .id("engineering-run")
-                            // Below the bar, not inside it: the ask is a thing
-                            // to ACT on, and burying it in a summary the founder
-                            // has already read is how a run sits paused unnoticed.
-                            ForEach(eng.approvals) { approval in
-                                EngineeringApprovalCard(approval: approval) { allow, reason in
-                                    await eng.answer(toolUseId: approval.id,
-                                                     allow: allow, reason: reason)
-                                }
-                                .id("engineering-approval-\(approval.id)")
-                            }
                         }
                     }
                     // A run with no chat anchor (triggered from tasks/roadmap) falls to the bottom.

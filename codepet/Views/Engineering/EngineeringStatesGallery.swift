@@ -48,15 +48,9 @@ struct EngineeringStatesGallery: View {
                     EngineeringResultBar(store: working, ask: Self.ask, elapsed: 41, onReview: {})
                 }
 
-                section("2 · Needs you", "the run is stopped until this is answered") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        EngineeringResultBar(store: needsYou, ask: Self.ask, onReview: {})
-                        ForEach(needsYou.approvals) { approval in
-                            EngineeringApprovalCard(approval: approval) { allow, reason in
-                                await needsYou.answer(toolUseId: approval.id, allow: allow, reason: reason)
-                            }
-                        }
-                    }
+                section("2 · Needs you",
+                        "the run is stopped until this is answered; the ask is a tinted section INSIDE the card, not a second card") {
+                    EngineeringResultBar(store: needsYou, ask: Self.ask, onReview: {})
                 }
 
                 section("3 · Ready to review", "the only state with a diff to open") {

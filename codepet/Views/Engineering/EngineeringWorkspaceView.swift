@@ -10,9 +10,10 @@ import SwiftUI
 /// `companyStore.view`, so leaving review restores the founder's page because
 /// nothing ever navigated away from it.
 ///
-/// The Review pane itself is Task 11. Until it lands this is the frame plus an
-/// honest placeholder — deliberately not a spinner, which would imply something
-/// is loading that is in fact not built.
+/// The frame; `ReviewPane` is the content. Kept separate so the shell owns the
+/// header and the close affordance while the pane owns the diff and its own
+/// scrolling — a long diff scrolls inside the pane, and the way out of review
+/// never scrolls away with it.
 struct EngineeringWorkspaceView: View {
     let runId: String
     @ObservedObject var store: EngineeringRunStore
@@ -26,21 +27,7 @@ struct EngineeringWorkspaceView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            // Task 11 replaces this with ReviewPane. The placeholder states what
-            // it is rather than pretending to load: a founder who sees a spinner
-            // that never resolves learns to distrust every spinner in the app.
-            VStack(alignment: .leading, spacing: 8) {
-                Text(lang == .vi ? "Khung xem lại" : "Review pane")
-                    .font(CodepetTheme.inter(13, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-                Text(lang == .vi
-                     ? "Phần diff sẽ hiện ở đây. Chưa dựng xong."
-                     : "The diff will appear here. Not built yet.")
-                    .font(CodepetTheme.inter(12))
-                    .foregroundColor(CodepetTheme.mutedText)
-            }
-            .padding(20)
-            Spacer(minLength: 0)
+            ReviewPane(store: store, onScope: { await store.loadDiff(scope: $0) })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(CodepetTheme.pageBackground)
@@ -51,12 +38,6 @@ struct EngineeringWorkspaceView: View {
             Text(lang == .vi ? "XEM LẠI" : "REVIEW")
                 .font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
                 .foregroundColor(hue)
-
-            if let diff = store.diff {
-                Text("+\(diff.additions) −\(diff.deletions)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(CodepetTheme.mutedText)
-            }
 
             Spacer(minLength: 8)
 

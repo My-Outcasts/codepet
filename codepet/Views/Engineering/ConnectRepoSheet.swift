@@ -140,15 +140,38 @@ struct ConnectRepoSheet: View {
         .opacity(isBusy && busyFullName != repo.fullName ? 0.4 : 1)
     }
 
+    /// The button plus the line that says what it makes.
+    ///
+    /// The label alone reads as SAFE — "a new repo" cannot be misread as
+    /// acting on the repos listed above it — but not as KNOWN: named what,
+    /// public or private, in whose account? The hesitation to design against
+    /// here is not "will this break something" but "what am I about to find in
+    /// my namespace." The backend answers all three (`private: true`,
+    /// `auto_init: true`, created through `/user/repos` so it lands in the
+    /// founder's own account) and none of it was on screen. The sheet's
+    /// subtitle answers the fear for the CONNECT path and says nothing about
+    /// this one.
+    ///
+    /// No name is shown: `engCreateRepo` derives it with `repoSlug` from the
+    /// company, and reproducing that slug here would be a second
+    /// implementation free to drift from the one that actually names the repo.
+    /// Better to promise less and be right.
     @ViewBuilder private func createButton(secondary: Bool) -> some View {
-        Button(creating ? Self.creatingText(lang: lang) : Self.createLabel(lang: lang)) {
-            Task { await create() }
+        VStack(alignment: .leading, spacing: 6) {
+            Button(creating ? Self.creatingText(lang: lang) : Self.createLabel(lang: lang)) {
+                Task { await create() }
+            }
+            .buttonStyle(CodepetPillButtonStyle(
+                fill: secondary ? CodepetTheme.mutedText.opacity(0.15) : CodepetTheme.accentPurple,
+                foreground: secondary ? CodepetTheme.primaryText : .white
+            ))
+            .disabled(isBusy)
+
+            Text(Self.createNote(lang: lang))
+                .font(CodepetTheme.inter(11))
+                .foregroundColor(CodepetTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(CodepetPillButtonStyle(
-            fill: secondary ? CodepetTheme.mutedText.opacity(0.15) : CodepetTheme.accentPurple,
-            foreground: secondary ? CodepetTheme.primaryText : .white
-        ))
-        .disabled(isBusy)
     }
 
     // MARK: - chrome
@@ -276,6 +299,16 @@ struct ConnectRepoSheet: View {
     /// that this makes something NEW rather than touching what they have.
     static func createLabel(lang: AppLanguage) -> String {
         lang == .vi ? "Tạo repo mới cho tôi" : "Create a new repo for me"
+    }
+
+    /// Three facts, all of them true of what `engCreateRepo` actually does:
+    /// `private: true`, `auto_init: true`, and `/user/repos` — the founder's
+    /// own account, not an org of ours. Deliberately no repo NAME, because
+    /// the backend derives it and a client-side guess could disagree.
+    static func createNote(lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Tạo một repo riêng tư trong tài khoản GitHub của bạn, có sẵn một commit đầu tiên."
+            : "Creates a private repo in your GitHub account, with one commit to start from."
     }
 
     static func creatingText(lang: AppLanguage) -> String {

@@ -71,6 +71,31 @@ final class ConnectRepoStateTests: XCTestCase {
         XCTAssertTrue(en.contains("for me") || en.contains("for you"), "does not say who it is for: \(en)")
     }
 
+    func test_theCreateNoteSaysWhatWillExistAfterwards() {
+        // "Create a new repo for me" reads as SAFE — nothing about it suggests
+        // touching the repos listed above it — but it does not read as KNOWN.
+        // Named what, public or private, in whose account? The hesitation this
+        // answers is "what am I about to find in my namespace," and all three
+        // facts are true of `engCreateRepo`: `private: true`, `auto_init:
+        // true`, and `/user/repos`.
+        let en = ConnectRepoSheet.createNote(lang: .en).lowercased()
+        XCTAssertTrue(en.contains("private"), "does not say the repo is private: \(en)")
+        XCTAssertTrue(en.contains("your github") || en.contains("your account"),
+                      "does not say whose account it lands in: \(en)")
+        XCTAssertTrue(en.contains("commit"), "does not say it arrives non-empty: \(en)")
+    }
+
+    func test_theCreateNotePromisesNoNameItCannotKeep() {
+        // `engCreateRepo` derives the name with `repoSlug` from the company.
+        // Reproducing that here would be a second implementation free to
+        // drift from the one that actually names the repo, so the note
+        // promises less and stays right. If a name ever IS shown, it must come
+        // from the backend's response, not from a client-side guess.
+        let en = ConnectRepoSheet.createNote(lang: .en)
+        XCTAssertFalse(en.contains("`"), "the note appears to name the repo: \(en)")
+        XCTAssertFalse(en.lowercased().contains("called"), "the note appears to name the repo: \(en)")
+    }
+
     func test_theSubtitleSaysMainIsNeverTouched() {
         // The fear this sheet has to answer before a founder hands over a repo.
         let en = ConnectRepoSheet.subtitle(lang: .en).lowercased()
@@ -84,6 +109,7 @@ final class ConnectRepoStateTests: XCTestCase {
             (ConnectRepoSheet.needsGitHubText(lang: .en), ConnectRepoSheet.needsGitHubText(lang: .vi)),
             (ConnectRepoSheet.noReposText(lang: .en), ConnectRepoSheet.noReposText(lang: .vi)),
             (ConnectRepoSheet.createLabel(lang: .en), ConnectRepoSheet.createLabel(lang: .vi)),
+            (ConnectRepoSheet.createNote(lang: .en), ConnectRepoSheet.createNote(lang: .vi)),
             (ConnectRepoSheet.connectGitHubLabel(lang: .en), ConnectRepoSheet.connectGitHubLabel(lang: .vi)),
             (ConnectRepoSheet.notNowLabel(lang: .en), ConnectRepoSheet.notNowLabel(lang: .vi))
         ]

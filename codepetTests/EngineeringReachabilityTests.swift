@@ -111,6 +111,21 @@ final class EngineeringReachabilityTests: XCTestCase {
                        "no control calls openEngineeringReview() — the pane can render but never opens")
     }
 
+    func testTheConnectRepoSheetIsPresentedSomewhere() {
+        // Without this the refusal "connect one first" is a true statement
+        // with nothing anywhere that connects one — the exact dead end the
+        // spec's §7 forbids for this state.
+        XCTAssertFalse(callers(of: "ConnectRepoSheet(", definedIn: "ConnectRepoSheet.swift").isEmpty,
+                       "nothing presents the connect-or-create sheet")
+    }
+
+    func testTheRefusalCanReopenTheSheet() {
+        // The sheet shows once. After "Not now", the control on the refusal is
+        // the only way back; if nothing calls this, closing it is permanent.
+        XCTAssertFalse(callers(of: "promptForEngineeringRepo()", definedIn: "CompanyStore.swift").isEmpty,
+                       "no control reopens the connect sheet after it is dismissed")
+    }
+
     func testTheEngineeringModeHasASendPath() {
         XCTAssertFalse(callers(of: "startEngineeringRun(", definedIn: "CompanyStore.swift").isEmpty,
                        "no surface starts an engineering run")

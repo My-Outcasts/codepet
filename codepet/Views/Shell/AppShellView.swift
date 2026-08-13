@@ -120,6 +120,19 @@ struct AppShellView: View {
                     .transition(.opacity)
             }
         }
+        // A real `.sheet`, unlike Settings: this one is a question the founder
+        // must answer before the ask they typed can go anywhere, and it has a
+        // "Not now" that puts them back with the refusal and a way to reopen.
+        .sheet(isPresented: Binding(
+            get: { companyStore.engineeringRepoPrompt != nil },
+            set: { if !$0 { companyStore.engineeringRepoPrompt = nil } }
+        )) {
+            ConnectRepoSheet(
+                repos: EngineeringRepoClient(),
+                onLinked: { _ in companyStore.engineeringRepoLinked() },
+                onCancel: { companyStore.engineeringRepoPrompt = nil }
+            )
+        }
     }
 
     /// The draggable divider between the content and the copilot: hover shows the

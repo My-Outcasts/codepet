@@ -54,6 +54,15 @@ enum EngineeringError: Error, Equatable {
     /// this line they are told to connect a repo they connected days ago — a
     /// wrong instruction they can act on, which is worse than no message.
     case budgetReached
+    /// 422 `no_default_branch` — the repo the founder just picked has no
+    /// commits, so there is no branch to build from and `engLinkRepo` writes
+    /// nothing rather than a link `loadRepo` would reject.
+    ///
+    /// Its own case because it is the one refusal in the connect flow the
+    /// founder caused and can fix — pick another repo, or let Codepet create
+    /// one. Folded into `.unknown` it reads "Something went wrong. Try
+    /// again," and trying again picks the same empty repo.
+    case repoUnusable
     /// 500 — a deploy problem. Ours, never the founder's fault.
     case misconfigured
     /// 503 — retryable.
@@ -66,6 +75,7 @@ enum EngineeringError: Error, Equatable {
         case (409, "budget_reached"): return .budgetReached
         case (409, "github_not_connected"): return .gitHubNotConnected
         case (409, _): return .noRepoLinked
+        case (422, _): return .repoUnusable
         case (500, _): return .misconfigured
         case (503, _): return .unavailable
         default: return .unknown(status)

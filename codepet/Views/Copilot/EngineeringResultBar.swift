@@ -50,7 +50,8 @@ struct EngineeringResultBar: View {
                     workedRow
                     if stepsExpanded { stepList }
                     if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
-                    if let failure = store.failure { failureRow(failure) }
+                    noteRow
+                    approvalRows
                 }
                 .padding(14)
             }
@@ -230,13 +231,80 @@ struct EngineeringResultBar: View {
         }
     }
 
-    // MARK: - failure
+    // MARK: - the agent's outstanding questions
 
-    @ViewBuilder private func failureRow(_ failure: EngineeringError) -> some View {
-        Text(Self.message(for: failure, lang: lang))
-            .font(CodepetTheme.inter(12))
-            .foregroundColor(CodepetTheme.bodyText)
-            .fixedSize(horizontal: false, vertical: true)
+    /// Inside this card, not stacked beneath it.
+    ///
+    /// They were separate siblings in the transcript until Aug 13, which put
+    /// two different container idioms on top of each other: this card carries
+    /// `CodepetCard`'s opaque surface, shadow and `cardRadius` behind a 24pt
+    /// right gutter, while the ask drew its own tinted rect at radius 10 across
+    /// the FULL width. Visibly misaligned, and in a column this narrow the
+    /// second set of chrome costs roughly 40pt of vertical furniture to say
+    /// nothing — the run and its question are one event, not two.
+    ///
+    /// Salience is why they were separated, and that concern was right: an ask
+    /// the founder must ACT on cannot read as part of a summary they have
+    /// already skimmed. It is answered here by the tint and stroke against this
+    /// card's surface — the same device `changeSummary` uses — rather than by a
+    /// second border. Answering collapses the section and the card simply gets
+    /// shorter, where before a whole sibling card vanished from under the
+    /// cursor.
+    @ViewBuilder private var approvalRows: some View {
+        ForEach(store.approvals) { approval in
+            EngineeringApprovalCard(approval: approval) { allow, reason in
+                await store.answer(toolUseId: approval.id, allow: allow, reason: reason)
+            }
+        }
+    }
+
+    // MARK: - the one explanatory line
+
+    @ViewBuilder private var noteRow: some View {
+        if let text = Self.note(phase: store.phase, failure: store.failure, lang: lang) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(text)
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Drawn only when repeating the operation could actually answer
+                // differently AND the store still knows what to repeat. Everything
+                // else gets the message alone — see `EngineeringError.isRetryable`.
+                if store.canRetry {
+                    Button(lang == .vi ? "Thử lại" : "Try again") {
+                        Task { await store.retry() }
+                    }
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(hue)
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// The single line of explanation under the summary, and the one place that
+    /// decides which line it is.
+    ///
+    /// Two paths reach a budget pause and they leave DIFFERENT state behind.
+    /// The stream ending with `budget_reached` sets only `phase`; answering a
+    /// card on an already-paused run comes back 409 and sets `failure` too. So
+    /// rendering off `failure` alone — which this bar did until now — meant the
+    /// commonest path, a run that simply exhausts its budget while the founder
+    /// watches, drew the "Paused at its limit" chip and NOTHING that said the
+    /// work was safe on the branch. Rendering off both would print the same
+    /// sentence twice on the other path. The phase decides first; the failure
+    /// fills in every case the phase has no opinion about.
+    ///
+    /// The phase also WINS over a failure, so a diff fetch that happened to
+    /// fail cannot displace the one sentence telling the founder their work
+    /// survived — the sentence that stops them re-running and paying twice.
+    static func note(phase: EngineeringPhase,
+                     failure: EngineeringError?,
+                     lang: AppLanguage) -> String? {
+        if case .budgetReached = phase { return message(for: .budgetReached, lang: lang) }
+        guard let failure else { return nil }
+        return message(for: failure, lang: lang)
     }
 
     /// Every refusal in the founder's words, and never blaming them for ours.
@@ -259,9 +327,22 @@ struct EngineeringResultBar: View {
                 ? "Cần kết nối GitHub trước khi chạy."
                 : "Connect GitHub before running this."
         case .noCredits:
+            // The balance is definitionally 0 here — `engStartRun` refuses on
+            // `credits <= 0` — so printing it would say "you have 0", which
+            // the founder already knows. The number worth showing is what a
+            // run needs, because that is the one they can act on.
             return lang == .vi
-                ? "Hết credit cho lần chạy này."
-                : "You're out of credits for a run."
+                ? "Hết credit rồi. Một lần chạy cần tối đa \(EngineeringRun.creditsPerRun) credit."
+                : "You're out of credits. A run needs up to \(EngineeringRun.creditsPerRun)."
+        case .budgetReached:
+            // Paused, not failed, and the work is intact — saying otherwise
+            // makes a founder start over and pay twice. No "Resume" control:
+            // raising a session's budget resumes it on Anthropic's side, but
+            // Codepet ships no endpoint that does it, and a dead button was
+            // already removed from this codebase once (`6982df0`).
+            return lang == .vi
+                ? "Lần chạy này đã dừng ở hạn mức. Phần đã làm vẫn còn nguyên trên nhánh — mở phần xem lại để xem."
+                : "This run stopped at its spend limit. The work so far is intact on the branch — open Review to see it."
         case .misconfigured:
             // Ours. Never worded as something the founder did or can fix.
             return lang == .vi

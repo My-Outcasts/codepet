@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// The agent asking permission, inline in the transcript.
+/// The agent asking permission, inline in the transcript — rendered as a
+/// section INSIDE `EngineeringResultBar`, not as a card beside it. Its tint
+/// and stroke are what make it read as an ask rather than as more summary;
+/// see `EngineeringResultBar.approvalRows` for why a second card was wrong.
 ///
 /// NOT a sheet, NOT an alert, NOT a `confirmationDialog`. Three reasons, in
 /// order of how much they cost:

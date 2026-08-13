@@ -169,6 +169,31 @@ struct AppShellView: View {
     }
 
     @ViewBuilder private var content: some View {
+        // Review takes over the content area WITHOUT touching `companyStore.view`
+        // — see `ShellLayout.contentSurface`. That is what makes closing it free:
+        // the destination below was never navigated away from, so there is no
+        // previous page to remember and restore.
+        switch ShellLayout.contentSurface(destination: companyStore.view,
+                                          reviewingRunId: companyStore.engineeringReviewRunId) {
+        case .engineeringReview(let runId):
+            if let store = companyStore.engineeringRunStore {
+                EngineeringWorkspaceView(
+                    runId: runId,
+                    store: store,
+                    onClose: { companyStore.engineeringReviewRunId = nil }
+                )
+            } else {
+                // Reviewing an id with no store behind it cannot render anything.
+                // Clearing the flag is the honest recovery: it puts the founder
+                // back on their page rather than on a blank pane.
+                destinationContent.onAppear { companyStore.engineeringReviewRunId = nil }
+            }
+        case .destination:
+            destinationContent
+        }
+    }
+
+    @ViewBuilder private var destinationContent: some View {
         if companyStore.view == .roadmap {
             RoadmapView()
         } else if companyStore.view == .company {

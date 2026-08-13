@@ -22,6 +22,40 @@ final class MockEngineeringRunner: EngineeringRunning {
         case failsAtBudget
     }
 
+    /// The dev flag that picks the ending, read once per run.
+    static let endingKey = "CODEPET_MOCK_ENG_ENDING"
+
+    /// Which ending a mock run in the RUNNING APP takes.
+    ///
+    ///   open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES \
+    ///                                  -CODEPET_MOCK_ENG_ENDING budget
+    ///
+    /// The launch arg, NOT `defaults write` — that writes into a stale
+    /// sandbox container this app no longer reads, and fails silently while
+    /// `defaults read` reports success. See `MockChat` for the measurement.
+    /// This doc comment recommended `defaults write` for about two hours on
+    /// Aug 13 and was wrong the whole time.
+    ///
+    /// This exists because `.finishes` was the only ending the app could reach:
+    /// the two endings worth looking at — a run that pauses a second time, and
+    /// a run that stops at its spend cap — were reachable only from the Xcode
+    /// preview canvas. Copy does not get judged in a canvas; it gets judged in
+    /// the app, at the size and beside the chrome a founder sees it in.
+    ///
+    /// An unset OR unrecognised value is `.finishes`. Deliberately not a
+    /// `precondition`: a typo in a dev flag must fail back to the ordinary
+    /// demo rather than crash the app or silently show a different one.
+    static func endingFromDefaults(_ defaults: UserDefaults = .standard) -> Ending {
+        let raw = defaults.string(forKey: endingKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch raw {
+        case "budget", "failsatbudget": return .failsAtBudget
+        case "pauses", "pausesagain": return .pausesAgain
+        default: return .finishes
+        }
+    }
+
     private let ending: Ending
     private let stepDelay: Duration
     private var onFrame: ((EngineeringFrame) -> Void)?

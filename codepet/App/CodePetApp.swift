@@ -44,7 +44,22 @@ struct CodePetApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // `-CODEPET_MOCK_ENG_GALLERY YES` replaces the whole app with the
+            // engineering state gallery. It takes over the root rather than
+            // hiding behind a menu item so it needs no account, no company and
+            // no Firestore to reach — the states are the point, not the route
+            // to them. DEBUG-only; a release build has no branch here at all.
+            Group {
+                #if DEBUG
+                if EngineeringStatesGallery.enabled {
+                    EngineeringStatesGallery()
+                } else {
+                    ContentView()
+                }
+                #else
+                ContentView()
+                #endif
+            }
                 .environment(\.font, CodepetTheme.body(13))
                 .environment(\.uiLanguage, appState.uiLanguage)
                 .environmentObject(appState)

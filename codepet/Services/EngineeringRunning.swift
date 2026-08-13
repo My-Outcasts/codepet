@@ -46,6 +46,14 @@ enum EngineeringError: Error, Equatable {
     case gitHubNotConnected
     /// 402 — out of credits.
     case noCredits
+    /// 409 `budget_reached` — the run stopped at its spend cap.
+    ///
+    /// Its own case because the fallback below folds every unrecognised 409
+    /// into `.noRepoLinked`, and `engSendTurn.ts:118` returns exactly this one
+    /// when the founder answers a permission card on a paused run. Without
+    /// this line they are told to connect a repo they connected days ago — a
+    /// wrong instruction they can act on, which is worse than no message.
+    case budgetReached
     /// 500 — a deploy problem. Ours, never the founder's fault.
     case misconfigured
     /// 503 — retryable.
@@ -55,12 +63,24 @@ enum EngineeringError: Error, Equatable {
     static func from(status: Int, code: String?) -> EngineeringError {
         switch (status, code) {
         case (402, _): return .noCredits
+        case (409, "budget_reached"): return .budgetReached
         case (409, "github_not_connected"): return .gitHubNotConnected
         case (409, _): return .noRepoLinked
         case (500, _): return .misconfigured
         case (503, _): return .unavailable
         default: return .unknown(status)
         }
+    }
+
+    /// Whether offering a "try again" control is honest.
+    ///
+    /// Only `.unavailable` is. Every other refusal needs the founder or us to
+    /// change something first, and a retry button that re-runs the same
+    /// refusal teaches them the button is decoration — after which they stop
+    /// believing the one place it works.
+    var isRetryable: Bool {
+        if case .unavailable = self { return true }
+        return false
     }
 }
 

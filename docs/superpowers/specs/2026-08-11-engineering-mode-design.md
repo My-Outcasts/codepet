@@ -283,7 +283,13 @@ That is the same shape as the go/no-go the launch plan already carries for the b
 access; volume is untested. Evidence from the spike, so nobody re-runs it:
 
 - The pinned `@anthropic-ai/sdk` already exposes `client.beta.{agents, sessions,
-  environments, webhooks}` — **no SDK upgrade was needed**, `package.json` untouched.
+  environments, webhooks}`, which is why the spike reported **"no SDK upgrade was
+  needed, `package.json` untouched."** That was true of the spike and **false of
+  the build.** `budget`, `usage.list_cost` and `budget_reached` do not exist below
+  `@anthropic-ai/sdk` **0.116.0** — an `as never` cast was hiding three missing
+  fields, and the spend cap cannot be enforced without them. The floor is 0.116.0.
+  Do not trust the older sentence; it is kept here only so its correction is
+  visible to the next reader.
 - A cloud environment, an agent on `claude-opus-5`, and a session with a private
   GitHub repo mounted at `/workspace/repo` all created successfully.
 - The event stream delivered `session.status_running` → `span.model_request_start`

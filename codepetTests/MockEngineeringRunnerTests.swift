@@ -138,6 +138,53 @@ final class MockEngineeringRunnerTests: XCTestCase {
         XCTAssertEqual(EngineeringRun.phase(fromStopReason: reason), .budgetReached)
     }
 
+    // MARK: - picking the ending from the dev flag
+
+    /// A scratch domain, so a test can never leave the real app parked on a
+    /// non-default ending — a stray `CODEPET_MOCK_ENG_ENDING` would make every
+    /// later demo stop at its spend cap with nothing saying why.
+    private func scratchDefaults(_ name: String = #function) -> UserDefaults {
+        let suite = "codepet.tests.\(name)"
+        UserDefaults().removePersistentDomain(forName: suite)
+        return UserDefaults(suiteName: suite)!
+    }
+
+    func testTheEndingDefaultsToTheOrdinaryRunWhenTheFlagIsUnset() {
+        XCTAssertEqual(MockEngineeringRunner.endingFromDefaults(scratchDefaults()), .finishes)
+    }
+
+    func testTheFlagSelectsTheBudgetEnding() {
+        // The reason this flag exists: the budget-paused state was reachable
+        // only from the preview canvas, and copy is judged in the app.
+        let d = scratchDefaults()
+        d.set("budget", forKey: MockEngineeringRunner.endingKey)
+        XCTAssertEqual(MockEngineeringRunner.endingFromDefaults(d), .failsAtBudget)
+    }
+
+    func testTheFlagIsForgivingAboutCaseAndStraySpace() {
+        // It gets typed by hand into `defaults write`, and a value that is
+        // right-but-shouty failing silently back to the default would look
+        // exactly like the flag not working at all.
+        let d = scratchDefaults()
+        d.set("  BUDGET ", forKey: MockEngineeringRunner.endingKey)
+        XCTAssertEqual(MockEngineeringRunner.endingFromDefaults(d), .failsAtBudget)
+    }
+
+    func testTheFlagSelectsTheSecondPause() {
+        let d = scratchDefaults()
+        d.set("pauses", forKey: MockEngineeringRunner.endingKey)
+        XCTAssertEqual(MockEngineeringRunner.endingFromDefaults(d), .pausesAgain)
+    }
+
+    func testATypoFallsBackToTheOrdinaryRunRatherThanSomeOtherOne() {
+        // Failing back to `.finishes` is the only safe direction: a misspelled
+        // flag that silently produced a DIFFERENT ending would have someone
+        // review the wrong state and believe they had seen the right one.
+        let d = scratchDefaults()
+        d.set("budgett", forKey: MockEngineeringRunner.endingKey)
+        XCTAssertEqual(MockEngineeringRunner.endingFromDefaults(d), .finishes)
+    }
+
     func testAttachReplaysHistorySoTheStoreMustTolerateRepeats() async throws {
         // A real reattach replays what already happened. Any consumer that
         // cannot dedupe will show two of everything.

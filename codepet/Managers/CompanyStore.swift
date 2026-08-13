@@ -16,6 +16,20 @@ final class CompanyStore: ObservableObject {
     /// overlay rather than an `AppView`, so opening it never changes `view` and closing
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
+    /// The engineering run whose diff is under review, or `nil`.
+    ///
+    /// Deliberately NOT an `AppView` case, for the same reason `settingsSection`
+    /// is not one: it does not change `view`, so closing it needs no route to
+    /// restore. `ShellLayout.contentSurface` turns this plus the destination into
+    /// which surface the content area renders.
+    @Published var engineeringReviewRunId: String?
+    /// The store driving the engineering run the dock is showing, or `nil` when no
+    /// run is in flight.
+    ///
+    /// Held here rather than constructed by a view so one run survives a view
+    /// rebuild, and injected rather than created so the whole flow is drivable
+    /// from `MockEngineeringRunner` with no credits and no network.
+    @Published var engineeringRunStore: EngineeringRunStore?
     @Published private(set) var company: CompanyState = .empty
 
     #if DEBUG
@@ -46,6 +60,14 @@ final class CompanyStore: ObservableObject {
     /// inline right after that ask. `nil` for runs triggered outside chat (tasks/roadmap):
     /// those fall back to the transcript bottom.
     @Published var codingRunAnchorId: String?
+
+    /// The chat message an engineering run anchors to, so its result bar and
+    /// approval cards render inline right after that ask.
+    ///
+    /// Always set, unlike `codingRunAnchorId` — an engineering run can only be
+    /// started from the composer, so there is no anchorless case to fall back
+    /// to the transcript bottom for.
+    @Published var engineeringRunAnchorId: String?
 
     /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
     /// The `-CODEPET_MOCK_CHAT` launch arg (via `MockChat.enabled`, same flag chat/task
@@ -617,6 +639,82 @@ final class CompanyStore: ObservableObject {
         codingRun.propose(ask: trimmed, plannedFiles: 2, needsBash: false, link: activeProjectLink)
     }
 
+    // MARK: - Engineering runs (the cloud agent)
+
+    /// Re-publishes the nested engineering store's changes, same reason
+    /// `codingRunBag` exists: a view observing only `CompanyStore` would not
+    /// re-render as frames arrive, and the result bar would visibly stick.
+    private var engineeringRunBag: AnyCancellable?
+
+    /// Start an engineering run for `ask`, and put its store on the dock.
+    ///
+    /// Mirrors `startCodeRun` — the founder's message lands in the transcript
+    /// first, so the ask is visible whether or not the run ever starts.
+    ///
+    /// The runner is INJECTED off the same `CODEPET_MOCK_CHAT` flag `codingRun`
+    /// uses, which is what makes the whole flow walkable with no Anthropic
+    /// credits, no repo and no network. That is not only a test affordance right
+    /// now: it is the only way to see this feature at all until the account has
+    /// balance.
+    func startEngineeringRun(ask: String) {
+        let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let msg = CopilotMessage(role: .me, text: trimmed)
+        chatMessages.append(msg)
+        engineeringRunAnchorId = msg.id
+
+        #if DEBUG
+        let mock = MockChat.enabled
+        #else
+        let mock = false
+        #endif
+        // `CODEPET_MOCK_ENG_ENDING` picks how the scripted run ends, because
+        // the default ending finishes cleanly and the states worth reviewing
+        // (a second pause, a stop at the spend cap) were otherwise reachable
+        // only from the Xcode preview canvas.
+        let runner: EngineeringRunning = mock
+            ? MockEngineeringRunner(ending: MockEngineeringRunner.endingFromDefaults(),
+                                    stepDelay: .milliseconds(700))
+            : EngineeringClient()
+        let store = EngineeringRunStore(runner: runner)
+        engineeringRunBag = store.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        engineeringRunStore = store
+        // A fresh run closes any pane left open on the previous one — reviewing a
+        // diff while a different run streams behind it is two runs' state on one
+        // screen with nothing saying which is which.
+        engineeringReviewRunId = nil
+        Task { await store.start(ask: trimmed) }
+    }
+
+    /// Open the Review pane on the run currently in flight.
+    ///
+    /// Reads the id off the store rather than taking one, so the pane can never
+    /// be opened on a run this store is not driving.
+    func openEngineeringReview() {
+        guard let runId = engineeringRunStore?.runId, !runId.isEmpty else { return }
+        engineeringReviewRunId = runId
+    }
+
+    /// Drop an engineering run when the conversation it belongs to goes away.
+    ///
+    /// Same rule `codingRunAnchorId`/`codingRun.cancel()` already follow at all
+    /// four of these sites, for the same reason: a bar anchored in the outgoing
+    /// thread would otherwise render against a message the incoming thread does
+    /// not contain, and the Review pane would stay open on a run the founder
+    /// can no longer see the ask for.
+    ///
+    /// The run itself keeps going on Anthropic's side and its branch survives —
+    /// this drops Codepet's handle on it, which is all a client can honestly
+    /// do while no endpoint cancels a session.
+    private func clearEngineeringRun() {
+        engineeringRunAnchorId = nil
+        engineeringRunStore = nil
+        engineeringReviewRunId = nil
+        engineeringRunBag = nil
+    }
+
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
 
     /// Flush the working buffer (`chatMessages`) into its `ChatThread` entry —
@@ -662,6 +760,7 @@ final class CompanyStore: ObservableObject {
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
+        clearEngineeringRun()
     }
 
     /// Switch the working buffer to a different thread: flush the outgoing one,
@@ -680,6 +779,7 @@ final class CompanyStore: ObservableObject {
         // the incoming one — clear it (no-op while running).
         codingRunAnchorId = nil
         codingRun.cancel()
+        clearEngineeringRun()
     }
 
     /// Rename a thread. A blank/whitespace-only title clears back to nil — the
@@ -713,6 +813,7 @@ final class CompanyStore: ObservableObject {
             // the bottom of the fallback one — clear it (no-op while running).
             codingRunAnchorId = nil
             codingRun.cancel()
+            clearEngineeringRun()
         } else {
             chatMessages = []
             newChat()   // newChat() already clears codingRunAnchorId/codingRun
@@ -2324,6 +2425,7 @@ final class CompanyStore: ObservableObject {
         activeProjectLink = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
+        clearEngineeringRun()
     }
 }
 

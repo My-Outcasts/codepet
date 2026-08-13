@@ -16,12 +16,29 @@ enum EngineeringPhase: Equatable {
     case awaitingApproval
     /// Finished a turn. There is a diff to read.
     case reviewing
-    /// Paused at its spend cap. Resumable — raising the budget continues the
-    /// work in place, which is why this is NOT `.failed`. Telling a founder
-    /// their run failed when it is sitting there intact makes them start over
-    /// and pay twice.
+    /// Paused at its spend cap, which is why this is NOT `.failed`: the work
+    /// is intact on the branch, and telling a founder their run failed when it
+    /// is sitting there makes them start over and pay twice.
+    ///
+    /// Resumable in principle only. Raising a session's budget continues it in
+    /// place on Anthropic's side, but Codepet exposes no endpoint that raises
+    /// one — so there is nothing to hang a "Resume" control on today, and the
+    /// copy says the work is safe rather than offering a button that lies.
     case budgetReached
     case failed(String)
+}
+
+extension EngineeringRun {
+    /// The most credits one run can spend, mirroring `DEFAULT_RUN_CREDITS` in
+    /// `functions/src/engineering/engBudget.ts` (40 credits = $2.00 at
+    /// `CREDIT_CENTS = 5`).
+    ///
+    /// Duplicated across the wire rather than sent in the 402 body, because
+    /// it is a product constant and not runtime state. Being honest about the
+    /// cost: NO test can catch this drifting from the backend's value — they
+    /// are in different languages and different test runners. If the cap
+    /// changes there, it has to be changed here by hand.
+    static let creditsPerRun = 40
 }
 
 /// Which base the Review pane's diff is taken against.

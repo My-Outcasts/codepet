@@ -233,10 +233,24 @@ struct EngineeringResultBar: View {
     // MARK: - failure
 
     @ViewBuilder private func failureRow(_ failure: EngineeringError) -> some View {
-        Text(Self.message(for: failure, lang: lang))
-            .font(CodepetTheme.inter(12))
-            .foregroundColor(CodepetTheme.bodyText)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Self.message(for: failure, lang: lang))
+                .font(CodepetTheme.inter(12))
+                .foregroundColor(CodepetTheme.bodyText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Drawn only when repeating the operation could actually answer
+            // differently AND the store still knows what to repeat. Everything
+            // else gets the message alone — see `EngineeringError.isRetryable`.
+            if store.canRetry {
+                Button(lang == .vi ? "Thử lại" : "Try again") {
+                    Task { await store.retry() }
+                }
+                .font(CodepetTheme.inter(12, weight: .semibold))
+                .foregroundColor(hue)
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     /// Every refusal in the founder's words, and never blaming them for ours.
@@ -259,9 +273,22 @@ struct EngineeringResultBar: View {
                 ? "Cần kết nối GitHub trước khi chạy."
                 : "Connect GitHub before running this."
         case .noCredits:
+            // The balance is definitionally 0 here — `engStartRun` refuses on
+            // `credits <= 0` — so printing it would say "you have 0", which
+            // the founder already knows. The number worth showing is what a
+            // run needs, because that is the one they can act on.
             return lang == .vi
-                ? "Hết credit cho lần chạy này."
-                : "You're out of credits for a run."
+                ? "Hết credit rồi. Một lần chạy cần tối đa \(EngineeringRun.creditsPerRun) credit."
+                : "You're out of credits. A run needs up to \(EngineeringRun.creditsPerRun)."
+        case .budgetReached:
+            // Paused, not failed, and the work is intact — saying otherwise
+            // makes a founder start over and pay twice. No "Resume" control:
+            // raising a session's budget resumes it on Anthropic's side, but
+            // Codepet ships no endpoint that does it, and a dead button was
+            // already removed from this codebase once (`6982df0`).
+            return lang == .vi
+                ? "Lần chạy này đã dừng ở hạn mức. Phần đã làm vẫn còn nguyên trên nhánh — mở phần xem lại để xem."
+                : "This run stopped at its spend limit. The work so far is intact on the branch — open Review to see it."
         case .misconfigured:
             // Ours. Never worded as something the founder did or can fix.
             return lang == .vi

@@ -32,6 +32,19 @@ final class EngineeringRunStore: ObservableObject {
     /// reappears once answered reads as the agent asking twice.
     private var answered: Set<String> = []
 
+    /// What to do again, captured at the moment a failure was recorded.
+    ///
+    /// A retry control is only honest if it repeats the thing that actually
+    /// failed. `start`, answering a permission card, and fetching a diff are
+    /// three different retries — one shared "try again" that always re-runs
+    /// the ask would re-spend a founder's credits to fix a diff that merely
+    /// failed to load, on work that already succeeded.
+    private var retryAction: (() async -> Void)?
+
+    /// Whether to draw a retry control: there has to be something to repeat
+    /// AND repeating it has to be capable of a different answer.
+    var canRetry: Bool { failure?.isRetryable == true && retryAction != nil }
+
     init(runner: EngineeringRunning) {
         self.runner = runner
     }
@@ -41,17 +54,20 @@ final class EngineeringRunStore: ObservableObject {
     func start(ask: String) async {
         phase = .preparing
         failure = nil
+        retryAction = nil
         do {
             runId = try await runner.start(ask: ask) { [weak self] frame in
                 Task { @MainActor in self?.handle(frame) }
             }
             if case .preparing = phase { phase = .running }
         } catch let error as EngineeringError {
-            failure = error
-            phase = .failed(String(describing: error))
+            record(error, phase: .failed(String(describing: error))) { [weak self] in
+                await self?.start(ask: ask)
+            }
         } catch {
-            failure = .unknown(0)
-            phase = .failed("unknown")
+            record(.unknown(0), phase: .failed("unknown")) { [weak self] in
+                await self?.start(ask: ask)
+            }
         }
     }
 
@@ -66,21 +82,75 @@ final class EngineeringRunStore: ObservableObject {
         let turn: EngineeringTurn = allow
             ? .approve(toolUseId: toolUseId)
             : .deny(toolUseId: toolUseId, reason: reason)
-        try? await runner.send(runId: runId, turn: turn)
+        do {
+            try await runner.send(runId: runId, turn: turn)
+        } catch let error as EngineeringError {
+            // This used to be `try?`. A run paused at its budget answers this
+            // call with 409 `budget_reached`, so the swallow meant the card
+            // vanished, the run sat paused, and NOTHING said why — the founder
+            // is left watching a spinner that will never move.
+            record(error, phase: phase(after: error)) { [weak self] in
+                await self?.answer(toolUseId: toolUseId, allow: allow, reason: reason)
+            }
+        } catch {
+            record(.unknown(0), phase: phase) { [weak self] in
+                await self?.answer(toolUseId: toolUseId, allow: allow, reason: reason)
+            }
+        }
     }
 
     func loadDiff(scope: ReviewScope) async {
         guard let runId else { return }
         do {
             diff = try await runner.diff(runId: runId, scope: scope)
+            // A retry that succeeded has nothing left to repeat, and a stale
+            // failure under a diff that loaded reads as a diff you cannot trust.
+            failure = nil
+            retryAction = nil
         } catch let error as EngineeringError {
             // A diff that will not load does NOT make the run failed — the
             // work happened and the branch exists. Saying otherwise would send
-            // a founder off to re-run something that already succeeded.
-            failure = error
+            // a founder off to re-run something that already succeeded. So the
+            // phase is left alone and only the retry is offered.
+            record(error, phase: phase) { [weak self] in
+                await self?.loadDiff(scope: scope)
+            }
         } catch {
-            failure = .unknown(0)
+            record(.unknown(0), phase: phase) { [weak self] in
+                await self?.loadDiff(scope: scope)
+            }
         }
+    }
+
+    /// One place a failure, its phase, and the way to repeat it are recorded
+    /// together — so a surface can never show a retry control wired to a
+    /// different operation than the message above it describes.
+    private func record(
+        _ error: EngineeringError,
+        phase newPhase: EngineeringPhase,
+        retry: @escaping () async -> Void
+    ) {
+        failure = error
+        phase = newPhase
+        retryAction = retry
+    }
+
+    /// A paused run is paused, not failed. Every other refusal leaves the
+    /// phase where it was, because the run itself is unharmed by a turn that
+    /// did not land.
+    private func phase(after error: EngineeringError) -> EngineeringPhase {
+        if case .budgetReached = error { return .budgetReached }
+        return phase
+    }
+
+    func retry() async {
+        guard let action = retryAction else { return }
+        // Cleared BEFORE the await, for the same reason `answer` removes the
+        // approval card first: a live button through a round trip invites a
+        // second tap, and two retries of one start are two runs and two bills.
+        retryAction = nil
+        failure = nil
+        await action()
     }
 
     // MARK: - folding frames

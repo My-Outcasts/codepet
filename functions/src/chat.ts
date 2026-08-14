@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { MODEL } from "./anthropic";
+import { MODEL, cacheableSystemBlock } from "./anthropic";
 
 import { PetPersonaInput, renderPersonaBlock } from "./anthropic";
 
@@ -223,7 +223,7 @@ async function* defaultStreamFactory(args: {
   const stream = args.client.messages.stream({
     model: MODEL,
     max_tokens: 600,
-    system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
+    system: [cacheableSystemBlock({ model: MODEL, text: args.system })],
     messages: args.messages.map((m) => ({ role: m.role, content: m.content }))
   });
 

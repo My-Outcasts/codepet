@@ -1,5 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "./registry";
-import { AgentCaller } from "./router";
+import { AgentCaller, POSITION_EFFORT } from "./router";
 import {
   AgentId,
   AgentPosition,
@@ -150,51 +150,69 @@ export async function runIndependentPass(args: {
     args.realQuestion.trim()
   );
 
+  const runOne = async (agent: AgentId): Promise<PassResult> => {
+    const model = AGENT_DEFS[agent].model;
+    const system = composeAgentSystem({
+      agent,
+      founder: args.founder,
+      rawRequest: args.rawRequest
+    });
+    const ask = (message: string) =>
+      args.call({
+        agent,
+        model,
+        system,
+        userMessage: message,
+        tool: POSITION_TOOL,
+        toolName: POSITION_TOOL.name,
+        effort: POSITION_EFFORT
+      });
+
+    const first = await ask(userMessage);
+    const parsed = parsePositionToolInput(first.input);
+    if (!("error" in parsed)) {
+      return { agent, position: parsed, usage: first.usage, model };
+    }
+
+    // Measured on real runs: the model drops a required field (usually stance)
+    // in roughly 1 call in 3, with stop_reason=tool_use — the schema is a hint,
+    // not a constraint. Losing a department to that silently degrades the run to
+    // a single opinion, which is the one outcome this feature exists to prevent,
+    // so a rejected position is asked again once with the reason quoted back.
+    const retry = await ask(
+      `${userMessage}\n\nYour previous submit_position call was rejected: ${parsed.error}. ` +
+        `Every required field must be present, including stance. Call submit_position again ` +
+        `with all of them.`
+    );
+    // Both calls were billed, so both are reported whichever way this ends.
+    const usage = addUsage(first.usage, retry.usage);
+    const reparsed = parsePositionToolInput(retry.input);
+    if ("error" in reparsed) {
+      return { agent, error: reparsed.error, usage, model };
+    }
+    return { agent, position: reparsed, usage, model };
+  };
+
+  // Concurrent dispatch is load-bearing, not incidental: it is the second line
+  // of defence for mutual blindness (spec §2.2 Phase 2), because a sequential
+  // loop is what would let a later refactor thread an earlier position into a
+  // later prompt. See the concurrency test in companyIndependentPass.test.ts.
+  //
+  // It does cost money. Every agent here sends a byte-identical cached prefix,
+  // and an entry is only readable once one request has finished writing it — so
+  // N concurrent agents each WRITE and none reads. The breakpoint is kept anyway
+  // because THIS phase retries: a rejected position is asked again with the same
+  // tool and the same system, which is a 0.1x read. At the measured ~1-in-3
+  // retry rate that clears the p = 0.28 break-even in composeAgentSystem's docs.
+  //
+  // It does NOT get read by the negotiation phase, which is what an earlier
+  // version of this comment claimed. Negotiation sends submit_negotiation_turn
+  // where this sends submit_position, tools render before system, so the two
+  // prefixes differ from byte 0. companyCachePrefix.test.ts pins that.
+  //
   // allSettled, not all: one department failing must not take down the room
   // (spec §5.5 graceful degradation).
-  const settled = await Promise.allSettled(
-    args.agents.map(async (agent): Promise<PassResult> => {
-      const model = AGENT_DEFS[agent].model;
-      const system = composeAgentSystem({
-        agent,
-        founder: args.founder,
-        rawRequest: args.rawRequest
-      });
-      const ask = (message: string) =>
-        args.call({
-          agent,
-          model,
-          system,
-          userMessage: message,
-          tool: POSITION_TOOL,
-          toolName: POSITION_TOOL.name
-        });
-
-      const first = await ask(userMessage);
-      const parsed = parsePositionToolInput(first.input);
-      if (!("error" in parsed)) {
-        return { agent, position: parsed, usage: first.usage, model };
-      }
-
-      // Measured on real runs: the model drops a required field (usually stance)
-      // in roughly 1 call in 3, with stop_reason=tool_use — the schema is a hint,
-      // not a constraint. Losing a department to that silently degrades the run to
-      // a single opinion, which is the one outcome this feature exists to prevent,
-      // so a rejected position is asked again once with the reason quoted back.
-      const retry = await ask(
-        `${userMessage}\n\nYour previous submit_position call was rejected: ${parsed.error}. ` +
-          `Every required field must be present, including stance. Call submit_position again ` +
-          `with all of them.`
-      );
-      // Both calls were billed, so both are reported whichever way this ends.
-      const usage = addUsage(first.usage, retry.usage);
-      const reparsed = parsePositionToolInput(retry.input);
-      if ("error" in reparsed) {
-        return { agent, error: reparsed.error, usage, model };
-      }
-      return { agent, position: reparsed, usage, model };
-    })
-  );
+  const settled = await Promise.allSettled(args.agents.map(runOne));
 
   const zero: TokenUsage = { input: 0, output: 0, cache_read: 0 };
   const results: PassResult[] = settled.map((outcome, i) => {

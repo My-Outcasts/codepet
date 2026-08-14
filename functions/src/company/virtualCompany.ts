@@ -75,6 +75,9 @@ const defaultAgentCaller: AgentCaller = async (args) => {
   const response = await anthropicClient().messages.create({
     model: args.model,
     max_tokens: args.maxTokens ?? POSITION_MAX_TOKENS,
+    // Spread rather than always-present: an `effort` of undefined is still a
+    // key on the wire, and ROUTER_MODEL (Haiku 4.5) errors on the field at all.
+    ...(args.effort ? { output_config: { effort: args.effort } } : {}),
     system: args.system as any,
     tools: [args.tool as any],
     tool_choice: { type: "tool", name: args.toolName },
@@ -96,6 +99,14 @@ const defaultAgentCaller: AgentCaller = async (args) => {
   }
   throw new Error(`${args.agent} did not call ${args.toolName}`);
 };
+
+/**
+ * Exposed for the wire-shape test only. Every other test in this feature
+ * injects its own AgentCaller, which means the translation done HERE — phase
+ * arguments into SDK request fields — is the one link in the chain that nothing
+ * exercised. A dropped `effort` would have made the whole tiering silently dead.
+ */
+export const __defaultAgentCallerForTests = (): AgentCaller => defaultAgentCaller;
 
 let _agentCaller: AgentCaller | null = null;
 export function __setAgentCallerForTests(caller: AgentCaller): void {

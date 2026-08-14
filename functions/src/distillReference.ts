@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { PLAN_MODEL } from "./anthropic";
+import { PLAN_MODEL, cacheableSystemBlock } from "./anthropic";
 
 // MARK: - Types
 //
@@ -189,8 +189,13 @@ export async function handleDistillReference(
   try {
     const response = await anthropicClient().messages.create({
       model: PLAN_MODEL,
-      max_tokens: 800,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      // Was 800 against a model that did not think by default; on Sonnet 5 the
+      // cap covers thinking too.
+      max_tokens: 2000,
+      // Distillation of text already supplied. `low` is sufficient and is the
+      // reason this can stay on a mid tier at all.
+      output_config: { effort: "low" },
+      system: [cacheableSystemBlock({ model: PLAN_MODEL, text: system, tools: REFERENCE_TOOL })],
       tools: [REFERENCE_TOOL as any],
       tool_choice: { type: "tool", name: "record_reference" },
       messages: [{ role: "user", content: user }]

@@ -231,6 +231,44 @@ describe("runSynthesis", () => {
     expect(seen[0].model).toBe(SYNTHESIS_MODEL);
   });
 
+  test("keeps the cache breakpoint whether or not the red team ran", async () => {
+    // Corrected premise. The red team sends submit_red_team and this sends
+    // record_decision_brief; the tool is part of the cached prefix, so neither
+    // could ever read the other's entry. The reader here is this phase's own
+    // retry, which is unaffected by whether the red team ran.
+    for (const devilsAdvocate of [null, {
+      load_bearing_assumption: "a", how_it_could_be_false: "b", cheapest_test: "c",
+      failure_post_mortem: "d", who_is_not_in_the_room: "e", objections: ["o"],
+      plan_is_sound: true
+    }]) {
+      const seen: any[] = [];
+      await runSynthesis({
+        ...baseArgs,
+        devilsAdvocate: devilsAdvocate as any,
+        call: async (args) => {
+          seen.push(args);
+          return { input: briefInput(), usage: zeroUsage };
+        }
+      });
+      expect(seen[0].system[0].cache_control).toEqual({ type: "ephemeral" });
+    }
+  });
+
+  test("does not lower effort — synthesis keeps the top tier default", async () => {
+    // The department phases run at POSITION_EFFORT to save tokens. Synthesis is
+    // one call doing the job the top tier is paid for; sending an effort here
+    // would be a silent quality cut.
+    const seen: any[] = [];
+    await runSynthesis({
+      ...baseArgs,
+      call: async (args) => {
+        seen.push(args);
+        return { input: briefInput(), usage: zeroUsage };
+      }
+    });
+    expect(seen[0].effort).toBeUndefined();
+  });
+
   test("passes both positions verbatim so dissent can be quoted", async () => {
     let prompt = "";
     await runSynthesis({

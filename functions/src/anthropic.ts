@@ -3,7 +3,15 @@ import Anthropic from "@anthropic-ai/sdk";
 export const MODEL = "claude-haiku-4-5-20251001";
 // Higher-tier model for Project Health action plans: plans are richer,
 // less frequent, and (later) paywalled, so quality justifies the cost.
-export const PLAN_MODEL = "claude-sonnet-4-6";
+//
+// Sonnet 5 rather than Sonnet 4.6: same list price ($3/$15), better on the
+// forced-tool-call shape every caller here uses, and a 1024-token cache floor
+// instead of 4096. Two behaviours change with it and both are handled at the
+// call sites: adaptive thinking is ON when `thinking` is omitted (it was off on
+// 4.6), and the tokenizer emits ~30% more tokens for the same text — so every
+// PLAN_MODEL caller sets `effort` and carries a larger `max_tokens`, because
+// `max_tokens` caps thinking and answer together.
+export const PLAN_MODEL = "claude-sonnet-5";
 export const MAX_TOKENS = 2000;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_EVENTS = 50;
@@ -16,6 +24,19 @@ const MAX_EVENTS = 50;
 export const ROUTER_MODEL = "claude-haiku-4-5";
 export const AGENT_MODEL = "claude-sonnet-5";
 export const SYNTHESIS_MODEL = "claude-opus-5";
+
+/**
+ * Thinking depth / token spend, from cheapest to most thorough. `high` is the
+ * API default when the field is omitted, so every value below except `xhigh`
+ * and `max` is a cost reduction. Declared here so call sites can annotate their
+ * constant and keep the literal type — an unannotated `const x = "medium"`
+ * widens to `string` the moment it lands in an object literal, and the SDK
+ * rejects `string`.
+ *
+ * Not accepted by Haiku 4.5: sending `effort` to it is an API error, so no
+ * `MODEL`/`ROUTER_MODEL` call site may carry one.
+ */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ModelPrice {
   inputPerMTok: number;
@@ -32,6 +53,58 @@ export const MODEL_PRICING: Record<string, ModelPrice> = {
   "claude-sonnet-5": { inputPerMTok: 3, outputPerMTok: 15, cacheMinTokens: 1024 },
   "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25, cacheMinTokens: 512 }
 };
+
+/**
+ * Looks up pricing for a model id, tolerating a dated snapshot suffix — `MODEL`
+ * is `claude-haiku-4-5-20251001` while the table is keyed on the alias.
+ */
+export function priceFor(model: string): ModelPrice | undefined {
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  for (const [alias, price] of Object.entries(MODEL_PRICING)) {
+    if (model.startsWith(alias)) return price;
+  }
+  return undefined;
+}
+
+/** Rough char→token estimate. Good enough to compare against a cache floor. */
+export function estimatePromptTokens(text: string): number {
+  if (text.length === 0) return 0;
+  return Math.max(1, Math.round(text.length / 3.5));
+}
+
+/**
+ * A `system` block that carries a cache breakpoint ONLY when the prefix it
+ * closes is long enough for this model to actually cache.
+ *
+ * Below the model's minimum cacheable prefix the API accepts `cache_control`
+ * and silently ignores it: no error, no warning, `cache_creation_input_tokens`
+ * just stays 0. Every Haiku call site here used to carry a marker that could
+ * never fire (Haiku 4.5 wants 4096 tokens; the largest prefix in this file is
+ * ~2500), which made the `cache_hit` telemetry read as a cache miss forever
+ * rather than as a cache that was never possible.
+ *
+ * `tools` render before `system`, so a breakpoint on the last system block
+ * closes a prefix of tools + system. Pass the tool schema in `tools` so the
+ * estimate measures what the API measures — omitting it undercounts by ~1000
+ * tokens here and would wrongly drop a marker that would have fired.
+ *
+ * An unknown model keeps the marker: a dead marker is free, a missing one is
+ * not, so the guard only removes markers it can prove are dead.
+ */
+export function cacheableSystemBlock(args: {
+  model: string;
+  text: string;
+  tools?: unknown;
+}): { type: "text"; text: string; cache_control?: { type: "ephemeral" } } {
+  const block = { type: "text" as const, text: args.text };
+  const floor = priceFor(args.model)?.cacheMinTokens;
+  if (floor === undefined) return { ...block, cache_control: { type: "ephemeral" } };
+
+  const toolTokens =
+    args.tools === undefined ? 0 : estimatePromptTokens(JSON.stringify(args.tools));
+  const prefixTokens = estimatePromptTokens(args.text) + toolTokens;
+  return prefixTokens >= floor ? { ...block, cache_control: { type: "ephemeral" } } : block;
+}
 
 export const SYSTEM_PROMPT = `You are the user's coding companion — a pet character who watched ONE working turn and now helps them UNDERSTAND what they just did and WHY it matters.
 
@@ -401,7 +474,7 @@ export async function callAnthropicSession(
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1200,
-    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    system: [cacheableSystemBlock({ model: MODEL, text: system, tools: SESSION_SUMMARY_TOOL })],
     tools: [SESSION_SUMMARY_TOOL as any],
     tool_choice: { type: "tool", name: "record_session_summary" },
     messages: [{ role: "user", content: user }]
@@ -445,7 +518,7 @@ export async function* streamAnthropicSession(
   const stream = client.messages.stream({
     model: MODEL,
     max_tokens: 1200,
-    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    system: [cacheableSystemBlock({ model: MODEL, text: system, tools: SESSION_SUMMARY_TOOL })],
     tools: [SESSION_SUMMARY_TOOL as any],
     tool_choice: { type: "tool", name: "record_session_summary" },
     messages: [{ role: "user", content: user }]
@@ -546,7 +619,7 @@ export async function* streamAnthropic(
   const stream = client.messages.stream({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    system: [cacheableSystemBlock({ model: MODEL, text: system, tools: NARRATIVE_TOOL })],
     tools: [NARRATIVE_TOOL as any],
     tool_choice: { type: "tool", name: "record_narrative" },
     messages: [{ role: "user", content: user }]
@@ -623,9 +696,7 @@ export async function callAnthropic(
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: [
-      { type: "text", text: system, cache_control: { type: "ephemeral" } }
-    ],
+    system: [cacheableSystemBlock({ model: MODEL, text: system, tools: NARRATIVE_TOOL })],
     tools: [NARRATIVE_TOOL as any],
     tool_choice: { type: "tool", name: "record_narrative" },
     messages: [{ role: "user", content: user }]

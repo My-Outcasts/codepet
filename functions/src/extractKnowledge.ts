@@ -3,7 +3,7 @@ import { Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
-import { MODEL } from "./anthropic";
+import { MODEL, cacheableSystemBlock } from "./anthropic";
 
 // MARK: - Types
 
@@ -171,7 +171,7 @@ Extract practical knowledge entries from this text. Remember: each entry must be
     const response = await anthropicClient().messages.create({
       model: MODEL,
       max_tokens: 4000,
-      system: [{ type: "text", text: EXTRACTION_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      system: [cacheableSystemBlock({ model: MODEL, text: EXTRACTION_SYSTEM_PROMPT, tools: EXTRACTION_TOOL })],
       tools: [EXTRACTION_TOOL as any],
       tool_choice: { type: "tool", name: "record_knowledge_entries" },
       messages: [{ role: "user", content: userMessage }]

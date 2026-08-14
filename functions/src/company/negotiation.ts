@@ -1,5 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "./registry";
-import { AgentCaller } from "./router";
+import { AgentCaller, POSITION_EFFORT } from "./router";
 import {
   AgentId,
   AgentPosition,
@@ -187,14 +187,19 @@ export async function runNegotiation(args: {
           system: composeAgentSystem({
             agent,
             founder: args.founder,
-            rawRequest: args.rawRequest
+            rawRequest: args.rawRequest,
+            // This phase has no retry path, and it cannot read the positions
+            // phase's entry because it sends a different tool. Every copy would
+            // be a write nobody reads — a flat 25% surcharge on the prefix.
+            cache: false
           }),
           userMessage: NEGOTIATION_INSTRUCTION.replace("<round>", String(round))
             .replace("<real_question>", args.realQuestion.trim())
             .replace("<opposing>", renderOpposing(agent, participants, args.positions))
             .replace("<prior>", prior),
           tool: NEGOTIATION_TOOL,
-          toolName: NEGOTIATION_TOOL.name
+          toolName: NEGOTIATION_TOOL.name,
+          effort: POSITION_EFFORT
         });
         usages.push({ agent, model, usage });
 

@@ -80,7 +80,15 @@ export async function handleExtractDecisions(req: Request, res: Response): Promi
   try {
     const response = await client().messages.create({
       model: DECISIONS_MODEL,
-      max_tokens: 1024,
+      // 1024 was set when this cap covered the answer alone. Sonnet 5 thinks by
+      // default, and thinking is charged against the same budget, so a decision
+      // list that fit before could return truncated tool JSON — which this
+      // handler cannot distinguish from a model that ignored the schema,
+      // because it fails open to an empty list.
+      max_tokens: 3000,
+      // Extraction from text already in the prompt. Nothing here needs the
+      // `high` default; `low` is the whole point of running it on a mid tier.
+      output_config: { effort: "low" },
       system: EXTRACT_SYSTEM,
       tools: [RECORD_TOOL as any],
       tool_choice: { type: "tool", name: "record_decisions" },

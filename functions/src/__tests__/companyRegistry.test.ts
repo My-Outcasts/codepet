@@ -151,3 +151,24 @@ describe("composeAgentSystem", () => {
     }
   });
 });
+
+describe("composeAgentSystem cache breakpoint", () => {
+  test("places the breakpoint on the shared prefix by default", () => {
+    const blocks = composeAgentSystem({ agent: "product", founder, rawRequest });
+    expect(blocks[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(blocks[1].cache_control).toBeUndefined();
+  });
+
+  test("omits the breakpoint when the caller says nothing will read it", () => {
+    // A cache write nobody reads bills 1.25x instead of 1x. Callers that know
+    // they are the last call of their model in a run opt out.
+    const blocks = composeAgentSystem({
+      agent: "chief_of_staff",
+      founder,
+      rawRequest,
+      cache: false
+    });
+    expect(blocks[0].cache_control).toBeUndefined();
+    expect(blocks[0].text).toContain("THE FOUNDER'S REQUEST");
+  });
+});

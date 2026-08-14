@@ -5,6 +5,7 @@ import {
 } from "../company/independentPass";
 import { AgentId, FounderContext, TokenUsage } from "../company/types";
 import { AGENT_MODEL } from "../anthropic";
+import { POSITION_EFFORT } from "../company/router";
 
 const founder: FounderContext = {
   profile: "Solo technical founder.",
@@ -202,6 +203,23 @@ describe("runIndependentPass — MUTUAL BLINDNESS", () => {
     });
     expect(messages).toHaveLength(2);
     expect(new Set(messages).size).toBe(1);
+  });
+
+  test("every department call carries POSITION_EFFORT", async () => {
+    // The department phases fan out, so effort is paid once per department per
+    // round. Dropping this back to the API default (high) is a silent cost rise.
+    const efforts: (string | undefined)[] = [];
+    await runIndependentPass({
+      founder,
+      rawRequest,
+      realQuestion,
+      agents: ["product", "finance"],
+      call: async (args) => {
+        efforts.push(args.effort);
+        return { input: positionInput(), usage: zeroUsage };
+      }
+    });
+    expect(efforts).toEqual([POSITION_EFFORT, POSITION_EFFORT]);
   });
 
   test("agents are dispatched concurrently, not sequentially", async () => {

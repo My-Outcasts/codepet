@@ -1,4 +1,4 @@
-import { ROUTER_MODEL } from "../anthropic";
+import { Effort, ROUTER_MODEL } from "../anthropic";
 import { composeAgentSystem, SystemBlock } from "./registry";
 import {
   AgentId,
@@ -194,6 +194,15 @@ export type AgentCaller = (args: {
    * truncates the tool JSON mid-object and silently drops the trailing fields.
    */
   maxTokens?: number;
+  /**
+   * Thinking depth for this call. Omitted means the API default, `high`.
+   * Phases declare it because they differ: a department position is one voice
+   * with a fixed schema, while synthesis is the job the top tier is paid for.
+   *
+   * Must stay undefined for any phase running on ROUTER_MODEL — Haiku 4.5
+   * rejects `effort` outright rather than ignoring it.
+   */
+  effort?: Effort;
 }) => Promise<{
   input: unknown;
   usage: TokenUsage;
@@ -219,6 +228,19 @@ export const BRIEF_MAX_TOKENS = 4000;
  * three short fields, never the whole brief, so it needs a fraction of the room.
  */
 export const PATCH_MAX_TOKENS = 800;
+
+/**
+ * Thinking depth for the department phases (positions and negotiation), which
+ * run on AGENT_MODEL. `medium` rather than the `high` default: a position is
+ * 120–200 words against a fixed schema by construction, and these are the two
+ * phases that fan out — every department pays whatever this costs, twice.
+ *
+ * Synthesis and the red team deliberately do NOT set this. They are one call
+ * each, on the top tier, doing the job the top tier is paid for; they keep the
+ * `high` default. The router does not set it either, and must not: it runs on
+ * Haiku 4.5, which errors on `effort`.
+ */
+export const POSITION_EFFORT: Effort = "medium";
 
 const INTAKE_INSTRUCTION = `Perform your INTAKE duties on the founder's request below.
 

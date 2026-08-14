@@ -365,8 +365,13 @@ final class CompanyStore: ObservableObject {
         #if DEBUG
         // The demo has been onboarded now. Without this the next hydrate — an
         // account switch, a sign-out and back in — would drop the founder at
-        // the cold open again, mid-walkthrough.
-        if MockChat.flowEnabled { MockChat.flowOnboarded = true }
+        // the cold open again, mid-walkthrough. The brief goes with it, so the
+        // fixture keeps talking about the project they typed rather than
+        // reverting to the one hardcoded in `MockChat.company()`.
+        if MockChat.flowEnabled {
+            MockChat.flowOnboarded = true
+            MockChat.flowBrief = brief
+        }
         #endif
     }
 
@@ -504,7 +509,9 @@ final class CompanyStore: ObservableObject {
         #if DEBUG
         // Skipping is finishing, as far as the demo is concerned — otherwise
         // the founder who skips is sent back to the cold open on next hydrate,
-        // which reads as the Skip button not having worked.
+        // which reads as the Skip button not having worked. No brief is
+        // captured: they typed nothing, so the fixture's own project is the
+        // honest fallback.
         if MockChat.flowEnabled { MockChat.flowOnboarded = true }
         #endif
     }

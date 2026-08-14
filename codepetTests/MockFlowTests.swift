@@ -20,9 +20,11 @@ final class MockFlowTests: XCTestCase {
         previousChat = UserDefaults.standard.object(forKey: "CODEPET_MOCK_CHAT")
         previousFlow = UserDefaults.standard.object(forKey: "CODEPET_MOCK_FLOW")
         MockChat.flowOnboarded = false
+        MockChat.flowBrief = nil
     }
 
     override func tearDown() {
+        MockChat.flowBrief = nil
         restore("CODEPET_MOCK_CHAT", previousChat)
         restore("CODEPET_MOCK_FLOW", previousFlow)
         // Process-global. Left true, every later suite that reads it would see
@@ -146,6 +148,55 @@ final class MockFlowTests: XCTestCase {
         let depts = Set(tasks.filter { $0.who == .draft && $0.phase == .find }.map { $0.dept })
         XCTAssertGreaterThanOrEqual(depts.count, 3,
             "fewer than three departments have runnable work, so the fan-out demos as one agent")
+    }
+
+    // MARK: - whose project is this
+
+    func testTheDemoKeepsTheProjectTheFounderTyped() async {
+        // The bug this closes: `CompanyData.load` answers every hydrate after
+        // onboarding with `company()`, whose brief was hardcoded — so a
+        // founder who onboarded something else watched their project silently
+        // become Codepet on the next account switch.
+        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        let store = CompanyStore(loader: { _ in MockChat.preOnboardingCompany() },
+                                 saver: { _, _ in true })
+        await store.hydrate(companyId: "demo")
+
+        var brief = CompanyBrief()
+        brief.founderName = "Mona"
+        brief.projectName = "Murror"
+        await store.finishOnboarding(brief: brief, token: store.onboardingToken)
+
+        let reloaded = await CompanyData.load(companyId: "demo")
+        XCTAssertEqual(reloaded.brief.projectName, "Murror",
+                       "the demo replaced the founder's project with the fixture's")
+    }
+
+    func testCannedCopyNamesTheFoundersProductNotOurs() {
+        // Thirteen hardcoded mentions used to say "Codepet" no matter what was
+        // onboarded, which reads as the fixture having ignored what they typed.
+        var brief = CompanyBrief()
+        brief.projectName = "Murror"
+        MockChat.flowBrief = brief
+
+        let filled = MockChat.fill("Here's where {{product}} stands.")
+        XCTAssertEqual(filled, "Here's where Murror stands.")
+        XCTAssertFalse(filled.contains("{{"), "a token leaked into copy the founder reads")
+    }
+
+    func testWithNoFlowBriefTheCopyStillNamesSomething() {
+        // Plain `-CODEPET_MOCK_CHAT` never captures a brief. The token must
+        // still resolve — a raw `{{product}}` on screen is worse than a name
+        // that happens to be ours.
+        MockChat.flowBrief = nil
+        XCTAssertEqual(MockChat.fill("{{product}} ships."), "Codepet ships.")
+    }
+
+    func testABlankProjectNameDoesNotProduceAnEmptySentence() {
+        var brief = CompanyBrief()
+        brief.projectName = "   "
+        MockChat.flowBrief = brief
+        XCTAssertEqual(MockChat.fill("{{product}} ships."), "Codepet ships.")
     }
 
     // MARK: - enrichment

@@ -203,6 +203,49 @@ final class EngineeringResultBarLayoutTests: XCTestCase {
             scope: .branch, scopeFellBack: false)
     }
 
+    // MARK: - the patch, in the card
+
+    func test_aFileWithAPatchCanBeOpened() {
+        // "Why not show the changed source code?" — because it was behind a
+        // button into a pane that takes over the content area. For an
+        // engineer the diff IS the answer, not a link to it.
+        let file = EngFileDiff(file: "api/billing.ts", path: "api/billing.ts",
+                               additions: 2, deletions: 0, status: "modified",
+                               patch: "@@ -0,0 +1,2 @@\n+const a = 1\n+const b = 2")
+        XCTAssertTrue(EngineeringResultBar.canExpand(file))
+    }
+
+    func test_aBinaryRowDoesNotPretendToOpen() {
+        // GitHub omits the patch for a binary. A row that opens to nothing is
+        // worse than a row that does not open — and the chevron is drawn from
+        // this same answer, so the affordance cannot disagree with what
+        // happens when you tap it.
+        let binary = EngFileDiff(file: "public/logo.png", path: "public/logo.png",
+                                 additions: 0, deletions: 0, status: "modified", patch: nil)
+        XCTAssertFalse(EngineeringResultBar.canExpand(binary))
+    }
+
+    func test_anEmptyPatchDoesNotOpenEither() {
+        // Distinct from nil, and just as empty on screen.
+        let empty = EngFileDiff(file: "a.ts", path: "a.ts", additions: 0, deletions: 0,
+                                status: "modified", patch: "")
+        XCTAssertFalse(EngineeringResultBar.canExpand(empty))
+    }
+
+    func test_theOpenedPatchParsesToRealLines() {
+        // The card renders exactly what `DiffPatch` returns, so a file that
+        // claims to be expandable must yield lines carrying line numbers —
+        // otherwise the row opens onto an empty box.
+        let file = EngFileDiff(file: "web/Checkout.tsx", path: "web/Checkout.tsx",
+                               additions: 1, deletions: 1, status: "modified",
+                               patch: "@@ -10,2 +10,2 @@\n-const total = 0\n+const total = cart.sum()")
+        let lines = DiffPatch.parse(file.patch)
+        XCTAssertEqual(lines.filter { $0.kind == .added }.count, 1)
+        XCTAssertEqual(lines.filter { $0.kind == .removed }.count, 1)
+        XCTAssertEqual(lines.first?.kind, .hunk)
+        XCTAssertNotNil(lines.first(where: { $0.kind == .added })?.newLine)
+    }
+
     // MARK: - the run's state, carried by the worked line
 
     func test_theTenseIsTheStatus() {

@@ -50,6 +50,11 @@ struct EngineeringResultBar: View {
     /// "Show N more file" fold, so the tap is now the worse of the two — the
     /// reason for the divergence went away.
     @State private var filesExpanded = true
+    /// Which files have their patch open, keyed by `EngFileDiff.id` (the
+    /// file's current name). A set rather than one selection: reviewing means
+    /// comparing two files, and closing one to open another makes that
+    /// impossible.
+    @State private var openPatches: Set<String> = []
     /// Ticks once a second while the run is live, so "Worked for" climbs.
     /// Stops when the run does: `elapsedSeconds` freezes on `finishedAt`, so a
     /// finished run keeps its final number even though this keeps firing.
@@ -315,7 +320,64 @@ struct EngineeringResultBar: View {
     }
 
     @ViewBuilder private func fileRow(_ file: EngFileDiff) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                guard Self.canExpand(file) else { return }
+                if openPatches.contains(file.id) { openPatches.remove(file.id) }
+                else { openPatches.insert(file.id) }
+            } label: {
+                fileRowLabel(file)
+            }
+            .buttonStyle(.plain)
+            .disabled(!Self.canExpand(file))
+
+            if openPatches.contains(file.id) { patch(file) }
+        }
+    }
+
+    /// Whether tapping this row can show anything.
+    ///
+    /// A binary file has no patch — GitHub omits it — and a row that opens to
+    /// nothing is worse than a row that does not open. The chevron is drawn
+    /// from the same answer, so the affordance and the behaviour cannot
+    /// disagree.
+    static func canExpand(_ file: EngFileDiff) -> Bool {
+        !file.isBinary && !(file.patch ?? "").isEmpty
+    }
+
+    /// The patch itself, in the card.
+    ///
+    /// Mona: "why not show the changed source code?" Because it was behind a
+    /// button, in a pane that takes over the content area — and for an
+    /// engineer the diff IS the answer, not a link to the answer. The pieces
+    /// were already here: `DiffPatch` carries real line numbers, `DiffLineView`
+    /// owns a line, and the tokeniser landed the same day.
+    ///
+    /// Horizontal scroll rather than wrapping. At dock width a diff line does
+    /// not fit, and wrapped code loses the column alignment that makes a diff
+    /// readable at a glance — an engineer would rather scroll than read
+    /// ragged code. The Review pane stays for reading a large diff full-width.
+    @ViewBuilder private func patch(_ file: EngFileDiff) -> some View {
+        let language = SyntaxHighlight.Language.of(path: file.file)
+        ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(DiffPatch.parse(file.patch)) { line in
+                    DiffLineView(line: line, language: language)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(maxHeight: 260)
+        .background(CodepetTheme.pageBackground.opacity(0.5))
+    }
+
+    @ViewBuilder private func fileRowLabel(_ file: EngFileDiff) -> some View {
         HStack(spacing: 8) {
+            Image(systemName: openPatches.contains(file.id) ? "chevron.down" : "chevron.right")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: 10)
+                .opacity(Self.canExpand(file) ? 1 : 0)
             // The directory recedes and the filename carries the weight —
             // scanning a diff means reading basenames.
             Text(Self.directory(file.path))
@@ -343,6 +405,7 @@ struct EngineeringResultBar: View {
         .truncationMode(.middle)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
     /// Everything up to and including the last slash, or empty. Split rather

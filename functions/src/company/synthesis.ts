@@ -342,7 +342,14 @@ export async function runSynthesis(args: {
   const system = composeAgentSystem({
     agent: "chief_of_staff",
     founder: args.founder,
-    rawRequest: args.rawRequest
+    rawRequest: args.rawRequest,
+    // Kept, but NOT because the red team ran first: it sends submit_red_team
+    // and this sends record_decision_brief, and the tool is part of the cached
+    // prefix, so one could never read the other's entry. The reader here is
+    // this phase's OWN retry — a brief that comes back missing fields, or with
+    // the dissent smoothed away, is asked for again with the same tool and the
+    // same system. See composeAgentSystem's `cache` doc for the break-even.
+    cache: true
   });
   const baseMessage = SYNTHESIS_INSTRUCTION.replace("<real_question>", args.realQuestion.trim())
     .replace("<positions>", renderPositions(args.positions))

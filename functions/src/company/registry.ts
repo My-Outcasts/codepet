@@ -474,16 +474,40 @@ export function composeAgentSystem(args: {
   agent: AgentId;
   founder: FounderContext;
   rawRequest: string;
+  /**
+   * Whether to place the cache breakpoint. Default true.
+   *
+   * Read this before changing a phase: the breakpoint buys much less than it
+   * looks like it does.
+   *
+   * The API hashes an exact byte prefix, and the render order is
+   * tools -> system -> messages. This breakpoint sits on the FIRST system
+   * block, so the cached prefix is `tools + shared prefix`, not the shared
+   * prefix alone. Every phase sends a different tool — submit_position,
+   * submit_negotiation_turn, submit_red_team, record_decision_brief — so no
+   * phase can ever read another phase's entry, however identical their system
+   * blocks look. companyCachePrefix.test.ts pins exactly that.
+   *
+   * Within a phase, departments are dispatched concurrently and an entry is
+   * only readable once one has finished writing it, so siblings cannot read
+   * each other either. That leaves exactly one reader: a RETRY of the same
+   * agent in the same phase, which sends the same tool and the same system.
+   *
+   * So the breakpoint pays off only where retries are common enough. With a
+   * retry probability p, it costs 1.25 + 0.1p against 1 + p without it, which
+   * breaks even at p = 0.28. Phases that never retry should pass false.
+   */
+  cache?: boolean;
 }): SystemBlock[] {
+  const prefix: SystemBlock = {
+    type: "text",
+    text: buildSharedPrefix({
+      founder: args.founder,
+      rawRequest: args.rawRequest
+    })
+  };
   return [
-    {
-      type: "text",
-      text: buildSharedPrefix({
-        founder: args.founder,
-        rawRequest: args.rawRequest
-      }),
-      cache_control: { type: "ephemeral" }
-    },
+    args.cache === false ? prefix : { ...prefix, cache_control: { type: "ephemeral" } },
     { type: "text", text: AGENT_DEFS[args.agent].role.trim() }
   ];
 }

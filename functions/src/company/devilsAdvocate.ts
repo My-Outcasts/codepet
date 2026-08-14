@@ -178,7 +178,10 @@ export async function runDevilsAdvocate(args: {
     system: composeAgentSystem({
       agent: "devils_advocate",
       founder: args.founder,
-      rawRequest: args.rawRequest
+      rawRequest: args.rawRequest,
+      // One call, no retry, and its tool is unique to this phase — nothing will
+      // ever read what a breakpoint here would write.
+      cache: false
     }),
     userMessage: RED_TEAM_INSTRUCTION.replace(
       "<real_question>",

@@ -5,7 +5,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { MODEL, PetPersonaInput, renderPersonaBlock } from "./anthropic";
+import { MODEL, PetPersonaInput, renderPersonaBlock, cacheableSystemBlock } from "./anthropic";
 
 // The project-aware Dictionary: the user's REAL code surfaces the terms, and
 // this function turns each detected term into a plain-language, pet-voiced card
@@ -325,7 +325,7 @@ export async function handleGenerateDictionary(
       const response = await anthropicClient().messages.create({
         model: MODEL,
         max_tokens: 4000,
-        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        system: [cacheableSystemBlock({ model: MODEL, text: system, tools: DICTIONARY_TOOL })],
         tools: [DICTIONARY_TOOL as any],
         tool_choice: { type: "tool", name: "record_dictionary_entries" },
         messages: [{ role: "user", content: user }]

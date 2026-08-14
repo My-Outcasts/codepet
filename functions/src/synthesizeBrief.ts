@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { MODEL } from "./anthropic";
+import { MODEL, cacheableSystemBlock } from "./anthropic";
 
 // MARK: - Synthesize a complete project brief from session history.
 //
@@ -165,7 +165,7 @@ export async function handleSynthesizeBrief(
     const response = await anthropicClient().messages.create({
       model: MODEL,
       max_tokens: 600,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      system: [cacheableSystemBlock({ model: MODEL, text: system, tools: OVERVIEW_TOOL })],
       tools: [OVERVIEW_TOOL as any],
       tool_choice: { type: "tool", name: "record_overview" },
       messages: [{ role: "user", content: user }]

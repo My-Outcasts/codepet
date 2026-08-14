@@ -1,3 +1,4 @@
+import { Effort } from "./anthropic";
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
@@ -7,7 +8,14 @@ import { checkAndIncrement } from "./rateLimit";
 import { buildRoadmapPrompt, coerceRoadmap, RoadmapBrief } from "./generateRoadmapCore";
 
 // Quality surface / credit driver — same tier as runTask (see spec).
-const ROADMAP_MODEL = "claude-opus-4-8";
+// Sonnet 5 rather than Opus 4.8 for the same reason runTask moved: forced
+// tool call against a fixed schema, 40% cheaper per token. Sonnet 5 thinks by
+// default when `thinking` is omitted, so the cap below covers thinking too.
+const ROADMAP_MODEL = "claude-sonnet-5";
+const ROADMAP_EFFORT: Effort = "medium";
+// Was 3000, sized before thinking counted against the same budget. Headroom is
+// only billed if generated.
+const ROADMAP_MAX_TOKENS = 8000;
 
 const RECORD_TOOL = {
   name: "record_roadmap",
@@ -84,7 +92,8 @@ export async function handleGenerateRoadmap(req: Request, res: Response): Promis
   try {
     const response = await client().messages.create({
       model: ROADMAP_MODEL,
-      max_tokens: 3000,
+      max_tokens: ROADMAP_MAX_TOKENS,
+      output_config: { effort: ROADMAP_EFFORT },
       system: SYSTEM,
       tools: [RECORD_TOOL as any],
       tool_choice: { type: "tool", name: "record_roadmap" },

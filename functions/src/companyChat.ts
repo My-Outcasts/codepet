@@ -1,3 +1,4 @@
+import { Effort } from "./anthropic";
 import { Request } from "firebase-functions/v2/https";
 import { Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
@@ -51,6 +52,13 @@ const CHAT_MODEL = "claude-sonnet-5";
 // a memory note. A turn that still hits it is now logged rather than silently cut (see the
 // stop_reason warn below), because the failure is invisible from the transcript.
 const CHAT_MAX_TOKENS = 4096;
+// Sonnet 5 defaults to `high` effort. `medium` is the cost lever on the
+// highest-volume model call in the product: it shortens thinking, which also
+// buys back room under CHAT_MAX_TOKENS (the cap covers thinking and reply
+// together, and this handler already logs when a turn hits it). This is the
+// most user-visible change of the batch — raise it first if replies get
+// shallower.
+const CHAT_EFFORT: Effort = "medium";
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -190,6 +198,7 @@ async function* defaultStreamFactory(args: {
   const params = {
     model: CHAT_MODEL,
     max_tokens: CHAT_MAX_TOKENS,
+    output_config: { effort: CHAT_EFFORT },
     system: args.systemBlocks as any,
     messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
     ...(args.tools && args.tools.length ? { tools: args.tools as any } : {}),
@@ -394,6 +403,7 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
       const baseParams = {
         model: CHAT_MODEL,
         max_tokens: CHAT_MAX_TOKENS,
+        output_config: { effort: CHAT_EFFORT },
         system: systemBlocks as any,
         messages: messages as any,
         ...(tools ? { tools: tools as any } : {}),

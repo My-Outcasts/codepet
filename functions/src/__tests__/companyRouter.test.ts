@@ -182,6 +182,24 @@ describe("runIntake", () => {
     expect(routing.decision).toBe("multi_agent");
   });
 
+  test("sends no effort — ROUTER_MODEL is Haiku, which rejects the field", async () => {
+    // Not a cost choice: Haiku 4.5 returns an API error when `effort` is
+    // present, so routing (which runs on every single request) would fail
+    // outright. If a future refactor threads a default effort through
+    // AgentCaller, this goes red before it reaches production.
+    const seen: any[] = [];
+    await runIntake({
+      founder,
+      rawRequest: "Should I add team seats?",
+      call: async (args) => {
+        seen.push(args);
+        return { input: validInput(), usage: zeroUsage };
+      }
+    });
+    expect(seen[0].model).toBe(ROUTER_MODEL);
+    expect(seen[0].effort).toBeUndefined();
+  });
+
   test("passes the founder's verbatim request to the router", async () => {
     let userMessage = "";
     await runIntake({

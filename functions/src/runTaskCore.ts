@@ -85,6 +85,12 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
     "- sheet: a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input.\n" +
     "- site: copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML.\n" +
     "- screens: exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order." +
+    // Length discipline. Every field above says what to produce and none said how
+    // long, so `body` — the part the founder actually reads — was unbounded.
+    // Framed as what a finished artifact looks like rather than as a word cap:
+    // a hard count starves the longer kinds (site copy, a 2-week calendar) while
+    // still leaving a short email padded.
+    "\n\nLENGTH: this is a finished artifact, not a report about one. Write only what the founder needs to use it. No preamble, no restating the task, no \"here is\", no summary of what you just wrote, no closing offer of further help. Do not add sections the kind above does not ask for. Prefer the shortest version that is still complete and specific: an email is an email, not an email plus notes on the email. If a sentence does not change what the founder would do next, cut it." +
     vi +
     revise
   );

@@ -13,7 +13,6 @@ struct OnboardingView: View {
         var projName = "", oneLiner = "", audience = "", link = "", notes = ""
         var categories: [String] = []
         var stageIndex = OnboardingContent.defaultStageIndex
-        var pick = ""
     }
 
     @State private var step = 0
@@ -52,7 +51,7 @@ struct OnboardingView: View {
             }
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
-        .onAppear { if d.pick.isEmpty { d.pick = companyStore.company.companionId } }
+
     }
 
     // Two-panel card: art left (42% of the card, as on the web), form right.
@@ -78,7 +77,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: 600, minHeight: 22, alignment: .leading)
 
                     Group {
-                        if step == 4 || step == 8 {   // tall: project + companion → top-align + scroll
+                        if step == 4 {   // tall: the project form → top-align + scroll
                             ScrollView {
                                 bodyColumn.padding(.top, 8).padding(.bottom, 24)
                             }
@@ -171,10 +170,8 @@ struct OnboardingView: View {
                 .padding(.top, 28)   // web `.stagebar { margin-top: 28px }`
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
-        case 7:
-            OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
         default:
-            OnboardingCompanionStep(pickedId: $d.pick)
+            OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
         }
     }
 
@@ -218,8 +215,7 @@ struct OnboardingView: View {
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
-        case 7: bigButton("Choose your companion", enabled: true) { step = 8 }
-        default: bigButton("Start building", enabled: true) { finishWithCompanion() }
+        default: bigButton("Start building", enabled: true) { finish() }
         }
     }
 
@@ -256,17 +252,28 @@ struct OnboardingView: View {
         }
     }
 
-    private func finishWithCompanion() {
+    /// Leave onboarding.
+    ///
+    /// Still sets the companion, which is no longer a choice made here: the
+    /// picker step was removed on 14 Aug because it asked a question with no
+    /// consequence — companions differ in identity and voice only, never in
+    /// capability, and Settings has carried the same picker since #98. Asking
+    /// at the door made it look like a decision that shaped the product.
+    ///
+    /// The call stays because `appState.activeChar` has to agree with the
+    /// store, and the store's default (`byte`) is what every later surface
+    /// reads. Dropping it would leave the two out of step on first run.
+    private func finish() {
         streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         let token = companyStore.onboardingToken
-        let id = d.pick.isEmpty ? companyStore.company.companionId : d.pick
+        let id = companyStore.company.companionId
         Task {
             await companyStore.setCompanion(id: id)
             appState.activeChar = id
             // Pass the store's current (already-enriched, by scaffoldFromOnboarding)
             // brief — NOT the local raw `brief()` draft — so finishOnboarding doesn't
             // clobber the enriched summary/audience/categories with unenriched values.
-            // Steps 6-8 never edit brief fields, so company.brief is authoritative here;
+            // Steps 6-7 never edit brief fields, so company.brief is authoritative here;
             // if enrichment failed (fail-open) it already equals the raw brief, so this
             // is safe in all cases. EXCEPT: if "Start building" was reached while the
             // scaffold Task was still in-flight, the `scaffoldTask?.cancel()` above can

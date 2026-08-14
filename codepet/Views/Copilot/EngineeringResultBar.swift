@@ -32,6 +32,11 @@ struct EngineeringResultBar: View {
     /// Seconds the run has been working, or nil while that is unknown.
     var elapsed: Int?
     var onReview: () -> Void
+    /// Reopens the connect-or-create sheet. Optional because the gallery and
+    /// the previews have no sheet to open — but wherever a founder can see
+    /// `.noRepoLinked`, this must be wired, or the message is an instruction
+    /// with no control ("never a dead-end", spec §7).
+    var onConnectRepo: (() -> Void)?
 
     @State private var stepsExpanded = false
     @State private var filesExpanded = false
@@ -279,6 +284,17 @@ struct EngineeringResultBar: View {
                     .foregroundColor(hue)
                     .buttonStyle(.plain)
                 }
+
+                // "Connect one first" is an instruction. Without a control it
+                // is an instruction the founder cannot follow from where they
+                // are standing — which is the definition of the dead end §7
+                // forbids for exactly this state.
+                if store.failure == .noRepoLinked, let onConnectRepo {
+                    Button(lang == .vi ? "Kết nối repo" : "Connect a repo", action: onConnectRepo)
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(hue)
+                        .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -343,6 +359,20 @@ struct EngineeringResultBar: View {
             return lang == .vi
                 ? "Lần chạy này đã dừng ở hạn mức. Phần đã làm vẫn còn nguyên trên nhánh — mở phần xem lại để xem."
                 : "This run stopped at its spend limit. The work so far is intact on the branch — open Review to see it."
+        case .repoUnusable:
+            // Names the cause AND both ways out, because "try again" on the
+            // same empty repo produces the same 422.
+            return lang == .vi
+                ? "Repo đó chưa có commit nào nên chưa có nhánh để làm việc. Chọn repo khác, hoặc để Codepet tạo một cái mới."
+                : "That repo has no commits yet, so there's no branch to build on. Pick another, or let Codepet make you one."
+        case .nothingToShip:
+            // The run recorded no repo or no branch, so there is nothing to
+            // open a PR from. Ours to explain, not theirs to fix — and never
+            // worded as "your repo is broken", which is what sharing a 422
+            // with `repoUnusable` used to make it say.
+            return lang == .vi
+                ? "Lần chạy này chưa có nhánh nào để mở PR."
+                : "This run has no branch to open a pull request from."
         case .misconfigured:
             // Ours. Never worded as something the founder did or can fix.
             return lang == .vi

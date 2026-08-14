@@ -95,6 +95,43 @@ struct EngDiffSummary: Equatable, Codable {
     )
 }
 
+/// Where shipping stands for one run.
+enum ShipState: Equatable {
+    case idle
+    case shipping
+    case shipped(EngShipResult)
+    case shipFailed(EngineeringError)
+}
+
+/// A pull request `engShip` opened, or found already open.
+struct EngShipResult: Equatable, Codable {
+    let prNumber: Int
+    let prUrl: String
+}
+
+/// Where a branch's preview deploy stands.
+///
+/// `engPreview` answers 200 in all three cases, because "there is no preview"
+/// is information rather than a failure — and WHICH no it is decides what the
+/// founder is told. "Install Vercel" and "wait a moment" are different
+/// instructions, and a single null cannot tell them apart; the handler makes a
+/// second GitHub call specifically to separate them.
+enum EngPreviewState: Equatable, Codable {
+    /// A successful deploy, with somewhere to send them.
+    case ready(url: String)
+    /// A deploy target exists and has not finished. Worth waiting for.
+    case pending
+    /// Nothing is wired up, so no preview will EVER appear for this repo.
+    /// The pane says so instead of showing a chip that never resolves.
+    case noDeployTarget
+
+    /// Decoded from `engPreview`'s body: `{url}` or `{url: null, reason}`.
+    static func decode(_ json: [String: Any]) -> EngPreviewState {
+        if let url = json["url"] as? String, !url.isEmpty { return .ready(url: url) }
+        return (json["reason"] as? String) == "no_deploy_target" ? .noDeployTarget : .pending
+    }
+}
+
 /// A tool the agent wants to run, waiting on the founder.
 ///
 /// `id` is the Managed Agents `tool_use_id`, which is what `engSendTurn`

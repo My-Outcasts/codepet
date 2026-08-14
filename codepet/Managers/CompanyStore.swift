@@ -69,6 +69,15 @@ final class CompanyStore: ObservableObject {
     /// to the transcript bottom for.
     @Published var engineeringRunAnchorId: String?
 
+    /// The ask waiting on a repo, or nil when the connect-or-create sheet is
+    /// closed. Set ONLY by a run coming back `no_repo_linked`, so the server
+    /// decides whether the sheet is needed and the client never guesses.
+    ///
+    /// Holding the ask is what makes the sheet worth showing: once a repo is
+    /// linked the run can be started again from here, rather than asking the
+    /// founder to retype what they already typed.
+    @Published var engineeringRepoPrompt: String?
+
     /// Drives local coding-agent runs. Lazy so the runner is built only on first use.
     /// The `-CODEPET_MOCK_CHAT` launch arg (via `MockChat.enabled`, same flag chat/task
     /// runs key off) swaps in `MockCodeRunner` (no `claude`, no cost) while keeping the
@@ -685,7 +694,45 @@ final class CompanyStore: ObservableObject {
         // diff while a different run streams behind it is two runs' state on one
         // screen with nothing saying which is which.
         engineeringReviewRunId = nil
-        Task { await store.start(ask: trimmed) }
+        Task {
+            await store.start(ask: trimmed)
+            // The server decides whether a repo is needed, and it decides
+            // cheaply: `engStartRun` returns `no_repo_linked` before it reads
+            // the balance and long before it creates a session, so this
+            // attempt spent nothing. The refusal stays in the bar either way —
+            // closing the sheet must not leave an ask with no answer.
+            if store.failure == .noRepoLinked { engineeringRepoPrompt = trimmed }
+        }
+    }
+
+    /// Reopen the connect sheet for the ask that is already on screen.
+    ///
+    /// The "never a dead-end" half of §5.4: the sheet is shown once, and after
+    /// that the refusal in the result bar is the way back to it. Without this
+    /// a founder who closed it has an ask, a message telling them to connect a
+    /// repo, and nothing anywhere that connects one.
+    func promptForEngineeringRepo() {
+        guard let id = engineeringRunAnchorId,
+              let ask = chatMessages.first(where: { $0.id == id })?.text
+        else { return }
+        engineeringRepoPrompt = ask
+    }
+
+    /// A repo now exists. Close the sheet and run the ask it interrupted.
+    ///
+    /// Re-running rather than resuming: nothing started, so there is nothing
+    /// to resume — `engStartRun` refused before creating a session, which is
+    /// also why this cannot double-charge.
+    func engineeringRepoLinked() {
+        guard let ask = engineeringRepoPrompt else { return }
+        engineeringRepoPrompt = nil
+        // The ask is already in the transcript from the first attempt;
+        // `startEngineeringRun` appends it again, so drop the stale copy
+        // rather than showing the founder their own sentence twice.
+        if let id = engineeringRunAnchorId {
+            chatMessages.removeAll { $0.id == id }
+        }
+        startEngineeringRun(ask: ask)
     }
 
     /// Open the Review pane on the run currently in flight.
@@ -713,6 +760,10 @@ final class CompanyStore: ObservableObject {
         engineeringRunStore = nil
         engineeringReviewRunId = nil
         engineeringRunBag = nil
+        // The sheet holds the ask it interrupted, and that ask belongs to the
+        // outgoing thread. Left set, linking a repo would run a sentence the
+        // founder typed in a conversation they have already left.
+        engineeringRepoPrompt = nil
     }
 
     // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)

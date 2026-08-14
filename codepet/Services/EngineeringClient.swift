@@ -111,6 +111,53 @@ final class EngineeringClient: EngineeringRunning {
         return try JSONDecoder().decode(EngDiffSummary.self, from: data)
     }
 
+    /// Open the PR.
+    ///
+    /// Not `postJSON`, because one of `engShip`'s failures is not a failure to
+    /// the founder. `pr_write_failed` is a 503 whose body carries `prNumber`
+    /// and `prUrl`: the pull request WAS opened on GitHub and only Firestore's
+    /// record of it did not land. Throwing that away would show a retry
+    /// control for work that already happened, and the retry would ask GitHub
+    /// to open a pull request that already exists.
+    ///
+    /// So a PR in the body wins over the status. The run document stays out of
+    /// sync until the reconciler that does not exist yet catches up — but the
+    /// founder is shown the truth, which is that their PR is open.
+    func ship(runId: String) async throws -> EngShipResult {
+        var request = URLRequest(url: base.appending(path: "engShip"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(try await idToken())", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["runId": runId])
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw EngineeringError.unknown(0) }
+        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+
+        if let result = Self.shipResult(from: json) { return result }
+        guard http.statusCode == 200 else { throw Self.error(status: http.statusCode, body: data) }
+        // 200 with no PR number is a contract the backend does not have.
+        throw EngineeringError.unknown(502)
+    }
+
+    /// A PR in the body, whatever the status was.
+    static func shipResult(from json: [String: Any]) -> EngShipResult? {
+        guard let number = json["prNumber"] as? Int, number > 0 else { return nil }
+        return EngShipResult(prNumber: number, prUrl: json["prUrl"] as? String ?? "")
+    }
+
+    func preview(runId: String) async throws -> EngPreviewState {
+        var request = URLRequest(url: base.appending(path: "engPreview")
+            .appending(queryItems: [URLQueryItem(name: "runId", value: runId)]))
+        request.setValue("Bearer \(try await idToken())", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw EngineeringError.unknown(0) }
+        guard http.statusCode == 200 else { throw Self.error(status: http.statusCode, body: data) }
+        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        return EngPreviewState.decode(json)
+    }
+
     // MARK: - plumbing
 
     private func postJSON(path: String, body: [String: Any]) async throws -> [String: Any] {

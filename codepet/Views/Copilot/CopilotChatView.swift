@@ -245,7 +245,8 @@ struct CopilotChatView: View {
                             EngineeringResultBar(
                                 store: eng,
                                 ask: m.text,
-                                onReview: { companyStore.openEngineeringReview() }
+                                onReview: { companyStore.openEngineeringReview() },
+                                onConnectRepo: { companyStore.promptForEngineeringRepo() }
                             )
                             .id("engineering-run")
                         }

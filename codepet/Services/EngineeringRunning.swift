@@ -54,6 +54,24 @@ enum EngineeringError: Error, Equatable {
     /// this line they are told to connect a repo they connected days ago — a
     /// wrong instruction they can act on, which is worse than no message.
     case budgetReached
+    /// 422 `no_default_branch` — the repo the founder just picked has no
+    /// commits, so there is no branch to build from and `engLinkRepo` writes
+    /// nothing rather than a link `loadRepo` would reject.
+    ///
+    /// Its own case because it is the one refusal in the connect flow the
+    /// founder caused and can fix — pick another repo, or let Codepet create
+    /// one. Folded into `.unknown` it reads "Something went wrong. Try
+    /// again," and trying again picks the same empty repo.
+    case repoUnusable
+    /// 422 `run_not_shippable` — the run has no repo or no branch recorded,
+    /// so there is nothing to open a PR from.
+    ///
+    /// Shares a status with `repoUnusable` and means something completely
+    /// different, which is why `from` reads the code for 422 rather than
+    /// mapping the status alone. It did map the status alone for about an
+    /// hour after `repoUnusable` was added, and would have told a founder
+    /// whose run produced nothing that their repo had no commits.
+    case nothingToShip
     /// 500 — a deploy problem. Ours, never the founder's fault.
     case misconfigured
     /// 503 — retryable.
@@ -66,6 +84,8 @@ enum EngineeringError: Error, Equatable {
         case (409, "budget_reached"): return .budgetReached
         case (409, "github_not_connected"): return .gitHubNotConnected
         case (409, _): return .noRepoLinked
+        case (422, "run_not_shippable"): return .nothingToShip
+        case (422, _): return .repoUnusable
         case (500, _): return .misconfigured
         case (503, _): return .unavailable
         default: return .unknown(status)
@@ -105,4 +125,33 @@ protocol EngineeringRunning {
     func send(runId: String, turn: EngineeringTurn) async throws
 
     func diff(runId: String, scope: ReviewScope) async throws -> EngDiffSummary
+
+    /// Open a pull request from the run's branch. Idempotent on the backend:
+    /// `engShip` returns the existing PR when the run already has one, so a
+    /// second call cannot open a second PR.
+    func ship(runId: String) async throws -> EngShipResult
+
+    /// Where the branch's preview deploy stands. Never throws for "there is
+    /// no preview" — that is an answer, and WHICH kind of no it is decides
+    /// what the founder is told.
+    func preview(runId: String) async throws -> EngPreviewState
+}
+
+/// Default to "this conformer does not do that".
+///
+/// Every test fixture and the gallery's runner conform to this protocol, and
+/// none of them ship or deploy anything. Without defaults, adding these two
+/// calls would have meant six stub implementations whose only content is a
+/// throw — noise that hides which conformers genuinely implement them.
+///
+/// 501 rather than a silent success: a surface that reached one of these by
+/// accident must fail loudly in a test, not quietly render "shipped".
+extension EngineeringRunning {
+    func ship(runId: String) async throws -> EngShipResult {
+        throw EngineeringError.unknown(501)
+    }
+
+    func preview(runId: String) async throws -> EngPreviewState {
+        throw EngineeringError.unknown(501)
+    }
 }

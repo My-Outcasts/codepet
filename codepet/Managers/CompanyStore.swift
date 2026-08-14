@@ -669,6 +669,57 @@ final class CompanyStore: ObservableObject {
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
     /// run card to it, and stage the run. With no linked project the coordinator lands
     /// in `.noProject` and the card offers "Link a project".
+    /// Build: change the founder's code. The one code mode, since 14 Aug.
+    ///
+    /// **Cloud by default, and not because it is better.** The local runner
+    /// shells out to the `claude` CLI (`ClaudeCodeRunner`), so it works for
+    /// someone who already has Claude Code installed and authenticated — which
+    /// is Mona, and nobody who downloads Codepet in August. Defaulting to the
+    /// path that works for a customer is the whole reason this is the default;
+    /// defaulting to local would ship a mode that does nothing for everyone
+    /// except us.
+    ///
+    /// **Nothing is decided silently.** Auto-routing between two coding agents
+    /// behind one button is the wrong-machine-wrong-bill problem one level
+    /// deeper, where it is harder to see: local edits files on disk for the
+    /// price of an ordinary turn, cloud opens a branch and can spend 40
+    /// credits. So the run says where it is running, and offers the other one
+    /// when it is actually available (`localBuildAvailable`).
+    ///
+    /// Falling back to local when no repo is linked would be exactly that
+    /// silent routing. Instead the cloud run refuses — cheaply, before the
+    /// balance is read — and the connect-or-create sheet opens.
+    func startBuild(ask: String) {
+        startEngineeringRun(ask: ask)
+    }
+
+    /// Whether "run this on my machine instead" is a real offer.
+    ///
+    /// A linked folder only. It cannot check for the `claude` binary from here
+    /// — that is the runner's job and it happens at spawn — so this is
+    /// necessary and not sufficient, which is the honest limit of what the
+    /// dock can know before trying.
+    var localBuildAvailable: Bool { activeProjectLink != nil }
+
+    /// Re-run the same ask on the local agent.
+    ///
+    /// Drops the cloud run rather than leaving both alive: two coding agents on
+    /// one ask, writing to two different places, is a state no card could
+    /// explain. The cloud branch survives on GitHub — this drops Codepet's
+    /// handle on it, which is all a client can do while no endpoint cancels a
+    /// session.
+    func switchBuildToLocal(ask: String) {
+        let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, localBuildAvailable else { return }
+        // The ask is already in the transcript from the cloud attempt;
+        // `startCodeRun` appends it again.
+        if let id = engineeringRunAnchorId {
+            chatMessages.removeAll { $0.id == id }
+        }
+        clearEngineeringRun()
+        startCodeRun(ask: trimmed)
+    }
+
     func startCodeRun(ask: String) {
         let trimmed = ask.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

@@ -138,6 +138,60 @@ final class EngineeringRunStoreTests: XCTestCase {
         XCTAssertEqual(store.phase, .reviewing)
     }
 
+    // MARK: - the agent's own account, and how long it took
+
+    func testTheAgentsProseIsKeptInOrder() {
+        // It was collected from day one and rendered nowhere, which is why a
+        // finished run showed six shell commands and no explanation. The
+        // commands are the evidence; this is the answer.
+        let (store, _) = makeStore()
+        store.handle(.message("Reading the project."))
+        store.handle(.message("Added Stripe checkout across three files."))
+        XCTAssertEqual(store.messages,
+                       ["Reading the project.", "Added Stripe checkout across three files."])
+    }
+
+    func testThereIsNoDurationBeforeARunStarts() {
+        // nil, not zero. Zero reads as an instant run; nil is "we do not know".
+        let (store, _) = makeStore()
+        XCTAssertNil(store.elapsedSeconds())
+    }
+
+    func testTheClockRunsFromTheStart() async {
+        let (store, _) = makeStore()
+        await store.start(ask: "add stripe checkout")
+        guard let started = store.startedAt else { return XCTFail("no start stamp") }
+        XCTAssertEqual(store.elapsedSeconds(now: started.addingTimeInterval(124)), 124)
+    }
+
+    func testTheClockFreezesWhenTheRunStops() async {
+        // A finished run whose timer kept climbing reads as still going.
+        let (store, _) = makeStore()
+        await store.start(ask: "add stripe checkout")
+        guard let started = store.startedAt else { return XCTFail("no start stamp") }
+        store.handle(.done(stopReason: "end_turn"))
+
+        let long = started.addingTimeInterval(9_999)
+        let frozen = store.elapsedSeconds(now: long)
+        XCTAssertNotNil(frozen)
+        XCTAssertLessThan(frozen ?? .max, 60, "the clock kept running after the run stopped")
+    }
+
+    func testABudgetPauseAlsoStopsTheClock() async {
+        // Paused is stopped, for this purpose: the founder wants to know how
+        // long it worked before it hit the cap.
+        let (store, _) = makeStore()
+        await store.start(ask: "x")
+        store.handle(.done(stopReason: "budget_reached"))
+        XCTAssertNotNil(store.finishedAt)
+    }
+
+    func testDurationReadsAsMinutesAndSecondsPastAMinute() {
+        XCTAssertEqual(EngineeringResultBar.duration(41), "41s")
+        XCTAssertEqual(EngineeringResultBar.duration(124), "2m 4s")
+        XCTAssertEqual(EngineeringResultBar.duration(60), "1m 0s")
+    }
+
     // MARK: - a command asked for is not a command run
 
     func testAStepWaitingOnPermissionIsNotListedAsSomethingThatHappened() {

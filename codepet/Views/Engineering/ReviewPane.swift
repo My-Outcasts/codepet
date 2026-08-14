@@ -159,11 +159,16 @@ struct ReviewPane: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                 } else {
+                    // The language is read from the file's own name, once per
+                    // file rather than per line — `file.file` is the current
+                    // name even for a rename, which is the one that has the
+                    // right extension.
+                    let language = SyntaxHighlight.Language.of(path: file.file)
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(DiffPatch.parse(file.patch)) { line in
                             // `onComment` stays nil: the hit target exists, the
                             // action does not. Inline comments are v1.1.
-                            DiffLineView(line: line)
+                            DiffLineView(line: line, language: language)
                         }
                     }
                     .padding(.bottom, 6)

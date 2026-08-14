@@ -19,7 +19,24 @@ final class EngineeringRunStore: ObservableObject {
     @Published private(set) var approvals: [EngApproval] = []
     /// The agent's prose, in order. Separate from `steps` because one is what
     /// it DID and the other is what it says about it.
+    ///
+    /// Collected since Plan 3 Task 6 and rendered NOWHERE until 14 Aug, which
+    /// is why a finished run showed six shell commands and no explanation of
+    /// what it built. Same shape as the run being invisible: stored, correct,
+    /// never on screen.
     @Published private(set) var messages: [String] = []
+
+    /// When the run started, and when it stopped — the two ends of "Worked
+    /// for 2m 4s".
+    ///
+    /// Stamped here rather than passed in, because the dock has no idea when a
+    /// run began: `EngineeringResultBar.elapsed` has existed since the card was
+    /// built and only ever received `nil` from the app, so the row could say
+    /// "N steps" and nothing else. A preview passing 41 was the only place the
+    /// duration branch had ever run.
+    @Published private(set) var startedAt: Date?
+    @Published private(set) var finishedAt: Date?
+
     @Published private(set) var diff: EngDiffSummary?
     @Published private(set) var runId: String?
     /// A refusal the founder has to act on, or nil. Not a phase: a run can be
@@ -51,6 +68,15 @@ final class EngineeringRunStore: ObservableObject {
     /// Whether to draw a retry control: there has to be something to repeat
     /// AND repeating it has to be capable of a different answer.
     var canRetry: Bool { failure?.isRetryable == true && retryAction != nil }
+
+    /// Seconds worked: to now while running, frozen once the run stops.
+    ///
+    /// nil before the run starts, so the caller still has an honest "we do not
+    /// know" rather than a zero that looks like an instant run.
+    func elapsedSeconds(now: Date = Date()) -> Int? {
+        guard let startedAt else { return nil }
+        return max(0, Int((finishedAt ?? now).timeIntervalSince(startedAt)))
+    }
 
     /// The steps worth SHOWING: the log, minus anything still waiting on
     /// permission.
@@ -87,6 +113,8 @@ final class EngineeringRunStore: ObservableObject {
         phase = .preparing
         failure = nil
         retryAction = nil
+        startedAt = Date()
+        finishedAt = nil
         do {
             runId = try await runner.start(ask: ask) { [weak self] frame in
                 Task { @MainActor in self?.handle(frame) }
@@ -252,9 +280,15 @@ final class EngineeringRunStore: ObservableObject {
             phase = .awaitingApproval
         case .done(let stopReason):
             phase = EngineeringRun.phase(fromStopReason: stopReason)
+            // The clock stops on ANY terminal reason, including a budget
+            // pause: the founder wants to know how long it worked before it
+            // stopped, and a paused run whose timer kept climbing would read
+            // as still going.
+            finishedAt = Date()
         case .failure(let code):
             failure = .unavailable
             phase = .failed(code)
+            finishedAt = Date()
         }
     }
 

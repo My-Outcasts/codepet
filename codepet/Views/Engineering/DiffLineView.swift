@@ -13,6 +13,10 @@ import SwiftUI
 /// geometry is the hard part to retrofit, the action is not.
 struct DiffLineView: View {
     let line: DiffLine
+    /// The file this line belongs to, so the tokeniser knows what language to
+    /// read it as. `nil` renders plain, which is what an unknown extension
+    /// should do — colouring a file we cannot parse is worse than not trying.
+    var language: SyntaxHighlight.Language?
     /// Called with the line a comment would attach to. `nil` today, which is
     /// what makes the row inert while still owning its target.
     var onComment: ((Int) -> Void)?
@@ -34,9 +38,8 @@ struct DiffLineView: View {
                 .foregroundColor(markerColour)
                 .frame(width: 12, alignment: .center)
 
-            Text(line.text.isEmpty ? " " : line.text)
+            highlighted
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(textColour)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -61,6 +64,38 @@ struct DiffLineView: View {
         .onTapGesture {
             guard let anchor = line.commentAnchor else { return }
             onComment?(anchor)
+        }
+    }
+
+    /// The line's code, syntax-coloured, as one `Text` built from spans.
+    ///
+    /// Concatenated rather than an HStack of `Text`s: an HStack would let the
+    /// line wrap between spans at arbitrary points and break selection into
+    /// fragments. `+` on `Text` keeps it a single run for both.
+    ///
+    /// A hunk header keeps its own colour and is not tokenised — it is diff
+    /// syntax, not the file's.
+    private var highlighted: Text {
+        let body = line.text.isEmpty ? " " : line.text
+        guard line.kind != .hunk, let language else {
+            return Text(body).foregroundColor(textColour)
+        }
+        return SyntaxHighlight.spans(body, language: language)
+            .reduce(Text("")) { acc, span in
+                acc + Text(span.text).foregroundColor(Self.colour(span.kind, base: textColour))
+            }
+    }
+
+    /// Syntax colours, chosen to sit on the added/removed tints rather than
+    /// fight them: the diff's own green and red are the background, so these
+    /// are drawn from the theme's accents at full strength.
+    static func colour(_ kind: SyntaxHighlight.Kind, base: Color) -> Color {
+        switch kind {
+        case .plain:   return base
+        case .keyword: return CodepetTheme.accentPurple
+        case .string:  return CodepetTheme.accentTeal
+        case .number:  return CodepetTheme.accentOrange
+        case .comment: return CodepetTheme.mutedText
         }
     }
 

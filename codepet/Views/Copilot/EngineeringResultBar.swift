@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// The collapsed result of an engineering run, in the chat dock.
 ///
@@ -8,19 +9,24 @@ import SwiftUI
 /// (`accentBlue`, the Department catalog's colour for `key: "eng"`) so an eng
 /// turn reads as distinct from the purple copilot chrome.
 ///
-/// Three deliberate divergences from Codex, per the design's §5.2:
+/// Four deliberate divergences from Codex, per the design's §5.2 — two of
+/// which have flipped since it was written, because Codex moved:
 ///
-/// - **Filenames are ONE tap away, not two.** Codex hides edited filenames
-///   behind an aggregate summary and its users filed a bug about it
-///   (openai/codex#19891). "Changed 3 files" collapsed, names on first expand.
+/// - **Filenames are visible, not behind a tap.** Codex hid them behind an
+///   aggregate and its users filed openai/codex#19891, so this card put them
+///   one tap away. Their current build shows the list outright with a
+///   "Show N more file" fold — the reason for the divergence went away, and on
+///   14 Aug so did the tap.
+/// - **The agent's prose leads, the commands follow.** `store.messages` was
+///   collected from the first day and rendered nowhere, so a finished run was
+///   six shell commands and no explanation of what got built.
 /// - **No Undo button.** The branch IS the undo — nothing touched the founder's
 ///   default branch, so discarding is deleting a branch, and that belongs next
 ///   to the diff rather than behind a button implying local file surgery. A dead
 ///   Undo was already removed from this codebase once (`6982df0`).
-/// - **No preview chip.** Nothing serves a preview URL yet (that is Plan 2's
-///   `engPreview`, wired in a later task). A chip that never resolves is worse
-///   than no chip, and the design says a repo with no deploy target should
-///   degrade honestly rather than show a dead affordance.
+/// - **A preview chip only for a URL that exists.** `engPreview` answers three
+///   ways and the two "no"s get words instead — a chip that never resolves is
+///   worse than no chip.
 struct EngineeringResultBar: View {
     @ObservedObject var store: EngineeringRunStore
     @Environment(\.uiLanguage) private var lang
@@ -42,7 +48,16 @@ struct EngineeringResultBar: View {
     var onRunLocally: (() -> Void)?
 
     @State private var stepsExpanded = false
-    @State private var filesExpanded = false
+    /// Open by default. Codex hid filenames behind an aggregate, its users
+    /// filed openai/codex#19891, and this card diverged deliberately to put
+    /// them one tap away. Their current build shows the list outright with a
+    /// "Show N more file" fold, so the tap is now the worse of the two — the
+    /// reason for the divergence went away.
+    @State private var filesExpanded = true
+    /// Ticks once a second while the run is live, so "Worked for" climbs.
+    /// Stops when the run does: `elapsedSeconds` freezes on `finishedAt`, so a
+    /// finished run keeps its final number even though this keeps firing.
+    @State private var now = Date()
 
     private var hue: Color { CodepetTheme.accentBlue }
 
@@ -56,6 +71,7 @@ struct EngineeringResultBar: View {
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     destinationRow
+                    summaryProse
                     workedRow
                     if stepsExpanded { stepList }
                     if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
@@ -67,6 +83,43 @@ struct EngineeringResultBar: View {
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // A 1s timer rather than TimelineView: this card sits inside the
+        // transcript's ScrollView, and a TimelineView redraw there costs more
+        // than a published Date on one row.
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
+    }
+
+    // MARK: - the agent's own account of what it did
+
+    /// What the agent SAYS it did, above what it ran.
+    ///
+    /// Collected since the store was written and rendered nowhere until 14 Aug.
+    /// A finished run showed six shell commands and no explanation — the
+    /// opposite of Codex, which leads with "Created a complete, responsive
+    /// landing-page source package" and folds the commands away. The commands
+    /// are evidence; this is the answer.
+    ///
+    /// Every message, not just the last: the agent narrates as it goes, and
+    /// keeping only the final line would drop the reasoning that explains a
+    /// permission ask three rows above.
+    @ViewBuilder private var summaryProse: some View {
+        if !store.messages.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(store.messages.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    /// "2m 4s", or "41s" under a minute — Codex's shape, and it reads better
+    /// than 124 seconds at the length these runs actually take.
+    static func duration(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
     // MARK: - header
@@ -133,8 +186,12 @@ struct EngineeringResultBar: View {
     }
 
     private var workedText: String {
-        if let elapsed {
-            return lang == .vi ? "Đã làm \(elapsed)s" : "Worked for \(elapsed)s"
+        // The store's clock first, the caller's override second. `elapsed` was
+        // the only source until 14 Aug and the dock never passed one, so in the
+        // running app this row could never say a duration — only a preview and
+        // the gallery ever supplied a number.
+        if let secs = elapsed ?? store.elapsedSeconds(now: now) {
+            return (lang == .vi ? "Đã làm " : "Worked for ") + Self.duration(secs)
         }
         // The VISIBLE count, or the row would promise steps the list does not
         // show — "6 steps" above four rows is its own small lie.

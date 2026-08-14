@@ -63,7 +63,7 @@ enum OnboardingContent {
     /// Per-step left-panel art (STEP_ART), steps 0...8. Steps 0, 7 & 8 reuse ob-team.
     static let stepArt = [
         "ob-team", "ob-couch", "ob-chess", "ob-drummer",
-        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team", "ob-team",
+        "ob-observatory", "ob-isometric", "ob-boardroom", "ob-team",
     ]
     static let analysisLines = [
         "Reading what you told me…",
@@ -74,7 +74,7 @@ enum OnboardingContent {
     /// Total onboarding screens INCLUDING the cinematic cold-open (step 0). The footer
     /// counts `step + 1` of `total` — matching the web (`OB_TOTAL`), where the cold-open
     /// is counted but renders no footer, so the first question reads "Step 2 of 9".
-    static let total = 9
+    static let total = 8
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.

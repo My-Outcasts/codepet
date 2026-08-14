@@ -52,7 +52,63 @@ import Foundation
 /// `-CODEPET_MOCK_CHAT YES` sidesteps all of it: `NSArgumentDomain` outranks
 /// every preference file and touches no disk.
 enum MockChat {
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") }
+    /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
+    /// is ONE launch argument rather than two that must agree — two flags where
+    /// one is meaningless without the other is a state you can get half-right.
+    static var enabled: Bool {
+        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") || flowEnabled
+    }
+
+    /// `-CODEPET_MOCK_FLOW YES` — start at the cold open and walk the whole
+    /// product, with a fake company built from whatever gets typed in.
+    ///
+    /// Plain mock mode boots an ALREADY-ONBOARDED company, which is what makes
+    /// chat and engineering reachable with no spend — and it means onboarding
+    /// is the one stretch of the product a mock has never been able to show.
+    /// This flag closes that: `CompanyData.load` reports "not onboarded yet"
+    /// until the founder finishes, `enrichBrief` and `fetchRoadmap` answer from
+    /// fixtures instead of the network, and the shell that follows is the same
+    /// populated company plain mock mode has always given.
+    static var flowEnabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW") }
+
+    /// Flipped once onboarding completes, so the next `load` in this process
+    /// returns the finished company rather than sending the founder back
+    /// through the cold open.
+    ///
+    /// Process-lifetime, not persisted, and deliberately so: relaunching with
+    /// the flag is how you get the first-run flow again. A persisted "seen"
+    /// flag would make the demo a one-shot, and the whole point is walking it
+    /// repeatedly while judging the copy.
+    nonisolated(unsafe) static var flowOnboarded = false
+
+    /// The brief the founder actually typed during the flow demo.
+    ///
+    /// Without it the demo forgets: `CompanyData.load` answers every hydrate
+    /// after onboarding with `company()`, whose brief is hardcoded — so an
+    /// account switch or a sign-out would quietly replace the founder's project
+    /// with Codepet's, mid-walkthrough, with nothing saying why.
+    nonisolated(unsafe) static var flowBrief: CompanyBrief?
+
+    /// What the canned copy calls the product.
+    ///
+    /// Every deliverable and reply below is written with a `{{product}}` token
+    /// rather than a name, because a demo that talks about Codepet while the
+    /// founder is onboarding something else is a demo they have to translate in
+    /// their head — and the first thing they will conclude is that the fixture
+    /// ignored what they typed.
+    ///
+    /// One substitution point, not thirteen interpolations: the token survives
+    /// being copied into new canned text, an interpolation has to be remembered
+    /// each time.
+    static var productName: String {
+        let typed = (flowBrief?.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? "Codepet" : typed
+    }
+
+    /// Fill `{{product}}` in any canned string.
+    static func fill(_ text: String) -> String {
+        text.replacingOccurrences(of: "{{product}}", with: productName)
+    }
 
     /// Decide the reply text + which `.done` action fires, from the message text
     /// and the request's own `runnable`/`envSetup` lists (so echoed ids are valid).
@@ -62,7 +118,7 @@ enum MockChat {
         // summarize → a grounded read of where the project stands (guided flow start).
         if msg.contains("summar") {
             return ("""
-            Here\u{2019}s where Codepet stands. You\u{2019}re **building** \u{2014} the product exists, and the job \
+            Here\u{2019}s where {{product}} stands. You\u{2019}re **building** \u{2014} the product exists, and the job \
             now is getting it in front of real users. Your foundation is mostly in place; what\u{2019}s \
             missing is the launch surface (landing, waitlist) and the go-to-market basics (pricing, \
             outreach).
@@ -205,7 +261,7 @@ enum MockChat {
         try? await Task.sleep(nanoseconds: 300_000_000)
         let (raw, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
-        let text = raw.replacingOccurrences(of: "**", with: "")
+        let text = fill(raw).replacingOccurrences(of: "**", with: "")
         return CompanyChatReply(text: text, runTaskId: action.runTaskId, nav: action.nav,
                                 setup: action.setup, remember: action.remember)
     }
@@ -216,7 +272,7 @@ enum MockChat {
     static func stream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         let (rawFull, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
-        let full = rawFull.replacingOccurrences(of: "**", with: "")
+        let full = fill(rawFull).replacingOccurrences(of: "**", with: "")
         return AsyncThrowingStream { continuation in
             let task = Task.detached {
                 try? await Task.sleep(nanoseconds: 500_000_000)  // "Working on it…" beat
@@ -244,7 +300,7 @@ enum MockChat {
         try? await Task.sleep(nanoseconds: 700_000_000)  // "producing…" beat
         let (kind, body) = deliverable(for: req.taskTitle)
         let note = req.reviseNote.map { "\n\n_Revised per your note: \($0)_" } ?? ""
-        return RunTaskResponse(kind: kind, title: req.taskTitle, body: body + note, payload: nil)
+        return RunTaskResponse(kind: kind, title: req.taskTitle, body: fill(body + note), payload: nil)
     }
 
     /// A realistic deliverable (kind + markdown body) tailored to the task title.
@@ -252,13 +308,13 @@ enum MockChat {
         let t = title.lowercased()
         if t.contains("positioning") || t.contains("value prop") {
             return ("doc", """
-            For solo founders drowning in scattered docs and stalled momentum, **Codepet** is the \
+            For solo founders drowning in scattered docs and stalled momentum, **{{product}}** is the \
             AI cofounder that turns your company into one living workspace — it plans your next \
             move, does the work with you, and remembers every decision. Unlike a generic AI chat \
-            or a stack of disconnected tools, Codepet is grounded in *your* company and acts, not \
+            or a stack of disconnected tools, {{product}} is grounded in *your* company and acts, not \
             just answers.
 
-            **One-liner** — Codepet is the AI cofounder that runs your company's busywork so you \
+            **One-liner** — {{product}} is the AI cofounder that runs your company's busywork so you \
             can build.
 
             **Why it works**
@@ -273,7 +329,7 @@ enum MockChat {
             return ("post", """
             **Headline** — Your AI cofounder, not another chatbot.
 
-            **Subhead** — Codepet plans your next move, does the work with you, and remembers \
+            **Subhead** — {{product}} plans your next move, does the work with you, and remembers \
             every decision — grounded in your actual company.
 
             **Benefit bullets**
@@ -316,7 +372,7 @@ enum MockChat {
             return ("email", """
             **Subject** — a quick idea for {{company}}
 
-            Hi {{name}} — I'll keep this short. I'm building Codepet, an AI cofounder that runs a \
+            Hi {{name}} — I'll keep this short. I'm building {{product}}, an AI cofounder that runs a \
             solo founder's whole company — it plans the next move, does the work with you, and \
             remembers every decision.
 
@@ -334,10 +390,10 @@ enum MockChat {
             return ("doc", """
             The first questions new users ask — answer them before they have to write in.
 
-            **What is Codepet?** An AI cofounder that runs your company's busywork — it plans, does \
+            **What is {{product}}?** An AI cofounder that runs your company's busywork — it plans, does \
             the work with you, and remembers your decisions.
 
-            **Do I need to know how to code?** No. Codepet drafts and produces; you approve.
+            **Do I need to know how to code?** No. {{product}} drafts and produces; you approve.
 
             **Is my data private?** Your company context is yours; we don't train on it.
 
@@ -366,7 +422,7 @@ enum MockChat {
             return ("legal", """
             _Plain-language draft — have a lawyer review before you publish._
 
-            **Privacy Policy — Codepet**
+            **Privacy Policy — {{product}}**
 
             **What we collect** — your account email, the company context you enter, and basic usage \
             analytics. We do **not** sell your data or train public models on your company content.
@@ -433,13 +489,61 @@ enum MockChat {
     /// deterministic roadmap with THREE distinct runnable departments (mkt / eng /
     /// design) → "Run my next moves" fans out to 3 parallel agents, all offline.
     static func company() -> CompanyState {
-        var brief = CompanyBrief()
-        brief.founderName = "Mona"
-        brief.projectName = "Codepet"
-        brief.oneLiner = "Your AI cofounder that runs the whole company with you."
-        brief.stage = "building"
+        // The founder's own brief wins whenever the flow demo captured one.
+        // Falling back to Codepet's here — as this did until a founder
+        // onboarded something else and watched their project get replaced on
+        // the next hydrate — makes the fixture look like it ignored them.
+        var brief = flowBrief ?? {
+            var b = CompanyBrief()
+            b.founderName = "Mona"
+            b.projectName = "Codepet"
+            b.oneLiner = "Your AI cofounder that runs the whole company with you."
+            return b
+        }()
+        if (brief.stage ?? "").isEmpty { brief.stage = "building" }
         return CompanyState(brief: brief, departments: [], library: [], stage: .building,
                             companionId: "byte", onboardedAt: Date(), tasks: roadmap())
+    }
+
+    /// An empty company, so `needsOnboarding` is true and the cold open runs.
+    ///
+    /// `onboardedAt` nil AND a brief with no signal — `needsOnboarding` checks
+    /// both, so returning a blank brief with a stamp (or a stamped brief with
+    /// no fields) would silently land in the shell instead.
+    static func preOnboardingCompany() -> CompanyState {
+        CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                     stage: .idea, companionId: "byte", onboardedAt: nil, tasks: [])
+    }
+
+    /// What `enrichBrief` would have filled in, filled in locally.
+    ///
+    /// Only touches fields the founder left blank, which is what the real
+    /// enricher is for — a mock that overwrote what they typed would make step
+    /// 7 show someone else's project back to them, and the reveal is the
+    /// moment the whole onboarding is judged on.
+    static func enrich(_ brief: CompanyBrief) -> CompanyBrief {
+        /// Blank and absent are the same thing to the enricher: a founder who
+        /// tabbed past a field and one who typed spaces into it both left it
+        /// empty, and the real enricher fills both.
+        func blank(_ s: String?) -> Bool {
+            (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        var b = brief
+        let name = (b.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = name.isEmpty ? "this product" : name
+        if blank(b.oneLiner) {
+            b.oneLiner = "\(subject) — the thing you're building, in one line."
+        }
+        if blank(b.audience) {
+            b.audience = "Early solo founders shipping their first product"
+        }
+        if blank(b.problem) {
+            b.problem = "Context is scattered across tools, so momentum stalls between sessions."
+        }
+        if blank(b.goal) {
+            b.goal = "Get one real signal from one real user this week."
+        }
+        return b
     }
 
     /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the

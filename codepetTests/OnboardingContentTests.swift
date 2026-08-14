@@ -15,9 +15,13 @@ final class OnboardingContentTests: XCTestCase {
         XCTAssertEqual(OnboardingContent.departments.count, 8)
         XCTAssertEqual(OnboardingContent.departments.first?.name, "Engineering")
         XCTAssertEqual(OnboardingContent.analysisLines.count, 4)
-        XCTAssertEqual(OnboardingContent.total, 9)
-        // step art covers steps 0...8 (9 entries)
-        XCTAssertEqual(OnboardingContent.stepArt.count, 9)
+        // Eight steps, 0...7, ending on the reveal. The companion picker was
+        // step 8 until 14 Aug; it asked a question with no consequence, and
+        // Settings has carried the same picker since #98.
+        XCTAssertEqual(OnboardingContent.total, 8)
+        // One art entry per step. Fewer than `total` and the last step crashes
+        // on the index; more and a step silently shows the wrong panel.
+        XCTAssertEqual(OnboardingContent.stepArt.count, OnboardingContent.total)
         XCTAssertEqual(OnboardingContent.stepArt[0], "ob-team")
         XCTAssertEqual(OnboardingContent.stepArt[6], "ob-boardroom")
     }

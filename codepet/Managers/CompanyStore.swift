@@ -246,7 +246,18 @@ final class CompanyStore: ObservableObject {
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
-         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { try await ReflectionAPIClient().enrichBrief($0) },
+         // The mock branch lives in the DEFAULT rather than inside
+         // `scaffoldFromOnboarding`, so the store keeps exactly one enrichment
+         // path and every test that injects its own closure is untouched by it.
+         enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { brief in
+             #if DEBUG
+             if MockChat.enabled {
+                 try? await Task.sleep(nanoseconds: 900_000_000)
+                 return MockChat.enrich(brief)
+             }
+             #endif
+             return try await ReflectionAPIClient().enrichBrief(brief)
+         },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
          decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract,
          // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
@@ -351,6 +362,17 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
+        #if DEBUG
+        // The demo has been onboarded now. Without this the next hydrate — an
+        // account switch, a sign-out and back in — would drop the founder at
+        // the cold open again, mid-walkthrough. The brief goes with it, so the
+        // fixture keeps talking about the project they typed rather than
+        // reverting to the one hardcoded in `MockChat.company()`.
+        if MockChat.flowEnabled {
+            MockChat.flowOnboarded = true
+            MockChat.flowBrief = brief
+        }
+        #endif
     }
 
     /// Seed byte's first-run greeting (name + best first move + optional inline action)
@@ -484,6 +506,14 @@ final class CompanyStore: ObservableObject {
         guard token == hydrationToken else { return }
         company.onboardedAt = Date()
         isOnboarding = false
+        #if DEBUG
+        // Skipping is finishing, as far as the demo is concerned — otherwise
+        // the founder who skips is sent back to the cold open on next hydrate,
+        // which reads as the Skip button not having worked. No brief is
+        // captured: they typed nothing, so the fixture's own project is the
+        // honest fallback.
+        if MockChat.flowEnabled { MockChat.flowOnboarded = true }
+        #endif
     }
 
     /// Generate the roadmap (fail-open). Token-guarded: an account switch during the

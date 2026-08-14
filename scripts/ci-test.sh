@@ -7,10 +7,15 @@
 # line is truncated when the run is large. `xcresulttool get test-results summary` reads
 # the result bundle and is the only count this project trusts.
 #
-# It also separates the two ways a run can end badly, which xcodebuild collapses into one
-# exit code: TESTS THAT FAILED (a real regression — the thing CI is for) versus a TEST
-# HOST THAT DIED (an environment problem — see SKIP_SUITES below). Reporting the second
-# as the first is how a team learns to ignore its own CI.
+# It also separates the ways a run can end badly, which xcodebuild collapses into one exit
+# code:
+#   TESTS FAILED          a real regression — the thing CI is for
+#   TARGET DID NOT BUILD  also a regression, and NOT the same message
+#   HOST DIED PART WAY    an environment problem; what ran is real, the rest is uncovered
+#   NOTHING RAN           unverified, which is never a pass
+# Reporting the second as the third is how a red build ships: it happened on 14 Aug, when a
+# test-target compile error was announced as "the host died … not treated as a regression"
+# and exited 0. Reporting the third as the first is how a team learns to ignore its own CI.
 set -uo pipefail
 
 RESULT_BUNDLE="${RESULT_BUNDLE:-build/ci.xcresult}"
@@ -74,6 +79,11 @@ if [ ! -d "$RESULT_BUNDLE" ]; then
   exit "${xcodebuild_status:-1}"
 fi
 
+# Build errors live in the SAME bundle, under a different subcommand. Read them before
+# the test summary, because a test target that failed to compile produces a bundle whose
+# test summary is a perfectly well-formed zero.
+build_json=$(xcrun xcresulttool get build-results --path "$RESULT_BUNDLE" 2>/dev/null)
+
 summary=$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" 2>&1)
 if [ -z "$summary" ] || ! printf '%s' "$summary" | head -c1 | grep -q '{'; then
   # Says "treating as failure" and now actually does. This used to
@@ -95,7 +105,7 @@ fi
 # "xcodebuild exited 0". A crash would have been kinder; this failed silently in the exact
 # direction that looks like success. Found by asking why the summary line never appeared in
 # the logs.
-SUMMARY_JSON="$summary" python3 - "$xcodebuild_status" <<'PY'
+SUMMARY_JSON="$summary" BUILD_JSON="$build_json" python3 - "$xcodebuild_status" <<'PY'
 import json, os, sys
 status = int(sys.argv[1])
 d = json.loads(os.environ["SUMMARY_JSON"])
@@ -116,13 +126,59 @@ if failed:
     print(f"\nFAILED: {failed} test(s) — a real regression.")
     sys.exit(1)
 
-# No test failed, but xcodebuild still complained. That is the host-death case (see the
-# header): report it as an environment problem, loudly, WITHOUT dressing it up as green.
+# NOTHING RAN. Never a pass, whatever the cause.
+#
+# This branch used to be folded into the host-death case below, which exits 0 — so on
+# 14 Aug a test target that failed to COMPILE was reported as "the test host died mid-run
+# … not treated as a regression", in green, having verified nothing at all. Same shape as
+# the two bugs already recorded in this file: a check that announces it cannot verify
+# something and then passes it anyway.
+#
+# Zero tests has two causes and they need different words, because they need different
+# fixes: fix your code, versus re-run the flake.
+if total == 0:
+    errors = []
+    try:
+        build = json.loads(os.environ.get("BUILD_JSON") or "{}")
+        for e in (build.get("errors") or []):
+            # `sourceURL` is a file: URL with the position in its fragment —
+            # unreadable in a CI log, so reduce it to the path:line a person
+            # can paste into an editor.
+            raw = e.get("sourceURL") or ""
+            where = e.get("targetName") or ""
+            if raw.startswith("file://"):
+                path = raw.split("#", 1)[0].replace("file://", "")
+                line = ""
+                if "#" in raw:
+                    for part in raw.split("#", 1)[1].split("&"):
+                        if part.startswith("StartingLineNumber="):
+                            line = ":" + part.split("=", 1)[1]
+                where = os.path.relpath(path, os.getcwd()) + line
+            message = e.get("message") or e.get("title") or ""
+            errors.append(f"{where}: {message}".strip(": "))
+    except (ValueError, TypeError):
+        pass
+
+    if errors:
+        print(f"\n::error::The test target did not BUILD — {len(errors)} compile error(s), "
+              f"so no test ran. This is a regression in the code, not a flaky host.")
+        for line in errors[:10]:
+            print(f"::error::{line}")
+    else:
+        print(f"\n::error::No test ran and xcodebuild exited {status}, with no compile "
+              f"error in the bundle — the host died before the first test. Re-run; if it "
+              f"repeats, it is not the known flake.")
+    sys.exit(1)
+
+# Some tests ran, none failed, and xcodebuild still complained: the host died PART WAY
+# through. Coverage is incomplete but what did run is real, so this stays a non-blocking
+# warning — with the number attached, because "incomplete" without a count is unactionable.
 if status != 0:
-    print(f"\n::warning::No test failed, but xcodebuild exited {status} — the test host "
-          f"died mid-run rather than a test failing. This is the known @MainActor "
-          f"ObservableObject dealloc crash (CLAUDE.md landmine 3). Not treated as a "
-          f"regression, but it means coverage this run was INCOMPLETE.")
+    print(f"\n::warning::{passed} test(s) passed and none failed, but xcodebuild exited "
+          f"{status} — the test host died PART WAY through rather than a test failing. "
+          f"This is the known @MainActor ObservableObject dealloc crash (CLAUDE.md "
+          f"landmine 3). Not a regression, but the suite did not finish: whatever runs "
+          f"after the crash point was NOT covered this run.")
     sys.exit(0)
 
 print(f"\nAll {passed} test(s) passed.")

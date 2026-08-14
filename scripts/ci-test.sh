@@ -63,6 +63,19 @@ rm -rf "$RESULT_BUNDLE"
 # reach Firebase auth unsigned (see CLAUDE.md), but no test in this suite talks to a live
 # Firebase — CompanyStore is driven entirely through injected closures — so unsigned is
 # the right trade for CI. A signed build stays the requirement for anything a human runs.
+#
+# -derivedDataPath: ITS OWN, and this is not tidiness.
+#
+# Without it this test build writes an adhoc, entitlement-less codepet.app over the signed
+# one in the shared DerivedData. Nothing announces it. The next launch looks identical and
+# sign-in is simply broken, because Firebase auth needs the keychain and adhoc does not get
+# it — which is exactly what happened on 14 Aug: run the suite, relaunch, spend the next
+# stretch wondering why signing in stopped working.
+#
+# The cost is one cold build the first time and a second DerivedData on disk. The trap it
+# removes is silent, hits a human rather than CI, and looks like a product bug.
+DERIVED_DATA="${DERIVED_DATA:-build/dd-ci}"
+
 set -x
 xcodebuild test \
   -project "$PROJECT" \
@@ -70,6 +83,7 @@ xcodebuild test \
   -destination 'platform=macOS' \
   ${skip_args[@]+"${skip_args[@]}"} \
   CODE_SIGNING_ALLOWED=NO \
+  -derivedDataPath "$DERIVED_DATA" \
   -resultBundlePath "$RESULT_BUNDLE"
 xcodebuild_status=$?
 set +x

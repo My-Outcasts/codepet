@@ -61,17 +61,16 @@ struct EngineeringResultBar: View {
         VStack(alignment: .leading, spacing: 12) {
             // Run metadata: how long, and on which machine. Grey and quiet,
             // above the rule, because it is not the answer.
-            VStack(alignment: .leading, spacing: 3) {
-                workedRow
-                destinationRow
-            }
+            workedRow
             if stepsExpanded { stepList }
 
-            // The rule only exists to separate the metadata from the answer,
-            // so it appears only when there IS an answer under it.
-            if !store.messages.isEmpty {
-                Divider().opacity(0.5)
-            }
+            // Always, not only when there is prose. It is the line between
+            // the run's metadata and the run's answer, and Codex draws it
+            // whether or not the answer has arrived yet — which is also when
+            // the separation matters most, because otherwise the commands run
+            // straight into the sentence.
+            Divider().opacity(0.45)
+            runLocallyRow
             summaryProse
             noteRow
 
@@ -102,11 +101,17 @@ struct EngineeringResultBar: View {
     /// permission ask three rows above.
     @ViewBuilder private var summaryProse: some View {
         if !store.messages.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(store.messages.enumerated()), id: \.offset) { _, line in
+                    // 14pt and leaded, against 13 flat before. This is the
+                    // ANSWER, and it was set smaller than the founder's own
+                    // question while four lines of monospaced shell sat above
+                    // it — which is why the surface still read as a log after
+                    // the card came off. Codex's answer is its largest text.
                     Text(line)
-                        .font(CodepetTheme.inter(13))
-                        .foregroundColor(CodepetTheme.bodyText)
+                        .font(CodepetTheme.inter(14))
+                        .lineSpacing(3)
+                        .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -129,8 +134,13 @@ struct EngineeringResultBar: View {
             HStack(spacing: 6) {
                 Image(systemName: stepsExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                Text(workedText)
+                // One line of metadata, not two. The destination used to have
+                // its own row under this one, which put two grey lines above
+                // the answer — Codex has none there at all, and the closest
+                // honest thing is to say both in one breath.
+                Text(workedText + " · " + Self.destinationText(lang: lang))
                     .font(CodepetTheme.inter(12))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundColor(CodepetTheme.mutedText)
         }
@@ -193,8 +203,10 @@ struct EngineeringResultBar: View {
                         .foregroundColor(step.done ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
                         .frame(width: 10, alignment: .leading)
                     Text(step.label)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(CodepetTheme.bodyText)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        // Dimmer than the prose on purpose. Expanded, this is
+                        // evidence you went looking for, not the reply.
+                        .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -204,27 +216,62 @@ struct EngineeringResultBar: View {
 
     // MARK: - the change summary
 
+    /// The diff, shaped like Codex's: a title with its counts beneath, the
+    /// action at the top right, then the files as rows with the basename
+    /// carrying the weight, then a fold.
+    ///
+    /// Restyled 14 Aug from a tinted block with the counts on the same line
+    /// and "Review" as a text link underneath. The information was all there;
+    /// it read as a sub-section of a log rather than as an artifact you can
+    /// act on, which is the whole difference Mona was pointing at.
+    ///
+    /// No Undo, unlike theirs — Codex edits local files, ours works on a
+    /// branch, and the branch IS the undo.
     @ViewBuilder private func changeSummary(_ diff: EngDiffSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                filesExpanded.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    Text("±")
-                        .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(hue)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(changedText(diff))
-                        .font(CodepetTheme.inter(13, weight: .medium))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    Spacer(minLength: 8)
                     Text("+\(diff.additions) −\(diff.deletions)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(CodepetTheme.mutedText)
                 }
+                Spacer(minLength: 8)
+                Button(lang == .vi ? "Xem lại" : "Review", action: onReview)
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(hue)
+                    .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
-            if filesExpanded { fileList(diff) }
+            Divider().opacity(0.35)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Self.shownFiles(diff, expanded: filesExpanded)) { file in
+                    fileRow(file)
+                }
+                if let more = Self.hiddenCount(diff, expanded: filesExpanded) {
+                    Button {
+                        filesExpanded.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(Self.foldLabel(more: more, lang: lang))
+                                .font(CodepetTheme.inter(12))
+                            Image(systemName: filesExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             // GitHub caps a compare at 300 files. Saying the list is incomplete
             // is the difference between a partial answer and a wrong one.
@@ -234,18 +281,81 @@ struct EngineeringResultBar: View {
                      : "This list is cut short — there are more files than shown.")
                     .font(CodepetTheme.inter(11))
                     .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
-
-            Button(lang == .vi ? "Xem lại" : "Review", action: onReview)
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(hue)
-                .buttonStyle(.plain)
         }
-        .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(hue.opacity(0.06))
+                .fill(CodepetTheme.mutedText.opacity(0.07))
         )
+    }
+
+    /// Three files, then a fold — Codex's threshold, and it fits the dock.
+    static let visibleFileLimit = 3
+
+    static func shownFiles(_ diff: EngDiffSummary, expanded: Bool) -> [EngFileDiff] {
+        expanded ? diff.files : Array(diff.files.prefix(visibleFileLimit))
+    }
+
+    /// How many rows the fold is hiding, or nil when there is nothing to fold.
+    static func hiddenCount(_ diff: EngDiffSummary, expanded: Bool) -> Int? {
+        let hidden = diff.files.count - visibleFileLimit
+        guard hidden > 0 else { return nil }
+        return expanded ? 0 : hidden
+    }
+
+    /// "Show 1 more file" / "Show 4 more files" / "Collapse files" — Codex's
+    /// wording, including the singular, because "Show 1 more files" is the
+    /// kind of thing that makes a product feel unfinished.
+    static func foldLabel(more: Int, lang: AppLanguage) -> String {
+        if more == 0 { return lang == .vi ? "Thu gọn" : "Collapse files" }
+        if lang == .vi { return "Xem thêm \(more) tệp" }
+        return more == 1 ? "Show 1 more file" : "Show \(more) more files"
+    }
+
+    @ViewBuilder private func fileRow(_ file: EngFileDiff) -> some View {
+        HStack(spacing: 8) {
+            // The directory recedes and the filename carries the weight —
+            // scanning a diff means reading basenames.
+            Text(Self.directory(file.path))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(CodepetTheme.mutedText)
+            + Text(Self.basename(file.path))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(CodepetTheme.primaryText)
+
+            Spacer(minLength: 8)
+            if file.isBinary {
+                Text(lang == .vi ? "nhị phân" : "binary")
+                    .font(CodepetTheme.inter(10))
+                    .foregroundColor(CodepetTheme.mutedText)
+            } else {
+                Text("+\(file.additions)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CodepetTheme.accentGreen)
+                Text("−\(file.deletions)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CodepetTheme.accentPink)
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    /// Everything up to and including the last slash, or empty. Split rather
+    /// than styled whole so a rename ("old → new") keeps reading correctly:
+    /// the basename of the DISPLAY path is what changed.
+    static func directory(_ path: String) -> String {
+        guard let slash = path.lastIndex(of: "/") else { return "" }
+        return String(path[...slash])
+    }
+
+    static func basename(_ path: String) -> String {
+        guard let slash = path.lastIndex(of: "/") else { return path }
+        return String(path[path.index(after: slash)...])
     }
 
     private func changedText(_ diff: EngDiffSummary) -> String {
@@ -293,20 +403,21 @@ struct EngineeringResultBar: View {
     /// cloud opens a branch and can spend 40 credits. A founder who cannot tell
     /// which is happening cannot tell what a run cost them or where to look for
     /// the result.
-    @ViewBuilder private var destinationRow: some View {
-        HStack(spacing: 8) {
-            Text(lang == .vi
-                 ? "Đang làm trên một nhánh trong repo của bạn."
-                 : "Working on a branch in your repo.")
-                .font(CodepetTheme.inter(11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 8)
-            if let onRunLocally, Self.canSwitchToLocal(store.phase) {
-                Button(lang == .vi ? "Chạy trên máy mình" : "Run on my machine", action: onRunLocally)
-                    .font(CodepetTheme.inter(11, weight: .semibold))
-                    .foregroundColor(hue)
-                    .buttonStyle(.plain)
-            }
+    /// Shortened to fit beside the duration: "Worked for 41s · on a branch in
+    /// your repo". The long form was a sentence on its own row.
+    static func destinationText(lang: AppLanguage) -> String {
+        lang == .vi ? "trên một nhánh trong repo của bạn" : "on a branch in your repo"
+    }
+
+    /// The switch to the other machine, on its own quiet row and only while
+    /// there is nothing to lose. It cannot join the metadata line — that line
+    /// is text, and this needs a hit target.
+    @ViewBuilder private var runLocallyRow: some View {
+        if let onRunLocally, Self.canSwitchToLocal(store.phase) {
+            Button(lang == .vi ? "Chạy trên máy mình" : "Run on my machine", action: onRunLocally)
+                .font(CodepetTheme.inter(11, weight: .semibold))
+                .foregroundColor(hue)
+                .buttonStyle(.plain)
         }
     }
 

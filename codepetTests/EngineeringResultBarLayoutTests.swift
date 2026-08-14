@@ -151,6 +151,58 @@ final class EngineeringResultBarLayoutTests: XCTestCase {
     // instance method and did not compile. That failure was the useful kind:
     // untestable copy is copy nobody checks.
 
+    // MARK: - the file list, folded like Codex's
+
+    func test_threeFilesShowAndTheRestFold() {
+        let diff = Self.diff(fileCount: 6)
+        XCTAssertEqual(EngineeringResultBar.shownFiles(diff, expanded: false).count, 3)
+        XCTAssertEqual(EngineeringResultBar.hiddenCount(diff, expanded: false), 3)
+        XCTAssertEqual(EngineeringResultBar.shownFiles(diff, expanded: true).count, 6)
+    }
+
+    func test_thereIsNoFoldWhenNothingIsHidden() {
+        // Three files or fewer: no control, because there is nothing behind it.
+        XCTAssertNil(EngineeringResultBar.hiddenCount(Self.diff(fileCount: 3), expanded: false))
+        XCTAssertNil(EngineeringResultBar.hiddenCount(Self.diff(fileCount: 1), expanded: false))
+    }
+
+    func test_theFoldCountsInTheSingular() {
+        // "Show 1 more files" is the kind of thing that makes a product feel
+        // unfinished, and it is exactly what a naive interpolation produces.
+        XCTAssertEqual(EngineeringResultBar.foldLabel(more: 1, lang: .en), "Show 1 more file")
+        XCTAssertEqual(EngineeringResultBar.foldLabel(more: 4, lang: .en), "Show 4 more files")
+        XCTAssertEqual(EngineeringResultBar.foldLabel(more: 0, lang: .en), "Collapse files")
+        XCTAssertNotEqual(EngineeringResultBar.foldLabel(more: 1, lang: .vi),
+                          EngineeringResultBar.foldLabel(more: 1, lang: .en))
+    }
+
+    func test_thePathSplitsSoTheFilenameCarriesTheWeight() {
+        // Scanning a diff means reading basenames; the directory recedes.
+        XCTAssertEqual(EngineeringResultBar.directory("outputs/site/index.html"), "outputs/site/")
+        XCTAssertEqual(EngineeringResultBar.basename("outputs/site/index.html"), "index.html")
+    }
+
+    func test_aBareFilenameIsAllBasename() {
+        XCTAssertEqual(EngineeringResultBar.directory("README.md"), "")
+        XCTAssertEqual(EngineeringResultBar.basename("README.md"), "README.md")
+        // Concatenating the two must always reproduce the path, or a row shows
+        // a file that is not the file that changed.
+        for path in ["a/b/c.ts", "c.ts", "a/b/", "", "outputs/x y/z.tsx"] {
+            XCTAssertEqual(EngineeringResultBar.directory(path)
+                           + EngineeringResultBar.basename(path), path, "split lost \(path)")
+        }
+    }
+
+    private static func diff(fileCount: Int) -> EngDiffSummary {
+        EngDiffSummary(
+            files: (0..<fileCount).map {
+                EngFileDiff(file: "src/f\($0).ts", path: "src/f\($0).ts",
+                            additions: 1, deletions: 0, status: "modified", patch: "@@")
+            },
+            additions: fileCount, deletions: 0, truncated: false,
+            scope: .branch, scopeFellBack: false)
+    }
+
     // MARK: - the run's state, carried by the worked line
 
     func test_theTenseIsTheStatus() {

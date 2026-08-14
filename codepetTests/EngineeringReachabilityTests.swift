@@ -126,9 +126,29 @@ final class EngineeringReachabilityTests: XCTestCase {
                        "no control reopens the connect sheet after it is dismissed")
     }
 
-    func testTheEngineeringModeHasASendPath() {
-        XCTAssertFalse(callers(of: "startEngineeringRun(", definedIn: "CompanyStore.swift").isEmpty,
-                       "no surface starts an engineering run")
+    func testBuildModeHasASendPath() {
+        // Looks for `startBuild(`, not `startEngineeringRun(`. Since 14 Aug the
+        // composer sends every code ask through one entry point and the store
+        // picks the machine — so a surface calling `startEngineeringRun`
+        // directly would be a second route past that decision, which is the
+        // thing merging the modes removed.
+        XCTAssertFalse(callers(of: "startBuild(", definedIn: "CompanyStore.swift").isEmpty,
+                       "no surface starts a build")
+    }
+
+    func testNothingBypassesTheDestinationDecision() {
+        // `startEngineeringRun` and `startCodeRun` are now internals of
+        // `startBuild`. A view calling either directly would pick a machine
+        // behind the founder's back — same button, different bill.
+        //
+        // `switchBuildToLocal` is the sanctioned exception and lives in the
+        // store, so it is excluded along with the rest of CompanyStore.
+        for entry in ["startEngineeringRun(", "startCodeRun("] {
+            let sites = callers(of: entry, definedIn: "CompanyStore.swift")
+                .filter { $0 != "TasksView.swift" }   // pre-dates this; runs a task, not a chat ask
+            XCTAssertTrue(sites.isEmpty,
+                          "\(entry) is called from \(sites) — that bypasses startBuild")
+        }
     }
 }
 

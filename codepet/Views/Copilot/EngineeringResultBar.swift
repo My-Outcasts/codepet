@@ -37,6 +37,9 @@ struct EngineeringResultBar: View {
     /// `.noRepoLinked`, this must be wired, or the message is an instruction
     /// with no control ("never a dead-end", spec §7).
     var onConnectRepo: (() -> Void)?
+    /// Offered only when a project folder is linked. Nil hides the control —
+    /// an offer to run somewhere the founder has not set up is not an offer.
+    var onRunLocally: (() -> Void)?
 
     @State private var stepsExpanded = false
     @State private var filesExpanded = false
@@ -52,6 +55,7 @@ struct EngineeringResultBar: View {
                         .font(CodepetTheme.inter(14, weight: .medium))
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
+                    destinationRow
                     workedRow
                     if stepsExpanded { stepList }
                     if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
@@ -233,6 +237,46 @@ struct EngineeringResultBar: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - where this is running
+
+    /// Says where the work is happening, and offers the other machine.
+    ///
+    /// Build stopped being a choice between two modes on 14 Aug and became one
+    /// mode with a destination. The destination still has to be VISIBLE: local
+    /// edits files on the founder's disk for the price of an ordinary turn,
+    /// cloud opens a branch and can spend 40 credits. A founder who cannot tell
+    /// which is happening cannot tell what a run cost them or where to look for
+    /// the result.
+    @ViewBuilder private var destinationRow: some View {
+        HStack(spacing: 8) {
+            Text(lang == .vi
+                 ? "Đang làm trên một nhánh trong repo của bạn."
+                 : "Working on a branch in your repo.")
+                .font(CodepetTheme.inter(11))
+                .foregroundColor(CodepetTheme.mutedText)
+            Spacer(minLength: 8)
+            if let onRunLocally, Self.canSwitchToLocal(store.phase) {
+                Button(lang == .vi ? "Chạy trên máy mình" : "Run on my machine", action: onRunLocally)
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .foregroundColor(hue)
+                    .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Only before there is anything to lose.
+    ///
+    /// Once a run is reviewing or paused at its cap it has produced a branch,
+    /// and offering to start over somewhere else invites throwing that away by
+    /// accident — the founder reads it as "also run locally", not "abandon
+    /// this". Early on there is nothing to abandon.
+    static func canSwitchToLocal(_ phase: EngineeringPhase) -> Bool {
+        switch phase {
+        case .preparing, .running, .awaitingApproval: return true
+        case .reviewing, .budgetReached, .failed: return false
         }
     }
 

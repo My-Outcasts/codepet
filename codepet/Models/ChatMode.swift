@@ -5,7 +5,7 @@ import Foundation
 /// is no backend concept of modes and no build session — this is pure
 /// message-shaping, which is why it is a small, unit-testable value type.
 enum ChatMode: CaseIterable, Identifiable {
-    case ask, plan, build, engineering
+    case ask, plan, build
 
     var id: Self { self }
 
@@ -15,13 +15,19 @@ enum ChatMode: CaseIterable, Identifiable {
     /// into `allCases`, because the rule it encodes outlives today's contents:
     /// **a mode belongs here only once a send in that mode goes somewhere.**
     ///
-    /// `.engineering` was deliberately held out of this list from the moment the
-    /// case existed until `EngineeringWorkspaceView` landed (Plan 3 Task 10).
-    /// `ChatComposer` renders whatever this returns, so listing it earlier would
-    /// have put a control in front of a founder whose send silently did nothing —
-    /// the dead affordance this codebase already removed once (`6982df0`).
-    /// Selecting it now starts a real run through
-    /// `CompanyStore.startEngineeringRun`, and the dock renders its result bar.
+    /// There were four until 14 Aug. `.engineering` — shown as "Developer" —
+    /// was folded into `.build`, because the two never differed in INTENT.
+    /// Ask and Plan are a real choice: answer me, versus deliberate with the
+    /// team. Build and Developer both meant "change my code" and differed only
+    /// in WHERE the work executed: the local `claude` CLI against a linked
+    /// folder, or the cloud agent against a branch. That is infrastructure, and
+    /// asking a founder to pick it per message made them understand our
+    /// deployment before they could send a sentence.
+    ///
+    /// Worse, it was the same word twice: the composer's department chip is
+    /// also "Engineering", and it ALSO reaches the local agent
+    /// (`EditCodeRouting`). Three doors to two agents. Where the work runs is
+    /// now the run's own business — see `CompanyStore.startBuild`.
     static var composerCases: [ChatMode] { allCases }
 
     /// Short control label — matches the terse pill style used elsewhere in chat.
@@ -33,30 +39,6 @@ enum ChatMode: CaseIterable, Identifiable {
         case (.plan, _):    return "Plan"
         case (.build, .vi): return "Bắt tay làm"
         case (.build, _):   return "Build"
-        // "Developer", NOT "Engineering" — Mona's call, Aug 13, and it fixes a
-        // real collision rather than a matter of taste.
-        //
-        // The composer already had an "Engineering" control: the DEPARTMENT
-        // chip (`DepartmentCatalog` key `eng`), eight points above this picker.
-        // Two identical words, and behind them two different coding agents —
-        // the chip routes to the LOCAL agent when a project folder is linked
-        // (`EditCodeRouting`), editing files on the founder's own machine for
-        // the price of an ordinary turn, while this mode starts the CLOUD run
-        // that opens a branch on GitHub and can spend 40 credits. Confusing
-        // them is not a cosmetic error; it is picking the wrong machine and the
-        // wrong bill. `ChatModeEngineeringTests` now fails if any mode label
-        // ever collides with a department name again.
-        //
-        // The case, the store, the endpoints and the docs all stay
-        // "engineering": that is the feature's name in the code and on the
-        // backend. This is the founder-facing word only.
-        //
-        // Still one word for both languages, and still not a translation — see
-        // the placeholder test. Every other mode has a considered Vietnamese
-        // rendering ("Bắt tay làm" for Build, not a literal one), and inventing
-        // a fourth would be the one part of this feature written by someone who
-        // does not speak the language.
-        case (.engineering, _): return "Developer"
         }
     }
 
@@ -89,16 +71,13 @@ enum ChatMode: CaseIterable, Identifiable {
                 ? "Giúp mình lập kế hoạch — nêu các bước cụ thể tiếp theo: \(text)"
                 : "Help me plan this — give me the concrete next steps: \(text)"
         case .build:
-            return lang == .vi
-                ? "Cùng bắt tay làm luôn — nếu là việc bạn làm được, hãy chạy và cho mình xem bản nháp: \(text)"
-                : "Let's build this together — if it's a task you can do, run it and show me a draft: \(text)"
-        case .engineering:
-            // IDENTITY, deliberately. The other modes wrap the founder's text
-            // for a chat model that benefits from framing; this text goes to
-            // `engStartRun`'s `ask`, which becomes the coding agent's task and
-            // its session title. Prepending "Let's build this together" would
-            // put copy into the instruction the agent acts on, and into the
-            // title the founder later scans a list of runs by.
+            // IDENTITY, deliberately, and this is a change: `.build` used to
+            // wrap the text with "Let's build this together…". That copy was
+            // already dead — `send()` routes `.build` straight to a runner and
+            // never called `shape` for it — and now that Build IS the coding
+            // mode, the text goes to `engStartRun`'s `ask`, which becomes the
+            // agent's instruction and the session title. Framing copy would end
+            // up inside both.
             return text
         }
     }

@@ -246,7 +246,10 @@ struct CopilotChatView: View {
                                 store: eng,
                                 ask: m.text,
                                 onReview: { companyStore.openEngineeringReview() },
-                                onConnectRepo: { companyStore.promptForEngineeringRepo() }
+                                onConnectRepo: { companyStore.promptForEngineeringRepo() },
+                                onRunLocally: companyStore.localBuildAvailable
+                                    ? { companyStore.switchBuildToLocal(ask: m.text) }
+                                    : nil
                             )
                             .id("engineering-run")
                         }
@@ -356,12 +359,9 @@ struct CopilotChatView: View {
                                             convenesRoom: mode.convenesRoom)
             }
         case .build:
-            companyStore.startCodeRun(ask: text)   // shows .noProject card if nothing linked
-        case .engineering:
-            // `mode.shape` is identity here, so the founder's text reaches
-            // engStartRun's `ask` verbatim — it becomes the agent's instruction
-            // and the session title, and framing copy would end up in both.
-            companyStore.startEngineeringRun(ask: text)
+            // One code mode. WHERE it runs is the run's business, not the
+            // founder's — `startBuild` decides and says so on the card.
+            companyStore.startBuild(ask: text)
         }
     }
 }

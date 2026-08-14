@@ -15,6 +15,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "../auth";
 import { toExecStep } from "./engEvents";
+import { isReadOnlyBash } from "./engBashSafety";
 import { getEngClient, isSafePathSegment, safeErrorDetail } from "./engClient";
 
 /**
@@ -190,8 +191,43 @@ export async function handleEngStream(req: Request, res: Response): Promise<void
       if (text) writeFrame(res, "message", { text });
     }
     if (event.type === "agent.tool_use" && (event as { evaluated_permission?: string }).evaluated_permission === "ask") {
+      const input = (event.input ?? {}) as { command?: unknown };
+      // A command that can only READ is answered here rather than shown.
+      //
+      // The agent explores with bash — `ls`, `cat`, `git status`, `grep` — so
+      // `always_ask` put four consecutive cards in front of the founder for
+      // commands that could not change anything. That does not make them
+      // safer; it teaches them to click Allow without reading, which is
+      // exactly what the gate exists to prevent for the command that matters.
+      //
+      // The step still appears in the transcript, so nothing becomes
+      // invisible: it is the INTERRUPTION that is removed, not the record.
+      // `isReadOnlyBash` fails closed on anything it cannot fully parse.
+      // `event.id` is typed unknown here; the frame writer below gets away
+      // with it inside an object literal, but a confirmation MUST carry a
+      // real tool_use_id or it silently answers nothing.
+      const toolUseId = typeof event.id === "string" ? event.id : null;
+      if (toolUseId && event.name === "bash" && isReadOnlyBash(input.command)) {
+        autoApprove(sessionId, toolUseId).catch((err) =>
+          logger.error("engStream: auto-approve failed", safeErrorDetail(err)));
+        return;
+      }
       writeFrame(res, "approval", { toolUseId: event.id, name: event.name, input: event.input });
     }
+  };
+
+  /**
+   * Answer a read-only tool call on the founder's behalf.
+   *
+   * Fire-and-forget on purpose: the stream must not stall waiting for this
+   * round trip, and a failure is not fatal — the agent simply stays blocked
+   * on a confirmation that never came, which the founder sees as a run that
+   * stopped. Logged loudly for that reason.
+   */
+  const autoApprove = async (session: string, toolUseId: string): Promise<void> => {
+    await client.beta.sessions.events.send(session, {
+      events: [{ type: "user.tool_confirmation", tool_use_id: toolUseId, result: "allow" }]
+    });
   };
 
   let stream: Awaited<ReturnType<typeof client.beta.sessions.events.stream>> | undefined;

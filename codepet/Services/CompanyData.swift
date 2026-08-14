@@ -247,6 +247,16 @@ enum CompanyData {
     /// non-200 / unreachable — `generateRoadmap` treats `[]` as "no change", so the board
     /// is never clobbered.
     static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
+        #if DEBUG
+        // The canned roadmap, with a beat of delay so the analysis screen plays
+        // rather than snapping. `generateRoadmap` treats [] as "no change", so
+        // returning the fixture here is what puts a real board behind the
+        // reveal instead of an empty one.
+        if MockChat.enabled {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            return MockChat.roadmap()
+        }
+        #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
         var req = URLRequest(url: roadmapEndpoint)
         req.httpMethod = "POST"
@@ -277,6 +287,13 @@ enum CompanyData {
         // run-a-task, "Run my next moves" fan-out, dept→specialist handoff — is
         // exercisable with zero Anthropic spend. DEBUG-only; default off, Release
         // hits the real Firestore load below.
+        // Full-flow demo (`-CODEPET_MOCK_FLOW`): report "not onboarded yet" so
+        // the cold open runs, until the founder finishes it. Checked BEFORE the
+        // populated company below, which is the branch that has always skipped
+        // onboarding entirely.
+        if MockChat.flowEnabled && !MockChat.flowOnboarded {
+            return MockChat.preOnboardingCompany()
+        }
         if MockChat.enabled { return MockChat.company() }
         #endif
         let db = Firestore.firestore()

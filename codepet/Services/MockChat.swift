@@ -52,7 +52,34 @@ import Foundation
 /// `-CODEPET_MOCK_CHAT YES` sidesteps all of it: `NSArgumentDomain` outranks
 /// every preference file and touches no disk.
 enum MockChat {
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") }
+    /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
+    /// is ONE launch argument rather than two that must agree — two flags where
+    /// one is meaningless without the other is a state you can get half-right.
+    static var enabled: Bool {
+        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") || flowEnabled
+    }
+
+    /// `-CODEPET_MOCK_FLOW YES` — start at the cold open and walk the whole
+    /// product, with a fake company built from whatever gets typed in.
+    ///
+    /// Plain mock mode boots an ALREADY-ONBOARDED company, which is what makes
+    /// chat and engineering reachable with no spend — and it means onboarding
+    /// is the one stretch of the product a mock has never been able to show.
+    /// This flag closes that: `CompanyData.load` reports "not onboarded yet"
+    /// until the founder finishes, `enrichBrief` and `fetchRoadmap` answer from
+    /// fixtures instead of the network, and the shell that follows is the same
+    /// populated company plain mock mode has always given.
+    static var flowEnabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW") }
+
+    /// Flipped once onboarding completes, so the next `load` in this process
+    /// returns the finished company rather than sending the founder back
+    /// through the cold open.
+    ///
+    /// Process-lifetime, not persisted, and deliberately so: relaunching with
+    /// the flag is how you get the first-run flow again. A persisted "seen"
+    /// flag would make the demo a one-shot, and the whole point is walking it
+    /// repeatedly while judging the copy.
+    nonisolated(unsafe) static var flowOnboarded = false
 
     /// Decide the reply text + which `.done` action fires, from the message text
     /// and the request's own `runnable`/`envSetup` lists (so echoed ids are valid).
@@ -440,6 +467,47 @@ enum MockChat {
         brief.stage = "building"
         return CompanyState(brief: brief, departments: [], library: [], stage: .building,
                             companionId: "byte", onboardedAt: Date(), tasks: roadmap())
+    }
+
+    /// An empty company, so `needsOnboarding` is true and the cold open runs.
+    ///
+    /// `onboardedAt` nil AND a brief with no signal — `needsOnboarding` checks
+    /// both, so returning a blank brief with a stamp (or a stamped brief with
+    /// no fields) would silently land in the shell instead.
+    static func preOnboardingCompany() -> CompanyState {
+        CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                     stage: .idea, companionId: "byte", onboardedAt: nil, tasks: [])
+    }
+
+    /// What `enrichBrief` would have filled in, filled in locally.
+    ///
+    /// Only touches fields the founder left blank, which is what the real
+    /// enricher is for — a mock that overwrote what they typed would make step
+    /// 7 show someone else's project back to them, and the reveal is the
+    /// moment the whole onboarding is judged on.
+    static func enrich(_ brief: CompanyBrief) -> CompanyBrief {
+        /// Blank and absent are the same thing to the enricher: a founder who
+        /// tabbed past a field and one who typed spaces into it both left it
+        /// empty, and the real enricher fills both.
+        func blank(_ s: String?) -> Bool {
+            (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        var b = brief
+        let name = (b.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = name.isEmpty ? "this product" : name
+        if blank(b.oneLiner) {
+            b.oneLiner = "\(subject) — the thing you're building, in one line."
+        }
+        if blank(b.audience) {
+            b.audience = "Early solo founders shipping their first product"
+        }
+        if blank(b.problem) {
+            b.problem = "Context is scattered across tools, so momentum stalls between sessions."
+        }
+        if blank(b.goal) {
+            b.goal = "Get one real signal from one real user this week."
+        }
+        return b
     }
 
     /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the

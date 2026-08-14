@@ -128,22 +128,24 @@ struct EngineeringResultBar: View {
         // never a fabricated number. The web's version of this row invented its
         // counts (`3 + (label.length % 6)`); native shows what actually
         // happened or says nothing.
-        .disabled(store.steps.isEmpty)
-        .opacity(store.steps.isEmpty ? 0.5 : 1)
+        .disabled(store.visibleSteps.isEmpty)
+        .opacity(store.visibleSteps.isEmpty ? 0.5 : 1)
     }
 
     private var workedText: String {
         if let elapsed {
             return lang == .vi ? "Đã làm \(elapsed)s" : "Worked for \(elapsed)s"
         }
-        let n = store.steps.count
+        // The VISIBLE count, or the row would promise steps the list does not
+        // show — "6 steps" above four rows is its own small lie.
+        let n = store.visibleSteps.count
         if n == 0 { return lang == .vi ? "Chưa có bước nào" : "No steps yet" }
         return lang == .vi ? "\(n) bước" : "\(n) steps"
     }
 
     @ViewBuilder private var stepList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(store.steps) { step in
+            ForEach(store.visibleSteps) { step in
                 HStack(alignment: .top, spacing: 6) {
                     Text(step.done ? "✓" : "›")
                         .font(CodepetTheme.inter(11, weight: .semibold))

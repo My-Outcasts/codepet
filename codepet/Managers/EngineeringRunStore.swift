@@ -52,6 +52,31 @@ final class EngineeringRunStore: ObservableObject {
     /// AND repeating it has to be capable of a different answer.
     var canRetry: Bool { failure?.isRetryable == true && retryAction != nil }
 
+    /// The steps worth SHOWING: the log, minus anything still waiting on
+    /// permission.
+    ///
+    /// A step is created from `agent.tool_use`, which is the agent asking for a
+    /// tool — not running one. So under `bash: always_ask` the same command was
+    /// on screen twice: once as an un-ticked step, and once as the card asking
+    /// whether it may run at all. Seen for real on 14 Aug, in the first live
+    /// run, two rows apart and disagreeing about whether it had happened.
+    ///
+    /// The card is the better of the two — it says what the state actually is
+    /// and offers the answer — so the step waits its turn. Answered or denied,
+    /// the approval leaves `approvals` and the row appears where it belongs, in
+    /// order, as the log of what the agent DID.
+    ///
+    /// `steps` itself is untouched: the log keeps everything, and this is only
+    /// what a surface renders.
+    var visibleSteps: [ExecStep] {
+        guard !approvals.isEmpty else { return steps }
+        // The relay sends `toolUseId: event.id` for an approval and `id:
+        // event.id` for a step (`engStream.ts:193`), so the two correlate
+        // exactly — this is not a heuristic on the label.
+        let pending = Set(approvals.map(\.id))
+        return steps.filter { !pending.contains($0.id) }
+    }
+
     init(runner: EngineeringRunning) {
         self.runner = runner
     }

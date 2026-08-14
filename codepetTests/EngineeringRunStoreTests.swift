@@ -138,6 +138,44 @@ final class EngineeringRunStoreTests: XCTestCase {
         XCTAssertEqual(store.phase, .reviewing)
     }
 
+    // MARK: - a command asked for is not a command run
+
+    func testAStepWaitingOnPermissionIsNotListedAsSomethingThatHappened() {
+        // THE BUG THE FIRST LIVE RUN SHOWED. A step is built from
+        // `agent.tool_use` — the agent ASKING for a tool — so under
+        // `bash: always_ask` the same command appeared twice in one card: an
+        // un-ticked step row, and directly below it the card asking whether it
+        // may run at all. Two rows apart, disagreeing.
+        let (store, _) = makeStore()
+        store.handle(.step(ExecStep(id: "t1", label: "ls -la", done: true, kind: .mono)))
+        store.handle(.step(ExecStep(id: "t2", label: "rm -rf build", done: false, kind: .mono)))
+        store.handle(.approval(EngApproval(id: "t2", name: "bash", input: "rm -rf build")))
+
+        XCTAssertEqual(store.steps.count, 2, "the log must keep everything")
+        XCTAssertEqual(store.visibleSteps.map(\.id), ["t1"],
+                       "a command still awaiting permission is shown as a step")
+    }
+
+    func testTheStepAppearsOnceTheAskIsAnswered() async {
+        // Answered or denied, the approval leaves and the row takes its place
+        // in the log — in order, as what the agent actually did.
+        let (store, _) = makeStore()
+        store.handle(.step(ExecStep(id: "t2", label: "rm -rf build", done: false, kind: .mono)))
+        store.handle(.approval(EngApproval(id: "t2", name: "bash", input: "rm -rf build")))
+        XCTAssertTrue(store.visibleSteps.isEmpty)
+
+        await store.answer(toolUseId: "t2", allow: true)
+
+        XCTAssertEqual(store.visibleSteps.map(\.id), ["t2"])
+    }
+
+    func testWithNothingPendingEveryStepShows() {
+        let (store, _) = makeStore()
+        store.handle(.step(ExecStep(id: "a", label: "one", done: true, kind: .mono)))
+        store.handle(.step(ExecStep(id: "b", label: "two", done: true, kind: .mono)))
+        XCTAssertEqual(store.visibleSteps.count, 2)
+    }
+
     func testABudgetPauseIsNotAFailure() {
         // Resumable. Calling it failed makes a founder start over and pay twice.
         let (store, _) = makeStore()

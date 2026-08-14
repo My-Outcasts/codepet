@@ -44,27 +44,27 @@ struct EngineeringStatesGallery: View {
             VStack(alignment: .leading, spacing: 28) {
                 title
 
-                section("1 · Working", "steps land one at a time; the row expands") {
-                    EngineeringResultBar(store: working, ask: Self.ask, elapsed: 41, onReview: {})
+                section("1 · Working", "the tense carries the status: Working… while it runs, Worked for once it stops") {
+                    EngineeringResultBar(store: working, elapsed: 41, onReview: {})
                 }
 
                 section("2 · Needs you",
-                        "the run is stopped until this is answered; the ask is a tinted section INSIDE the card, not a second card") {
-                    EngineeringResultBar(store: needsYou, ask: Self.ask, onReview: {})
+                        "the run is stopped until this is answered. There is no phase chip any more — the unanswered card IS the signal") {
+                    EngineeringResultBar(store: needsYou, onReview: {})
                 }
 
                 section("3 · Ready to review", "the only state with a diff to open") {
-                    EngineeringResultBar(store: ready, ask: Self.ask, elapsed: 118, onReview: {})
+                    EngineeringResultBar(store: ready, elapsed: 118, onReview: {})
                 }
 
                 section("4 · Paused at its limit",
                         "NOT a failure — the work is intact, and no Resume button, because nothing can resume it") {
-                    EngineeringResultBar(store: paused, ask: Self.ask, elapsed: 240, onReview: {})
+                    EngineeringResultBar(store: paused, elapsed: 240, onReview: {})
                 }
 
                 section("5 · Couldn't reach it",
-                        "the ONE state that earns a retry. The chip still reads Ready to review on purpose — the RUN succeeded, only the diff fetch failed, and calling the run failed would send you to re-run work that already landed") {
-                    EngineeringResultBar(store: unreachable, ask: Self.ask, onReview: {})
+                        "the ONE state that earns a retry. The worked line still reads as finished on purpose — the RUN succeeded, only the diff fetch failed, and calling the run failed would send you to re-run work that already landed") {
+                    EngineeringResultBar(store: unreachable, onReview: {})
                 }
 
                 section("6 · The Review pane",

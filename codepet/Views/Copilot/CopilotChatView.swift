@@ -244,7 +244,6 @@ struct CopilotChatView: View {
                             // not line up.
                             EngineeringResultBar(
                                 store: eng,
-                                ask: m.text,
                                 onReview: { companyStore.openEngineeringReview() },
                                 onConnectRepo: { companyStore.promptForEngineeringRepo() },
                                 onRunLocally: companyStore.localBuildAvailable

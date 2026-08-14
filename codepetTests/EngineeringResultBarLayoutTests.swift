@@ -35,8 +35,8 @@ final class EngineeringResultBarLayoutTests: XCTestCase {
         return store
     }
 
-    private func bar(_ store: EngineeringRunStore, ask: String = "add stripe checkout") -> some View {
-        EngineeringResultBar(store: store, ask: ask, elapsed: 41, onReview: {})
+    private func bar(_ store: EngineeringRunStore) -> some View {
+        EngineeringResultBar(store: store, elapsed: 41, onReview: {})
             .environment(\.uiLanguage, .en)
     }
 
@@ -105,22 +105,42 @@ final class EngineeringResultBarLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(extent.first, 0)
     }
 
-    func test_aLongAskWrapsRatherThanWidensTheCard() throws {
-        // `fixedSize(horizontal: false, vertical: true)` is what makes this
-        // wrap; without it the Text refuses to compress and the card overflows.
-        let long = String(repeating: "add stripe checkout and a customer portal ", count: 4)
-        let extent = try XCTUnwrap(drawnExtent(bar(store(), ask: long), width: Self.dockWidth))
+    func test_longProseWrapsRatherThanWidensTheBar() throws {
+        // Was the ASK until 14 Aug — the bar repeated it above the summary,
+        // and this pinned its wrapping. The ask now lives only in the
+        // founder's own bubble, and the long text in this surface is the
+        // agent's prose, which arrives in paragraphs and is the thing that can
+        // overflow. `fixedSize(horizontal: false, vertical: true)` is what
+        // makes it wrap; without it the Text refuses to compress.
+        let s = store()
+        s.handle(.message(String(repeating:
+            "Added Stripe checkout and a customer portal across four files. ", count: 4)))
+        let extent = try XCTUnwrap(drawnExtent(bar(s), width: Self.dockWidth))
         XCTAssertLessThanOrEqual(extent.last, Int(Self.dockWidth),
-                                 "a long ask widened the card instead of wrapping")
+                                 "long prose widened the bar instead of wrapping")
     }
 
-    func test_theCollapsedBarIsShorterThanTheExpandedOne() throws {
-        // Proves the step list is actually collapsed by default rather than
-        // rendered and invisible — "filenames one tap away" only means anything
-        // if the first state is genuinely smaller.
-        let collapsed = try XCTUnwrap(height(bar(store()), width: Self.dockWidth))
-        XCTAssertGreaterThan(collapsed, 40, "the card is implausibly short to be a real render")
-        XCTAssertLessThan(collapsed, 400, "the collapsed card is tall enough to be showing everything")
+    func test_contentActuallyReachesTheScreen() throws {
+        // Rewritten 14 Aug. It used to assert the collapsed card sat between
+        // 40 and 400 points — a range that encoded the card's own chrome
+        // (padding, eyebrow, the repeated ask). The card is gone, an empty run
+        // now draws two grey lines at ~32pt, and the old floor was measuring
+        // furniture rather than content.
+        //
+        // What is worth pinning is that content REACHES the render at all.
+        // `store.messages` was collected and drawn nowhere for a fortnight,
+        // and no height assertion would have caught it — this one would.
+        let empty = try XCTUnwrap(height(bar(store()), width: Self.dockWidth))
+        XCTAssertGreaterThan(empty, 12, "even an empty run draws its metadata lines")
+
+        let full = store()
+        full.handle(.message("Added Stripe checkout across three files. Tests pass."))
+        full.handle(.step(ExecStep(id: "s1", label: "npm install stripe", done: true, kind: .mono)))
+        let withContent = try XCTUnwrap(height(bar(full), width: Self.dockWidth))
+
+        XCTAssertGreaterThan(withContent, empty + 20,
+                             "the agent's prose added no height — it is not being rendered")
+        XCTAssertLessThan(withContent, 400, "the bar is tall enough to be showing everything at once")
     }
 
     // MARK: - what it says
@@ -131,36 +151,53 @@ final class EngineeringResultBarLayoutTests: XCTestCase {
     // instance method and did not compile. That failure was the useful kind:
     // untestable copy is copy nobody checks.
 
-    func test_budgetReachedIsNotWordedAsAFailure() {
-        // The session is paused and resumable. Wording it as a failure makes a
-        // founder start over and pay for the same work twice.
-        let (paused, _) = EngineeringResultBar.phaseLabel(.budgetReached, lang: .en)
-        let (failed, _) = EngineeringResultBar.phaseLabel(.failed("x"), lang: .en)
-        XCTAssertNotEqual(paused, failed)
-        XCTAssertFalse(paused.lowercased().contains("fail"),
-                       "a budget pause must not read as a failure: \(paused)")
-        XCTAssertTrue(paused.lowercased().contains("paused"),
-                      "a budget pause should say it is paused: \(paused)")
+    // MARK: - the run's state, carried by the worked line
+
+    func test_theTenseIsTheStatus() {
+        // There was a phase chip in an eyebrow until 14 Aug — "Working",
+        // "Needs you", "Ready to review" — and it went with the card. Codex
+        // carries the same thing in one line, and a founder reading
+        // "Working… 41s" does not also need a badge saying Working.
+        XCTAssertTrue(EngineeringResultBar.workedPrefix(running: true, lang: .en)
+            .lowercased().contains("working"))
+        XCTAssertTrue(EngineeringResultBar.workedPrefix(running: false, lang: .en)
+            .lowercased().contains("worked"))
+        XCTAssertNotEqual(EngineeringResultBar.workedPrefix(running: true, lang: .vi),
+                          EngineeringResultBar.workedPrefix(running: true, lang: .en))
     }
 
-    func test_everyPhaseHasALabelInBothLanguages() {
-        let phases: [EngineeringPhase] = [
-            .preparing, .running, .awaitingApproval, .reviewing, .budgetReached, .failed("x")
-        ]
-        for phase in phases {
-            XCTAssertFalse(EngineeringResultBar.phaseLabel(phase, lang: .en).0.isEmpty,
-                           "\(phase) has no English label")
-            XCTAssertFalse(EngineeringResultBar.phaseLabel(phase, lang: .vi).0.isEmpty,
-                           "\(phase) has no Vietnamese label")
-        }
+    func test_awaitingApprovalStillCountsAsRunning() {
+        // The session is alive and billing; it is blocked on a human. A run
+        // that showed "Worked for" while an unanswered card sat under it would
+        // read as finished.
+        XCTAssertTrue(EngineeringResultBar.isRunning(.preparing))
+        XCTAssertTrue(EngineeringResultBar.isRunning(.running))
+        XCTAssertTrue(EngineeringResultBar.isRunning(.awaitingApproval))
+        XCTAssertFalse(EngineeringResultBar.isRunning(.reviewing))
+        XCTAssertFalse(EngineeringResultBar.isRunning(.budgetReached))
+        XCTAssertFalse(EngineeringResultBar.isRunning(.failed("x")))
     }
 
-    func test_awaitingApprovalNamesTheFounderAsTheBlocker() {
-        // "Needs you" rather than "Waiting" — the run is not slow, it is
-        // waiting on a decision only the founder can make.
-        let (text, _) = EngineeringResultBar.phaseLabel(.awaitingApproval, lang: .en)
-        XCTAssertTrue(text.lowercased().contains("you"),
-                      "the founder must be able to tell they are the blocker: \(text)")
+    func test_aFailedRunIsNeverSilent() {
+        // `EngineeringRun.phase(fromStopReason:)` maps an unrecognised reason
+        // to `.failed` and attaches NO refusal. The chip was the only thing
+        // marking that state, and the chip is gone — without this the run
+        // would simply stop, with nothing anywhere saying so.
+        let note = EngineeringResultBar.note(phase: .failed("unknown_stop_reason"),
+                                             failure: nil, lang: .en)
+        XCTAssertNotNil(note, "a failed run with no refusal says nothing at all")
+        XCTAssertTrue(note?.lowercased().contains("branch") == true,
+                      "does not say the work survived: \(note ?? "nil")")
+        XCTAssertNotEqual(note, EngineeringResultBar.note(phase: .failed("x"),
+                                                         failure: nil, lang: .vi))
+    }
+
+    func test_aSpecificRefusalStillWinsOverTheGenericOne() {
+        // The generic line is a floor, not a replacement: when we know WHY,
+        // say why.
+        let specific = EngineeringResultBar.note(phase: .failed("x"),
+                                                 failure: .noCredits, lang: .en)
+        XCTAssertEqual(specific, EngineeringResultBar.message(for: .noCredits, lang: .en))
     }
 
     func test_ourOwnMisconfigurationIsNeverBlamedOnTheFounder() {

@@ -31,10 +31,6 @@ struct EngineeringResultBar: View {
     @ObservedObject var store: EngineeringRunStore
     @Environment(\.uiLanguage) private var lang
 
-    /// The founder's ask, shown above the summary. Passed in rather than read
-    /// off the store: the store holds one run's live state, while the ask
-    /// belongs to the chat turn this bar is rendered inside.
-    let ask: String
     /// Seconds the run has been working, or nil while that is unknown.
     var elapsed: Int?
     var onReview: () -> Void
@@ -62,25 +58,27 @@ struct EngineeringResultBar: View {
     private var hue: Color { CodepetTheme.accentBlue }
 
     var body: some View {
-        HStack {
-            CodepetCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    header
-                    Text(ask)
-                        .font(CodepetTheme.inter(14, weight: .medium))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    destinationRow
-                    summaryProse
-                    workedRow
-                    if stepsExpanded { stepList }
-                    if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
-                    noteRow
-                    approvalRows
-                }
-                .padding(14)
+        VStack(alignment: .leading, spacing: 12) {
+            // Run metadata: how long, and on which machine. Grey and quiet,
+            // above the rule, because it is not the answer.
+            VStack(alignment: .leading, spacing: 3) {
+                workedRow
+                destinationRow
             }
-            Spacer(minLength: 24)
+            if stepsExpanded { stepList }
+
+            // The rule only exists to separate the metadata from the answer,
+            // so it appears only when there IS an answer under it.
+            if !store.messages.isEmpty {
+                Divider().opacity(0.5)
+            }
+            summaryProse
+            noteRow
+
+            // Cards from here down, and only for things that are an artifact
+            // or need an answer.
+            if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
+            approvalRows
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // A 1s timer rather than TimelineView: this card sits inside the
@@ -122,46 +120,6 @@ struct EngineeringResultBar: View {
         seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
-    // MARK: - header
-
-    @ViewBuilder private var header: some View {
-        HStack(spacing: 8) {
-            Text(lang == .vi ? "KỸ THUẬT" : "ENGINEERING")
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
-                .foregroundColor(hue)
-            Spacer(minLength: 8)
-            phaseChip
-        }
-    }
-
-    @ViewBuilder private var phaseChip: some View {
-        let (text, colour) = Self.phaseLabel(store.phase, lang: lang)
-        Text(text)
-            .font(CodepetTheme.inter(10, weight: .semibold))
-            .foregroundColor(colour)
-    }
-
-    /// One label per phase, and `budgetReached` is NOT worded as a failure —
-    /// the session is paused and resumable, and telling a founder their work
-    /// failed when it is sitting there intact makes them start over and pay
-    /// twice.
-    static func phaseLabel(_ phase: EngineeringPhase, lang: AppLanguage) -> (String, Color) {
-        switch phase {
-        case .preparing:
-            return (lang == .vi ? "Đang chuẩn bị" : "Starting", CodepetTheme.mutedText)
-        case .running:
-            return (lang == .vi ? "Đang làm" : "Working", CodepetTheme.accentBlue)
-        case .awaitingApproval:
-            return (lang == .vi ? "Cần bạn xác nhận" : "Needs you", CodepetTheme.accentGold)
-        case .reviewing:
-            return (lang == .vi ? "Sẵn sàng duyệt" : "Ready to review", CodepetTheme.accentGold)
-        case .budgetReached:
-            return (lang == .vi ? "Tạm dừng ở hạn mức" : "Paused at its limit", CodepetTheme.accentGold)
-        case .failed:
-            return (lang == .vi ? "Không xong" : "Didn't finish", CodepetTheme.mutedText)
-        }
-    }
-
     // MARK: - "Worked for Ns"
 
     @ViewBuilder private var workedRow: some View {
@@ -185,13 +143,39 @@ struct EngineeringResultBar: View {
         .opacity(store.visibleSteps.isEmpty ? 0.5 : 1)
     }
 
+    /// "Working… 41s" while it runs, "Worked for 1m 44s" once it has stopped.
+    ///
+    /// The tense IS the status. There was a phase chip in an eyebrow until 14
+    /// Aug — "Working", "Needs you", "Ready to review" — and it went with the
+    /// card: Codex carries the same information in this one line plus the
+    /// presence of an ask, and a founder reading "Working… 41s" does not also
+    /// need a badge saying Working.
+    ///
+    /// "Needs you" is not lost either: the permission card is on screen,
+    /// unanswered, which is a louder signal than a word in a corner.
+    static func workedPrefix(running: Bool, lang: AppLanguage) -> String {
+        if running { return lang == .vi ? "Đang làm… " : "Working… " }
+        return lang == .vi ? "Đã làm " : "Worked for "
+    }
+
+    /// Whether the clock is still moving — the run has not reached a terminal
+    /// state. `awaitingApproval` counts as running: the session is alive and
+    /// billing, it is just blocked on a human.
+    static func isRunning(_ phase: EngineeringPhase) -> Bool {
+        switch phase {
+        case .preparing, .running, .awaitingApproval: return true
+        case .reviewing, .budgetReached, .failed: return false
+        }
+    }
+
     private var workedText: String {
         // The store's clock first, the caller's override second. `elapsed` was
         // the only source until 14 Aug and the dock never passed one, so in the
         // running app this row could never say a duration — only a preview and
         // the gallery ever supplied a number.
         if let secs = elapsed ?? store.elapsedSeconds(now: now) {
-            return (lang == .vi ? "Đã làm " : "Worked for ") + Self.duration(secs)
+            return Self.workedPrefix(running: Self.isRunning(store.phase), lang: lang)
+                + Self.duration(secs)
         }
         // The VISIBLE count, or the row would promise steps the list does not
         // show — "6 steps" above four rows is its own small lie.
@@ -422,8 +406,18 @@ struct EngineeringResultBar: View {
                      failure: EngineeringError?,
                      lang: AppLanguage) -> String? {
         if case .budgetReached = phase { return message(for: .budgetReached, lang: lang) }
-        guard let failure else { return nil }
-        return message(for: failure, lang: lang)
+        if let failure { return message(for: failure, lang: lang) }
+        // A run can reach `.failed` with NO refusal attached — an unrecognised
+        // stop reason maps there and sets nothing (`EngineeringRun.phase`'s
+        // default). The phase chip was the only thing marking it, and the chip
+        // is gone, so this state would otherwise be silent: a run that simply
+        // stops with no explanation anywhere.
+        if case .failed = phase {
+            return lang == .vi
+                ? "Lần chạy này dừng lại mà không nói rõ lý do. Phần đã làm vẫn ở trên nhánh."
+                : "This run stopped without saying why. Whatever it finished is still on the branch."
+        }
+        return nil
     }
 
     /// Every refusal in the founder's words, and never blaming them for ours.
@@ -501,7 +495,7 @@ struct EngineeringResultBar: View {
     store.handle(.step(ExecStep(id: "s1", label: "read the repository", done: true, kind: .mono)))
     store.handle(.step(ExecStep(id: "s2", label: "npm install stripe", done: false, kind: .mono)))
     store.handle(.approval(EngApproval(id: "tu_1", name: "bash", input: "npm install stripe")))
-    return EngineeringResultBar(store: store, ask: "add stripe checkout", elapsed: 41, onReview: {})
+    return EngineeringResultBar(store: store, elapsed: 41, onReview: {})
         .padding()
         .frame(width: 360)
 }

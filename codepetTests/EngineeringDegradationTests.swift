@@ -112,13 +112,17 @@ final class EngineeringDegradationMappingTests: XCTestCase {
                       "budgetReached never says the work is safe: \(en)")
     }
 
-    func test_theTwoPausedStatesAgreeThatNothingFailed() {
-        // The phase chip and the message are two surfaces for one moment; if
-        // one says "paused" and the other says "didn't finish", the founder
-        // believes the worse of the two.
-        let (chip, _) = EngineeringResultBar.phaseLabel(.budgetReached, lang: .en)
-        XCTAssertFalse(chip.lowercased().contains("didn't"), "phase chip contradicts the message")
-        XCTAssertTrue(chip.lowercased().contains("paused"), "phase chip: \(chip)")
+    func test_aPausedRunReadsAsPausedOnTheOneSurfaceLeft() {
+        // This used to compare the phase chip against the message, because a
+        // chip saying "didn't finish" over a message saying "paused" would
+        // have the founder believe the worse of the two. The chip went with
+        // the card on 14 Aug, so there is one surface now — and it has to
+        // carry the whole meaning by itself.
+        let note = EngineeringResultBar.note(phase: .budgetReached, failure: nil, lang: .en)
+        XCTAssertNotNil(note)
+        XCTAssertFalse(note?.lowercased().contains("didn't") == true, "reads as a failure")
+        XCTAssertTrue(note?.lowercased().contains("intact") == true,
+                      "does not say the work survived: \(note ?? "nil")")
     }
 
     // MARK: - which explanation the bar draws

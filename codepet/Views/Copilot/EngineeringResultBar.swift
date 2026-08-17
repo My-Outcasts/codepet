@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// The collapsed result of an engineering run, in the chat dock.
 ///
@@ -8,27 +9,28 @@ import SwiftUI
 /// (`accentBlue`, the Department catalog's colour for `key: "eng"`) so an eng
 /// turn reads as distinct from the purple copilot chrome.
 ///
-/// Three deliberate divergences from Codex, per the design's §5.2:
+/// Four deliberate divergences from Codex, per the design's §5.2 — two of
+/// which have flipped since it was written, because Codex moved:
 ///
-/// - **Filenames are ONE tap away, not two.** Codex hides edited filenames
-///   behind an aggregate summary and its users filed a bug about it
-///   (openai/codex#19891). "Changed 3 files" collapsed, names on first expand.
+/// - **Filenames are visible, not behind a tap.** Codex hid them behind an
+///   aggregate and its users filed openai/codex#19891, so this card put them
+///   one tap away. Their current build shows the list outright with a
+///   "Show N more file" fold — the reason for the divergence went away, and on
+///   14 Aug so did the tap.
+/// - **The agent's prose leads, the commands follow.** `store.messages` was
+///   collected from the first day and rendered nowhere, so a finished run was
+///   six shell commands and no explanation of what got built.
 /// - **No Undo button.** The branch IS the undo — nothing touched the founder's
 ///   default branch, so discarding is deleting a branch, and that belongs next
 ///   to the diff rather than behind a button implying local file surgery. A dead
 ///   Undo was already removed from this codebase once (`6982df0`).
-/// - **No preview chip.** Nothing serves a preview URL yet (that is Plan 2's
-///   `engPreview`, wired in a later task). A chip that never resolves is worse
-///   than no chip, and the design says a repo with no deploy target should
-///   degrade honestly rather than show a dead affordance.
+/// - **A preview chip only for a URL that exists.** `engPreview` answers three
+///   ways and the two "no"s get words instead — a chip that never resolves is
+///   worse than no chip.
 struct EngineeringResultBar: View {
     @ObservedObject var store: EngineeringRunStore
     @Environment(\.uiLanguage) private var lang
 
-    /// The founder's ask, shown above the summary. Passed in rather than read
-    /// off the store: the store holds one run's live state, while the ask
-    /// belongs to the chat turn this bar is rendered inside.
-    let ask: String
     /// Seconds the run has been working, or nil while that is unknown.
     var elapsed: Int?
     var onReview: () -> Void
@@ -42,71 +44,85 @@ struct EngineeringResultBar: View {
     var onRunLocally: (() -> Void)?
 
     @State private var stepsExpanded = false
-    @State private var filesExpanded = false
+    /// Open by default. Codex hid filenames behind an aggregate, its users
+    /// filed openai/codex#19891, and this card diverged deliberately to put
+    /// them one tap away. Their current build shows the list outright with a
+    /// "Show N more file" fold, so the tap is now the worse of the two — the
+    /// reason for the divergence went away.
+    @State private var filesExpanded = true
+    /// Ticks once a second while the run is live, so "Worked for" climbs.
+    /// Stops when the run does: `elapsedSeconds` freezes on `finishedAt`, so a
+    /// finished run keeps its final number even though this keeps firing.
+    @State private var now = Date()
 
     private var hue: Color { CodepetTheme.accentBlue }
 
     var body: some View {
-        HStack {
-            CodepetCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    header
-                    Text(ask)
-                        .font(CodepetTheme.inter(14, weight: .medium))
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    destinationRow
-                    workedRow
-                    if stepsExpanded { stepList }
-                    if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
-                    noteRow
-                    approvalRows
-                }
-                .padding(14)
-            }
-            Spacer(minLength: 24)
+        VStack(alignment: .leading, spacing: 12) {
+            // Run metadata: how long, and on which machine. Grey and quiet,
+            // above the rule, because it is not the answer.
+            workedRow
+            if stepsExpanded { stepList }
+
+            // Always, not only when there is prose. It is the line between
+            // the run's metadata and the run's answer, and Codex draws it
+            // whether or not the answer has arrived yet — which is also when
+            // the separation matters most, because otherwise the commands run
+            // straight into the sentence.
+            Divider().opacity(0.45)
+            runLocallyRow
+            summaryProse
+            noteRow
+
+            // Cards from here down, and only for things that are an artifact
+            // or need an answer.
+            if let diff = store.diff, !diff.files.isEmpty { changeSummary(diff) }
+            approvalRows
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // A 1s timer rather than TimelineView: this card sits inside the
+        // transcript's ScrollView, and a TimelineView redraw there costs more
+        // than a published Date on one row.
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
     }
 
-    // MARK: - header
+    // MARK: - the agent's own account of what it did
 
-    @ViewBuilder private var header: some View {
-        HStack(spacing: 8) {
-            Text(lang == .vi ? "KỸ THUẬT" : "ENGINEERING")
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
-                .foregroundColor(hue)
-            Spacer(minLength: 8)
-            phaseChip
+    /// What the agent SAYS it did, above what it ran.
+    ///
+    /// Collected since the store was written and rendered nowhere until 14 Aug.
+    /// A finished run showed six shell commands and no explanation — the
+    /// opposite of Codex, which leads with "Created a complete, responsive
+    /// landing-page source package" and folds the commands away. The commands
+    /// are evidence; this is the answer.
+    ///
+    /// Every message, not just the last: the agent narrates as it goes, and
+    /// keeping only the final line would drop the reasoning that explains a
+    /// permission ask three rows above.
+    @ViewBuilder private var summaryProse: some View {
+        if !store.messages.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(store.messages.enumerated()), id: \.offset) { _, line in
+                    // 14pt and leaded, against 13 flat before. This is the
+                    // ANSWER, and it was set smaller than the founder's own
+                    // question while four lines of monospaced shell sat above
+                    // it — which is why the surface still read as a log after
+                    // the card came off. Codex's answer is its largest text.
+                    Text(line)
+                        .font(CodepetTheme.inter(14))
+                        .lineSpacing(3)
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 
-    @ViewBuilder private var phaseChip: some View {
-        let (text, colour) = Self.phaseLabel(store.phase, lang: lang)
-        Text(text)
-            .font(CodepetTheme.inter(10, weight: .semibold))
-            .foregroundColor(colour)
-    }
-
-    /// One label per phase, and `budgetReached` is NOT worded as a failure —
-    /// the session is paused and resumable, and telling a founder their work
-    /// failed when it is sitting there intact makes them start over and pay
-    /// twice.
-    static func phaseLabel(_ phase: EngineeringPhase, lang: AppLanguage) -> (String, Color) {
-        switch phase {
-        case .preparing:
-            return (lang == .vi ? "Đang chuẩn bị" : "Starting", CodepetTheme.mutedText)
-        case .running:
-            return (lang == .vi ? "Đang làm" : "Working", CodepetTheme.accentBlue)
-        case .awaitingApproval:
-            return (lang == .vi ? "Cần bạn xác nhận" : "Needs you", CodepetTheme.accentGold)
-        case .reviewing:
-            return (lang == .vi ? "Sẵn sàng duyệt" : "Ready to review", CodepetTheme.accentGold)
-        case .budgetReached:
-            return (lang == .vi ? "Tạm dừng ở hạn mức" : "Paused at its limit", CodepetTheme.accentGold)
-        case .failed:
-            return (lang == .vi ? "Không xong" : "Didn't finish", CodepetTheme.mutedText)
-        }
+    /// "2m 4s", or "41s" under a minute — Codex's shape, and it reads better
+    /// than 124 seconds at the length these runs actually take.
+    static func duration(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
     // MARK: - "Worked for Ns"
@@ -118,8 +134,13 @@ struct EngineeringResultBar: View {
             HStack(spacing: 6) {
                 Image(systemName: stepsExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                Text(workedText)
+                // One line of metadata, not two. The destination used to have
+                // its own row under this one, which put two grey lines above
+                // the answer — Codex has none there at all, and the closest
+                // honest thing is to say both in one breath.
+                Text(workedText + " · " + Self.destinationText(lang: lang))
                     .font(CodepetTheme.inter(12))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundColor(CodepetTheme.mutedText)
         }
@@ -132,9 +153,39 @@ struct EngineeringResultBar: View {
         .opacity(store.visibleSteps.isEmpty ? 0.5 : 1)
     }
 
+    /// "Working… 41s" while it runs, "Worked for 1m 44s" once it has stopped.
+    ///
+    /// The tense IS the status. There was a phase chip in an eyebrow until 14
+    /// Aug — "Working", "Needs you", "Ready to review" — and it went with the
+    /// card: Codex carries the same information in this one line plus the
+    /// presence of an ask, and a founder reading "Working… 41s" does not also
+    /// need a badge saying Working.
+    ///
+    /// "Needs you" is not lost either: the permission card is on screen,
+    /// unanswered, which is a louder signal than a word in a corner.
+    static func workedPrefix(running: Bool, lang: AppLanguage) -> String {
+        if running { return lang == .vi ? "Đang làm… " : "Working… " }
+        return lang == .vi ? "Đã làm " : "Worked for "
+    }
+
+    /// Whether the clock is still moving — the run has not reached a terminal
+    /// state. `awaitingApproval` counts as running: the session is alive and
+    /// billing, it is just blocked on a human.
+    static func isRunning(_ phase: EngineeringPhase) -> Bool {
+        switch phase {
+        case .preparing, .running, .awaitingApproval: return true
+        case .reviewing, .budgetReached, .failed: return false
+        }
+    }
+
     private var workedText: String {
-        if let elapsed {
-            return lang == .vi ? "Đã làm \(elapsed)s" : "Worked for \(elapsed)s"
+        // The store's clock first, the caller's override second. `elapsed` was
+        // the only source until 14 Aug and the dock never passed one, so in the
+        // running app this row could never say a duration — only a preview and
+        // the gallery ever supplied a number.
+        if let secs = elapsed ?? store.elapsedSeconds(now: now) {
+            return Self.workedPrefix(running: Self.isRunning(store.phase), lang: lang)
+                + Self.duration(secs)
         }
         // The VISIBLE count, or the row would promise steps the list does not
         // show — "6 steps" above four rows is its own small lie.
@@ -152,8 +203,10 @@ struct EngineeringResultBar: View {
                         .foregroundColor(step.done ? CodepetTheme.accentTeal : CodepetTheme.mutedText)
                         .frame(width: 10, alignment: .leading)
                     Text(step.label)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(CodepetTheme.bodyText)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        // Dimmer than the prose on purpose. Expanded, this is
+                        // evidence you went looking for, not the reply.
+                        .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -163,27 +216,62 @@ struct EngineeringResultBar: View {
 
     // MARK: - the change summary
 
+    /// The diff, shaped like Codex's: a title with its counts beneath, the
+    /// action at the top right, then the files as rows with the basename
+    /// carrying the weight, then a fold.
+    ///
+    /// Restyled 14 Aug from a tinted block with the counts on the same line
+    /// and "Review" as a text link underneath. The information was all there;
+    /// it read as a sub-section of a log rather than as an artifact you can
+    /// act on, which is the whole difference Mona was pointing at.
+    ///
+    /// No Undo, unlike theirs — Codex edits local files, ours works on a
+    /// branch, and the branch IS the undo.
     @ViewBuilder private func changeSummary(_ diff: EngDiffSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                filesExpanded.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    Text("±")
-                        .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(hue)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(changedText(diff))
-                        .font(CodepetTheme.inter(13, weight: .medium))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
-                    Spacer(minLength: 8)
                     Text("+\(diff.additions) −\(diff.deletions)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(CodepetTheme.mutedText)
                 }
+                Spacer(minLength: 8)
+                Button(lang == .vi ? "Xem lại" : "Review", action: onReview)
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(hue)
+                    .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
-            if filesExpanded { fileList(diff) }
+            Divider().opacity(0.35)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Self.shownFiles(diff, expanded: filesExpanded)) { file in
+                    fileRow(file)
+                }
+                if let more = Self.hiddenCount(diff, expanded: filesExpanded) {
+                    Button {
+                        filesExpanded.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(Self.foldLabel(more: more, lang: lang))
+                                .font(CodepetTheme.inter(12))
+                            Image(systemName: filesExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             // GitHub caps a compare at 300 files. Saying the list is incomplete
             // is the difference between a partial answer and a wrong one.
@@ -193,18 +281,81 @@ struct EngineeringResultBar: View {
                      : "This list is cut short — there are more files than shown.")
                     .font(CodepetTheme.inter(11))
                     .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
-
-            Button(lang == .vi ? "Xem lại" : "Review", action: onReview)
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(hue)
-                .buttonStyle(.plain)
         }
-        .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(hue.opacity(0.06))
+                .fill(CodepetTheme.mutedText.opacity(0.07))
         )
+    }
+
+    /// Three files, then a fold — Codex's threshold, and it fits the dock.
+    static let visibleFileLimit = 3
+
+    static func shownFiles(_ diff: EngDiffSummary, expanded: Bool) -> [EngFileDiff] {
+        expanded ? diff.files : Array(diff.files.prefix(visibleFileLimit))
+    }
+
+    /// How many rows the fold is hiding, or nil when there is nothing to fold.
+    static func hiddenCount(_ diff: EngDiffSummary, expanded: Bool) -> Int? {
+        let hidden = diff.files.count - visibleFileLimit
+        guard hidden > 0 else { return nil }
+        return expanded ? 0 : hidden
+    }
+
+    /// "Show 1 more file" / "Show 4 more files" / "Collapse files" — Codex's
+    /// wording, including the singular, because "Show 1 more files" is the
+    /// kind of thing that makes a product feel unfinished.
+    static func foldLabel(more: Int, lang: AppLanguage) -> String {
+        if more == 0 { return lang == .vi ? "Thu gọn" : "Collapse files" }
+        if lang == .vi { return "Xem thêm \(more) tệp" }
+        return more == 1 ? "Show 1 more file" : "Show \(more) more files"
+    }
+
+    @ViewBuilder private func fileRow(_ file: EngFileDiff) -> some View {
+        HStack(spacing: 8) {
+            // The directory recedes and the filename carries the weight —
+            // scanning a diff means reading basenames.
+            Text(Self.directory(file.path))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(CodepetTheme.mutedText)
+            + Text(Self.basename(file.path))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(CodepetTheme.primaryText)
+
+            Spacer(minLength: 8)
+            if file.isBinary {
+                Text(lang == .vi ? "nhị phân" : "binary")
+                    .font(CodepetTheme.inter(10))
+                    .foregroundColor(CodepetTheme.mutedText)
+            } else {
+                Text("+\(file.additions)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CodepetTheme.accentGreen)
+                Text("−\(file.deletions)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CodepetTheme.accentPink)
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    /// Everything up to and including the last slash, or empty. Split rather
+    /// than styled whole so a rename ("old → new") keeps reading correctly:
+    /// the basename of the DISPLAY path is what changed.
+    static func directory(_ path: String) -> String {
+        guard let slash = path.lastIndex(of: "/") else { return "" }
+        return String(path[...slash])
+    }
+
+    static func basename(_ path: String) -> String {
+        guard let slash = path.lastIndex(of: "/") else { return path }
+        return String(path[path.index(after: slash)...])
     }
 
     private func changedText(_ diff: EngDiffSummary) -> String {
@@ -252,20 +403,21 @@ struct EngineeringResultBar: View {
     /// cloud opens a branch and can spend 40 credits. A founder who cannot tell
     /// which is happening cannot tell what a run cost them or where to look for
     /// the result.
-    @ViewBuilder private var destinationRow: some View {
-        HStack(spacing: 8) {
-            Text(lang == .vi
-                 ? "Đang làm trên một nhánh trong repo của bạn."
-                 : "Working on a branch in your repo.")
-                .font(CodepetTheme.inter(11))
-                .foregroundColor(CodepetTheme.mutedText)
-            Spacer(minLength: 8)
-            if let onRunLocally, Self.canSwitchToLocal(store.phase) {
-                Button(lang == .vi ? "Chạy trên máy mình" : "Run on my machine", action: onRunLocally)
-                    .font(CodepetTheme.inter(11, weight: .semibold))
-                    .foregroundColor(hue)
-                    .buttonStyle(.plain)
-            }
+    /// Shortened to fit beside the duration: "Worked for 41s · on a branch in
+    /// your repo". The long form was a sentence on its own row.
+    static func destinationText(lang: AppLanguage) -> String {
+        lang == .vi ? "trên một nhánh trong repo của bạn" : "on a branch in your repo"
+    }
+
+    /// The switch to the other machine, on its own quiet row and only while
+    /// there is nothing to lose. It cannot join the metadata line — that line
+    /// is text, and this needs a hit target.
+    @ViewBuilder private var runLocallyRow: some View {
+        if let onRunLocally, Self.canSwitchToLocal(store.phase) {
+            Button(lang == .vi ? "Chạy trên máy mình" : "Run on my machine", action: onRunLocally)
+                .font(CodepetTheme.inter(11, weight: .semibold))
+                .foregroundColor(hue)
+                .buttonStyle(.plain)
         }
     }
 
@@ -365,8 +517,18 @@ struct EngineeringResultBar: View {
                      failure: EngineeringError?,
                      lang: AppLanguage) -> String? {
         if case .budgetReached = phase { return message(for: .budgetReached, lang: lang) }
-        guard let failure else { return nil }
-        return message(for: failure, lang: lang)
+        if let failure { return message(for: failure, lang: lang) }
+        // A run can reach `.failed` with NO refusal attached — an unrecognised
+        // stop reason maps there and sets nothing (`EngineeringRun.phase`'s
+        // default). The phase chip was the only thing marking it, and the chip
+        // is gone, so this state would otherwise be silent: a run that simply
+        // stops with no explanation anywhere.
+        if case .failed = phase {
+            return lang == .vi
+                ? "Lần chạy này dừng lại mà không nói rõ lý do. Phần đã làm vẫn ở trên nhánh."
+                : "This run stopped without saying why. Whatever it finished is still on the branch."
+        }
+        return nil
     }
 
     /// Every refusal in the founder's words, and never blaming them for ours.
@@ -444,7 +606,7 @@ struct EngineeringResultBar: View {
     store.handle(.step(ExecStep(id: "s1", label: "read the repository", done: true, kind: .mono)))
     store.handle(.step(ExecStep(id: "s2", label: "npm install stripe", done: false, kind: .mono)))
     store.handle(.approval(EngApproval(id: "tu_1", name: "bash", input: "npm install stripe")))
-    return EngineeringResultBar(store: store, ask: "add stripe checkout", elapsed: 41, onReview: {})
+    return EngineeringResultBar(store: store, elapsed: 41, onReview: {})
         .padding()
         .frame(width: 360)
 }

@@ -52,6 +52,63 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertEqual(s.questionSegments.map(\.text).joined(), s.question)
     }
 
+    // MARK: - Who is signed in — ONE answer
+
+    /// The bug this replaces: the rail said "Founder" while the hero said "there",
+    /// both on screen at once, for the same unknown founder.
+    func testTheRailAndTheHeroCannotDisagreeAboutAnUnknownFounder() {
+        let brief = CompanyBrief()
+        let label = FounderName.label(brief: brief, accountName: nil, language: .en)
+        let greeting = ChatLandingState(company: company(tasks: [], founder: nil),
+                                        now: Date(), language: .en).greeting
+        XCTAssertEqual(label, "You")
+        XCTAssertFalse(greeting.contains("Founder"))
+        XCTAssertFalse(greeting.contains("there"),
+                       "no placeholder noun — the clause is dropped instead: \(greeting)")
+    }
+
+    /// "Good afternoon." is a complete greeting. "Good afternoon, there." is a
+    /// stock chatbot tic that makes the app sound like it is pretending to know you.
+    func testAnUnknownFounderGetsAGreetingWithNoNameClause() {
+        let at3pm = Calendar.current.date(bySettingHour: 15, minute: 0, second: 0, of: Date())!
+        let s = ChatLandingState(company: company(tasks: [], founder: nil),
+                                 now: at3pm, language: .en)
+        XCTAssertEqual(s.greeting, "Good afternoon.")
+    }
+
+    func testAKnownFounderIsNamed() {
+        let at3pm = Calendar.current.date(bySettingHour: 15, minute: 0, second: 0, of: Date())!
+        let s = ChatLandingState(company: company(tasks: [], founder: "Mona"),
+                                 now: at3pm, language: .en)
+        XCTAssertEqual(s.greeting, "Good afternoon, Mona.")
+    }
+
+    /// A founder who signed in with Google was called "there" by an app that
+    /// already had their name — `AuthManager` captures it into
+    /// `AppState.displayName` and no greeting ever read it.
+    func testTheAccountNameIsUsedWhenTheBriefHasNone() {
+        let at3pm = Calendar.current.date(bySettingHour: 15, minute: 0, second: 0, of: Date())!
+        let s = ChatLandingState(company: company(tasks: [], founder: nil), now: at3pm,
+                                 language: .en, accountName: "Mona Truong")
+        XCTAssertEqual(s.greeting, "Good afternoon, Mona Truong.")
+    }
+
+    /// The brief is what the founder typed about their own company; the account
+    /// name is whatever their Google profile happens to say.
+    func testTheBriefOutranksTheAccountName() {
+        XCTAssertEqual(FounderName.resolve(brief: {
+            var b = CompanyBrief(); b.founderName = "Mona"; return b
+        }(), accountName: "monatruong@gmail.com"), "Mona")
+    }
+
+    /// A brief saved with a stray space is not a name.
+    func testWhitespaceOnlyNamesCountAsAbsent() {
+        var b = CompanyBrief()
+        b.founderName = "   "
+        XCTAssertNil(FounderName.resolve(brief: b, accountName: "  "))
+        XCTAssertEqual(FounderName.resolve(brief: b, accountName: " Mona "), "Mona")
+    }
+
     // MARK: - The beacon card
 
     /// A department-owned task: the department drafts, the founder approves. The

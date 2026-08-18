@@ -10,6 +10,9 @@ import SwiftUI
 struct TwoModeSidebar: View {
     @Binding var mode: WorkspaceMode
     @EnvironmentObject var companyStore: CompanyStore
+    /// Carries the signed-in account's display name, the second source for who
+    /// the founder is when the brief has no name.
+    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var lang
 
     /// Collapsed by default in Developer; the founder can open it in place.
@@ -210,11 +213,12 @@ struct TwoModeSidebar: View {
         }
     }
 
-    /// The brief owns the founder's name — the same source the chat greeting reads,
-    /// so the rail cannot disagree with the hero about who is signed in.
+    /// Who is signed in, through the one resolver the hero also goes through — so
+    /// the rail cannot disagree with it. It could before, and did: this returned
+    /// "Founder" while the hero returned "there", both visible at once.
     private var founderName: String {
-        let raw = (companyStore.company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw.isEmpty ? (lang == .vi ? "Nhà sáng lập" : "Founder") : raw
+        FounderName.label(brief: companyStore.company.brief,
+                          accountName: appState.displayName, language: lang)
     }
 
     // MARK: - Row furniture

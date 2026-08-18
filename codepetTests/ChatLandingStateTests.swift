@@ -37,10 +37,31 @@ final class ChatLandingStateTests: XCTestCase {
         XCTAssertTrue(ChatLandingState(company: company(), now: date(hour: 17), language: .en).greeting.hasPrefix("Good afternoon"))
         XCTAssertTrue(ChatLandingState(company: company(), now: date(hour: 18), language: .en).greeting.hasPrefix("Good evening"))
     }
+    /// The fallback CHANGED, deliberately: a missing name now drops the clause
+    /// instead of substituting one ("Good morning." not "Good morning, there.").
+    /// Two surfaces were inventing different placeholders for the same unknown
+    /// founder — the rail said "Founder" beside a hero saying "there" — and
+    /// `herePhrase`/`FirstRunGreetingBuilder` already rewrote rather than
+    /// substituted. See `FounderName`.
+    ///
+    /// What this test has always been for is unchanged: an absent name must not
+    /// produce a broken or half-punctuated string.
     func testGreetingFounderNameAndFallback() {
         XCTAssertEqual(ChatLandingState(company: company(founder: "Mona"), now: date(hour: 9), language: .en).greeting, "Good morning, Mona.")
-        XCTAssertEqual(ChatLandingState(company: company(founder: "  "), now: date(hour: 9), language: .en).greeting, "Good morning, there.")
-        XCTAssertEqual(ChatLandingState(company: company(founder: nil), now: date(hour: 9), language: .vi).greeting, "Chào buổi sáng, bạn.")
+        XCTAssertEqual(ChatLandingState(company: company(founder: "  "), now: date(hour: 9), language: .en).greeting, "Good morning.")
+        XCTAssertEqual(ChatLandingState(company: company(founder: nil), now: date(hour: 9), language: .vi).greeting, "Chào buổi sáng.")
+    }
+
+    /// The account is the second source: the app captures Firebase's display name
+    /// into `AppState.displayName`, and the greeting used to ignore it and call a
+    /// signed-in founder "there".
+    func testGreetingFallsBackToTheAccountNameBeforeGivingUp() {
+        XCTAssertEqual(ChatLandingState(company: company(founder: nil), now: date(hour: 9),
+                                        language: .en, accountName: "Mona").greeting,
+                       "Good morning, Mona.")
+        XCTAssertEqual(ChatLandingState(company: company(founder: "Mona"), now: date(hour: 9),
+                                        language: .en, accountName: "someone@else.com").greeting,
+                       "Good morning, Mona.", "the brief outranks the account")
     }
     func testQuestionUsesProjectWithFallback() {
         XCTAssertTrue(ChatLandingState(company: company(project: "Acme"), now: date(hour: 9), language: .en).question.contains("Acme"))

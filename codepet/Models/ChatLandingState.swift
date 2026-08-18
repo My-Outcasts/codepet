@@ -14,9 +14,12 @@ struct ChatLandingState {
     /// itself the decoration; accenting the verb points at the thing being offered.
     let accentWord: String
 
-    init(company: CompanyState, now: Date, language: AppLanguage) {
-        let founderRaw = (company.brief.founderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let founder = founderRaw.isEmpty ? (language == .vi ? "bạn" : "there") : founderRaw
+    /// `accountName` is the signed-in account's display name (`AppState.displayName`,
+    /// captured from Firebase). Defaulted so callers that have no account context —
+    /// previews, tests — keep working; the live chat passes it, because a founder
+    /// who signed in with Google should not be greeted as a stranger by an app that
+    /// already has their name.
+    init(company: CompanyState, now: Date, language: AppLanguage, accountName: String? = nil) {
         let hour = Calendar.current.component(.hour, from: now)
         let part: String
         switch hour {
@@ -24,7 +27,8 @@ struct ChatLandingState {
         case 12..<18: part = language == .vi ? "Chào buổi chiều" : "Good afternoon"
         default:      part = language == .vi ? "Chào buổi tối" : "Good evening"
         }
-        greeting = "\(part), \(founder)."
+        // No name → "Good afternoon.", not "Good afternoon, there." See `FounderName`.
+        greeting = FounderName.greeting(part: part, brief: company.brief, accountName: accountName)
 
         let projectRaw = (company.brief.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let project = projectRaw.isEmpty ? "Codepet" : projectRaw

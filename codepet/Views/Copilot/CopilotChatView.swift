@@ -9,6 +9,9 @@ import SwiftUI
 /// `ThreadListView` history switcher are preserved from `main`.
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    /// The signed-in account's display name — the greeting's second source for who
+    /// the founder is when the brief carries no name. See `FounderName`.
+    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var lang
     /// Which shell is hosting this — the dock, or the two-mode pane. Decides the
     /// header row, where the composer sits, and whether the mode pill exists.
@@ -79,7 +82,8 @@ struct CopilotChatView: View {
                     ThreadListView(showHistory: $showHistory)
                 } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
                     ChatEmptyState(
-                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        state: ChatLandingState(company: companyStore.company, now: Date(),
+                                                language: lang, accountName: appState.displayName),
                         onOpenRoadmap: { companyStore.select(.roadmap) },
                         onStarter: { starter in
                             companyStore.chatDraft = starter

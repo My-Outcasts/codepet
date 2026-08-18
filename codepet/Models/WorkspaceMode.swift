@@ -1,0 +1,83 @@
+// codepet/Models/WorkspaceMode.swift
+import Foundation
+
+/// The shell's two destinations. **A place, not a per-message intent.**
+///
+/// This is what `ChatMode` becomes. `ChatMode` asked the founder to pick
+/// `ask / plan / build` per message, and its own header records why that was
+/// wrong: Build and Developer "differed only in WHERE the work executed", which
+/// made a founder understand our deployment before they could send a sentence.
+/// Intent stays inferred from what they typed; the PLACE decides which agents may
+/// act and on which backend. One door per agent.
+///
+/// Spec: `docs/superpowers/specs/2026-08-17-codepet-two-mode-product-design.md` §3.
+enum WorkspaceMode: String, CaseIterable, Identifiable {
+    /// Talk to your company — the nine departments, on the cloud backend.
+    case ask
+    /// Your company touches your code — Local CLI or the cloud Managed Agent.
+    case developer
+
+    var id: String { rawValue }
+
+    func title(_ lang: AppLanguage) -> String {
+        switch (self, lang) {
+        case (.ask, .vi):       return "Hỏi"
+        case (.ask, _):         return "Ask"
+        case (.developer, .vi): return "Lập trình"
+        case (.developer, _):   return "Developer"
+        }
+    }
+
+    /// One line under the switch, on a new account only, retired once Developer
+    /// has been opened. Guidance that outstays its welcome is just clutter.
+    static func hint(_ lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Hỏi để trò chuyện với công ty. Developer để chạm vào mã của bạn."
+            : "Ask talks to your company. Developer touches your code."
+    }
+
+    // MARK: - The sidebar's company surfaces
+
+    /// The five that never move. They are STATE the founder browses — they feed
+    /// context slices and expose verbs; work itself only ever happens in chat.
+    ///
+    /// `.chat` and `.secondBrain` are deliberately absent: chat is the surface
+    /// these sit beside, and Second Brain becomes a tab inside Company.
+    static let workspaceSurfaces: [AppView] = [.roadmap, .company, .tasks, .library, .environment]
+
+    /// Ask shows the five open; Developer collapses them to a single row so a
+    /// session gets the vertical space, without making them unreachable — a
+    /// roadmap task and the code that satisfies it belong one click apart.
+    var collapsesWorkspace: Bool { self == .developer }
+
+    // MARK: - Persistence
+
+    /// `cp_`-prefixed per the project's UserDefaults convention.
+    static let defaultsKey = "cp_workspaceMode"
+
+    /// Restored on launch. An unknown or absent value opens on Ask, which is the
+    /// mode that needs no repo and no CLI.
+    static func restore(from defaults: UserDefaults = .standard) -> WorkspaceMode {
+        guard let raw = defaults.string(forKey: defaultsKey),
+              let mode = WorkspaceMode(rawValue: raw) else { return .ask }
+        return mode
+    }
+
+    func persist(to defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
+
+/// Whether the two-mode shell replaces `AppShellView`.
+///
+/// Off by default, so `main` keeps shipping the web-parity shell while this is
+/// built. Launch with `-CODEPET_TWO_MODE YES`.
+///
+/// GOTCHA (measured Aug 13): `defaults write app.murror.codepet …` does NOT reach
+/// a sandboxed build — a stale container eats the write and `defaults read` still
+/// reports success. Pass the flag as a launch ARGUMENT:
+/// `open -n <app> --args -CODEPET_TWO_MODE YES`.
+enum TwoModeShell {
+    static let flagKey = "CODEPET_TWO_MODE"
+    static var enabled: Bool { UserDefaults.standard.bool(forKey: flagKey) }
+}

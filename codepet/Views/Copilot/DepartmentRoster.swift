@@ -40,7 +40,7 @@ struct DepartmentRoster: View {
             Text(lang == .vi
                  ? "ĐỘI CỦA BẠN — MỖI PHÒNG BAN CÓ GIỌNG NÓI RIÊNG"
                  : "YOUR TEAM — EACH DEPARTMENT SPEAKS WITH ITS OWN VOICE")
-                .font(CodepetTheme.inter(10))
+                .font(CodepetTheme.inter(CodepetType.footnote))
                 .tracking(1)
                 .foregroundColor(CodepetTokens.faint)
                 .multilineTextAlignment(.center)
@@ -80,11 +80,11 @@ struct DepartmentRoster: View {
                 }
                 if let pet, let name = PetCharacter.all[pet]?.name {
                     Text(name)
-                        .font(CodepetTheme.inter(11.5, weight: .semibold))
+                        .font(CodepetTheme.inter(CodepetType.subheadline, weight: .semibold))
                         .foregroundColor(on ? dep.accent : CodepetTheme.bodyText)
                 }
                 Text("· \(dep.name)")
-                    .font(CodepetTheme.inter(11.5))
+                    .font(CodepetTheme.inter(CodepetType.subheadline))
                     .foregroundColor(on ? dep.accent : CodepetTokens.faint)
                     .lineLimit(1)
                 Spacer(minLength: 0)

@@ -63,7 +63,7 @@ struct TwoModeSidebar: View {
                 ForEach(WorkspaceMode.allCases) { m in
                     Button { mode = m } label: {
                         Text(m.title(lang).uppercased())
-                            .font(CodepetTheme.inter(11, weight: .semibold))
+                            .font(CodepetTheme.inter(CodepetType.subheadline, weight: .semibold))
                             .tracking(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -98,7 +98,7 @@ struct TwoModeSidebar: View {
             // every switch bumped `+ New` and the whole nav down the sidebar.
             if seenDeveloper == false {
                 Text(WorkspaceMode.hint(lang))
-                    .font(CodepetTheme.inter(10.5))
+                    .font(CodepetTheme.inter(CodepetType.footnote))
                     .lineSpacing(2)
                     .foregroundStyle(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -112,7 +112,7 @@ struct TwoModeSidebar: View {
             companyStore.view = TwoModeLayout.newChatDestination
         } label: {
             Text(lang == .vi ? "+ Mới" : "+ New")
-                .font(CodepetTheme.inter(12.5, weight: .medium))
+                .font(CodepetTheme.inter(CodepetType.body, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 9).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -201,7 +201,7 @@ struct TwoModeSidebar: View {
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
                         .frame(width: 21, height: 21)
                     Text(founderName)
-                        .font(CodepetTheme.inter(12, weight: .medium))
+                        .font(CodepetTheme.inter(CodepetType.body, weight: .medium))
                         .foregroundStyle(CodepetTheme.bodyText)
                     Spacer(minLength: 0)
                 }
@@ -223,7 +223,7 @@ struct TwoModeSidebar: View {
 
     // MARK: - Row furniture
 
-    /// `SectionEyebrow`'s exact type spec — inter(10) regular, 1pt tracking,
+    /// `SectionEyebrow`'s exact type spec — inter(CodepetType.footnote) regular, 1pt tracking,
     /// `CodepetTokens.faint` — which is the app's ONE section label, used by
     /// Environment, the department page and everything since.
     ///
@@ -236,7 +236,7 @@ struct TwoModeSidebar: View {
     /// wordmark (`TopNavView.swift:51`).
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(CodepetTheme.inter(10))
+            .font(CodepetTheme.inter(CodepetType.footnote))
             .tracking(1)
             .foregroundStyle(CodepetTokens.faint)
             .padding(.leading, 4)
@@ -244,7 +244,7 @@ struct TwoModeSidebar: View {
 
     private func emptyLine(_ text: String) -> some View {
         Text(text)
-            .font(CodepetTheme.inter(11))
+            .font(CodepetTheme.inter(CodepetType.subheadline))
             .foregroundStyle(CodepetTokens.faint)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4).padding(.vertical, 3)
@@ -255,11 +255,11 @@ struct TwoModeSidebar: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Text(icon)
-                    .font(CodepetTheme.inter(11))
+                    .font(CodepetTheme.inter(CodepetType.subheadline))
                     .foregroundStyle(selected ? CodepetTheme.accentPurple : CodepetTokens.faint)
                     .frame(width: 13)
                 Text(label)
-                    .font(CodepetTheme.inter(12.5, weight: selected ? .semibold : .regular))
+                    .font(CodepetTheme.inter(CodepetType.body, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
                     .foregroundStyle(selected ? CodepetTheme.accentPurple : CodepetTheme.bodyText)
                 Spacer(minLength: 0)
@@ -268,7 +268,7 @@ struct TwoModeSidebar: View {
                     // 5/1 padding. The rail counts the same things the top nav
                     // counted, so they should not be two different objects.
                     Text("\(count)")
-                        .font(CodepetTheme.inter(9, weight: .semibold))
+                        .font(CodepetTheme.inter(CodepetType.footnote, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(CodepetTheme.accentGold))

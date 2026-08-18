@@ -203,7 +203,7 @@ struct CopilotChatView: View {
             Text(lang == .vi
                  ? "Codepet là AI và có thể mắc lỗi. Hãy kiểm tra lại nội dung quan trọng."
                  : "Codepet is AI and can make mistakes. Please double-check its work.")
-                .font(CodepetTheme.inter(10.5))
+                .font(CodepetTheme.inter(CodepetType.footnote))
                 .foregroundColor(CodepetTokens.faint)
                 .multilineTextAlignment(.center)
         }

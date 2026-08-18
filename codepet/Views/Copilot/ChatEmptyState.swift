@@ -154,10 +154,10 @@ struct ChatEmptyState<Composer: View>: View {
                 acc + Text(seg.text).foregroundStyle(
                     seg.accent ? CodepetTheme.accentPurple : CodepetTheme.primaryText)
             }
-            .font(CodepetTheme.inter(16.5, weight: .semibold))
+            .font(CodepetTheme.inter(CodepetType.title2, weight: .semibold))
 
             Text(state.greeting)
-                .font(CodepetTheme.inter(13.5, weight: .medium))
+                .font(CodepetTheme.inter(CodepetType.body, weight: .medium))
                 .foregroundColor(CodepetTheme.mutedText)
         }
         .multilineTextAlignment(.center)
@@ -182,14 +182,14 @@ struct ChatEmptyState<Composer: View>: View {
             Capsule().fill(hue).frame(width: 3).padding(.vertical, 2)
             VStack(alignment: .leading, spacing: 0) {
                 Text(offer.eyebrow.uppercased())
-                    .font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
+                    .font(CodepetTheme.inter(CodepetType.footnote, weight: .semibold)).tracking(0.5)
                     .foregroundColor(hue)
                 Text(offer.title)
-                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .font(CodepetTheme.inter(CodepetType.title3, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                     .padding(.top, 4)
                 Text(offer.detail)
-                    .font(CodepetTheme.inter(12))
+                    .font(CodepetTheme.inter(CodepetType.callout))
                     .foregroundColor(CodepetTheme.mutedText)
                     .padding(.top, 3)
                 HStack(spacing: 8) {
@@ -227,7 +227,7 @@ struct ChatEmptyState<Composer: View>: View {
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(CodepetTheme.inter(11.5, weight: .semibold))
+                .font(CodepetTheme.inter(CodepetType.subheadline, weight: .semibold))
                 .foregroundColor(filled ? CodepetTheme.onAccent(hue) : CodepetTheme.bodyText)
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Capsule().fill(filled ? hue : .clear))
@@ -242,10 +242,10 @@ struct ChatEmptyState<Composer: View>: View {
     private var gradientGreeting: some View {
         VStack(spacing: 4) {
             Text(state.greeting)
-                .font(CodepetTheme.inter(22, weight: .semibold))
+                .font(CodepetTheme.inter(CodepetType.title1, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             Text(state.question)
-                .font(CodepetTheme.inter(22, weight: .semibold))
+                .font(CodepetTheme.inter(CodepetType.title1, weight: .semibold))
                 .foregroundStyle(LinearGradient(
                     gradient: Gradient(colors: [
                         CodepetTheme.primaryText, CodepetTheme.accentPurple, CodepetTheme.accentPink]),
@@ -296,9 +296,9 @@ struct ChatEmptyState<Composer: View>: View {
             HStack(alignment: .top, spacing: 0) {
                 Capsule().fill(hue).frame(width: 3).padding(.vertical, 2)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(eyebrow).font(CodepetTheme.inter(10, weight: .semibold))
+                    Text(eyebrow).font(CodepetTheme.inter(CodepetType.footnote, weight: .semibold))
                         .foregroundColor(hue).tracking(0.5)
-                    Text(value).font(CodepetTheme.inter(14, weight: .semibold))
+                    Text(value).font(CodepetTheme.inter(CodepetType.title3, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText).lineLimit(2)
                         .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }.padding(.leading, 12)
@@ -316,7 +316,7 @@ struct ChatEmptyState<Composer: View>: View {
         Button { onStarter(text) } label: {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles").font(.system(size: 13)).foregroundColor(CodepetTheme.accentPurple)
-                Text(text).font(CodepetTheme.inter(13, weight: .semibold))
+                Text(text).font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                     .lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)

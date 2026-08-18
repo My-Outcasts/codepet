@@ -130,14 +130,14 @@ struct TwoModeShellView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(lang == .vi ? "Developer cần một nơi để làm việc"
                                  : "Developer needs somewhere to work")
-                    .font(CodepetTheme.inter(14.5, weight: .semibold))
+                    .font(CodepetTheme.inter(CodepetType.title3, weight: .semibold))
                     .foregroundStyle(CodepetTheme.primaryText)
                 stateDot(lang == .vi ? "Ngủ đông" : "Dormant", tint: CodepetTheme.mutedText)
             }
             Text(lang == .vi
                  ? "Trỏ nó vào mã và nó sẽ thức dậy. Trước đó, không có gì trung thực để hiển thị."
                  : "Point it at code and it wakes up. Until then there is nothing honest for it to show you.")
-                .font(CodepetTheme.body(12.5))
+                .font(CodepetTheme.inter(CodepetType.body))
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
@@ -174,7 +174,7 @@ struct TwoModeShellView: View {
         HStack(spacing: 6) {
             Circle().fill(tint).frame(width: 7, height: 7)
             Text(label.uppercased())
-                .font(CodepetTheme.inter(10)).tracking(1)
+                .font(CodepetTheme.inter(CodepetType.footnote)).tracking(1)
                 .foregroundStyle(tint)
         }
     }
@@ -185,7 +185,7 @@ struct TwoModeShellView: View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         return Button(action: action) {
             Text(label)
-                .font(CodepetTheme.inter(11.5, weight: .semibold))
+                .font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(shape.fill(filled ? hue : CodepetTokens.cardRaised))
                 .overlay(filled ? nil : shape.stroke(CodepetTokens.cardEdge))
@@ -202,11 +202,11 @@ struct TwoModeShellView: View {
         VStack(alignment: .leading, spacing: 5) {
             Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1)
             Text(title.uppercased())
-                .font(CodepetTheme.inter(10)).tracking(1)
+                .font(CodepetTheme.inter(CodepetType.footnote)).tracking(1)
                 .foregroundStyle(CodepetTokens.faint)
                 .padding(.top, 4)
             Text(body)
-                .font(CodepetTheme.inter(11))
+                .font(CodepetTheme.inter(CodepetType.subheadline))
                 .lineSpacing(3)
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)

@@ -97,7 +97,7 @@ struct CopilotChatView: View {
                     // of stacking it inside the hero — that is what keeps the beacon's
                     // buttons on screen when the greeting or the card grows.
                     if surface == .twoMode {
-                        composer.readingColumn(column).padding(.bottom, 12)
+                        composerDock(column: column)
                     }
                 } else {
                     messageList(column: column)
@@ -105,7 +105,11 @@ struct CopilotChatView: View {
                     // so the seam was redundant chrome. Matches the header's no-divider
                     // direction. It shares the transcript's reading column, so the composer
                     // and the words above it start and end on the same two vertical lines.
-                    composer.readingColumn(column).padding(.bottom, 12)
+                    if surface == .twoMode {
+                        composerDock(column: column)
+                    } else {
+                        composer.readingColumn(column).padding(.bottom, 12)
+                    }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -182,6 +186,26 @@ struct CopilotChatView: View {
             onSend: send,
             onQuickAction: handleQuickAction
         )
+    }
+
+    /// The pane's composer and the line under it.
+    ///
+    /// The composer was sitting ~6pt off the window's bottom edge, which is most of why
+    /// it read as cramped — Claude leaves ~22pt and then a line of text below that, and
+    /// Codex leaves ~10. The disclaimer is not filler: this product hands the founder
+    /// drafts they file and act on, and Claude carries the same sentence under the same
+    /// control. It doubles as the air the composer was missing.
+    private func composerDock(column: CGFloat) -> some View {
+        VStack(spacing: 8) {
+            composer.readingColumn(column)
+            Text(lang == .vi
+                 ? "Codepet là AI và có thể mắc lỗi. Hãy kiểm tra lại nội dung quan trọng."
+                 : "Codepet is AI and can make mistakes. Please double-check its work.")
+                .font(CodepetTheme.inter(10.5))
+                .foregroundColor(CodepetTokens.faint)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.bottom, 14)
     }
 
     private var placeholderText: String {

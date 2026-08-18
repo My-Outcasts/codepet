@@ -79,8 +79,9 @@ struct ChatComposer: View {
     /// outline (the dock's) makes the composer the loudest thing on a pane it no
     /// longer has to compete for attention in.
     private var twoModeBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
+        VStack(alignment: .leading, spacing: 12) {
+            ComposerField(placeholder: placeholder, text: $draft, focus: focus,
+                          floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
                 deptChips
@@ -89,7 +90,7 @@ struct ChatComposer: View {
                 sendButton
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 11)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 11)
         // The house card: `cardRaised` + `cardEdge` at radius 12 with `shadowS`,
         // the same object Tasks and Roadmap are built from. Accent moves to the
         // edge only on focus — an always-accent outline (the dock's) made the
@@ -238,11 +239,14 @@ struct ChatComposer: View {
                 .foregroundColor(CodepetTheme.bodyText)
                 .frame(width: surface == .dock ? 30 : 26,
                        height: surface == .dock ? 30 : 26)
+                // Bare in the pane. Claude and Codex both draw their `+` as a glyph with
+                // no container; ours was a fourth outlined pill in a row that already had
+                // three, which is most of why the control row read as heavy.
                 .overlay(
                     surface == .dock
                         ? AnyView(RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .stroke(CodepetTheme.hairline))
-                        : AnyView(Capsule().stroke(CodepetTokens.cardEdge))
+                        : nil
                 )
                 .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }

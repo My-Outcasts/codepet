@@ -148,23 +148,24 @@ struct TwoModeShellView: View {
         HStack(spacing: 6) {
             Circle().fill(tint).frame(width: 7, height: 7)
             Text(label.uppercased())
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
+                .font(CodepetTheme.inter(10)).tracking(1)
                 .foregroundStyle(tint)
         }
     }
 
     private func doorButton(_ label: String, filled: Bool,
                             action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let hue = CodepetTheme.accentGreen
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return Button(action: action) {
             Text(label)
                 .font(CodepetTheme.inter(11.5, weight: .semibold))
                 .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 7)
-                    .fill(filled ? CodepetTheme.accentGreen : CodepetTheme.surface))
-                .overlay(filled ? nil : RoundedRectangle(cornerRadius: 7)
-                    .stroke(CodepetTheme.hairline))
-                .foregroundStyle(filled ? CodepetTheme.onAccent(CodepetTheme.accentGreen)
-                                        : CodepetTheme.bodyText)
+                .background(shape.fill(filled ? hue : CodepetTokens.cardRaised))
+                .overlay(filled ? nil : shape.stroke(CodepetTokens.cardEdge))
+                .foregroundStyle(filled ? CodepetTheme.onAccent(hue) : CodepetTheme.bodyText)
+                .contentShape(shape)
+                .hoverAffordance(shape, accent: hue)
         }
         .buttonStyle(.plain)
     }
@@ -173,17 +174,18 @@ struct TwoModeShellView: View {
     /// a promise rather than a state.
     private func ceiling(title: String, body: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Divider()
+            Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1)
             Text(title.uppercased())
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
-                .foregroundStyle(CodepetTheme.bodyText)
+                .font(CodepetTheme.inter(10)).tracking(1)
+                .foregroundStyle(CodepetTokens.faint)
+                .padding(.top, 4)
             Text(body)
-                .font(CodepetTheme.inter(10.5))
+                .font(CodepetTheme.inter(11))
                 .lineSpacing(3)
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 3)
+        .padding(.top, 6)
     }
 
     /// The five company pages — the same views the top nav shows today, so this

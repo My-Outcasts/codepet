@@ -29,6 +29,9 @@ struct ChatComposer: View {
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.chatSurface) private var surface
+    @Environment(\.colorScheme) private var scheme
+
+    private var restShadow: CodepetTheme.Shadow { CodepetTokens.shadowS(scheme == .dark) }
 
     var body: some View {
         switch surface {
@@ -87,15 +90,20 @@ struct ChatComposer: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 11)
+        // The house card: `cardRaised` + `cardEdge` at radius 12 with `shadowS`,
+        // the same object Tasks and Roadmap are built from. Accent moves to the
+        // edge only on focus — an always-accent outline (the dock's) made the
+        // composer the loudest thing on a pane it no longer competes for.
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(CodepetTheme.surface)
+                .fill(CodepetTokens.cardRaised)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(focus.wrappedValue ? accent.opacity(0.65) : CodepetTheme.hairline,
+                .stroke(focus.wrappedValue ? accent.opacity(0.65) : CodepetTokens.cardEdge,
                         lineWidth: 1)
         )
+        .shadow(color: restShadow.color, radius: restShadow.radius, x: restShadow.x, y: restShadow.y)
         .shadow(color: (focus.wrappedValue && !reduceTransparency) ? accent.opacity(0.28) : .clear, radius: 16)
         .opacity(isBusy ? 0.62 : 1.0)
     }
@@ -234,7 +242,7 @@ struct ChatComposer: View {
                     surface == .dock
                         ? AnyView(RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .stroke(CodepetTheme.hairline))
-                        : AnyView(Capsule().stroke(CodepetTheme.hairline))
+                        : AnyView(Capsule().stroke(CodepetTokens.cardEdge))
                 )
                 .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }

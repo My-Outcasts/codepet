@@ -28,6 +28,7 @@ struct ChatEmptyState<Composer: View>: View {
 
     @Environment(\.uiLanguage) private var lang
     @Environment(\.chatSurface) private var surface
+    @Environment(\.colorScheme) private var scheme
     @EnvironmentObject private var companyStore: CompanyStore
 
     /// Which candidate the beacon is showing. `Something else` advances it; it is
@@ -115,59 +116,71 @@ struct ChatEmptyState<Composer: View>: View {
     /// The tinted card: an eyebrow, the work, one line about who does it and where
     /// the founder's gate is, then the buttons. Left-aligned inside a centered
     /// hero — a title that wraps must not centre itself into a diamond.
+    ///
+    /// Built from `CodepetTokens`, not from the prototype's own numbers. The
+    /// prototype mixes its tint with `color-mix` and draws the accent as a 4px
+    /// inset shadow at radius 9; this app already has a house recipe for exactly
+    /// this object — `accentTint` + `accentLine` at radius 12 with `shadowS`, and
+    /// a 3pt capsule rail, which is what `landingCard` below (and every card on
+    /// Tasks and Roadmap) is made of. A second card language in the same window
+    /// would read as a different app.
     private func beaconCard(_ offer: BeaconOffer) -> some View {
         let hue = CodepetTheme.accentPurple
-        return VStack(alignment: .leading, spacing: 0) {
-            Text(offer.eyebrow.uppercased())
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1.2)
-                .foregroundColor(hue)
-            Text(offer.title)
-                .font(CodepetTheme.inter(13, weight: .semibold))
-                .foregroundColor(CodepetTheme.primaryText)
-                .padding(.top, 5)
-            Text(offer.detail)
-                .font(CodepetTheme.inter(12))
-                .foregroundColor(CodepetTheme.mutedText)
-                .padding(.top, 3)
-            HStack(spacing: 7) {
-                act(offer.primary.label, filled: true, hue: hue) {
-                    if let task = beaconTask { onBeacon(offer.primary, task) }
-                }
-                if offer.canSkip {
-                    act(lang == .vi ? "Việc khác" : "Something else", filled: false, hue: hue) {
-                        beaconIndex += 1
+        let sh = CodepetTokens.shadowS(scheme == .dark)
+        return HStack(alignment: .top, spacing: 0) {
+            Capsule().fill(hue).frame(width: 3).padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(offer.eyebrow.uppercased())
+                    .font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
+                    .foregroundColor(hue)
+                Text(offer.title)
+                    .font(CodepetTheme.inter(14, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .padding(.top, 4)
+                Text(offer.detail)
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.top, 3)
+                HStack(spacing: 8) {
+                    act(offer.primary.label, filled: true, hue: hue) {
+                        if let task = beaconTask { onBeacon(offer.primary, task) }
+                    }
+                    if offer.canSkip {
+                        act(lang == .vi ? "Việc khác" : "Something else", filled: false, hue: hue) {
+                            beaconIndex += 1
+                        }
                     }
                 }
+                .padding(.top, 10)
             }
-            .padding(.top, 10)
+            .padding(.leading, 12)
+            Spacer(minLength: 0)
         }
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: 400, alignment: .leading)
-        .padding(.vertical, 11).padding(.horizontal, 13)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(hue.opacity(0.13)))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .stroke(hue.opacity(0.52), lineWidth: 1))
-        // The prototype's `inset 4px 0 0 0` — a bar the card's own corner radius
-        // clips, not a capsule floating inside the padding.
-        .overlay(alignment: .leading) {
-            hue.opacity(0.58).frame(width: 4)
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .allowsHitTesting(false)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.vertical, 12).padding(.trailing, 14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(CodepetTokens.accentTint))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(CodepetTokens.accentLine, lineWidth: 1))
+        .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
     }
 
+    /// The card's buttons. Filled = the accent capsule main uses for a primary
+    /// action; ghost = `cardEdge`, the same outline every secondary control in the
+    /// app carries. Both take `hoverAffordance`, which is not decoration here —
+    /// `.plain` strips AppKit's pointer response and leaves a live control reading
+    /// as a dead one.
     private func act(_ label: String, filled: Bool, hue: Color,
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(CodepetTheme.inter(11, weight: .semibold))
+                .font(CodepetTheme.inter(11.5, weight: .semibold))
                 .foregroundColor(filled ? CodepetTheme.onAccent(hue) : CodepetTheme.bodyText)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(filled ? hue.opacity(0.82) : .clear))
-                .overlay(filled ? nil : Capsule().stroke(CodepetTheme.hairline))
+                .background(Capsule().fill(filled ? hue : .clear))
+                .overlay(filled ? nil : Capsule().stroke(CodepetTokens.cardEdge))
                 .hoverAffordance(Capsule(), accent: hue)
         }
         .buttonStyle(.plain)

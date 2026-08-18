@@ -64,11 +64,22 @@ struct TwoModeSidebar: View {
                             .tracking(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
+                            // The selected segment is a raised card sitting in a
+                            // well — `cardRaised` on `well`, the pairing main uses
+                            // wherever something is lifted out of a track.
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(mode == m ? CodepetTheme.pageBackground : .clear)
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(mode == m ? CodepetTokens.cardRaised : .clear)
                             )
-                            .foregroundStyle(mode == m ? CodepetTheme.primaryText : CodepetTheme.mutedText)
+                            .overlay(
+                                mode == m
+                                    ? RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .stroke(CodepetTokens.cardEdge, lineWidth: 1)
+                                    : nil
+                            )
+                            .foregroundStyle(mode == m ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                            .contentShape(Rectangle())
+                            .hoverAffordance(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(mode == m ? [.isSelected] : [])
@@ -76,7 +87,7 @@ struct TwoModeSidebar: View {
             }
             .padding(3)
             .background(
-                RoundedRectangle(cornerRadius: 9).stroke(CodepetTheme.hairline, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CodepetTokens.well)
             )
             // Retires once Developer has been opened — guidance that outstays its
             // welcome is clutter. Deliberately NOT gated on `mode`: an Ask-only
@@ -98,12 +109,16 @@ struct TwoModeSidebar: View {
             companyStore.view = TwoModeLayout.newChatDestination
         } label: {
             Text(lang == .vi ? "+ Mới" : "+ New")
-                .font(CodepetTheme.body(12.5))
+                .font(CodepetTheme.inter(12.5, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 9).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 7).fill(CodepetTheme.pageBackground))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(CodepetTheme.hairline, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(CodepetTokens.cardRaised))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(CodepetTokens.cardEdge, lineWidth: 1))
                 .foregroundStyle(CodepetTheme.bodyText)
+                .contentShape(Rectangle())
+                .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -175,12 +190,21 @@ struct TwoModeSidebar: View {
             Divider()
             Button { companyStore.settingsSection = .preferences } label: {
                 HStack(spacing: 8) {
-                    Circle().fill(accent).frame(width: 21, height: 21)
+                    // The account avatar is a gradient everywhere else it appears
+                    // (`AccountMenuView`, the prototype's `.acct .av`); a flat disc
+                    // was the one place it read as a placeholder.
+                    Circle()
+                        .fill(LinearGradient(colors: [CodepetTokens.accentDeep, accent],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 21, height: 21)
                     Text(founderName)
-                        .font(CodepetTheme.body(12))
+                        .font(CodepetTheme.inter(12, weight: .medium))
                         .foregroundStyle(CodepetTheme.bodyText)
                     Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 5).padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .hoverAffordance(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -195,27 +219,29 @@ struct TwoModeSidebar: View {
 
     // MARK: - Row furniture
 
-    /// The prototype's `.lbl` — 10.5px uppercase, `.17em` tracked — set in the
-    /// app's own sans.
+    /// `SectionEyebrow`'s exact type spec — inter(10) regular, 1pt tracking,
+    /// `CodepetTokens.faint` — which is the app's ONE section label, used by
+    /// Environment, the department page and everything since.
     ///
-    /// `inter`, NOT `pixel`. The prototype uses a mono face for these and this
-    /// rail used the bitmap one, but `main` spends pixel on exactly one thing: the
-    /// wordmark (`TopNavView.swift:51`). Every label, nav row and badge in the
-    /// shipping shell is `inter`, and a rail that disagrees is a second type
-    /// system in the same window. Tracking is what makes an uppercase label read
-    /// as a label; the typeface is not.
+    /// Not the `SectionEyebrow` view itself: it carries the page rhythm's 36/10
+    /// padding, which is right for a scrolling page and far too much air for a
+    /// 208pt rail. The type is what has to agree; the spacing belongs to the
+    /// surface.
+    ///
+    /// `inter`, NOT `pixel`. `main` spends pixel on exactly one thing — the
+    /// wordmark (`TopNavView.swift:51`).
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(CodepetTheme.inter(10, weight: .semibold))
-            .tracking(1.2)
-            .foregroundStyle(CodepetTheme.mutedText)
+            .font(CodepetTheme.inter(10))
+            .tracking(1)
+            .foregroundStyle(CodepetTokens.faint)
             .padding(.leading, 4)
     }
 
     private func emptyLine(_ text: String) -> some View {
         Text(text)
             .font(CodepetTheme.inter(11))
-            .foregroundStyle(CodepetTheme.mutedText)
+            .foregroundStyle(CodepetTokens.faint)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4).padding(.vertical, 3)
     }
@@ -226,27 +252,35 @@ struct TwoModeSidebar: View {
             HStack(spacing: 8) {
                 Text(icon)
                     .font(CodepetTheme.inter(11))
-                    .foregroundStyle(CodepetTheme.mutedText)
+                    .foregroundStyle(selected ? CodepetTheme.accentPurple : CodepetTokens.faint)
                     .frame(width: 13)
                 Text(label)
-                    .font(CodepetTheme.body(12.5))
+                    .font(CodepetTheme.inter(12.5, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
-                    .foregroundStyle(selected ? CodepetTheme.primaryText : CodepetTheme.bodyText)
+                    .foregroundStyle(selected ? CodepetTheme.accentPurple : CodepetTheme.bodyText)
                 Spacer(minLength: 0)
                 if let count, count > 0 {
+                    // `TopNavView`'s badge exactly: white on gold, 9pt semibold,
+                    // 5/1 padding. The rail counts the same things the top nav
+                    // counted, so they should not be two different objects.
                     Text("\(count)")
                         .font(CodepetTheme.inter(9, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(CodepetTheme.accentGold))
-                        .foregroundStyle(.black)
                 }
             }
             .padding(.horizontal, 7).padding(.vertical, 5)
+            // Selection is the violet tint, which is how `main` marks a chosen
+            // thing everywhere (`RoadmapView:174`, the Overview chrome row). It
+            // used the page colour, which on the rail's own fill is a hole rather
+            // than a highlight.
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selected ? CodepetTheme.pageBackground : .clear)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? CodepetTokens.accentTint : .clear)
             )
             .contentShape(Rectangle())
+            .hoverAffordance(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
     }

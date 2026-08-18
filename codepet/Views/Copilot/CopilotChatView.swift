@@ -70,7 +70,7 @@ struct CopilotChatView: View {
         // each site would be asking two different questions and getting two different
         // answers — and these two must line up exactly.
         GeometryReader { geo in
-            let column = ChatColumn.textWidth(forBox: geo.size.width)
+            let column = ChatColumn.textWidth(forBox: geo.size.width, surface: surface)
             VStack(spacing: 0) {
                 // Two-mode has no dock to collapse and no history icon: the rail's
                 // Recent list IS the thread switcher, so the row would be two
@@ -570,6 +570,8 @@ struct CopilotBubble: View {
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
     @Environment(\.colorScheme) private var scheme
+    /// Decides how loud the founder's own turn is — see `textBubble`.
+    @Environment(\.chatSurface) private var surface
     /// For the identity fields on a thumb — the same ones `FeatureFeedbackManager` sends.
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var appState: AppState
@@ -1315,15 +1317,28 @@ struct CopilotBubble: View {
         } else if message.supersededByRoom && !isMe {
             firstTakeRow
         } else if isMe {
+            // The founder's own words, quietly.
+            //
+            // In the dock this is a solid accent bubble, and at 380pt that earns its
+            // volume: the column is too narrow for an attribution row on every turn, so
+            // colour is what separates the two speakers.
+            //
+            // The pane does not have that problem — the reply carries an avatar and a
+            // name row — and there the accent bubble makes the loudest object on screen
+            // the one sentence the founder already knows, on every single turn. Claude
+            // gives the question a quiet grey and spends no accent in the transcript at
+            // all. `well` is this app's own version of that: the neutral it already uses
+            // for a recessed track.
+            let quiet = surface == .twoMode
             HStack {
                 Spacer(minLength: 24)
                 Text(message.text)
                     .font(CodepetTheme.inter(13.5))
                     .lineSpacing(ChatRhythm.lineSpacing)
-                    .foregroundColor(.white)
+                    .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(CodepetTheme.accentPurple))
+                        .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1627,16 +1642,32 @@ enum ChatColumn {
     /// width is now a constant rather than half the window.
     static let measureCap: CGFloat = 640
 
+    /// The cap for the two-mode PANE, which is a different problem from the dock.
+    ///
+    /// 640 was chosen when a dragged-wide dock was the only way the box got large; in
+    /// the pane the box starts large, so the cap is what decides the column at every
+    /// size above ~700pt rather than an edge case. At a ~995pt window it barely binds
+    /// (the pane is ~787 and the margins land near 73), which is why this reads fine
+    /// today — but maximised on an external display the same constant leaves the app's
+    /// widest surface carrying its narrowest column.
+    ///
+    /// 760, not more: the prose is `inter(13.5)`, so 760 is already ~110 characters.
+    /// The other half of this — the pane could carry LARGER type than a 380pt dock —
+    /// is a real question and a riskier change, because `ChatRhythm` and the draft
+    /// card are both pinned to 13.5 and would have to move with it.
+    static let paneMeasureCap: CGFloat = 760
+
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
-    static func textWidth(forBox box: CGFloat) -> CGFloat {
-        max(0, min(box - inset * 2, measureCap).rounded())
+    static func textWidth(forBox box: CGFloat, surface: ChatSurface = .dock) -> CGFloat {
+        let cap = surface == .dock ? measureCap : paneMeasureCap
+        return max(0, min(box - inset * 2, cap).rounded())
     }
 
     /// The margin each side — whatever the column leaves, split in two. Derived rather than
     /// stated so it can never disagree with the column.
-    static func margin(forBox box: CGFloat) -> CGFloat {
-        max(0, (box - textWidth(forBox: box)) / 2)
+    static func margin(forBox box: CGFloat, surface: ChatSurface = .dock) -> CGFloat {
+        max(0, (box - textWidth(forBox: box, surface: surface)) / 2)
     }
 }
 

@@ -50,6 +50,25 @@ enum TwoModeLayout {
     /// on the chat surface, so creating one also navigates there.
     static let newChatDestination: AppView = .chat
 
+    /// Where this shell opens.
+    ///
+    /// `CompanyStore.view` starts at `.roadmap` and `AppView.home` is `.roadmap` — a
+    /// founder call from 6 Aug, made for the TOP-NAV shell, where chat was a dock
+    /// visible alongside whatever page you were on. Landing on Roadmap there cost
+    /// nothing, because the conversation was still on screen.
+    ///
+    /// Here it is not: chat is the pane. Opening on Roadmap means opening a product
+    /// whose thesis is "a chat with two destinations" into a destination, with the
+    /// chat nowhere in sight. And because `onChange(of: mode)` redirects to `.chat`
+    /// whenever the current view is not a conversation, the FIRST mode toggle
+    /// silently moved you there anyway — so the real behaviour was "Roadmap until
+    /// you touch the switch, then chat for the rest of the session", which is not a
+    /// design, it is a leak.
+    ///
+    /// The wordmark still goes to `AppView.home`, so Roadmap keeps the thing the
+    /// Aug 6 call actually gave it.
+    static let launchDestination: AppView = .chat
+
     /// Whether Developer has somewhere to work. **Either door counts.**
     ///
     /// The prototype has one flag, `repoLinked`, and two ways to set it: a folder

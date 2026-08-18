@@ -20,6 +20,8 @@ struct TwoModeShellView: View {
     @Environment(\.uiLanguage) private var lang
 
     @State private var mode: WorkspaceMode = .restore()
+    /// Guards the one-time landing redirect in `onAppear`.
+    @State private var landed = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -35,6 +37,17 @@ struct TwoModeShellView: View {
         // bottom. Set once here so a future destination that shows the chat
         // cannot forget it.
         .environment(\.chatSurface, .twoMode)
+        // Open in the conversation. Once per appearance, and only from the store's
+        // launch default — a founder who navigated to Tasks and came back must not
+        // be yanked out of it by a re-render.
+        .onAppear {
+            if !landed {
+                landed = true
+                if companyStore.view == AppView.home {
+                    companyStore.view = TwoModeLayout.launchDestination
+                }
+            }
+        }
         .onChange(of: mode) { _, new in
             new.persist()
             // Switching INTO Developer while browsing a company page would leave

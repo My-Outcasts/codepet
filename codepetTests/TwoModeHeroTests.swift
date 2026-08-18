@@ -222,6 +222,44 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertEqual(EnvironmentValues().chatSurface, .dock)
     }
 
+    // MARK: - Where the shell opens, and how wide the words run
+
+    /// The leak this closes: nothing set `.chat` at launch, so the shell opened on
+    /// Roadmap and the first mode toggle — which redirects when the view is not a
+    /// conversation — quietly moved you to chat and left you there. "Roadmap until
+    /// you touch the switch" was not a decision anyone made.
+    func testTheShellOpensInTheConversation() {
+        XCTAssertEqual(TwoModeLayout.launchDestination, .chat)
+        XCTAssertTrue(TwoModeLayout.showsConversation(for: TwoModeLayout.launchDestination))
+    }
+
+    /// The wordmark keeps what the Aug 6 founder call actually gave Roadmap.
+    func testTheWordmarkStillGoesToRoadmap() {
+        XCTAssertEqual(AppView.home, .roadmap)
+        XCTAssertNotEqual(TwoModeLayout.launchDestination, AppView.home,
+                          "if these converge the launch redirect becomes a no-op")
+    }
+
+    /// 640 was tuned for a 380pt dock. In the pane the box starts large, so the cap
+    /// decides the column at every ordinary size rather than in an edge case.
+    func testThePaneRunsAWiderColumnThanTheDock() {
+        let wide: CGFloat = 1400
+        XCTAssertEqual(ChatColumn.textWidth(forBox: wide, surface: .dock), 640)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: wide, surface: .twoMode), 760)
+    }
+
+    /// Below the cap the inset decides, in both surfaces — the pane must not invent
+    /// a wider column than it has room for.
+    func testANarrowBoxIsStillGovernedByTheInset() {
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 400, surface: .twoMode),
+                       ChatColumn.textWidth(forBox: 400, surface: .dock))
+    }
+
+    /// The default argument is what keeps this additive for main's shell.
+    func testTheDefaultSurfaceKeepsTheDockMeasure() {
+        XCTAssertEqual(ChatColumn.textWidth(forBox: 1400), 640)
+    }
+
     // MARK: - Developer wakes on EITHER door
 
     /// The bug: the shell tested the cloud run store alone, so linking a folder on

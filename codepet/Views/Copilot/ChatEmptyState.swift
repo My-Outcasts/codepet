@@ -74,7 +74,7 @@ struct ChatEmptyState<Composer: View>: View {
     /// under a composer that grew.
     private var heroBody: some View {
         VStack(spacing: 10) {
-            CompanionOrb(size: 52)
+            brandMark
             greeting
             if let offer = BeaconOffer.offer(for: beaconTask, in: beaconTasks,
                                              host: hostName, language: lang) {
@@ -89,6 +89,47 @@ struct ChatEmptyState<Composer: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 22)
         .padding(.top, 14).padding(.bottom, 10)
+    }
+
+    /// Codepet's own mark, where the companion orb used to be.
+    ///
+    /// The hero says "What should we build for **Codepet** today?" — it is the
+    /// product speaking, not a pet. And now that the roster below carries the cast,
+    /// an orb here was the brand's only slot on the screen being spent on a
+    /// character. Brand above, characters below.
+    ///
+    /// Three things taken from `CollapsedCopilotButton`, which learned each of them
+    /// from founder review — do not re-derive them here:
+    ///
+    /// - `codepet-logo` is RGBA with a **fully transparent** background, so it
+    ///   carries no ground of its own.
+    /// - Its opaque glyph measures 646×826 in a 1024 canvas — taller than wide, with
+    ///   only 9.7% vertical margin — so a fitted square renders the "C" at ~81% of
+    ///   the box and reads as overflowing. The box is oversized against the ink it
+    ///   is meant to produce: 64 here lands ~52pt of glyph, the orb's old diameter.
+    /// - `.interpolation(.none)`, per the project rule that pixel art is never
+    ///   smoothed.
+    ///
+    /// **No white disc.** The collapsed button puts one under the mark because a
+    /// BUTTON needs a body to be findable on near-black; this is not a control, and
+    /// at hero size a white disc punches a hole in a deliberately dark pane. The
+    /// roadmap's root node already draws the bare mark, and the aura behind it here
+    /// is the same device — it keeps the glyph from sitting flat and stands in for
+    /// the bloom the orb used to cast.
+    private var brandMark: some View {
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.34), .clear],
+                                     center: .center, startRadius: 0, endRadius: 46))
+                .frame(width: 92, height: 92)
+                .blur(radius: 18)
+                .allowsHitTesting(false)
+            Image("codepet-logo")
+                .resizable().interpolation(.none).scaledToFit()
+                .frame(width: 64, height: 64)
+        }
+        .frame(height: 64)
+        .accessibilityLabel(CodepetBrand.name)
     }
 
     /// The task the card is offering — the beacon, or wherever `Something else`

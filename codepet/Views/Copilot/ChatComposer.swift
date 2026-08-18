@@ -28,8 +28,18 @@ struct ChatComposer: View {
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.chatSurface) private var surface
 
     var body: some View {
+        switch surface {
+        case .dock:    dockBody
+        case .twoMode: twoModeBody
+        }
+    }
+
+    /// The dock: chips on their own row (380pt cannot hold chips + controls), and
+    /// the mode pill, which still drives `ChatMode` in main's shell.
+    private var dockBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
 
@@ -57,42 +67,75 @@ struct ChatComposer: View {
         .opacity(isBusy ? 0.72 : 1.0)
     }
 
+    /// The prototype's composer: input, then ONE control row — chips, `+`, send.
+    /// No mode pill: `Ask` and `Developer` are places in the rail now, and a pill
+    /// that re-asks the question the rail already answered is the exact confusion
+    /// the two-mode design set out to end.
+    ///
+    /// The border is neutral at rest and accent only on focus. An always-accent
+    /// outline (the dock's) makes the composer the loudest thing on a pane it no
+    /// longer has to compete for attention in.
+    private var twoModeBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
+
+            HStack(spacing: 7) {
+                deptChips
+                quickActionsMenu
+                Spacer(minLength: 8)
+                sendButton
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(CodepetTheme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(focus.wrappedValue ? accent.opacity(0.65) : CodepetTheme.hairline,
+                        lineWidth: 1)
+        )
+        .shadow(color: (focus.wrappedValue && !reduceTransparency) ? accent.opacity(0.28) : .clear, radius: 16)
+        .opacity(isBusy ? 0.62 : 1.0)
+    }
+
     private var deptChips: some View {
-        // Dock adaptation (380pt): show the first 2 chips + overflow, not 3 —
+        // Dock adaptation (380pt): 2 chips + overflow, not the prototype's 3 —
         // keeps the row + the active-project chip from overflowing the dock width.
-        let firstTwo = Array(DepartmentCatalog.roster.prefix(2))
-        // A department chosen from the ••• overflow menu isn't one of the visible
+        let visible = Array(DepartmentCatalog.roster.prefix(surface.visibleDeptChips))
+        // A department chosen from the overflow menu isn't one of the visible
         // chips, so its selection was invisible. Surface it as its own chip.
         let overflowSelected: Department? = selectedDept.flatMap { sel in
-            firstTwo.contains(where: { $0.key == sel.key }) ? nil : sel
+            visible.contains(where: { $0.key == sel.key }) ? nil : sel
         }
         return HStack(spacing: 6) {
-            ForEach(firstTwo) { dep in
+            ForEach(visible) { dep in
                 chip(dep)
             }
             if let sel = overflowSelected {
                 chip(sel)
             }
-            Menu {
-                ForEach(DepartmentCatalog.roster.dropFirst(2)) { dep in
-                    Button {
-                        selectedDept = (selectedDept?.key == dep.key) ? nil : dep
-                    } label: {
-                        Label(dep.name, systemImage: selectedDept?.key == dep.key ? "checkmark" : "")
-                    }
+            // Two-mode folds the overflow into the `+` menu, the way the prototype's
+            // single `+` does — one control, not a `•••` beside a `＋`.
+            if surface == .dock {
+                Menu {
+                    deptOverflowItems
+                } label: {
+                    Text("•••").font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .padding(.horizontal, 10).frame(height: 26)
+                        .overlay(Capsule().stroke(CodepetTheme.hairline))
+                        .hoverAffordance(Capsule())
                 }
-            } label: {
-                Text("•••").font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 10).frame(height: 26)
-                    .overlay(Capsule().stroke(CodepetTheme.hairline))
-                    .hoverAffordance(Capsule())
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
 
             // Active coding-agent project (2C-3): a quiet, always-visible reminder of
             // which folder the agent will touch. Tap → the Environment link surface.
-            if let link = companyStore.activeProjectLink {
+            // Two-mode has no room for it beside three chips, and Developer's own
+            // session bar names the repo, so it stays a dock affordance.
+            if surface == .dock, let link = companyStore.activeProjectLink {
                 Spacer(minLength: 8)
                 Button { companyStore.select(.environment) } label: {
                     HStack(spacing: 4) {
@@ -156,6 +199,18 @@ struct ChatComposer: View {
         DepartmentCompanions.specialistId(for: dep.key, host: companyStore.company.companionId)
     }
 
+    /// The departments that don't have a visible chip. One list, two call sites —
+    /// the dock's `•••` and two-mode's `+` — so the two can't drift apart.
+    @ViewBuilder private var deptOverflowItems: some View {
+        ForEach(DepartmentCatalog.roster.dropFirst(surface.visibleDeptChips)) { dep in
+            Button {
+                selectedDept = (selectedDept?.key == dep.key) ? nil : dep
+            } label: {
+                Label(dep.name, systemImage: selectedDept?.key == dep.key ? "checkmark" : "")
+            }
+        }
+    }
+
     private var quickActionsMenu: some View {
         Menu {
             ForEach(quickActions) { qa in
@@ -165,14 +220,21 @@ struct ChatComposer: View {
                     Label(qa.title, systemImage: qa.systemImage)
                 }
             }
+            if surface == .twoMode {
+                Divider()
+                Section(lang == .vi ? "Phòng ban" : "Departments") { deptOverflowItems }
+            }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: surface == .dock ? 15 : 12, weight: .medium))
                 .foregroundColor(CodepetTheme.bodyText)
-                .frame(width: 30, height: 30)
+                .frame(width: surface == .dock ? 30 : 26,
+                       height: surface == .dock ? 30 : 26)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(CodepetTheme.hairline)
+                    surface == .dock
+                        ? AnyView(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(CodepetTheme.hairline))
+                        : AnyView(Capsule().stroke(CodepetTheme.hairline))
                 )
                 .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
@@ -218,11 +280,14 @@ struct ChatComposer: View {
     }
 
     private var sendButton: some View {
-        Button(action: onSend) {
+        // 27pt in two-mode (the prototype's `.send`), 34 in the dock. The pane's
+        // composer is a quiet strip at the bottom, not the hero's centrepiece.
+        let d: CGFloat = surface == .dock ? 34 : 27
+        return Button(action: onSend) {
             Image(systemName: "arrow.up")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: surface == .dock ? 15 : 12, weight: .semibold))
                 .foregroundColor(canSend ? CodepetTheme.onAccent(accent) : .white)
-                .frame(width: 34, height: 34)
+                .frame(width: d, height: d)
                 .background(
                     Circle().fill(
                         canSend

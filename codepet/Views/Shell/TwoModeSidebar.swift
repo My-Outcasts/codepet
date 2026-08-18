@@ -15,6 +15,11 @@ struct TwoModeSidebar: View {
     /// Collapsed by default in Developer; the founder can open it in place.
     @State private var workspaceExpanded = false
 
+    /// Retires the hint under the switch. `@AppStorage`, not a plain read, so the
+    /// line disappears the moment Developer is first opened instead of on the next
+    /// launch.
+    @AppStorage(WorkspaceMode.seenDeveloperKey) private var seenDeveloper = false
+
     private var accent: Color { CodepetTheme.accentPurple }
 
     var body: some View {
@@ -55,7 +60,8 @@ struct TwoModeSidebar: View {
                 ForEach(WorkspaceMode.allCases) { m in
                     Button { mode = m } label: {
                         Text(m.title(lang).uppercased())
-                            .font(CodepetTheme.pixel(10))
+                            .font(CodepetTheme.pixel(11))
+                            .tracking(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                             .background(
@@ -73,10 +79,13 @@ struct TwoModeSidebar: View {
                 RoundedRectangle(cornerRadius: 9).stroke(CodepetTheme.hairline, lineWidth: 1)
             )
             // Retires once Developer has been opened — guidance that outstays its
-            // welcome is clutter.
-            if mode == .ask && companyStore.engineeringRunStore == nil {
+            // welcome is clutter. Deliberately NOT gated on `mode`: an Ask-only
+            // hint made the rail two lines taller in one mode than the other, so
+            // every switch bumped `+ New` and the whole nav down the sidebar.
+            if seenDeveloper == false {
                 Text(WorkspaceMode.hint(lang))
-                    .font(CodepetTheme.pixel(9))
+                    .font(CodepetTheme.pixel(10.5))
+                    .lineSpacing(2)
                     .foregroundStyle(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -186,16 +195,20 @@ struct TwoModeSidebar: View {
 
     // MARK: - Row furniture
 
+    /// The prototype's `.lbl`: 10.5px, uppercase, `.17em` tracked. It was set at
+    /// 9pt here, which in a bitmap face lands below the size its glyphs were drawn
+    /// for and turns "WORKSPACE" into texture.
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(CodepetTheme.pixel(9))
+            .font(CodepetTheme.pixel(10.5))
+            .tracking(1.8)
             .foregroundStyle(CodepetTheme.mutedText)
             .padding(.leading, 4)
     }
 
     private func emptyLine(_ text: String) -> some View {
         Text(text)
-            .font(CodepetTheme.pixel(9))
+            .font(CodepetTheme.pixel(11))
             .foregroundStyle(CodepetTheme.mutedText)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4).padding(.vertical, 3)

@@ -10,6 +10,9 @@ import SwiftUI
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    /// Which shell is hosting this — the dock, or the two-mode pane. Decides the
+    /// header row, where the composer sits, and whether the mode pill exists.
+    @Environment(\.chatSurface) private var surface
     @FocusState private var inputFocused: Bool
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
@@ -66,7 +69,12 @@ struct CopilotChatView: View {
         GeometryReader { geo in
             let column = ChatColumn.textWidth(forBox: geo.size.width)
             VStack(spacing: 0) {
-                header(column: column)
+                // Two-mode has no dock to collapse and no history icon: the rail's
+                // Recent list IS the thread switcher, so the row would be two
+                // controls that duplicate or lie about what the shell can do.
+                if surface.showsDockChrome {
+                    header(column: column)
+                }
                 if showHistory {
                     ThreadListView(showHistory: $showHistory)
                 } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
@@ -77,8 +85,16 @@ struct CopilotChatView: View {
                             companyStore.chatDraft = starter
                             mode = .ask
                             send()
-                        }
-                    ) { composer }
+                        },
+                        beaconTasks: companyStore.company.tasks,
+                        onBeacon: runBeacon
+                    ) { if surface == .dock { composer } }
+                    // Two-mode docks the composer at the bottom of the pane instead
+                    // of stacking it inside the hero — that is what keeps the beacon's
+                    // buttons on screen when the greeting or the card grows.
+                    if surface == .twoMode {
+                        composer.readingColumn(column).padding(.bottom, 12)
+                    }
                 } else {
                     messageList(column: column)
                     // No rule above the composer — it carries its own bordered container,
@@ -151,8 +167,9 @@ struct CopilotChatView: View {
             focus: $inputFocused,
             // "Codepet", not the pet's name: the founder is talking to the product, and
             // the pet's own name belongs to the moment it answers (`headerName`).
-            placeholder: lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
-                                     : "Ask Codepet anything about your company…",
+            // Two-mode says "your company" instead: the rail already says Codepet, and
+            // Ask is defined as the door that talks to the company.
+            placeholder: placeholderText,
             quickActions: quickActions,
             accent: companionColor,
             accent2: CodepetTheme.accentPink,
@@ -161,6 +178,42 @@ struct CopilotChatView: View {
             onSend: send,
             onQuickAction: handleQuickAction
         )
+    }
+
+    private var placeholderText: String {
+        switch surface {
+        case .dock:
+            return lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
+                               : "Ask Codepet anything about your company…"
+        case .twoMode:
+            return lang == .vi ? "Hỏi công ty của bạn bất cứ điều gì…"
+                               : "Ask your company anything…"
+        }
+    }
+
+    /// The hero card's buttons. Each is wired to something that already exists —
+    /// no button here promises a surface the app does not have.
+    ///
+    /// `walkthrough` sends the ask rather than opening a dedicated flow: the
+    /// native app has no walkthrough surface (the web app's `#125` never ported),
+    /// and a chat turn that explains the step and captures what was learned is the
+    /// honest version of it. `review` navigates to the roadmap, where the draft
+    /// actually is; generating a second draft would spend credits to show the
+    /// founder something they already have.
+    private func runBeacon(_ primary: BeaconOffer.Primary, _ task: RoadmapTask) {
+        showHistory = false
+        switch primary {
+        case .run:
+            Task { await companyStore.runTask(task, language: lang) }
+        case .walkthrough:
+            companyStore.chatDraft = lang == .vi
+                ? "Hướng dẫn tôi làm: \(task.title)"
+                : "Walk me through: \(task.title)"
+            mode = .ask
+            send()
+        case .review:
+            companyStore.select(.roadmap)
+        }
     }
 
     /// The `+` menu quick-actions. "Run my next moves" fans out parallel

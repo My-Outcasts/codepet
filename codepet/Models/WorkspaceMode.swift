@@ -28,8 +28,14 @@ enum WorkspaceMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// One line under the switch, on a new account only, retired once Developer
-    /// has been opened. Guidance that outstays its welcome is just clutter.
+    /// One line under the switch, retired once Developer has been opened.
+    /// Guidance that outstays its welcome is just clutter.
+    ///
+    /// **Not gated on the current mode.** It used to show in Ask only, which meant
+    /// the rail was two lines taller in Ask than in Developer and every switch made
+    /// `+ New` and the whole workspace nav jump ~33pt. Its visibility is a property
+    /// of the ACCOUNT ("have you been to Developer yet"), never of where you are
+    /// standing right now.
     static func hint(_ lang: AppLanguage) -> String {
         lang == .vi
             ? "Hỏi để trò chuyện với công ty. Developer để chạm vào mã của bạn."
@@ -65,6 +71,17 @@ enum WorkspaceMode: String, CaseIterable, Identifiable {
 
     func persist(to defaults: UserDefaults = .standard) {
         defaults.set(rawValue, forKey: Self.defaultsKey)
+        if self == .developer { defaults.set(true, forKey: Self.seenDeveloperKey) }
+    }
+
+    /// Set the first time Developer is opened; retires the hint.
+    static let seenDeveloperKey = "cp_twoModeSeenDeveloper"
+
+    /// Whether the hint under the switch still has a job. Reads the flag rather
+    /// than the live mode, so switching back to Ask does not bring it back — a
+    /// founder who has seen Developer does not need to be told it exists.
+    static func showsHint(in defaults: UserDefaults = .standard) -> Bool {
+        !defaults.bool(forKey: seenDeveloperKey)
     }
 }
 

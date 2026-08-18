@@ -222,6 +222,25 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertEqual(EnvironmentValues().chatSurface, .dock)
     }
 
+    // MARK: - Developer wakes on EITHER door
+
+    /// The bug: the shell tested the cloud run store alone, so linking a folder on
+    /// this Mac left Developer insisting it had nowhere to work — immediately after
+    /// the founder pressed the button that said it would fix that.
+    func testALinkedLocalFolderWakesDeveloperUp() {
+        XCTAssertTrue(TwoModeLayout.developerIsAwake(projectLink: true, cloudRun: false))
+    }
+
+    func testAConnectedCloudRepoWakesDeveloperUp() {
+        XCTAssertTrue(TwoModeLayout.developerIsAwake(projectLink: false, cloudRun: true))
+    }
+
+    /// Dormant means BOTH doors are shut. If this ever returns true with nothing
+    /// linked, an empty session claims a tree it cannot read.
+    func testDeveloperStaysDormantWhenBothDoorsAreShut() {
+        XCTAssertFalse(TwoModeLayout.developerIsAwake(projectLink: false, cloudRun: false))
+    }
+
     // MARK: - The rail must not jump between modes
 
     /// The hint's visibility is a property of the account, not of where the

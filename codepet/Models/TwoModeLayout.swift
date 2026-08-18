@@ -49,4 +49,19 @@ enum TwoModeLayout {
     /// Where the rail's `+ New` sends you: a new conversation is only meaningful
     /// on the chat surface, so creating one also navigates there.
     static let newChatDestination: AppView = .chat
+
+    /// Whether Developer has somewhere to work. **Either door counts.**
+    ///
+    /// The prototype has one flag, `repoLinked`, and two ways to set it: a folder
+    /// on this Mac (Local, 0 credits) or a connected repo (Cloud). The shell tested
+    /// only the cloud half, so linking a folder left Developer insisting it had
+    /// nowhere to work while pointed straight at a repo — and the founder had just
+    /// used the button that said it would fix that.
+    ///
+    /// Pure, and tested, because it is the gate the whole Developer flow hangs off:
+    /// get it wrong in one direction and the dormant screen is unescapable, wrong
+    /// in the other and an empty session claims a tree it cannot read.
+    static func developerIsAwake(projectLink: Bool, cloudRun: Bool) -> Bool {
+        projectLink || cloudRun
+    }
 }

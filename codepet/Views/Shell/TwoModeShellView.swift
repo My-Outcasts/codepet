@@ -78,13 +78,21 @@ struct TwoModeShellView: View {
     /// Developer: the run if there is one, otherwise an honest dormant state.
     /// An empty session would be a worse lie than an offer — without a repo there
     /// is no tree to read and no branch to commit to.
+    ///
+    /// **Dormant means BOTH doors are shut.** This used to test
+    /// `engineeringRunStore` alone, which is the CLOUD path — so linking a local
+    /// folder woke nothing up and Developer went on saying it had nowhere to work
+    /// while pointed at a repo. The prototype's gate is `repoLinked`, which either
+    /// door satisfies; `activeProjectLink` is the local half of it.
     @ViewBuilder private var developerPane: some View {
         if let runId = companyStore.engineeringReviewRunId, let store = companyStore.engineeringRunStore {
             EngineeringWorkspaceView(runId: runId, store: store,
                                      onClose: { companyStore.engineeringReviewRunId = nil })
-        } else if companyStore.engineeringRunStore != nil {
-            // A run exists but nothing is being reviewed yet — the conversation is
-            // still where the run streams, so keep the founder in it.
+        } else if TwoModeLayout.developerIsAwake(projectLink: companyStore.activeProjectLink != nil,
+                                                 cloudRun: companyStore.engineeringRunStore != nil) {
+            // Awake but nothing under review: the conversation is where a run is
+            // described and where it streams (`EditCodeRouting` sends a code ask to
+            // the coding run once a folder is linked), so keep the founder in it.
             CopilotChatView()
         } else {
             dormantDeveloper
@@ -120,10 +128,15 @@ struct TwoModeShellView: View {
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
+                // The picker, right here — not a trip to Environment to hunt for a
+                // button with a different label. `ProjectLinker` is the shared flow
+                // Environment and the chat card both use, so the CLAUDE.md consent
+                // rule is the same one in all three places (it is never written
+                // without an explicit yes).
                 doorButton(lang == .vi ? "Liên kết một thư mục trên máy Mac này"
                                        : "Link a folder on this Mac",
                            filled: true) {
-                    companyStore.select(.environment)
+                    _ = ProjectLinker.pickAndLink(into: companyStore, language: lang)
                 }
                 doorButton(lang == .vi ? "Kết nối một repo" : "Connect a repo",
                            filled: false) {

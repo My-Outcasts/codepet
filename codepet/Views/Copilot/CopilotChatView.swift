@@ -91,7 +91,9 @@ struct CopilotChatView: View {
                             send()
                         },
                         beaconTasks: companyStore.company.tasks,
-                        onBeacon: runBeacon
+                        onBeacon: runBeacon,
+                        selectedDept: $selectedDept,
+                        onDepartment: armDepartment
                     ) { if surface == .dock { composer } }
                     // Two-mode docks the composer at the bottom of the pane instead
                     // of stacking it inside the hero — that is what keeps the beacon's
@@ -217,6 +219,15 @@ struct CopilotChatView: View {
             return lang == .vi ? "Hỏi công ty của bạn bất cứ điều gì…"
                                : "Ask your company anything…"
         }
+    }
+
+    /// A roster tap arms the department and puts the caret in the composer. It does
+    /// NOT send: the founder came to ask their own question, and a tap that spends a
+    /// chat turn on "where would you start?" bills them for a question they did not
+    /// write. Toggles, so tapping the armed pet disarms it — same as its chip.
+    private func armDepartment(_ dep: Department) {
+        selectedDept = (selectedDept?.key == dep.key) ? nil : dep
+        inputFocused = true
     }
 
     /// The hero card's buttons. Each is wired to something that already exists —

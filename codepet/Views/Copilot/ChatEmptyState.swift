@@ -24,6 +24,11 @@ struct ChatEmptyState<Composer: View>: View {
     /// roadmap and passes nothing here.
     var beaconTasks: [RoadmapTask] = []
     var onBeacon: (BeaconOffer.Primary, RoadmapTask) -> Void = { _, _ in }
+    /// The roster's armed department — the SAME binding the composer's chips read,
+    /// so a pet armed here lights the chip down there rather than becoming a second,
+    /// disagreeing selection.
+    var selectedDept: Binding<Department?> = .constant(nil)
+    var onDepartment: (Department) -> Void = { _ in }
     @ViewBuilder var composer: Composer
 
     @Environment(\.uiLanguage) private var lang
@@ -75,6 +80,11 @@ struct ChatEmptyState<Composer: View>: View {
                                              host: hostName, language: lang) {
                 beaconCard(offer)
             }
+            // The cast, under the one thing to do. Both fit: the chips are two or
+            // three short rows, and on a board with no actionable task they carry
+            // the screen on their own — which is the state the hero was emptiest in.
+            DepartmentRoster(selected: selectedDept, onPick: onDepartment)
+                .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 22)

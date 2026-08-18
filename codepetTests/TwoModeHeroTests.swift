@@ -260,6 +260,33 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertEqual(ChatColumn.textWidth(forBox: 1400), 640)
     }
 
+    // MARK: - The cast on the first screen
+
+    /// Eight departments, every one with a voice. Product is deliberately absent —
+    /// it has placeholder art and no pet, which is the launch-blocking gap.
+    func testEveryRosterDepartmentHasAPetToSpeakForIt() {
+        let host = "byte"
+        for dep in DepartmentCatalog.roster {
+            let pet = DepartmentCompanions.specialistId(for: dep.key, host: host)
+            XCTAssertNotNil(pet, "\(dep.name) would show the host orb and no name")
+            XCTAssertNotNil(PetCharacter.all[pet ?? ""],
+                            "\(dep.name) maps to '\(pet ?? "")', which is not a character")
+        }
+        XCTAssertFalse(DepartmentCatalog.roster.contains { $0.key == "product" })
+    }
+
+    /// Four pets cover eight departments. That is the design (nova takes Marketing
+    /// and Sales, sage Finance and Support, glitch Operations and Legal) — if this
+    /// ever became 1:1 the roster would be claiming eight characters we do not have.
+    func testTheCastIsSmallerThanTheRoster() {
+        let pets = Set(DepartmentCatalog.roster.compactMap {
+            DepartmentCompanions.specialistId(for: $0.key, host: "byte")
+        })
+        XCTAssertLessThan(pets.count, DepartmentCatalog.roster.count)
+        XCTAssertEqual(pets, ["crash", "luna", "nova", "sage", "glitch"],
+                       "five voices across eight departments")
+    }
+
     // MARK: - Developer wakes on EITHER door
 
     /// The bug: the shell tested the cloud run store alone, so linking a folder on

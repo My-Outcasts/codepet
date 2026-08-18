@@ -119,7 +119,7 @@ struct ChatEmptyState<Composer: View>: View {
         let hue = CodepetTheme.accentPurple
         return VStack(alignment: .leading, spacing: 0) {
             Text(offer.eyebrow.uppercased())
-                .font(CodepetTheme.pixel(9.5)).tracking(1.5)
+                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1.2)
                 .foregroundColor(hue)
             Text(offer.title)
                 .font(CodepetTheme.inter(13, weight: .semibold))

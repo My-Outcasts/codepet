@@ -141,13 +141,14 @@ struct TwoModeShellView: View {
         .padding(.horizontal, 17).padding(.vertical, 15)
     }
 
-    /// A run-state label with its dot — `● READY`, `● DORMANT`. Monospaced and
-    /// tracked, so it reads as machine state rather than as a second heading.
+    /// A run-state label with its dot — `● READY`, `● DORMANT`. Uppercase and
+    /// tracked so it reads as machine state rather than as a second heading; the
+    /// typeface is the app's sans, same as every other label in the shell.
     private func stateDot(_ label: String, tint: Color) -> some View {
         HStack(spacing: 6) {
             Circle().fill(tint).frame(width: 7, height: 7)
             Text(label.uppercased())
-                .font(CodepetTheme.pixel(10)).tracking(1)
+                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                 .foregroundStyle(tint)
         }
     }
@@ -174,10 +175,10 @@ struct TwoModeShellView: View {
         VStack(alignment: .leading, spacing: 5) {
             Divider()
             Text(title.uppercased())
-                .font(CodepetTheme.pixel(10)).tracking(1)
+                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                 .foregroundStyle(CodepetTheme.bodyText)
             Text(body)
-                .font(CodepetTheme.pixel(10))
+                .font(CodepetTheme.inter(10.5))
                 .lineSpacing(3)
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)

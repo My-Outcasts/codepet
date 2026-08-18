@@ -60,7 +60,7 @@ struct TwoModeSidebar: View {
                 ForEach(WorkspaceMode.allCases) { m in
                     Button { mode = m } label: {
                         Text(m.title(lang).uppercased())
-                            .font(CodepetTheme.pixel(11))
+                            .font(CodepetTheme.inter(11, weight: .semibold))
                             .tracking(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -84,7 +84,7 @@ struct TwoModeSidebar: View {
             // every switch bumped `+ New` and the whole nav down the sidebar.
             if seenDeveloper == false {
                 Text(WorkspaceMode.hint(lang))
-                    .font(CodepetTheme.pixel(10.5))
+                    .font(CodepetTheme.inter(10.5))
                     .lineSpacing(2)
                     .foregroundStyle(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -195,20 +195,26 @@ struct TwoModeSidebar: View {
 
     // MARK: - Row furniture
 
-    /// The prototype's `.lbl`: 10.5px, uppercase, `.17em` tracked. It was set at
-    /// 9pt here, which in a bitmap face lands below the size its glyphs were drawn
-    /// for and turns "WORKSPACE" into texture.
+    /// The prototype's `.lbl` — 10.5px uppercase, `.17em` tracked — set in the
+    /// app's own sans.
+    ///
+    /// `inter`, NOT `pixel`. The prototype uses a mono face for these and this
+    /// rail used the bitmap one, but `main` spends pixel on exactly one thing: the
+    /// wordmark (`TopNavView.swift:51`). Every label, nav row and badge in the
+    /// shipping shell is `inter`, and a rail that disagrees is a second type
+    /// system in the same window. Tracking is what makes an uppercase label read
+    /// as a label; the typeface is not.
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(CodepetTheme.pixel(10.5))
-            .tracking(1.8)
+            .font(CodepetTheme.inter(10, weight: .semibold))
+            .tracking(1.2)
             .foregroundStyle(CodepetTheme.mutedText)
             .padding(.leading, 4)
     }
 
     private func emptyLine(_ text: String) -> some View {
         Text(text)
-            .font(CodepetTheme.pixel(11))
+            .font(CodepetTheme.inter(11))
             .foregroundStyle(CodepetTheme.mutedText)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4).padding(.vertical, 3)
@@ -219,7 +225,7 @@ struct TwoModeSidebar: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Text(icon)
-                    .font(CodepetTheme.pixel(10))
+                    .font(CodepetTheme.inter(11))
                     .foregroundStyle(CodepetTheme.mutedText)
                     .frame(width: 13)
                 Text(label)
@@ -229,7 +235,7 @@ struct TwoModeSidebar: View {
                 Spacer(minLength: 0)
                 if let count, count > 0 {
                     Text("\(count)")
-                        .font(CodepetTheme.pixel(9))
+                        .font(CodepetTheme.inter(9, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(Capsule().fill(CodepetTheme.accentGold))
                         .foregroundStyle(.black)

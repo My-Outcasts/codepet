@@ -22,13 +22,16 @@ enum ComposerMetrics {
     /// The resting height of the PANE's composer — the typing area an empty composer
     /// reserves before its control row.
     ///
-    /// Measured off Claude and Codex at the same window size: both give the text
-    /// region ~21pt from the top edge before anything else, and the whole composer
-    /// ~67pt. The dock's 21 is the height of one line and nothing more, which is
-    /// right when the composer is 380pt wide and every point is content — and is
-    /// what made the pane's version read as cramped: a single line of placeholder
-    /// with a row of pills immediately under it.
-    static let paneMinTextHeight: CGFloat = 32
+    /// The dock's 21 is one line and nothing more, which is right at 380pt where
+    /// every point is content, and is what made the pane's version read as cramped:
+    /// a line of placeholder with a row of pills immediately beneath it.
+    ///
+    /// 24, walked down from 32 — and 32 is why this comment exists. It was chosen
+    /// while the pane's control row still held three department chips, which
+    /// justified the height; once the chips moved to `DepartmentRoster` the same
+    /// floor left a 95pt box (Claude's is 67) with `+` alone at one end of an empty
+    /// row. Rendered offscreen at both values rather than argued about.
+    static let paneMinTextHeight: CGFloat = 24
 
     /// How tall the field should be for content of the measured height.
     ///

@@ -99,7 +99,10 @@ struct CopilotChatView: View {
                     // of stacking it inside the hero — that is what keeps the beacon's
                     // buttons on screen when the greeting or the card grows.
                     if surface == .twoMode {
-                        composerDock(column: column)
+                        // No chips here: `DepartmentRoster` is directly above and
+                        // offers the same control for the same departments, with
+                        // all eight and their pets rather than three names.
+                        composerDock(column: column, showsDeptChips: false)
                     }
                 } else {
                     messageList(column: column)
@@ -169,7 +172,9 @@ struct CopilotChatView: View {
     /// hero (injected via `ChatEmptyState`'s trailing closure) and the active
     /// conversation (at the bottom). Owns no state: draft/mode/selectedDept live
     /// here so the same values drive both placements.
-    private var composer: some View {
+    private var composer: some View { composer(showsDeptChips: true) }
+
+    private func composer(showsDeptChips: Bool) -> some View {
         ChatComposer(
             draft: $companyStore.chatDraft,
             mode: $mode,
@@ -184,6 +189,7 @@ struct CopilotChatView: View {
             accent: companionColor,
             accent2: CodepetTheme.accentPink,
             isBusy: isChatBusy,
+            showsDeptChips: showsDeptChips,
             selectedDept: $selectedDept,
             onSend: send,
             onQuickAction: handleQuickAction
@@ -197,9 +203,9 @@ struct CopilotChatView: View {
     /// Codex leaves ~10. The disclaimer is not filler: this product hands the founder
     /// drafts they file and act on, and Claude carries the same sentence under the same
     /// control. It doubles as the air the composer was missing.
-    private func composerDock(column: CGFloat) -> some View {
+    private func composerDock(column: CGFloat, showsDeptChips: Bool = true) -> some View {
         VStack(spacing: 8) {
-            composer.readingColumn(column)
+            composer(showsDeptChips: showsDeptChips).readingColumn(column)
             Text(lang == .vi
                  ? "Codepet là AI và có thể mắc lỗi. Hãy kiểm tra lại nội dung quan trọng."
                  : "Codepet is AI and can make mistakes. Please double-check its work.")

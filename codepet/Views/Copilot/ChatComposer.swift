@@ -21,6 +21,14 @@ struct ChatComposer: View {
     var accent: Color
     var accent2: Color
     var isBusy: Bool
+    /// Whether the composer carries its own department chips.
+    ///
+    /// False on the two-mode hero, where `DepartmentRoster` sits directly above it
+    /// and offers the SAME control for the same three departments — the same
+    /// affordance twice on one screen. The roster is the better of the two there:
+    /// it shows all eight rather than three, and it carries the pet each one speaks
+    /// with. The chips come back with the transcript, where there is no roster.
+    var showsDeptChips: Bool = true
     @Binding var selectedDept: Department?
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
@@ -79,18 +87,18 @@ struct ChatComposer: View {
     /// outline (the dock's) makes the composer the loudest thing on a pane it no
     /// longer has to compete for attention in.
     private var twoModeBody: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             ComposerField(placeholder: placeholder, text: $draft, focus: focus,
                           floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
-                deptChips
+                if showsDeptChips { deptChips }
                 quickActionsMenu
                 Spacer(minLength: 8)
                 sendButton
             }
         }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 11)
+        .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 10)
         // The house card: `cardRaised` + `cardEdge` at radius 12 with `shadowS`,
         // the same object Tasks and Roadmap are built from. Accent moves to the
         // edge only on focus — an always-accent outline (the dock's) made the

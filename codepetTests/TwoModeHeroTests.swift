@@ -384,6 +384,19 @@ final class TwoModeHeroTests: XCTestCase {
                        TwoModeLayout.railMinWidth)
     }
 
+    /// The two rail keys must be DISTINCT and `cp_`-prefixed.
+    ///
+    /// The collapse button lives in the sidebar and the divider lives in the shell,
+    /// and they stay in step by sharing an `@AppStorage` key rather than threading a
+    /// binding. That is clean until someone copy-pastes the constant: one key for
+    /// both would write a Bool into the width slot, and the rail would resize itself
+    /// every time it was collapsed.
+    func testTheRailsTwoStoredKeysAreDistinct() {
+        XCTAssertNotEqual(TwoModeLayout.railWidthKey, TwoModeLayout.railCollapsedKey)
+        XCTAssertTrue(TwoModeLayout.railWidthKey.hasPrefix("cp_"))
+        XCTAssertTrue(TwoModeLayout.railCollapsedKey.hasPrefix("cp_"))
+    }
+
     /// The grab area is the dock's, not a second number. Two different hit widths for
     /// the same gesture is a difference nobody can learn.
     func testTheDividerReusesTheDocksGrabWidth() {

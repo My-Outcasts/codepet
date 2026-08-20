@@ -39,6 +39,10 @@ struct TwoModeSidebar: View {
     /// decision and nothing should persist it.
     @State private var query = ""
 
+    /// The shell owns the rail's geometry; this is the same key, so the collapse
+    /// button in the brand row and the shell's divider drive one value.
+    @AppStorage(TwoModeLayout.railCollapsedKey) private var railCollapsed = false
+
     private var accent: Color { CodepetTheme.accentPurple }
 
     /// Fixed block, then the list that grows, then the account.
@@ -107,18 +111,43 @@ struct TwoModeSidebar: View {
 
     // MARK: - Pieces
 
+    /// The wordmark, and the collapse control beside it.
+    ///
+    /// The collapse button lives HERE, visible whenever the rail is open, because the
+    /// alternatives are not discoverable: the divider is a 1pt line, and ⌘B is
+    /// something you have to already know. Claude Code keeps its panel icon at the
+    /// top of the sidebar permanently, and the prototype's brand row carries the same
+    /// `◨` glyph — which I skipped when this was built, on the grounds that it would
+    /// be decoration until the rail could actually collapse. It can now, so it isn't.
     private var brand: some View {
-        Button {
-            // The wordmark goes home, the way a site's logo does (founder call,
-            // Aug 6) — which is also the Overview answer: it is what carries it.
-            companyStore.view = AppView.home
-        } label: {
-            Text("Codepet")
-                .font(CodepetTheme.pixel(14))
-                .foregroundStyle(CodepetTheme.primaryText)
+        HStack(spacing: 8) {
+            Button {
+                // The wordmark goes home, the way a site's logo does (founder call,
+                // Aug 6) — which is also the Overview answer: it is what carries it.
+                companyStore.view = AppView.home
+            } label: {
+                Text("Codepet")
+                    .font(CodepetTheme.pixel(14))
+                    .foregroundStyle(CodepetTheme.primaryText)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(lang == .vi ? "Về trang chủ" : "Home")
+
+            Spacer(minLength: 0)
+
+            // Same `@AppStorage` key the shell owns — AppStorage is shared by key, so
+            // the two stay in step with no binding threaded through.
+            Button { railCollapsed = true } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CodepetTokens.faint)
+                    .padding(4)
+                    .contentShape(Rectangle())
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Thu gọn thanh bên (⌘B)" : "Collapse sidebar (⌘B)")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(lang == .vi ? "Về trang chủ" : "Home")
     }
 
     private var modeSwitch: some View {

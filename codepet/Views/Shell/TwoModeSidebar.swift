@@ -35,22 +35,74 @@ struct TwoModeSidebar: View {
     /// launch.
     @AppStorage(WorkspaceMode.seenDeveloperKey) private var seenDeveloper = false
 
+    /// The conversation search. View state, not company state — a query is not a
+    /// decision and nothing should persist it.
+    @State private var query = ""
+
     private var accent: Color { CodepetTheme.accentPurple }
 
+    /// Fixed block, then the list that grows, then the account.
+    ///
+    /// `group` (Recent in Ask, Sessions in Developer) used to sit ABOVE `workspace`,
+    /// which is backwards for the one region that grows: every new conversation
+    /// pushed the five fixed surfaces further down, and the rail still ended in
+    /// ~460pt of dead space because the list was capped rather than allowed to fill
+    /// it. Claude Code puts its fixed rows at the top and lets "Chats and tasks"
+    /// take everything below, scrolling on its own — which is why its sidebar has no
+    /// empty band. Same rule here, and it holds in Developer too: the collapsed
+    /// Workspace row is fixed, the session list is what grows.
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             brand
             modeSwitch
             newButton
-            group
+            if mode == .ask { searchField }
             workspace
-            Spacer(minLength: 8)
+            // The scroller owns the leftover height, so the list fills the rail
+            // instead of leaving a band under it — and long lists scroll here rather
+            // than pushing the account row off the bottom.
+            ScrollView {
+                group.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: .infinity)
+            .scrollBounceBehavior(.basedOnSize)
             account
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 12)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(CodepetTheme.surface)
+    }
+
+    /// Find a conversation by name — the magnifier Claude Code anchors its sidebar
+    /// with, and the affordance this rail was missing most: it lists a slice of the
+    /// threads and nothing else searched them.
+    ///
+    /// Ask only. Developer's list is sessions on one repo, which is short by
+    /// construction — a session owns a branch — so a field there would be furniture.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(CodepetTokens.faint)
+            TextField(lang == .vi ? "Tìm cuộc trò chuyện" : "Search conversations",
+                      text: $query)
+                .textFieldStyle(.plain)
+                .font(CodepetTheme.inter(CodepetType.subheadline))
+                .foregroundStyle(CodepetTheme.bodyText)
+            if ThreadSearch.isSearching(query) {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(CodepetTokens.faint)
+                }
+                .buttonStyle(.plain)
+                .help(lang == .vi ? "Xoá" : "Clear")
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(CodepetTokens.well))
     }
 
     // MARK: - Pieces
@@ -148,13 +200,23 @@ struct TwoModeSidebar: View {
                     emptyLine(lang == .vi ? "Cuộc trò chuyện của bạn sẽ ở đây."
                                           : "Your conversations appear here.")
                 } else {
-                    let all = sortThreadsByRecent(companyStore.threads)
+                    let untitled = lang == .vi ? "Trò chuyện mới" : "New chat"
+                    let searching = ThreadSearch.isSearching(query)
+                    // Searching lifts the cap. Filtering a list that is already
+                    // truncated to 8 would search the slice rather than the threads —
+                    // the founder would type a title they can remember and be told it
+                    // does not exist.
+                    let all = ThreadSearch.matches(sortThreadsByRecent(companyStore.threads),
+                                                   query: query, untitled: untitled)
+                    if searching && all.isEmpty {
+                        emptyLine(lang == .vi ? "Không có kết quả." : "No matches.")
+                    }
                     // 8, not 4. The rail had ~460pt of dead space below Environment
                     // while capping the one list that could fill it — and this is the
                     // only thread switcher on this surface.
-                    ForEach(all.prefix(Self.recentShown)) { thread in
+                    ForEach(searching ? all : Array(all.prefix(Self.recentShown))) { thread in
                         row(symbol: "bubble.left",
-                            label: thread.title ?? (lang == .vi ? "Trò chuyện mới" : "New chat"),
+                            label: thread.title ?? untitled,
                             selected: thread.id == companyStore.activeThreadId) {
                             companyStore.switchThread(thread.id)
                             companyStore.view = .chat
@@ -164,7 +226,7 @@ struct TwoModeSidebar: View {
                     // lives in `CopilotChatView` and was toggled only by the dock header
                     // this shell hides. Claude Code's sidebar has the same escape — its
                     // chat list ends in "Show more".
-                    if all.count > Self.recentShown {
+                    if !searching && all.count > Self.recentShown {
                         row(symbol: "clock.arrow.circlepath",
                             label: lang == .vi
                                 ? "Tất cả (\(all.count))" : "All conversations (\(all.count))",

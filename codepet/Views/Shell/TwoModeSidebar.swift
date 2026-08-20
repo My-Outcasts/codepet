@@ -269,12 +269,29 @@ struct TwoModeSidebar: View {
         case .developer:
             VStack(alignment: .leading, spacing: 3) {
                 sectionLabel(lang == .vi ? "Kho mã" : "Repo")
-                if companyStore.engineeringRunStore == nil {
+                // BOTH doors, via the same helper the pane uses. This checked
+                // `engineeringRunStore` alone — the CLOUD path — so a folder linked
+                // on this Mac left the rail insisting nothing was linked while the
+                // pane beside it had already woken up. The identical defect was
+                // fixed in `developerPane` days ago and `developerIsAwake` was
+                // extracted for it; this call site was simply never updated, which
+                // is the argument for the helper existing at all.
+                if !TwoModeLayout.developerIsAwake(
+                        projectLink: companyStore.activeProjectLink != nil,
+                        cloudRun: companyStore.engineeringRunStore != nil) {
                     emptyLine(lang == .vi ? "Chưa liên kết." : "Nothing linked yet.")
                     sectionLabel(lang == .vi ? "Phiên" : "Sessions").padding(.top, 6)
                     emptyLine(lang == .vi ? "Một phiên cần repo trước." : "A session needs a repo first.")
                 } else {
-                    row(symbol: "folder", label: "codepet", selected: true) {}
+                    // The folder that is actually linked, not a hardcoded name. A
+                    // rail that says "codepet" while pointed at someone else's
+                    // directory is worse than saying nothing.
+                    row(symbol: "folder",
+                        label: companyStore.activeProjectLink
+                            .map { Project.nameFromPath($0.path) } ?? "codepet",
+                        selected: true) {
+                        companyStore.select(.environment)
+                    }
                     sectionLabel(lang == .vi ? "Phiên" : "Sessions").padding(.top, 6)
                     row(symbol: companyStore.engineeringReviewRunId == nil ? "circle" : "circle.fill",
                         label: lang == .vi ? "Phiên hiện tại" : "Current session",

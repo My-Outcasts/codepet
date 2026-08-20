@@ -154,6 +154,31 @@ final class MockFlowPlayer: ObservableObject {
             // Safe under the demo flags only because `vcRunner` resolves to
             // `MockVirtualCompany` when `MockChat.enabled` — nothing on the wire.
             Task { await store.sendChat(ask, language: language, convenesRoom: true) }
+        case .linkDemoFolder:
+            guard store.activeProjectLink == nil else { return }
+            // A real directory with a real file: `ProjectProbe` reads the disk, so an
+            // invented path would link something that does not exist and the pane
+            // would wake up describing nothing.
+            let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("codepet-walkthrough", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let file = dir.appendingPathComponent("SignupView.swift")
+            if !FileManager.default.fileExists(atPath: file.path) {
+                try? "// demo target for the walkthrough\nstruct SignupView {}\n"
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            // `bootstrapClaudeMd: false`, always. The consent rule is that a CLAUDE.md
+            // is never written without an explicit yes, and an unattended walkthrough
+            // cannot give one on the founder's behalf.
+            _ = store.linkProject(path: dir.path, bootstrapClaudeMd: false)
+        case .codeRun(let ask):
+            store.view = .chat
+            guard store.activeProjectLink != nil else { return }
+            store.startCodeRun(ask: ask)
+        case .approveCodeRun:
+            guard let run = store.codingRun.run, !run.diffs.isEmpty else { return }
+            let paths = Set(run.diffs.map(\.path))
+            Task { await store.codingRun.approve(acceptedPaths: paths) }
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the

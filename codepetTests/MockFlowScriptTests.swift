@@ -140,11 +140,31 @@ final class MockFlowScriptTests: XCTestCase {
         }
     }
 
-    /// The whole thing has to be watchable in one sitting.
-    func testTheWalkthroughIsShortEnoughToWatch() {
+    /// The whole thing has to be watchable — but "watchable" changed meaning when the
+    /// caption bar got chapter jumps.
+    ///
+    /// The ceiling was 60s and I twice refused to raise it, because raising a budget
+    /// to fit the thing that broke it is just deleting the budget. What changed is not
+    /// the tour's length, it is that a viewer can now ENTER ANYWHERE: the prototype
+    /// runs 33 beats without complaint for exactly that reason. A linear-only story
+    /// must be short enough to sit through; a navigable one has to be COMPLETE, and
+    /// the Developer build flow was the largest thing missing.
+    ///
+    /// 100s, not unlimited: past a couple of minutes the fixtures start drifting from
+    /// the product they mock, which is a maintenance cost with no viewer on the other
+    /// end of it.
+    func testTheWalkthroughIsWatchableAndNavigable() {
         let total = beats.reduce(0) { $0 + $1.seconds }
-        XCTAssertLessThan(total, 60, "a \(Int(total))s tour is one nobody finishes")
+        XCTAssertLessThan(total, 100, "a \(Int(total))s tour is one nobody maintains")
         XCTAssertGreaterThan(total, 15, "too short to show anything")
+        // The licence for the longer runtime. If the jumps ever go away, the ceiling
+        // has to come back down with them.
+        XCTAssertGreaterThanOrEqual(MockFlowScript.chapters.count, 8,
+                                    "a long tour needs chapters to enter at")
+        for chapter in MockFlowScript.chapters {
+            XCTAssertNotNil(MockFlowScript.firstBeat(of: chapter),
+                            "\(chapter) has no entry point, so the tour is linear-only again")
+        }
     }
 
     /// Autoplay without the fixtures behind it would either spend real credits or

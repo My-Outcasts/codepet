@@ -26,10 +26,42 @@ struct MockFlowCaptionBar: View {
                         .stroke(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1))
                     .transition(.opacity)
             }
+            chapters
             transport
         }
         .padding(.bottom, 16)
         .animation(.easeOut(duration: 0.18), value: player.caption)
+    }
+
+    /// Chapter jumps — the prototype has had these from the start, and their absence
+    /// here is why the app's tour had to stay under a minute: a story you can only
+    /// watch linearly must be short enough to sit through, while one you can enter
+    /// anywhere can afford to be complete. The player already had `jump(toChapter:)`;
+    /// nothing exposed it.
+    private var chapters: some View {
+        let current = player.currentChapter
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                ForEach(MockFlowScript.chapters, id: \.self) { chapter in
+                    Button { player.jump(toChapter: chapter) } label: {
+                        Text(chapter)
+                            .font(CodepetTheme.inter(CodepetType.footnote,
+                                                     weight: chapter == current ? .semibold : .regular))
+                            .foregroundColor(chapter == current
+                                             ? CodepetTheme.accentPurple : .white.opacity(0.7))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Capsule().fill(chapter == current
+                                                       ? CodepetTheme.accentPurple.opacity(0.18)
+                                                       : Color.white.opacity(0.06)))
+                            .contentShape(Capsule())
+                            .hoverAffordance(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+        }
+        .frame(maxWidth: 720)
     }
 
     private var transport: some View {

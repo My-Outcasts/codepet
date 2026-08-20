@@ -50,6 +50,20 @@ enum MockFlowScript {
         case convene(String)
         /// A new conversation.
         case newChat
+        /// Link a scratch folder so Developer wakes up.
+        ///
+        /// `ProjectLinker.pickAndLink` opens an `NSOpenPanel`, which no script can
+        /// drive — and I wrongly concluded from that the whole Developer flow was
+        /// undemoable. The picker is one CALLER; `CompanyStore.linkProject(path:)`
+        /// takes a path. The folder is real and created on the spot, because
+        /// `ProjectProbe` reads what is actually on disk.
+        case linkDemoFolder
+        /// Describe a code change. Goes through `startCodeRun`, so it proposes, gates,
+        /// and then runs on `MockCodeRunner` — no `claude`, no cost, real exec steps
+        /// and a real diff object.
+        case codeRun(String)
+        /// Approve the diff, which commits to a branch and stops there.
+        case approveCodeRun
         /// Nothing — a beat that only narrates. The prototype has these too; some
         /// captions are about what is already on screen.
         case hold
@@ -157,6 +171,21 @@ enum MockFlowScript {
          "With nothing linked it says so, and offers both doors: a folder on this Mac "
          + "at zero credits, or a repo in the cloud. The ceiling holds from the first run "
          + "either way — no merge, no deploy, no delete, no force-push."),
+
+        ("Into the code", 3.2, .linkDemoFolder,
+         "Developer was dormant because nothing was linked. Point it at a folder and it "
+         + "wakes — the same one click the two doors offer, and from here it is bounded to "
+         + "that folder at every tier."),
+
+        ("Into the code", 4.4, .codeRun("Fix the signup validation — it rejects valid emails"),
+         "Describe the change. It names its steps out loud as it works, so the founder is "
+         + "watching a process rather than a spinner — which is the only thing that earns "
+         + "enough trust to let it act at all."),
+
+        ("Ship it", 4.0, .approveCodeRun,
+         "The diff comes to a human. Approving <b>commits to a branch and stops there</b> — "
+         + "no merge, no deploy, no force-push, at any tier, ever. The worst case this "
+         + "product can produce is a branch you delete."),
 
         ("When it goes wrong", 4.2, .say("Are we offline right now?"),
          "The path a demo usually hides. The departments are unreachable — and the refusal "

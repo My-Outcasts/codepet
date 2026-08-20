@@ -23,6 +23,13 @@ struct TwoModeShellView: View {
     /// Guards the one-time landing redirect in `onAppear`.
     @State private var landed = false
 
+    #if DEBUG
+    /// The self-driving walkthrough. Owned here because this is the only view that
+    /// can adopt the mode it asks for — `mode` is `@State` and the player cannot
+    /// reach into it.
+    @StateObject private var player = MockFlowPlayer()
+    #endif
+
     var body: some View {
         HStack(spacing: 0) {
             TwoModeSidebar(mode: $mode)
@@ -63,6 +70,26 @@ struct TwoModeShellView: View {
                 SettingsModal(initial: section).transition(.opacity)
             }
         }
+        #if DEBUG
+        // The walkthrough sits over the pane, not inside it, so no beat can be
+        // pushed off screen by the content it is narrating.
+        .overlay(alignment: .bottom) {
+            if MockFlowPlayer.enabled {
+                MockFlowCaptionBar(player: player)
+            }
+        }
+        .onAppear {
+            guard MockFlowPlayer.enabled else { return }
+            player.attach(store: companyStore, language: lang)
+            player.play()
+        }
+        // The player cannot set `mode` — it publishes a request and the shell
+        // adopts it, which also means a beat that changes mode goes through the
+        // same `persist()`/redirect path a founder's tap does.
+        .onChange(of: player.requestedMode) { _, requested in
+            if let requested, requested != mode { mode = requested }
+        }
+        #endif
         .sheet(isPresented: Binding(
             get: { companyStore.engineeringRepoPrompt != nil },
             set: { if !$0 { companyStore.engineeringRepoPrompt = nil } }

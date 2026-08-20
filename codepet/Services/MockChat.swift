@@ -69,7 +69,15 @@ enum MockChat {
     /// until the founder finishes, `enrichBrief` and `fetchRoadmap` answer from
     /// fixtures instead of the network, and the shell that follows is the same
     /// populated company plain mock mode has always given.
-    static var flowEnabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW") }
+    /// `CODEPET_MOCK_AUTOPLAY` implies this, for the same reason this implies
+    /// `enabled`: the autoplaying walkthrough sends chat turns and runs a task on
+    /// its own, unattended. Without the fixtures behind it, it would drive the REAL
+    /// Cloud Functions and spend real credits with nobody watching the ledger — and
+    /// two flags where one is meaningless alone is a state you can get half-right.
+    static var flowEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW")
+            || UserDefaults.standard.bool(forKey: "CODEPET_MOCK_AUTOPLAY")
+    }
 
     /// Flipped once onboarding completes, so the next `load` in this process
     /// returns the finished company rather than sending the founder back

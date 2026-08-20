@@ -4,10 +4,22 @@ import SwiftUI
 /// The rail: brand, the mode switch, `+ New`, the mode-specific group, and the
 /// five company surfaces — open in Ask, collapsed to one row in Developer.
 ///
-/// The gradient belongs to `Upgrade` alone, so `+ New` is a quiet outlined row:
-/// it is frequent and low-stakes, and it must not compete with the one control
-/// in the rail that sells something.
+/// `+ New` is a quiet outlined row: it is frequent and low-stakes, and nothing in
+/// the rail should shout louder than the work.
+///
+/// This used to say the gradient "belongs to `Upgrade` alone". There is no Upgrade
+/// control and never was — `BillingPanel` records that the web view never had one
+/// either, because there is no billing backend. The conclusion was right and the
+/// reason was fiction, which is worse than no reason: the next person reads it,
+/// looks for `Upgrade`, and finds nothing.
 struct TwoModeSidebar: View {
+    /// How many conversations the rail lists before offering the full history.
+    ///
+    /// 8, up from 4. The rail was leaving ~460pt of dead space below Environment
+    /// while capping the one list that grows, and on this surface Recent is the ONLY
+    /// thread switcher — the dock's history icon is hidden here.
+    static let recentShown = 8
+
     @Binding var mode: WorkspaceMode
     @EnvironmentObject var companyStore: CompanyStore
     /// Carries the signed-in account's display name, the second source for who
@@ -136,12 +148,29 @@ struct TwoModeSidebar: View {
                     emptyLine(lang == .vi ? "Cuộc trò chuyện của bạn sẽ ở đây."
                                           : "Your conversations appear here.")
                 } else {
-                    ForEach(sortThreadsByRecent(companyStore.threads).prefix(4)) { thread in
-                        row(icon: "›",
+                    let all = sortThreadsByRecent(companyStore.threads)
+                    // 8, not 4. The rail had ~460pt of dead space below Environment
+                    // while capping the one list that could fill it — and this is the
+                    // only thread switcher on this surface.
+                    ForEach(all.prefix(Self.recentShown)) { thread in
+                        row(symbol: "bubble.left",
                             label: thread.title ?? (lang == .vi ? "Trò chuyện mới" : "New chat"),
                             selected: thread.id == companyStore.activeThreadId) {
                             companyStore.switchThread(thread.id)
                             companyStore.view = .chat
+                        }
+                    }
+                    // Without this, threads past the cap are UNREACHABLE: `showHistory`
+                    // lives in `CopilotChatView` and was toggled only by the dock header
+                    // this shell hides. Claude Code's sidebar has the same escape — its
+                    // chat list ends in "Show more".
+                    if all.count > Self.recentShown {
+                        row(symbol: "clock.arrow.circlepath",
+                            label: lang == .vi
+                                ? "Tất cả (\(all.count))" : "All conversations (\(all.count))",
+                            selected: false) {
+                            companyStore.view = .chat
+                            companyStore.historyRequested = true
                         }
                     }
                 }
@@ -154,9 +183,9 @@ struct TwoModeSidebar: View {
                     sectionLabel(lang == .vi ? "Phiên" : "Sessions").padding(.top, 6)
                     emptyLine(lang == .vi ? "Một phiên cần repo trước." : "A session needs a repo first.")
                 } else {
-                    row(icon: "▣", label: "codepet", selected: true) {}
+                    row(symbol: "folder", label: "codepet", selected: true) {}
                     sectionLabel(lang == .vi ? "Phiên" : "Sessions").padding(.top, 6)
-                    row(icon: companyStore.engineeringReviewRunId == nil ? "○" : "●",
+                    row(symbol: companyStore.engineeringReviewRunId == nil ? "circle" : "circle.fill",
                         label: lang == .vi ? "Phiên hiện tại" : "Current session",
                         selected: companyStore.engineeringReviewRunId != nil) {
                         companyStore.view = .chat
@@ -170,14 +199,14 @@ struct TwoModeSidebar: View {
     /// vertical space — reachable in one click, not gone.
     @ViewBuilder private var workspace: some View {
         if mode.collapsesWorkspace && !workspaceExpanded {
-            row(icon: "▦", label: lang == .vi ? "Không gian" : "Workspace", selected: false) {
+            row(symbol: "square.grid.2x2", label: lang == .vi ? "Không gian" : "Workspace", selected: false) {
                 workspaceExpanded = true
             }
         } else {
             VStack(alignment: .leading, spacing: 3) {
                 sectionLabel(lang == .vi ? "Không gian" : "Workspace")
                 ForEach(WorkspaceMode.workspaceSurfaces) { surface in
-                    row(icon: icon(for: surface),
+                    row(symbol: symbol(for: surface),
                         label: surface.title(lang),
                         count: count(for: surface),
                         selected: companyStore.view == surface) {
@@ -250,14 +279,19 @@ struct TwoModeSidebar: View {
             .padding(.horizontal, 4).padding(.vertical, 3)
     }
 
-    private func row(icon: String, label: String, count: Int? = nil,
+    private func row(symbol: String, label: String, count: Int? = nil,
                      selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Text(icon)
-                    .font(CodepetTheme.inter(CodepetType.subheadline))
+                // SF Symbols, not unicode glyphs. `◈ ◍ ☰ ▤ ✳` are TEXT characters
+                // borrowed as icons, so each one carries its own font's stroke weight,
+                // optical size and baseline — at rail size they read as five unrelated
+                // shapes rather than one set. Claude Code's sidebar uses real icons, and
+                // a symbol set is the only way the row's glyphs agree with each other.
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(selected ? CodepetTheme.accentPurple : CodepetTokens.faint)
-                    .frame(width: 13)
+                    .frame(width: 15)
                 Text(label)
                     .font(CodepetTheme.inter(CodepetType.body, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
@@ -289,14 +323,17 @@ struct TwoModeSidebar: View {
         .buttonStyle(.plain)
     }
 
-    private func icon(for surface: AppView) -> String {
+    /// One SF Symbol per surface. Chosen for what the page IS, not for decoration:
+    /// a roadmap is a map, Company is the departments, Tasks is a checklist, Library
+    /// is what has been filed, Environment is the tooling.
+    private func symbol(for surface: AppView) -> String {
         switch surface {
-        case .roadmap:     return "◈"
-        case .company:     return "◍"
-        case .tasks:       return "☰"
-        case .library:     return "▤"
-        case .environment: return "✳"
-        default:           return "·"
+        case .roadmap:     return "map"
+        case .company:     return "building.2"
+        case .tasks:       return "checklist"
+        case .library:     return "books.vertical"
+        case .environment: return "wrench.and.screwdriver"
+        default:           return "circle"
         }
     }
 

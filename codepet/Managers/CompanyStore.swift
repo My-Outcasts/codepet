@@ -16,6 +16,18 @@ final class CompanyStore: ObservableObject {
     /// overlay rather than an `AppView`, so opening it never changes `view` and closing
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
+
+    /// A request to open the full conversation list, raised from OUTSIDE the chat.
+    ///
+    /// `showHistory` is `@State` inside `CopilotChatView` and was toggled from one
+    /// place: the dock's header icon. The two-mode shell hides that header — there is
+    /// no dock to collapse and the rail carries Recent — so `ThreadListView` became
+    /// unreachable there, and `Recent` shows `prefix(4)`. Conversations five and older
+    /// could not be opened at all.
+    ///
+    /// A signal rather than the state itself, so the nine `showHistory` sites in
+    /// `CopilotChatView` keep one owner. Same shape as `MockFlowPlayer.requestedMode`.
+    @Published var historyRequested = false
     /// The engineering run whose diff is under review, or `nil`.
     ///
     /// Deliberately NOT an `AppView` case, for the same reason `settingsSection`

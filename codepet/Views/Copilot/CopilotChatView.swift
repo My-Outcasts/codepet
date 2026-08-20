@@ -120,6 +120,12 @@ struct CopilotChatView: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .background(ChatBackdrop())
+        // The rail asks; the chat opens. `showHistory` stays owned here.
+        .onChange(of: companyStore.historyRequested) { _, requested in
+            guard requested else { return }
+            showHistory = true
+            companyStore.historyRequested = false
+        }
     }
 
     /// The dock's only chrome: a trailing pair of icon buttons — history (thread

@@ -345,6 +345,24 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertLessThan(ChatRhythm.topFade, ChatRhythm.transcriptTop(.twoMode))
     }
 
+    // MARK: - Every conversation stays reachable
+
+    /// The hole this closes: `showHistory` is `@State` in `CopilotChatView` toggled
+    /// from ONE place — the dock header this shell hides — so `ThreadListView` was
+    /// unreachable here while `Recent` showed a fixed slice. Conversations past the
+    /// cap could not be opened at all. The rail now raises `historyRequested`, so the
+    /// cap must be paired with that escape and never stand alone.
+    func testTheRailListsEnoughThreadsToBeUsefulAndHasAnEscape() {
+        XCTAssertGreaterThanOrEqual(TwoModeSidebar.recentShown, 8,
+                                    "the rail has ~460pt of unused height below Environment")
+        // The escape's mechanism: a request the chat adopts. If this flag were ever
+        // removed, the rail's "All conversations" row would silently do nothing.
+        let store = CompanyStore()
+        XCTAssertFalse(store.historyRequested)
+        store.historyRequested = true
+        XCTAssertTrue(store.historyRequested)
+    }
+
     // MARK: - The cast on the first screen
 
     /// Eight departments, every one with a voice. Product is deliberately absent —

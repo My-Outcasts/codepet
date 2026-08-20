@@ -10,9 +10,41 @@ import CoreGraphics
 /// Spec: `docs/superpowers/specs/2026-08-17-codepet-two-mode-product-design.md` §3.2, §5.
 enum TwoModeLayout {
 
-    /// The rail. Wide enough for `WORKSPACE` rows with a count badge, narrow
-    /// enough that the conversation still owns the window.
+    /// The rail's DEFAULT width. Wide enough for workspace rows with a count badge,
+    /// narrow enough that the conversation still owns the window.
     static let railWidth: CGFloat = 208
+
+    /// Narrowest the rail may be dragged. Below this the mode switch's two segments
+    /// cannot both hold their label — "DEVELOPER" at subheadline with tracking is
+    /// ~70pt on its own — and a switch whose labels truncate is a switch you have to
+    /// guess at.
+    static let railMinWidth: CGFloat = 180
+
+    /// Widest. Past this the rail stops being a rail and starts competing with the
+    /// conversation for the window, which is the thing `railWidth`'s comment has
+    /// always been about.
+    static let railMaxWidth: CGFloat = 340
+
+    /// The conversation's floor: whatever the rail does, the pane keeps enough width
+    /// to hold the reading measure plus its margins.
+    static let paneFloor: CGFloat = 520
+
+    /// Clamped against BOTH the rail's own bounds and the window's, so a founder who
+    /// drags hard on a narrow window cannot squeeze the conversation to nothing —
+    /// same shape as `ShellLayout.clampDockWidth`.
+    static func clampRailWidth(_ desired: CGFloat, windowWidth: CGFloat) -> CGFloat {
+        let ceiling = min(railMaxWidth, max(railMinWidth, windowWidth - paneFloor))
+        return min(max(railMinWidth, desired), ceiling)
+    }
+
+    /// The divider's grab area. The visible line is 1pt; 16 is what makes it
+    /// catchable — reused from the dock rather than re-picked, because two different
+    /// hit widths for the same gesture is a difference nobody can learn.
+    static var railResizeHitWidth: CGFloat { ShellLayout.dockResizeHitWidth }
+
+    /// `cp_`-prefixed per the project's UserDefaults convention.
+    static let railWidthKey = "cp_twoModeRailWidth"
+    static let railCollapsedKey = "cp_twoModeRailCollapsed"
 
     /// The inspector's share of the pane when open.
     static let inspectorFraction: CGFloat = 0.47

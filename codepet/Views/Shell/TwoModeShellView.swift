@@ -23,6 +23,16 @@ struct TwoModeShellView: View {
     /// Guards the one-time landing redirect in `onAppear`.
     @State private var landed = false
 
+    /// Rail geometry, persisted: a founder who narrows the rail means it, and having
+    /// to redo it every launch is the kind of thing that makes a window feel rented.
+    @AppStorage(TwoModeLayout.railWidthKey) private var railWidth = TwoModeLayout.railWidth
+    @AppStorage(TwoModeLayout.railCollapsedKey) private var railCollapsed = false
+    /// Drag bookkeeping. `dragStartWidth` is what makes the gesture absolute rather
+    /// than incremental — see the divider's comment.
+    @State private var dragStartWidth: CGFloat?
+    @State private var handleDragging = false
+    @State private var handleHovered = false
+
     #if DEBUG
     /// The self-driving walkthrough. Owned here because this is the only view that
     /// can adopt the mode it asks for — `mode` is `@State` and the player cannot
@@ -31,12 +41,18 @@ struct TwoModeShellView: View {
     #endif
 
     var body: some View {
-        HStack(spacing: 0) {
-            TwoModeSidebar(mode: $mode)
-                .frame(width: TwoModeLayout.railWidth)
-            Divider()
-            pane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                if !railCollapsed {
+                    TwoModeSidebar(mode: $mode)
+                        .frame(width: TwoModeLayout.clampRailWidth(railWidth,
+                                                                   windowWidth: geo.size.width))
+                    railDivider(windowWidth: geo.size.width)
+                }
+                pane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topLeading) { revealButton }
+            }
         }
         .background(CodepetTheme.pageBackground)
         // Every chat this shell hosts is the pane's chat, not the dock's: no
@@ -44,6 +60,14 @@ struct TwoModeShellView: View {
         // bottom. Set once here so a future destination that shows the chat
         // cannot forget it.
         .environment(\.chatSurface, .twoMode)
+        // ⌘B toggles the rail. Free on this surface: main binds it to collapsing the
+        // dock, and this shell has no dock — the pane IS the conversation.
+        .background {
+            Button("") { railCollapsed.toggle() }
+                .keyboardShortcut("b", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
         // Open in the conversation. Once per appearance, and only from the store's
         // launch default — a founder who navigated to Tasks and came back must not
         // be yanked out of it by a re-render.
@@ -99,6 +123,73 @@ struct TwoModeShellView: View {
                 onLinked: { _ in companyStore.engineeringRepoLinked() },
                 onCancel: { companyStore.engineeringRepoPrompt = nil }
             )
+        }
+    }
+
+    // MARK: - Rail geometry
+
+    /// Click to collapse, drag to resize — one control, the way Claude Code's is.
+    ///
+    /// `.global`, NOT the default `.local`, and the reason is already written down in
+    /// this codebase: the gesture is attached to the divider and dragging it MOVES
+    /// the divider, so in local space the reported translation is
+    /// (pointer moved − handle moved) and each frame's new width feeds into the next
+    /// frame's translation. Measured off a recording on 10 Aug for the dock's version
+    /// of this handle: it tracked at ~half the pointer's speed and reversed direction
+    /// 33 times in one drag, ending 90–115pt behind. It reads as lag; it is a
+    /// feedback loop. Global space is fixed while the handle moves through it.
+    private func railDivider(windowWidth: CGFloat) -> some View {
+        Rectangle()
+            .fill(CodepetTheme.hairline)
+            .frame(width: 1)
+            .overlay {
+                Rectangle().fill(CodepetTheme.accentPurple.opacity(0.6))
+                    .frame(width: 2)
+                    .opacity(handleDragging || handleHovered ? 1 : 0)
+            }
+            // The visible line is 1pt; this is what makes it catchable.
+            .overlay(Color.clear
+                .frame(width: TwoModeLayout.railResizeHitWidth)
+                .contentShape(Rectangle()))
+            .help(lang == .vi ? "Nhấn để thu gọn (⌘B) · Kéo để đổi cỡ"
+                              : "Click to collapse (⌘B) · Drag to resize")
+            .cursorOnHover(.resizeLeftRight, held: handleDragging) { handleHovered = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                    .onChanged { value in
+                        let start = dragStartWidth ?? railWidth
+                        if dragStartWidth == nil { dragStartWidth = start }
+                        handleDragging = true
+                        // The divider sits to the RIGHT of the rail, so dragging right
+                        // grows it — the opposite sign to the dock's handle, which sits
+                        // to the left of what it moves.
+                        railWidth = TwoModeLayout.clampRailWidth(start + value.translation.width,
+                                                                windowWidth: windowWidth)
+                    }
+                    .onEnded { _ in
+                        dragStartWidth = nil
+                        handleDragging = false
+                    }
+            )
+            // A tap that follows a drag must not also collapse the rail.
+            .onTapGesture { if !handleDragging { railCollapsed = true } }
+    }
+
+    /// The way back. Collapsing a panel with no visible means of return is a trap,
+    /// and ⌘B alone is not a means of return — it is a thing you have to already know.
+    @ViewBuilder private var revealButton: some View {
+        if railCollapsed {
+            Button { railCollapsed = false } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(CodepetTheme.mutedText)
+                    .padding(7)
+                    .contentShape(Rectangle())
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Hiện thanh bên (⌘B)" : "Show sidebar (⌘B)")
+            .padding(.leading, 10).padding(.top, 8)
         }
     }
 

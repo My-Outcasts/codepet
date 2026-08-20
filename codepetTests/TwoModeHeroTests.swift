@@ -345,6 +345,52 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertLessThan(ChatRhythm.topFade, ChatRhythm.transcriptTop(.twoMode))
     }
 
+    // MARK: - The rail resizes and collapses
+
+    /// The default has to sit inside the range it is clamped to, or the rail jumps
+    /// the first time anyone touches the divider.
+    func testTheDefaultRailWidthIsInsideItsOwnBounds() {
+        XCTAssertGreaterThanOrEqual(TwoModeLayout.railWidth, TwoModeLayout.railMinWidth)
+        XCTAssertLessThanOrEqual(TwoModeLayout.railWidth, TwoModeLayout.railMaxWidth)
+    }
+
+    func testTheRailClampsToItsOwnBounds() {
+        let wide: CGFloat = 1600
+        XCTAssertEqual(TwoModeLayout.clampRailWidth(10, windowWidth: wide),
+                       TwoModeLayout.railMinWidth)
+        XCTAssertEqual(TwoModeLayout.clampRailWidth(9_000, windowWidth: wide),
+                       TwoModeLayout.railMaxWidth)
+        XCTAssertEqual(TwoModeLayout.clampRailWidth(240, windowWidth: wide), 240)
+    }
+
+    /// The conversation keeps a floor. Dragging hard on a narrow window must not be
+    /// able to squeeze the pane to nothing — the rail's own maximum is not enough,
+    /// because on a small window even 340 leaves too little.
+    func testTheConversationKeepsAFloorOnANarrowWindow() {
+        let narrow: CGFloat = 640
+        let rail = TwoModeLayout.clampRailWidth(TwoModeLayout.railMaxWidth, windowWidth: narrow)
+        XCTAssertLessThanOrEqual(rail, TwoModeLayout.railMaxWidth)
+        // Either the pane keeps its floor, or the rail is already at its minimum and
+        // cannot give up any more — never a pane squeezed below the floor by choice.
+        XCTAssertTrue(narrow - rail >= TwoModeLayout.paneFloor
+                        || rail == TwoModeLayout.railMinWidth,
+                      "rail \(rail) on a \(narrow)pt window leaves \(narrow - rail)")
+    }
+
+    /// A window narrower than the floor plus the minimum still has to produce a
+    /// usable number rather than a negative one.
+    func testAnAbsurdlyNarrowWindowStillClampsToTheMinimum() {
+        XCTAssertEqual(TwoModeLayout.clampRailWidth(300, windowWidth: 200),
+                       TwoModeLayout.railMinWidth)
+    }
+
+    /// The grab area is the dock's, not a second number. Two different hit widths for
+    /// the same gesture is a difference nobody can learn.
+    func testTheDividerReusesTheDocksGrabWidth() {
+        XCTAssertEqual(TwoModeLayout.railResizeHitWidth, ShellLayout.dockResizeHitWidth)
+        XCTAssertGreaterThan(TwoModeLayout.railResizeHitWidth, 8, "a 1pt line is not catchable")
+    }
+
     // MARK: - Every conversation stays reachable
 
     /// The hole this closes: `showHistory` is `@State` in `CopilotChatView` toggled

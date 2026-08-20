@@ -1814,14 +1814,24 @@ enum ChatRhythm {
         surface == .dock ? lineSpacing : DeliverableStyle.leading
     }
 
-    /// Paragraph separation inside one reply.
+    /// Paragraph separation inside one reply — the EXTRA space beyond a line break.
     ///
-    /// The replies arrive with `\n\n` between paragraphs, and a single `Text`
-    /// renders that as a genuinely EMPTY LINE — measured at 1.94× the line height,
-    /// where the typographic convention is 0.5–0.75× and Claude sits at ~1.48×
-    /// including its own leading. So the paragraphs are split and spaced instead:
-    /// the gap becomes this plus the natural leading, which lands near 0.6×.
-    static let paragraphGap: CGFloat = 8
+    /// The replies arrive with `\n\n`, and a single `Text` renders that as a
+    /// genuinely empty line: measured at 1.94× the line height, where the
+    /// convention is a paragraph sitting 1.5–1.75× baseline-to-baseline. So the
+    /// paragraphs are split and spaced instead.
+    ///
+    /// **8 was too little and shipped.** Measured on screen it produced a 35px gap
+    /// against a 34px line — the paragraphs merged into one block, which is a worse
+    /// failure than the airiness it replaced, because now nothing separates a new
+    /// thought from a wrapped line. 16 is ~0.67 of the 23.8pt line height, which
+    /// puts the baselines at ~1.67×.
+    ///
+    /// The reason the first value looked fine on paper: `lineSpacing` already adds
+    /// its 7pt below every line INCLUDING the last one of a block, so it is inside
+    /// the line height and must not be counted again as part of the paragraph gap.
+    /// The test asserting this ratio made exactly that mistake and passed 8.
+    static let paragraphGap: CGFloat = 16
     /// Between consecutive messages from the SAME speaker.
     static let messageGap: CGFloat = 12
     /// Added on top of `messageGap` when the speaker changes, so a turn boundary reads as

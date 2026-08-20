@@ -308,15 +308,23 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertEqual(ChatRhythm.proseLeading(.dock), ChatRhythm.lineSpacing)
     }
 
-    /// Paragraph separation lands inside the convention. The gap a reader sees is
-    /// `paragraphGap` plus the natural leading, over the line height.
+    /// Paragraph separation, as the ratio a reader actually perceives: baseline to
+    /// baseline across a paragraph break, over baseline to baseline within one.
+    ///
+    /// **This test was wrong when written and passed a value that shipped.** It
+    /// computed `(paragraphGap + leading) / lineHeight`, double-counting the leading
+    /// that `lineSpacing` already puts inside the line height — so a gap of 8 scored
+    /// 0.63 and looked correct, while on screen it measured 35px against a 34px
+    /// line and the paragraphs merged into one block. The ratio is the gap over the
+    /// line height, nothing added.
     func testParagraphSeparationIsWithinConvention() {
         let size = ChatRhythm.prose(.twoMode)
         let lineHeight = size * 1.2 + ChatRhythm.proseLeading(.twoMode)
-        let ratio = (ChatRhythm.paragraphGap + ChatRhythm.proseLeading(.twoMode)) / lineHeight
-        XCTAssertGreaterThan(ratio, 0.4, "paragraphs are running together")
-        XCTAssertLessThan(ratio, 0.85,
-                          "\(ratio) of a line — an empty line between paragraphs is 1.0+")
+        let ratio = ChatRhythm.paragraphGap / lineHeight
+        XCTAssertGreaterThan(ratio, 0.5,
+                             "\(ratio) of a line — a new thought reads as a wrapped line")
+        XCTAssertLessThan(ratio, 0.8,
+                          "\(ratio) of a line — approaching the empty line this replaced")
     }
 
     // MARK: - The cast on the first screen

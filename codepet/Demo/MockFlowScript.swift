@@ -39,6 +39,10 @@ enum MockFlowScript {
         /// Approve the newest draft, which is what files it in Library and closes
         /// the task. The one beat that proves "nothing is written before approval".
         case approveNewestDraft
+        /// Ask for a walkthrough of the first `who == .you` task on the board — work
+        /// Codepet cannot do for the founder. The prototype's "Work only you can do".
+        /// No-ops when the board has no founder-only task, rather than narrating one.
+        case walkthroughFounderTask
         /// A new conversation.
         case newChat
         /// Nothing — a beat that only narrates. The prototype has these too; some
@@ -75,9 +79,14 @@ enum MockFlowScript {
     /// to the end, and the two things this product has to prove are that the work
     /// is real and that the founder's approval is what commits it.
     static let beats: [Beat] = build([
+        // This caption used to say "a brand-new account — onboarding already read the
+        // brief", over a shell that never shows onboarding. The cold open IS reachable
+        // (`CODEPET_MOCK_FLOW` boots it), but the player is owned by `TwoModeShellView`,
+        // which `ContentView` does not mount until `isOnboarding` is false — so it
+        // cannot narrate the screen it was claiming credit for. Say what is on screen.
         ("Signing in", 2.6, .go(.chat),
-         "A brand-new account. Onboarding already read the brief, so the roadmap "
-         + "exists before the first screen does — no blank page, and nothing charged yet."),
+         "Signed in, with a roadmap already built from the brief — so the first screen "
+         + "has real work on it and nothing has been charged yet."),
 
         ("The first minute", 3.0, .hold,
          "The hero asks for work and names the company. Under it, the cast: eight "
@@ -99,6 +108,15 @@ enum MockFlowScript {
         ("Ask anything", 3.6, .say("What should I focus on first?"),
          "Ask talks to the company. The reply is grounded in the same brief every "
          + "department reads, which is why a wrong brief poisons everything downstream."),
+
+        ("Work only you can do", 3.2, .newChat,
+         "A fresh conversation puts the hero back, and the beacon has moved on — the "
+         + "approved task is closed, so it names the next one."),
+
+        ("Work only you can do", 4.2, .walkthroughFounderTask,
+         "Not every task can be handed over. Talking to users is the founder's own "
+         + "work, so this one is never offered as \"Run it\" — Codepet prepares it and "
+         + "records what comes back, and says plainly that it cannot do it for you."),
 
         ("Where the state lives", 2.8, .go(.roadmap),
          "The five surfaces are state you browse — the work itself only ever happens "

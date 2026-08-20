@@ -149,6 +149,19 @@ final class MockFlowPlayer: ObservableObject {
         case .approveNewestDraft:
             guard let id = newestDraftMessageId(in: store) else { return }
             Task { await store.approveDraft(messageId: id) }
+        case .walkthroughFounderTask:
+            store.view = .chat
+            // The first founder-only task still open. `BeaconOffer.candidates` is the
+            // same ordered list the hero's card walks, so the beat asks about the task
+            // the founder would actually have been offered — not an arbitrary one.
+            guard let task = BeaconOffer.candidates(store.company.tasks)
+                .first(where: { $0.who == .you }) else { return }
+            Task {
+                await store.sendChat(
+                    language == .vi ? "Hướng dẫn tôi làm: \(task.title)"
+                                    : "Walk me through: \(task.title)",
+                    language: language)
+            }
         }
     }
 

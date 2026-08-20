@@ -54,6 +54,18 @@ final class MockFlowScriptTests: XCTestCase {
         XCTAssertTrue(ranBefore, "approval at beat \(approve) has no run before it")
     }
 
+    /// The founder-only beat narrates "Codepet cannot do this for you" — which is
+    /// only true if the fixture actually holds a `who == .you` task. Without one the
+    /// intent no-ops and the caption talks over an unchanged screen.
+    func testTheFixtureHasTheFounderOnlyTaskThatBeatDescribes() {
+        guard beats.contains(where: { $0.intent == .walkthroughFounderTask }) else { return }
+        let tasks = MockChat.company().tasks
+        XCTAssertTrue(tasks.contains { $0.who == .you },
+                      "no founder-only task in the fixture — the beat would narrate nothing")
+        XCTAssertNotNil(BeaconOffer.candidates(tasks).first { $0.who == .you },
+                        "a founder-only task exists but is not reachable as a candidate")
+    }
+
     /// The walkthrough must show both doors — a tour of a two-mode product that
     /// only ever shows one mode is not a tour of the product.
     func testBothModesAreVisited() {

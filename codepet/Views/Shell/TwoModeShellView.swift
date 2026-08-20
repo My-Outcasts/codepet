@@ -233,11 +233,23 @@ struct TwoModeShellView: View {
     /// The prototype's dormant state: a title row with its own status dot, the
     /// honest line, BOTH doors, and the ceiling.
     ///
-    /// Two doors, not one. Local (your own `claude` CLI against a folder on this
-    /// Mac) is the **primary**, and it is tinted `accentGreen` rather than the
-    /// companion violet — the prototype gives Local its own hue because the thing
-    /// worth saying about it is that it costs **0 credits**. Offering only
-    /// "Connect a repo" hides the free path behind the billed one.
+    /// **Laid out like every other pane state**, which it was not: it sat at
+    /// `.topLeading` with 17/15 of its own padding, so it began 23pt under the
+    /// titlebar hard against the left edge while the hero and the transcript both
+    /// run down a centred 620pt column with 44pt of head. It also collided with the
+    /// rail's own reveal button, which lives at the pane's top-left when the sidebar
+    /// is collapsed — the icon landed on top of the "D" of "Developer". Sharing the
+    /// column and the head padding fixes the look and the collision in one move.
+    ///
+    /// Two doors, not one: offering only "Connect a repo" hides the free path behind
+    /// the billed one.
+    ///
+    /// **The primary is violet, not green.** It was `accentGreen`, because the
+    /// prototype gives Local its own hue and the thing worth saying is that it costs
+    /// 0 credits. But green means STATUS in this app — energy level, a positive
+    /// delta, Product's department accent — and it is a primary action nowhere, so a
+    /// mint CTA read as a control borrowed from another product. The fact survives
+    /// where it belongs, in the ceiling line: "0 credits on your own CLI".
     ///
     /// The ceiling here is the *pricing* one. `no merge · no deploy · no delete ·
     /// no force-push` is the tier ceiling and belongs to the READY state, where a
@@ -280,9 +292,11 @@ struct TwoModeShellView: View {
                     ? "0 tín dụng trên CLI của bạn · tính tín dụng trên đám mây · và trần giới hạn giữ nguyên từ lần chạy đầu tiên"
                     : "0 credits on your own CLI · credits in the cloud · and the ceiling holds from the first run")
         }
-        .frame(maxWidth: 460, alignment: .leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 17).padding(.vertical, 15)
+        // The same column and head the transcript uses, so Developer sits on the two
+        // vertical lines every other pane state does.
+        .readingColumn(ChatColumn.paneMeasureCap)
+        .padding(.top, ChatRhythm.transcriptTop(.twoMode))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// A run-state label with its dot — `● READY`, `● DORMANT`. Uppercase and
@@ -299,7 +313,9 @@ struct TwoModeShellView: View {
 
     private func doorButton(_ label: String, filled: Bool,
                             action: @escaping () -> Void) -> some View {
-        let hue = CodepetTheme.accentGreen
+        // Violet, the app's primary. See `dormantDeveloper` for why this is not the
+        // prototype's green.
+        let hue = CodepetTheme.accentPurple
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         return Button(action: action) {
             Text(label)

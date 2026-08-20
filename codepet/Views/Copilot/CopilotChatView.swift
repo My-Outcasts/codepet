@@ -1920,11 +1920,16 @@ enum ChatRhythm {
     }
 }
 
-private extension View {
+extension View {
     /// Sized to the column and centred in whatever is left. Two frames, in this order: the
     /// first sets the content to the column width and left-aligns inside it — so a companion
     /// reply and a right-hand founder pill anchor to the same two edges — and the second
     /// expands to the available width and centres that column in it.
+    ///
+    /// Internal rather than `private`, because the Developer pane needs the same column
+    /// and the ORDER of these two frames is the whole subtlety — a second copy is a
+    /// second chance to write them the other way round and get a left-aligned pane
+    /// that looks almost right.
     func readingColumn(_ column: CGFloat) -> some View {
         self
             .frame(width: column, alignment: .leading)

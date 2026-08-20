@@ -240,12 +240,22 @@ final class TwoModeHeroTests: XCTestCase {
                           "if these converge the launch redirect becomes a no-op")
     }
 
-    /// 640 was tuned for a 380pt dock. In the pane the box starts large, so the cap
-    /// decides the column at every ordinary size rather than in an edge case.
-    func testThePaneRunsAWiderColumnThanTheDock() {
+    /// The pane's column is NARROWER than the dock's, which is the opposite of what
+    /// this test asserted when it was written.
+    ///
+    /// The reasoning then was "the pane is wide, so give the words more room", and
+    /// it produced ~115 characters a line. Measure is not width, it is width over
+    /// type size: the pane sets 14pt where the dock sets 13.5, and takes the app's
+    /// own 620pt measure, which is 88 characters. The dock's 640 only binds when the
+    /// divider is dragged wide — at its 380pt default the inset decides and the
+    /// column is ~344pt.
+    func testThePaneRunsTheAppsMeasureAndTheDockKeepsIts640() {
         let wide: CGFloat = 1400
         XCTAssertEqual(ChatColumn.textWidth(forBox: wide, surface: .dock), 640)
-        XCTAssertEqual(ChatColumn.textWidth(forBox: wide, surface: .twoMode), 760)
+        XCTAssertEqual(ChatColumn.textWidth(forBox: wide, surface: .twoMode), 620)
+        XCTAssertLessThan(ChatColumn.textWidth(forBox: wide, surface: .twoMode),
+                          ChatColumn.textWidth(forBox: wide, surface: .dock),
+                          "narrower on purpose — it carries larger type")
     }
 
     /// Below the cap the inset decides, in both surfaces — the pane must not invent
@@ -258,6 +268,55 @@ final class TwoModeHeroTests: XCTestCase {
     /// The default argument is what keeps this additive for main's shell.
     func testTheDefaultSurfaceKeepsTheDockMeasure() {
         XCTAssertEqual(ChatColumn.textWidth(forBox: 1400), 640)
+    }
+
+    // MARK: - The transcript's reading standard
+
+    /// The defect: 13.5pt across the pane's 739pt column ran ~115 characters a
+    /// line, against a convention of 45–75 and a hard ceiling near 90. Asserted as
+    /// characters, not as points, because the pair is what matters — a change to
+    /// either the size or the measure alone can pass a points check and still read
+    /// badly.
+    func testThePaneRunsAReadableMeasure() {
+        let width = ChatColumn.textWidth(forBox: 1400, surface: .twoMode)
+        let size = ChatRhythm.prose(.twoMode)
+        let chars = width / (size * 0.5)
+        XCTAssertLessThanOrEqual(chars, 92, "\(Int(chars)) characters a line is past the ceiling")
+        XCTAssertGreaterThanOrEqual(chars, 70, "\(Int(chars)) is needlessly narrow for a pane")
+    }
+
+    /// The pane adopts `DeliverableStyle` rather than a third scale — the standard
+    /// nine viewers already share, and the reason the card was set LARGER in a
+    /// NARROWER measure than the prose introducing it.
+    func testThePaneUsesTheAppsOwnDeliverableStandard() {
+        XCTAssertEqual(ChatRhythm.prose(.twoMode), DeliverableStyle.body)
+        XCTAssertEqual(ChatRhythm.proseLeading(.twoMode), DeliverableStyle.leading)
+        XCTAssertEqual(ChatColumn.paneMeasureCap, DeliverableStyle.measure)
+    }
+
+    /// The prose must not be SMALLER than the card it introduces. That inversion is
+    /// what the measurement found, and it is the one thing here that cannot be
+    /// defended as a taste call.
+    func testTheProseIsNotSmallerThanTheCardInsideIt() {
+        XCTAssertGreaterThanOrEqual(ChatRhythm.prose(.twoMode), DeliverableStyle.body)
+    }
+
+    /// The dock keeps 13.5/6 — correct at 380pt, and untouched so main cannot
+    /// regress.
+    func testTheDockReadingStandardIsUnchanged() {
+        XCTAssertEqual(ChatRhythm.prose(.dock), 13.5)
+        XCTAssertEqual(ChatRhythm.proseLeading(.dock), ChatRhythm.lineSpacing)
+    }
+
+    /// Paragraph separation lands inside the convention. The gap a reader sees is
+    /// `paragraphGap` plus the natural leading, over the line height.
+    func testParagraphSeparationIsWithinConvention() {
+        let size = ChatRhythm.prose(.twoMode)
+        let lineHeight = size * 1.2 + ChatRhythm.proseLeading(.twoMode)
+        let ratio = (ChatRhythm.paragraphGap + ChatRhythm.proseLeading(.twoMode)) / lineHeight
+        XCTAssertGreaterThan(ratio, 0.4, "paragraphs are running together")
+        XCTAssertLessThan(ratio, 0.85,
+                          "\(ratio) of a line — an empty line between paragraphs is 1.0+")
     }
 
     // MARK: - The cast on the first screen

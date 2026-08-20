@@ -1338,8 +1338,8 @@ struct CopilotBubble: View {
             .cursorOnHover(.pointingHand)
             if showFirstTake {
                 Text(message.text)
-                    .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(ChatRhythm.lineSpacing)
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1371,16 +1371,24 @@ struct CopilotBubble: View {
             // all. `well` is this app's own version of that: the neutral it already uses
             // for a recessed track.
             let quiet = surface == .twoMode
+            let pad: CGFloat = 14
             HStack {
                 Spacer(minLength: 24)
                 Text(message.text)
-                    .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(ChatRhythm.lineSpacing)
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
                     .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .padding(.horizontal, pad).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
                     .fixedSize(horizontal: false, vertical: true)
+                    // The bubble's TEXT lands on the column's right edge, not its
+                    // border — so the founder's words and the reply's words end on
+                    // the same vertical line, and only the bubble's padding
+                    // overhangs it. This is what Claude does, and without it the
+                    // question sits ~7pt inside the answer for no reason a reader
+                    // could name.
+                    .padding(.trailing, quiet ? -pad : 0)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
@@ -1405,22 +1413,43 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
-                    // Blanks are tinted here as well as in the message viewers. When the
-                    // companion writes a message conversationally rather than producing a
-                    // deliverable, this prose IS the draft — and a `[name]` buried mid-sentence
-                    // is the one thing in it the founder has to act on before sending (Aug 10).
-                    Text(MessagePlaceholders.tinted(message.text,
-                                                    tint: MessageDraftStyle.blankTint,
-                                                    ink: MessageDraftStyle.blankInk))
-                        .font(CodepetTheme.inter(13.5))
-                        .lineSpacing(ChatRhythm.lineSpacing)
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    prose(message.text)
                     inlineActions
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The reply's prose, one block per paragraph.
+    ///
+    /// Split on blank lines rather than handed to a single `Text`. A `Text` renders
+    /// `\n\n` as a real empty line — measured at 1.94× the line height against a
+    /// convention of 0.5–0.75× — which is why the transcript read airier and longer
+    /// than its word count deserved. Spacing the blocks lands the gap near 0.6×.
+    ///
+    /// Blanks are still tinted per paragraph: when the companion writes
+    /// conversationally rather than producing a deliverable, this prose IS the draft,
+    /// and a `[name]` buried mid-sentence is the one thing in it the founder has to
+    /// act on before sending (Aug 10). Tinting after the split keeps that, because
+    /// a placeholder never spans a paragraph break.
+    @ViewBuilder private func prose(_ text: String) -> some View {
+        let paragraphs = text
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        VStack(alignment: .leading, spacing: ChatRhythm.paragraphGap) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(MessagePlaceholders.tinted(paragraph,
+                                                tint: MessageDraftStyle.blankTint,
+                                                ink: MessageDraftStyle.blankInk))
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The finished run's steps, collapsed behind a disclosure on the deliverable card.
@@ -1692,11 +1721,14 @@ enum ChatColumn {
     /// today — but maximised on an external display the same constant leaves the app's
     /// widest surface carrying its narrowest column.
     ///
-    /// 760, not more: the prose is `inter(13.5)`, so 760 is already ~110 characters.
-    /// The other half of this — the pane could carry LARGER type than a 380pt dock —
-    /// is a real question and a riskier change, because `ChatRhythm` and the draft
-    /// card are both pinned to 13.5 and would have to move with it.
-    static let paneMeasureCap: CGFloat = 760
+    /// `DeliverableStyle.measure` — the app's own reading measure, 620.
+    ///
+    /// This was 760, chosen while the prose was still 13.5pt, with a comment
+    /// admitting 760 was "already ~110 characters". Measured on screen it was ~115,
+    /// against a convention of 45–75 and a ceiling near 90. Widening the column was
+    /// treating the symptom: the type was a dock size in a pane-sized column, and
+    /// the fix is the pair, not either half. See `ChatRhythm.prose`.
+    static var paneMeasureCap: CGFloat { DeliverableStyle.measure }
 
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
@@ -1758,6 +1790,38 @@ enum ChatRhythm {
     /// Extra leading between lines. SwiftUI's `lineSpacing` adds to the font's natural ~1.2em,
     /// so 6 on 13.5pt lands at ~1.64em — the references' ratio.
     static let lineSpacing: CGFloat = 6
+
+    /// The transcript's reading standard, per surface.
+    ///
+    /// The dock keeps 13.5/6 — correct at 380pt, where the column is too narrow for
+    /// anything larger. The pane adopts **`DeliverableStyle`**, which is this app's
+    /// own answer to "how should a document be set": body 14 at a 620pt measure,
+    /// with 7 of extra leading.
+    ///
+    /// Measured, which is why it changed: at 13.5pt across the pane's 739pt column
+    /// the transcript ran ~115 characters a line. The convention is 45–75 and the
+    /// hard ceiling ~90; Claude's chat sits at ~88. `DeliverableStyle`'s pair —
+    /// 620 ÷ (14 × 0.5) — is 88 exactly. The app had already solved this for its
+    /// deliverables and the transcript was the one surface not using it, which is
+    /// how the *card* ended up set LARGER (14) in a NARROWER measure (620) than the
+    /// prose introducing it (13.5 at 739). Adopting the standard closes that
+    /// backwards gap instead of inventing a third scale.
+    static func prose(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? 13.5 : DeliverableStyle.body
+    }
+
+    static func proseLeading(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? lineSpacing : DeliverableStyle.leading
+    }
+
+    /// Paragraph separation inside one reply.
+    ///
+    /// The replies arrive with `\n\n` between paragraphs, and a single `Text`
+    /// renders that as a genuinely EMPTY LINE — measured at 1.94× the line height,
+    /// where the typographic convention is 0.5–0.75× and Claude sits at ~1.48×
+    /// including its own leading. So the paragraphs are split and spaced instead:
+    /// the gap becomes this plus the natural leading, which lands near 0.6×.
+    static let paragraphGap: CGFloat = 8
     /// Between consecutive messages from the SAME speaker.
     static let messageGap: CGFloat = 12
     /// Added on top of `messageGap` when the speaker changes, so a turn boundary reads as

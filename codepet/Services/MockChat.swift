@@ -120,8 +120,47 @@ enum MockChat {
 
     /// Decide the reply text + which `.done` action fires, from the message text
     /// and the request's own `runnable`/`envSetup` lists (so echoed ids are valid).
+    /// The most recent decision the founder has locked in, read back out of the
+    /// context the client already composes.
+    ///
+    /// `Decisions.composeDecisions` renders them as `- topic: statement` lines, so
+    /// the mock can quote one without inventing it — which is the whole point. Use
+    /// case 6 is "stay consistent over weeks", and its success signal is that a
+    /// captured fact CHANGES a later answer. A canned reply saying "I read your
+    /// decisions" demonstrates nothing: it reads identically whether or not one was
+    /// ever recorded.
+    private static func lockedDecision(in context: String) -> String? {
+        guard let header = context.range(of: "Decisions the founder has locked in") else { return nil }
+        for line in context[header.upperBound...].split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("- ") else { continue }
+            let body = String(t.dropFirst(2))
+            // `- topic: statement` — the statement is the part worth quoting back.
+            if let colon = body.firstIndex(of: ":") {
+                let statement = body[body.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if !statement.isEmpty { return statement }
+            }
+            return body
+        }
+        return nil
+    }
+
     private static func route(_ req: CompanyChatRequest) -> (text: String, action: ChatDoneAction) {
         let msg = req.userMessage.lowercased()
+
+        // A lookup, when something has actually been decided → quote it back.
+        // Placed FIRST so it beats the generic fallthrough, and gated on a real
+        // recorded decision so it can never claim one that does not exist.
+        if msg.contains("settle") || msg.contains("decide") || msg.contains("consistent"),
+           let decision = lockedDecision(in: req.context) {
+            return ("""
+            From your decisions — **\(decision)** — that still holds this week, and nothing on the \
+            roadmap contradicts it.
+
+            That is the whole point of recording it: every department reads the same line before it \
+            answers, so you are not re-litigating it on Thursday.
+            """, ChatDoneAction())
+        }
 
         // summarize → a grounded read of where the project stands (guided flow start).
         if msg.contains("summar") {

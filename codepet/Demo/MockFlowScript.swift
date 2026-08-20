@@ -102,7 +102,7 @@ enum MockFlowScript {
          + "department's specialist takes it — with its own name — and works in steps "
          + "it names out loud."),
 
-        ("A real deliverable", 3.4, .hold,
+        ("A real deliverable", 3.0, .hold,
          "The draft arrives in the conversation, attributed to the pet that wrote it. "
          + "Nothing has been filed yet."),
 
@@ -127,14 +127,23 @@ enum MockFlowScript {
          "Some questions are decisions, not tasks. Convening puts one to four "
          + "departments — a priced act, ~10 credits, and the founder taps it."),
 
-        ("A real decision", 3.8, .hold,
+        ("A real decision", 3.2, .hold,
          "They do not agree, and the room is not allowed to pretend they do. Finance "
          + "hard-blocks on having no basis for a price; Marketing will not give up the "
          + "one day attention is free."),
 
-        ("A real decision", 3.6, .hold,
+        ("A real decision", 3.0, .hold,
          "It ends on the trade-off rather than a verdict — either launch with a number "
          + "you may have to change, or launch without one. Unresolved is an answer."),
+
+        ("It remembers", 3.4, .say("Remember: we ship the trial at launch and the paywall when billing lands."),
+         "Anything the founder learns can be recorded. This is the cheapest thing in the "
+         + "product and the one that compounds — it is free, and every department reads it."),
+
+        ("It remembers", 4.0, .say("What did we settle on?"),
+         "And minutes later the answer quotes it back — the words that were recorded, not "
+         + "a promise that they were. That is the difference between a chatbot you re-explain "
+         + "your company to every morning and one that gets more useful each week."),
 
         ("Where the state lives", 2.8, .go(.roadmap),
          "The five surfaces are state you browse — the work itself only ever happens "

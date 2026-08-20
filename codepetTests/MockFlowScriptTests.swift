@@ -66,6 +66,24 @@ final class MockFlowScriptTests: XCTestCase {
                         "a founder-only task exists but is not reachable as a candidate")
     }
 
+    /// The citation beat must come AFTER something was recorded, or the caption
+    /// ("the answer quotes it back") narrates a lie over a reply that had nothing to
+    /// quote. Same ordering trap the prototype's own version of this check fell into:
+    /// there, the assertion passed on the decision's RECEIPT rather than on a later
+    /// citation.
+    func testTheCitationBeatFollowsSomethingWorthCiting() {
+        let asks = beats.compactMap { beat -> (Int, String)? in
+            if case .say(let text) = beat.intent { return (beat.id, text) }
+            return nil
+        }
+        guard let recorded = asks.first(where: { $0.1.lowercased().hasPrefix("remember") })?.0,
+              let cited = asks.first(where: { $0.1.lowercased().contains("settle") })?.0 else {
+            return XCTFail("the walkthrough no longer proves that context compounds")
+        }
+        XCTAssertLessThan(recorded, cited,
+                          "beat \(cited) asks what was settled before beat \(recorded) settles it")
+    }
+
     /// The walkthrough must show both doors — a tour of a two-mode product that
     /// only ever shows one mode is not a tour of the product.
     func testBothModesAreVisited() {

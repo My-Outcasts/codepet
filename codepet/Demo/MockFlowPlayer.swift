@@ -149,6 +149,11 @@ final class MockFlowPlayer: ObservableObject {
         case .approveNewestDraft:
             guard let id = newestDraftMessageId(in: store) else { return }
             Task { await store.approveDraft(messageId: id) }
+        case .convene(let ask):
+            store.view = .chat
+            // Safe under the demo flags only because `vcRunner` resolves to
+            // `MockVirtualCompany` when `MockChat.enabled` — nothing on the wire.
+            Task { await store.sendChat(ask, language: language, convenesRoom: true) }
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the

@@ -43,6 +43,11 @@ enum MockFlowScript {
         /// Codepet cannot do for the founder. The prototype's "Work only you can do".
         /// No-ops when the board has no founder-only task, rather than narrating one.
         case walkthroughFounderTask
+        /// Convene the Virtual Company on a decision. Safe under the demo flags only
+        /// because `MockVirtualCompany` now backs `vcRunner` — before that fixture
+        /// existed this beat would have spent ~$0.20 on the live endpoint, unattended,
+        /// which is why the chapter was left out of the first version of this script.
+        case convene(String)
         /// A new conversation.
         case newChat
         /// Nothing — a beat that only narrates. The prototype has these too; some
@@ -117,6 +122,19 @@ enum MockFlowScript {
          "Not every task can be handed over. Talking to users is the founder's own "
          + "work, so this one is never offered as \"Run it\" — Codepet prepares it and "
          + "records what comes back, and says plainly that it cannot do it for you."),
+
+        ("A real decision", 3.4, .convene("Should we ship the paywall before launch?"),
+         "Some questions are decisions, not tasks. Convening puts one to four "
+         + "departments — a priced act, ~10 credits, and the founder taps it."),
+
+        ("A real decision", 3.8, .hold,
+         "They do not agree, and the room is not allowed to pretend they do. Finance "
+         + "hard-blocks on having no basis for a price; Marketing will not give up the "
+         + "one day attention is free."),
+
+        ("A real decision", 3.6, .hold,
+         "It ends on the trade-off rather than a verdict — either launch with a number "
+         + "you may have to change, or launch without one. Unresolved is an answer."),
 
         ("Where the state lives", 2.8, .go(.roadmap),
          "The five surfaces are state you browse — the work itself only ever happens "

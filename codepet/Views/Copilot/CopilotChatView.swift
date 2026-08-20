@@ -203,6 +203,25 @@ struct CopilotChatView: View {
     /// Codex leaves ~10. The disclaimer is not filler: this product hands the founder
     /// drafts they file and act on, and Claude carries the same sentence under the same
     /// control. It doubles as the air the composer was missing.
+    /// The dissolve at the upper edge of the transcript.
+    ///
+    /// A scroll view clips its content on a hard line, so a message scrolling out
+    /// gets sliced mid-glyph against the window's top edge. Claude fades it — the
+    /// dimmed first line in its transcript — and the fade is what makes the space
+    /// above read as deliberate rather than as content that ran out of room.
+    ///
+    /// Painted in `pageBackground`, not black or a material: the pane's own colour
+    /// is the only thing that can dissolve INTO the pane in both themes.
+    @ViewBuilder private var topFade: some View {
+        if surface == .twoMode {
+            LinearGradient(colors: [CodepetTheme.pageBackground,
+                                    CodepetTheme.pageBackground.opacity(0)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: ChatRhythm.topFade)
+                .allowsHitTesting(false)
+        }
+    }
+
     private func composerDock(column: CGFloat, showsDeptChips: Bool = true) -> some View {
         VStack(spacing: 8) {
             composer(showsDeptChips: showsDeptChips).readingColumn(column)
@@ -368,9 +387,10 @@ struct CopilotChatView: View {
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
                 .readingColumn(column)
-                .padding(.top, ChatRhythm.transcriptTop)
+                .padding(.top, ChatRhythm.transcriptTop(surface))
                 .padding(.bottom, ChatRhythm.transcriptBottom)
             }
+            .overlay(alignment: .top) { topFade }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 scrollGeneration &+= 1
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
@@ -1843,6 +1863,30 @@ enum ChatRhythm {
     static let proseToAction: CGFloat = 12
     /// Head of the transcript, so the first message doesn't touch the dock's chrome.
     static let transcriptTop: CGFloat = 20
+
+    /// The pane's head, which has to do a job the dock's does not.
+    ///
+    /// In the dock, 20 sits under a header row (collapse + history) that already
+    /// held the top of the window open. The pane has no header — I removed that row
+    /// for this surface and never replaced the space it occupied — so the transcript
+    /// began 23pt below the titlebar with nothing above it, and the first card read
+    /// as jammed against the top edge.
+    ///
+    /// Claude's equivalent space is ~70pt, and it is not empty: it is the header
+    /// carrying the conversation's title. 44 is the space without the title, which
+    /// is the smaller half of that fix — see `topFade`, and the note that the pane
+    /// still names no thread.
+    static let paneTranscriptTop: CGFloat = 44
+
+    static func transcriptTop(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? transcriptTop : paneTranscriptTop
+    }
+
+    /// How far the top fade reaches. Content passing the upper edge dissolves into
+    /// the page instead of being sliced off — the dimmed first line in Claude's
+    /// transcript. Shorter than the head padding, so at rest (nothing scrolled) the
+    /// fade covers only empty space and touches nothing.
+    static let topFade: CGFloat = 28
     /// Tail of the transcript — larger than the head so the last message clears the composer.
     static let transcriptBottom: CGFloat = 24
 

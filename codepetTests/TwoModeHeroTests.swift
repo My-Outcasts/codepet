@@ -327,6 +327,24 @@ final class TwoModeHeroTests: XCTestCase {
                           "\(ratio) of a line — approaching the empty line this replaced")
     }
 
+    /// The pane's transcript needs more head than the dock's, because the dock has a
+    /// header row holding the top of the window open and the pane has none — that row
+    /// was removed for this surface and its space was never replaced, so the first
+    /// card sat against the titlebar.
+    func testThePaneHoldsMoreSpaceAtTheTopThanTheDock() {
+        XCTAssertGreaterThan(ChatRhythm.transcriptTop(.twoMode),
+                             ChatRhythm.transcriptTop(.dock))
+        XCTAssertEqual(ChatRhythm.transcriptTop(.dock), ChatRhythm.transcriptTop,
+                       "main's shell must be untouched")
+    }
+
+    /// The fade must be shorter than the head padding. If it reached further, it
+    /// would dim the first message at rest — with nothing scrolled, the fade has to
+    /// cover empty space only.
+    func testTheTopFadeDoesNotDimTheFirstMessageAtRest() {
+        XCTAssertLessThan(ChatRhythm.topFade, ChatRhythm.transcriptTop(.twoMode))
+    }
+
     // MARK: - The cast on the first screen
 
     /// Eight departments, every one with a voice. Product is deliberately absent —

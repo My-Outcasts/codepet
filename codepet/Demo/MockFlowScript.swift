@@ -93,7 +93,7 @@ enum MockFlowScript {
          "Signed in, with a roadmap already built from the brief — so the first screen "
          + "has real work on it and nothing has been charged yet."),
 
-        ("The first minute", 3.0, .hold,
+        ("The first minute", 2.7, .hold,
          "The hero asks for work and names the company. Under it, the cast: eight "
          + "departments, each speaking with its own pet."),
 
@@ -109,10 +109,6 @@ enum MockFlowScript {
         ("A real deliverable", 3.0, .approveNewestDraft,
          "Approving is what files it. Library goes up by one, the roadmap task closes, "
          + "and the beacon moves on. Until that click, nothing had been written anywhere."),
-
-        ("Ask anything", 3.6, .say("What should I focus on first?"),
-         "Ask talks to the company. The reply is grounded in the same brief every "
-         + "department reads, which is why a wrong brief poisons everything downstream."),
 
         ("Work only you can do", 3.2, .newChat,
          "A fresh conversation puts the hero back, and the beacon has moved on — the "
@@ -161,6 +157,11 @@ enum MockFlowScript {
          "With nothing linked it says so, and offers both doors: a folder on this Mac "
          + "at zero credits, or a repo in the cloud. The ceiling holds from the first run "
          + "either way — no merge, no deploy, no delete, no force-push."),
+
+        ("When it goes wrong", 4.2, .say("Are we offline right now?"),
+         "The path a demo usually hides. The departments are unreachable — and the refusal "
+         + "says what did NOT happen: no task started, nothing written to decisions or the "
+         + "roadmap, nothing charged. Your question stays in the composer."),
 
         ("Where it ends", 3.0, .mode(.ask),
          "Back to Ask. Every success needed the founder's approval, and nothing was "

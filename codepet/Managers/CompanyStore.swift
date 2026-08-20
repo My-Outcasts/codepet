@@ -1204,9 +1204,27 @@ final class CompanyStore: ObservableObject {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
+            // The spec's refusal grammar, which this line did not follow: say what
+            // happened, say what you did NOT do, and never bill a failure. The old
+            // copy — "I can't reach my brain right now, try again in a bit" — did
+            // only the first, leaving the founder to wonder whether the question was
+            // half-processed and whether it cost anything. Both answers are "no", and
+            // saying so is the difference between an outage and a scare.
             let offline = language == .vi
-                ? "Mình không kết nối được lúc này — thử lại sau nhé."
-                : "I can't reach my brain right now — try again in a bit."
+                ? """
+                  Mình không liên lạc được với các phòng ban lúc này.
+
+                  Chưa có gì chạy cả: không có tác vụ nào bắt đầu, không có gì được ghi vào \
+                  quyết định hay lộ trình, và bạn không bị tính phí. Câu hỏi vẫn còn nguyên \
+                  trong ô soạn — gửi lại khi có mạng.
+                  """
+                : """
+                  I cannot reach your departments right now.
+
+                  Nothing ran: no task was started, nothing was written to your decisions or \
+                  your roadmap, and you were not charged. Your question is still in the \
+                  composer — send it again when the connection is back.
+                  """
             // Every field the reply can carry, or the non-streaming path silently drops half a
             // turn. `complete_task`/`add_task` were added on Aug 8 and missed here first time:
             // the streaming path decoded them and this one did not, so the founder would have

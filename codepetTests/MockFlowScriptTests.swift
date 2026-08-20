@@ -84,6 +84,27 @@ final class MockFlowScriptTests: XCTestCase {
                           "beat \(cited) asks what was settled before beat \(recorded) settles it")
     }
 
+    /// A demo that only ever succeeds is the one most likely to mislead, so the
+    /// walkthrough has to show at least one refusal — and it must be a real one.
+    /// `MockChat.forcesFailure` drives the store's ACTUAL fallback rather than
+    /// printing a picture of an outage, which means this beat regression-tests the
+    /// refusal path instead of illustrating it.
+    func testTheWalkthroughShowsARealFailureAndNotAPictureOfOne() {
+        let failing = beats.compactMap { beat -> String? in
+            if case .say(let text) = beat.intent, MockChat.forcesFailure(text) { return text }
+            return nil
+        }
+        XCTAssertFalse(failing.isEmpty,
+                       "no beat triggers a failure — every path shown succeeds")
+        // It must not be the last word: the tour ends on working software.
+        let lastFailing = beats.last { beat in
+            if case .say(let t) = beat.intent { return MockChat.forcesFailure(t) }
+            return false
+        }
+        XCTAssertNotEqual(lastFailing?.id, beats.last?.id,
+                          "the walkthrough ends on a failure")
+    }
+
     /// The walkthrough must show both doors — a tour of a two-mode product that
     /// only ever shows one mode is not a tour of the product.
     func testBothModesAreVisited() {

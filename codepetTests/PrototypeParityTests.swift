@@ -28,10 +28,6 @@ final class PrototypeParityTests: XCTestCase {
     /// claim that the divergence was considered; a chapter missing from BOTH this
     /// list and the prototype fails the test.
     private let appOnly: [String: String] = [
-        "Ask anything":
-            "An ordinary grounded turn. The prototype folds this into `The first minute` "
-            + "rather than giving it a chapter, and the app needs it standalone because its "
-            + "opening has fewer beats.",
         "A real deliverable":
             "The draft arriving and being approved. The prototype covers both inside "
             + "`The first minute`; splitting them in the app keeps each caption short enough "

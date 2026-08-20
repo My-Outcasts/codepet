@@ -51,6 +51,10 @@ import Foundation
 ///
 /// `-CODEPET_MOCK_CHAT YES` sidesteps all of it: `NSArgumentDomain` outranks
 /// every preference file and touches no disk.
+/// The failure `forcesFailure` injects. Its own type so a reader of a log can tell
+/// a deliberately mocked outage from a real decoding error.
+enum MockChatFailure: Error { case unreachable }
+
 enum MockChat {
     /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
     /// is ONE launch argument rather than two that must agree — two flags where
@@ -304,8 +308,22 @@ enum MockChat {
     }
 
     /// Non-streaming counterpart of `stream`.
+    /// The one word that makes a mocked turn FAIL.
+    ///
+    /// Deliberately a real failure rather than a canned "this is what an outage looks
+    /// like" reply: returning nil here and throwing from `stream` drives the store's
+    /// actual fallback, so the walkthrough shows the copy a founder would really get
+    /// during an outage — and the beat regression-tests that path instead of
+    /// illustrating it. A fixture that merely *depicts* a refusal can drift from the
+    /// refusal the app performs, which is the whole failure mode this session kept
+    /// running into.
+    static func forcesFailure(_ message: String) -> Bool {
+        message.lowercased().contains("offline")
+    }
+
     static func reply(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         try? await Task.sleep(nanoseconds: 300_000_000)
+        if forcesFailure(req.userMessage) { return nil }
         let (raw, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
         let text = fill(raw).replacingOccurrences(of: "**", with: "")
@@ -317,6 +335,12 @@ enum MockChat {
     /// frame carrying the routed action — mirroring the real CF's SSE shape so
     /// the store's streaming path is exercised end-to-end.
     static func stream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        if forcesFailure(req.userMessage) {
+            // Throw rather than finish empty: an empty stream reads as a completed
+            // turn that said nothing, and the store would seal it as a blank reply
+            // instead of falling back.
+            return AsyncThrowingStream { $0.finish(throwing: MockChatFailure.unreachable) }
+        }
         let (rawFull, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
         let full = fill(rawFull).replacingOccurrences(of: "**", with: "")

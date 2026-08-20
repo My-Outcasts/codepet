@@ -1253,6 +1253,24 @@ final class CompanyStore: ObservableObject {
     /// own appended message, and `vcTasks`/`vcRunDeadlineNanos` for what bounds it.
     private func startVirtualCompanyRun(ask: String, anchorId: String,
                                         cid: String?, language: AppLanguage) {
+        #if DEBUG
+        // `VirtualCompanyClient` has NO mock path — it is the one client that still
+        // goes to the network when every other one is stubbed. Convening under
+        // `-CODEPET_MOCK_CHAT` or the autoplay walkthrough would therefore spend on
+        // the live `virtualCompanyRun` (~$0.20 a room), unattended, while every
+        // surface around it claims to be free.
+        //
+        // Refused in the spec's own grammar: say what happened, say what was NOT
+        // done, and never bill a failure. This is a stop, not a fixture — a mocked
+        // room is the piece still missing.
+        if MockChat.enabled {
+            chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
+                ? "Phòng họp chạy trên backend thật và chưa có bản mô phỏng — nên mình KHÔNG triệu tập, và không tính phí gì."
+                : "The room runs on the live backend and has no mock yet — so I did not "
+                  + "convene it, and nothing was charged."))
+            return
+        }
+        #endif
         let vcRequest = VirtualCompanyRequest(
             request: ask,
             language: language.rawValue,

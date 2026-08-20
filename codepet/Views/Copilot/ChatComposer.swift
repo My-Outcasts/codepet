@@ -32,6 +32,9 @@ struct ChatComposer: View {
     @Binding var selectedDept: Department?
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
+    /// Convene the Virtual Company on the current draft. Defaulted so main's shell,
+    /// which still reaches the room through its `.plan` pill, passes nothing.
+    var onConveneRoom: () -> Void = {}
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -238,6 +241,17 @@ struct ChatComposer: View {
                 }
             }
             if surface == .twoMode {
+                Divider()
+                // The room's only way in on this surface. The mode pill that used to
+                // reach it (`.plan`) is gone, so without this the Virtual Company is
+                // unreachable in the pane — see `RoomOffer`.
+                Button {
+                    onConveneRoom()
+                } label: {
+                    Label(RoomOffer.label(lang), systemImage: "person.3")
+                }
+                .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
+                .help(RoomOffer.detail(lang))
                 Divider()
                 Section(lang == .vi ? "Phòng ban" : "Departments") { deptOverflowItems }
             }

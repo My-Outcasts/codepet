@@ -192,8 +192,23 @@ struct CopilotChatView: View {
             showsDeptChips: showsDeptChips,
             selectedDept: $selectedDept,
             onSend: send,
-            onQuickAction: handleQuickAction
+            onQuickAction: handleQuickAction,
+            onConveneRoom: conveneRoom
         )
+    }
+
+    /// Convene the Virtual Company on what is in the composer.
+    ///
+    /// Goes through the same `sendChat` every message does, with `convenesRoom: true`
+    /// — so the founder's words become both the room's question and her own bubble,
+    /// and the router still holds its escape hatch to decline. The draft is cleared
+    /// the way `send` clears it, because the words have been committed.
+    private func conveneRoom() {
+        let ask = companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RoomOffer.canConvene(draft: ask), !isChatBusy else { return }
+        showHistory = false
+        companyStore.chatDraft = ""
+        Task { await companyStore.sendChat(ask, language: lang, convenesRoom: true) }
     }
 
     /// The pane's composer and the line under it.

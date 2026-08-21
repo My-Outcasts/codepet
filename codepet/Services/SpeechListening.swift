@@ -10,6 +10,57 @@ enum VoiceAudioError: Error, Equatable {
     case engineFailed(String)
 }
 
+/// What the founder has said this turn, across however many recognition requests it
+/// took to hear it.
+///
+/// **A turn outlives a request.** `SFSpeechRecognitionTask` has a ~1 minute audio
+/// limit, so a long question is heard by two or three requests in succession and each
+/// fresh one starts its transcript from empty. Nothing downstream can compensate for
+/// that: a renewal is invisible from outside, so a consumer accumulating partials
+/// cannot tell "the founder restarted her sentence" from "the recognizer restarted its
+/// request", and the founder's long question reaches `sendChat` as only the fragment
+/// after the seam — a silently truncated question, with a credit spent on it. So the
+/// knowledge lives here, where the renewal happens.
+///
+/// Pure, and separated out for exactly the reason `SpeakingQueue` is: as inline state
+/// on `SpeechListener` no test could reach it, because reaching it needs an
+/// `SFSpeechRecognizer`.
+struct TurnTranscript: Equatable {
+    /// What requests already retired **this turn** heard, in order.
+    private var committed: [String] = []
+    /// The live request's transcript. Replaced wholesale, never appended to — a
+    /// recognizer revises what it already said ("teh" → "the"), and a growing string
+    /// is not the same thing as a growing list of words.
+    private var current = ""
+
+    /// Everything the founder has said this turn.
+    ///
+    /// Joined with a space. There is already a gap in the audio at each seam (see
+    /// `SpeechListener.renew()`), so the two fragments are two different words far
+    /// more often than they are two halves of one.
+    var text: String {
+        (committed + [current]).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// The live request revised its transcript.
+    mutating func update(_ transcript: String) { current = transcript }
+
+    /// The live request is being retired mid-turn: keep what it heard. An empty one
+    /// contributes nothing rather than an empty fragment, so a renewal that heard
+    /// silence cannot leave a stray space in the middle of the founder's sentence.
+    mutating func commit() {
+        if !current.isEmpty { committed.append(current) }
+        current = ""
+    }
+
+    /// The turn is over — it was sent, or the microphone went away. The next turn must
+    /// not inherit the previous question's words.
+    mutating func endTurn() {
+        committed.removeAll()
+        current = ""
+    }
+}
+
 /// Streams what the founder is saying.
 ///
 /// A protocol so the suite can drive a fake — the concrete type wants a microphone,
@@ -17,14 +68,18 @@ enum VoiceAudioError: Error, Equatable {
 protocol SpeechListening: AnyObject {
     /// The running transcript so far, called repeatedly as it grows.
     ///
-    /// **Not monotonic across a whole conversation.** `SFSpeechRecognitionTask` has a
-    /// documented ~1 minute audio limit per request, and barge-in needs the
-    /// microphone live for the length of a conversation rather than a turn — so the
-    /// concrete listener retires a request and opens a fresh one when the limit is
-    /// hit (see `SpeechListener.renew()`). The next string after a renewal starts
-    /// over from the new request. A consumer that needs the whole conversation must
-    /// accumulate; one that reads the current utterance, which is what the overlay
-    /// wants, can take this as given.
+    /// **Monotonic within a turn**, and it is the listener that makes it so. A
+    /// recognition request lasts about a minute (`SFSpeechRecognitionTask`'s audio
+    /// limit) while a turn lasts until the founder stops talking, so a long question
+    /// spans several requests and each new one transcribes from empty; the listener
+    /// accumulates across those renewals so this always carries the whole turn. A
+    /// consumer may therefore take the latest string as the founder's message and must
+    /// **not** accumulate — see `endTurn()`.
+    ///
+    /// Known cost, accepted rather than fixed: roughly 100-200ms of audio is dropped
+    /// at each renewal seam, so a syllable can be clipped about once a minute. The
+    /// alternative is two recognition tasks running on one recognizer, which is
+    /// undocumented and cannot be measured without a microphone.
     var onPartial: ((String) -> Void)? { get set }
     /// Input level 0…1, for the orb.
     var onLevel: ((Float) -> Void)? { get set }
@@ -35,6 +90,15 @@ protocol SpeechListening: AnyObject {
     var isRunning: Bool { get }
     func start() throws
     func stop()
+    /// The founder's turn was taken — sent as a message, or abandoned. Clears the
+    /// accumulation so the next `onPartial` starts from empty.
+    ///
+    /// **The consumer has to call this, and only the consumer can.** It owns the
+    /// end-of-turn decision (the silence timeout, the send), and that decision is not
+    /// visible from inside the listener: recognition going quiet looks identical to the
+    /// founder pausing mid-sentence. Not called, the next question arrives with the
+    /// previous one still glued to the front of it.
+    func endTurn()
 }
 
 /// `SFSpeechRecognizer` over our own `AVAudioEngine`.
@@ -61,7 +125,9 @@ protocol SpeechListening: AnyObject {
 ///
 /// **One request does not last a conversation.** Barge-in needs the microphone open
 /// while the pet speaks, so this runs continuously; `SFSpeechRecognitionTask` does
-/// not. `renew()` swaps in a fresh request/task pair without touching the engine.
+/// not. `renew()` swaps in a fresh request/task pair without touching the engine, and
+/// carries the transcript across the swap so a renewal is invisible from outside — see
+/// `TurnTranscript`, which is why `endTurn()` exists.
 final class SpeechListener: SpeechListening {
     var onPartial: ((String) -> Void)?
     var onLevel: ((Float) -> Void)?
@@ -127,6 +193,9 @@ final class SpeechListener: SpeechListening {
     /// renewal there is a tight loop of failing tasks, silently, forever. One
     /// renewal is spent finding out; the second failure is reported.
     private var renewalsWithoutResult = 0
+
+    /// The founder's turn, accumulated across renewals. See `TurnTranscript`.
+    private var transcript = TurnTranscript()
 
     /// `contextualStrings` is why the locale is held: product nouns are exactly the
     /// words a general recognizer mishears.
@@ -264,7 +333,18 @@ final class SpeechListener: SpeechListening {
             }
         }
         renewalsWithoutResult = 0
+        // A turn cannot survive the microphone being torn down. `renew()` bridges a
+        // gap of 100-200ms; this gap is unbounded — the founder was told listening
+        // stopped — so resuming her half-sentence afterwards would put words she has
+        // moved on from at the front of her next question.
+        transcript.endTurn()
         isRunning = false
+    }
+
+    /// See the protocol. The listener cannot infer this: recognition going quiet looks
+    /// the same whether she finished or paused.
+    func endTurn() {
+        transcript.endTurn()
     }
 
     // MARK: - Recognition
@@ -303,6 +383,14 @@ final class SpeechListener: SpeechListening {
     /// Close the current request/task pair. Safe to call twice, and safe to call on a
     /// pair that was never opened.
     private func retireRecognition() {
+        // **Here rather than in `renew()`, deliberately.** This is the moment a request
+        // stops being fed, so committing here means no future caller has to remember
+        // to save its transcript first — the retiring request's words are the first
+        // half of a sentence the founder is still saying, and dropped here they are
+        // dropped for good, since the new request cannot re-hear audio already past.
+        // `stop()` calls this too and then ends the turn outright, so the commit is
+        // harmless there.
+        transcript.commit()
         feed.endAudio()
         task?.cancel()
         task = nil
@@ -323,7 +411,9 @@ final class SpeechListener: SpeechListening {
 
         if let text {
             renewalsWithoutResult = 0
-            onPartial?(text)
+            transcript.update(text)
+            // The whole turn, not this request's fragment of it.
+            onPartial?(transcript.text)
         }
 
         // Anything else is this task ending.
@@ -371,6 +461,8 @@ final class SpeechListener: SpeechListening {
     /// here, and it matches how `start()`/`stop()` already use it — one task at a time.
     private func renew() {
         guard isRunning, let recognizer else { return }
+        // `retireRecognition()` commits the retiring request's transcript, so the
+        // founder's turn crosses the swap intact — see `TurnTranscript`.
         retireRecognition()
         openRecognition(recognizer)
     }

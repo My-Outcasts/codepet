@@ -87,13 +87,33 @@ final class SpeechFakesTests: XCTestCase {
         /// something because this fake sets it true whenever it does start.
         var refuseStart: Error?
 
+        /// **The real `TurnTranscript`, not a re-implementation.** Same reason
+        /// `FakeVoice` drives the real `SpeakingQueue`: a fake with its own idea of
+        /// how partials accumulate would let the protocol's monotonic-within-a-turn
+        /// promise pass here and fail in production.
+        private var transcript = TurnTranscript()
+
         func start() throws {
             startCount += 1
             if let refuseStart { throw refuseStart }
             isRunning = true
         }
-        func stop() { isRunning = false }
-        func emit(_ partial: String) { onPartial?(partial) }
+        func stop() {
+            isRunning = false
+            transcript.endTurn()
+        }
+        func endTurn() { transcript.endTurn() }
+
+        /// The recognizer revised what it has heard of the current request.
+        func emit(_ partial: String) {
+            transcript.update(partial)
+            onPartial?(transcript.text)
+        }
+
+        /// The ~1 minute audio limit was hit mid-turn: this request retires and a
+        /// fresh one starts transcribing from empty. Invisible to a consumer, which is
+        /// the whole point — the next `emit` is the new request's first partial.
+        func renewMidTurn() { transcript.commit() }
         /// Recognition dying after `start()` returned. Mirrors `SpeechListener`,
         /// which stops before it reports.
         func failMidSession(_ error: Error) {
@@ -263,5 +283,105 @@ final class SpeechFakesTests: XCTestCase {
                        "recognition died and the overlay was never told")
         XCTAssertFalse(listener.isRunning, "a dead recognizer left the orb looking live")
         XCTAssertEqual(partials, ["hello"])
+    }
+
+    // MARK: - The turn survives a renewal
+
+    /// **The one the overlay depends on.** A recognition request lasts about a minute
+    /// and a question does not have to, so a long question is heard by two requests in
+    /// succession. The consumer takes the latest partial as the founder's message, and
+    /// it cannot compensate for a renewal because nothing tells it one happened — so
+    /// if the second request's transcript arrives alone, the founder asks a long
+    /// question, watches a truncated fragment of it get sent, and pays a credit for
+    /// the fragment.
+    ///
+    /// Driven through the protocol existential, with the renewal poked in on the fake,
+    /// because "a renewal happened" is not something a consumer can see or trigger.
+    func testATurnSpanningTwoRequestsArrivesAsOneString() {
+        let fake = FakeListener()
+        let listener: SpeechListening = fake
+        var partials: [String] = []
+        listener.onPartial = { partials.append($0) }
+        XCTAssertNoThrow(try listener.start())
+
+        fake.emit("what do you")
+        fake.emit("what do you think about")
+        fake.renewMidTurn()
+        fake.emit("pricing")
+        fake.emit("pricing for the beta")
+
+        XCTAssertEqual(partials.last, "what do you think about pricing for the beta",
+                       "the renewal truncated the founder's question")
+        // Monotonic within the turn: never shorter than the partial before it.
+        XCTAssertEqual(partials, partials.sorted { $0.count < $1.count },
+                       "a partial went backwards, so the consumer cannot trust the latest one")
+    }
+
+    /// The other half of owning the accumulation: it has to be given back. Without
+    /// `endTurn()` the founder's next question arrives with the previous one glued to
+    /// the front of it — and that one gets sent.
+    func testEndTurnClearsSoTheNextQuestionIsNotInherited() {
+        let fake = FakeListener()
+        let listener: SpeechListening = fake
+        var partials: [String] = []
+        listener.onPartial = { partials.append($0) }
+        XCTAssertNoThrow(try listener.start())
+
+        fake.emit("what should we charge")
+        fake.renewMidTurn()
+        fake.emit("for the beta")
+        XCTAssertEqual(partials.last, "what should we charge for the beta")
+
+        listener.endTurn()
+        fake.emit("thanks")
+        XCTAssertEqual(partials.last, "thanks",
+                       "the next turn inherited the previous question's words")
+    }
+
+    /// Tearing the microphone down ends the turn too. `renew()` bridges 100-200ms;
+    /// a `stop()` is unbounded and the founder was told listening stopped, so
+    /// resuming her half-sentence afterwards is wrong.
+    func testStoppingEndsTheTurn() {
+        let fake = FakeListener()
+        var partials: [String] = []
+        fake.onPartial = { partials.append($0) }
+        XCTAssertNoThrow(try fake.start())
+        fake.emit("half a sentence")
+        fake.stop()
+        XCTAssertNoThrow(try fake.start())
+        fake.emit("a new question")
+        XCTAssertEqual(partials.last, "a new question")
+    }
+
+    /// A recognizer revises what it already said ("teh" → "the"), so the live
+    /// request's transcript replaces rather than appends — while committed fragments
+    /// stay put. Straight at the struct: this is the distinction that makes the
+    /// accumulation correct rather than merely additive.
+    func testARevisionReplacesTheLiveRequestButKeepsWhatIsCommitted() {
+        var t = TurnTranscript()
+        t.update("what do you thing")
+        t.update("what do you think")
+        XCTAssertEqual(t.text, "what do you think", "a revision was appended instead of replacing")
+        t.commit()
+        t.update("about")
+        t.update("about pricing")
+        XCTAssertEqual(t.text, "what do you think about pricing")
+    }
+
+    /// A renewal during silence must not leave a seam in the middle of the sentence.
+    func testARequestThatHeardNothingAddsNoSeam() {
+        var t = TurnTranscript()
+        t.update("hello")
+        t.commit()
+        t.commit()          // a second renewal, nothing heard in between
+        XCTAssertEqual(t.text, "hello")
+        t.update("there")
+        XCTAssertEqual(t.text, "hello there", "an empty request left a stray space")
+
+        var fresh = TurnTranscript()
+        fresh.commit()
+        XCTAssertEqual(fresh.text, "", "a turn that heard nothing is empty, not whitespace")
+        fresh.endTurn()
+        XCTAssertEqual(fresh, TurnTranscript(), "endTurn left state behind")
     }
 }

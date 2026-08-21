@@ -1,10 +1,13 @@
 # Codepet — composer controls: a departments button and a real `+` menu
 
-**Status:** designed, approved by the founder 21 Aug 2026. Not built.
+**Status:** designed, approved by the founder 21 Aug 2026. Amended the same day to bring attachments
+and the web-search toggle into scope (§7), which slips the code freeze — founder's call, made with the
+cost stated. Not built.
 **Branch:** `feat/composer-controls`, off `feat/two-mode-shell` — the composer this changes lives there,
 not on `main`.
-**Scope:** Swift only. No `functions/` change, so nothing here crosses the 22 Aug freeze with a deploy
-attached to it.
+**Scope:** Swift **and** `functions/` (§7.3, §7.5). Measured: `functions/` on this branch is 0 commits
+behind `origin/main`, so the deploy-from-a-stale-branch hazard does not bite today — re-measure before
+deploying anyway.
 **Amends:** `2026-08-17-codepet-two-mode-product-design.md` §4 (the cast) and §8.2 (the tier lives in the
 composer). It does not amend the SSE contract.
 
@@ -133,15 +136,28 @@ branches instead.
 
 ```
 BRING SOMETHING IN
-  📚  From your Library          ›
-  🗺  A roadmap task             ›
-  🧠  What Codepet knows         ✓        ← a toggle, not a picker
-  📁  Linked folder — codepet    ›
+  📎  Attach a file or image          ⌘U
+      Screenshots, PDFs, notes
+  📚  From your Library                ›
+      Ground this answer in work you've shipped
+  🗺  A roadmap task                   ›
+      Pin what you're working on
+  🧠  What Codepet knows               ✓
+      Let it use your saved decisions
+  📁  Linked folder — codepet          ›
+      The folder the agent may touch
 GO DEEPER
   👥  Convene the room · ~10 credits
-──────────────────────────────────
-  Set up skills & connectors…             → Environment
+      4 departments argue this and hand you a recommendation
+  🌐  Web search                       ✓
+      Let it look things up as it answers
+──────────────────────────────────────
+  Set up skills & connectors…                  → Environment
 ```
+
+Every row carries a second line (§7.7). macOS menus render two-line items; the
+description comes from the same `PlusMenu` type as the label, and the room's comes
+from the `RoomOffer.detail()` that already exists.
 
 Row by row, and what each one actually reaches:
 
@@ -220,17 +236,109 @@ it gets its own test.
 turn; this replaces the ranker's guess with the founder's choice, and gives the chosen item more room.
 Saying it any other way oversells it.
 
-## 7. Not in this spec
+## 7. Attachments and web search — IN SCOPE (amended 21 Aug)
 
-Two named follow-ups, each its own PR after launch. The menu grows by insertion — no re-layout.
+**Founder call, 21 Aug, after comparing the menu against both ChatGPT's and Claude's.** Both competitors
+lead with a file row; Codepet had nothing. The two items this spec originally deferred are now in scope,
+and the code freeze slips to accommodate them. The founder was shown the freeze cost and chose this.
 
-- **`📎 Attach a file or image`** — Firebase Storage upload + rules, image/document blocks through
-  `companyChat`, and a vision-capable prompt path. This is the door a founder coming from Claude will
-  look for first, and it is real backend work, not a menu row.
-- **`🌐 Web search`** — `companyChatCore.ts` already registers `web_search_20260209` and instructs the
-  model to "use it only when" it needs to, so search happens today at the model's discretion with no
-  founder control. A toggle means a `webSearch` flag on `CompanyChatRequest` that, when off, **actually
-  strips the tool** server-side. A checkbox that doesn't change behaviour is worse than no checkbox.
+Every fact below was verified against the code, not assumed.
+
+### 7.1 The model is better than the deferral assumed
+
+`CHAT_MODEL` in `functions/src/companyChat.ts` is **`claude-sonnet-5`** — not the `claude-haiku-4-5`
+that `anthropic.ts` exports as `MODEL` (that one serves other callers). Sonnet 5 changes the calculus:
+
+| | Sonnet 5 |
+|---|---|
+| Images | **High-resolution tier** — 2576px long edge, up to ~4784 image tokens. The first Sonnet with it |
+| PDFs | **600 pages** — the 100-page cap applies only to 200K-context models, and Sonnet 5 is 1M |
+| Beta headers | **None.** `image` and `document` base64 blocks are GA |
+| Cost | A full-res image ≈ 4784 input tokens ≈ **2–3× an ordinary turn's input** |
+
+So a founder attaching a UI screenshot or a chart gets a real read, not a downgraded one.
+
+### 7.2 Transport: inline base64, downscaled client-side
+
+**The client has no Anthropic key** — deployed functions read it from Secret Manager — so the client can
+never call the Files API directly. Every path goes through a function, which collapses the choice to two:
+inline base64, or Storage + a Files-API-uploading function.
+
+**Decided: inline base64.** The Swift side reads the file, downscales images to the 2576px tier, and
+base64s it into the existing request. No Storage bucket, no new function, no `file_id` lifecycle, no beta
+header. The cost lever — how far to downscale — lives entirely client-side and needs no deploy to tune.
+
+Its real cost, stated rather than discovered later: **an inlined image re-uploads on every turn it stays
+in history.** Storage + the Files API is the correct long-term answer (upload once, reference by id
+forever) and becomes worth building when someone attaches a 40-page PDF and asks ten questions about it.
+Until then, history replay is capped (§7.4).
+
+### 7.3 The landmine — `ClaudeMessage.content` is a `string`
+
+This is the defect the whole section turns on. In `functions/src/companyChatCore.ts`:
+
+```ts
+export interface ClaudeMessage {
+  role: "user" | "assistant";
+  content: string;                 // not a content-block array
+}
+```
+
+and in `buildMessages`, the turn-coalescing step:
+
+```ts
+last.content = `${last.content}\n\n${msg.content}`;   // string concatenation
+```
+
+Widen `content` to accept blocks without touching that line and it silently produces `"[object Object]"`
+— no error, no type complaint at runtime, just a prompt with a corrupted turn in it.
+
+**And the wire DTO has the same shape.** `ChatTurn { role: string; text: string }` carries plain strings,
+so an attachment sent on turn 1 is **absent from history on turn 2**: "what's in this screenshot?" works,
+and the follow-up "what about the top left?" reaches a model that can no longer see it. A one-shot
+attachment is not worth shipping — the second question is the one founders ask.
+
+Three edits, therefore, and all three are required together:
+
+1. `ClaudeMessage.content` widens to `string | ContentBlock[]`
+2. coalescing becomes block-aware (concatenate text-to-text; otherwise append blocks)
+3. `ChatTurn` gains optional attachments so they replay
+
+### 7.4 What ships
+
+- **Swift:** `ChatAttachment` — a value type beside `ContextPin`, carrying kind, filename, media type,
+  and base64 data. Images downscaled to a 2576px long edge before encoding; text files inlined as text
+  (no block needed); PDFs sent as `document` blocks.
+- **Caps, all stated in the type:** 3 attachments per message (matching `ContextPin.max`), 8MB per file
+  before encoding (well inside the 32MB request ceiling), and **history replay capped at the 3 most
+  recent turns that carry one** — after that the attachment drops out of the replayed history and the
+  transcript says so, rather than silently re-billing it forever.
+- **The pills are shared.** An attachment renders in the same removable pill row as a `ContextPin`,
+  because to the founder they are the same gesture: *this goes with my next message*.
+
+### 7.5 Web search becomes a real toggle
+
+`companyChatCore.ts` registers `web_search_20260209` and instructs the model to "use it only when" — so
+search happens today at the model's discretion with no founder control. The toggle adds a `webSearch`
+flag to `CompanyChatRequest` that, when off, **actually strips the tool from the request**. A checkbox
+that doesn't change behaviour is worse than no checkbox.
+
+Folded in here rather than deferred because `functions/` is already open for §7.3; it is ~20 lines.
+
+### 7.6 One deploy note, measured
+
+`functions/` on this branch is **0 commits behind `origin/main`** (`git rev-list --count HEAD..origin/main
+-- functions/`). The standing rule — a `firebase deploy` uploads the working tree, so deploying from a
+branch behind `main` deletes `main`'s functions from prod — still holds and must be re-measured before
+any deploy. It simply does not bite today.
+
+### 7.7 Every row gets a description
+
+**Founder call, 21 Aug.** ChatGPT captions every row (`Deep research → Get a detailed report`); Claude
+captions none. ChatGPT is right, and this spec has direct evidence: the founder had to ask what
+`Convene the room · ~10 credits` meant. `RoomOffer.detail()` already holds the sentence that would have
+answered it — *"4 departments argue this question and hand you a recommendation"* — wasted as a hover
+tooltip nobody reads before spending 10 credits.
 
 ## 8. Testing
 

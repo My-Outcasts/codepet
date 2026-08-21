@@ -93,6 +93,20 @@ final class SpeechFakesTests: XCTestCase {
         /// promise pass here and fail in production.
         private var transcript = TurnTranscript()
 
+        /// **The live recognition request's own memory, modelled rather than assumed
+        /// away.** `SFSpeechAudioBufferRecognitionRequest` has no reset:
+        /// `bestTranscription` is the transcription of *every* buffer appended to that
+        /// request for its whole ~1 minute life, so the only way to obtain a transcript
+        /// that starts from empty is to replace the request. This array is therefore
+        /// cleared by exactly one thing — `retireLiveRequest()` — and whether a turn
+        /// boundary reaches it is the whole question T1 turned on.
+        ///
+        /// The earlier version of this fake cleared its transcript inside `endTurn()`
+        /// and modelled the next partial as the new request's first word. That made the
+        /// glued-question bug pass review twice: the fake kept a promise production did
+        /// not.
+        private var liveRequest: [String] = []
+
         func start() throws {
             startCount += 1
             if let refuseStart { throw refuseStart }
@@ -101,19 +115,55 @@ final class SpeechFakesTests: XCTestCase {
         func stop() {
             isRunning = false
             transcript.endTurn()
+            retireLiveRequest()
         }
-        func endTurn() { transcript.endTurn() }
 
-        /// The recognizer revised what it has heard of the current request.
-        func emit(_ partial: String) {
-            transcript.update(partial)
-            onPartial?(transcript.text)
+        /// **A line-for-line mirror of `SpeechListener.endTurn()`, and it has to stay
+        /// one.** Clearing `transcript` is half of it; retiring the live request is the
+        /// half whose absence sent the founder's previous question again. If the two
+        /// bodies drift, this fake goes back to certifying a promise production does not
+        /// keep — and no test can catch that, because testing the real `endTurn()`
+        /// needs an `SFSpeechRecognizer`.
+        func endTurn() {
+            transcript.endTurn()
+            retireLiveRequest()      // `SpeechListener.endTurn()` calls `renew()`
+        }
+
+        /// The founder says more words into the live request. The request re-reports
+        /// its **whole** transcript, not just the new words — that is the behaviour
+        /// this fake exists to reproduce.
+        func emit(_ words: String) {
+            liveRequest.append(words)
+            report()
+        }
+
+        /// The recognizer revises what the live request has heard so far ("teh" → "the"):
+        /// the transcript is replaced wholesale, not appended to.
+        func revise(to whole: String) {
+            liveRequest = [whole]
+            report()
         }
 
         /// The ~1 minute audio limit was hit mid-turn: this request retires and a
         /// fresh one starts transcribing from empty. Invisible to a consumer, which is
         /// the whole point — the next `emit` is the new request's first partial.
-        func renewMidTurn() { transcript.commit() }
+        func renewMidTurn() { retireLiveRequest() }
+
+        /// What the consumer sees: the request's cumulative transcript, folded into the
+        /// turn. Suppressed when nothing changed, mirroring `recognitionUpdate`.
+        private func report() {
+            if transcript.update(liveRequest.joined(separator: " ")) {
+                onPartial?(transcript.text)
+            }
+        }
+
+        /// The listener replaced the request — `renew()`, or `stop()`. The retiring
+        /// request's words are kept (they are the first half of a sentence the founder
+        /// may still be saying) and its memory goes with it.
+        private func retireLiveRequest() {
+            transcript.commit()
+            liveRequest.removeAll()
+        }
         /// Recognition dying after `start()` returned. Mirrors `SpeechListener`,
         /// which stops before it reports.
         func failMidSession(_ error: Error) {
@@ -305,10 +355,10 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertNoThrow(try listener.start())
 
         fake.emit("what do you")
-        fake.emit("what do you think about")
+        fake.revise(to: "what do you think about")
         fake.renewMidTurn()
         fake.emit("pricing")
-        fake.emit("pricing for the beta")
+        fake.revise(to: "pricing for the beta")
 
         XCTAssertEqual(partials.last, "what do you think about pricing for the beta",
                        "the renewal truncated the founder's question")
@@ -338,6 +388,60 @@ final class SpeechFakesTests: XCTestCase {
                        "the next turn inherited the previous question's words")
     }
 
+    /// **T1, the version with no renewal in it — the sequence from the plan's own Task
+    /// 6 wiring.** The listener runs continuously across turns because barge-in needs
+    /// the microphone open while the pet speaks, so one recognition request spans
+    /// several turns. `endTurn()` clearing only our own accumulation leaves that
+    /// request live and still holding turn 1: its next partial is
+    /// `"what should we charge for the beta thanks"`, which is sent and spends a
+    /// credit, and it compounds every turn for the session with nothing thrown and
+    /// nothing logged.
+    ///
+    /// The fake models the request's memory (see `liveRequest`), so this is red for the
+    /// production reason unless `endTurn()` retires the request.
+    func testTheNextTurnDoesNotInheritTheLiveRequestsMemory() {
+        let fake = FakeListener()
+        let listener: SpeechListening = fake
+        var sent: [String] = []
+        listener.onPartial = { sent = [$0] }        // the consumer keeps only the latest
+        XCTAssertNoThrow(try listener.start())
+
+        // Turn 1, heard by one request, no renewal anywhere near it.
+        fake.emit("what should we charge")
+        fake.emit("for the beta")
+        XCTAssertEqual(sent.last, "what should we charge for the beta")
+        listener.endTurn()                          // sent; a credit spent
+
+        // Turn 2. The founder says one word; the pet is still speaking, so the
+        // listener never stopped.
+        fake.emit("thanks")
+        XCTAssertEqual(sent.last, "thanks",
+                       "turn 2 carried turn 1: the live request was never retired")
+
+        // Turn 3 compounds it, which is how a session-long defect looks in a test.
+        listener.endTurn()
+        fake.emit("and what about the annual plan")
+        XCTAssertEqual(sent.last, "and what about the annual plan",
+                       "turns are accumulating in the request for the whole session")
+    }
+
+    /// A recognizer re-reports a string it has already reported, freely. Task 6 stamps
+    /// `lastSpeechAt` on every partial and, while the pet is speaking, treats any
+    /// partial as barge-in — so an unchanged partial cuts the pet off with words the
+    /// founder has already had answered. Only real changes reach the consumer.
+    func testAnUnchangedPartialIsNotReportedAgain() {
+        var t = TurnTranscript()
+        XCTAssertTrue(t.update("what should we charge"))
+        XCTAssertFalse(t.update("what should we charge"),
+                       "the same transcript was reported as a change")
+        XCTAssertTrue(t.update("what should we charge for"))
+        t.commit()
+        XCTAssertFalse(t.update(""),
+                       "an empty live request after a commit is not a change")
+        XCTAssertTrue(t.update("the beta"))
+        XCTAssertEqual(t.text, "what should we charge for the beta")
+    }
+
     /// Tearing the microphone down ends the turn too. `renew()` bridges 100-200ms;
     /// a `stop()` is unbounded and the founder was told listening stopped, so
     /// resuming her half-sentence afterwards is wrong.
@@ -359,23 +463,23 @@ final class SpeechFakesTests: XCTestCase {
     /// accumulation correct rather than merely additive.
     func testARevisionReplacesTheLiveRequestButKeepsWhatIsCommitted() {
         var t = TurnTranscript()
-        t.update("what do you thing")
-        t.update("what do you think")
+        _ = t.update("what do you thing")
+        _ = t.update("what do you think")
         XCTAssertEqual(t.text, "what do you think", "a revision was appended instead of replacing")
         t.commit()
-        t.update("about")
-        t.update("about pricing")
+        _ = t.update("about")
+        _ = t.update("about pricing")
         XCTAssertEqual(t.text, "what do you think about pricing")
     }
 
     /// A renewal during silence must not leave a seam in the middle of the sentence.
     func testARequestThatHeardNothingAddsNoSeam() {
         var t = TurnTranscript()
-        t.update("hello")
+        _ = t.update("hello")
         t.commit()
         t.commit()          // a second renewal, nothing heard in between
         XCTAssertEqual(t.text, "hello")
-        t.update("there")
+        _ = t.update("there")
         XCTAssertEqual(t.text, "hello there", "an empty request left a stray space")
 
         var fresh = TurnTranscript()

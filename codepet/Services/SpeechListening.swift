@@ -43,7 +43,18 @@ struct TurnTranscript: Equatable {
     }
 
     /// The live request revised its transcript.
-    mutating func update(_ transcript: String) { current = transcript }
+    ///
+    /// **Returns whether `text` actually changed**, so a caller can tell a real
+    /// revision from the recognizer re-reporting a string it has already reported.
+    /// That distinction is not cosmetic: Task 6 stamps `lastSpeechAt` on every partial
+    /// and, while the pet is speaking, treats any partial as barge-in — so a repeated
+    /// partial cuts the pet off with words the founder has already had answered. Not
+    /// `@discardableResult` on purpose: ignoring it is a decision, not a default.
+    mutating func update(_ transcript: String) -> Bool {
+        let before = text
+        current = transcript
+        return text != before
+    }
 
     /// The live request is being retired mid-turn: keep what it heard. An empty one
     /// contributes nothing rather than an empty fragment, so a renewal that heard
@@ -90,14 +101,25 @@ protocol SpeechListening: AnyObject {
     var isRunning: Bool { get }
     func start() throws
     func stop()
-    /// The founder's turn was taken — sent as a message, or abandoned. Clears the
-    /// accumulation so the next `onPartial` starts from empty.
+    /// The founder's turn was taken — sent as a message, or abandoned. The next
+    /// `onPartial` starts from empty.
     ///
     /// **The consumer has to call this, and only the consumer can.** It owns the
     /// end-of-turn decision (the silence timeout, the send), and that decision is not
     /// visible from inside the listener: recognition going quiet looks identical to the
     /// founder pausing mid-sentence. Not called, the next question arrives with the
     /// previous one still glued to the front of it.
+    ///
+    /// **An implementation must retire the live recognition request, not merely clear
+    /// its own accumulation.** `SFSpeechAudioBufferRecognitionRequest` has no reset:
+    /// `bestTranscription` is the transcription of *all* audio ever appended to that
+    /// request, for its whole ~1 minute life, and the listener keeps running across
+    /// turns because barge-in needs the microphone open while the pet speaks. So a
+    /// listener that clears only its own state hears the previous question again on the
+    /// next partial and sends it — a glued question, with a credit spent on it, growing
+    /// every turn for the rest of the session. Nothing throws and nothing logs. This is
+    /// stated on the protocol rather than in one implementation because a fake that
+    /// gets it wrong certifies a promise production does not keep.
     func endTurn()
 }
 
@@ -136,14 +158,32 @@ final class SpeechListener: SpeechListening {
     /// The request the audio tap is currently feeding.
     ///
     /// **A box, because the tap is installed once and the request is not.** `renew()`
-    /// retires a request roughly once a minute; a tap closure that captured the
-    /// request directly would go on appending to the retired one for the rest of the
-    /// session, which is the "hears nothing, no error" failure again. The lock is
-    /// real work, not ceremony: `append` runs on the real-time render thread while
-    /// `renew()` and `stop()` swap on the main actor. It is uncontended except for
-    /// one pointer swap a minute, and `append` itself is already doing more than this
-    /// costs.
-    private final class RequestFeed: @unchecked Sendable {
+    /// retires a request at every turn boundary and again at the ~1 minute limit; a
+    /// tap closure that captured the request directly would go on appending to the
+    /// retired one for the rest of the session, which is the "hears nothing, no error"
+    /// failure again.
+    ///
+    /// **`nonisolated`, not merely `@unchecked Sendable`.** Under
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a bare `final class` is *inferred*
+    /// main-actor, and `@unchecked Sendable` does not opt it out — so `feed.append(buf)`
+    /// from the render thread was a main-actor call from a nonisolated context. Swift 5
+    /// mode says nothing; `-strict-concurrency=complete` reports it, and Swift 6 makes
+    /// it an error. The safety argument the tap comment makes was true at runtime and
+    /// untrue at the type level, which is the kind of gap that survives review.
+    ///
+    /// **The lock is held on a real-time thread, deliberately.** `append` runs on
+    /// `AVAudioEngine`'s render thread while `renew()` and `stop()` swap on the main
+    /// actor, so the swap must not tear — and `NSLock` on the render thread means a
+    /// render callback can, in principle, block on a lower-priority thread
+    /// (unbounded priority inversion, the textbook real-time hazard). Accepted here on
+    /// the measured numbers: the critical section is one pointer read plus
+    /// `SFSpeechAudioBufferRecognitionRequest.append`, the tap delivers ~10 callbacks a
+    /// second with 4800-frame (100-109ms) buffers, and the only competing writer holds
+    /// the lock for one pointer store a turn. A dropped buffer would cost a syllable,
+    /// not a glitch in anything audible — nothing here is feeding an output device.
+    /// The lock-free alternative (an atomic swap plus a retain race on the request) is
+    /// more code and more ways to append to a retired request.
+    nonisolated final class RequestFeed: @unchecked Sendable {
         private let lock = NSLock()
         private var request: SFSpeechAudioBufferRecognitionRequest?
 
@@ -184,15 +224,14 @@ final class SpeechListener: SpeechListening {
     private var tapInstalled = false
     private var voiceProcessingOn = false
 
-    /// Renewals since a recognition task last produced any transcript at all.
+    /// The bound on renewing after a task ends by itself. Pure and tested — see
+    /// `RenewalBudget`, which is where the reasoning lives.
     ///
-    /// The bound on `renew()`. Hitting the ~1 minute audio limit means a minute of
-    /// audio flowed, so a *fresh* task that dies having delivered nothing is not that
-    /// — it is a genuinely fatal condition (authorisation revoked in System Settings,
-    /// the recognizer withdrawn) that will kill every task we open. Unbounded
-    /// renewal there is a tight loop of failing tasks, silently, forever. One
-    /// renewal is spent finding out; the second failure is reported.
-    private var renewalsWithoutResult = 0
+    /// Only tasks that end on their own reach it. A task *we* retire (`renew()`,
+    /// `stop()`) is cancelled, and its cancellation callback is dropped by the identity
+    /// guard in `recognitionUpdate` before it can reach `endOfTask` — so retiring a
+    /// request at a turn boundary does not spend budget.
+    private var budget = RenewalBudget()
 
     /// The founder's turn, accumulated across renewals. See `TurnTranscript`.
     private var transcript = TurnTranscript()
@@ -206,12 +245,23 @@ final class SpeechListener: SpeechListening {
         self.hints = hints
     }
 
-    deinit {
-        // I2's other half: a listener deallocated while running would otherwise leave
-        // the tap installed and the engine holding the microphone. `stop()` and
-        // nothing else — an inlined copy of three of its four steps is exactly the
-        // drift the single-teardown claim was supposed to prevent, and the step it
-        // dropped was `setVoiceProcessingEnabled(false)`.
+    /// **`isolated deinit` (SE-0371), because the teardown is main-actor work.** I2's
+    /// other half: a listener deallocated while running would otherwise leave the tap
+    /// installed and the engine holding the microphone. `stop()` and nothing else — an
+    /// inlined copy of three of its four steps is exactly the drift the single-teardown
+    /// claim was supposed to prevent, and the step it dropped was
+    /// `setVoiceProcessingEnabled(false)`.
+    ///
+    /// A plain `deinit` is nonisolated, so calling the main-actor `stop()` from it is a
+    /// warning under complete checking and an error in Swift 6. The two obvious fixes
+    /// are both worse: hopping with `DispatchQueue.main.async` requires capturing
+    /// `self` from a deinit, which is a use-after-free, and `MainActor.assumeIsolated`
+    /// trades a compile-time warning for a crash on any release that happens off the
+    /// main thread. `isolated deinit` is the language feature for exactly this — the
+    /// deallocation hops to the main actor when it is not already there. Verified to
+    /// compile under `-swift-version 5 -default-isolation MainActor
+    /// -strict-concurrency=complete`.
+    isolated deinit {
         stop()
     }
 
@@ -295,7 +345,12 @@ final class SpeechListener: SpeechListening {
             let frames = Int(buf.frameLength)
             guard frames > 0 else { return }
             let level = VoiceLevel.level(from: UnsafeBufferPointer(start: channel, count: frames))
-            DispatchQueue.main.async {
+            // `[weak self]` on the hop as well, matching `SpeechSpeaker`: reaching the
+            // outer closure's captured `self` var from inside a second concurrently
+            // executing closure is a warning under complete checking and an error in
+            // Swift 6 (`#SendableClosureCaptures`). Re-capturing weakly here is what
+            // the rest of the codebase does and costs nothing.
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated { self?.onLevel?(level) }
             }
         }
@@ -332,7 +387,7 @@ final class SpeechListener: SpeechListening {
                 // later `stop()` retries, and the next `start()` re-enables anyway.
             }
         }
-        renewalsWithoutResult = 0
+        budget = RenewalBudget()
         // A turn cannot survive the microphone being torn down. `renew()` bridges a
         // gap of 100-200ms; this gap is unbounded — the founder was told listening
         // stopped — so resuming her half-sentence afterwards would put words she has
@@ -343,8 +398,33 @@ final class SpeechListener: SpeechListening {
 
     /// See the protocol. The listener cannot infer this: recognition going quiet looks
     /// the same whether she finished or paused.
+    ///
+    /// **Clearing `transcript` is only half of it, and the missing half sent the
+    /// founder's previous question again.** `SFSpeechAudioBufferRecognitionRequest` has
+    /// no reset — `bestTranscription` covers every buffer appended for that request's
+    /// whole life — and this listener deliberately keeps running across turns, because
+    /// barge-in needs the microphone open while the pet speaks. So the request that
+    /// heard turn 1 was still live and still being fed, and its next partial was
+    /// `"what should we charge for the beta thanks"`: sent, credit spent, compounding
+    /// every turn for the session, with nothing thrown and nothing logged.
+    /// `renew()` is the only thing that yields a request transcribing from empty.
+    ///
+    /// It costs the 100-200ms seam `renew()` always costs, taken at the one moment it
+    /// is free: she has just stopped talking. The alternative — a `dropPrefix` baseline
+    /// inside `TurnTranscript` — was rejected because a recognizer revises words it has
+    /// already reported, so yesterday's prefix is not reliably still a prefix, and it
+    /// would leave the request accumulating the whole session behind our back.
+    ///
+    /// **Keep this body and `SpeechFakesTests.FakeListener.endTurn()` in step.** The
+    /// fake is the only place the promise is tested, because testing it here needs an
+    /// `SFSpeechRecognizer`.
     func endTurn() {
         transcript.endTurn()
+        // Not running: `stop()` has already ended the turn and retired the request, and
+        // renewing would report a failure through `renew()`'s else branch for a
+        // listener that is correctly idle.
+        guard isRunning else { return }
+        renew()
     }
 
     // MARK: - Recognition
@@ -388,8 +468,10 @@ final class SpeechListener: SpeechListening {
         // to save its transcript first — the retiring request's words are the first
         // half of a sentence the founder is still saying, and dropped here they are
         // dropped for good, since the new request cannot re-hear audio already past.
-        // `stop()` calls this too and then ends the turn outright, so the commit is
-        // harmless there.
+        // `stop()` calls this too and then ends the turn outright, and `endTurn()`
+        // clears the transcript before it renews, so in both of those the commit is a
+        // no-op on an already-empty `current` rather than a resurrection of words the
+        // founder has moved on from.
         transcript.commit()
         feed.endAudio()
         task?.cancel()
@@ -410,10 +492,19 @@ final class SpeechListener: SpeechListening {
         guard isRunning, feed.isCurrent(req) else { return }
 
         if let text {
-            renewalsWithoutResult = 0
-            transcript.update(text)
-            // The whole turn, not this request's fragment of it.
-            onPartial?(transcript.text)
+            // Non-empty only, and `RenewalBudget` enforces that rather than this call
+            // site: a result carrying `""` is what a task delivers while it is failing
+            // to hear anything, so clearing the budget on it clears it in exactly the
+            // condition the budget exists to detect.
+            budget.sawTranscript(text)
+            // Only on a real change. A recognizer re-reports the same string freely,
+            // and Task 6 reads every partial as speech — `lastSpeechAt`, and barge-in
+            // while the pet is talking — so an unchanged partial cuts the pet off with
+            // words the founder has already had answered.
+            if transcript.update(text) {
+                // The whole turn, not this request's fragment of it.
+                onPartial?(transcript.text)
+            }
         }
 
         // Anything else is this task ending.
@@ -421,29 +512,19 @@ final class SpeechListener: SpeechListening {
         endOfTask(error)
     }
 
-    /// A recognition task ended. Renew unless renewing is evidently futile.
-    ///
-    /// **Renew on any task end, bounded — I could not reliably tell renewable from
-    /// fatal by the error.** The resolution offered `isFinal` with no error, or "the
-    /// duration limit", as the renewable cases. The first is checkable; the second is
-    /// not: the ~1 minute limit surfaces as an `NSError` in `kAFAssistantErrorDomain`
-    /// whose codes are undocumented and version-dependent, and I may not construct an
-    /// `SFSpeechRecognizer` to find out what this OS reports. Matching on a guessed
-    /// code would either close the session on a renewable end (the bug) or renew
-    /// forever on a fatal one (worse). So the discriminator is not the error, it is
-    /// `renewalsWithoutResult`: renewing costs one request, and a fresh request that
-    /// produces nothing at all has answered the question.
+    /// A recognition task ended by itself. Renew unless renewing is evidently futile —
+    /// the decision is `RenewalBudget`'s, and so is the reasoning for it.
     private func endOfTask(_ error: Error?) {
-        guard renewalsWithoutResult < 1 else {
+        switch budget.taskEnded() {
+        case .renew:
+            renew()
+        case .fail:
             // Ordered: stop first, so `isRunning` is already false when the overlay
             // handles this, and the cancellation error `retireRecognition()` may
             // deliver is dropped by the identity guard rather than reported twice.
             stop()
             onFailure?(error ?? VoiceAudioError.engineFailed("recognition ended"))
-            return
         }
-        renewalsWithoutResult += 1
-        renew()
     }
 
     /// Retire the request/task pair and open a fresh one.
@@ -459,8 +540,24 @@ final class SpeechListener: SpeechListening {
     /// a buffer or two (roughly 100-200ms) is not transcribed. That is preferable to
     /// running two tasks on one recognizer, which is undocumented and unmeasurable
     /// here, and it matches how `start()`/`stop()` already use it — one task at a time.
+    ///
+    /// Called at every turn boundary (`endTurn()`) as well as on task end, because the
+    /// request's transcript is the only copy of the previous question that neither we
+    /// nor the consumer can clear.
     private func renew() {
-        guard isRunning, let recognizer else { return }
+        guard isRunning, let recognizer else {
+            // **Unreachable, and it must not be silent anyway.** `endOfTask` only gets
+            // here behind the identity guard, so the listener is running; `endTurn()`
+            // returns early when it is not; and a nil recognizer makes `start()` throw
+            // before anything can renew. If it ever is reached, returning quietly
+            // leaves no task and no request with `isRunning` still true — a
+            // live-looking orb that hears nothing, the exact failure this class exists
+            // to report. Stop first so `isRunning` is already false when the overlay
+            // reacts, matching `endOfTask`.
+            stop()
+            onFailure?(VoiceAudioError.recognizerUnavailable)
+            return
+        }
         // `retireRecognition()` commits the retiring request's transcript, so the
         // founder's turn crosses the swap intact — see `TurnTranscript`.
         retireRecognition()

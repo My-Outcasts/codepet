@@ -43,6 +43,11 @@ struct CopilotChatView: View {
     /// The department chip selected in the composer (nil = no focus). Threads into
     /// `sendChat(department:)` for the specialist handoff.
     @State private var selectedDept: Department?
+    /// Pinned context and attached files for the next message. Live here rather than
+    /// in the store for the same reason `selectedDept` does — both are consumed by
+    /// one send. PROTOTYPE: held and shown correctly; not yet threaded to the model.
+    @State private var pins: [ContextPin] = []
+    @State private var attachments: [ChatAttachment] = []
 
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
@@ -196,6 +201,8 @@ struct CopilotChatView: View {
             accent2: CodepetTheme.accentPink,
             isBusy: isChatBusy,
             showsDeptChips: showsDeptChips,
+            pins: $pins,
+            attachments: $attachments,
             selectedDept: $selectedDept,
             onSend: send,
             onQuickAction: handleQuickAction,
@@ -488,6 +495,11 @@ struct CopilotChatView: View {
         // the department, and leaving one armed chip behind is the exact state this removes.
         let dept = selectedDept
         selectedDept = nil
+        // Same rule, same reason as the chip above: one message, one handoff. A pin
+        // or an attachment that survived its send would re-send — and, once the wire
+        // carries them, re-bill — the same context on every later turn.
+        pins = []
+        attachments = []
         switch mode {
         case .ask, .plan:
             // `founderAsk` is the unshaped text: byte should see the mode's framing

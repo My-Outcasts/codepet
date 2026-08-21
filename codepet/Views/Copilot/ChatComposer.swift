@@ -4,13 +4,21 @@ import SwiftUI
 /// and the docked active conversation. Owns no state: draft/mode live in the
 /// parent (`CopilotChatView`) so the same value drives both placements.
 ///
-/// Honesty notes: the `+` button is a quick-actions menu (NOT a file picker —
-/// the app has no attachments), and the mode control shapes the outgoing message
-/// via `ChatMode` (no backend mode exists).
+/// Two controls, not four — spec `2026-08-21-composer-controls-design.md`.
+/// `departmentControl` collapses all eight departments into one button (it replaced
+/// three chips, a `•••` overflow, and a fourth chip that appeared only when the
+/// selection came from that overflow), and `plusMenu` is the capability door: what
+/// this turn gets to see, and how hard it should work.
 ///
-/// DOCK ADAPTATION (380pt): `deptChips` shows the first 2 department chips (PR#39
-/// showed 3) + the `•••` overflow menu, so the chip row + the active-project chip
-/// fit inside the 380pt dock width.
+/// **PROTOTYPE STATE, 21 Aug.** The controls, the picker, the pills and the caps are
+/// all live. What is NOT wired is the last hop for pins and attachments — neither
+/// reaches the model yet, because that needs `ChatContext.compose(pinned:)` and a
+/// widened `ClaudeMessage.content` in `functions/`. Both are on the plan and neither
+/// is in this change, which is why the `🌐 Web search` row is absent rather than
+/// present and lying: a toggle that does not change the request is worse than none.
+///
+/// The mode control still shapes the outgoing message via `ChatMode` (no backend
+/// mode exists), and it is dock-only — `Ask` and `Developer` are places in the rail.
 struct ChatComposer: View {
     @Binding var draft: String
     @Binding var mode: ChatMode
@@ -33,6 +41,12 @@ struct ChatComposer: View {
     /// the dock and every existing call site render exactly what they rendered
     /// before — the same additive rule `ChatSurface` follows.
     var tier: Binding<ApprovalTier>? = nil
+    /// What the founder pinned or attached for this message, when the surface offers
+    /// it. Optional and nil by default — same additive rule as `tier`, so
+    /// `DeveloperWorkPane` (whose context is its branch and its folder, not a
+    /// marketing deliverable) passes nothing and renders exactly as before.
+    var pins: Binding<[ContextPin]>? = nil
+    var attachments: Binding<[ChatAttachment]>? = nil
     @Binding var selectedDept: Department?
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
@@ -59,12 +73,19 @@ struct ChatComposer: View {
     /// the mode pill, which still drives `ChatMode` in main's shell.
     private var dockBody: some View {
         VStack(alignment: .leading, spacing: 12) {
+            pillRow
+
             ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
 
-            deptChips
+            // The dock keeps the active-project chip on its own row now that the
+            // department chips it shared with are gone.
+            if let link = companyStore.activeProjectLink {
+                HStack(spacing: 6) { projectChip(link) }
+            }
 
             HStack(spacing: 8) {
-                quickActionsMenu
+                departmentControl
+                plusMenu
                 modeMenu
                 Spacer()
                 sendButton
@@ -95,12 +116,14 @@ struct ChatComposer: View {
     /// longer has to compete for attention in.
     private var twoModeBody: some View {
         VStack(alignment: .leading, spacing: 10) {
+            pillRow
+
             ComposerField(placeholder: placeholder, text: $draft, focus: focus,
                           floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
-                if showsDeptChips { deptChips }
-                quickActionsMenu
+                if showsDeptChips { departmentControl }
+                plusMenu
                 // "The tier lives in the composer, beside `+`" (§8.2) — the session
                 // bar carries facts set once, the composer carries controls for the
                 // NEXT instruction, and how much rope the next instruction gets is
@@ -129,115 +152,165 @@ struct ChatComposer: View {
         .opacity(isBusy ? 0.62 : 1.0)
     }
 
-    private var deptChips: some View {
-        // Dock adaptation (380pt): 2 chips + overflow, not the prototype's 3 —
-        // keeps the row + the active-project chip from overflowing the dock width.
-        let visible = Array(DepartmentCatalog.roster.prefix(surface.visibleDeptChips))
-        // A department chosen from the overflow menu isn't one of the visible
-        // chips, so its selection was invisible. Surface it as its own chip.
-        let overflowSelected: Department? = selectedDept.flatMap { sel in
-            visible.contains(where: { $0.key == sel.key }) ? nil : sel
-        }
-        return HStack(spacing: 6) {
-            ForEach(visible) { dep in
-                chip(dep)
-            }
-            if let sel = overflowSelected {
-                chip(sel)
-            }
-            // Two-mode folds the overflow into the `+` menu, the way the prototype's
-            // single `+` does — one control, not a `•••` beside a `＋`.
-            if surface == .dock {
-                Menu {
-                    deptOverflowItems
-                } label: {
-                    Text("•••").font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .padding(.horizontal, 10).frame(height: 26)
-                        .overlay(Capsule().stroke(CodepetTheme.hairline))
-                        .hoverAffordance(Capsule())
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            }
-
-            // Active coding-agent project (2C-3): a quiet, always-visible reminder of
-            // which folder the agent will touch. Tap → the Environment link surface.
-            // Two-mode has no room for it beside three chips, and Developer's own
-            // session bar names the repo, so it stays a dock affordance.
-            if surface == .dock, let link = companyStore.activeProjectLink {
-                Spacer(minLength: 8)
-                Button { companyStore.select(.environment) } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: link.isGitRepo ? "arrow.triangle.branch" : "folder")
-                            .font(.system(size: 9))
-                        Text(Project.nameFromPath(link.path))
-                            .font(CodepetTheme.inter(11, weight: .medium)).lineLimit(1)
-                    }
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .padding(.horizontal, 8).frame(height: 26)
-                    .overlay(Capsule().stroke(CodepetTheme.hairline))
-                    .hoverAffordance(Capsule())
-                }
-                .buttonStyle(.plain).fixedSize()
-                .help(link.path)
-            }
-        }
-    }
-
-    /// A department chip. Selecting one summons that department's PET — and until the reply
-    /// landed, nothing said so: the chip named a department, the answer arrived signed "Nova ·
-    /// Marketing", and the founder had to send a message to find out who she had picked. The
-    /// sprite rides the selected chip so the handoff is legible at the moment of choosing.
+    /// What the founder pinned or attached, above the field — Claude's attachment
+    /// chips in Codepet's nouns.
     ///
-    /// Only the ON state carries it. A sprite on every chip would put four portraits in a row
-    /// under the composer competing with the send button, and the pet is only a fact once the
-    /// chip is armed. A department with no mapped companion (or one that IS the host — the same
-    /// case `actingSpecialist` declines to hand off) shows the name alone, so the chip never
-    /// promises a pet that won't appear.
-    private func chip(_ dep: Department) -> some View {
-        let on = selectedDept?.key == dep.key
-        return Button {
-            selectedDept = on ? nil : dep
-        } label: {
-            HStack(spacing: 5) {
-                if on, let pet = chipPet(dep) {
-                    // 18pt, not the 20-28pt used in the transcript: the chip row is 26pt tall,
-                    // and these sprites are tall portraits fitted into a square frame, so the
-                    // sprite reads as ~13pt wide. It is an identity cue next to the name it
-                    // belongs to, not a thing to be recognised on its own.
-                    CharacterImage(pet, size: 18)
+    /// **Pins and attachments share one row and one cap**, because to the founder
+    /// they are the same gesture: *this goes with my next message*. Two rows with
+    /// two ceilings would be an implementation detail leaking into the UI.
+    @ViewBuilder private var pillRow: some View {
+        let pinList = pins?.wrappedValue ?? []
+        let attList = attachments?.wrappedValue ?? []
+        if !pinList.isEmpty || !attList.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(attList) { att in
+                    pill(icon: att.icon, title: att.filename, gloss: att.gloss) {
+                        attachments?.wrappedValue = ChatAttachment.removing(att, from: attList)
+                    }
                 }
-                Text(dep.name).font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(on ? dep.accent : CodepetTheme.bodyText)
-            }
-            .padding(.horizontal, 10).frame(height: 26)
-            // Off used to be `Color.clear`, which made the chip hard to select and
-            // easy to deselect — the interior only existed once it was already on.
-            // `surface` is what the composer sits on, so this reads identically at
-            // rest while giving the off state a real interior.
-            .background(Capsule().fill(on ? dep.accent.opacity(0.15) : CodepetTheme.surface))
-            .overlay(Capsule().stroke(on ? dep.accent : CodepetTheme.hairline))
-            .hoverAffordance(Capsule(), accent: dep.accent)
-        }.buttonStyle(.plain)
-    }
-
-    /// The pet this chip summons, or nil when the turn would stay with the host. Goes through the
-    /// SAME `specialistId` the send does (`CompanyStore.actingSpecialist`), so the chip can never
-    /// promise a pet the reply then doesn't sign — see that function for why the rule has one home.
-    private func chipPet(_ dep: Department) -> String? {
-        DepartmentCompanions.specialistId(for: dep.key, host: companyStore.company.companionId)
-    }
-
-    /// The departments that don't have a visible chip. One list, two call sites —
-    /// the dock's `•••` and two-mode's `+` — so the two can't drift apart.
-    @ViewBuilder private var deptOverflowItems: some View {
-        ForEach(DepartmentCatalog.roster.dropFirst(surface.visibleDeptChips)) { dep in
-            Button {
-                selectedDept = (selectedDept?.key == dep.key) ? nil : dep
-            } label: {
-                Label(dep.name, systemImage: selectedDept?.key == dep.key ? "checkmark" : "")
+                ForEach(pinList) { pin in
+                    pill(icon: pin.icon, title: pin.title, gloss: pin.gloss) {
+                        pins?.wrappedValue = ContextPin.removing(pin, from: pinList)
+                    }
+                }
+                Spacer(minLength: 0)
             }
         }
+    }
+
+    private func pill(icon: String, title: String, gloss: String,
+                      remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(title)
+                .font(CodepetTheme.inter(CodepetType.subheadline, weight: .medium))
+                .lineLimit(1).truncationMode(.middle)
+            Text(gloss)
+                .font(CodepetTheme.inter(9, weight: .medium))
+                .foregroundColor(CodepetTokens.faint)
+            Button(action: remove) {
+                Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .help("Remove")
+        }
+        .foregroundColor(CodepetTheme.mutedText)
+        .padding(.leading, 8).padding(.trailing, 4).frame(height: 22)
+        .background(Capsule().fill(CodepetTokens.well))
+        .overlay(Capsule().stroke(CodepetTokens.cardEdge))
+        .frame(maxWidth: 210)
+    }
+
+    /// Departments, collapsed — spec §4.
+    ///
+    /// This replaces a row of three chips (two in the dock), a `•••` overflow, and a
+    /// fourth chip that appeared only when the selection came from that overflow.
+    /// The promoted chip existed because a choice made inside a menu was invisible;
+    /// an armed BUTTON is visible, so the patch stops being needed.
+    ///
+    /// **One capsule, two hit targets.** The label opens the menu, the `✕` clears.
+    /// A `✕` that only decorated would be worse than none, and SwiftUI gives a
+    /// `Menu` its whole label as one target — hence an `HStack` of two controls
+    /// sharing one background rather than a `Menu` with an overlay.
+    private var departmentControl: some View {
+        let host = companyStore.company.companionId
+        let armed = selectedDept
+        return HStack(spacing: 0) {
+            Menu {
+                Button { selectedDept = nil } label: {
+                    if armed == nil {
+                        Label(DepartmentMenu.anyoneLabel(lang), systemImage: "checkmark")
+                    } else {
+                        Text(DepartmentMenu.anyoneLabel(lang))
+                    }
+                }
+                Divider()
+                ForEach(DepartmentMenu.rosterOrder) { dep in
+                    Button { selectedDept = dep } label: { deptRow(dep, host: host) }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    if let dep = armed, let pet = DepartmentMenu.pet(for: dep, host: host) {
+                        CharacterImage(pet, size: 16)
+                    }
+                    Text(armed.map { DepartmentMenu.armedLabel($0, host: host) }
+                         ?? DepartmentMenu.restLabel(lang))
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(armed?.accent ?? CodepetTheme.bodyText)
+                        .lineLimit(1)
+                    if armed == nil {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                }
+                .padding(.leading, 10)
+                .padding(.trailing, armed == nil ? 10 : 6)
+                .frame(height: 26)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
+            if let dep = armed {
+                Button { selectedDept = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(dep.accent)
+                        .frame(width: 20, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(DepartmentMenu.clearHelp(lang))
+            }
+        }
+        // The armed treatment is the retired chip's treatment, unchanged: two
+        // treatments for one control would read as two features.
+        .background(Capsule().fill(armed.map { $0.accent.opacity(0.15) } ?? CodepetTheme.surface))
+        .overlay(Capsule().stroke(armed?.accent ?? CodepetTheme.hairline))
+        .hoverAffordance(Capsule(), accent: armed?.accent ?? CodepetTheme.accentPurple)
+    }
+
+    /// One menu row: checkmark when armed, else the pet's sprite, then
+    /// `crash · Engineering`.
+    ///
+    /// **The known risk (spec §4).** macOS decides how a menu draws a `Label`'s icon,
+    /// and `char-*` are pixel-art assets rather than SF Symbols. If the sprite does
+    /// not survive at menu-icon size, delete the `icon:` closure and keep the `Text`
+    /// — the row stays cast-signed, which is the part that matters. Do NOT replace
+    /// this with a custom popover; that shape was considered and rejected 21 Aug for
+    /// costing its own keyboard and dismiss handling.
+    @ViewBuilder private func deptRow(_ dep: Department, host: String) -> some View {
+        let on = selectedDept?.key == dep.key
+        let title = DepartmentMenu.rowTitle(dep, host: host)
+        if on {
+            Label(title, systemImage: "checkmark")
+        } else if let pet = DepartmentMenu.pet(for: dep, host: host) {
+            Label { Text(title) } icon: { Image("char-" + pet).renderingMode(.original) }
+        } else {
+            Text(title)
+        }
+    }
+
+    /// The active coding-agent project — a quiet, always-visible reminder of which
+    /// folder the agent will touch. Tap goes to the Environment link surface. Lifted
+    /// out of the retired `deptChips` unchanged.
+    private func projectChip(_ link: ProjectLink) -> some View {
+        Button { companyStore.select(.environment) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: link.isGitRepo ? "arrow.triangle.branch" : "folder")
+                    .font(.system(size: 9))
+                Text(Project.nameFromPath(link.path))
+                    .font(CodepetTheme.inter(11, weight: .medium)).lineLimit(1)
+            }
+            .foregroundColor(CodepetTheme.mutedText)
+            .padding(.horizontal, 8).frame(height: 26)
+            .overlay(Capsule().stroke(CodepetTheme.hairline))
+            .hoverAffordance(Capsule())
+        }
+        .buttonStyle(.plain).fixedSize()
+        .help(link.path)
     }
 
     /// How much rope, per session.
@@ -284,29 +357,113 @@ struct ChatComposer: View {
         .help(tier.wrappedValue.detail(lang))
     }
 
-    private var quickActionsMenu: some View {
+    /// The capability door — spec §5. Two sections and a footer, every row captioned.
+    ///
+    /// `quickActions` no longer appears here. Those three are prompt STARTERS and
+    /// they are already cards on the empty hero; the `+` was their second home, and a
+    /// menu that mixes "say this for me" with "let the model see this" has no
+    /// organising idea. `CopilotChatView` still builds them for the hero.
+    ///
+    /// **PROTOTYPE STATE (21 Aug).** Pinning and attaching are live here — the picker
+    /// runs, the pills appear, the caps hold. What is not wired is the last hop:
+    /// neither reaches the model yet, because that needs `ChatContext.compose` and
+    /// `functions/`. The `🌐 Web search` row is therefore absent rather than present
+    /// and lying: a toggle that does not change the request is worse than no toggle.
+    private var plusMenu: some View {
         Menu {
-            ForEach(quickActions) { qa in
+            Section(PlusMenu.bringInLabel(lang)) {
+                if let atts = attachments {
+                    let full = atts.wrappedValue.count >= ChatAttachment.max
+                    Button {
+                        let room = ChatAttachment.max - atts.wrappedValue.count
+                        guard room > 0 else { return }
+                        let picked = AttachmentPicker.pickAndEncode(limit: room)
+                        var next = atts.wrappedValue
+                        for a in picked.attachments { next = ChatAttachment.adding(a, to: next) }
+                        atts.wrappedValue = next
+                    } label: {
+                        menuRow(PlusMenu.attachLabel(lang),
+                                full ? PlusMenu.attachFullDetail(lang)
+                                     : PlusMenu.attachDetail(lang),
+                                icon: "paperclip")
+                    }
+                    .disabled(full)
+                }
+                if let pins {
+                    let full = pins.wrappedValue.count >= ContextPin.max
+                    Menu {
+                        ForEach(PlusMenu.recentLibrary(companyStore.company.library)) { d in
+                            Button(d.title) {
+                                pins.wrappedValue = ContextPin.adding(
+                                    .deliverable(id: d.id, title: d.title),
+                                    to: pins.wrappedValue)
+                            }
+                            .disabled(full)
+                        }
+                        Divider()
+                        Button(PlusMenu.browseLibraryLabel(lang)) { companyStore.select(.library) }
+                    } label: {
+                        menuRow(PlusMenu.libraryLabel(lang), PlusMenu.libraryDetail(lang),
+                                icon: "books.vertical")
+                    }
+                    Menu {
+                        ForEach(PlusMenu.openTasks(companyStore.company.tasks)) { t in
+                            Button(t.title) {
+                                pins.wrappedValue = ContextPin.adding(
+                                    .task(id: t.id, title: t.title), to: pins.wrappedValue)
+                            }
+                            .disabled(full)
+                        }
+                        Divider()
+                        Button(PlusMenu.openRoadmapLabel(lang)) { companyStore.select(.roadmap) }
+                    } label: {
+                        menuRow(PlusMenu.taskLabel(lang), PlusMenu.taskDetail(lang), icon: "map")
+                    }
+                }
+                // A toggle, not a picker: `memoryEnabled` is already the real gate on
+                // the decisions block in `ChatContext.compose`.
                 Button {
-                    onQuickAction(qa.title)
+                    Task { await companyStore.updateFounderPrefs { $0.memoryEnabled.toggle() } }
                 } label: {
-                    Label(qa.title, systemImage: qa.systemImage)
+                    menuRow(PlusMenu.knowsLabel(lang), PlusMenu.knowsDetail(lang),
+                            icon: companyStore.company.founderPrefs.memoryEnabled
+                                ? "checkmark" : "brain")
+                }
+                Menu {
+                    Button(PlusMenu.changeFolderLabel(lang)) {
+                        _ = ProjectLinker.pickAndLink(into: companyStore, language: lang)
+                    }
+                    Button(PlusMenu.openEnvironmentLabel(lang)) {
+                        companyStore.select(.environment)
+                    }
+                } label: {
+                    menuRow(PlusMenu.folderLabel(lang,
+                                                 path: companyStore.activeProjectLink?.path),
+                            PlusMenu.folderDetail(lang), icon: "folder")
                 }
             }
+
+            // Two-mode only, and this is a decision rather than an oversight: the
+            // dock still reaches the room through its `.plan` mode pill
+            // (`ChatMode.convenesRoom`), so a row here would be a SECOND door to one
+            // ~10-credit act on the same surface. The pane has no mode pill, which is
+            // why `RoomOffer` exists at all.
             if surface == .twoMode {
-                Divider()
-                // The room's only way in on this surface. The mode pill that used to
-                // reach it (`.plan`) is gone, so without this the Virtual Company is
-                // unreachable in the pane — see `RoomOffer`.
-                Button {
-                    onConveneRoom()
-                } label: {
-                    Label(RoomOffer.label(lang), systemImage: "person.3")
+                Section(PlusMenu.goDeeperLabel(lang)) {
+                    Button {
+                        onConveneRoom()
+                    } label: {
+                        menuRow(RoomOffer.label(lang), RoomOffer.detail(lang), icon: "person.3")
+                    }
+                    .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
                 }
-                .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
-                .help(RoomOffer.detail(lang))
-                Divider()
-                Section(lang == .vi ? "Phòng ban" : "Departments") { deptOverflowItems }
+            }
+
+            Divider()
+            Button {
+                companyStore.select(.environment)
+            } label: {
+                menuRow(PlusMenu.setupLabel(lang), PlusMenu.setupDetail(lang), icon: "gearshape")
             }
         } label: {
             Image(systemName: "plus")
@@ -314,9 +471,9 @@ struct ChatComposer: View {
                 .foregroundColor(CodepetTheme.bodyText)
                 .frame(width: surface == .dock ? 30 : 26,
                        height: surface == .dock ? 30 : 26)
-                // Bare in the pane. Claude and Codex both draw their `+` as a glyph with
-                // no container; ours was a fourth outlined pill in a row that already had
-                // three, which is most of why the control row read as heavy.
+                // Bare in the pane. Claude and Codex both draw their `+` as a glyph
+                // with no container; ours was a fourth outlined pill in a row that
+                // already had three, which is most of why the row read as heavy.
                 .overlay(
                     surface == .dock
                         ? AnyView(RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -329,6 +486,24 @@ struct ChatComposer: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    /// A menu row with its caption underneath — spec §7.7.
+    ///
+    /// `Text` + `Text` in a `VStack` is what macOS renders as a two-line item; a
+    /// `Label` with a subtitle is not something menus draw. If the second line does
+    /// not survive, the label alone still reads correctly — so this degrades rather
+    /// than breaking.
+    @ViewBuilder private func menuRow(_ title: String, _ detail: String,
+                                      icon: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(detail).font(CodepetTheme.inter(CodepetType.footnote))
+            }
+        } icon: {
+            Image(systemName: icon)
+        }
     }
 
     /// The mode control — the "streamline Let's build in" change: a `Menu` over

@@ -15,10 +15,12 @@ final class SpeakingQueueTests: XCTestCase {
     /// code block then "That should do it." `SentenceSplitter.speakable` deletes the
     /// fence entirely, so for the 5-15s it streams there are no speakable sentences
     /// and the queue is empty. If that reports finished, the overlay applies
-    /// `.replyFinished` and clears her transcript mid-reply, while the real reply is
-    /// still arriving. It was worse than that until 21 Aug: the mic reopened, the 1.2s
-    /// silence timer fired on the founder saying nothing, and an empty turn was sent
-    /// and charged. Decision 4 removed the timer; this half of the damage remains.
+    /// `.replyFinished` and leaves `.speaking` while the real reply is still arriving —
+    /// so `VoiceModeOverlay.speak` refuses every sentence after the fence and the
+    /// founder hears half an answer. It was worse than that: it also cleared her
+    /// transcript (deleted 22 Aug, see `VoiceModeOverlay.replyEnded`), and until 21 Aug
+    /// the mic reopened, the 1.2s silence timer fired on the founder saying nothing,
+    /// and an empty turn was sent and charged.
     func testADrainMidStreamDoesNotReportTheReplyFinished() {
         var q = SpeakingQueue()
         _ = q.beginReply()

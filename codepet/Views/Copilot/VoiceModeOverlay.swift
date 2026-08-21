@@ -497,28 +497,19 @@ struct VoiceModeOverlay: View {
 
         // The reply is over: drained AND `endOfReply()` was called.
         voice.onFinishedAll = {
-            // A reply with nothing speakable — an answer that is only a fenced code
-            // block, which `SentenceSplitter.speakable` deletes entirely — never
-            // reached `.speaking`, and `.replyFinished` is not legal from `.thinking`.
-            // Step through it, or the overlay hangs in `.thinking` with the turn
-            // taken, the mic shut, and nothing to wait for.
-            if session.state == .thinking { session.apply(.replyBegan) }
-            session.apply(.replyFinished)
-            // A fresh turn. **`partial` is cleared here even though nothing sends on
-            // its own any more**, and the reason is `streamEndBelongsToVoiceTurn`:
-            // that guard exists because this clear can erase a spoken question, and
-            // removing the clear to keep words she said *while the pet was talking*
-            // would leave the guard protecting almost nothing. Those words are not
-            // lost either way — `endTurn()` is not called at the end of a reply, so
-            // `TurnTranscript` still holds them and the next partial re-reports the
-            // whole turn.
-            partial = ""
+            // The orb stops tracking anything. `onLevel` is what feeds it and the tap
+            // fires ~10 times a second, so this is one frame of honesty and not a
+            // latched value — which is why it is here and not inside `replyEnded`,
+            // where a returned constant asserted against its own literal would be a
+            // test that cannot fail.
             level = 0
-            // **The mic may have died during the reply.** See `onFailure`'s
-            // `.speaking` branch: this is the transition that makes the header say
-            // "Listening", so it is where that has to become true again.
-            do { try Self.ensureListening(listener, state: session.state) }
-            catch {
+            // Everything else — the stepping, the mic, and what must survive — is in
+            // `replyEnded`, which a test can drive. Only the failure path stays here,
+            // because it writes `failure`.
+            do {
+                partial = try Self.replyEnded(session: &session, pending: partial,
+                                              listener: listener)
+            } catch {
                 // The restart itself refused — that is a real, fatal failure, and it
                 // takes the normal path rather than being swallowed a second time.
                 listener.stop()
@@ -526,6 +517,62 @@ struct VoiceModeOverlay: View {
                 session.apply(.close)
             }
         }
+    }
+
+    /// **The reply is over.** Steps the machine, hands back the transcript that must
+    /// still be on screen, and makes "Listening" true again.
+    ///
+    /// Static and taking its collaborators for the same reason as `takeTurn` and
+    /// `ensureListening`: this ran inside `voice.onFinishedAll`, and a SwiftUI
+    /// closure is unreachable from `ImageRenderer`, which fires no lifecycle hooks.
+    /// Every rule below fails silently, and one of them shipped.
+    ///
+    /// 1. **`.replyBegan` first, from `.thinking`.** A reply with nothing speakable —
+    ///    an answer that is only a fenced code block, which
+    ///    `SentenceSplitter.speakable` deletes entirely — never reached `.speaking`,
+    ///    and `.replyFinished` is not legal from `.thinking`. Without the step the
+    ///    overlay hangs in `.thinking` with the turn taken, the mic shut, and nothing
+    ///    to wait for.
+    /// 2. **The mic may have died during the reply.** See `wire()`'s `onFailure`
+    ///    `.speaking` branch: a recognition failure raised while the pet spoke is
+    ///    deliberately not shown, and `SpeechListener` has already torn itself down by
+    ///    then. This is the transition that makes the header say "Listening", so it is
+    ///    where that has to become true again. It throws rather than swallowing a
+    ///    refusal, so the caller can show it.
+    /// 3. **`pending` comes back unchanged, and that deletion is the fix.** This used
+    ///    to be `partial = ""`, and the sequence it destroyed is ordinary: she asks
+    ///    Q1 and taps ✓, then while the pet is thinking she adds "and check the
+    ///    runway". `onPartial` fires — the state is `.thinking`, not `.speaking`, so
+    ///    this is **not** barge-in — and `partial` and `TurnTranscript` both hold that
+    ///    sentence. The reply arrives, she listens to it in silence, the reply drains,
+    ///    and the clear erased it. **And nothing can bring it back:**
+    ///    `recognitionUpdate` calls `onPartial` only when `TurnTranscript.update`
+    ///    returns true, and the live request re-reporting the identical string is not
+    ///    a change — so the sentence is off screen with ✓ disabled, and the next words
+    ///    she says resurrect the whole thing glued to their front, one tap from being
+    ///    sent. Those are the two failures `streamEndBelongsToVoiceTurn` and ✕'s own
+    ///    `endTurn()` exist to prevent, reached from inside a legitimate voice turn.
+    ///
+    ///    The clear was redundant everywhere else, which is why deleting it is safe
+    ///    rather than a trade. `.founderSentTurn` is the only way into `.thinking` and
+    ///    it is applied at exactly one production site — `takeTurn`, from `sendTurn`,
+    ///    which clears `partial` on the next line — and `discardTurn` clears after ✕.
+    ///    So `partial` is already empty on every path where the turn was taken or
+    ///    dropped, and the only words this could ever destroy are ones spoken *after*
+    ///    that. Barge-in cannot reach here either: `SpeakingQueue.stop()` sets
+    ///    `reported = true`, so an interrupted reply never reports finished.
+    ///
+    ///    **Not `listener.endTurn()` either**, which review proposed alongside. That
+    ///    discards her words deliberately instead of accidentally — the same loss with
+    ///    a clear conscience.
+    @discardableResult
+    static func replyEnded(session: inout VoiceSession,
+                           pending: String,
+                           listener: SpeechListening) throws -> String {
+        if session.state == .thinking { session.apply(.replyBegan) }
+        session.apply(.replyFinished)
+        try ensureListening(listener, state: session.state)
+        return pending
     }
 
     /// **The microphone is alive whenever the overlay claims to be listening.**
@@ -712,10 +759,13 @@ struct VoiceModeOverlay: View {
     /// `endOfReply()` is what lets `onFinishedAll` ever fire. It is NOT inferable
     /// from the queue draining: `speakable` deletes fenced code blocks entirely, so a
     /// 50-line snippet is 5–15 seconds with nothing to say. Treat that drain as the
-    /// end and the overlay reopens the mic and clears her transcript mid-reply, while
-    /// the real reply is still arriving. (It also used to spend a credit on an empty
-    /// turn, back when silence sent one; decision 4 removed that half of the damage
-    /// and left the rest.)
+    /// end and the overlay reopens the mic and drops the orb to zero mid-reply, while
+    /// the real reply is still arriving — and the session takes `.replyFinished`, so
+    /// the *rest* of the reply is then spoken from `.listening`, which `speak()`
+    /// refuses outright: the founder hears half an answer. (It also used to clear her
+    /// transcript, until the reply-end clear was deleted — see `replyEnded` — and
+    /// before decision 4 it spent a credit on an empty turn as well. Two of the three
+    /// are gone; the mechanism is not.)
     private func replyStreamEnded() {
         // **The stream that just ended has to be OURS.** The overlay is openable at
         // any moment, including over a typed turn already in flight, and that seam is
@@ -730,13 +780,22 @@ struct VoiceModeOverlay: View {
         // tap. Then the TYPED reply finishes, and ungated this fired `endOfReply()` on
         // a queue that had never begun a reply — and `SpeakingQueue` starts
         // `accepting = true, reported = false`, so a virgin queue drains and *reports*.
-        // `onFinishedAll` then no-ops the illegal `.replyFinished` and unconditionally
-        // clears `partial` and `level`.
+        // `onFinishedAll` then runs the whole reply-end path for a reply that was never
+        // this overlay's.
         //
-        // **Her spoken question is erased mid-flight** — no message, no orb change,
-        // no credit spent, and she has to say it all again. `VoicePermission
-        // .canEnterVoiceMode` keeps her out of this situation; this keeps the
-        // situation harmless if she is in it.
+        // **It used to erase her spoken question mid-flight** — no message, no orb
+        // change, no credit spent, and she had to say it all again. That half is fixed
+        // at the source: `replyEnded` no longer clears the transcript, and this guard
+        // is no longer the only thing standing between her sentence and the bin.
+        //
+        // **It is still the right guard, and it still fires.** What is left ungated is
+        // not cosmetic: `endOfReply()` marks the queue `reported`, `level` drops to
+        // zero mid-sentence, and `ensureListening` runs against a `.listening` state
+        // it was never asked about. Keeping it also means the two facts stay
+        // independent — a later change that gives the reply-end path something new to
+        // reset does not silently acquire this seam along with it. `VoicePermission
+        // .canEnterVoiceMode` keeps her out of the situation; this keeps the situation
+        // harmless if she is in it.
         guard Self.streamEndBelongsToVoiceTurn(session.state) else { return }
         speak(replyText, streaming: false)
         voice.endOfReply()
@@ -745,9 +804,11 @@ struct VoiceModeOverlay: View {
     /// Whether `isStreaming` going false is the end of a reply **this overlay asked
     /// for**. Only `.thinking` and `.speaking` follow a `beginReply()`.
     ///
-    /// Extracted so it can be tested: its failure is silent — an erased question and
-    /// a founder repeating herself — and every other line of `replyStreamEnded` is
-    /// unreachable from a test.
+    /// Extracted so it can be tested: its failure is silent — the reply-end path run
+    /// against a reply that was never this overlay's — and every other line of
+    /// `replyStreamEnded` is unreachable from a test. It cost an erased question until
+    /// `replyEnded` stopped clearing the transcript; what it costs now is written out
+    /// at the call site, and it is still not nothing.
     static func streamEndBelongsToVoiceTurn(_ state: VoiceState) -> Bool {
         state == .thinking || state == .speaking
     }

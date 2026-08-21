@@ -767,6 +767,150 @@ final class SpeechFakesTests: XCTestCase {
                        "the discarded sentence came back glued to the next one")
     }
 
+    // MARK: - A question queued while the pet was thinking
+
+    /// **A follow-up spoken while the pet was thinking must survive the reply ending.**
+    ///
+    /// `onFinishedAll` used to clear `partial`, and the sequence that made that a
+    /// silent loss is ordinary: she asks Q1 and taps ✓ (`sendTurn` clears `partial`
+    /// itself, so the state the overlay reaches `.thinking` in is already empty);
+    /// while the pet is thinking she adds *"and check the runway"*; `onPartial` fires
+    /// and — the state being `.thinking` rather than `.speaking` — this is **not**
+    /// barge-in, so `partial` and `TurnTranscript` now both hold that sentence; the
+    /// reply arrives and she listens to it in silence; the reply drains and the clear
+    /// erased her sentence.
+    ///
+    /// **And it cannot come back on its own.** `recognitionUpdate` calls `onPartial`
+    /// only when `TurnTranscript.update` returns true, and `update` compares against
+    /// what it already reported — so the live request re-reporting the identical
+    /// string fires nothing. The transcript is off screen with ✓ disabled, and the
+    /// next words she says bring the whole thing back glued to their front, one tap
+    /// from being sent: the two failures `streamEndBelongsToVoiceTurn` and ✕'s own
+    /// `endTurn()` both exist to prevent, reached from inside a legitimate voice turn.
+    ///
+    /// The clear was redundant on every other path. `partial` is written in exactly
+    /// five places, and `.founderSentTurn` — the only way into `.thinking` — is
+    /// applied at exactly one production site (`takeTurn`, from `sendTurn`, which
+    /// clears `partial` on the next line). `discardTurn` clears after ✕. So by the
+    /// time a reply ends, the only words `partial` can be holding are ones spoken
+    /// *after* the turn was taken.
+    ///
+    /// **Verified RED, 22 Aug**, against `replyEnded` extracted faithfully — i.e. with
+    /// `return ""` in place of `return pending`. The last three assertions fail.
+    func testAQuestionSpokenWhileThePetWasThinkingSurvivesTheReplyEnding() throws {
+        var fixture = try listeningFixture()
+        let profile = PetVoice.profile(for: "nova")
+
+        // Q1, taken by ✓.
+        fixture.listener.emit("what should we charge for the beta")
+        XCTAssertEqual(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+                                                 session: &fixture.session,
+                                                 listener: fixture.listener,
+                                                 voice: fixture.voice,
+                                                 driver: &fixture.driver, isBusy: false),
+                       "what should we charge for the beta")
+        fixture.partial.text = ""                      // what `sendTurn` does after ✓
+        XCTAssertEqual(fixture.session.state, .thinking)
+
+        // The follow-up, while the pet is thinking. Not barge-in: the state is
+        // `.thinking`, so `wire()`'s `onPartial` takes no interrupt branch and the
+        // `SpeakingQueue` latch stays open.
+        fixture.listener.emit("and check the runway")
+        XCTAssertEqual(fixture.partial.text, "and check the runway")
+
+        // The reply is spoken and she listens to it in silence. `atEnd` is the session
+        // the reply-end path actually runs against — `VoiceSession` is a value type and
+        // the closure is where `onFinishedAll` reaches it.
+        let transcript = fixture.partial
+        let listener = fixture.listener
+        var ended = 0
+        var thrown: Error?
+        var atEnd = fixture.session
+        fixture.voice.onFinishedAll = {
+            ended += 1
+            do {
+                transcript.text = try VoiceModeOverlay.replyEnded(session: &atEnd,
+                                                                  pending: transcript.text,
+                                                                  listener: listener)
+            } catch { thrown = error }
+        }
+        fixture.voice.enqueue("Charge forty a seat.", profile: profile)
+        _ = fixture.session.apply(.replyBegan)
+        atEnd = fixture.session
+        XCTAssertEqual(fixture.session.state, .speaking)
+        fixture.voice.speakingCaughtUp()
+        fixture.voice.endOfReply()
+
+        XCTAssertEqual(ended, 1, "the reply never reported finished")
+        XCTAssertNil(thrown)
+        XCTAssertEqual(atEnd.state, .listening)
+        XCTAssertEqual(fixture.listener.endTurnCount, 1,
+                       "the reply ending retired her follow-up's request — the fix must "
+                       + "not discard her words deliberately instead of accidentally")
+        XCTAssertEqual(transcript.text, "and check the runway",
+                       "the question she queued while the pet was thinking was erased "
+                       + "when the reply ended, and no further partial can bring it back")
+        XCTAssertTrue(VoiceModeOverlay.canTakeTurn(partial: transcript.text,
+                                                   state: atEnd.state, isBusy: false),
+                      "✓ is disabled, so she cannot send the sentence she is looking at")
+
+        // And it does not come back glued: the words are already on screen, so saying
+        // more extends them instead of resurrecting them.
+        fixture.listener.emit("too")
+        XCTAssertEqual(transcript.text, "and check the runway too")
+    }
+
+    /// A reply that is only a fenced code block never reaches `.speaking`, so the
+    /// reply-end path has to step `.replyBegan` before `.replyFinished` — and it has
+    /// to revive a microphone that died while the pet was speaking, because this is
+    /// the transition that makes the header claim to be listening.
+    ///
+    /// Both in one test on purpose: they are the two things `replyEnded` does besides
+    /// leaving `pending` alone, and each of them fails silently — a hang in
+    /// `.thinking` with the mic shut, and a live-looking orb that hears nothing.
+    func testANothingSpeakableReplyStillLandsInListeningWithTheMicAlive() throws {
+        let fake = FakeListener()
+        var session = VoiceSession()
+        _ = session.apply(.open)
+        _ = session.apply(.founderSentTurn)
+        XCTAssertEqual(session.state, .thinking, "no reply sentence was ever spoken")
+        // The mic died mid-reply and `SpeechListener` stops before it reports.
+        XCTAssertNoThrow(try fake.start())
+        fake.failMidSession(VoiceAudioError.engineFailed("no speech detected"))
+        XCTAssertFalse(fake.isRunning)
+        let startsBefore = fake.startCount
+
+        let kept = try VoiceModeOverlay.replyEnded(session: &session,
+                                                   pending: "and check the runway",
+                                                   listener: fake)
+        XCTAssertEqual(session.state, .listening,
+                       "the overlay hung in .thinking with the turn taken and the mic shut")
+        XCTAssertTrue(fake.isRunning, "the header says Listening with the microphone gone")
+        XCTAssertEqual(fake.startCount, startsBefore + 1)
+        XCTAssertEqual(kept, "and check the runway")
+        XCTAssertEqual(fake.endTurnCount, 0, "the reply ending discarded her words")
+    }
+
+    /// A refused restart is thrown, not swallowed — and the machine has already
+    /// reached `.listening` by then, so the caller's `.close` is a legal transition
+    /// rather than a no-op that leaves the overlay claiming to listen.
+    func testAReplyEndWhoseMicRefusesToRestartThrowsFromListening() {
+        let fake = FakeListener()
+        fake.refuseStart = VoiceAudioError.recognizerUnavailable
+        var session = VoiceSession()
+        _ = session.apply(.open)
+        _ = session.apply(.founderSentTurn)
+        _ = session.apply(.replyBegan)
+
+        XCTAssertThrowsError(try VoiceModeOverlay.replyEnded(session: &session,
+                                                             pending: "and the runway",
+                                                             listener: fake)) {
+            XCTAssertEqual($0 as? VoiceAudioError, .recognizerUnavailable)
+        }
+        XCTAssertEqual(session.state, .listening)
+        XCTAssertTrue(session.apply(.close), "the caller's failure path was a no-op")
+    }
+
     // MARK: - Opening voice mode over a live typed turn
 
     /// **C3.** `SpeakingQueue` starts `accepting = true, reported = false`, so

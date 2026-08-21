@@ -29,13 +29,21 @@ struct ChatComposer: View {
     var accent: Color
     var accent2: Color
     var isBusy: Bool
-    /// Whether the composer carries its own department chips.
+    /// Whether the composer carries the departments control **at rest**.
     ///
-    /// False on the two-mode hero, where `DepartmentRoster` sits directly above it
-    /// and offers the SAME control for the same three departments — the same
-    /// affordance twice on one screen. The roster is the better of the two there:
-    /// it shows all eight rather than three, and it carries the pet each one speaks
-    /// with. The chips come back with the transcript, where there is no roster.
+    /// False on the two-mode hero, where `DepartmentRoster` sits directly above it:
+    /// eight portraits are a better picker than one button, and the roster is where
+    /// the founder LEARNS the cast (two-mode §4 puts it on the first screen).
+    ///
+    /// **It no longer means "hidden".** The original reason for hiding was that the
+    /// chip row offered "the same three departments" without pets, so the roster was
+    /// strictly better — both halves of that are false of `departmentControl`, which
+    /// reaches all eight and carries the pet when armed. So an ARMED department is
+    /// drawn here regardless of this flag: without that, picking from the roster lit
+    /// up a roster chip and left the composer showing nothing, which is precisely the
+    /// defect the retired promoted chip existed to patch. It also matters past the
+    /// first screen — the roster is replaced by the transcript on send, and this
+    /// control is the only thing that carries the selection forward.
     var showsDeptChips: Bool = true
     /// The approval tier, when the surface has one. Optional and nil by default, so
     /// the dock and every existing call site render exactly what they rendered
@@ -122,7 +130,7 @@ struct ChatComposer: View {
                           floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
-                if showsDeptChips { departmentControl }
+                if showsDeptChips || selectedDept != nil { departmentControl }
                 plusMenu
                 // "The tier lives in the composer, beside `+`" (§8.2) — the session
                 // bar carries facts set once, the composer carries controls for the
@@ -488,22 +496,27 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
-    /// A menu row with its caption underneath — spec §7.7.
+    /// A menu row with its caption — spec §7.7.
     ///
-    /// `Text` + `Text` in a `VStack` is what macOS renders as a two-line item; a
-    /// `Label` with a subtitle is not something menus draw. If the second line does
-    /// not survive, the label alone still reads correctly — so this degrades rather
-    /// than breaking.
+    /// **Observed on screen, 21 Aug: a `VStack` of two `Text`s does NOT work.** macOS
+    /// extracts the first `Text` from a menu item's label and discards the rest, so
+    /// the captions rendered as nothing at all. Two-line rows are an HTML pattern —
+    /// ChatGPT can caption every row because its menu is a web page; `NSMenu` decides
+    /// for itself.
+    ///
+    /// A newline inside ONE `Text` is the remaining native option: `NSMenuItem` does
+    /// render multi-line titles, and here SwiftUI has a single string to hand it
+    /// rather than a view tree to flatten. `.help()` carries the caption regardless,
+    /// so the row is never left with less information than it had before — that is
+    /// the floor, not the goal, because nobody hovers a menu row before clicking it.
     @ViewBuilder private func menuRow(_ title: String, _ detail: String,
                                       icon: String) -> some View {
         Label {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                Text(detail).font(CodepetTheme.inter(CodepetType.footnote))
-            }
+            Text("\(title)\n\(detail)")
         } icon: {
             Image(systemName: icon)
         }
+        .help(detail)
     }
 
     /// The mode control — the "streamline Let's build in" change: a `Menu` over

@@ -304,7 +304,7 @@ The reply arrives as a *growing string*: `CompanyStore` assigns `chatMessages[i]
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `struct SentenceSplitter` with `init()`, `mutating func take(from full: String) -> [String]`, `mutating func reset()`
+  - `struct SentenceSplitter` with `init()`, `mutating func take(from full: String) -> [String]`, `mutating func flush(from full: String) -> [String]`, `mutating func reset()`
   - `static func speakable(_ raw: String) -> String` — strips markdown for speech
 
 - [ ] **Step 1: Write the failing test**
@@ -1601,6 +1601,15 @@ The silence check runs on a `Timer` at 4Hz asking `VoiceTurn.shouldEndTurn`, and
 a true it sends `partial` through `companyStore.sendChat` and applies
 `.heardSilence`. Speaking is driven by observing the last message's text with
 `.onChange`, feeding `SentenceSplitter.take(from:)` and enqueuing what comes back.
+
+**And `flush(from:)` when the stream ends** — on `companyStore.isStreaming` going
+false. `take` deliberately refuses to speak a sentence whose terminator is the last
+character currently available, because mid-stream it cannot tell a pause from an
+ending: `"The price is $3."` is a complete sentence and also the first half of
+`"$3.14 today."`. That refusal means the final sentence of every reply is held back
+until something tells the splitter the reply is over, which is what `flush` is. Omit
+the flush call and every reply loses its last sentence — a defect that is invisible
+in a unit test and obvious the first time you listen.
 
 - [ ] **Step 3: Run, then commit**
 

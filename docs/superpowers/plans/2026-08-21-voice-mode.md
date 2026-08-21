@@ -1750,9 +1750,17 @@ a true it sends `partial` through `companyStore.sendChat` and applies
 **Three calls in this task exist to close findings the reviewer proved against the
 audio services. None of them is optional.**
 
-`voice.beginReply()` when a reply starts — on `.replyBegan`. It reopens the latch
-that `stopImmediately` closed, and resets the end-of-reply flag. Without it, the
-first barge-in silences the pet for the rest of the session.
+`voice.beginReply()` **before the reply's first `enqueue`** — not "on `.replyBegan`",
+which is what an earlier draft of this line said and which is wrong. `.replyBegan` is
+the event the overlay applies *when the first sentence is enqueued* (see Task 1's
+transition table), so "on `.replyBegan`" reads as `enqueue` → `.replyBegan` →
+`beginReply()`. After any barge-in the latch is still closed when sentence 1 arrives,
+so **sentence 1 of every post-interruption reply is dropped** — the pet answers
+starting from its second sentence. Call `beginReply()` first, then enqueue.
+
+It reopens the latch that `stopImmediately` closed, resets the end-of-reply flag, and
+clears any pending stop-retry. Without it, the first barge-in silences the pet for the
+rest of the session.
 
 `voice.endOfReply()` when `companyStore.isStreaming` goes false, in the same place
 the driver is told to flush. `onFinishedAll` fires only when the queue is empty **and**

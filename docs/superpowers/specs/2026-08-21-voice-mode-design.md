@@ -162,16 +162,50 @@ mixer's **output**. Measured on this Mac, 21 Aug:
 |---|---|
 | `inputNode` output, VP on | 7 ch, 48000 Hz, Float32, deinterleaved |
 | mixer **input** after that `connect` | 7 ch, 48000 Hz — a no-op restatement |
-| mixer **output**, inherited — *what the code actually tapped* | **2 ch, 44100 Hz** |
-| mixer output after stating the format on `installTap` | **1 ch, 16000 Hz** ✅ |
+| mixer **output**, inherited — *what the first implementation tapped* | **2 ch, 44100 Hz** |
 
-So the recognizer was being handed **stereo 44.1kHz**, uncontrolled and machine-dependent, rather than
-the mono 16k it wants. The format argument to `installTap` *does* take effect — measured above — and is
-legal precisely because the mixer's output bus is connected to nothing (`AVAudioNode.h`: "should only be
-done when attaching to an output bus which is not connected to another node").
+So the recognizer was being handed **stereo 44.1kHz**, uncontrolled and machine-dependent. The format
+argument to `installTap` does take effect — it is legal precisely because the mixer's output bus is
+connected to nothing (`AVAudioNode.h`: "should only be done when attaching to an output bus which is not
+connected to another node").
 
-**Do not "fix" this by connecting the mixer to `mainMixerNode` to force a format.** That routes the
-microphone to the speakers, and with voice processing on it builds a feedback loop.
+**But moving the bus format is not the same as audio flowing, and the first attempt at this fix proved
+it the hard way.** Stating `1 ch / 16000 Hz` moves the bus to exactly that — and then **the tap never
+fires again**. Measured 21 Aug with microphone authorisation confirmed (`AVCaptureDevice.authorizationStatus(for: .audio) == 3`),
+two seconds per trial, voice processing on:
+
+| Requested tap format | Resulting bus | Tap callbacks in 2s |
+|---|---|---|
+| inherited | 2 ch / 44100 | 19 — fires |
+| **1 ch / 44100** | 1 ch / 44100 | **19 — fires** ✅ |
+| **1 ch / 48000** | 1 ch / 48000 | **19 — fires** ✅ |
+| 1 ch / **16000** | 1 ch / 16000 | **0 — silent** ❌ |
+| 2 ch / 44100 | 2 ch / 44100 | 19 — fires |
+
+**`AVAudioMixerNode` will downmix channels but will not resample on a tapped output bus.** Force the
+channel count, inherit the sample rate:
+
+```swift
+let inherited = downmix.outputFormat(forBus: 0)
+guard let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                    sampleRate: inherited.sampleRate,   // MUST inherit — 16k kills the tap
+                                    channels: 1, interleaved: false) else { throw … }
+```
+
+Mono is the part the recognizer actually needs; `SFSpeechAudioBufferRecognitionRequest` accepts the
+device rate. At 44100, `bufferSize: 4800` is 109ms, inside `AVAudioNode.h`'s documented `[100, 400] ms`.
+
+**The lesson is bigger than the constant.** Two spikes in a row measured a *property* and inferred
+behaviour from it: the first read `channelMap == [-1]` and predicted silence; the second read the bus
+format and declared the fix good. Only counting tap callbacks distinguishes "configured" from "working".
+Any future change to this graph must be verified by callback count, not by format inspection.
+
+**Still unmeasured:** peak amplitude was 0.0000 in every trial, because nobody was speaking into the mic
+in that environment. Frames flow; that the *voice* survives the 7→1 downmix needs one human saying a
+sentence. That is a handoff, not a claim.
+
+**Do not "fix" any of this by connecting the mixer to `mainMixerNode` to force a format.** That routes
+the microphone to the speakers, and with voice processing on it builds a feedback loop.
 
 **Two TCC prompts on first use** — microphone and speech recognition — and the app has neither usage
 string today (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` are absent from

@@ -283,19 +283,25 @@ struct ChatComposer: View {
     /// One menu row: checkmark when armed, else the pet's sprite, then
     /// `crash · Engineering`.
     ///
-    /// **The known risk (spec §4).** macOS decides how a menu draws a `Label`'s icon,
-    /// and `char-*` are pixel-art assets rather than SF Symbols. If the sprite does
-    /// not survive at menu-icon size, delete the `icon:` closure and keep the `Text`
-    /// — the row stays cast-signed, which is the part that matters. Do NOT replace
-    /// this with a custom popover; that shape was considered and rejected 21 Aug for
-    /// costing its own keyboard and dismiss handling.
+    /// **The risk in spec §4 landed, and this is the fix.** `Image("char-crash")` in
+    /// a menu icon slot renders the asset at its NATIVE pixel size — on screen the
+    /// menu became a vertical slideshow of full-screen pixel faces, one per row.
+    /// `PetMenuIcon` hands AppKit an `NSImage` whose `size` is already 16pt, which is
+    /// the only sizing input a menu item reads; a SwiftUI `.frame()` here is dropped
+    /// because the label is flattened to `(title, image)` rather than laid out.
+    ///
+    /// A missing sprite falls back to the text alone — still cast-signed, which is
+    /// the part that matters. It does NOT fall back to a custom popover; that shape
+    /// was considered and rejected 21 Aug for costing its own keyboard and dismiss
+    /// handling.
     @ViewBuilder private func deptRow(_ dep: Department, host: String) -> some View {
         let on = selectedDept?.key == dep.key
         let title = DepartmentMenu.rowTitle(dep, host: host)
         if on {
             Label(title, systemImage: "checkmark")
-        } else if let pet = DepartmentMenu.pet(for: dep, host: host) {
-            Label { Text(title) } icon: { Image("char-" + pet).renderingMode(.original) }
+        } else if let pet = DepartmentMenu.pet(for: dep, host: host),
+                  let sprite = PetMenuIcon.image(pet) {
+            Label { Text(title) } icon: { sprite }
         } else {
             Text(title)
         }

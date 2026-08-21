@@ -56,7 +56,7 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet \
   - `static let max = 3`
   - `static func adding(_ pin: ContextPin, to pins: [ContextPin]) -> [ContextPin]`
   - `static func removing(_ pin: ContextPin, from pins: [ContextPin]) -> [ContextPin]`
-  - `static func label(_ lang: AppLanguage) -> String` — the pinned-block heading, consumed by Task 2
+  - `static let groundingHeading: String` — the pinned-block heading, consumed by Task 2. **English only, and not a function of `AppLanguage`:** this is prompt text the model reads, not chrome the founder reads, and the rest of `ChatContext` composes in English regardless of `uiLanguage`.
 
 - [ ] **Step 1: Write the failing test**
 

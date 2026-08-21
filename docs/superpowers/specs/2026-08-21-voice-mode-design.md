@@ -133,11 +133,24 @@ never called by a test.
 
 ## 7. Risks, in the order they will bite
 
-**Two owners for the audio engine.** `ChiptuneEngine` holds an `AVAudioEngine`; voice mode needs an
-input tap with voice processing enabled. Whether they share one engine or run two cannot be settled by
-reading — **this needs a spike before the plan is written**, because the answer decides whether
-`SpeechListener` takes an injected engine or owns its own. It is the one genuinely unresolved question
-in this spec.
+**~~Two owners for the audio engine.~~ RESOLVED by spike, 21 Aug — voice mode owns its own engine.**
+
+`setVoiceProcessingEnabled(true)` **throws `-10849`** (`kAudioUnitErr_Initialized`) when the engine is
+already running, and `ChiptuneEngine` starts lazily then stays running. Sharing would mean stopping the
+SFX engine, reconfiguring the input unit, and restarting it every time voice mode opens — killing sound
+mid-playback. Two engines were then run simultaneously (output + mic-with-VP) and both reported
+`isRunning == true`, so coexistence is fine.
+
+It also helps that `ChiptuneEngine` never touches `inputNode`: keeping the mic out of the SFX engine
+means sound effects never require microphone permission, and a denial cannot break them.
+
+**And the spike found a landmine the design would have missed.** Enabling voice processing changes the
+input format from **1ch to 7ch, 48kHz, deinterleaved** — that is what a tap actually receives. Feeding
+that straight to `SFSpeechAudioBufferRecognitionRequest` is not safe: `AVAudioConverter(7ch 48k → 1ch
+16k)` *constructs* but reports `channelMap == [-1]`, i.e. no valid source mapping, so the naive
+conversion would most likely hand the recognizer silence — which fails as "voice mode hears nothing",
+with no error to chase. The reliable path is an intermediate `AVAudioMixerNode` between `inputNode` and
+the tap, with the downmix format stated explicitly rather than inherited.
 
 **Two TCC prompts on first use** — microphone and speech recognition — and the app has neither usage
 string today (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` are absent from
@@ -184,7 +197,10 @@ neither private nor cast-signed. Not fixable by us; stated rather than hidden.
 
 ## 9. Open
 
-**One blocking question:** shared or separate `AVAudioEngine` (§7). A spike answers it in under an hour
-and the plan should not be written before it is answered — the unit boundary in §6 depends on it.
+**Nothing blocking.** The one open question — shared or separate `AVAudioEngine` — was answered by spike
+on 21 Aug: **separate**, because enabling voice processing on a running engine throws. See §7 for the
+error code, the coexistence check, and the 7-channel format landmine the same spike surfaced.
 
-Everything else in this spec is decided.
+One thing still unmeasured, deliberately: **whether 1.2s is the right silence threshold.** That is a
+feel, not a fact, and no spike answers it — it needs the founder talking to the built thing. It lives as
+one named constant for exactly that reason.

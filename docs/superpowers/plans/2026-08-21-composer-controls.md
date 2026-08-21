@@ -277,19 +277,20 @@ import XCTest
 final class ChatContextPinTests: XCTestCase {
 
     /// A brief with enough in it that `BriefContext.compose` returns real text.
+    /// Field names verified against `codepet/Models/CompanyBrief.swift` — it has
+    /// `projectName`/`oneLiner`, not `name`/`idea`. Same two fields
+    /// `ChatContextTests` uses.
     private func brief() -> CompanyBrief {
-        var b = CompanyBrief()
-        b.name = "Codepet"
-        b.idea = "A macOS app where a founder runs their company with an AI team."
-        return b
+        CompanyBrief(projectName: "Codepet", oneLiner: "AI coding companion")
     }
 
     private func deliverable(id: String, title: String, body: String) -> Deliverable {
         Deliverable(id: id, kind: .doc, title: title, body: body, createdAt: "2026-08-20T10:00:00Z")
     }
 
+    /// `TaskWho` is `does | draft | you` — there is no `.codepet` or `.founder`.
     private func task(id: String, title: String, detail: String = "") -> RoadmapTask {
-        RoadmapTask(id: id, title: title, detail: detail, phase: .build, who: .codepet)
+        RoadmapTask(id: id, title: title, detail: detail, phase: .build, who: .does)
     }
 
     // MARK: - The regression guard
@@ -539,7 +540,21 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platfor
 xcrun xcresulttool get test-results summary --path build/t2b.xcresult | head -20
 ```
 
-Expected: all pass, 0 failed. If `codepetTests/ChatContextTests` does not exist under that name, find the real one first with `ls codepetTests | grep -i context` and run every match. A red test here means the defaulted parameter was not actually additive — fix the implementation, not the test.
+There are five existing grounding suites and `compose`/`selectPriorWork` are shared by all of them, so run the lot:
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/ChatContextTests \
+  -only-testing:codepetTests/ChatContextDecisionsTests \
+  -only-testing:codepetTests/ChatContextFocusTests \
+  -only-testing:codepetTests/MarkDoneGroundingTests \
+  -only-testing:codepetTests/ReflectionCompositionChatContextTests \
+  -only-testing:codepetTests/CompanyStoreChatTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t2b.xcresult 2>&1 | tail -25
+xcrun xcresulttool get test-results summary --path build/t2b.xcresult | head -20
+```
+
+Expected: all pass, 0 failed. A red test here means the defaulted parameter was not actually additive — fix the implementation, not the test.
 
 - [ ] **Step 6: Commit**
 
@@ -596,28 +611,43 @@ import XCTest
 @MainActor
 final class ContextPinSendTests: XCTestCase {
 
-    /// Captures the `CompanyChatRequest` the store composes, without a network.
-    private func storeCapturingRequest(_ onRequest: @escaping (CompanyChatRequest) -> Void)
-        -> CompanyStore {
-        let store = CompanyStore()
-        store.companyId = "test-company"
-        store.company.library = [
-            Deliverable(id: "d1", kind: .doc, title: "Pricing page",
-                        body: "We charge $20/mo for Pro.", createdAt: "2026-08-20T10:00:00Z"),
-        ]
-        store.chatSender = { req in
-            onRequest(req)
-            return CompanyChatResponse(reply: "ok")
-        }
-        return store
+    /// A `chatStreamer` that throws before yielding — this is what makes the
+    /// non-streaming `chatSender` path run deterministically, with no network and no
+    /// `Auth.auth()` (unconfigured under XCTest, and it TRAPS rather than throwing).
+    /// Copied from `CompanyStoreChatTests`, which is the pattern of record.
+    private static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+    }
+
+    /// `CompanyStore.company` is `private(set)` — state is seeded through the
+    /// LOADER and `hydrate`, never by assigning to `store.company`.
+    private func store(capturing onRequest: @escaping (CompanyChatRequest) -> Void) -> CompanyStore {
+        CompanyStore(
+            loader: { _ in
+                CompanyState(brief: CompanyBrief(projectName: "Codepet", oneLiner: "AI coding companion"),
+                             departments: [],
+                             library: [Deliverable(id: "d1", kind: .doc, title: "Pricing page",
+                                                   body: "We charge $20/mo for Pro.",
+                                                   createdAt: "2026-08-20T10:00:00Z")],
+                             stage: .idea, companionId: "byte", onboardedAt: Date(),
+                             tasks: [RoadmapTask(id: "t1", title: "Ship billing", detail: "",
+                                                 phase: .build, who: .does)])
+            },
+            saver: { _, _ in true },
+            chatSender: { req in
+                onRequest(req)
+                return CompanyChatReply(text: "ok", runTaskId: nil)
+            },
+            chatStreamer: Self.failingStreamer)
     }
 
     func testAPinnedDeliverableReachesTheRequestContext() async {
         var captured: CompanyChatRequest?
-        let store = storeCapturingRequest { captured = $0 }
+        let s = store { captured = $0 }
+        await s.hydrate(companyId: "u")
 
-        await store.sendChat("What should we charge?", language: .en,
-                             pinned: [.deliverable(id: "d1", title: "Pricing page")])
+        await s.sendChat("What should we charge?", language: .en,
+                         pinned: [.deliverable(id: "d1", title: "Pricing page")])
 
         guard let req = captured else { return XCTFail("no request was composed") }
         XCTAssertTrue(req.context.contains(ContextPin.groundingHeading),
@@ -628,9 +658,10 @@ final class ContextPinSendTests: XCTestCase {
     /// The default path is untouched: no `pinned:` argument, no pinned block.
     func testAnUnpinnedSendCarriesNoPinnedBlock() async {
         var captured: CompanyChatRequest?
-        let store = storeCapturingRequest { captured = $0 }
+        let s = store { captured = $0 }
+        await s.hydrate(companyId: "u")
 
-        await store.sendChat("What should we charge?", language: .en)
+        await s.sendChat("What should we charge?", language: .en)
 
         guard let req = captured else { return XCTFail("no request was composed") }
         XCTAssertFalse(req.context.contains(ContextPin.groundingHeading))
@@ -648,13 +679,7 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platfor
 
 Expected: does not build — `extra argument 'pinned' in call`.
 
-The injection point names above (`store.chatSender`, `CompanyChatResponse(reply:)`) are the likely ones but **must be verified before writing the test body**:
-
-```bash
-grep -n "chatSender\|var companyId\|struct CompanyChatResponse" codepet/Managers/CompanyStore.swift codepet/Services/*.swift | head -20
-```
-
-Copy the real closure property name and the real response initializer into the test. Then look at how `CompanyStoreChatTests` builds its store and follow that exactly — it is the suite that already does this and it is the pattern of record.
+The scaffolding above was verified against `codepetTests/CompanyStoreChatTests.swift`, which is the pattern of record: `CompanyStore(loader:saver:chatSender:chatStreamer:)`, a `failingStreamer` to force the non-streaming path, `CompanyChatReply(text:runTaskId:)` for the reply, and `hydrate(companyId:)` before any send. Read that file if anything here does not compile — do not invent a different injection route.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -1125,23 +1150,35 @@ import XCTest
 @MainActor
 final class ContextPinLifecycleTests: XCTestCase {
 
+    /// Same scaffolding as `ContextPinSendTests` — see the comments there for why
+    /// the streamer must fail and why state is seeded through the loader.
+    private static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+        AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+    }
+
     func testPinsAreConsumedByTheSend() async {
         var contexts: [String] = []
-        let store = CompanyStore()
-        store.companyId = "test-company"
-        store.company.library = [
-            Deliverable(id: "d1", kind: .doc, title: "Pricing page",
-                        body: "We charge $20/mo for Pro.", createdAt: "2026-08-20T10:00:00Z"),
-        ]
-        store.chatSender = { req in
-            contexts.append(req.context)
-            return CompanyChatResponse(reply: "ok")
-        }
+        let s = CompanyStore(
+            loader: { _ in
+                CompanyState(brief: CompanyBrief(projectName: "Codepet", oneLiner: "AI coding companion"),
+                             departments: [],
+                             library: [Deliverable(id: "d1", kind: .doc, title: "Pricing page",
+                                                   body: "We charge $20/mo for Pro.",
+                                                   createdAt: "2026-08-20T10:00:00Z")],
+                             stage: .idea, companionId: "byte", onboardedAt: Date(), tasks: [])
+            },
+            saver: { _, _ in true },
+            chatSender: { req in
+                contexts.append(req.context)
+                return CompanyChatReply(text: "ok", runTaskId: nil)
+            },
+            chatStreamer: Self.failingStreamer)
+        await s.hydrate(companyId: "u")
 
         // Turn 1 carries the pin; turn 2 must not.
-        await store.sendChat("What should we charge?", language: .en,
-                             pinned: [.deliverable(id: "d1", title: "Pricing page")])
-        await store.sendChat("And what about the free tier?", language: .en)
+        await s.sendChat("What should we charge?", language: .en,
+                         pinned: [.deliverable(id: "d1", title: "Pricing page")])
+        await s.sendChat("And what about the free tier?", language: .en)
 
         XCTAssertEqual(contexts.count, 2)
         XCTAssertTrue(contexts[0].contains(ContextPin.groundingHeading))
@@ -1339,10 +1376,11 @@ final class PlusMenuTests: XCTestCase {
     }
 
     func testOpenTasksExcludeDoneOnesAndKeepRoadmapOrder() {
+        // `TaskWho` is `does | draft | you`.
         let tasks = [
-            RoadmapTask(id: "t1", title: "One", detail: "", phase: .build, who: .codepet, done: true),
-            RoadmapTask(id: "t2", title: "Two", detail: "", phase: .build, who: .codepet),
-            RoadmapTask(id: "t3", title: "Three", detail: "", phase: .build, who: .founder),
+            RoadmapTask(id: "t1", title: "One", detail: "", phase: .build, who: .does, done: true),
+            RoadmapTask(id: "t2", title: "Two", detail: "", phase: .build, who: .does),
+            RoadmapTask(id: "t3", title: "Three", detail: "", phase: .build, who: .you),
         ]
         XCTAssertEqual(PlusMenu.openTasks(tasks).map(\.id), ["t2", "t3"])
     }
@@ -1559,14 +1597,21 @@ Replace `quickActionsMenu` wholesale with:
                     }
                 }
             }
-            Section(PlusMenu.goDeeperLabel(lang)) {
-                Button {
-                    onConveneRoom()
-                } label: {
-                    Label(RoomOffer.label(lang), systemImage: "person.3")
+            // Two-mode only, and this is a decision rather than an oversight: the
+            // dock still reaches the room through its `.plan` mode pill
+            // (`ChatMode.convenesRoom`), so a row here would be a SECOND door to
+            // one ~10-credit act on the same surface. The pane has no mode pill,
+            // which is why `RoomOffer` exists at all.
+            if surface == .twoMode {
+                Section(PlusMenu.goDeeperLabel(lang)) {
+                    Button {
+                        onConveneRoom()
+                    } label: {
+                        Label(RoomOffer.label(lang), systemImage: "person.3")
+                    }
+                    .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
+                    .help(RoomOffer.detail(lang))
                 }
-                .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
-                .help(RoomOffer.detail(lang))
             }
             Divider()
             Button(PlusMenu.setupLabel(lang)) { companyStore.select(.environment) }
@@ -1595,8 +1640,6 @@ Replace `quickActionsMenu` wholesale with:
 ```
 
 Rename both call sites from `quickActionsMenu` to `plusMenu`.
-
-The room row is now unconditional rather than `surface == .twoMode`. Verify that is right for the dock before shipping: `grep -n "showsModePill\|convenesRoom" codepet/Views/Copilot/CopilotChatView.swift`. If the dock still reaches the room through its `.plan` pill, wrap the `GO DEEPER` section in `if surface == .twoMode` to avoid two doors to one priced act in the dock.
 
 `quickActions` and `onQuickAction` stay as `ChatComposer` properties — `ChatEmptyState` reads them for the hero cards. Do not delete them.
 
@@ -1680,16 +1723,28 @@ import XCTest
 @MainActor
 final class ComposerControlRowTests: XCTestCase {
 
+    /// **State is seeded in `init`, never in `.onAppear`.** `ImageRenderer` lays a
+    /// view out without a window and does not reliably fire `onAppear`, so an
+    /// `onAppear`-seeded `armed` would leave every host measuring the BARE row —
+    /// and `testArmingADepartmentDoesNotGrowTheDock` would then compare two
+    /// identical bare rows and pass while asserting nothing.
     private struct Host: View {
-        var width: CGFloat
-        var surface: ChatSurface
-        var armed: Department?
-        var pins: [ContextPin]
-        @State private var draft = "What should we charge?"
+        let width: CGFloat
+        let surface: ChatSurface
+        @State private var draft: String
         @State private var mode: ChatMode = .ask
         @FocusState private var focused: Bool
         @State private var dept: Department?
-        @State private var pinState: [ContextPin] = []
+        @State private var pins: [ContextPin]
+
+        init(width: CGFloat, surface: ChatSurface,
+             armed: Department? = nil, pins: [ContextPin] = []) {
+            self.width = width
+            self.surface = surface
+            _draft = State(initialValue: "What should we charge?")
+            _dept = State(initialValue: armed)
+            _pins = State(initialValue: pins)
+        }
 
         var body: some View {
             ChatComposer(
@@ -1697,24 +1752,42 @@ final class ComposerControlRowTests: XCTestCase {
                 placeholder: "Ask anything about your company…",
                 quickActions: [], accent: CodepetTheme.accentPurple,
                 accent2: CodepetTheme.accentPink, isBusy: false,
-                pins: $pinState, selectedDept: $dept,
+                pins: $pins, selectedDept: $dept,
                 onSend: {}, onQuickAction: { _ in }
             )
             .frame(width: width)
             .environment(\.chatSurface, surface)
             .environmentObject(CompanyStore())
-            .onAppear { dept = armed; pinState = pins }
         }
     }
 
-    private func size(_ view: some View, width: CGFloat) -> CGSize {
+    private func size(_ view: some View) -> CGSize {
         ImageRenderer(content: view).nsImage?.size ?? .zero
+    }
+
+    /// **Guards the guard.** The test below asserts arming does NOT change the
+    /// composer's height at 380pt — which means at 380pt a host that failed to arm
+    /// is indistinguishable from one that armed correctly, and the assertion would
+    /// pass while checking nothing.
+    ///
+    /// So prove the seeded state takes somewhere it cannot hide: at 150pt the armed
+    /// label (sprite + pet name + department + `✕`) cannot share a line with `+` and
+    /// the send button, so the row wraps and the composer grows. If this goes red,
+    /// every height assertion in this suite is vacuous — fix the host, not this.
+    func testTheArmedHostReallyArms() {
+        let bare = size(Host(width: 150, surface: .dock))
+        let armed = size(Host(width: 150, surface: .dock, armed: DepartmentCatalog.find("eng")))
+        XCTAssertGreaterThan(bare.height, 0, "nothing laid out at all")
+        XCTAssertGreaterThan(armed.height, bare.height,
+                             "armed \(armed.height)pt vs bare \(bare.height)pt at 150pt wide — "
+                             + "the seeded department never took, so the equality assertions "
+                             + "in this suite are comparing identical views")
     }
 
     /// The dock at its real width, nothing armed. A row that wrapped would grow the
     /// composer's height past the two-line baseline.
     func testTheDockRowFitsAt380() {
-        let bare = size(Host(width: 380, surface: .dock, armed: nil, pins: []), width: 380)
+        let bare = size(Host(width: 380, surface: .dock))
         XCTAssertGreaterThan(bare.height, 40, "the composer measured \(bare.height)pt — it did not lay out")
         XCTAssertLessThan(bare.height, 220,
                           "the dock composer is \(bare.height)pt tall — the control row wrapped")
@@ -1725,9 +1798,8 @@ final class ComposerControlRowTests: XCTestCase {
     /// wraps at 380pt the composer grows under the founder's cursor the moment she
     /// picks a department.
     func testArmingADepartmentDoesNotGrowTheDock() {
-        let bare = size(Host(width: 380, surface: .dock, armed: nil, pins: []), width: 380)
-        let armed = size(Host(width: 380, surface: .dock,
-                              armed: DepartmentCatalog.find("eng"), pins: []), width: 380)
+        let bare = size(Host(width: 380, surface: .dock))
+        let armed = size(Host(width: 380, surface: .dock, armed: DepartmentCatalog.find("eng")))
         XCTAssertEqual(bare.height, armed.height, accuracy: 1,
                        "bare \(bare.height)pt vs armed \(armed.height)pt — the armed label wrapped")
     }
@@ -1735,12 +1807,12 @@ final class ComposerControlRowTests: XCTestCase {
     /// Three pins is the cap, and it must stay one line rather than stacking three
     /// rows above the field.
     func testThreePinsAddOneRowNotThree() {
-        let none = size(Host(width: 380, surface: .dock, armed: nil, pins: []), width: 380)
-        let three = size(Host(width: 380, surface: .dock, armed: nil, pins: [
+        let none = size(Host(width: 380, surface: .dock))
+        let three = size(Host(width: 380, surface: .dock, pins: [
             .deliverable(id: "d1", title: "Pricing"),
             .task(id: "t1", title: "Ship billing"),
             .deliverable(id: "d2", title: "ICP"),
-        ]), width: 380)
+        ]))
         let added = three.height - none.height
         XCTAssertGreaterThan(added, 8, "the pins reserved no height — the pill row did not render")
         XCTAssertLessThan(added, 60,
@@ -1748,8 +1820,7 @@ final class ComposerControlRowTests: XCTestCase {
     }
 
     func testThePaneRowFitsAtItsWidth() {
-        let pane = size(Host(width: 720, surface: .twoMode, armed: DepartmentCatalog.find("mkt"),
-                             pins: []), width: 720)
+        let pane = size(Host(width: 720, surface: .twoMode, armed: DepartmentCatalog.find("mkt")))
         XCTAssertGreaterThan(pane.height, 40)
         XCTAssertLessThan(pane.height, 220, "the pane composer is \(pane.height)pt tall — the row wrapped")
     }
@@ -1766,7 +1837,7 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platfor
 xcrun xcresulttool get test-results summary --path build/t7.xcresult | head -20
 ```
 
-Expected: 4 tests, 4 passed. A failure here is a **real layout defect**, not a bad threshold — read the measured number in the failure message and fix the view. Widen a threshold only if the measured number is plainly reasonable and the bound was wrong; say so in the commit if you do.
+Expected: 5 tests, 5 passed. A failure here is a **real layout defect**, not a bad threshold — read the measured number in the failure message and fix the view. Widen a threshold only if the measured number is plainly reasonable and the bound was wrong; say so in the commit if you do.
 
 Per the `ImageRenderer` note in `MockFlowCaptionBarLayoutTests`: it renders nothing inside a `ScrollView`. The composer is not in one here, which is why this works.
 
@@ -1904,4 +1975,10 @@ Expected: the `test` and `functions` jobs both report. A PR with no checks means
 
 **Type consistency.** `ContextPin.groundingHeading` is the single name used in Tasks 1, 2, 3 and 5 (an earlier draft called it `label(_:)` in the interface block — corrected). `ContextPin.max` is used in Tasks 1, 5 and 6. `DepartmentMenu.rowTitle(_:host:)` and `armedLabel(_:host:)` both take `host:` and are called with `companyStore.company.companionId` at the one call site. `PlusMenu.recentLibrary(_:)`/`openTasks(_:)` take the collection, not the store.
 
-**Two names to verify before writing test bodies, flagged inline rather than guessed:** `CompanyStore.chatSender` and `CompanyChatResponse(reply:)` in Task 3 Step 2, and the real name of the existing `ChatContext` suite in Task 2 Step 5. Both have a `grep` in the step that produces them.
+**Pre-flight corrections applied 21 Aug, before Task 2 was dispatched.** Five things in the first draft would not have compiled or would have asserted nothing, all found by reading the models rather than trusting the draft:
+
+- `TaskWho` is `does | draft | you` — the draft used `.codepet` and `.founder` (Tasks 2 and 6)
+- `CompanyBrief` has `projectName`/`oneLiner`, not `name`/`idea` (Task 2)
+- `CompanyStore.company` is `private(set)` — state seeds through the **loader** and `hydrate`, never by assignment, and the reply type is `CompanyChatReply(text:runTaskId:)` behind a deliberately-failing `chatStreamer` (Tasks 3 and 5, both rewritten against `CompanyStoreChatTests`, the pattern of record)
+- Task 7's host seeded `armed` in `.onAppear`, which `ImageRenderer` does not reliably fire — every height assertion would have compared identical bare rows. State now seeds in `init`, and `testTheArmedHostReallyArms` proves it took at 150pt where the armed label cannot hide
+- Task 6's room row is gated to `surface == .twoMode`. The dock reaches the room through its `.plan` mode pill, so an ungated row would be a second door to one ~10-credit act on the same surface

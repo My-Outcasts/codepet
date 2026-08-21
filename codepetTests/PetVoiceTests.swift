@@ -9,7 +9,14 @@ import XCTest
 /// back rather than crashing.
 final class PetVoiceTests: XCTestCase {
 
-    private let pets = ["byte", "crash", "luna", "nova", "sage", "glitch"]
+    /// **All SEVEN starters, from `PetCharacter.starters`.** An earlier draft of this
+    /// plan listed six and dropped `null` — "The Chaos Gremlin", a real shipped
+    /// character with its own `voiceGuide` and its own match score. It fell into
+    /// `default` and got byte's exact profile: same voice, same rate, same pitch. The
+    /// collision was invisible because `null` was missing from this very list, so
+    /// `testNoTwoPetsSoundIdentical` never saw it. Derive from the roster, do not
+    /// retype it.
+    private let pets = PetCharacter.starters
 
     func testEveryPetHasAProfile() {
         for p in pets {
@@ -55,5 +62,37 @@ final class PetVoiceTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(r, AVSpeechUtteranceMinimumSpeechRate)
             XCTAssertLessThanOrEqual(r, AVSpeechUtteranceMaximumSpeechRate)
         }
+    }
+
+    /// **Pitch needs the same guard as rate, and for the same reason.**
+    /// `pitchMultiplier` accepts 0.5…2.0 and clamps silently outside it, so a future
+    /// edit to 3.0 would ship sounding wrong with a green suite. `testEveryPetHasAProfile`
+    /// only asserts `pitch > 0`, which 3.0 passes.
+    func testPitchesAreInsideTheSynthesisersRange() {
+        for p in pets {
+            let pitch = PetVoice.profile(for: p).pitch
+            XCTAssertGreaterThanOrEqual(pitch, 0.5, "\(p) pitch clamps low")
+            XCTAssertLessThanOrEqual(pitch, 2.0, "\(p) pitch clamps high")
+        }
+    }
+
+    /// `pick` walks the preference list IN ORDER and takes the first available.
+    /// Working in names is what makes this testable at all — see the doc comment on
+    /// `pick`. Deleting the ordering (returning `available.first`, say) turns the
+    /// second assertion red.
+    func testPickTakesTheFirstAvailableInPreferenceOrder() {
+        let crash = PetVoice.profile(for: "crash")   // ["Daniel", "Samantha"]
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Daniel", "Samantha"]), "Daniel")
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Samantha", "Daniel"]), "Daniel",
+                       "order comes from the PROFILE, not from what the system lists first")
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Samantha"]), "Samantha",
+                       "falls through to the guaranteed voice")
+    }
+
+    /// Nothing installed matches: return nil so the caller can let the synthesiser
+    /// choose. Refusing to speak would be worse than speaking in the wrong voice.
+    func testPickReturnsNilWhenNothingMatches() {
+        XCTAssertNil(PetVoice.pick(PetVoice.profile(for: "crash"), from: []))
+        XCTAssertNil(PetVoice.pick(PetVoice.profile(for: "crash"), from: ["Zarvox"]))
     }
 }

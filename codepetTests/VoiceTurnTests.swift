@@ -33,6 +33,6 @@ final class VoiceTurnTests: XCTestCase {
     func testAClockThatWentBackwardsDoesNotEndTheTurn() {
         let now = Date()
         XCTAssertFalse(VoiceTurn.shouldEndTurn(lastSpeechAt: now.addingTimeInterval(5),
-                                               now: now, threshold: 1.2))
+                                               now: now, threshold: VoiceTurn.silenceThreshold))
     }
 }

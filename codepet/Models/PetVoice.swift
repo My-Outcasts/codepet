@@ -1,5 +1,7 @@
-import AVFoundation
 import Foundation
+// NO `import AVFoundation`. This file is pure — see the File-structure table.
+// Rate and pitch are plain Floats on AVSpeechUtterance's scales; naming a voice
+// is a String. Task 4 owns the one line that touches the framework.
 
 /// A voice, a speed, and a pitch.
 struct VoiceProfile: Equatable {
@@ -43,6 +45,12 @@ enum PetVoice {
         case "glitch":
             // Clipped and irreverent.
             return VoiceProfile(preferredVoices: ["Tessa", "Samantha"], rate: 0.54, pitch: 1.08)
+        case "null":
+            // The Chaos Gremlin: "sentences zigzag — starts one thought, finishes
+            // another." Fastest and highest, because the zigzag is carried by pace.
+            // Junior is a young en-US voice — the only installed HUMAN voice that
+            // reads as playful. Not Bahh/Boing/Jester, which are sound effects.
+            return VoiceProfile(preferredVoices: ["Junior", "Kathy", "Samantha"], rate: 0.58, pitch: 1.15)
         default:
             // byte, the host — heard most often, so the most listenable. Also the
             // fallback for an unknown pet: the overlay must never be voiceless.
@@ -50,15 +58,17 @@ enum PetVoice {
         }
     }
 
-    /// The first installed voice from the profile's list, or nil when none of them
-    /// exist — in which case the caller lets the synthesiser pick the system
-    /// default rather than refusing to speak.
-    static func resolve(_ profile: VoiceProfile,
-                        installed: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices())
-        -> AVSpeechSynthesisVoice? {
-        for name in profile.preferredVoices {
-            if let hit = installed.first(where: { $0.name == name }) { return hit }
-        }
-        return nil
+    /// The first name in the profile's preference list that appears in `available`,
+    /// or nil when none do — in which case the caller lets the synthesiser pick the
+    /// system default rather than refusing to speak.
+    ///
+    /// **Takes names, not `AVSpeechSynthesisVoice`.** `AVSpeechSynthesisVoice` has
+    /// no public initialiser that sets an arbitrary `name`, so a parameter of that
+    /// type can only ever be fed the voices really installed on the machine running
+    /// the test — which makes the preference-order walk untestable and pins this
+    /// file to AVFoundation for no gain. Task 4 maps the returned name to a real
+    /// voice; that one line is the only place the framework is needed.
+    static func pick(_ profile: VoiceProfile, from available: [String]) -> String? {
+        profile.preferredVoices.first { available.contains($0) }
     }
 }

@@ -476,9 +476,17 @@ struct ChatComposer: View {
                     Button {
                         onConveneRoom()
                     } label: {
-                        menuRow(RoomOffer.label(lang), RoomOffer.detail(lang), icon: "person.3")
+                        Label(RoomOffer.label(lang), systemImage: "person.3")
                     }
                     .disabled(!RoomOffer.canConvene(draft: draft) || isBusy)
+                    .help(RoomOffer.detail(lang))
+                    // The one visible caption, as a bare `Text` ITEM rather than part
+                    // of a Button's label — `tierMenu` below already ships exactly
+                    // this shape (a multi-line Text item under a Divider), so it is
+                    // the one form in a menu known to render here. This is the row
+                    // the founder had to ask about, and the only one where not
+                    // knowing costs 10 credits.
+                    Text(RoomOffer.detail(lang))
                 }
             }
 
@@ -511,27 +519,23 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
-    /// A menu row with its caption — spec §7.7.
+    /// A menu row: icon, label, and the caption as a help tag only.
     ///
-    /// **Observed on screen, 21 Aug: a `VStack` of two `Text`s does NOT work.** macOS
-    /// extracts the first `Text` from a menu item's label and discards the rest, so
-    /// the captions rendered as nothing at all. Two-line rows are an HTML pattern —
-    /// ChatGPT can caption every row because its menu is a web page; `NSMenu` decides
-    /// for itself.
+    /// **Captions on every row do not work, established on screen 21 Aug.** Two
+    /// attempts failed: a `VStack` of two `Text`s rendered as one line, and a newline
+    /// inside one `Text` fared no better. macOS flattens a `Button`'s label to
+    /// `(title, image)` and keeps the first string. Captioning every row is an HTML
+    /// pattern — ChatGPT can do it because its menu is a web page; `NSMenu` will not.
     ///
-    /// A newline inside ONE `Text` is the remaining native option: `NSMenuItem` does
-    /// render multi-line titles, and here SwiftUI has a single string to hand it
-    /// rather than a view tree to flatten. `.help()` carries the caption regardless,
-    /// so the row is never left with less information than it had before — that is
-    /// the floor, not the goal, because nobody hovers a menu row before clicking it.
+    /// So the founder's decision narrowed to the row that prompted it: only
+    /// `Convene the room` carries a visible caption, and it does so as a bare `Text`
+    /// ITEM rather than a label — see `plusMenu`. Everything else stands on its label,
+    /// which is what a Mac menu does anyway. `.help()` stays because a tooltip costs
+    /// nothing; it is not the answer, since nobody hovers a menu row before clicking.
     @ViewBuilder private func menuRow(_ title: String, _ detail: String,
                                       icon: String) -> some View {
-        Label {
-            Text("\(title)\n\(detail)")
-        } icon: {
-            Image(systemName: icon)
-        }
-        .help(detail)
+        Label(title, systemImage: icon)
+            .help(detail)
     }
 
     /// The mode control — the "streamline Let's build in" change: a `Menu` over

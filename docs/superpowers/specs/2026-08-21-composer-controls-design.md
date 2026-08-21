@@ -1,8 +1,10 @@
 # Codepet — composer controls: a departments button and a real `+` menu
 
-**Status:** designed, approved by the founder 21 Aug 2026. Amended the same day to bring attachments
-and the web-search toggle into scope (§7), which slips the code freeze — founder's call, made with the
-cost stated. Not built.
+**Status:** the **UI is built and verified** — 1581/1581 tests green, running in the app. The last hop is
+NOT built: pins and attachments are held, capped and shown, and reach the model nowhere, because that
+needs `ChatContext.compose(pinned:)` and the widened `ClaudeMessage.content` in `functions/` (§7.3).
+Amended twice on 21 Aug: attachments and the web-search toggle came into scope (§7), and §7.7's
+every-row captions were cut to one row after macOS refused them (§8).
 **Branch:** `feat/composer-controls`, off `feat/two-mode-shell` — the composer this changes lives there,
 not on `main`.
 **Scope:** Swift **and** `functions/` (§7.3, §7.5). Measured: `functions/` on this branch is 0 commits
@@ -56,7 +58,7 @@ Founder, 21 Aug 2026, in order:
 | 5 | ~~`📎 Attach` and `🌐 Web search` are **omitted, not greyed** — they ship as their own PRs after launch~~ — **SUPERSEDED by decision 7** |
 | 6 | `🧠 What Codepet knows` is a **toggle over the boolean that already gates memory**, not the fact-picker the mockup drew (raised as a correction before approval; see §5) |
 | 7 | **Both come into scope and the freeze slips** — decided later the same day, after the menu was compared against ChatGPT's and Claude's, which both lead with a file row. See §7 |
-| 8 | **Every row carries a description line**, ChatGPT-style rather than Claude's bare labels. See §7.7 |
+| 8 | ~~**Every row carries a description line**, ChatGPT-style rather than Claude's bare labels~~ — **revised to `Convene the room` only**, after two implementations were refused by `NSMenu`. Founder's call, 21 Aug evening. See §7.7 and §8 |
 
 **Why decision 5 was right when made, and why 7 overrides it.** Decision 5 departed from this branch's
 own `ApprovalTier.isHonoured` precedent — list every option, disable the unhonoured one with its reason —
@@ -338,13 +340,29 @@ Folded in here rather than deferred because `functions/` is already open for §7
 branch behind `main` deletes `main`'s functions from prod — still holds and must be re-measured before
 any deploy. It simply does not bite today.
 
-### 7.7 Every row gets a description
+### 7.7 One row gets a description — macOS decided the rest
 
-**Founder call, 21 Aug.** ChatGPT captions every row (`Deep research → Get a detailed report`); Claude
-captions none. ChatGPT is right, and this spec has direct evidence: the founder had to ask what
-`Convene the room · ~10 credits` meant. `RoomOffer.detail()` already holds the sentence that would have
-answered it — *"4 departments argue this question and hand you a recommendation"* — wasted as a hover
-tooltip nobody reads before spending 10 credits.
+**Founder call, 21 Aug**, then revised the same evening after the platform refused it.
+
+The original decision was ChatGPT's: caption every row (`Deep research → Get a detailed report`) rather
+than Claude's bare labels. The evidence for it is in this spec's own history — the founder had to ask
+what `Convene the room · ~10 credits` meant, and `RoomOffer.detail()` had held the answer all along
+(*"4 departments argue this question and hand you a recommendation"*), wasted as a hover tooltip nobody
+reads before spending 10 credits.
+
+**Two implementations failed on screen.** A `VStack` of two `Text`s in the row's label rendered as one
+line; a newline inside a single `Text` fared no better. macOS flattens a `Button`'s label to
+`(title, image)` and keeps the first string. **Captioning every row is an HTML pattern** — ChatGPT can do
+it because its menu is a web page, and `NSMenu` will not.
+
+**Revised, 21 Aug:** caption only `Convene the room`. That is the row that prompted the question, and the
+only one where not knowing costs money; the rest stand on their labels, which is what a Mac menu does
+anyway. Every row keeps a `.help()` tooltip — free, and strictly better than nothing, but not the answer.
+
+**The mechanism that does work** is a bare `Text` *item*, not a label: `tierMenu` in the same file
+already ships a multi-line `Text` under a `Divider`. A standalone `Text` item is not flattened; a
+`Button`'s label is. That distinction is the whole finding, and it is the same one that made pet sprites
+render full-size in menu rows and in the armed control's label — see §7.8.
 
 ## 8. Testing
 
@@ -375,3 +393,39 @@ is not protecting anything. The pinned-id exclusion in §6 is the guard that mos
 Nothing blocking. Two decisions deliberately deferred to §7, and one pre-existing launch blocker this
 touches but does not fix: **Product still has no pet and placeholder art**, so it stays filtered out of
 `roster` and therefore out of this menu.
+
+
+---
+
+## 8. What macOS refused, and what it cost
+
+Added 21 Aug, after building it. Four separate bugs in this change turned out to be **one platform rule**
+seen from four angles, and none of them were visible in the HTML prototype.
+
+> **Anything handed to a SwiftUI `Menu` is flattened to `(title, image)`. The title keeps the first
+> string; the image is sized from `NSImage.size`. SwiftUI layout modifiers on either are discarded.**
+
+| Symptom on screen | Cause | Resolution |
+|---|---|---|
+| Row captions rendered as nothing | `VStack` of two `Text`s in a `Button` label — only the first survived | §7.7: caption the priced row only, as a bare `Text` item |
+| Departments menu became a vertical slideshow of full-screen pixel faces | `Image("char-crash")` at native size. `char-crash@2x.png` is 1023×1263px, which `NSImage` reports as **341×421pt** — a 421pt row on a ~1300pt display is three rows per screen | `PetMenuIcon` sets `NSImage.size` to 16pt on a **copy** (the shared asset-catalog instance is also drawn by `DepartmentRoster`) |
+| The armed departments button swallowed the whole composer | Same flattening, one layer up: a `Menu`'s **own label** behaves like its rows. `CharacterImage(pet, size: 16)`'s explicit frame was discarded | Same `PetMenuIcon` |
+| Six unrelated SSE streaming tests began failing | `PetMenuIcon`'s first version redrew via `NSImage.lockFocus()`, which needs a window-server graphics context a headless XCTest host lacks. It destabilised the host; async tests afterwards timed out | Removed the drawing entirely — set `size` on a copy, no context needed |
+
+**Two rules worth carrying forward.**
+
+Sprites are fine in ordinary views and broken in menus. `DepartmentRoster`'s chips render the identical
+`CharacterImage` crisply at 16pt, because they are plain `Button`s. The boundary is `Menu`, not
+`CharacterImage` — and that contrast, visible in one screenshot, is what located the bug.
+
+`CLAUDE.md`'s "always nearest-neighbour for pixel art" is **reversed here on purpose**. That rule is about
+*upscaling*, where nearest is the difference between crisp pixels and blur. This path reduces ~20× (421pt
+to 16pt), where nearest samples one pixel in twenty and can drop a 4px eye entirely. Smooth downscaling
+keeps the face legible. Right rule, opposite direction — written into `PetMenuIcon` so nobody "fixes" it
+back.
+
+**Process note.** Screen Recording is denied in this environment (`screencapture` fails with *"could not
+create image from display"*), so every one of these surfaced only when the founder looked. The one that
+did not need eyes was the sprite size: a 20-line AppKit script printed `native 341x421 → PetMenuIcon
+16x16`, which explained the row height arithmetically. Where a rendering claim can be reduced to a
+number, measure it rather than asking for another screenshot.

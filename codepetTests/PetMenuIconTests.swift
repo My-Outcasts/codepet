@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import codepet
 
@@ -25,19 +26,18 @@ final class PetMenuIconTests: XCTestCase {
     /// Every pet the roster can summon, per `DepartmentCompanions`.
     private let pets = ["crash", "luna", "nova", "sage", "glitch"]
 
-    func testEverySpriteReportsMenuIconSize() throws {
+    func testEverySpriteReportsMenuIconSize() {
         for pet in pets {
-            guard let img = PetMenuIcon.image(pet) else {
+            // Assert on the NSImage, not a SwiftUI wrapper around it: `size` on this
+            // object is the only sizing input a menu row has.
+            guard let sized = PetMenuIcon.nsImage(pet) else {
                 XCTFail("no sprite for \(pet) — a row would show text alone")
                 continue
             }
-            let ns = NSImage(named: "char-\(pet)")
-            XCTAssertNotNil(ns, "asset char-\(pet) is missing")
-            // The assertion that matters: what AppKit will read.
-            let sized = try XCTUnwrap(ImageRenderer(content: img).nsImage)
             XCTAssertEqual(sized.size.width, PetMenuIcon.side, accuracy: 1,
                            "\(pet) is \(sized.size.width)pt wide — a menu row would be that tall")
             XCTAssertEqual(sized.size.height, PetMenuIcon.side, accuracy: 1)
+            XCTAssertNotNil(PetMenuIcon.image(pet), "the SwiftUI wrapper should follow")
         }
     }
 
@@ -65,9 +65,9 @@ final class PetMenuIconTests: XCTestCase {
     /// Cached, because a menu re-renders whenever the composer does and redrawing
     /// eight 341×421 bitmaps on the main thread per render is real work.
     func testTheSameSpriteIsNotRedrawnEveryCall() {
-        _ = PetMenuIcon.image("crash")
+        _ = PetMenuIcon.nsImage("crash")
         let start = Date()
-        for _ in 0..<200 { _ = PetMenuIcon.image("crash") }
+        for _ in 0..<200 { _ = PetMenuIcon.nsImage("crash") }
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.1,
                           "200 cached lookups took too long — the cache is not being hit")
     }

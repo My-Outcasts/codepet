@@ -48,6 +48,19 @@ struct CopilotChatView: View {
     /// one send. PROTOTYPE: held and shown correctly; not yet threaded to the model.
     @State private var pins: [ContextPin] = []
     @State private var attachments: [ChatAttachment] = []
+    /// Voice mode's takeover — spec §2 decision 2. The overlay owns its own
+    /// `VoiceSession`; this is only the presentation flag, same as `showHistory`.
+    @State private var voiceMode = false
+    /// Built once per tap of the waveform button, not once per `body` — a plain
+    /// (non-`@State`) `let` on `VoiceModeOverlay` takes whatever value THIS view's
+    /// latest `body` evaluation passes it, and `body` re-runs on every streamed
+    /// token; constructing a fresh `SFSpeechRecognizer`/`AVSpeechSynthesizer` on
+    /// each one would be wasteful and, worse, would silently replace the
+    /// instance the overlay's already-running `.task` wired its callbacks to.
+    /// Held here instead, so the overlay is handed the SAME two objects for the
+    /// life of one voice-mode session.
+    @State private var voiceListener: SpeechListening?
+    @State private var voiceVoice: SpeakingVoice?
 
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
@@ -132,6 +145,26 @@ struct CopilotChatView: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .background(ChatBackdrop())
+        // The takeover — covers this pane, not the whole shell, so the rail and
+        // the topbar stay reachable (spec §2 decision 2). `voiceListener`/
+        // `voiceVoice` are non-nil for exactly the overlay's lifetime: set together
+        // in `startVoiceMode()`, read together here, so the two can never drift —
+        // an overlay built with `.ready`-checked availability but no engine spun up
+        // would be a silent no-op tap.
+        .overlay {
+            if voiceMode, let listener = voiceListener, let voice = voiceVoice {
+                VoiceModeOverlay(isPresented: $voiceMode, listener: listener, voice: voice)
+            }
+        }
+        // Release the pair the moment the overlay dismisses itself (its own `close()`
+        // already called `stopImmediately()`/`stop()`) — nothing here needs to hold a
+        // mic or a synthesizer open once the founder has left voice mode.
+        .onChange(of: voiceMode) { _, isOn in
+            if !isOn {
+                voiceListener = nil
+                voiceVoice = nil
+            }
+        }
         // The rail asks; the chat opens. `showHistory` stays owned here.
         .onChange(of: companyStore.historyRequested) { _, requested in
             guard requested else { return }
@@ -213,8 +246,25 @@ struct CopilotChatView: View {
             selectedDept: $selectedDept,
             onSend: send,
             onQuickAction: handleQuickAction,
-            onConveneRoom: conveneRoom
+            onConveneRoom: conveneRoom,
+            onVoiceMode: startVoiceMode
         )
+    }
+
+    /// The waveform button's action — builds the session's audio pair fresh (see
+    /// the state doc comment above) and raises the takeover.
+    ///
+    /// `DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\.name)
+    /// + ["Codepet"]`: the recognizer's `contextualStrings` (spec §3) — product
+    /// nouns are exactly the words a general recognizer mishears, and every name
+    /// the founder might say to address someone is one of these three sources.
+    private func startVoiceMode() {
+        let hints = DepartmentCatalog.roster.map(\.name)
+            + PetCharacter.all.values.map(\.name)
+            + ["Codepet"]
+        voiceListener = SpeechListener(locale: lang.speechLocale, hints: hints)
+        voiceVoice = SpeechSpeaker()
+        voiceMode = true
     }
 
     /// Convene the Virtual Company on what is in the composer.

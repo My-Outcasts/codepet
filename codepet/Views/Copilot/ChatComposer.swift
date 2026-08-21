@@ -61,6 +61,10 @@ struct ChatComposer: View {
     /// Convene the Virtual Company on the current draft. Defaulted so main's shell,
     /// which still reaches the room through its `.plan` pill, passes nothing.
     var onConveneRoom: () -> Void = {}
+    /// Enter voice mode. `nil` by default, so `DeveloperWorkPane` and every existing
+    /// call site render exactly as they do today — the same additive rule `tier`
+    /// and `pins` follow.
+    var onVoiceMode: (() -> Void)? = nil
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -94,6 +98,7 @@ struct ChatComposer: View {
             HStack(spacing: 8) {
                 departmentControl
                 plusMenu
+                voiceButton
                 modeMenu
                 Spacer()
                 sendButton
@@ -132,6 +137,7 @@ struct ChatComposer: View {
             HStack(spacing: 7) {
                 if showsDeptChips || selectedDept != nil { departmentControl }
                 plusMenu
+                voiceButton
                 // "The tier lives in the composer, beside `+`" (§8.2) — the session
                 // bar carries facts set once, the composer carries controls for the
                 // NEXT instruction, and how much rope the next instruction gets is
@@ -517,6 +523,25 @@ struct ChatComposer: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    /// Voice mode — spec §1. `waveform` rather than `mic`: the mic glyph means
+    /// dictation in both ChatGPT and Claude, and this is the other feature.
+    @ViewBuilder private var voiceButton: some View {
+        if let onVoiceMode {
+            let availability = VoicePermission.current(locale: lang.speechLocale)
+            Button(action: onVoiceMode) {
+                Image(systemName: "waveform")
+                    .font(.system(size: surface == .dock ? 15 : 12, weight: .medium))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .frame(width: surface == .dock ? 30 : 26,
+                           height: surface == .dock ? 30 : 26)
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!VoicePermission.offersButton(availability))
+            .help(VoicePermission.help(availability, lang) ?? (lang == .vi ? "Chế độ giọng nói" : "Voice mode"))
+        }
     }
 
     /// A menu row: icon, label, and the caption as a help tag only.

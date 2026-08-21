@@ -53,14 +53,20 @@ Founder, 21 Aug 2026, in order:
 | 2 | At rest it reads `Departments ▾`; **armed, it becomes the chip** — pet sprite, `crash · Engineering`, department accent, and a `✕` |
 | 3 | The picker is a **native menu of cast-signed rows**, one flat list, not a popover grid |
 | 4 | `+` is organised as **bring something in / go deeper**, with Toolkit management as a single footer link |
-| 5 | `📎 Attach` and `🌐 Web search` are **omitted, not greyed** — they ship as their own PRs after launch |
+| 5 | ~~`📎 Attach` and `🌐 Web search` are **omitted, not greyed** — they ship as their own PRs after launch~~ — **SUPERSEDED by decision 7** |
 | 6 | `🧠 What Codepet knows` is a **toggle over the boolean that already gates memory**, not the fact-picker the mockup drew (raised as a correction before approval; see §5) |
+| 7 | **Both come into scope and the freeze slips** — decided later the same day, after the menu was compared against ChatGPT's and Claude's, which both lead with a file row. See §7 |
+| 8 | **Every row carries a description line**, ChatGPT-style rather than Claude's bare labels. See §7.7 |
 
-Decision 5 departs from this branch's own `ApprovalTier.isHonoured` precedent, which lists an unhonoured
-option disabled with its reason. That precedent is right *there* and wrong *here*: a founder who wrongly
-believes a run will prompt her before acting is exposed to a safety failure, so the tier must show the
-gap. A missing paperclip is not a safety failure — it is an unfinished-looking row on the most-used
-control in the app, during a paid beta. Different risk, different answer.
+**Why decision 5 was right when made, and why 7 overrides it.** Decision 5 departed from this branch's
+own `ApprovalTier.isHonoured` precedent — list every option, disable the unhonoured one with its reason —
+and the departure was correct: a founder who wrongly believes a run will prompt her before acting faces a
+safety failure, so the tier must show its gap, whereas a missing paperclip only *looks* unfinished.
+
+Decision 7 does not overturn that reasoning. It removes the premise. Greying a row you cannot honour and
+building the row are different answers to "we can't do this yet", and the founder chose the second once
+the deferral's real cost was visible: the one door both competitors put first, absent from ours. The
+freeze cost was stated before the decision, not after.
 
 ## 3. What retires
 

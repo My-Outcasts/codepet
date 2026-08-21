@@ -6,13 +6,14 @@
 
 **Architecture:** Three pure value types and one pure grounding function do the work; the views only bind to them. `ContextPin` is a new value type beside `ApprovalTier` and `RoomOffer`. Pinned items reach the model through the single chokepoint that already exists — `ChatContext.compose(…)` → `CompanyChatRequest.context` — so no new wire format and no `functions/` change. The department chips collapse into one `Menu` reading the same `DepartmentCatalog.roster` and the same `DepartmentCompanions.specialistId` the send already reads.
 
-**Tech Stack:** Swift 5, SwiftUI, macOS deployment target 26.2, XCTest. No new dependencies.
+**Tech Stack:** Swift 5, SwiftUI, macOS deployment target 26.2, XCTest — plus TypeScript / Node 22 / Jest for `functions/` (Tasks 9-10). No new dependencies; `@anthropic-ai/sdk` is already `^0.116.0`, and base64 `image` / `document` blocks are GA on `claude-sonnet-5` with **no beta header**.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-composer-controls-design.md`. Read it before Task 1 — the §6 double-count trap is the reason Task 2 exists.
 
 ## Global Constraints
 
-- **Swift only.** No file under `functions/` may be touched. A `functions/` deploy uploads the working tree, and this branch is behind `main` there.
+- **Swift AND `functions/`** (Tasks 9-10). Measured 21 Aug: `functions/` on this branch is **0 commits behind `origin/main`** (`git rev-list --count HEAD..origin/main -- functions/`), so the deploy-from-a-stale-branch hazard is not live. Re-measure before any deploy — a `firebase deploy` uploads the working tree, and from a branch behind `main` it deletes `main`'s functions from prod.
+- **`functions/` runs Jest, not XCTest.** `./scripts/ci-test.sh` does not see it. Run `cd functions && npx jest` for anything under `functions/src/`.
 - **New `.swift` files need no project-file edit.** `PBXFileSystemSynchronizedRootGroup` — target membership follows the folder on disk.
 - **`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.** View and store code is already main-actor; test classes that touch them are annotated `@MainActor`, as every existing suite is.
 - **Chrome is bilingual, content is EN.** Every founder-visible string added here takes `_ lang: AppLanguage` and switches on `lang == .vi`. Follow `ApprovalTier.label(_:)`.
@@ -1695,7 +1696,887 @@ MSG
 
 ---
 
-### Task 7: Measure the row, run everything, open the PR
+### Task 7: Every `+` row gets a description line
+
+**Files:**
+- Modify: `codepet/Models/PlusMenu.swift` — a `detail(_:)` per row
+- Modify: `codepet/Views/Copilot/ChatComposer.swift` — two-line menu labels
+- Modify: `codepetTests/PlusMenuTests.swift` — assert every row has a translated detail
+
+**Interfaces:**
+- Consumes: `PlusMenu` (Task 6), `RoomOffer.detail(_:)`.
+- Produces: `PlusMenu.libraryDetail(_:)`, `.taskDetail(_:)`, `.knowsDetail(_:)`, `.folderDetail(_:)`, `.attachDetail(_:)`, `.webSearchDetail(_:)`. The room's detail is **not** duplicated here — it comes from `RoomOffer.detail(_:)`.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `codepetTests/PlusMenuTests.swift`:
+
+```swift
+    /// **Every row has a description, and the room's is not a second copy.**
+    ///
+    /// The founder asked what "Convene the room · ~10 credits" meant — the answer
+    /// already existed in `RoomOffer.detail`, wasted as a hover tooltip. A second
+    /// copy of that sentence in `PlusMenu` is how the two drift.
+    func testEveryRowHasATranslatedDetail() {
+        let pairs: [(String, String)] = [
+            (PlusMenu.libraryDetail(.en), PlusMenu.libraryDetail(.vi)),
+            (PlusMenu.taskDetail(.en), PlusMenu.taskDetail(.vi)),
+            (PlusMenu.knowsDetail(.en), PlusMenu.knowsDetail(.vi)),
+            (PlusMenu.folderDetail(.en), PlusMenu.folderDetail(.vi)),
+            (PlusMenu.attachDetail(.en), PlusMenu.attachDetail(.vi)),
+            (PlusMenu.webSearchDetail(.en), PlusMenu.webSearchDetail(.vi)),
+        ]
+        for (en, vi) in pairs {
+            XCTAssertFalse(en.isEmpty)
+            XCTAssertNotEqual(en, vi, "\(en) is not translated")
+        }
+    }
+
+    /// A description explains; it does not restate the label.
+    func testDetailsAreNotJustTheLabelAgain() {
+        XCTAssertNotEqual(PlusMenu.libraryDetail(.en), PlusMenu.libraryLabel(.en))
+        XCTAssertNotEqual(PlusMenu.taskDetail(.en), PlusMenu.taskLabel(.en))
+    }
+```
+
+- [ ] **Step 2: Run it and watch it fail to build**
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/PlusMenuTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t7.xcresult 2>&1 | tail -20
+```
+
+Expected: `cannot find 'libraryDetail' in scope`.
+
+- [ ] **Step 3: Add the details to `PlusMenu`**
+
+```swift
+    // MARK: - Row descriptions (§7.7)
+    //
+    // ChatGPT captions every row; Claude captions none. ChatGPT is right, and this
+    // repo has the evidence: the founder had to ask what "Convene the room · ~10
+    // credits" meant. Say what a row does where the founder is already looking,
+    // not in a tooltip they'd have to hover to find.
+    //
+    // The room's description is deliberately ABSENT from this list — it comes from
+    // `RoomOffer.detail(_:)`, which already holds exactly that sentence. Two copies
+    // of one sentence is how the menu and the help tag drift apart.
+
+    static func libraryDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Dựa trên những gì bạn đã làm xong"
+                    : "Ground this answer in work you've shipped"
+    }
+
+    static func taskDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Ghim việc bạn đang làm" : "Pin what you're working on"
+    }
+
+    static func knowsDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Cho phép dùng các quyết định đã lưu"
+                    : "Let it use your saved decisions"
+    }
+
+    static func folderDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Thư mục mà tác nhân được phép sửa"
+                    : "The folder the agent may touch"
+    }
+
+    static func attachDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Ảnh chụp màn hình, PDF, ghi chú" : "Screenshots, PDFs, notes"
+    }
+
+    static func webSearchDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Cho phép tra cứu khi trả lời"
+                    : "Let it look things up as it answers"
+    }
+```
+
+- [ ] **Step 4: Render two-line rows in the menu**
+
+macOS renders a `Button` whose label is a `VStack` of two `Text`s as a two-line menu item. In
+`ChatComposer.plusMenu`, replace each bare `Button(PlusMenu.xLabel(lang))` with the helper:
+
+```swift
+    /// A menu row with its description underneath. `Text` + `Text` in a `VStack`
+    /// is what macOS renders as a two-line item; a `Label` with a subtitle is not
+    /// a thing menus draw.
+    @ViewBuilder private func menuRow(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+            Text(detail).font(CodepetTheme.inter(CodepetType.footnote))
+        }
+    }
+```
+
+Apply it to all six rows plus the room (whose detail is `RoomOffer.detail(lang)`).
+
+**If macOS collapses the second line to nothing**, keep the labels single-line and put the
+description in `.help(...)` — but say so in the commit rather than leaving the reader to
+discover it. Do **not** silently drop the descriptions; that reverts a founder decision.
+
+- [ ] **Step 5: Run, then commit**
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/PlusMenuTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t7.xcresult 2>&1 | tail -20
+xcrun xcresulttool get test-results summary --path build/t7.xcresult | head -20
+```
+
+Expected: 9 tests, 9 passed.
+
+```bash
+git add codepet/Models/PlusMenu.swift codepet/Views/Copilot/ChatComposer.swift codepetTests/PlusMenuTests.swift
+git commit -F - <<'MSG'
+feat(composer): every + row says what it does
+
+The founder asked what "Convene the room · ~10 credits" meant. The answer had
+been sitting in RoomOffer.detail() the whole time — "4 departments argue this
+question and hand you a recommendation" — reachable only by hovering, which
+nobody does before spending 10 credits.
+
+ChatGPT captions every row in its + menu; Claude captions none. ChatGPT is
+right, and this is the evidence.
+
+The room's caption is deliberately NOT duplicated into PlusMenu: it reads from
+RoomOffer.detail(), because two copies of one sentence is how a menu and its
+help tag drift apart. A test asserts each caption is translated and that none
+of them is just the label again.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+---
+
+### Task 8: `ChatAttachment` — the file, downscaled and encoded
+
+Pure value type plus pure downscale math. No UI, no network.
+
+**Files:**
+- Create: `codepet/Models/ChatAttachment.swift`
+- Create: `codepetTests/ChatAttachmentTests.swift`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `enum AttachmentKind { case image, pdf, text }`
+  - `struct ChatAttachment: Identifiable, Equatable` — `id`, `kind`, `filename`, `mediaType`, `data` (base64 String), `byteCount`
+  - `static let max = 3`, `static let maxBytes = 8 * 1024 * 1024`, `static let imageLongEdge: CGFloat = 2576`
+  - `static func fittedSize(for original: CGSize, longEdge: CGFloat) -> CGSize` — pure
+  - `static func kind(forPathExtension ext: String) -> AttachmentKind?`
+  - `static func mediaType(for kind: AttachmentKind, pathExtension ext: String) -> String`
+  - `var icon: String`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `codepetTests/ChatAttachmentTests.swift`:
+
+```swift
+import XCTest
+@testable import codepet
+
+/// The pure half of attachments: how far to shrink an image, what kind a file is,
+/// and what media type goes on the wire. All three are decidable without a file
+/// picker, a network, or a running app — so all three are tested here, and the
+/// view layer is left with nothing to get wrong but layout.
+final class ChatAttachmentTests: XCTestCase {
+
+    // MARK: - Downscale math
+
+    /// **2576px is Sonnet 5's high-resolution long edge.** Above it we pay for
+    /// pixels the model discards; below it we throw away fidelity the founder
+    /// attached the file for. The cap is a product decision with a number.
+    func testAnOversizeImageIsFittedToTheLongEdge() {
+        let fitted = ChatAttachment.fittedSize(for: CGSize(width: 5152, height: 2576),
+                                               longEdge: ChatAttachment.imageLongEdge)
+        XCTAssertEqual(fitted.width, 2576, accuracy: 1)
+        XCTAssertEqual(fitted.height, 1288, accuracy: 1, "aspect ratio was not preserved")
+    }
+
+    func testAPortraitImageFitsOnItsHeight() {
+        let fitted = ChatAttachment.fittedSize(for: CGSize(width: 1000, height: 4000),
+                                               longEdge: 2576)
+        XCTAssertEqual(fitted.height, 2576, accuracy: 1)
+        XCTAssertEqual(fitted.width, 644, accuracy: 1)
+    }
+
+    /// **A small image is never upscaled.** Enlarging a 400px screenshot to 2576
+    /// buys no detail and multiplies its token cost ~40×.
+    func testASmallImageIsLeftAlone() {
+        let fitted = ChatAttachment.fittedSize(for: CGSize(width: 400, height: 300),
+                                               longEdge: 2576)
+        XCTAssertEqual(fitted, CGSize(width: 400, height: 300))
+    }
+
+    func testADegenerateSizeDoesNotProduceNaN() {
+        let fitted = ChatAttachment.fittedSize(for: .zero, longEdge: 2576)
+        XCTAssertFalse(fitted.width.isNaN || fitted.height.isNaN,
+                       "a zero-size image produced NaN — that reaches the encoder")
+        XCTAssertEqual(fitted, .zero)
+    }
+
+    // MARK: - Kind and media type
+
+    func testKindsAreRecognisedByExtension() {
+        XCTAssertEqual(ChatAttachment.kind(forPathExtension: "png"), .image)
+        XCTAssertEqual(ChatAttachment.kind(forPathExtension: "PNG"), .image, "case-sensitive")
+        XCTAssertEqual(ChatAttachment.kind(forPathExtension: "pdf"), .pdf)
+        XCTAssertEqual(ChatAttachment.kind(forPathExtension: "md"), .text)
+        XCTAssertEqual(ChatAttachment.kind(forPathExtension: "swift"), .text)
+        XCTAssertNil(ChatAttachment.kind(forPathExtension: "sketch"),
+                     "an unknown extension must be nil, not silently .text")
+    }
+
+    /// The media type is what the API validates. A jpg sent as `image/png` is a
+    /// 400 the founder sees as "attachment failed" with no explanation.
+    func testMediaTypeMatchesTheActualFormat() {
+        XCTAssertEqual(ChatAttachment.mediaType(for: .image, pathExtension: "png"), "image/png")
+        XCTAssertEqual(ChatAttachment.mediaType(for: .image, pathExtension: "jpg"), "image/jpeg")
+        XCTAssertEqual(ChatAttachment.mediaType(for: .image, pathExtension: "jpeg"), "image/jpeg")
+        XCTAssertEqual(ChatAttachment.mediaType(for: .pdf, pathExtension: "pdf"), "application/pdf")
+    }
+
+    // MARK: - Caps
+
+    func testCapsAreTheOnesTheSpecStates() {
+        XCTAssertEqual(ChatAttachment.max, 3)
+        XCTAssertEqual(ChatAttachment.maxBytes, 8 * 1024 * 1024)
+        XCTAssertEqual(ChatAttachment.imageLongEdge, 2576)
+    }
+}
+```
+
+- [ ] **Step 2: Run it and watch it fail to build**
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/ChatAttachmentTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t8.xcresult 2>&1 | tail -20
+```
+
+Expected: `cannot find 'ChatAttachment' in scope`.
+
+- [ ] **Step 3: Write it**
+
+Create `codepet/Models/ChatAttachment.swift`:
+
+```swift
+// codepet/Models/ChatAttachment.swift
+import CoreGraphics
+import Foundation
+
+/// What kind of thing the founder attached, which decides the content block it
+/// becomes on the wire: `image` and `pdf` are base64 blocks, `text` is inlined as
+/// text (no block type exists for it, and none is needed).
+enum AttachmentKind: String, Equatable {
+    case image, pdf, text
+}
+
+/// A file the founder attached to the next message — spec §7.
+///
+/// **Why base64 lives in this type.** The client has no Anthropic key (deployed
+/// functions read it from Secret Manager), so the Files API is unreachable from
+/// Swift and every byte has to ride the request it belongs to. That makes the
+/// encoded payload part of the attachment's identity rather than something fetched
+/// later, and it makes the downscale cap below a product decision rather than an
+/// implementation detail.
+struct ChatAttachment: Identifiable, Equatable {
+    let id: String
+    let kind: AttachmentKind
+    let filename: String
+    /// The IANA type the API validates against — see `mediaType(for:pathExtension:)`.
+    let mediaType: String
+    /// Base64, no newlines. The API rejects wrapped base64.
+    let data: String
+    /// Size BEFORE encoding, for the cap and for what the pill shows.
+    let byteCount: Int
+
+    /// Matches `ContextPin.max`: both are "things riding the next message", and two
+    /// different ceilings for one pill row would be arbitrary.
+    static let max = 3
+
+    /// Per file, before base64. The API's request ceiling is 32MB and base64 adds
+    /// ~33%, so three 8MB files still fit with room for the prompt.
+    static let maxBytes = 8 * 1024 * 1024
+
+    /// **Sonnet 5's high-resolution long edge.** `CHAT_MODEL` is `claude-sonnet-5`,
+    /// the first Sonnet in the high-res tier, which reads up to 2576px on the long
+    /// edge at ~4784 image tokens. Sending more pixels than this pays for detail the
+    /// model discards; sending fewer throws away fidelity the founder attached the
+    /// file to show us.
+    static let imageLongEdge: CGFloat = 2576
+
+    /// Fit `original` inside `longEdge`, preserving aspect ratio, **never upscaling**.
+    ///
+    /// Upscaling a 400px screenshot to 2576 buys no detail and multiplies its token
+    /// cost by ~40×, so a small image is returned untouched. A zero or negative size
+    /// returns `.zero` rather than a NaN that would reach the encoder.
+    static func fittedSize(for original: CGSize, longEdge: CGFloat) -> CGSize {
+        let w = original.width, h = original.height
+        guard w > 0, h > 0, longEdge > 0 else { return .zero }
+        let longest = Swift.max(w, h)
+        guard longest > longEdge else { return original }   // never upscale
+        let scale = longEdge / longest
+        return CGSize(width: (w * scale).rounded(), height: (h * scale).rounded())
+    }
+
+    /// nil for an extension we don't handle — deliberately, rather than defaulting
+    /// to `.text`. Base64-ing a `.sketch` as text would send the founder's binary
+    /// into the prompt as mojibake and bill her for it.
+    static func kind(forPathExtension ext: String) -> AttachmentKind? {
+        switch ext.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp":
+            return .image
+        case "pdf":
+            return .pdf
+        case "md", "markdown", "txt", "csv", "json", "yml", "yaml",
+             "swift", "ts", "tsx", "js", "jsx", "py", "rb", "go", "rs", "sh":
+            return .text
+        default:
+            return nil
+        }
+    }
+
+    /// The IANA media type. This is what the API validates, and a mismatch is a 400
+    /// the founder experiences as "attachment failed" with nothing explaining why —
+    /// so `.jpg` must map to `image/jpeg`, not `image/jpg`.
+    static func mediaType(for kind: AttachmentKind, pathExtension ext: String) -> String {
+        switch kind {
+        case .pdf:
+            return "application/pdf"
+        case .text:
+            return "text/plain"
+        case .image:
+            switch ext.lowercased() {
+            case "jpg", "jpeg": return "image/jpeg"
+            case "gif":         return "image/gif"
+            case "webp":        return "image/webp"
+            default:            return "image/png"
+            }
+        }
+    }
+
+    var icon: String {
+        switch kind {
+        case .image: return "photo"
+        case .pdf:   return "doc.richtext"
+        case .text:  return "doc.plaintext"
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Run, then commit**
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/ChatAttachmentTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t8.xcresult 2>&1 | tail -20
+xcrun xcresulttool get test-results summary --path build/t8.xcresult | head -20
+```
+
+Expected: 8 tests, 8 passed.
+
+```bash
+git add codepet/Models/ChatAttachment.swift codepetTests/ChatAttachmentTests.swift
+git commit -F - <<'MSG'
+feat(model): ChatAttachment — the file, fitted to what the model actually reads
+
+2576px is not an arbitrary cap. CHAT_MODEL is claude-sonnet-5, the first Sonnet
+in the high-resolution tier, which reads up to 2576px on the long edge at ~4784
+image tokens. More pixels than that pays for detail the model discards.
+
+Three decisions the tests pin, each because the alternative is a defect the
+founder sees and can't diagnose:
+
+Never upscale. Enlarging a 400px screenshot to 2576 buys no detail and
+multiplies its token cost by ~40×.
+
+An unknown extension returns nil rather than defaulting to .text. Base64-ing a
+.sketch as text would put binary mojibake in the prompt and bill her for it.
+
+`.jpg` maps to image/jpeg, not image/jpg. A media-type mismatch is a 400 that
+surfaces as "attachment failed" with nothing explaining why.
+
+The base64 lives in the type rather than being fetched later because the client
+has no Anthropic key — functions read it from Secret Manager — so the Files API
+is unreachable from Swift and every byte rides the request it belongs to.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+---
+
+### Task 9: `functions/` — content blocks, and the coalescing that breaks
+
+**This is the task the attachment work turns on.** Everything else is plumbing.
+
+**Files:**
+- Modify: `functions/src/companyChatCore.ts` — `ClaudeMessage`, `ChatTurn`, `buildMessages`
+- Create: `functions/src/__tests__/buildMessagesAttachments.test.ts`
+
+**Interfaces:**
+- Consumes: nothing from the Swift tasks.
+- Produces:
+  - `type ContentBlock` — the `text` / `image` / `document` union
+  - `interface AttachmentDTO { kind: "image" | "pdf" | "text"; filename: string; media_type: string; data: string }`
+  - `ClaudeMessage.content: string | ContentBlock[]`
+  - `ChatTurn.attachments?: AttachmentDTO[]`
+  - `buildMessages(history, userMessage, attachments?)`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `functions/src/__tests__/buildMessagesAttachments.test.ts`:
+
+```ts
+import { buildMessages } from "../companyChatCore";
+
+/**
+ * buildMessages coalesces consecutive same-role turns with
+ *   last.content = `${last.content}\n\n${msg.content}`
+ * which is correct for strings and silently produces "[object Object]" the moment
+ * content can be an array. That one line is why this suite exists.
+ */
+describe("buildMessages with attachments", () => {
+  const img = {
+    kind: "image" as const,
+    filename: "shot.png",
+    media_type: "image/png",
+    data: "aGVsbG8=",
+  };
+
+  it("leaves an unattached conversation as plain strings", () => {
+    // The regression guard: every existing caller passes no attachments and must
+    // get byte-identical output to before this parameter existed.
+    const out = buildMessages(
+      [{ role: "me", text: "hi" }, { role: "companion", text: "hello" }],
+      "and now?",
+    );
+    expect(out.every((m) => typeof m.content === "string")).toBe(true);
+    expect(out).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+      { role: "user", content: "and now?" },
+    ]);
+  });
+
+  it("puts the image block BEFORE the text on the current turn", () => {
+    // Documented ordering: the media block precedes the text block that asks
+    // about it. Reversed, the model reads the question before seeing the image.
+    const out = buildMessages([], "what is this?", [img]);
+    const blocks = out[out.length - 1].content as any[];
+    expect(Array.isArray(blocks)).toBe(true);
+    expect(blocks[0].type).toBe("image");
+    expect(blocks[0].source).toEqual({
+      type: "base64",
+      media_type: "image/png",
+      data: "aGVsbG8=",
+    });
+    expect(blocks[blocks.length - 1]).toEqual({ type: "text", text: "what is this?" });
+  });
+
+  it("inlines a text attachment as text, not as a block type", () => {
+    const out = buildMessages([], "review this", [
+      { kind: "text", filename: "notes.md", media_type: "text/plain", data: btoa("# Notes") },
+    ]);
+    const content = out[out.length - 1].content;
+    const rendered = typeof content === "string" ? content : JSON.stringify(content);
+    expect(rendered).toContain("notes.md");
+    expect(rendered).toContain("# Notes");
+    expect(rendered).not.toContain('"type":"text_file"');
+  });
+
+  it("sends a pdf as a document block", () => {
+    const out = buildMessages([], "summarize", [
+      { kind: "pdf", filename: "q3.pdf", media_type: "application/pdf", data: "JVBER" },
+    ]);
+    const blocks = out[out.length - 1].content as any[];
+    expect(blocks[0].type).toBe("document");
+    expect(blocks[0].source.media_type).toBe("application/pdf");
+  });
+
+  // ── The landmine ────────────────────────────────────────────────────────────
+
+  it("never stringifies a block array when coalescing same-role turns", () => {
+    // Two consecutive user turns, the first carrying an attachment. The old
+    // concat produced "[object Object]" here — with no error and no crash.
+    const out = buildMessages(
+      [
+        { role: "me", text: "look at this", attachments: [img] },
+        { role: "me", text: "specifically the top left" },
+      ],
+      "what do you see?",
+    );
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain("[object Object]");
+    // and the image survived the merge
+    expect(serialized).toContain("aGVsbG8=");
+  });
+
+  it("replays an attachment from history so a follow-up can still see it", () => {
+    // The reason a one-shot attachment isn't worth shipping: the second question
+    // is the one founders ask.
+    const out = buildMessages(
+      [
+        { role: "me", text: "what is in this screenshot?", attachments: [img] },
+        { role: "companion", text: "A login form." },
+      ],
+      "what about the top left?",
+    );
+    expect(JSON.stringify(out)).toContain("aGVsbG8=");
+  });
+
+  it("drops attachments older than the replay cap", () => {
+    // An inlined image re-uploads on every turn it survives. Unbounded replay
+    // bills the founder for the same screenshot forever.
+    const history = Array.from({ length: 12 }, (_, i) => ({
+      role: i % 2 === 0 ? "me" : "companion",
+      text: `turn ${i}`,
+      ...(i === 0 ? { attachments: [img] } : {}),
+    }));
+    const out = buildMessages(history, "still there?");
+    expect(JSON.stringify(out)).not.toContain("aGVsbG8=");
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+```bash
+cd functions && npx jest src/__tests__/buildMessagesAttachments.test.ts 2>&1 | tail -25; cd ..
+```
+
+Expected: TypeScript errors on the third argument and on `attachments` in `ChatTurn`.
+
+If `btoa` is undefined under this Node version, use `Buffer.from("# Notes").toString("base64")`.
+
+- [ ] **Step 3: Implement**
+
+In `functions/src/companyChatCore.ts`:
+
+```ts
+/** How many past turns may still carry their attachments. */
+const ATTACHMENT_REPLAY_TURNS = 3;
+
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+  | { type: "document"; source: { type: "base64"; media_type: string; data: string } };
+
+export interface AttachmentDTO {
+  kind: "image" | "pdf" | "text";
+  filename: string;
+  media_type: string;
+  /** base64, no newlines — the API rejects wrapped base64. */
+  data: string;
+}
+
+export interface ChatTurn {
+  role: string;
+  text: string;
+  attachments?: AttachmentDTO[];
+}
+
+export interface ClaudeMessage {
+  role: "user" | "assistant";
+  content: string | ContentBlock[];
+}
+
+/**
+ * Render one turn's attachments + text into content.
+ *
+ * **Media blocks come BEFORE the text.** The text asks about the attachment, so
+ * the model should have seen it by the time it reads the question.
+ *
+ * A `text` attachment is inlined into the text rather than given a block: no
+ * block type exists for a source file, and none is needed.
+ */
+function renderTurn(text: string, attachments?: AttachmentDTO[]): string | ContentBlock[] {
+  const atts = attachments ?? [];
+  if (atts.length === 0) return text;
+
+  const media = atts.filter((a) => a.kind !== "text");
+  const inlined = atts
+    .filter((a) => a.kind === "text")
+    .map((a) => {
+      let decoded: string;
+      try {
+        decoded = Buffer.from(a.data, "base64").toString("utf8");
+      } catch {
+        return "";   // undecodable — drop it rather than send mojibake
+      }
+      return `--- ${a.filename} ---\n${decoded}`;
+    })
+    .filter((s) => s.length > 0);
+
+  const combined = [...inlined, text].filter((s) => s.length > 0).join("\n\n");
+  if (media.length === 0) return combined;
+
+  return [
+    ...media.map((a): ContentBlock => ({
+      type: a.kind === "pdf" ? "document" : "image",
+      source: { type: "base64", media_type: a.media_type, data: a.data },
+    })),
+    { type: "text", text: combined },
+  ];
+}
+
+/** Merge two turns' content without ever stringifying a block array. */
+function mergeContent(
+  a: string | ContentBlock[],
+  b: string | ContentBlock[],
+): string | ContentBlock[] {
+  if (typeof a === "string" && typeof b === "string") return `${a}\n\n${b}`;
+  const toBlocks = (c: string | ContentBlock[]): ContentBlock[] =>
+    typeof c === "string" ? [{ type: "text", text: c }] : c;
+  return [...toBlocks(a), ...toBlocks(b)];
+}
+```
+
+Then rewrite `buildMessages`:
+
+```ts
+export function buildMessages(
+  history: ChatTurn[],
+  userMessage: string,
+  attachments?: AttachmentDTO[],
+): ClaudeMessage[] {
+  const turns = Array.isArray(history) ? history : [];
+  // Which past turns keep their attachments: the last N that have any. An inlined
+  // image re-uploads on every turn it survives, so unbounded replay bills the
+  // founder for the same screenshot forever.
+  const carrying = turns
+    .map((t, i) => (t?.attachments?.length ? i : -1))
+    .filter((i) => i >= 0);
+  const replayFrom = carrying.length > ATTACHMENT_REPLAY_TURNS
+    ? carrying[carrying.length - ATTACHMENT_REPLAY_TURNS]
+    : (carrying[0] ?? Infinity);
+
+  const mapped: ClaudeMessage[] = turns
+    .filter((t) => t && typeof t.text === "string" && t.text.trim().length > 0)
+    .map((t, i) => ({
+      role: t.role === "me" ? ("user" as const) : ("assistant" as const),
+      content: renderTurn(t.text.trim(), i >= replayFrom ? t.attachments : undefined),
+    }));
+  mapped.push({ role: "user", content: renderTurn(userMessage.trim(), attachments) });
+
+  const capped = mapped.slice(-20);
+  const out: ClaudeMessage[] = [];
+  for (const msg of capped) {
+    if (out.length === 0 && msg.role === "assistant") continue;
+    const last = out[out.length - 1];
+    if (last && last.role === msg.role) {
+      last.content = mergeContent(last.content, msg.content);   // NOT string concat
+    } else {
+      out.push({ ...msg });
+    }
+  }
+  return out;
+}
+```
+
+**Note the index bug this ordering avoids:** `replayFrom` is computed against the *unfiltered*
+`turns`, but `mapped` is built after `.filter(...)`, so the two index spaces differ. Compute
+`replayFrom` and then filter+map in one pass over `turns` (carrying the original index), or
+filter first and compute `carrying` from the filtered array. Either is fine; mixing them is not,
+and the replay-cap test is what catches it.
+
+- [ ] **Step 4: Run the new suite, then the whole functions suite**
+
+```bash
+cd functions
+npx jest src/__tests__/buildMessagesAttachments.test.ts 2>&1 | tail -20
+npx jest 2>&1 | tail -25
+cd ..
+```
+
+Expected: the new suite green, and **every existing `functions/` test still green** — `buildMessages`
+is called by every chat path.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add functions/src/companyChatCore.ts functions/src/__tests__/buildMessagesAttachments.test.ts
+git commit -F - <<'MSG'
+feat(functions): content blocks, and the coalescing line that quietly broke
+
+ClaudeMessage.content was a `string`, and buildMessages merges consecutive
+same-role turns with `${last.content}\n\n${msg.content}`. Widening the type
+without touching that line puts "[object Object]" in the prompt — no error, no
+crash, no type complaint at runtime. mergeContent replaces it and a test asserts
+the string never appears in a serialized message.
+
+ChatTurn is widened too, and that is not optional. Attachments that don't
+replay give you a chat where "what's in this screenshot?" works and "what about
+the top left?" reaches a model that can no longer see it. The second question is
+the one founders ask, so a one-shot attachment isn't worth shipping.
+
+Replay is capped at the 3 most recent turns carrying one. An inlined image
+re-uploads every turn it survives, so unbounded replay bills the founder for the
+same screenshot forever. Storage + the Files API is the real fix; this is the
+bound until then.
+
+Media blocks precede the text block, because the text asks about the attachment.
+Text files are inlined as text rather than given a block type — none exists for
+a source file and none is needed. An undecodable base64 payload is dropped
+rather than sent as mojibake.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+---
+
+### Task 10: `functions/` — the web-search flag actually strips the tool
+
+**Files:**
+- Modify: `functions/src/companyChatCore.ts` (tool assembly) and `functions/src/companyChat.ts` (read the flag)
+- Create: `functions/src/__tests__/webSearchFlag.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `webSearch?: boolean` on the request payload; the tool array omits `WEB_SEARCH_TOOL` when it is `false`.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// functions/src/__tests__/webSearchFlag.test.ts
+import { WEB_SEARCH_TOOL, chatTools } from "../companyChatCore";
+
+describe("web search toggle", () => {
+  it("includes the tool by default", () => {
+    expect(chatTools({ runnable: [] }).some((t: any) => t.name === "web_search")).toBe(true);
+  });
+
+  it("OMITS the tool when the founder turned it off", () => {
+    // A checkbox that doesn't change the request is worse than no checkbox.
+    expect(
+      chatTools({ runnable: [], webSearch: false }).some((t: any) => t.name === "web_search"),
+    ).toBe(false);
+  });
+
+  it("still exposes the tool constant so callers can't drift", () => {
+    expect(WEB_SEARCH_TOOL.type).toBe("web_search_20260209");
+  });
+});
+```
+
+The exported helper `chatTools` may not exist under that name — **read the current tool-assembly
+site in `companyChatCore.ts` first** (`grep -n "WEB_SEARCH_TOOL" functions/src/companyChatCore.ts`)
+and either use the real name or extract the array construction into a small pure exported function
+so it can be tested. Extracting is preferred: the assembly currently happens inline inside a larger
+builder, which is why there is no test for it today.
+
+- [ ] **Step 2: Run, implement, run**
+
+```bash
+cd functions && npx jest src/__tests__/webSearchFlag.test.ts 2>&1 | tail -20; cd ..
+```
+
+Thread `webSearch` from the Swift `CompanyChatRequest` through to the tool array; default `true`
+so an omitted field behaves exactly as today.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add functions/src/companyChatCore.ts functions/src/companyChat.ts functions/src/__tests__/webSearchFlag.test.ts
+git commit -F - <<'MSG'
+feat(functions): the web-search toggle strips the tool, not just the checkbox
+
+web_search_20260209 was registered unconditionally with a prompt line telling
+the model to "use it only when" it needs to — so search happened at the model's
+discretion and the founder had no control at all.
+
+Off now means the tool is absent from the request. A checkbox that doesn't
+change behaviour is worse than no checkbox, and this is the direction that
+matters: a founder who turns search off and gets searched anyway has been lied
+to by the UI.
+
+Defaults to true, so every existing caller sends exactly what it sent before.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+---
+
+### Task 11: Wire attachments end to end in Swift
+
+**Files:**
+- Create: `codepet/Views/Environment/AttachmentPicker.swift` — `NSOpenPanel` + downscale + encode
+- Modify: `codepet/Services/CompanyChatClient.swift` — `attachments` + `webSearch` on the request
+- Modify: `codepet/Managers/CompanyStore.swift` — carry both through `sendChat`/`sendMessage`
+- Modify: `codepet/Views/Copilot/ChatComposer.swift` — the `📎` row, the `🌐` toggle, attachment pills
+- Modify: `codepet/Views/Copilot/CopilotChatView.swift` — own the state, clear on send
+- Create: `codepetTests/AttachmentSendTests.swift`
+
+**Interfaces:**
+- Consumes: `ChatAttachment` (Task 8), the widened wire shape (Tasks 9–10), the pill row (Task 5).
+- Produces: `AttachmentPicker.pickAndEncode(language:) -> [ChatAttachment]`; `CompanyChatRequest.attachments`, `.webSearch`.
+
+- [ ] **Step 1: Write the failing test**
+
+`codepetTests/AttachmentSendTests.swift`, following `ContextPinSendTests`'s scaffolding exactly
+(`CompanyStore(loader:saver:chatSender:chatStreamer:)`, `failingStreamer`, `hydrate`):
+
+```swift
+    func testAnAttachmentReachesTheRequest() async { /* assert req.attachments?.first?.mediaType */ }
+    func testAttachmentsAreClearedBySend() async { /* turn 2 carries none */ }
+    func testWebSearchOffReachesTheWire() async { /* req.webSearch == false */ }
+    func testAnUnattachedSendOmitsBothFields() async { /* nil, not [] — keeps the wire clean */ }
+```
+
+The last one matters: `CompanyChatRequest` uses `encodeIfPresent` for optionals, so `nil` omits the
+key entirely. `[]` would add `"attachments":[]` to every request in the app.
+
+- [ ] **Step 2: Implement**
+
+`AttachmentPicker` follows `ProjectLinker`'s shape (a static func taking the store/language, opening
+`NSOpenPanel`). Per file: check `ChatAttachment.kind(forPathExtension:)`, reject `nil` and anything
+over `maxBytes`, downscale images via `ChatAttachment.fittedSize` + `NSImage`/`CGImage` redraw, then
+`base64EncodedString()` — **no line breaks** (the default has none; do not pass `.lineLength64Characters`).
+
+- [ ] **Step 3: Run**
+
+```bash
+xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
+  -only-testing:codepetTests/AttachmentSendTests \
+  -only-testing:codepetTests/ContextPinSendTests \
+  -only-testing:codepetTests/CompanyStoreChatTests \
+  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/t11.xcresult 2>&1 | tail -25
+xcrun xcresulttool get test-results summary --path build/t11.xcresult | head -20
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add codepet/Views/Environment/AttachmentPicker.swift codepet/Services/CompanyChatClient.swift \
+        codepet/Managers/CompanyStore.swift codepet/Views/Copilot/ChatComposer.swift \
+        codepet/Views/Copilot/CopilotChatView.swift codepetTests/AttachmentSendTests.swift
+git commit -F - <<'MSG'
+feat(composer): attach a file, and the 🌐 toggle, wired to the wire
+
+The paperclip both competitors put first now exists. Images are downscaled to
+Sonnet 5's 2576px tier before encoding, which is where the cost is decided —
+client-side, so tuning it never needs a deploy.
+
+Attachments render in the same pill row as pinned context, because to the
+founder they are one gesture: this goes with my next message. They are cleared
+by the send for the same reason pins are.
+
+Both new fields are nil rather than [] when unused: CompanyChatRequest encodes
+optionals with encodeIfPresent, so nil keeps the key off the wire entirely
+instead of adding "attachments":[] to every request in the app.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+---
+### Task 12: Measure the row, run everything, open the PR
 
 **Files:**
 - Create: `codepetTests/ComposerControlRowTests.swift`
@@ -1879,7 +2760,11 @@ A `-only-testing:` branch is an untested branch — the first full run on this b
 
 ```bash
 pkill -x codepet 2>/dev/null; ./scripts/ci-test.sh 2>&1 | tail -40
+cd functions && npx jest 2>&1 | tail -20; cd ..
 ```
+
+**Both suites, not just Swift.** Tasks 9 and 10 changed `functions/`, whose tests run under Jest and
+are invisible to `ci-test.sh`. A green Swift run says nothing about `buildMessages`.
 
 Expected: `All N test(s) passed.` If it reports the known `@MainActor ObservableObject` dealloc crash as a part-way host death, the run is **incomplete, not green** — re-run once. If it repeats, report what did and did not run rather than calling it a pass.
 

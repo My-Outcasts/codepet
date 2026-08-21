@@ -66,11 +66,12 @@ enum VoicePermission {
 
     /// Whether the waveform button is tappable.
     ///
-    /// `.needsPermission` counts as YES on purpose: tapping is what raises the TCC
-    /// prompt, so a button hidden until permission is granted makes the permission
-    /// unreachable and voice mode permanently dead. A refusal or a missing
-    /// recogniser counts as NO, with `help` supplying the reason — a disabled
-    /// control that explains itself beats a dead click that does not.
+    /// `.needsPermission` counts as YES on purpose: tapping is what **requests** the
+    /// two grants (`request(locale:)`), so a button hidden until permission is
+    /// granted makes the permission unreachable and voice mode permanently dead. A
+    /// refusal or a missing recogniser counts as NO, with `help` supplying the
+    /// reason — a disabled control that explains itself beats a dead click that
+    /// does not.
     static func offersButton(_ availability: VoiceAvailability) -> Bool {
         switch availability {
         case .ready, .needsPermission: return true
@@ -78,10 +79,88 @@ enum VoicePermission {
         }
     }
 
+    /// The waveform button's whole rule: permission **and** an idle conversation.
+    ///
+    /// **`isBusy` is here because of what happens without it, and it is not a
+    /// cosmetic dim.** The overlay can be opened while a typed turn is still
+    /// streaming; the founder then speaks into a `.listening` overlay that has never
+    /// called `beginReply()`, so when that typed reply finishes, `endOfReply()` lands
+    /// on a virgin `SpeakingQueue`, which drains and reports — firing
+    /// `onFinishedAll`, which unconditionally clears `partial`/`lastSpeechAt`. Her
+    /// spoken question is erased mid-flight, with no message, no orb change and no
+    /// credit spent: silence, and she has to say it again. `VoiceModeOverlay`'s
+    /// `replyStreamEnded` gate closes the same hole from the other side; this is the
+    /// half that stops her getting into the situation at all.
+    ///
+    /// Extracted rather than written inline in `.disabled` because its failure is
+    /// invisible on screen — a button that is merely enabled one moment too early
+    /// looks exactly like a button that is right.
+    static func canEnterVoiceMode(_ availability: VoiceAvailability, isBusy: Bool) -> Bool {
+        offersButton(availability) && !isBusy
+    }
+
     /// Live statuses, for the view. Not called by tests.
     static func current(locale: Locale) -> VoiceAvailability {
         availability(mic: AVCaptureDevice.authorizationStatus(for: .audio),
                      recognition: SFSpeechRecognizer.authorizationStatus(),
                      hasRecognizer: SFSpeechRecognizer(locale: locale) != nil)
+    }
+
+    /// **Raise both TCC prompts, then answer with what the founder actually chose.**
+    /// Live TCC, so not called by tests — same rule as `current`.
+    ///
+    /// This exists because `availability` only ever *reads*. Nothing in the app
+    /// requested speech-recognition authorisation, and macOS never raises that prompt
+    /// on its own: Apple requires the explicit `requestAuthorization` call, so
+    /// `authorizationStatus()` stayed `.notDetermined` for every founder forever. The
+    /// button offered a prompt the app never asked for, `SpeechListener.start()`
+    /// succeeded anyway (`isAvailable` is service availability, not authorisation),
+    /// the orb pulsed, and the recognition task failed with a raw
+    /// `kAFAssistantErrorDomain` string. Voice mode could not work for anyone.
+    ///
+    /// **Microphone first, and it short-circuits.** Recognition cannot do anything
+    /// with an input the app may not open, so a second dialog after a refused
+    /// microphone asks for a grant that buys nothing — and leaving recognition
+    /// `.notDetermined` is what lets the *next* tap ask for it once the founder has
+    /// turned the microphone back on in System Settings.
+    ///
+    /// The microphone is requested explicitly rather than left to the implicit prompt
+    /// macOS raises when the input node is touched: that one arrives *after* the
+    /// overlay is on screen and the engine is starting, so the order the founder sees
+    /// would depend on how fast `start()` got that far.
+    ///
+    /// `SFSpeechRecognizer.requestAuthorization`'s completion arrives on an arbitrary
+    /// queue. It is bridged through a continuation, so the `await` resumes back on
+    /// this actor and every caller's state write is already on the main actor —
+    /// rather than hopping by hand inside a callback, or blocking on a semaphore
+    /// while a modal TCC dialog waits for the main thread that would be blocked.
+    static func request(locale: Locale) async -> VoiceAvailability {
+        // Nothing to ask for: no recogniser for this locale is `.unsupported`, and no
+        // grant the founder can give changes it. Asking anyway would raise two
+        // dialogs for a feature that still cannot run.
+        guard SFSpeechRecognizer(locale: locale) != nil else { return current(locale: locale) }
+
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+        }
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            return current(locale: locale)
+        }
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            _ = await requestRecognition()
+        }
+        return current(locale: locale)
+    }
+
+    private static func requestRecognition() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            // `@Sendable` deliberately: under `SWIFT_DEFAULT_ACTOR_ISOLATION =
+            // MainActor` this closure would otherwise be *inferred* main-actor while
+            // Speech invokes it on an arbitrary queue. Only the status crosses, and
+            // `resume` is safe from any thread.
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in
+                continuation.resume(returning: status)
+            }
+        }
     }
 }

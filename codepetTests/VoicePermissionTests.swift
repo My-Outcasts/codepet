@@ -78,6 +78,34 @@ final class VoicePermissionTests: XCTestCase {
         XCTAssertFalse(VoicePermission.offersButton(.unsupported("No recogniser.")))
     }
 
+    /// **C3, the button half.** The waveform button was enabled while a typed turn
+    /// was still streaming, and that one fact cost the founder a whole spoken
+    /// question: she opens the overlay over the live stream, it comes up `.listening`
+    /// with no `beginReply()` behind it, she speaks — and when the TYPED reply
+    /// finishes, `endOfReply()` lands on a virgin `SpeakingQueue`, which drains and
+    /// reports, so `onFinishedAll` clears her partial. No message, no orb change, no
+    /// credit spent: silence, and she says it again.
+    ///
+    /// Worth its own test precisely because the failure is invisible on screen — a
+    /// button enabled one moment too early looks exactly like a button that is right,
+    /// and no layout or permission assertion sees it. Delete `&& !isBusy` and this
+    /// goes red.
+    func testTheButtonIsNotOfferedWhileAReplyIsInFlight() {
+        XCTAssertTrue(VoicePermission.canEnterVoiceMode(.ready, isBusy: false))
+        XCTAssertFalse(VoicePermission.canEnterVoiceMode(.ready, isBusy: true),
+                       "voice mode was reachable over a live stream: her first "
+                       + "spoken question is erased when that stream ends")
+        XCTAssertFalse(VoicePermission.canEnterVoiceMode(.needsPermission, isBusy: true))
+
+        // Busy is an ADDITIONAL condition, not a replacement: a refusal still refuses
+        // when nothing is in flight, or the two grants stop gating anything.
+        XCTAssertTrue(VoicePermission.canEnterVoiceMode(.needsPermission, isBusy: false))
+        XCTAssertFalse(VoicePermission.canEnterVoiceMode(.denied("Microphone access is off."),
+                                                        isBusy: false))
+        XCTAssertFalse(VoicePermission.canEnterVoiceMode(.unsupported("No recogniser."),
+                                                        isBusy: false))
+    }
+
     func testHelpTextIsBilingualAndAbsentWhenReady() {
         XCTAssertNil(VoicePermission.help(.ready, .en))
         let en = VoicePermission.help(.denied("Microphone access is off."), .en)

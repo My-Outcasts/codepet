@@ -99,6 +99,18 @@ protocol SpeechListening: AnyObject {
     /// must show this, because the alternative is a live-looking orb that hears nothing.
     var onFailure: ((Error) -> Void)? { get set }
     var isRunning: Bool { get }
+    /// **Whether the founder's audio stays on this Mac.** On the protocol because the
+    /// overlay states it as a privacy disclosure (spec §3) and the listener is the only
+    /// thing that knows: it is the value handed to
+    /// `SFSpeechAudioBufferRecognitionRequest.requiresOnDeviceRecognition`.
+    ///
+    /// It is **not** a property of the language. The overlay's line switched on `lang`
+    /// alone and said flatly "Recognition runs on this Mac. Nothing you say leaves
+    /// it." — so on any Mac where the en-US Assistant asset is not installed the
+    /// audio went to Apple's servers while the overlay said the opposite. Same shape
+    /// as the `lang == .vi ? why : why` defect: a decision that inspects one input and
+    /// ignores the one that determines the answer.
+    var isOnDevice: Bool { get }
     func start() throws
     func stop()
     /// The founder's turn was taken — sent as a message, or abandoned. The next
@@ -231,6 +243,13 @@ final class SpeechListener: SpeechListening {
     /// `stop()`) is cancelled, and its cancellation callback is dropped by the identity
     /// guard in `recognitionUpdate` before it can reach `endOfTask` — so retiring a
     /// request at a turn boundary does not spend budget.
+    /// See the protocol. **Reads the same expression `openRecognition` assigns to
+    /// `requiresOnDeviceRecognition`, and is next to it so a change to one is visible
+    /// against the other.** `false` with no recogniser is the safe answer: no
+    /// recogniser means `start()` throws, and claiming "nothing leaves this Mac" is
+    /// the one direction this line must never be wrong in.
+    var isOnDevice: Bool { recognizer?.supportsOnDeviceRecognition ?? false }
+
     private var budget = RenewalBudget()
 
     /// The founder's turn, accumulated across renewals. See `TurnTranscript`.

@@ -104,12 +104,23 @@ struct VoiceModeOverlay: View {
         // A takeover, not a panel: it covers the pane so the transcript is not
         // competing for attention with a conversation being held out loud.
         //
-        // **The VERTICAL half of this is not testable and is not tested.**
-        // `ImageRenderer` returns an image the size of any non-nil proposed
-        // dimension whatever the view did with it (measured: a deliberately
-        // non-filling overlay still reported 700pt of 700), so vertical fill is part
-        // of the founder's visual handoff. The horizontal half IS measured, against
-        // an unconstrained height — see `VoiceOverlayLayoutTests`.
+        // **Both axes ARE measurable, and both are measured** — see
+        // `VoiceOverlayLayoutTests`. An earlier note here said `ImageRenderer`
+        // "returns an image the size of any non-nil proposed dimension whatever the
+        // view did with it", and that is false: it reports the *resolved* size on both
+        // axes. **Do not repeat that claim in the other six `ImageRenderer` suites —
+        // a sentence saying the framework cannot measure a filled dimension will
+        // suppress a correct test somewhere else.**
+        //
+        // The real limitation is narrower: **the vertical fill is implemented twice
+        // over** — by `maxHeight: .infinity` and, independently, by the two
+        // `Spacer(minLength: 0)`s above, which take all offered height on their own.
+        // So a height assertion is a property guard, not a modifier guard. Measured on
+        // this branch against a 900×700 proposal:
+        //
+        //     frame + spacers          -> (900, 700)
+        //     maxHeight deleted only   -> (900, 700)   still filling, via the spacers
+        //     both deleted             -> (900, 368)   intrinsic, correctly reported
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(background)
         // The two observations that drive speech. On `body` rather than on a state
@@ -121,6 +132,23 @@ struct VoiceModeOverlay: View {
             if was && !now { replyStreamEnded() }
         }
         .task { await run() }
+        // **The only teardown that covers a dismissal which is not the ✕.** `close()`
+        // runs on the ✕ and nowhere else, and this overlay covers the pane rather than
+        // the window — so ⌘B (`AppShellView`'s `showsCopilot && !collapsed`) and the
+        // Developer pill (`TwoModeShellView` swapping `CopilotChatView` out) both
+        // remove it without it ever being told. `SpeechListener`'s `isolated deinit`
+        // still reaches `listener.stop()`, but `SpeechSpeaker.deinit` only restores
+        // the SFX volume — it never calls `synth.stopSpeaking(at:)`, and
+        // `AVSpeechSynthesizer`'s behaviour on dealloc mid-utterance is undocumented.
+        // So: press ⌘B mid-sentence and the pet may keep talking with no surface left
+        // to stop it, which is invariant 4's stated failure by a route the invariant
+        // does not cover.
+        //
+        // **Not `close()`** — that writes `isPresented` during teardown.
+        .onDisappear {
+            voice.stopImmediately()
+            listener.stop()
+        }
     }
 
     @ViewBuilder
@@ -134,7 +162,7 @@ struct VoiceModeOverlay: View {
 
     private var header: some View {
         HStack {
-            Text(stateCaption)
+            Text(Self.stateCaption(session.state, lang))
                 .font(CodepetTheme.inter(CodepetType.callout, weight: .medium))
                 .foregroundStyle(CodepetTheme.mutedText)
             Spacer()
@@ -190,7 +218,7 @@ struct VoiceModeOverlay: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            Text(Self.privacyLine(lang))
+            Text(Self.privacyLine(lang, onDevice: listener.isOnDevice))
                 .font(CodepetTheme.inter(CodepetType.footnote))
                 .foregroundStyle(CodepetTheme.mutedText)
             Text(Self.creditLine(turns: turns, lang))
@@ -203,16 +231,31 @@ struct VoiceModeOverlay: View {
 
     // MARK: - Copy
 
-    /// **Spec §3, and it is a disclosure rather than a footnote.** In English
-    /// recognition is on-device: nothing said in voice mode leaves the Mac, and the
-    /// audio costs no credits. In Vietnamese it does leave, because
-    /// `SFSpeechRecognizer(vi-VN)` reports `supportsOnDeviceRecognition == false`
-    /// ("No Assistant asset for language vi-VN") — measured 21 Aug. That is not
-    /// fixable by us, so it is stated.
-    static func privacyLine(_ lang: AppLanguage) -> String {
-        lang == .vi
+    /// **Spec §3, and it is a disclosure rather than a footnote.**
+    ///
+    /// **`onDevice` decides it, not `lang`.** This used to switch on the language
+    /// alone and tell every English founder "nothing you say leaves it" — but
+    /// `openRecognition` sets `requiresOnDeviceRecognition` from
+    /// `recognizer.supportsOnDeviceRecognition` (`SpeechListening.swift`), and on a Mac
+    /// where the en-US Assistant asset was never installed that is `false`: the audio
+    /// goes to Apple's servers while the overlay says the opposite. Same shape as the
+    /// `lang == .vi ? why : why` defect Task 5 caught — a decision that inspects one
+    /// input and ignores the one that determines the answer.
+    ///
+    /// Vietnamese branches too, rather than being hard-coded to "sent to Apple":
+    /// `SFSpeechRecognizer(vi-VN)` reports no on-device asset today (measured 21 Aug),
+    /// but that is a fact about Apple's assets, not about the language, and a line
+    /// that would still read "sent to Apple" the day the asset ships is the same
+    /// defect pointing the other way.
+    static func privacyLine(_ lang: AppLanguage, onDevice: Bool) -> String {
+        if onDevice {
+            return lang == .vi
+                ? "Nhận dạng chạy trên chiếc Mac này. Không có gì bạn nói rời khỏi máy."
+                : "Recognition runs on this Mac. Nothing you say leaves it."
+        }
+        return lang == .vi
             ? "Giọng nói của bạn được gửi tới Apple để nhận dạng."
-            : "Recognition runs on this Mac. Nothing you say leaves it."
+            : "Your speech is sent to Apple for recognition. It does not stay on this Mac."
     }
 
     /// The running count. Spelled out per turn as well as in total, because the
@@ -226,11 +269,25 @@ struct VoiceModeOverlay: View {
             : "\(turns) turns · ~\(amount) credits this session"
     }
 
-    private var stateCaption: String {
-        switch session.state {
-        case .idle, .listening: return lang == .vi ? "Đang nghe" : "Listening"
-        case .thinking:         return lang == .vi ? "Đang suy nghĩ" : "Thinking"
-        case .speaking:         return lang == .vi ? "Đang trả lời" : "Answering"
+    /// The header line.
+    ///
+    /// **`.idle` is its own caption, and that is the whole point.** Two paths land in
+    /// `.idle` with the overlay deliberately still on screen — `run()`'s catch, and
+    /// `onFailure`'s fatal branch applying `.close` — and both of them set `failure`,
+    /// so the transcript below is already reading "The microphone stopped: …". Folded
+    /// in with `.listening`, as it was, the header said **"Listening"** directly above
+    /// that: the founder told the microphone is live and dead in the same frame.
+    ///
+    /// No `failure` parameter, because it would be a guard that cannot fire:
+    /// `failure != nil` is reachable in `.idle` and nowhere else. A failure raised
+    /// while the pet is speaking is expected rather than broken and is not recorded
+    /// (see `wire()`), and `close()` dismisses the overlay in the same breath.
+    static func stateCaption(_ state: VoiceState, _ lang: AppLanguage) -> String {
+        switch state {
+        case .idle:      return lang == .vi ? "Đã dừng" : "Stopped"
+        case .listening: return lang == .vi ? "Đang nghe" : "Listening"
+        case .thinking:  return lang == .vi ? "Đang suy nghĩ" : "Thinking"
+        case .speaking:  return lang == .vi ? "Đang trả lời" : "Answering"
         }
     }
 
@@ -326,6 +383,23 @@ struct VoiceModeOverlay: View {
             // The guard CAN fire because the listener stays running through
             // `.speaking` on purpose: barge-in needs the mic open while the pet talks.
             // Every other state is a real failure and must be shown.
+            //
+            // **But the listener is already dead by the time this runs, and returning
+            // here used to be the end of it.** `endOfTask`'s `.fail` branch calls
+            // `stop()` *before* `onFailure?(error)` — tap removed, voice processing
+            // off, engine stopped, `isRunning == false` — and nothing ever restarted
+            // it: `start()` was called once, in `run()`, and `endTurn()` early-returns
+            // on `guard isRunning`. So a long reply whose own audio the voice
+            // processing cancels out of the mic exhausted `RenewalBudget` on genuine
+            // silence, fell through here, and left the founder in a `.listening`
+            // overlay whose header read "Listening" with the orb at 0 — talking to a
+            // microphone that was gone, with nothing shown and nothing logged.
+            //
+            // Still return, and still show nothing: closing mid-answer is wrong, and
+            // restarting *here* re-enters the same silence-death loop and churns the
+            // engine for the whole reply. `ensureListening` picks it up on the way
+            // back to `.listening`, which is the first moment the overlay claims the
+            // microphone is live.
             guard session.state != .speaking else { return }
             listener.stop()
             failure = error
@@ -346,7 +420,42 @@ struct VoiceModeOverlay: View {
             partial = ""
             lastSpeechAt = nil
             level = 0
+            // **The mic may have died during the reply.** See `onFailure`'s
+            // `.speaking` branch: this is the transition that makes the header say
+            // "Listening", so it is where that has to become true again.
+            do { try Self.ensureListening(listener, state: session.state) }
+            catch {
+                // The restart itself refused — that is a real, fatal failure, and it
+                // takes the normal path rather than being swallowed a second time.
+                listener.stop()
+                failure = error
+                session.apply(.close)
+            }
         }
+    }
+
+    /// **The microphone is alive whenever the overlay claims to be listening.**
+    ///
+    /// A recognition failure raised while the pet was speaking is deliberately not
+    /// shown (see `wire()`) — but `SpeechListener` has already fully torn itself down
+    /// by then, and nothing else ever calls `start()` a second time. Without this the
+    /// overlay returns to `.listening`, the header says so, and the founder talks into
+    /// a dead microphone for the rest of the session with no error on screen.
+    ///
+    /// Static and taking the state explicitly so the rule is reachable from a test:
+    /// everything inside a `View`'s private closures is not. Returns whether it
+    /// actually restarted, so a test can tell "was already running" from "did nothing".
+    @discardableResult
+    static func ensureListening(_ listener: SpeechListening, state: VoiceState) throws -> Bool {
+        // Only `.listening` makes the promise. `.speaking` deliberately tolerates a
+        // dead request, and in `.idle`/`.thinking` the overlay claims nothing.
+        guard state == .listening else { return false }
+        // `isRunning` rather than a flag set by `onFailure`: it is the same fact, it
+        // is already on the protocol, and a second copy of it is one more thing that
+        // can disagree with the listener about whether the listener is running.
+        guard !listener.isRunning else { return false }
+        try listener.start()
+        return true
     }
 
     /// ✕. **`stopImmediately()` first, then dismiss.** Without it the pet keeps
@@ -398,14 +507,23 @@ struct VoiceModeOverlay: View {
         // speakable would then never fire `onFinishedAll` and the overlay would hang
         // in `.thinking`.
         voice.beginReply()
-        turns += 1
 
         let toSend = text
         let language = lang
         // 1. Send what she said. `convenesRoom` is left at its default false: the
         //    room is unreachable by voice (spec §5) because a misheard sentence must
         //    never spend RoomOffer.credits.
-        Task { await companyStore.sendChat(toSend, language: language) }
+        //
+        //    **`turns += 1` is inside, after the await.** The flags checked below are
+        //    checked again by `sendMessage` when this Task actually runs, so counting
+        //    the turn out here counted one that could still be dropped. No real
+        //    interleaving was constructed, so this is defensive — but it makes the
+        //    credit line honest by construction rather than by argument, and the cost
+        //    is that the count updates when the reply lands instead of when it is sent.
+        Task {
+            await companyStore.sendChat(toSend, language: language)
+            turns += 1
+        }
         // 2. Retire the recognition request. See the protocol's note: without this
         //    the next question arrives with this one glued to its front.
         listener.endTurn()
@@ -460,8 +578,39 @@ struct VoiceModeOverlay: View {
     /// end and the overlay reopens the mic, arms the 1.2s timer, hears silence, and
     /// spends a credit on an empty turn while the real reply is still arriving.
     private func replyStreamEnded() {
+        // **The stream that just ended has to be OURS.** The overlay is openable at
+        // any moment, including over a typed turn already in flight, and that seam is
+        // what this guard closes:
+        //
+        // She sends a typed message; `isStreaming` is true. She taps the waveform —
+        // the overlay opens in `.listening` with no `beginReply()` behind it. She
+        // speaks: `onPartial` fills `partial` and stamps `lastSpeechAt`, and because
+        // the state is `.listening` rather than `.speaking` this is not barge-in, so
+        // the `SpeakingQueue` latch never closes. The 1.2s silence fires,
+        // `endTurnIfSilent`'s `guard !isStreaming` correctly waits a tick. Then the
+        // TYPED reply finishes, and ungated this fired `endOfReply()` on a queue that
+        // had never begun a reply — and `SpeakingQueue` starts `accepting = true,
+        // reported = false`, so a virgin queue drains and *reports*. `onFinishedAll`
+        // then no-ops the illegal `.replyFinished` and unconditionally clears
+        // `partial`, `lastSpeechAt` and `level`.
+        //
+        // **Her spoken question is erased mid-flight** — no message, no orb change,
+        // no credit spent, and she has to say it all again. `VoicePermission
+        // .canEnterVoiceMode` keeps her out of this situation; this keeps the
+        // situation harmless if she is in it.
+        guard Self.streamEndBelongsToVoiceTurn(session.state) else { return }
         speak(replyText, streaming: false)
         voice.endOfReply()
+    }
+
+    /// Whether `isStreaming` going false is the end of a reply **this overlay asked
+    /// for**. Only `.thinking` and `.speaking` follow a `beginReply()`.
+    ///
+    /// Extracted so it can be tested: its failure is silent — an erased question and
+    /// a founder repeating herself — and every other line of `replyStreamEnded` is
+    /// unreachable from a test.
+    static func streamEndBelongsToVoiceTurn(_ state: VoiceState) -> Bool {
+        state == .thinking || state == .speaking
     }
 }
 
@@ -488,6 +637,9 @@ final class InertSpeechListening: SpeechListening {
     var onLevel: ((Float) -> Void)?
     var onFailure: ((Error) -> Void)?
     var isRunning: Bool { false }
+    /// `true` so the measured overlay renders the ordinary English disclosure. The
+    /// copy itself is pinned against `privacyLine` directly, not against this.
+    var isOnDevice: Bool { true }
     func start() throws {}
     func endTurn() {}
     func stop() {}

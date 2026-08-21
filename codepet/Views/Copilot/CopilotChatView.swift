@@ -61,6 +61,32 @@ struct CopilotChatView: View {
     /// life of one voice-mode session.
     @State private var voiceListener: SpeechListening?
     @State private var voiceVoice: SpeakingVoice?
+    /// **Whether voice mode can run, cached — and the SAME value the button reads and
+    /// `startVoiceMode()` writes.** Two things depend on it being one value:
+    ///
+    /// 1. `VoicePermission.current` constructs an `SFSpeechRecognizer`, which is an
+    ///    XPC handshake with the speech daemon. Computed in `ChatComposer.body` it ran
+    ///    on **every streamed token** — `ChatComposer` holds `@EnvironmentObject
+    ///    companyStore`, so `chatMessages[i].text` invalidates it on every delta, and
+    ///    a 400-word reply built and tore down several hundred recognisers on the main
+    ///    actor while a stream was being parsed. It also put an `SFSpeechRecognizer`
+    ///    one `ImageRenderer` test away from a headless XCTest host.
+    /// 2. A refusal has to reach the button. `request(locale:)` learns the answer, and
+    ///    if the button computed its own copy the founder who granted the microphone
+    ///    and refused recognition would keep an enabled button whose tooltip promises
+    ///    a prompt that will never appear again — every tap a no-op, because
+    ///    `requestAuthorization` after a denial returns immediately and raises
+    ///    nothing. Writing the result here is what turns that into a disabled button
+    ///    carrying `VoicePermission.help`'s "turn it on in System Settings".
+    ///
+    /// `.needsPermission` until read: the button is offered and its tooltip says
+    /// Codepet will ask, which is true of the un-refreshed state and of the common one.
+    @State private var voiceAvailability: VoiceAvailability = .needsPermission
+    /// One tap at a time. The TCC dialogs are asynchronous, so a second tap while
+    /// they are up would run a second request chain and hand the overlay a fresh
+    /// listener/speaker pair — replacing, mid-session, the instances the overlay's
+    /// already-running `.task` wired its callbacks to.
+    @State private var voiceRequesting = false
 
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
@@ -163,7 +189,18 @@ struct CopilotChatView: View {
             if !isOn {
                 voiceListener = nil
                 voiceVoice = nil
+                // The founder may have revoked a grant in System Settings while the
+                // overlay was up, and a mid-session revoke is exactly what
+                // `onFailure` reports.
+                voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
             }
+        }
+        // Read once per appearance, and again when the language changes — the locale
+        // is what decides whether a recogniser exists at all. NOT in `body`: see
+        // `voiceAvailability`.
+        .task { voiceAvailability = VoicePermission.current(locale: lang.speechLocale) }
+        .onChange(of: lang) { _, next in
+            voiceAvailability = VoicePermission.current(locale: next.speechLocale)
         }
         // The rail asks; the chat opens. `showHistory` stays owned here.
         .onChange(of: companyStore.historyRequested) { _, requested in
@@ -247,24 +284,51 @@ struct CopilotChatView: View {
             onSend: send,
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
-            onVoiceMode: startVoiceMode
+            onVoiceMode: startVoiceMode,
+            voiceAvailability: voiceAvailability
         )
     }
 
-    /// The waveform button's action — builds the session's audio pair fresh (see
-    /// the state doc comment above) and raises the takeover.
+    /// The waveform button's action — **ask for the two grants, and only then** build
+    /// the session's audio pair (see the state doc comment above) and raise the
+    /// takeover.
+    ///
+    /// **The asking is the fix, not a formality.** Nothing in the app ever called
+    /// `SFSpeechRecognizer.requestAuthorization`, macOS never raises that prompt by
+    /// itself, and `SpeechListener.start()` succeeds without it — so the founder got a
+    /// pulsing orb, a raw `kAFAssistantErrorDomain` string, and a recognition status
+    /// still `.notDetermined` on every later tap. See `VoicePermission.request`.
+    ///
+    /// **Nothing is built before the grants land.** A `SpeechSpeaker` is an
+    /// `AVSpeechSynthesizer` and a `SpeechListener` an `AVAudioEngine` plus a
+    /// recogniser; spinning both up in front of a dialog the founder may refuse
+    /// leaves the overlay's own `.onChange(of: voiceMode)` release path unreached,
+    /// because the overlay was never presented.
     ///
     /// `DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\.name)
     /// + ["Codepet"]`: the recognizer's `contextualStrings` (spec §3) — product
     /// nouns are exactly the words a general recognizer mishears, and every name
     /// the founder might say to address someone is one of these three sources.
     private func startVoiceMode() {
-        let hints = DepartmentCatalog.roster.map(\.name)
-            + PetCharacter.all.values.map(\.name)
-            + ["Codepet"]
-        voiceListener = SpeechListener(locale: lang.speechLocale, hints: hints)
-        voiceVoice = SpeechSpeaker()
-        voiceMode = true
+        guard !voiceRequesting, !voiceMode else { return }
+        voiceRequesting = true
+        Task {
+            // `await` on the main actor: the TCC dialogs run without the main thread
+            // blocked, and both writes below are already back on it.
+            let availability = await VoicePermission.request(locale: lang.speechLocale)
+            voiceRequesting = false
+            // Written whatever the answer: a refusal has to reach the button, or the
+            // next tap silently does nothing forever. See `voiceAvailability`.
+            voiceAvailability = availability
+            guard availability == .ready else { return }
+
+            let hints = DepartmentCatalog.roster.map(\.name)
+                + PetCharacter.all.values.map(\.name)
+                + ["Codepet"]
+            voiceListener = SpeechListener(locale: lang.speechLocale, hints: hints)
+            voiceVoice = SpeechSpeaker()
+            voiceMode = true
+        }
     }
 
     /// Convene the Virtual Company on what is in the composer.

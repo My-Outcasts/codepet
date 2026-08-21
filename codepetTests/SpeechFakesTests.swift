@@ -82,6 +82,9 @@ final class SpeechFakesTests: XCTestCase {
         var onFailure: ((Error) -> Void)?
         var isRunning = false
         var startCount = 0
+        /// Settable, because the whole finding behind `privacyLine(_:onDevice:)` is
+        /// that this is a property of the installed assets and not of the language.
+        var isOnDevice = true
         /// When set, `start()` throws it. Deliberately the SAME fake that can start
         /// successfully: asserting `isRunning == false` after a refusal only means
         /// something because this fake sets it true whenever it does start.
@@ -455,6 +458,117 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertNoThrow(try fake.start())
         fake.emit("a new question")
         XCTAssertEqual(partials.last, "a new question")
+    }
+
+    // MARK: - The microphone is alive whenever the overlay says it is
+
+    /// **C2.** A recognition failure raised while the pet is speaking is expected
+    /// rather than broken, so the overlay deliberately shows nothing — but
+    /// `SpeechListener.endOfTask`'s `.fail` branch calls `stop()` **before**
+    /// `onFailure`, so the listener is already fully torn down by then, and nothing
+    /// ever called `start()` a second time: `run()` calls it once and `endTurn()`
+    /// early-returns on `guard isRunning`.
+    ///
+    /// The reachable sequence is not exotic. Voice processing cancels the pet's own
+    /// audio out of the microphone — that is what makes barge-in possible — so a
+    /// request left open while the founder merely LISTENS to a long reply hears
+    /// genuine silence, self-terminates, renews, does it again and exhausts
+    /// `RenewalBudget`. The reply then ends, the session returns to `.listening`, the
+    /// header reads "Listening", the orb sits at 0, **and the founder talks into a
+    /// microphone that is gone with no error displayed, for the rest of the session.**
+    ///
+    /// So the rule is not "restart on failure" (that re-enters the same silence-death
+    /// loop and churns the engine for the whole reply) but "the mic is running
+    /// whenever the overlay claims to be listening", checked at the transition back.
+    func testAMicThatDiedWhileThePetSpokeIsRunningAgainOnceListening() throws {
+        let fake = FakeListener()
+        let listener: SpeechListening = fake
+        var session = VoiceSession()
+        var shown: Error?
+        listener.onFailure = { error in
+            guard session.state != .speaking else { return }   // the overlay's guard
+            shown = error
+        }
+
+        _ = session.apply(.open)
+        _ = session.apply(.heardSilence)
+        _ = session.apply(.replyBegan)
+        XCTAssertEqual(session.state, .speaking)
+        XCTAssertNoThrow(try listener.start())
+        let startsBefore = fake.startCount
+
+        // `SpeechListener` stops before it reports, which is exactly why the overlay's
+        // guard is not enough on its own.
+        fake.failMidSession(VoiceAudioError.engineFailed("no speech detected"))
+        XCTAssertNil(shown, "a silence-terminated request was shown as a failure mid-answer")
+        XCTAssertFalse(listener.isRunning)
+
+        // The reply ends. This is the moment the header starts saying "Listening".
+        _ = session.apply(.replyFinished)
+        XCTAssertEqual(session.state, .listening)
+        XCTAssertTrue(try VoiceModeOverlay.ensureListening(listener, state: session.state),
+                      "the overlay claimed to be listening with the microphone torn down")
+        XCTAssertTrue(listener.isRunning)
+        XCTAssertEqual(fake.startCount, startsBefore + 1)
+    }
+
+    /// The other three cases, so the ensure is a check and not an unconditional
+    /// restart: a healthy listener must not be churned, and `.speaking`/`.thinking`
+    /// must be left alone — `.speaking` tolerates a dead request on purpose.
+    func testEnsureListeningOnlyActsWhenTheOverlayIsClaimingToListen() throws {
+        let fake = FakeListener()
+        XCTAssertNoThrow(try fake.start())
+        XCTAssertFalse(try VoiceModeOverlay.ensureListening(fake, state: .listening),
+                       "a running listener was restarted")
+        XCTAssertEqual(fake.startCount, 1)
+
+        fake.stop()
+        for st in [VoiceState.idle, .thinking, .speaking] {
+            XCTAssertFalse(try VoiceModeOverlay.ensureListening(fake, state: st))
+            XCTAssertFalse(fake.isRunning, "\(st) restarted a mic the overlay was not promising")
+        }
+        XCTAssertEqual(fake.startCount, 1)
+    }
+
+    /// If the restart itself refuses, that is a real failure and must be surfaced —
+    /// the one thing worse than a dead mic under a "Listening" header is a dead mic
+    /// under a "Listening" header that the app tried and failed to revive silently.
+    func testARefusedRestartThrowsSoTheOverlayCanShowIt() {
+        let fake = FakeListener()
+        fake.refuseStart = VoiceAudioError.recognizerUnavailable
+        XCTAssertThrowsError(try VoiceModeOverlay.ensureListening(fake, state: .listening)) {
+            XCTAssertEqual($0 as? VoiceAudioError, .recognizerUnavailable)
+        }
+    }
+
+    // MARK: - Opening voice mode over a live typed turn
+
+    /// **C3.** `SpeakingQueue` starts `accepting = true, reported = false`, so
+    /// `endOfReply()` on a queue that never had a `beginReply()` **drains and
+    /// reports** — firing `onFinishedAll`, which unconditionally clears the partial,
+    /// the timestamp and the level.
+    ///
+    /// That is reachable because the overlay can be opened over a typed turn already
+    /// in flight: she taps the waveform, speaks into a `.listening` overlay (so no
+    /// barge-in and the latch stays open), the 1.2s silence correctly waits on
+    /// `guard !isStreaming` — and then the TYPED reply finishes and erases her
+    /// question mid-flight, with no message, no orb change and no credit spent.
+    ///
+    /// The first assertion is the guard; the rest is why it must answer that way.
+    func testAStreamEndInListeningIsNotThisOverlaysReply() {
+        XCTAssertFalse(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.listening),
+                       "a typed reply's stream end was treated as the spoken turn's")
+        XCTAssertFalse(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.idle))
+        XCTAssertTrue(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.thinking))
+        XCTAssertTrue(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.speaking))
+
+        // And what the `.listening` answer is protecting: a virgin queue reports.
+        let voice = FakeVoice()
+        var finished = 0
+        voice.onFinishedAll = { finished += 1 }
+        voice.endOfReply()
+        XCTAssertEqual(finished, 1,
+                       "if a virgin queue no longer reports, this guard has lost its reason")
     }
 
     /// A recognizer revises what it already said ("teh" → "the"), so the live

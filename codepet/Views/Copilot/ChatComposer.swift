@@ -65,6 +65,23 @@ struct ChatComposer: View {
     /// call site render exactly as they do today — the same additive rule `tier`
     /// and `pins` follow.
     var onVoiceMode: (() -> Void)? = nil
+    /// Whether voice mode can run, **computed by the owner and handed down**. `nil`
+    /// means this surface has no voice mode at all, and pairs with `onVoiceMode` being
+    /// nil — `voiceButton` needs both.
+    ///
+    /// Not read here from `VoicePermission.current`, which is where it used to come
+    /// from: that constructs an `SFSpeechRecognizer` (an XPC handshake with the speech
+    /// daemon) and this `body` is invalidated by every streamed token, since
+    /// `companyStore` is an `@EnvironmentObject` and `chatMessages[i].text` is filled
+    /// in place delta by delta. A 400-word reply built and tore down several hundred
+    /// recognisers on the main actor while a stream was being parsed — and put an
+    /// `SFSpeechRecognizer` one `ImageRenderer` test away from a headless XCTest host,
+    /// which is the class of hazard that took six SSE tests down.
+    ///
+    /// It also has to be the owner's copy for a second reason: the owner is what
+    /// *requests* the grants, so a refusal is only visible on this button if the
+    /// answer comes from there. See `CopilotChatView.voiceAvailability`.
+    var voiceAvailability: VoiceAvailability? = nil
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -527,9 +544,14 @@ struct ChatComposer: View {
 
     /// Voice mode — spec §1. `waveform` rather than `mic`: the mic glyph means
     /// dictation in both ChatGPT and Claude, and this is the other feature.
+    ///
+    /// **`isBusy` is in the gate, and `VoicePermission.canEnterVoiceMode` owns the
+    /// rule.** Entering voice mode over a live typed turn cost the founder her first
+    /// spoken question outright — see that function, where the sequence is written
+    /// out. It is a one-line predicate whose failure is invisible on screen, so it is
+    /// tested rather than inlined here.
     @ViewBuilder private var voiceButton: some View {
-        if let onVoiceMode {
-            let availability = VoicePermission.current(locale: lang.speechLocale)
+        if let onVoiceMode, let availability = voiceAvailability {
             Button(action: onVoiceMode) {
                 Image(systemName: "waveform")
                     .font(.system(size: surface == .dock ? 15 : 12, weight: .medium))
@@ -539,7 +561,7 @@ struct ChatComposer: View {
                     .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(!VoicePermission.offersButton(availability))
+            .disabled(!VoicePermission.canEnterVoiceMode(availability, isBusy: isBusy))
             .help(VoicePermission.help(availability, lang) ?? (lang == .vi ? "Chế độ giọng nói" : "Voice mode"))
         }
     }

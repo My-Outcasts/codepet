@@ -366,7 +366,8 @@ struct CopilotChatView: View {
                                       scrollGeneration: scrollGeneration)
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
-                        if companyStore.codingRun.run != nil,
+                        if surface.showsCodingRunCard,
+                           companyStore.codingRun.run != nil,
                            companyStore.codingRunAnchorId == m.id {
                             CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                         }
@@ -395,7 +396,8 @@ struct CopilotChatView: View {
                     // Anchored runs render ONLY inline (above, next to their anchor message) —
                     // if the anchor isn't in this thread's buffer (a switch/leak), nothing
                     // renders here for it.
-                    if companyStore.codingRun.run != nil,
+                    if surface.showsCodingRunCard,
+                       companyStore.codingRun.run != nil,
                        companyStore.codingRunAnchorId == nil {
                         CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }

@@ -27,6 +27,16 @@ enum ChatSurface {
     /// The dock is 380pt wide and fits two chips + overflow; the pane fits the
     /// prototype's three.
     var visibleDeptChips: Int { self == .dock ? 2 : 3 }
+
+    /// **Who draws a coding run.**
+    ///
+    /// In the dock there is one column, so the run card renders inline in the
+    /// transcript beside the ask that started it. In two-mode a run belongs to a
+    /// Developer SESSION and is drawn by `DeveloperWorkPane` — so the Ask transcript
+    /// must not draw it too. It did, and the result is the screenshot that started
+    /// this: the founder ends the tour in Ask and finds an ENGINEERING card
+    /// announcing a branch commit, sitting between two questions about the roadmap.
+    var showsCodingRunCard: Bool { self == .dock }
 }
 
 private struct ChatSurfaceKey: EnvironmentKey {

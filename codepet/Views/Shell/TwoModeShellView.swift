@@ -81,6 +81,12 @@ struct TwoModeShellView: View {
         }
         .onChange(of: mode) { _, new in
             new.persist()
+            // The two doors are two conversations (spec §10). Without this there is
+            // one buffer behind both, so a code run described in Developer wrote its
+            // ask and its result card into the ASK transcript — the founder finished
+            // the tour, came back to Ask, and found a branch commit sitting between
+            // two unrelated questions.
+            companyStore.switchWorkspace(to: new == .developer ? .dev : .ask)
             // Switching INTO Developer while browsing a company page would leave
             // the founder looking at Roadmap with a Developer rail — the mode
             // change would appear to do nothing. Return them to the conversation,

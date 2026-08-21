@@ -225,7 +225,7 @@ struct TwoModeSidebar: View {
         case .ask:
             VStack(alignment: .leading, spacing: 3) {
                 sectionLabel(lang == .vi ? "Gần đây" : "Recent")
-                if companyStore.threads.isEmpty {
+                if threadsOfKind(.ask, in: companyStore.threads).isEmpty {
                     emptyLine(lang == .vi ? "Cuộc trò chuyện của bạn sẽ ở đây."
                                           : "Your conversations appear here.")
                 } else {
@@ -235,8 +235,12 @@ struct TwoModeSidebar: View {
                     // truncated to 8 would search the slice rather than the threads —
                     // the founder would type a title they can remember and be told it
                     // does not exist.
-                    let all = ThreadSearch.matches(sortThreadsByRecent(companyStore.threads),
-                                                   query: query, untitled: untitled)
+                    // Ask's list is the ASK threads — spec §10's first filter. Before
+                    // this it was every thread, so a Developer session appeared in
+                    // Recent and clicking it dropped a code run into Ask's transcript.
+                    let all = ThreadSearch.matches(
+                        sortThreadsByRecent(threadsOfKind(.ask, in: companyStore.threads)),
+                        query: query, untitled: untitled)
                     if searching && all.isEmpty {
                         emptyLine(lang == .vi ? "Không có kết quả." : "No matches.")
                     }
@@ -293,10 +297,22 @@ struct TwoModeSidebar: View {
                         companyStore.select(.environment)
                     }
                     sectionLabel(lang == .vi ? "Phiên" : "Sessions").padding(.top, 6)
-                    row(symbol: companyStore.engineeringReviewRunId == nil ? "circle" : "circle.fill",
-                        label: lang == .vi ? "Phiên hiện tại" : "Current session",
-                        selected: companyStore.engineeringReviewRunId != nil) {
-                        companyStore.view = .chat
+                    // The REAL dev threads — §10's second filter over the same
+                    // collection. This was one hardcoded "Current session" row that
+                    // navigated to chat and nothing else: a founder with three
+                    // sessions saw one, and it was not a switcher, it was a label.
+                    let sessions = sortThreadsByRecent(
+                        threadsOfKind(.dev, in: companyStore.threads))
+                    if sessions.isEmpty {
+                        emptyLine(lang == .vi ? "Chưa có phiên nào." : "No sessions yet.")
+                    }
+                    ForEach(sessions.prefix(Self.recentShown)) { session in
+                        row(symbol: "chevron.left.forwardslash.chevron.right",
+                            label: session.title ?? (lang == .vi ? "Phiên mới" : "New session"),
+                            selected: session.id == companyStore.activeThreadId) {
+                            companyStore.switchThread(session.id)
+                            companyStore.view = .chat
+                        }
                     }
                 }
             }

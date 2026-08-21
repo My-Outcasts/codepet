@@ -890,8 +890,42 @@ final class CompanyStore: ObservableObject {
             if threads[i].title == nil { threads[i].title = deriveThreadTitle(chatMessages) }
         } else {
             threads.append(ChatThread(id: id, title: deriveThreadTitle(chatMessages),
-                                       messages: chatMessages, createdAt: now, updatedAt: now))
+                                       messages: chatMessages, createdAt: now, updatedAt: now,
+                                       kind: activeThreadKind))
         }
+    }
+
+    // MARK: - The two doors
+
+    /// Which door the working buffer currently belongs to.
+    @Published private(set) var activeThreadKind: ChatThreadKind = .ask
+
+    /// The conversation each door was last in, so switching back returns you to the
+    /// session you left rather than the newest one.
+    private var lastThreadIdByKind: [ChatThreadKind: String] = [:]
+
+    /// Move the working buffer to the other door — spec §10.
+    ///
+    /// **This is not `switchThread`.** That one cancels the coding run, because a run
+    /// anchored in the outgoing conversation would otherwise float to the bottom of
+    /// the incoming one. A MODE switch is different: a Developer session owns a
+    /// branch and keeps working while the founder reads something in Ask, so the run
+    /// survives and is still there when they come back. Cancelling it here would make
+    /// glancing at the roadmap mid-run destroy the run.
+    func switchWorkspace(to kind: ChatThreadKind) {
+        guard !isStreaming, !isCompanionTyping else { return }
+        guard kind != activeThreadKind else { return }
+        flushActiveThread()
+        if let current = activeThreadId { lastThreadIdByKind[activeThreadKind] = current }
+        activeThreadKind = kind
+
+        // Where this door was, else its most recent conversation, else a fresh one.
+        let target = lastThreadIdByKind[kind].flatMap { id in
+            threads.first { $0.id == id && $0.kind == kind }?.id
+        } ?? sortThreadsByRecent(threadsOfKind(kind, in: threads)).first?.id
+
+        activeThreadId = target ?? UUID().uuidString
+        chatMessages = target.flatMap { id in threads.first { $0.id == id }?.messages } ?? []
     }
 
     /// Start a fresh, empty conversation: flush the outgoing thread (if it ever

@@ -152,6 +152,27 @@ conversion would most likely hand the recognizer silence — which fails as "voi
 with no error to chase. The reliable path is an intermediate `AVAudioMixerNode` between `inputNode` and
 the tap, with the downmix format stated explicitly rather than inherited.
 
+**"Stated explicitly" is the whole load-bearing phrase, and the first implementation still missed it.**
+Task 4 shipped `engine.connect(input, to: downmix, format: input.outputFormat(forBus: 0))` and then
+tapped `downmix.outputFormat(forBus: 0)` — reading the format back instead of setting it. `connect(_:to:format:)`
+sets the **source's** output bus and makes the destination's *input* match; it says nothing about the
+mixer's **output**. Measured on this Mac, 21 Aug:
+
+| Bus | Format |
+|---|---|
+| `inputNode` output, VP on | 7 ch, 48000 Hz, Float32, deinterleaved |
+| mixer **input** after that `connect` | 7 ch, 48000 Hz — a no-op restatement |
+| mixer **output**, inherited — *what the code actually tapped* | **2 ch, 44100 Hz** |
+| mixer output after stating the format on `installTap` | **1 ch, 16000 Hz** ✅ |
+
+So the recognizer was being handed **stereo 44.1kHz**, uncontrolled and machine-dependent, rather than
+the mono 16k it wants. The format argument to `installTap` *does* take effect — measured above — and is
+legal precisely because the mixer's output bus is connected to nothing (`AVAudioNode.h`: "should only be
+done when attaching to an output bus which is not connected to another node").
+
+**Do not "fix" this by connecting the mixer to `mainMixerNode` to force a format.** That routes the
+microphone to the speakers, and with voice processing on it builds a feedback loop.
+
 **Two TCC prompts on first use** — microphone and speech recognition — and the app has neither usage
 string today (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` are absent from
 `codepet/Info.plist`). The app is **not** sandboxed (`com.apple.security.app-sandbox` is `false`), so no

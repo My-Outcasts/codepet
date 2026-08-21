@@ -922,9 +922,25 @@ MSG
 **Interfaces:**
 - Consumes: `VoiceProfile`, `PetVoice`, `VoiceTurn`, `SentenceSplitter`.
 - Produces:
-  - `protocol SpeakingVoice: AnyObject { var onFinishedAll: (() -> Void)? { get set }; func enqueue(_ sentence: String, profile: VoiceProfile); func stopImmediately(); var isSpeaking: Bool { get } }`
+  - `protocol SpeakingVoice: AnyObject { var onFinishedAll: (() -> Void)? { get set }; func beginReply(); func enqueue(_ sentence: String, profile: VoiceProfile); func endOfReply(); func stopImmediately(); var isSpeaking: Bool { get } }`
+    — **`beginReply` and `endOfReply` are not decoration.** "The queue drained" and
+    "the reply finished" are different facts: a fenced code block yields zero
+    speakable sentences for 5-15s, and treating that drain as the end opens the mic,
+    arms the silence timer, and spends a credit on an empty turn while the real reply
+    is still streaming. `onFinishedAll` fires only when the queue is empty AND
+    `endOfReply()` has been called. `stopImmediately` also latches the speaker closed
+    so a still-streaming reply cannot resume talking over a founder who just
+    interrupted; only `beginReply` reopens it.
   - `final class SpeechSpeaker: NSObject, SpeakingVoice`
-  - `protocol SpeechListening: AnyObject { var onPartial: ((String) -> Void)? { get set }; var onLevel: ((Float) -> Void)? { get set }; func start() throws; func stop(); var isRunning: Bool { get } }`
+  - `protocol SpeechListening: AnyObject { var onPartial: ((String) -> Void)? { get set }; var onLevel: ((Float) -> Void)? { get set }; var onFailure: ((Error) -> Void)? { get set }; func start() throws; func stop(); var isRunning: Bool { get } }`
+    — **`onFailure` exists because `start() throws` only covers synchronous failure.**
+    `SFSpeechRecognizer.isAvailable` reports *service* availability, not
+    authorisation, so `start()` succeeds with recognition permission denied: the orb
+    goes live, the level pulses, and the recognition task then dies with the error
+    discarded. The founder watches a live-looking orb that never produces one word,
+    and nothing is logged. Same path for a mid-session revoke, and for `vi-VN` where
+    spec §3 measured recognition as server-side, so any network drop kills it
+    silently.
   - `final class SpeechListener: SpeechListening`
   - `enum VoiceAudioError: Error { case recognizerUnavailable, engineFailed(String) }`
 
@@ -1716,12 +1732,39 @@ listener.onPartial = { text in
         session.apply(.founderInterrupted)
     }
 }
+
+// listener.onFailure: recognition died AFTER start() returned. Show it — the
+// alternative is a live-looking orb that hears nothing (see the protocol's note).
+listener.onFailure = { error in
+    listener.stop()
+    failure = error          // rendered in place of the partial line
+    session.apply(.close)    // nothing useful can happen without recognition
+}
 ```
 
 The silence check runs on a `Timer` at 4Hz asking `VoiceTurn.shouldEndTurn`, and on
 a true it sends `partial` through `companyStore.sendChat` and applies
 `.heardSilence`. Speaking is driven by observing the last message's text with
-`.onChange`, feeding `SentenceSplitter.take(from:)` and enqueuing what comes back.
+`.onChange`, feeding the driver below and enqueuing what comes back.
+
+**Three calls in this task exist to close findings the reviewer proved against the
+audio services. None of them is optional.**
+
+`voice.beginReply()` when a reply starts — on `.replyBegan`. It reopens the latch
+that `stopImmediately` closed, and resets the end-of-reply flag. Without it, the
+first barge-in silences the pet for the rest of the session.
+
+`voice.endOfReply()` when `companyStore.isStreaming` goes false, in the same place
+the driver is told to flush. `onFinishedAll` fires only when the queue is empty **and**
+this has been called, because a drain mid-stream is ordinary — a fenced code block
+produces zero speakable sentences for 5-15 seconds. Treat that drain as the end and
+the overlay applies `.replyFinished`, opens the mic, arms the 1.2s timer, hears the
+founder's silence, and **sends an empty turn that spends a credit** while the real
+reply is still arriving. Then the rest of the answer is spoken over the new turn.
+
+`voice.stopImmediately()` on close, before dismissing. Tap ✕ while the pet is
+talking and without this it keeps talking to an overlay that is gone, with the
+chiptune SFX still ducked to zero.
 
 **And `flush(from:)` when the stream ends** — on `companyStore.isStreaming` going
 false. `take` deliberately refuses to speak a sentence whose terminator is the last

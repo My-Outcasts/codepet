@@ -1290,6 +1290,7 @@ MSG
   - `enum VoiceAvailability: Equatable { case ready, needsPermission, denied(String), unsupported(String) }`
   - `VoicePermission.availability(mic:recognition:hasRecognizer:) -> VoiceAvailability` — pure, takes raw statuses
   - `VoicePermission.help(_ availability:, _ lang:) -> String?`
+  - `VoicePermission.offersButton(_ availability: VoiceAvailability) -> Bool` — whether the waveform is tappable at all
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1339,6 +1340,18 @@ final class VoicePermissionTests: XCTestCase {
             mic: .authorized, recognition: .authorized, hasRecognizer: false) else {
             return XCTFail("a missing recognizer must be .unsupported")
         }
+    }
+
+    /// **The button's own rule, separate from the mapping.** `.needsPermission`
+    /// must still OFFER the button — tapping it is what triggers the TCC prompt, so
+    /// hiding it makes the permission unreachable and voice mode permanently dead.
+    /// A refusal or an unsupported locale must not offer it: a dead click tells the
+    /// founder nothing, where a disabled control with a reason tells her what to do.
+    func testTheButtonIsOfferedWhenReadyOrUnasked() {
+        XCTAssertTrue(VoicePermission.offersButton(.ready))
+        XCTAssertTrue(VoicePermission.offersButton(.needsPermission))
+        XCTAssertFalse(VoicePermission.offersButton(.denied("Microphone access is off.")))
+        XCTAssertFalse(VoicePermission.offersButton(.unsupported("No recogniser.")))
     }
 
     func testHelpTextIsBilingualAndAbsentWhenReady() {
@@ -1415,6 +1428,20 @@ enum VoicePermission {
                 : "\(which) Turn it on in System Settings › Privacy & Security."
         case .unsupported(let why):
             return lang == .vi ? why : why
+        }
+    }
+
+    /// Whether the waveform button is tappable.
+    ///
+    /// `.needsPermission` counts as YES on purpose: tapping is what raises the TCC
+    /// prompt, so a button hidden until permission is granted makes the permission
+    /// unreachable and voice mode permanently dead. A refusal or a missing
+    /// recogniser counts as NO, with `help` supplying the reason — a disabled
+    /// control that explains itself beats a dead click that does not.
+    static func offersButton(_ availability: VoiceAvailability) -> Bool {
+        switch availability {
+        case .ready, .needsPermission: return true
+        case .denied, .unsupported:    return false
         }
     }
 
@@ -1593,41 +1620,23 @@ measured number in the message before touching a threshold.
 **Files:**
 - Modify: `codepet/Views/Copilot/ChatComposer.swift` — the button
 - Modify: `codepet/Views/Copilot/CopilotChatView.swift` — present the overlay
-- Create: `codepetTests/VoiceButtonTests.swift`
+- Modify: `codepet/Models/AppLanguage.swift` — `speechLocale`
 
 **Interfaces:**
-- Consumes: `VoicePermission`, `VoiceModeOverlay`.
-- Produces: `ChatComposer.onVoiceMode: (() -> Void)?` — nil by default, so
-  `DeveloperWorkPane` and every existing call site render exactly as before.
+- Consumes: `VoicePermission.offersButton(_:)` and `.help(_:_:)` (Task 5), `VoiceModeOverlay` (Task 6).
+- Produces: `ChatComposer.onVoiceMode: (() -> Void)?` — nil by default, so `DeveloperWorkPane` and every existing call site render exactly as before.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: No new unit suite — and that is deliberate**
 
-```swift
-import XCTest
-@testable import codepet
+This task is wiring: a button that calls a closure, and an overlay presented from a
+`@State` flag. The button's *rule* — when it is offered at all — was extracted into
+`VoicePermission.offersButton(_:)` and tested in Task 5, precisely so this task does
+not need a suite that re-asserts Task 5's mapping under a different name. A test that
+passes whether or not this task's code exists is not protecting anything.
 
-/// The button's offer must match what the overlay can actually do.
-final class VoiceButtonTests: XCTestCase {
-
-    /// A button offered when nothing can start is worse than a disabled one: a
-    /// disabled button says wait, a dead click says nothing.
-    func testTheButtonIsOfferedOnlyWhenVoiceCanRun() {
-        XCTAssertTrue(VoicePermission.availability(mic: .authorized, recognition: .authorized,
-                                                   hasRecognizer: true) == .ready)
-        XCTAssertFalse(VoicePermission.availability(mic: .denied, recognition: .authorized,
-                                                    hasRecognizer: true) == .ready)
-    }
-
-    /// `.needsPermission` still offers the button — tapping it is what triggers the
-    /// TCC prompt, so refusing to show it makes the permission unreachable.
-    func testNeedsPermissionStillOffersTheButton() {
-        let a = VoicePermission.availability(mic: .notDetermined, recognition: .notDetermined,
-                                             hasRecognizer: true)
-        XCTAssertEqual(a, .needsPermission)
-        XCTAssertNotNil(VoicePermission.help(a, .en), "the founder must be told what will happen")
-    }
-}
-```
+Verification here is Step 4's full suite plus the founder handoff in Step 5. If you
+find yourself wanting a unit test, the thing worth testing is a rule that should live
+in a pure type — extract it rather than testing the view.
 
 - [ ] **Step 2: Add the button**
 
@@ -1648,7 +1657,7 @@ In `ChatComposer`, beside `plusMenu` in **both** `dockBody` and `twoModeBody`:
                     .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(availability != .ready && availability != .needsPermission)
+            .disabled(!VoicePermission.offersButton(availability))
             .help(VoicePermission.help(availability, lang) ?? (lang == .vi ? "Chế độ giọng nói" : "Voice mode"))
         }
     }

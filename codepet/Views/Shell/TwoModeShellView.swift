@@ -221,10 +221,16 @@ struct TwoModeShellView: View {
                                      onClose: { companyStore.engineeringReviewRunId = nil })
         } else if TwoModeLayout.developerIsAwake(projectLink: companyStore.activeProjectLink != nil,
                                                  cloudRun: companyStore.engineeringRunStore != nil) {
-            // Awake but nothing under review: the conversation is where a run is
-            // described and where it streams (`EditCodeRouting` sends a code ask to
-            // the coding run once a folder is linked), so keep the founder in it.
-            CopilotChatView()
+            // Developer's own surface, not the Ask transcript.
+            //
+            // This used to be `CopilotChatView()`, justified as "the conversation is
+            // where a run is described and where it streams". Seen next to the
+            // prototype that does not hold: a code run rendered as chat bubbles has no
+            // exec log, no changed-file summary, no branch and no Review gate — the
+            // founder was watching a transcript where the design has a work pane. The
+            // composer stays underneath, because describing the task is still a
+            // sentence you type.
+            DeveloperWorkPane(coordinator: companyStore.codingRun)
         } else {
             dormantDeveloper
         }

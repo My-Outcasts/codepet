@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// A pet sprite sized for a **menu row**.
+/// A pet sprite sized for a **menu row or a `Menu`'s label**.
 ///
 /// **Why this exists, observed 21 Aug.** `Image("char-crash")` inside a menu
 /// `Label`'s icon slot renders the asset at its NATIVE pixel size. On screen that
@@ -13,6 +13,12 @@ import SwiftUI
 /// laid out as a view tree. AppKit flattens the label to `(title, image)` and sizes
 /// the image from `NSImage.size`, so SwiftUI layout modifiers on it are dropped. The
 /// only thing macOS reads is that property, so this sets it.
+///
+/// **The same flattening applies to a `Menu`'s own label**, which is the less obvious
+/// half. `CharacterImage(pet, size: 16)` renders correctly in `DepartmentRoster`'s
+/// chips — those are plain `Button`s — and rendered full-size inside the armed
+/// departments control, because that is a `Menu` label. If a sprite belongs anywhere
+/// a `Menu` touches, it comes from here.
 ///
 /// **Nearest-neighbour, per CLAUDE.md.** These are pixel-art sprites; bilinear
 /// smoothing on a 16pt draw turns a crisp 4px eye into grey mush. `.none`

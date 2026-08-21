@@ -238,8 +238,17 @@ struct ChatComposer: View {
                 }
             } label: {
                 HStack(spacing: 5) {
-                    if let dep = armed, let pet = DepartmentMenu.pet(for: dep, host: host) {
-                        CharacterImage(pet, size: 16)
+                    // `PetMenuIcon`, not `CharacterImage`. A `Menu`'s LABEL is
+                    // flattened to `(title, image)` exactly like its rows are, and
+                    // the image is sized from `NSImage.size` — so CharacterImage's
+                    // explicit .frame(16) was discarded and the raw asset rendered
+                    // at native size, swallowing the whole composer. The roster
+                    // chips above use CharacterImage and are fine: they are plain
+                    // Buttons, not Menu labels.
+                    if let dep = armed,
+                       let pet = DepartmentMenu.pet(for: dep, host: host),
+                       let sprite = PetMenuIcon.image(pet) {
+                        sprite
                     }
                     Text(armed.map { DepartmentMenu.armedLabel($0, host: host) }
                          ?? DepartmentMenu.restLabel(lang))

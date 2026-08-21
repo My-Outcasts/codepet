@@ -3,6 +3,9 @@
 **Date:** 2026-08-21
 **Branch:** `feat/composer-controls`
 **Status:** approved, not implemented
+**Amended:** 2026-08-22 — three addresses in the first draft were wrong. Corrections
+are marked **[A1]**, **[A2]**, **[A3]** below and were found while writing the
+implementation plan, by reading each site instead of trusting the grep that found it.
 
 ## The problem
 
@@ -60,16 +63,30 @@ device rather than inventing a second.
 
 It is lifted to a token beside the accent colors:
 
+**[A1] The composer's two sites cannot consume a hard-coded brand ramp.**
+`ChatComposer` already receives `accent` and `accent2` as parameters, and
+`CopilotChatView.swift:277` passes `accent: companionColor` —
+`PetCharacter.all[companionId]?.color ?? accentPurple` (`:92-94`). The composer's
+ramp is the **active companion's** hue, purple only as a fallback. Hard-coding
+brand purple there would erase a deliberate personalization: precisely the mistake
+this spec refuses for the roster chips, one file away.
+
+So the shared thing is not a fixed gradient but a **constructor**, with the hue
+pair injected:
+
 ```swift
-/// The brand ramp. Purple into pink, top-leading to bottom-trailing — extracted
-/// from the composer's send button so every gradient in the product is the same
-/// gradient. Both stops are `Color.dyn`, so light and dark need no branch here.
-static let brandGradient = LinearGradient(
-    gradient: Gradient(colors: [accentPurple, accentPink]),
-    startPoint: .topLeading, endPoint: .bottomTrailing)
+/// The house ramp. Any two-stop brand gradient in the product is this function —
+/// one geometry, one direction, hues supplied by the caller, so a companion-tinted
+/// ramp and the brand ramp can never disagree about anything but their colors.
+static func ramp(_ a: Color, _ b: Color) -> LinearGradient {
+    LinearGradient(gradient: Gradient(colors: [a, b]),
+                   startPoint: .topLeading, endPoint: .bottomTrailing)
+}
 ```
 
-The send button and the composer's container edge consume it directly.
+The send button and composer edge call `ramp(accent, accent2)` — companion-aware.
+The hero mark is Codepet's logo rather than any companion, so it alone uses the
+brand pair.
 
 **The aura cannot.** `brandGradient` is a `LinearGradient`, and the mark's bloom
 is radial — filling a radial bloom with a linear ramp would change its shape, not
@@ -82,6 +99,9 @@ builds its own radial from it:
 /// its shape — so both forms of the ramp read from one pair of colors.
 static let brandRamp: [Color] = [accentPurple, accentPink]
 ```
+
+A `brandGradient` constant is deliberately **not** added: after [A1] every linear
+consumer injects its own pair, so a fixed one would ship with zero call sites.
 
 The aura becomes `RadialGradient([accentPurple.opacity(0.34),
 accentPink.opacity(0.18), .clear], startRadius: 0, endRadius: 46)` — same hue
@@ -108,7 +128,7 @@ apply the device uniformly, and the reason is measurable, not aesthetic:
 | Composer edge | `ChatComposer.swift:178` | `brandGradient` stroke, both states (see below) — a long path traverses the full ramp |
 | Send button | `ChatComposer.swift:634` | already the ramp; refactored onto the token |
 | `"build"` | `ChatEmptyState.swift:155` | **stays flat** `accentPurple` |
-| ASK/DEVELOPER active pill | `CopilotChatView.swift:766` | **stays flat**; fill `0.08` → `~0.18` |
+| ASK/DEVELOPER active pill | `TwoModeSidebar.swift:153-181` **[A2]** | **stays flat**; gains a purple fill tint + purple edge |
 
 `"build"` is one five-letter word at `title2`, roughly 55pt wide. The purple-to-pink
 ramp across it resolves to a single warm-shifted violet: a hue change, not a
@@ -117,9 +137,25 @@ gradient. And that headline is assembled by `Text` concatenation
 coordinate space inconsistently across runs and can silently render flat. New
 render path, no visible gain, a real silent-failure mode.
 
-The active pill is smaller still, and at `@0.08` fill the ramp has nothing to
-show. Raising the flat opacity toward `0.18` is the change that is actually
-visible on flat ground, and it carries no risk.
+The active pill is smaller still, so the ramp has nothing to show there either.
+
+**[A2] The pill's address and its current state were both wrong in the first
+draft.** `CopilotChatView.swift:766` is a *thread row* in the history list, not the
+mode switch; it keeps its `0.08` and is out of scope. The real control is
+`modeSwitch` in `TwoModeSidebar.swift:153-181`, and it has no purple fill to raise:
+the active segment is `CodepetTokens.cardRaised` filled, `CodepetTokens.cardEdge`
+stroked, with `accentPurple` **text**. The purple is already at full strength and
+already the only purple there.
+
+So "strengthen the flat purple" means giving the active segment purple *body*
+rather than raising a number that does not exist:
+
+- fill: `cardRaised`, overlaid with `accentPurple.opacity(0.10)`
+- stroke: `accentPurple.opacity(0.45)` in place of `cardEdge`
+- text: `accentPurple`, unchanged
+
+The inactive segment is untouched. This keeps the "raised card in a well" pairing
+the code comment defends — the card is still raised, it is now tinted.
 
 The rule this encodes, for the next person adding a gradient: **gradient where
 there is area, stronger flat accent where there is not.**
@@ -132,7 +168,7 @@ almost no value, and it was the ambient wash doing the separating. So the restin
 state is where this change matters, and leaving it at `cardEdge` would be the
 regression this design set out to avoid.
 
-Both states take `brandGradient`, differing only in opacity: **`0.35` at rest,
+Both states take the ramp, differing only in opacity: **`0.35` at rest,
 `0.9` focused.** One stroke definition, one number changing — not two treatments
 that could drift into reading as two different controls.
 
@@ -149,6 +185,15 @@ They keep their accents and are untouched.
 The native app cannot be screenshotted from this machine (Screen Recording
 denied), so "the purple is gone" cannot be an eyeball claim. It is a pixel
 assertion instead.
+
+**[A3] The guard renders `CopilotChatView`, not the bare hero.** The wash is
+applied at `CopilotChatView.swift:173`, so a test that renders `ChatEmptyState`
+alone would have flat corners *before* the change and pass without proving
+anything. `CopilotChatView` needs only `CompanyStore` and `AppState` (both already
+constructed in `AccountSwitchingTests.swift:106`), and its two `ScrollView`s sit on
+the transcript and history paths — the empty-hero path has neither, which is what
+makes it renderable at all. Asserting on the real composition also means the guard
+keeps working: it fails again if anyone re-adds an ambient wash.
 
 `BrandMarkRenderTests.swift` already renders the hero offscreen through
 `ImageRenderer` and samples for the violet fill. It gains:
@@ -170,9 +215,10 @@ light mode is where the wash was least intended and least reviewed.
 | File | Change |
 |---|---|
 | `codepet/Views/Copilot/ChatBackdrop.swift` | deleted |
-| `codepet/Views/Copilot/CopilotChatView.swift` | drop `.background(ChatBackdrop())` (:173); active pill fill `0.08` → `0.18` (:766) |
-| `codepet/Views/CodepetTheme.swift` | add `brandRamp` + `brandGradient` |
-| `codepet/Views/Copilot/ChatComposer.swift` | send button onto the token (:634); container edge → `brandGradient` @0.35 rest / 0.9 focus (:178) |
+| `codepet/Views/Copilot/CopilotChatView.swift` | drop `.background(ChatBackdrop())` (:173) only — :766 is a thread row, out of scope |
+| `codepet/Views/Shell/TwoModeSidebar.swift` | active mode segment: purple fill tint + purple edge (:166-175) |
+| `codepet/Views/CodepetTheme.swift` | add `brandRamp` + `ramp(_:_:)` |
+| `codepet/Views/Copilot/ChatComposer.swift` | send button onto `ramp(accent, accent2)` (:634); container edge → `ramp(accent, accent2)` @0.35 rest / 0.9 focus (:178) |
 | `codepet/Views/Copilot/ChatEmptyState.swift` | `brandMark` aura → radial `brandRamp`, purple → pink → clear (:122) |
 | `codepet/Views/Copilot/MessageCard.swift` | correct the comment at :18 reasoning about "a translucent tint over ChatBackdrop's wash" — false once the wash is gone |
 | `codepetTests/BrandMarkRenderTests.swift` | corner-flatness assertions, dark and light |

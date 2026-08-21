@@ -35,7 +35,8 @@ Founder, 21 Aug 2026:
 | # | Decision |
 |---|---|
 | 1 | **Voice mode**, the waveform — not dictation, and not the per-reply read-aloud |
-| 2 | The surface is a **takeover overlay**, not a panel that keeps the transcript visible |
+| 2 | ~~The surface is a **takeover overlay**~~ **REVERSED 22 Aug — see below** |
+| 5 | **Voice lives in the composer.** It grows in place; the chat stays visible. No overlay, no orb |
 | 3 | ~~A turn ends after **1.2s of silence** — automatic, not hold-to-talk~~ **REVERSED 21 Aug, see below** |
 | 4 | **A turn is sent only when the founder taps ✓.** ✕ discards it. Nothing auto-sends |
 
@@ -64,9 +65,43 @@ wrong — which was the one thing this spec said could only be settled by the fo
 talking to the built thing. The type and its tests are deleted rather than left
 unused; they are in git if a silence affordance is ever wanted.
 
-**Not adopted from Claude:** its voice mode lives *in the composer* with the
-transcript still visible, where ours is a takeover (decision 2, unchanged). The
-tradeoff being bought is that ours cannot show the conversation it is having.
+**Decision 2 was reversed on 22 Aug**, after the founder compared the built takeover
+against a recording of Claude's voice mode and said it was not working the same way.
+It was right that it wasn't: we had matched Claude on the *logic* — explicit ✓/✕,
+nothing auto-sends, mic open through the reply, spoken turns landing as ordinary
+messages — and diverged on the surface, which is the part you actually see.
+
+Measured from the recordings, 21-22 Aug. Claude's composer **grows in place**: the
+live transcript sits top-left in grey italic reading like a draft, a thin horizontal
+bar-waveform runs along the bottom, and ✕ (grey) with ✓ (blue, filled) sit
+bottom-right. `Cancel` appears only during `Connecting…`. There is **no orb and no
+overlay** — the conversation stays visible the whole time. State is carried by
+placeholder text (`Connecting…` → transcript → `Listening…` → `Claude is speaking…`)
+plus a warm glow at the bottom edge.
+
+So the surface becomes: composer expands, chat visible, no orb. **The tradeoff being
+given up is focus; what is bought is being able to see the conversation you are
+having** — which matters more here than it does for Claude, because a Codepet reply
+is signed by a department and a pet, and the founder loses that context behind a
+takeover.
+
+**What this does NOT change.** Every unit below the surface is surface-agnostic and
+survives: `VoiceSession`, `SentenceSplitter`, `PetVoice`, `SpeakingQueue`,
+`VoiceLevel`, `TurnTranscript`, `RenewalBudget`, `VoiceReplyDriver`,
+`VoicePermission`, both audio services, and the five statics that carry the
+invariants (`takeTurn`, `abandonTurn`, `ensureListening`,
+`streamEndBelongsToVoiceTurn`, `replyEnded`). They take their inputs explicitly for
+exactly this reason. `VoiceModeOverlay` and `VoiceOverlayLayoutTests` are deleted.
+
+**Two pieces of chrome the composer must still carry**, because they are requirements
+rather than decoration and Claude's own composer has neither:
+- **The privacy line** (§3). English is on-device; Vietnamese goes to Apple's
+  servers. It has to be visible, not a footnote.
+- **The running credit count** (§7). Voice makes turns cheap to spend without
+  noticing.
+Both fit as one compact line inside the expanded composer — `2 credits · on-device` —
+which is smaller than the overlay gave them but still legible and still not a
+footnote.
 
 Five further calls were made in the design and are open to reversal; each is stated with its reason in
 §5 rather than buried in code. §5 formerly restated decision 3 so its constant lived somewhere findable;

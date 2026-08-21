@@ -130,7 +130,7 @@ struct VoiceModeOverlay: View {
         //
         //     frame + spacers          -> (900, 700)
         //     maxHeight deleted only   -> (900, 700)   still filling, via the spacers
-        //     both deleted             -> (900, 368)   intrinsic, correctly reported
+        //     both deleted             -> (900, 426)   intrinsic, correctly reported
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(background)
         // The two observations that drive speech. On `body` rather than on a state

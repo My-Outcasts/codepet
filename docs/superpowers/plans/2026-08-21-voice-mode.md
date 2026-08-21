@@ -574,6 +574,13 @@ MSG
 
 ### Task 3: `VoiceTurn` and `PetVoice` — the two constants
 
+> **⚠️ `VoiceTurn` IS SUPERSEDED — do not build it.** Spec §2 decision 4 (21 Aug)
+> reversed auto-send: a turn is taken only when the founder taps ✓, so there is no
+> silence deadline and no threshold. `VoiceTurn` and `VoiceTurnTests` were deleted in
+> `d00ff2c`. Everything below about `silenceThreshold` and `shouldEndTurn` is kept as
+> the record of what was built and why, **not as an instruction.** `PetVoice`, the
+> other half of this task, is live and unaffected.
+
 Small, pure, and paired because neither is worth its own review gate.
 
 **Files:**

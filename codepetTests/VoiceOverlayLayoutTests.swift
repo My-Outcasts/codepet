@@ -32,9 +32,12 @@ import XCTest
 ///        both deleted             -> (900, 426)   <- intrinsic, correctly reported
 ///
 ///    **426, not the 368 this note carried until 21 Aug.** ✕ and ✓ were added beneath
-///    the transcript (spec §2 decision 4), which is 62pt of row plus 22pt of `VStack`
-///    spacing, and every intrinsic number in this file moved by that 84. Re-measured
-///    rather than adjusted.
+///    the transcript (spec §2 decision 4), and that row costs exactly 84pt — 62pt of
+///    row plus 22pt of `VStack` spacing — which is confirmed by the 496/412 pair
+///    below. But 368 + 84 is 452, not 426, so **368 does not reconcile and is not
+///    reproducible**, the same unexplained ~25pt drift already noted for 389 -> 412.
+///    Every number here was re-measured, not adjusted; do not try to derive one from
+///    another across that drift.
 ///
 ///    The real limitation is narrower and applies to width just as much: the
 ///    overlay's vertical fill is implemented **twice** — `.frame(maxHeight:

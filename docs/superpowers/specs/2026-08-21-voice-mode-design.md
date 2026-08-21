@@ -183,6 +183,16 @@ already describes each pet's written rhythm and maps onto voice, rate, and pitch
 | nova | "punchy… hype coach" | `Karen` en-AU | 1.12 | 1.10 |
 | sage | "measured… sentences that breathe" | `Rishi` en-IN | 0.88 | 0.95 |
 | glitch | "irreverent… hacker who reads philosophy" | `Tessa` en-ZA | 1.08 | 1.08 |
+| null | "playful, unpredictable… sentences zigzag" | `Junior` en-US | 1.16 | 1.15 |
+
+**This table listed six pets until 21 Aug and the roster has seven.** `null` — "The
+Chaos Gremlin" — was missing, so the implementation gave it byte's exact profile:
+same voice, same rate, same pitch. The test that exists to catch exactly that
+(`testNoTwoPetsSoundIdentical`) could not, because it iterated the same six-name
+list. The fix in the plan derives the list from `PetCharacter.starters` rather than
+retyping it, so the roster cannot silently outgrow the voices again. `Junior` is the
+only installed *human* voice that reads as playful — measured, 25 English voices, all
+`default` quality. Not `Bahh`/`Boing`/`Jester`, which are sound effects.
 
 Kept here because voice mode needs *a* voice and this table is the answer, and because the read-aloud
 button is a cheap follow-up once `SpeechSpeaker` exists. **Deliberately not the novelty voices**

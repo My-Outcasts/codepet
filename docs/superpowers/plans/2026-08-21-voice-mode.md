@@ -621,7 +621,7 @@ final class VoiceTurnTests: XCTestCase {
     func testAClockThatWentBackwardsDoesNotEndTheTurn() {
         let now = Date()
         XCTAssertFalse(VoiceTurn.shouldEndTurn(lastSpeechAt: now.addingTimeInterval(5),
-                                               now: now, threshold: 1.2))
+                                               now: now, threshold: VoiceTurn.silenceThreshold))
     }
 }
 ```
@@ -640,7 +640,14 @@ import XCTest
 /// back rather than crashing.
 final class PetVoiceTests: XCTestCase {
 
-    private let pets = ["byte", "crash", "luna", "nova", "sage", "glitch"]
+    /// **All SEVEN starters, from `PetCharacter.starters`.** An earlier draft of this
+    /// plan listed six and dropped `null` — "The Chaos Gremlin", a real shipped
+    /// character with its own `voiceGuide` and its own match score. It fell into
+    /// `default` and got byte's exact profile: same voice, same rate, same pitch. The
+    /// collision was invisible because `null` was missing from this very list, so
+    /// `testNoTwoPetsSoundIdentical` never saw it. Derive from the roster, do not
+    /// retype it.
+    private let pets = PetCharacter.starters
 
     func testEveryPetHasAProfile() {
         for p in pets {
@@ -686,6 +693,38 @@ final class PetVoiceTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(r, AVSpeechUtteranceMinimumSpeechRate)
             XCTAssertLessThanOrEqual(r, AVSpeechUtteranceMaximumSpeechRate)
         }
+    }
+
+    /// **Pitch needs the same guard as rate, and for the same reason.**
+    /// `pitchMultiplier` accepts 0.5…2.0 and clamps silently outside it, so a future
+    /// edit to 3.0 would ship sounding wrong with a green suite. `testEveryPetHasAProfile`
+    /// only asserts `pitch > 0`, which 3.0 passes.
+    func testPitchesAreInsideTheSynthesisersRange() {
+        for p in pets {
+            let pitch = PetVoice.profile(for: p).pitch
+            XCTAssertGreaterThanOrEqual(pitch, 0.5, "\(p) pitch clamps low")
+            XCTAssertLessThanOrEqual(pitch, 2.0, "\(p) pitch clamps high")
+        }
+    }
+
+    /// `pick` walks the preference list IN ORDER and takes the first available.
+    /// Working in names is what makes this testable at all — see the doc comment on
+    /// `pick`. Deleting the ordering (returning `available.first`, say) turns the
+    /// second assertion red.
+    func testPickTakesTheFirstAvailableInPreferenceOrder() {
+        let crash = PetVoice.profile(for: "crash")   // ["Daniel", "Samantha"]
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Daniel", "Samantha"]), "Daniel")
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Samantha", "Daniel"]), "Daniel",
+                       "order comes from the PROFILE, not from what the system lists first")
+        XCTAssertEqual(PetVoice.pick(crash, from: ["Samantha"]), "Samantha",
+                       "falls through to the guaranteed voice")
+    }
+
+    /// Nothing installed matches: return nil so the caller can let the synthesiser
+    /// choose. Refusing to speak would be worse than speaking in the wrong voice.
+    func testPickReturnsNilWhenNothingMatches() {
+        XCTAssertNil(PetVoice.pick(PetVoice.profile(for: "crash"), from: []))
+        XCTAssertNil(PetVoice.pick(PetVoice.profile(for: "crash"), from: ["Zarvox"]))
     }
 }
 ```
@@ -738,8 +777,10 @@ enum VoiceTurn {
 
 ```swift
 // codepet/Models/PetVoice.swift
-import AVFoundation
 import Foundation
+// NO `import AVFoundation`. This file is pure — see the File-structure table.
+// Rate and pitch are plain Floats on AVSpeechUtterance's scales; naming a voice
+// is a String. Task 4 owns the one line that touches the framework.
 
 /// A voice, a speed, and a pitch.
 struct VoiceProfile: Equatable {
@@ -783,6 +824,12 @@ enum PetVoice {
         case "glitch":
             // Clipped and irreverent.
             return VoiceProfile(preferredVoices: ["Tessa", "Samantha"], rate: 0.54, pitch: 1.08)
+        case "null":
+            // The Chaos Gremlin: "sentences zigzag — starts one thought, finishes
+            // another." Fastest and highest, because the zigzag is carried by pace.
+            // Junior is a young en-US voice — the only installed HUMAN voice that
+            // reads as playful. Not Bahh/Boing/Jester, which are sound effects.
+            return VoiceProfile(preferredVoices: ["Junior", "Kathy", "Samantha"], rate: 0.58, pitch: 1.15)
         default:
             // byte, the host — heard most often, so the most listenable. Also the
             // fallback for an unknown pet: the overlay must never be voiceless.
@@ -790,16 +837,18 @@ enum PetVoice {
         }
     }
 
-    /// The first installed voice from the profile's list, or nil when none of them
-    /// exist — in which case the caller lets the synthesiser pick the system
-    /// default rather than refusing to speak.
-    static func resolve(_ profile: VoiceProfile,
-                        installed: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices())
-        -> AVSpeechSynthesisVoice? {
-        for name in profile.preferredVoices {
-            if let hit = installed.first(where: { $0.name == name }) { return hit }
-        }
-        return nil
+    /// The first name in the profile's preference list that appears in `available`,
+    /// or nil when none do — in which case the caller lets the synthesiser pick the
+    /// system default rather than refusing to speak.
+    ///
+    /// **Takes names, not `AVSpeechSynthesisVoice`.** `AVSpeechSynthesisVoice` has
+    /// no public initialiser that sets an arbitrary `name`, so a parameter of that
+    /// type can only ever be fed the voices really installed on the machine running
+    /// the test — which makes the preference-order walk untestable and pins this
+    /// file to AVFoundation for no gain. Task 4 maps the returned name to a real
+    /// voice; that one line is the only place the framework is needed.
+    static func pick(_ profile: VoiceProfile, from available: [String]) -> String? {
+        profile.preferredVoices.first { available.contains($0) }
     }
 }
 ```
@@ -1036,7 +1085,11 @@ final class SpeechSpeaker: NSObject, SpeakingVoice, AVSpeechSynthesizerDelegate 
 
     func enqueue(_ sentence: String, profile: VoiceProfile) {
         let u = AVSpeechUtterance(string: sentence)
-        u.voice = PetVoice.resolve(profile)   // nil is fine: system default
+        // PetVoice.pick works in names so it stays testable; this is the ONE line
+        // that turns a name into a voice. nil is fine — system default.
+        let installed = AVSpeechSynthesisVoice.speechVoices()
+        u.voice = PetVoice.pick(profile, from: installed.map(\.name))
+            .flatMap { name in installed.first { $0.name == name } }
         u.rate = profile.rate
         u.pitchMultiplier = profile.pitch
         duckSFX()

@@ -155,7 +155,6 @@ final class MockFlowPlayer: ObservableObject {
             // `MockVirtualCompany` when `MockChat.enabled` — nothing on the wire.
             Task { await store.sendChat(ask, language: language, convenesRoom: true) }
         case .linkDemoFolder:
-            guard store.activeProjectLink == nil else { return }
             // A real directory with a real file: `ProjectProbe` reads the disk, so an
             // invented path would link something that does not exist and the pane
             // would wake up describing nothing.
@@ -167,6 +166,14 @@ final class MockFlowPlayer: ObservableObject {
                 try? "// demo target for the walkthrough\nstruct SignupView {}\n"
                     .write(to: file, atomically: true, encoding: .utf8)
             }
+            Self.prepareWalkthroughRepo(at: dir.path)
+            // **Always this folder, even when something is already linked.** The guard
+            // used to be `activeProjectLink == nil`, which reads as politeness and is
+            // the opposite: the link is restored from a bookmark at launch, so on any
+            // Mac where the founder had linked their own project, the walkthrough
+            // skipped this beat and then ran a coding beat — branch, edit and all —
+            // against their actual repo, unattended. A demo works on demo material.
+            //
             // `bootstrapClaudeMd: false`, always. The consent rule is that a CLAUDE.md
             // is never written without an explicit yes, and an unattended walkthrough
             // cannot give one on the founder's behalf.
@@ -175,10 +182,18 @@ final class MockFlowPlayer: ObservableObject {
             store.view = .chat
             guard store.activeProjectLink != nil else { return }
             store.startCodeRun(ask: ask)
+        case .confirmCodeRun:
+            // A multi-file change stops on the plan preview and waits, and the pane is
+            // what starts it — nothing in the app did until now, so this beat's absence
+            // is why the walkthrough sat on `PREPARING` for the whole chapter.
+            guard store.codingRun.run?.phase == .previewing else { return }
+            Task { await store.codingRun.execute() }
         case .approveCodeRun:
             guard let run = store.codingRun.run, !run.diffs.isEmpty else { return }
-            let paths = Set(run.diffs.map(\.path))
-            Task { await store.codingRun.approve(acceptedPaths: paths) }
+            // `acceptedPaths`, not `diffs.map(\.path)`: the coordinator keeps these
+            // relative to the commit root and the apply step re-joins them to it.
+            // Absolute paths made every file miss and the beat ended in a failure card.
+            Task { await store.codingRun.approve(acceptedPaths: run.acceptedPaths) }
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the
@@ -193,6 +208,51 @@ final class MockFlowPlayer: ObservableObject {
                     language: language)
             }
         }
+    }
+
+    /// Make the walkthrough's scratch folder a real git repo, with one commit.
+    ///
+    /// **Because the story's biggest claim is about a branch.** "Approving commits to
+    /// a branch and stops there" is the ceiling this product sells, and on a plain
+    /// folder the app takes the shadow backend instead — no branch, the session bar
+    /// reads `not a git repo`, and the beat narrates a safety guarantee the screen is
+    /// not demonstrating. `git init` costs two subprocesses in a temp directory and
+    /// makes the claim true.
+    ///
+    /// Identity is pinned with `-c` rather than written to a config: the commit must
+    /// not depend on the founder having `user.email` set globally, and a walkthrough
+    /// has no business editing anyone's git identity. Every failure is soft — if git
+    /// is missing or refuses, the folder still links and the run still happens on the
+    /// shadow backend. Degraded, not broken.
+    /// It also has to survive a REPLAY. The scratch folder outlives the process, so a
+    /// second walkthrough finds it sitting on the `codepet/*` branch the first one
+    /// made — and `beginGit` does `checkout -b <same name>`, which fails on an
+    /// existing branch and ends the chapter on "Couldn't start a git branch". Put it
+    /// back the way a first run finds it.
+    private static func prepareWalkthroughRepo(at path: String) {
+        // Only ever this folder. Every destructive git verb below is safe solely
+        // because of where it points, so the guard is on the path and not on intent.
+        let expected = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codepet-walkthrough", isDirectory: true)
+            .standardizedFileURL.path
+        guard URL(fileURLWithPath: path).standardizedFileURL.path == expected else { return }
+
+        if GitRunner.run(["rev-parse", "--is-inside-work-tree"], in: path).ok {
+            _ = GitRunner.run(["checkout", "--force", "main"], in: path)
+            _ = GitRunner.run(["reset", "--hard"], in: path)
+            _ = GitRunner.run(["clean", "-fd"], in: path)
+            let branches = GitRunner.run(["for-each-ref", "--format=%(refname:short)",
+                                          "refs/heads/codepet"], in: path)
+                .stdout.split(whereSeparator: \.isNewline).map(String.init)
+            for branch in branches { _ = GitRunner.run(["branch", "-D", branch], in: path) }
+            return
+        }
+        guard GitRunner.run(["init", "-b", "main"], in: path).ok else { return }
+        _ = GitRunner.run(["add", "."], in: path)
+        _ = GitRunner.run(["-c", "user.name=Codepet Walkthrough",
+                           "-c", "user.email=walkthrough@codepet.local",
+                           "commit", "-m", "the folder as it was before Codepet touched it"],
+                          in: path)
     }
 
     /// The newest reply carrying a draft that is still awaiting approval. Searched

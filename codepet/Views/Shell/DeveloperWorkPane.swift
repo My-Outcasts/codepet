@@ -11,11 +11,13 @@ import SwiftUI
 /// plain — the prototype's Developer is a session bar over a work pane, and the app
 /// was showing a transcript.
 ///
-/// **What it deliberately is not (yet).** The prototype also carries an INSPECTOR —
-/// a tabbed diff beside the conversation, `Result ⇄ Source`. That is the next slice
-/// and a larger one; this pane stops at the Review gate and hands off to the diff
-/// surface that already exists. Better a pane that ends honestly than one that
-/// implies a panel which is not there.
+/// **It also has to DRIVE the run, not just draw it.** The first version rendered
+/// three of the eight phases and called `execute()` from nowhere — the only caller
+/// in the app is `CodeRunCardView`, which the Ask transcript renders and this pane
+/// replaced. So a run proposed here reached `.previewing` and stopped: the header
+/// read `PREPARING` forever, no steps, no diff, and the walkthrough's whole Developer
+/// chapter played over a screen that never moved. Every phase now has a body, and
+/// `DevRunStage` holds the rule about which one starts itself.
 struct DeveloperWorkPane: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -53,27 +55,52 @@ struct DeveloperWorkPane: View {
                 }
             }
         }
-        // Review comes forward BY ITSELF when a run finishes (§5). Waiting for the
-        // founder to go looking for the diff would put the gate behind a click they
-        // have no reason to make.
+        .onAppear(perform: startIfReady)
         .onChange(of: coordinator.run?.phase) { _, phase in
+            startIfReady()
+            // Review comes forward BY ITSELF when a run finishes (§5). Waiting for the
+            // founder to go looking for the diff would put the gate behind a click they
+            // have no reason to make.
             guard phase == .reviewing, let run = coordinator.run, !run.diffs.isEmpty else { return }
-            // Keyed on the FILE SET, not the run: §5 is "one tab per output, not one
-            // per run", so a redo over the same files reopens the same tab instead of
-            // stacking a second Review the founder has to tell apart.
-            let key = run.diffs.map(\.path).sorted().joined(separator: "|")
-            tabs.open(InspectorTab(id: "review-\(key)", kind: .review,
-                                   title: lang == .vi ? "Duyệt" : "Review"))
+            openReview(run)
         }
     }
 
+    /// The pane is now the thing that starts a run, because it is the surface the
+    /// founder describes one from. `DevRunStage.startsItself` carries the rule —
+    /// `.readyToRun` goes, `.previewing` waits for the button below — so that the
+    /// difference between "the diff is the gate" and "you approve the plan first"
+    /// cannot be lost to a typo in a view.
+    private func startIfReady() {
+        guard DevRunStage.startsItself(coordinator.run?.phase) else { return }
+        Task { await coordinator.execute() }
+    }
+
+    /// Keyed on the FILE SET, not the run: §5 is "one tab per output, not one per
+    /// run", so a redo over the same files reopens the same tab instead of stacking
+    /// a second Review the founder has to tell apart.
+    private func openReview(_ run: EditCodeRun) {
+        let key = run.diffs.map(\.path).sorted().joined(separator: "|")
+        tabs.open(InspectorTab(id: "review-\(key)", kind: .review,
+                               title: lang == .vi ? "Duyệt" : "Review"))
+    }
+
+    /// The branch, when there IS one.
+    ///
+    /// This used to return a hardcoded `"codepet/session"` for every run, which is a
+    /// fabricated fact twice over: the git backend names its own branch off the ask,
+    /// and the shadow backend has no branch at all — it copies the folder and applies
+    /// back over it. The walkthrough links a plain temp folder, so the breadcrumb was
+    /// showing a branch name for a directory that is `not a git repo`.
     private var branchName: String? {
         guard let run = coordinator.run else { return nil }
-        switch run.phase {
-        case .committed, .reviewing: return "codepet/session"
-        default: return nil
+        switch run.backend {
+        case .git(let branch): return branch
+        case .shadow:          return nil
         }
     }
+
+    private var stage: DevRunStage { DevRunStage.stage(for: coordinator.run?.phase) }
 
     private var work: some View {
         VStack(spacing: 0) {
@@ -81,8 +108,7 @@ struct DeveloperWorkPane: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
-                    if !coordinator.steps.isEmpty { execLog }
-                    if let run = coordinator.run, !run.diffs.isEmpty { editedFiles(run) }
+                    stageBody
                     ceiling
                 }
                 .readingColumn(ChatColumn.paneMeasureCap)
@@ -231,9 +257,191 @@ struct DeveloperWorkPane: View {
         }
     }
 
+    // MARK: - One body per phase
+
+    /// Every phase draws something. A phase with no body is a screen that stops
+    /// responding — which is exactly what `.previewing` did.
+    @ViewBuilder private var stageBody: some View {
+        switch stage {
+        case .idle:
+            hint(lang == .vi
+                 ? "Mô tả một tác vụ bên dưới. Ở trong Developer CHÍNH LÀ ý định — không có chế độ nào phải chọn."
+                 : "Describe a task below. Being in Developer *is* the intent — "
+                 + "there is no mode to pick.")
+        case .dormant:
+            hint(lang == .vi
+                 ? "Chưa liên kết thư mục nào, nên không có chỗ nào để chạy."
+                 : "Nothing is linked, so there is nowhere for this to run.")
+        case .plan:
+            planCard
+        case .working:
+            execLog
+        case .gate:
+            execLog
+            if let run = coordinator.run { editedFiles(run) }
+        case .landed:
+            stepSummary
+            if let run = coordinator.run { committedCard(run) }
+        case .dropped:
+            runCard(kicker: lang == .vi ? "ĐÃ BỎ" : "DISCARDED", tint: CodepetTheme.mutedText) {
+                Text(lang == .vi
+                     ? "Không có gì chạm vào tệp của bạn. Việc từ chối cũng là một kết quả."
+                     : "Nothing reached your files. Rejecting is an outcome too.")
+                    .font(CodepetTheme.inter(CodepetType.callout))
+                    .foregroundStyle(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                startAnother
+            }
+        case .failed(let why):
+            runCard(kicker: lang == .vi ? "KHÔNG CHẠY ĐƯỢC" : "DID NOT RUN",
+                    tint: CodepetTheme.accentOrange) {
+                Text(why)
+                    .font(CodepetTheme.inter(CodepetType.body))
+                    .foregroundStyle(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(lang == .vi
+                     ? "Không có gì được ghi. Chạy lại là miễn phí trên máy của bạn."
+                     : "Nothing was written. Retrying is free on your own machine.")
+                    .font(CodepetTheme.inter(CodepetType.callout))
+                    .foregroundStyle(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button { retry() } label: {
+                        actionLabel(lang == .vi ? "Thử lại" : "Try again", filled: true)
+                    }
+                    .buttonStyle(.plain)
+                    Button { coordinator.cancel() } label: {
+                        actionLabel(lang == .vi ? "Bỏ qua" : "Dismiss", filled: false)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(CodepetTheme.inter(CodepetType.body))
+            .foregroundStyle(CodepetTheme.mutedText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The plan gate. A multi-file change or one that needs a shell says so and
+    /// waits — this is the confirmation `needsPreview` exists to demand, and the
+    /// pane had no way to give it.
+    private var planCard: some View {
+        runCard(kicker: lang == .vi ? "KẾ HOẠCH" : "PLAN", tint: CodepetTheme.accentGold) {
+            Text(lang == .vi
+                 ? "Mình sẽ làm việc trên máy của bạn và có thể chạy lệnh terminal. Bạn duyệt mọi thay đổi trước khi có gì được lưu."
+                 : "I'll work on your machine and may run terminal commands. "
+                 + "You review every change before anything is saved.")
+                .font(CodepetTheme.inter(CodepetType.body))
+                .foregroundStyle(CodepetTheme.bodyText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button { Task { await coordinator.execute() } } label: {
+                    actionLabel(lang == .vi ? "Chạy" : "Run", filled: true)
+                }
+                .buttonStyle(.plain)
+                Button { coordinator.cancel() } label: {
+                    actionLabel(lang == .vi ? "Huỷ" : "Cancel", filled: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Once the diff is the thing to look at, the steps collapse to their count —
+    /// the prototype's shape, and it keeps the landed card at the bottom in view.
+    @ViewBuilder private var stepSummary: some View {
+        if !coordinator.steps.isEmpty {
+            Text(lang == .vi ? "\(coordinator.steps.count) bước" : "\(coordinator.steps.count) steps")
+                .font(CodepetTheme.inter(CodepetType.callout))
+                .foregroundStyle(CodepetTokens.faint)
+        }
+    }
+
+    private func committedCard(_ run: EditCodeRun) -> some View {
+        runCard(kicker: lang == .vi ? "ĐÃ LƯU" : "LANDED", tint: CodepetTheme.accentGreen) {
+            Text(landedWhere(run))
+                .font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
+                .foregroundStyle(CodepetTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(lang == .vi
+                 ? "Mở pull request khi bạn muốn nó được review. Codepet sẽ không merge hộ bạn."
+                 : "Open a pull request when you want it reviewed. Codepet will not merge it for you.")
+                .font(CodepetTheme.inter(CodepetType.callout))
+                .foregroundStyle(CodepetTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+            startAnother
+        }
+    }
+
+    /// Where it actually landed, which is not the same sentence for both backends.
+    /// The card used to say "committed to the session branch" for every run — for a
+    /// folder that is not a git repo there is no branch and no commit: the shadow
+    /// copy is applied back over the files, with a backup taken first.
+    private func landedWhere(_ run: EditCodeRun) -> String {
+        let n = run.diffs.count
+        let files = n == 1 ? (lang == .vi ? "1 tệp" : "1 file")
+                           : (lang == .vi ? "\(n) tệp" : "\(n) files")
+        switch run.backend {
+        case .git(let branch):
+            return lang == .vi ? "\(files) trên nhánh \(branch). Merge là việc của bạn."
+                               : "\(files) on \(branch). Merging is yours."
+        case .shadow:
+            return lang == .vi
+                ? "\(files) đã ghi vào thư mục. Đây không phải repo git, nên không có nhánh nào để merge."
+                : "\(files) written into the folder. This is not a git repo, so there is no branch to merge."
+        }
+    }
+
+    private var startAnother: some View {
+        Button { coordinator.cancel() } label: {
+            actionLabel(lang == .vi ? "Bắt đầu việc khác" : "Start another task", filled: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func retry() {
+        guard let ask = coordinator.run?.ask else { return }
+        coordinator.cancel()
+        companyStore.startCodeRun(ask: ask)
+    }
+
+    /// Shared chrome for the phase cards, so a new phase gets the same object rather
+    /// than a new one invented at the call site.
+    private func runCard<C: View>(kicker: String, tint: Color,
+                                  @ViewBuilder content: () -> C) -> some View {
+        let sh = CodepetTokens.shadowS(scheme == .dark)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(kicker)
+                .font(CodepetTheme.inter(CodepetType.footnote, weight: .semibold)).tracking(0.5)
+                .foregroundStyle(tint)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(tint.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(tint.opacity(0.30)))
+        .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
+    }
+
     /// What it did, in its own words, as it does it.
     private var execLog: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // A run that has started but streamed nothing yet is the one moment this
+            // pane can honestly show a spinner: there is no step to name.
+            if coordinator.steps.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
+                    Text(lang == .vi ? "Đang bắt đầu…" : "Getting started…")
+                        .font(CodepetTheme.inter(CodepetType.callout))
+                        .foregroundStyle(CodepetTheme.mutedText)
+                }
+            }
             ForEach(coordinator.steps) { step in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(step.done ? "✓" : "●")
@@ -249,21 +457,37 @@ struct DeveloperWorkPane: View {
                     Spacer(minLength: 0)
                 }
             }
+            // The tail, while more is still coming. The prototype draws the whole
+            // five-step plan up front with the unreached ones greyed — this cannot,
+            // because the runner streams its steps and does not declare them in
+            // advance. Inventing a plan to grey out would be drawing steps no runner
+            // promised, so it shows only that there is more.
+            if coordinator.run?.phase == .running, !coordinator.steps.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12)
+                    Text(lang == .vi ? "đang làm…" : "working…")
+                        .font(CodepetTheme.inter(CodepetType.callout))
+                        .foregroundStyle(CodepetTokens.faint)
+                }
+            }
         }
     }
 
     /// The gate. Counts come from the diff itself rather than from the prose, so the
     /// card cannot claim a change size the run did not produce.
+    ///
+    /// The summary stays in the pane and the DIFF goes in the inspector — the
+    /// prototype's "Edited 2 files · Review" shape. `Review` is here as a button as
+    /// well as auto-opening, because a founder who closed the tab needs a way back
+    /// to the thing they are being asked to approve.
     private func editedFiles(_ run: EditCodeRun) -> some View {
         let added = run.diffs.reduce(0) { $0 + $1.lines.filter { $0.kind == .added }.count }
         let removed = run.diffs.reduce(0) { $0 + $1.lines.filter { $0.kind == .removed }.count }
         let names = run.diffs.map(\.fileName).joined(separator: " · ")
-        let reviewing = run.phase == .reviewing
-        let sh = CodepetTokens.shadowS(scheme == .dark)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text((lang == .vi ? "ĐÃ SỬA \(run.diffs.count) TỆP" : "EDITED \(run.diffs.count) FILES"))
-                .font(CodepetTheme.inter(CodepetType.footnote, weight: .semibold)).tracking(0.5)
-                .foregroundStyle(CodepetTheme.accentGold)
+        let n = run.diffs.count
+        return runCard(kicker: lang == .vi ? "ĐÃ SỬA \(n) TỆP"
+                                           : (n == 1 ? "EDITED 1 FILE" : "EDITED \(n) FILES"),
+                       tint: CodepetTheme.accentGold) {
             HStack(spacing: 8) {
                 Text(names)
                     .font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
@@ -273,35 +497,33 @@ struct DeveloperWorkPane: View {
             }
             .font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
             .fixedSize(horizontal: false, vertical: true)
-
-            if reviewing {
-                HStack(spacing: 8) {
-                    Button {
-                        Task { await coordinator.approve(acceptedPaths: Set(run.diffs.map(\.path))) }
-                    } label: {
-                        actionLabel(lang == .vi ? "Duyệt" : "Review and approve", filled: true)
-                    }
-                    .buttonStyle(.plain)
-                    Button { Task { await coordinator.reject() } } label: {
-                        actionLabel(lang == .vi ? "Bỏ" : "Discard", filled: false)
-                    }
-                    .buttonStyle(.plain)
+            Text(lang == .vi ? "Đọc diff trước khi nó chạm vào tệp của bạn."
+                             : "Read the diff before it touches your files.")
+                .font(CodepetTheme.inter(CodepetType.callout))
+                .foregroundStyle(CodepetTheme.mutedText)
+            HStack(spacing: 8) {
+                Button { openReview(run) } label: {
+                    actionLabel(lang == .vi ? "Xem diff" : "Review", filled: false)
                 }
-            } else if run.phase == .committed {
-                Text(lang == .vi
-                     ? "Đã commit lên nhánh của phiên. Merge là việc của bạn."
-                     : "Committed to the session branch. Merging is yours.")
-                    .font(CodepetTheme.inter(CodepetType.callout))
-                    .foregroundStyle(CodepetTheme.mutedText)
+                .buttonStyle(.plain)
+                Button {
+                    // `run.acceptedPaths`, NOT `diffs.map(\.path)`. The coordinator
+                    // stores paths RELATIVE to the commit root and `applyShadow`
+                    // appends them to it — handing it absolute paths built a
+                    // nonexistent `/project//private/var/…`, every copy threw, and
+                    // Approve ended in "Couldn't apply all the changes." The gate's
+                    // one button failed on the walkthrough's own temp folder.
+                    Task { await coordinator.approve(acceptedPaths: run.acceptedPaths) }
+                } label: {
+                    actionLabel(lang == .vi ? "Duyệt" : "Approve", filled: true)
+                }
+                .buttonStyle(.plain)
+                Button { Task { await coordinator.reject() } } label: {
+                    actionLabel(lang == .vi ? "Bỏ" : "Discard", filled: false)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(CodepetTokens.goldTint))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(CodepetTokens.goldLine))
-        .shadow(color: sh.color, radius: sh.radius, x: sh.x, y: sh.y)
     }
 
     private func actionLabel(_ text: String, filled: Bool) -> some View {

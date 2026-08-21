@@ -62,6 +62,14 @@ enum MockFlowScript {
         /// and then runs on `MockCodeRunner` — no `claude`, no cost, real exec steps
         /// and a real diff object.
         case codeRun(String)
+        /// Confirm the plan preview, which is what actually starts the work.
+        ///
+        /// Not ceremony in the script: a multi-file change lands in `.previewing` and
+        /// waits, and until the work pane grew a Run button NOTHING in Developer could
+        /// leave that phase — the chapter played over a header reading `PREPARING` and
+        /// a blank pane. A separate beat rather than folding it into `codeRun`, because
+        /// the gate is a state the founder should watch the walkthrough stop at.
+        case confirmCodeRun
         /// Approve the diff, which commits to a branch and stops there.
         case approveCodeRun
         /// Nothing — a beat that only narrates. The prototype has these too; some
@@ -177,15 +185,30 @@ enum MockFlowScript {
          + "wakes — the same one click the two doors offer, and from here it is bounded to "
          + "that folder at every tier."),
 
-        ("Into the code", 4.4, .codeRun("Fix the signup validation — it rejects valid emails"),
-         "Describe the change. It names its steps out loud as it works, so the founder is "
-         + "watching a process rather than a spinner — which is the only thing that earns "
-         + "enough trust to let it act at all."),
+        ("Into the code", 3.8, .codeRun("Fix the signup validation — it rejects valid emails"),
+         "Describe the change and it does not start. A change that touches more than one "
+         + "file shows the plan first — that it works on your machine, that it may run "
+         + "commands — and waits."),
+
+        ("Into the code", 4.4, .confirmCodeRun,
+         "That tap is the founder's. Now it names its steps out loud as it works, so what "
+         + "is on screen is a process rather than a spinner — which is the only thing that "
+         + "earns enough trust to let it act at all."),
+
+        ("Into the code", 3.6, .hold,
+         "The pane keeps the summary — which files, how many lines — and the diff itself "
+         + "opens beside it, never over it. Review comes forward by itself: a gate behind "
+         + "a click nobody makes is not a gate."),
 
         ("Ship it", 4.0, .approveCodeRun,
          "The diff comes to a human. Approving <b>commits to a branch and stops there</b> — "
          + "no merge, no deploy, no force-push, at any tier, ever. The worst case this "
          + "product can produce is a branch you delete."),
+
+        ("Ship it", 3.4, .hold,
+         "It landed on a branch of its own and stopped. Codepet does not open the pull "
+         + "request and will not merge it — that step stays yours, which is what makes "
+         + "the ceiling a ceiling and not a setting."),
 
         ("When it goes wrong", 4.2, .say("Are we offline right now?"),
          "The path a demo usually hides. The departments are unreachable — and the refusal "

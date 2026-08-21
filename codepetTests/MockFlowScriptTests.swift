@@ -105,6 +105,48 @@ final class MockFlowScriptTests: XCTestCase {
                           "the walkthrough ends on a failure")
     }
 
+    /// **The Developer chapter has to be able to finish.**
+    ///
+    /// This is the guard for the bug the founder found by watching: the script
+    /// described a code change, and the app rendered `PREPARING` for the rest of the
+    /// tour. A run proposed with more than one planned file lands in `.previewing`
+    /// and WAITS — nothing in Developer could leave that phase, so the diff never
+    /// existed and `approveCodeRun` no-opped over a caption claiming a branch.
+    ///
+    /// Ordering, not presence: all three beats could be in the script in the wrong
+    /// order and every one of them would silently do nothing.
+    func testTheCodeRunIsLinkedStartedAndOnlyThenApproved() {
+        let at: (MockFlowScript.Intent) -> Int? = { intent in
+            MockFlowScript.beats.firstIndex { $0.intent == intent }
+        }
+        guard let link = at(.linkDemoFolder),
+              let confirm = at(.confirmCodeRun),
+              let approve = at(.approveCodeRun),
+              let run = beats.firstIndex(where: {
+                  if case .codeRun = $0.intent { return true }
+                  return false
+              })
+        else { return XCTFail("the walkthrough no longer walks a code change end to end") }
+
+        XCTAssertLessThan(link, run, "beat \(run) describes a change with nothing linked")
+        XCTAssertLessThan(run, confirm, "beat \(confirm) confirms a plan that was never proposed")
+        XCTAssertLessThan(confirm, approve,
+                          "beat \(approve) approves a diff that no run was ever started to produce "
+                          + "— the pane would sit on PREPARING and the caption would narrate a "
+                          + "branch that does not exist")
+    }
+
+    /// `startCodeRun` proposes two planned files, which is what puts the run behind
+    /// the plan preview. If that ever drops to one the run auto-starts and the
+    /// confirm beat becomes a no-op that still narrates a tap — so the test that
+    /// protects the ordering above has to know why the ordering matters.
+    func testTheWalkthroughsCodeRunIsOneThatActuallyStopsForAPlan() {
+        XCTAssertTrue(EditCodePlanner.needsPreview(plannedFiles: 2, needsBash: false),
+                      "a two-file change no longer previews — the confirm beat narrates a "
+                      + "gate the founder is not being shown")
+        XCTAssertFalse(DevRunStage.startsItself(.previewing))
+    }
+
     /// The walkthrough must show both doors — a tour of a two-mode product that
     /// only ever shows one mode is not a tour of the product.
     func testBothModesAreVisited() {

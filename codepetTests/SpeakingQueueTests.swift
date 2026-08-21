@@ -20,7 +20,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// the real reply is still arriving.
     func testADrainMidStreamDoesNotReportTheReplyFinished() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         let first = q.enqueue()!.ticket
         XCTAssertEqual(q.finishedOne(first), SpeakingQueue.Effects(),
                        "the queue emptied mid-stream and claimed the reply was over")
@@ -38,7 +38,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// a reply that was ONLY a code fence never speaks a word yet is still over.
     func testAReplyThatSpokeNothingStillFinishesWhenTheStreamEnds() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertEqual(q.endOfReply(),
                        SpeakingQueue.Effects(unduck: false, finishedReply: true),
                        "a reply of nothing but a code fence must still end the turn")
@@ -48,7 +48,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// seeing `isStreaming` go false twice) must not move the session twice.
     func testTheReplyFinishesExactlyOnce() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         let t = q.enqueue()!.ticket
         _ = q.endOfReply()
         XCTAssertTrue(q.finishedOne(t).finishedReply)
@@ -64,14 +64,14 @@ final class SpeakingQueueTests: XCTestCase {
     /// silence and then the pet talks over her again.
     func testEnqueueAfterAStopIsRefusedUntilTheNextReply() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertNotNil(q.enqueue())
         _ = q.stop()
         XCTAssertFalse(q.accepts)
         XCTAssertNil(q.enqueue(), "the pet resumed on the next sentence after barge-in")
         XCTAssertNil(q.enqueue())
 
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertNotNil(q.enqueue(), "the latch never reopened, so the next reply is mute")
     }
 
@@ -79,7 +79,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// `.founderInterrupted`. The stream then ending must not also report finished.
     func testTheStreamEndingAfterBargeInReportsNothing() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         _ = q.enqueue()
         _ = q.stop()
         XCTAssertEqual(q.endOfReply(), SpeakingQueue.Effects())
@@ -93,11 +93,11 @@ final class SpeakingQueueTests: XCTestCase {
     /// new reply to zero and report a drain that has not happened.
     func testAStaleCallbackFromAnAbandonedReplyIsIgnored() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         let stale = q.enqueue()!.ticket
         _ = q.stop()
 
-        q.beginReply()
+        _ = q.beginReply()
         let live = q.enqueue()!.ticket
         XCTAssertEqual(q.endOfReply(), SpeakingQueue.Effects())
 
@@ -111,9 +111,9 @@ final class SpeakingQueueTests: XCTestCase {
     /// reply left outstanding.
     func testBeginReplyAbandonsThePreviousReplysOutstandingWork() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         let stale = q.enqueue()!.ticket
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertFalse(q.isSpeaking)
         _ = q.enqueue()
         _ = q.endOfReply()
@@ -126,7 +126,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// restore and no flapping across the gaps between sentences.
     func testOnlyTheFirstSentenceOfAReplyDucks() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertEqual(q.enqueue()?.shouldDuck, true)
         XCTAssertEqual(q.enqueue()?.shouldDuck, false)
         XCTAssertTrue(q.isDucked)
@@ -136,7 +136,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// stale volume over whatever a later reply ducked from.
     func testAnInterruptedReplyRestoresTheVolumeExactlyOnce() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         _ = q.enqueue()
         let stale = q.enqueue()!.ticket
         XCTAssertEqual(q.stop(), SpeakingQueue.Effects(unduck: true, finishedReply: false))
@@ -149,7 +149,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// A reply that nothing ever ducked for must not restore a volume it never took.
     func testAReplyThatSpokeNothingDoesNotRestoreAVolume() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         XCTAssertFalse(q.endOfReply().unduck)
         XCTAssertFalse(q.stop().unduck)
     }
@@ -157,12 +157,113 @@ final class SpeakingQueueTests: XCTestCase {
     /// A clean finish restores it too — the duck must not survive the reply.
     func testACleanFinishRestoresTheVolume() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         let t = q.enqueue()!.ticket
         _ = q.endOfReply()
         XCTAssertEqual(q.finishedOne(t),
                        SpeakingQueue.Effects(unduck: true, finishedReply: true))
         XCTAssertFalse(q.isDucked)
+    }
+
+    // MARK: - R4: a stalled reply must not leave the SFX ducked for the session
+
+    /// The normal path. The drain already handed the volume back, so beginning the
+    /// next reply must not hand it back again — that writes a stale volume over
+    /// whatever the new reply is about to duck from, and it is what makes "restore
+    /// exactly once" untrue by construction.
+    func testANormalBeginReplyDoesNotUnduck() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        let t = q.enqueue()!.ticket
+        _ = q.endOfReply()
+        XCTAssertTrue(q.finishedOne(t).unduck)
+        XCTAssertEqual(q.beginReply(), SpeakingQueue.Effects(),
+                       "the next reply flapped the SFX volume")
+    }
+
+    /// **`didFinish` never arrives** — AirPods disconnecting mid-sentence, an audio
+    /// device change, a synthesis stall. `live` stays non-empty forever, so
+    /// `endOfReply()` never drains and the duck is never released. Left there, every
+    /// later reply sees `ducked == true`, is told `shouldDuck: false`, and the sound
+    /// effects stay at zero for the rest of the session, recoverable only by a
+    /// barge-in or by quitting the app. Releasing it as the next reply begins bounds
+    /// the damage to the one reply that stalled.
+    func testABeginReplyAfterAStalledReplyUnducks() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        XCTAssertEqual(q.enqueue()?.shouldDuck, true)
+        XCTAssertEqual(q.endOfReply(), SpeakingQueue.Effects(),
+                       "a sentence is still outstanding, so the reply is not over")
+        XCTAssertTrue(q.isDucked)
+
+        XCTAssertEqual(q.beginReply(), SpeakingQueue.Effects(unduck: true),
+                       "the stuck duck survived into the next reply")
+        XCTAssertFalse(q.isDucked)
+        XCTAssertEqual(q.enqueue()?.shouldDuck, true,
+                       "the new reply could not duck, so the SFX stay at zero")
+    }
+
+    // MARK: - R2: an armed stop-retry belongs to the barge-in that armed it
+
+    /// **The silent reply.** `stopSpeaking(at:)` answers NO in the window between
+    /// `speak()` and synthesis starting, so the barge-in owes a retry. Reply B then
+    /// arrives and is enqueued. While this flag lived on the audio class, nothing
+    /// cleared it, and it fired on reply B's first delegate callback —
+    /// `AVSpeechSynthesis.h`: `stopSpeaking` "clears the queue". So **reply B was
+    /// spoken silently in its entirety**: the pet said nothing, the session cleanly
+    /// reported the reply finished, and hands-free the founder got no audio and no
+    /// error. Nothing logged.
+    func testARetryArmedDuringReplyAMustNotFireDuringReplyB() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        _ = q.enqueue()          // reply A's sentence, already handed to speak()
+        _ = q.stop()             // the founder interrupts
+        q.armStopRetry()         // ...and the framework answered NO
+
+        _ = q.beginReply()       // reply B
+        _ = q.enqueue()
+        XCTAssertFalse(q.takeStopRetry(),
+                       "reply B's utterance was cancelled by reply A's stale retry")
+    }
+
+    /// It still has to work for the barge-in that armed it, or I4's window is
+    /// unguarded and the interrupted sentence is spoken in full.
+    func testTheRetryFiresOnceWhileTheLatchIsStillClosed() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        _ = q.enqueue()
+        _ = q.stop()
+        q.armStopRetry()
+        XCTAssertTrue(q.takeStopRetry(), "the interrupted sentence was never stopped")
+        XCTAssertFalse(q.takeStopRetry(), "the retry fired a second time")
+    }
+
+    /// Half one of the two defences, on its own: **the latch gate.** A retry may
+    /// only fire while nothing is being accepted, because firing it into an
+    /// accepting queue clears that queue's utterances.
+    func testARetryArmedWithoutABargeInNeverFires() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        _ = q.enqueue()
+        q.armStopRetry()         // no stop() — the latch is open
+        XCTAssertFalse(q.takeStopRetry(),
+                       "a retry fired into an accepting queue and cleared its work")
+    }
+
+    /// Half two, on its own: **the next reply disarms it.** The gate cannot cover
+    /// this — a second barge-in closes the latch again, and the stale arming from
+    /// the first reply would then be spent cancelling this reply's work.
+    func testAnArmingFromAPreviousReplyIsDisarmed() {
+        var q = SpeakingQueue()
+        _ = q.beginReply()
+        _ = q.stop()
+        q.armStopRetry()
+
+        _ = q.beginReply()
+        _ = q.enqueue()
+        _ = q.stop()             // a second barge-in: latch closed, nothing owed
+        XCTAssertFalse(q.takeStopRetry(),
+                       "an arming from a previous reply survived into this one")
     }
 
     // MARK: - I7: isSpeaking is the queue, and the fake agrees with production
@@ -173,7 +274,7 @@ final class SpeakingQueueTests: XCTestCase {
     func testIsSpeakingFollowsTheQueueAndNotTheSynthesiser() {
         var q = SpeakingQueue()
         XCTAssertFalse(q.isSpeaking)
-        q.beginReply()
+        _ = q.beginReply()
         let t = q.enqueue()!.ticket
         XCTAssertTrue(q.isSpeaking, "a sentence was handed over and nothing is speaking")
         XCTAssertEqual(q.outstanding, 1)
@@ -183,7 +284,7 @@ final class SpeakingQueueTests: XCTestCase {
 
     func testStopEndsSpeakingImmediately() {
         var q = SpeakingQueue()
-        q.beginReply()
+        _ = q.beginReply()
         _ = q.enqueue()
         _ = q.enqueue()
         _ = q.stop()
@@ -204,7 +305,7 @@ final class SpeakingQueueTests: XCTestCase {
             if e.finishedReply { finished += 1 }
         }
 
-        q.beginReply()
+        _ = q.beginReply()
         var live: [SpeakingQueue.Ticket] = []
         for _ in 0..<3 {
             let a = q.enqueue()!

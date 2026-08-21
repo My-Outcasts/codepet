@@ -67,6 +67,13 @@ struct SpeakingQueue {
     /// `finishedReply` has already been reported for the reply in flight.
     private var reported = false
     private var ducked = false
+    /// The framework's `stopSpeaking(at:)` returned NO for the barge-in that closed
+    /// the latch, so a second attempt is owed. **Its lifetime belongs to that
+    /// barge-in and to nothing after it** — as a bare `Bool` on the audio class it
+    /// outlived the reply it was armed for and cancelled the *next* reply's
+    /// utterance, which is R2: reply B spoken silently in its entirety, the session
+    /// cleanly reporting it finished, nothing logged.
+    private var stopRetryArmed = false
 
     init() {}
 
@@ -83,16 +90,29 @@ struct SpeakingQueue {
 
     var outstanding: Int { live.count }
 
-    /// A new reply is starting: the latch opens and the end-of-reply flag clears.
+    /// A new reply is starting: the latch opens, the end-of-reply flag clears, and
+    /// anything the previous reply left armed is disarmed.
     ///
     /// Any ticket still outstanding is abandoned here — it belongs to the previous
     /// reply, and letting it count against this one is exactly the miscount in I4.
-    /// The duck is deliberately left alone: sentences are about to arrive.
-    mutating func beginReply() {
+    ///
+    /// **Returns `Effects`, and it can only ever carry `unduck`.** A reply whose
+    /// `didFinish` never arrives (AirPods disconnecting mid-sentence, a device
+    /// change, a synthesis stall) leaves `live` non-empty forever, so `endOfReply()`
+    /// never drains and the duck is never released. Left to itself that duck then
+    /// survives *every later reply* — each one sees `ducked == true`, returns
+    /// `shouldDuck: false`, and the SFX stay at zero for the whole session with no
+    /// recovery but `stopImmediately()` or quitting. Releasing it here bounds the
+    /// damage to the one stalled reply. On the normal path the drain already
+    /// released it, so this returns `Effects()` and nothing flaps — which is the
+    /// other end of *not* unducking on a mid-stream drain (see `drainIfDone`).
+    mutating func beginReply() -> Effects {
         live.removeAll()
         accepting = true
         streamEnded = false
         reported = false
+        stopRetryArmed = false
+        return releaseDuck()
     }
 
     /// Offer one sentence. `nil` means refused because the latch is closed — the
@@ -137,6 +157,29 @@ struct SpeakingQueue {
         // session would take a `.replyFinished` on top of `.founderInterrupted`.
         reported = true
         return releaseDuck()
+    }
+
+    /// The framework's `stopSpeaking(at:)` answered NO for the barge-in just taken:
+    /// nothing was speaking yet, so there was nothing to stop, and the utterance
+    /// already handed to `speak()` will start any moment. A second attempt is owed.
+    ///
+    /// Arm on the Bool alone. Do **not** also require the synthesiser to say it is
+    /// speaking: it returned NO *because* it is not speaking, so that conjunct
+    /// cancels the very case this exists for.
+    mutating func armStopRetry() {
+        stopRetryArmed = true
+    }
+
+    /// Consume the owed retry. True at most once per arming, and **only while the
+    /// latch is still closed** — the retry calls `stopSpeaking(at:)`, which
+    /// `AVSpeechSynthesis.h` says "clears the queue", so firing it once a later
+    /// reply is accepting would cancel that reply's utterances instead.
+    ///
+    /// Consumed either way: a retry that has become irrelevant is spent, not kept.
+    mutating func takeStopRetry() -> Bool {
+        let armed = stopRetryArmed
+        stopRetryArmed = false
+        return armed && !accepting
     }
 
     /// The queue is empty AND the stream has ended AND we have not said so yet.

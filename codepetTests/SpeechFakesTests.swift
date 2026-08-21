@@ -40,8 +40,9 @@ final class SpeechFakesTests: XCTestCase {
         var isSpeaking: Bool { queue.isSpeaking }
 
         func beginReply() {
-            queue.beginReply()
             outstanding.removeAll()
+            // Carries `unduck` only when the previous reply stalled — R4.
+            apply(queue.beginReply())
         }
 
         func enqueue(_ sentence: String, profile: VoiceProfile) {

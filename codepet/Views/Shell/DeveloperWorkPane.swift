@@ -26,11 +26,56 @@ struct DeveloperWorkPane: View {
     /// visibly stick.
     @ObservedObject var coordinator: CodingRunCoordinator
 
+    /// Tabs belong to the SESSION, not the app (§5) — so they live here, with the
+    /// surface that owns the session, rather than in a store everything can reach.
+    @State private var tabs = InspectorTabs()
     @State private var mode: ChatMode = .ask
     @State private var dept: Department?
     @FocusState private var focused: Bool
 
     var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                work
+                // A SIBLING column, never a cover. The first prototype overlaid the
+                // pane to show a deliverable and destroyed the transcript and its live
+                // controls with it; §5 turns that into a rule, and this is where it is
+                // kept. Collapses below the same window width the dock uses — one
+                // threshold for "too narrow for a side panel", not two that drift.
+                if !tabs.isEmpty,
+                   !TwoModeLayout.inspectorCollapsed(forWidth: geo.size.width) {
+                    TwoModeInspector(tabs: $tabs,
+                                     diffs: coordinator.run?.diffs ?? [],
+                                     branch: branchName,
+                                     projectName: companyStore.activeProjectLink
+                                        .map { Project.nameFromPath($0.path) } ?? "project")
+                        .frame(width: TwoModeLayout.inspectorWidth(forWidth: geo.size.width))
+                }
+            }
+        }
+        // Review comes forward BY ITSELF when a run finishes (§5). Waiting for the
+        // founder to go looking for the diff would put the gate behind a click they
+        // have no reason to make.
+        .onChange(of: coordinator.run?.phase) { _, phase in
+            guard phase == .reviewing, let run = coordinator.run, !run.diffs.isEmpty else { return }
+            // Keyed on the FILE SET, not the run: §5 is "one tab per output, not one
+            // per run", so a redo over the same files reopens the same tab instead of
+            // stacking a second Review the founder has to tell apart.
+            let key = run.diffs.map(\.path).sorted().joined(separator: "|")
+            tabs.open(InspectorTab(id: "review-\(key)", kind: .review,
+                                   title: lang == .vi ? "Duyệt" : "Review"))
+        }
+    }
+
+    private var branchName: String? {
+        guard let run = coordinator.run else { return nil }
+        switch run.phase {
+        case .committed, .reviewing: return "codepet/session"
+        default: return nil
+        }
+    }
+
+    private var work: some View {
         VStack(spacing: 0) {
             sessionBar
             ScrollView {

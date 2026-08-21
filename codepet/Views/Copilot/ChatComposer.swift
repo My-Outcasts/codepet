@@ -29,6 +29,10 @@ struct ChatComposer: View {
     /// it shows all eight rather than three, and it carries the pet each one speaks
     /// with. The chips come back with the transcript, where there is no roster.
     var showsDeptChips: Bool = true
+    /// The approval tier, when the surface has one. Optional and nil by default, so
+    /// the dock and every existing call site render exactly what they rendered
+    /// before — the same additive rule `ChatSurface` follows.
+    var tier: Binding<ApprovalTier>? = nil
     @Binding var selectedDept: Department?
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
@@ -97,6 +101,11 @@ struct ChatComposer: View {
             HStack(spacing: 7) {
                 if showsDeptChips { deptChips }
                 quickActionsMenu
+                // "The tier lives in the composer, beside `+`" (§8.2) — the session
+                // bar carries facts set once, the composer carries controls for the
+                // NEXT instruction, and how much rope the next instruction gets is
+                // exactly that.
+                if let tier { tierMenu(tier) }
                 Spacer(minLength: 8)
                 sendButton
             }
@@ -229,6 +238,50 @@ struct ChatComposer: View {
                 Label(dep.name, systemImage: selectedDept?.key == dep.key ? "checkmark" : "")
             }
         }
+    }
+
+    /// How much rope, per session.
+    ///
+    /// Every tier is listed, including the one the app cannot yet keep the promise
+    /// of — disabled, with the reason. Hiding `Ask me` would leave the founder
+    /// comparing three tiers in the design against two on screen and drawing their
+    /// own conclusion about which one they were given; showing it enabled would be
+    /// worse, because selecting "every command prompts" and getting a run that
+    /// prompts for nothing is the most dangerous direction this control can be wrong in.
+    private func tierMenu(_ tier: Binding<ApprovalTier>) -> some View {
+        Menu {
+            ForEach(ApprovalTier.allCases) { option in
+                Button { tier.wrappedValue = option } label: {
+                    Label(option.label(lang)
+                          + (option.isHonoured ? "" : (lang == .vi ? " — chưa có" : " — not yet")),
+                          systemImage: option.icon)
+                }
+                .disabled(!option.isHonoured)
+                .help(option.unavailableReason(lang) ?? option.detail(lang))
+            }
+            Divider()
+            Text((lang == .vi ? "KHÔNG BAO GIỜ, Ở BẤT KỲ MỨC NÀO" : "NEVER, AT ANY TIER")
+                 + "\n" + ApprovalTier.ceiling(lang))
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: tier.wrappedValue.icon)
+                    .font(.system(size: 10, weight: .medium))
+                Text(tier.wrappedValue.label(lang))
+                    .font(CodepetTheme.inter(CodepetType.subheadline))
+            }
+            .foregroundColor(tier.wrappedValue == .letItRun
+                             ? CodepetTheme.accentOrange : CodepetTheme.bodyText)
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Capsule().fill(CodepetTokens.well))
+            .overlay(Capsule().stroke(tier.wrappedValue == .letItRun
+                                      ? CodepetTheme.accentOrange.opacity(0.45)
+                                      : CodepetTokens.cardEdge))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(tier.wrappedValue.detail(lang))
     }
 
     private var quickActionsMenu: some View {

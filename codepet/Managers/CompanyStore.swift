@@ -1002,6 +1002,15 @@ final class CompanyStore: ObservableObject {
     }
     #endif
 
+    /// How much rope THIS session gets — spec §8.2, "per-session, not global".
+    ///
+    /// On the store rather than in the view, so it survives the pane being rebuilt,
+    /// and reset whenever the session changes below. Spec §10 files it on the dev
+    /// thread; that waits for threads to persist at all (they are in-memory only —
+    /// see `ChatThread`), because persisting a tier onto something that does not
+    /// itself survive a relaunch would buy nothing and imply otherwise.
+    @Published var sessionApprovalTier: ApprovalTier = .standard
+
     // MARK: - The two doors
 
     /// Which door the working buffer currently belongs to.
@@ -1054,6 +1063,7 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = UUID().uuidString
         chatMessages = []
+        sessionApprovalTier = .standard
         // A run anchored in (or floating at the bottom of) the outgoing thread must
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
@@ -1073,6 +1083,7 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = id
         chatMessages = threads.first(where: { $0.id == id })?.messages ?? []
+        sessionApprovalTier = .standard
         // A run anchored in the outgoing thread must not float to the bottom of
         // the incoming one — clear it (no-op while running).
         codingRunAnchorId = nil

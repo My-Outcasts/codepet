@@ -63,6 +63,7 @@ struct DeveloperWorkPane: View {
             // have no reason to make.
             guard phase == .reviewing, let run = coordinator.run, !run.diffs.isEmpty else { return }
             openReview(run)
+            commitIfTheTierSaysSo(run)
         }
     }
 
@@ -83,6 +84,24 @@ struct DeveloperWorkPane: View {
         let key = run.diffs.map(\.path).sorted().joined(separator: "|")
         tabs.open(InspectorTab(id: "review-\(key)", kind: .review,
                                title: lang == .vi ? "Duyệt" : "Review"))
+    }
+
+    /// **`Let it run` commits without showing the diff first.**
+    ///
+    /// Spec §8.3 records this as an AMENDMENT to a written rail — "Codepet never
+    /// writes the real tree without approval" — softened only by the founder's
+    /// explicit per-session choice. So it is deliberately not silent: the review tab
+    /// still opens (the diff is there to read AFTER the fact, which is the whole
+    /// difference between this and not showing it at all), and the landed card says
+    /// the commit happened without a review.
+    ///
+    /// The ceiling is untouched by this and by every other tier: no merge, no deploy,
+    /// no delete, no force-push, nothing outside the linked folder. That is what makes
+    /// a tier this permissive safe to offer — the worst case is still a branch you
+    /// delete.
+    private func commitIfTheTierSaysSo(_ run: EditCodeRun) {
+        guard !companyStore.sessionApprovalTier.promptsBeforeCommit else { return }
+        Task { await coordinator.approve(acceptedPaths: run.acceptedPaths) }
     }
 
     /// The branch, when there IS one.
@@ -147,6 +166,7 @@ struct DeveloperWorkPane: View {
                 accent2: CodepetTheme.accentPink,
                 isBusy: coordinator.run?.phase == .running,
                 showsDeptChips: false,
+                tier: $companyStore.sessionApprovalTier,
                 selectedDept: $dept,
                 onSend: send,
                 onQuickAction: { _ in }
@@ -371,6 +391,19 @@ struct DeveloperWorkPane: View {
                 .font(CodepetTheme.inter(CodepetType.body, weight: .semibold))
                 .foregroundStyle(CodepetTheme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            // Says so when nobody read it. `Let it run` is the founder's own choice
+            // and the diff is still one tab away — but a landed card that reads the
+            // same whether or not a human saw the change would quietly erase the
+            // distinction the tier exists to make.
+            if !companyStore.sessionApprovalTier.promptsBeforeCommit {
+                Text(lang == .vi
+                     ? "Đã commit mà không qua bước duyệt — bạn đã chọn \"Cứ chạy\" cho phiên này. Diff vẫn ở tab Duyệt."
+                     : "Committed without a review — you chose \"Let it run\" for this session. "
+                     + "The diff is still in the Review tab.")
+                    .font(CodepetTheme.inter(CodepetType.callout))
+                    .foregroundStyle(CodepetTheme.accentOrange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(lang == .vi
                  ? "Mở pull request khi bạn muốn nó được review. Codepet sẽ không merge hộ bạn."
                  : "Open a pull request when you want it reviewed. Codepet will not merge it for you.")
@@ -551,9 +584,7 @@ struct DeveloperWorkPane: View {
                 .font(CodepetTheme.inter(CodepetType.footnote)).tracking(1)
                 .foregroundStyle(CodepetTokens.faint)
                 .padding(.top, 4)
-            Text(lang == .vi
-                 ? "merge · deploy · xoá · force-push · chạm vào tệp ngoài thư mục"
-                 : "merge · deploy · delete · force-push · touch a file outside the folder")
+            Text(ApprovalTier.ceiling(lang))
                 .font(CodepetTheme.inter(CodepetType.subheadline))
                 .foregroundStyle(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)

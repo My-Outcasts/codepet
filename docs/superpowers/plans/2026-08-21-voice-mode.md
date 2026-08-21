@@ -38,7 +38,15 @@ xcrun xcresulttool get test-results summary --path build/task.xcresult | head -2
 
 `-derivedDataPath build/dd-ci` is load-bearing: without it the unsigned test build overwrites the signed `codepet.app` in shared DerivedData and Firebase sign-in silently breaks for the next human launch.
 
-**Full suite, required before the PR:** `./scripts/ci-test.sh` — currently **1581/1581 green**, so any red is yours.
+**Full suite, required before the PR:** `./scripts/ci-test.sh` — **1581/1581 green
+when this plan was written; 1619/1619 as of Task 4.** The number moves every task,
+so take the current one from `.superpowers/sdd/progress.md` rather than this line.
+Whatever it is, any red is yours.
+
+**Do not run two `xcodebuild` invocations against `build/dd-ci` at once.** `ci-test.sh`
+hardcodes that path; a concurrent `-only-testing:` run sharing it kills the test host,
+presenting as ~27 tests never finishing with **no actual failure** and a different
+victim each run. Concurrent agents each get their own path.
 
 **Signed build, for anything a human runs:**
 
@@ -1013,6 +1021,18 @@ final class SpeechFakesTests: XCTestCase {
                 voice.enqueue(s, profile: profile)
             }
         }
+        // **The flush is not optional and this test proves why.** `take` refuses to
+        // release a sentence whose terminator is the last character available,
+        // because mid-stream it cannot tell a pause from an ending. `full` ends in
+        // "Third." — terminator last — so without this line "Third." is NEVER
+        // spoken and the assertion below fails. A real consumer makes exactly this
+        // call when `isStreaming` goes false; see Task 6.
+        //
+        // An earlier draft of this plan omitted it and asserted all three sentences
+        // anyway, which cannot pass. Caught by the Task 4 implementer, not by my
+        // review — the second time this plan has written a splitter test that
+        // contradicts the splitter's own contract.
+        for s in splitter.flush(from: full) { voice.enqueue(s, profile: profile) }
         XCTAssertEqual(voice.spoken, ["First point.", "Second point.", "Third."])
     }
 
@@ -1282,14 +1302,32 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platfor
 xcrun xcresulttool get test-results summary --path build/v4.xcresult | head -20
 ```
 
-Expected: 4 tests, 4 passed. **Then run the whole suite** — this task adds a
-property to `ChiptuneEngine`, which the sound tests touch:
+Expected: 4 tests, 4 passed. **Then run the whole suite** — this task modifies
+`ChiptuneEngine`, which the app's audio depends on and which nothing in
+`codepetTests/` covers:
 
 ```bash
 pkill -x codepet 2>/dev/null; ./scripts/ci-test.sh 2>&1 | tail -12
 ```
 
-Expected: 1581 + the new tests, 0 failed.
+Expected: the current baseline + the new tests, 0 failed.
+
+**Two corrections to what this step used to say.** It claimed "the sound tests
+touch" `ChiptuneEngine`. There are no sound tests — `codepetTests/` has no
+chiptune, sfx or audio suite at all, which is the opposite of the stated reason and
+makes the full-suite run *more* important, not less: a change to the audio engine
+here is covered by nothing, so a regression surfaces only when a human hears it.
+
+It also gave `1581` as the expected count. That number moves with every task and a
+stale figure invites someone to "fix" a passing suite. Read the current baseline
+from the ledger, or take the number the previous task's run reported. As of Task 4
+it is **1619**.
+
+Also: this command shares `-derivedDataPath build/dd-ci` with `scripts/ci-test.sh`.
+Never run the two concurrently — two `xcodebuild` invocations against one derived
+data directory kill the test host, presenting as ~27 tests never finishing with **no
+actual failure**, a different victim each run. If a suite is already running, use
+your own path (`build/dd-t4`, etc).
 
 ```bash
 git add codepet/Services/SpeakingVoice.swift codepet/Services/SpeechListening.swift \
@@ -1839,10 +1877,10 @@ hints from `DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\
 pkill -x codepet 2>/dev/null; ./scripts/ci-test.sh 2>&1 | tail -14
 ```
 
-Expected: `All N test(s) passed.` The baseline before this plan was **1581/1581**,
-so any red is from this work. A `-only-testing:` branch is an untested branch — the
-first full run on the composer branch found a real bug that six unrelated suites
-paid for.
+Expected: `All N test(s) passed.` The baseline before this plan was **1581/1581** and
+it stood at **1619/1619** after Task 4, so any red is from this work. A
+`-only-testing:` branch is an untested branch — the first full run on the composer
+branch found a real bug that six unrelated suites paid for.
 
 - [ ] **Step 5: Signed build, hand off, PR**
 

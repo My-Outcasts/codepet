@@ -36,11 +36,41 @@ Founder, 21 Aug 2026:
 |---|---|
 | 1 | **Voice mode**, the waveform — not dictation, and not the per-reply read-aloud |
 | 2 | The surface is a **takeover overlay**, not a panel that keeps the transcript visible |
-| 3 | A turn ends after **1.2s of silence** — automatic, not hold-to-talk |
+| 3 | ~~A turn ends after **1.2s of silence** — automatic, not hold-to-talk~~ **REVERSED 21 Aug, see below** |
+| 4 | **A turn is sent only when the founder taps ✓.** ✕ discards it. Nothing auto-sends |
+
+**Decision 3 was reversed after watching Claude's own voice mode**, and the reason is
+that §4 of this spec had already argued against it without noticing.
+
+This spec says the live transcript is shown because "recognition gets names and jargon
+wrong, and a founder who cannot see what was heard will not trust the reply. Seeing it
+wrong *before* it sends is the difference between a bug and a retype." Auto-sending
+1.2s later means she cannot act on what she has just read. We had built the diagnosis
+and no remedy.
+
+It compounds with §7's own credit warning: voice makes turns cheap to spend without
+noticing, and a misheard "Codepet", "nova" or a department name auto-sent and cost
+0.25 credits with no way to stop it. ✕ is cheap insurance for exactly the words §7
+predicts the recognizer will get wrong.
+
+Measured from a screen recording of Claude's voice mode, 21 Aug: the composer holds a
+live transcript and a level meter, with ✕ and ✓ available the entire time the founder
+is speaking; the mic stays open through the reply, so barge-in still works; and
+nothing is ever sent without the tap.
+
+**Consequence: `VoiceTurn` and `silenceThreshold` lose their only consumer.** With an
+explicit confirm there is no silence deadline, so there is no threshold left to feel
+wrong — which was the one thing this spec said could only be settled by the founder
+talking to the built thing. The type and its tests are deleted rather than left
+unused; they are in git if a silence affordance is ever wanted.
+
+**Not adopted from Claude:** its voice mode lives *in the composer* with the
+transcript still visible, where ours is a takeover (decision 2, unchanged). The
+tradeoff being bought is that ours cannot show the conversation it is having.
 
 Five further calls were made in the design and are open to reversal; each is stated with its reason in
-§5 rather than buried in code. §5 restates decision 3 alongside them, attributed, because the constant
-it names has to live somewhere a reader will find it.
+§5 rather than buried in code. §5 formerly restated decision 3 so its constant lived somewhere findable;
+that entry is now struck through, because decision 4 leaves no constant to find.
 
 ## 3. Everything below was measured, not assumed
 
@@ -69,17 +99,22 @@ one-time nudge pointing at System Settings is honest; pretending otherwise is no
 ```
                  ┌──────────────────────────────────────────┐
                  │                                          │
-   idle ──tap──▶ listening ──silence 1.2s──▶ thinking ──────┤
-     ▲               ▲                                      │
-     │               │                          reply streams│
-   tap ✕             └────── she starts talking ─────▼       │
-     │                        (barge-in)         speaking ◀──┘
-     └────────────────────────────────────────────────┘
+   idle ──tap──▶ listening ─────tap ✓─────▶ thinking ───────┤
+     ▲             ▲   ▲                                    │
+     │             │   └── tap ✕ (discard, credit unspent)   │
+   tap ✕           │                        reply streams    │
+     │             └────── she starts talking ─────▼         │
+     │                      (barge-in)          speaking ◀───┘
+     └──────────────────────────────────────────────────┘
 ```
+
+**Nothing leaves this loop without a tap.** ✓ sends, ✕ discards and returns to
+listening with the credit unspent. Silence does nothing at all — the mic keeps
+capturing until she decides, exactly as Claude's does.
 
 | State | What the founder sees | What is running |
 |---|---|---|
-| `listening` | orb pulsing with mic level, live partial transcript in small type beneath | recognition task streaming partials; silence timer armed |
+| `listening` | orb pulsing with mic level, live partial transcript in small type beneath, **✕ and ✓ beneath that** | recognition task streaming partials. **No timer** — ✓ is the only thing that takes the turn |
 | `thinking` | orb stops tracking level and breathes on a slow fixed cycle — legibly *not* listening, so she knows the turn was taken | the ordinary `sendChat` — same path a typed message takes |
 | `speaking` | orb pulsing with output level | synthesiser working through a queue of complete sentences |
 
@@ -104,8 +139,9 @@ must never spend it. `Convene the room` stays a deliberate click in the `＋` me
 per-pet mapping from §8's parked design. This is not the feature; it is the only sensible answer to
 "which of the 25 voices."
 
-**1.2s of silence ends the turn** (founder's call). It lives as one named constant, because it is the
-value most likely to feel wrong and need changing after real use.
+~~**1.2s of silence ends the turn**~~ — **reversed 21 Aug, see §2.** A turn is taken only when the
+founder taps ✓, so there is no threshold left and `VoiceTurn` is deleted. **✓ is disabled while the
+transcript is empty**, so a tap cannot send nothing, and ✕ discards without spending the credit.
 
 **SFX duck while speaking.** `ChiptuneEngine.sfxMixer.outputVolume` drops and restores. Chiptune bleeps
 over a spoken sentence is a mess, and this is a real coupling rather than a nicety.
@@ -266,6 +302,7 @@ neither private nor cast-signed. Not fixable by us; stated rather than hidden.
 on 21 Aug: **separate**, because enabling voice processing on a running engine throws. See §7 for the
 error code, the coexistence check, and the 7-channel format landmine the same spike surfaced.
 
-One thing still unmeasured, deliberately: **whether 1.2s is the right silence threshold.** That is a
-feel, not a fact, and no spike answers it — it needs the founder talking to the built thing. It lives as
-one named constant for exactly that reason.
+~~One thing still unmeasured: whether 1.2s is the right silence threshold.~~ **Moot as of 21 Aug** —
+decision 4 removed the threshold entirely. The question that replaced it is not a measurement either:
+whether tapping ✓ every turn costs more than the misheard turns it prevents. That needs the founder
+using it, and it is reversible in one place if the answer is yes.

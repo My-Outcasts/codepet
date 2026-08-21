@@ -104,9 +104,16 @@ struct CopilotChatView: View {
                     // of stacking it inside the hero — that is what keeps the beacon's
                     // buttons on screen when the greeting or the card grows.
                     if surface == .twoMode {
-                        // No chips here: `DepartmentRoster` is directly above and
-                        // offers the same control for the same departments, with
-                        // all eight and their pets rather than three names.
+                        // Not AT REST here: `DepartmentRoster` is directly above and
+                        // is the better picker on this screen — eight portraits with
+                        // their pets, versus one button. It is also where the founder
+                        // LEARNS the cast (two-mode §4 puts it on the first screen).
+                        //
+                        // An ARMED department still draws, because the roster lights
+                        // its own chip and nothing else would say so — see
+                        // `ChatComposer.showsDeptChips`. Every other chat surface
+                        // carries the control permanently; this screen is the only
+                        // exception, and only while nothing is picked.
                         composerDock(column: column, showsDeptChips: false)
                     }
                 } else {

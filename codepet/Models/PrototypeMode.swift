@@ -45,6 +45,27 @@ enum PrototypeMode {
         return UserDefaults.standard.bool(forKey: key)
     }
 
+    /// **Whether the demo starts at the COLD OPEN**, which is not the same question
+    /// as whether fixtures are on — and collapsing the two was a regression CI caught
+    /// on the first full run of the suite.
+    ///
+    /// `-CODEPET_MOCK_CHAT` alone boots an ALREADY-ONBOARDED company; that is what
+    /// makes chat and engineering reachable in a single launch, and it is the mode
+    /// most of the mock work uses. `-CODEPET_MOCK_FLOW` / `-CODEPET_MOCK_AUTOPLAY`
+    /// additionally rewind to onboarding, which is the one stretch of the product a
+    /// plain mock has never been able to show. Making `MockChat.flowEnabled` follow
+    /// `isOn` sent plain mock mode into the cold open — `MockFlowTests` names exactly
+    /// that and went red.
+    ///
+    /// Deliberately NOT satisfied by the runtime switch: dropping a founder
+    /// mid-session into a first-run flow they did not ask for reads as the app losing
+    /// their account. Flipping the toggle gives fixtures and the walkthrough controls;
+    /// launching with the flag is what starts the story at the beginning.
+    static var startsAtColdOpen: Bool {
+        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW")
+            || UserDefaults.standard.bool(forKey: "CODEPET_MOCK_AUTOPLAY")
+    }
+
     /// Ignored while locked — a launch argument wins, and pretending otherwise would
     /// leave the preference and the running app disagreeing about which one is true.
     @discardableResult
@@ -70,6 +91,7 @@ enum PrototypeMode {
     #else
     static var isLocked: Bool { true }
     static var isOn: Bool { false }
+    static var startsAtColdOpen: Bool { false }
     @discardableResult
     static func set(_ on: Bool) -> Bool { false }
     static var allowsCloudWrites: Bool { true }

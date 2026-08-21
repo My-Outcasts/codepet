@@ -739,6 +739,30 @@ final class CompanyStore: ObservableObject {
         startEngineeringRun(ask: ask)
     }
 
+    /// The build entry point for a two-mode Developer SESSION.
+    ///
+    /// `DeveloperWorkPane` called `startCodeRun` directly, which
+    /// `EngineeringReachabilityTests` correctly failed: *"a view calling either
+    /// directly would pick a machine behind the founder's back — same button,
+    /// different bill."* It was picking one, and picking it wrong — always local, so
+    /// a founder whose Developer was awake on a CLOUD repo with no folder linked
+    /// typed a task and got `.noProject` staring back.
+    ///
+    /// Not routed through `startBuild`, which is cloud-first with a "run it locally
+    /// instead" escape on the resulting card. That shape belongs to the dock, where a
+    /// per-message ask has not declared a machine. A two-mode session HAS declared
+    /// one — the session bar says `Local · 0 credits` or `Cloud · credits` — so
+    /// sending a local session to the cloud would contradict the chip above the
+    /// composer and bill for it. The decision still lives here rather than in the
+    /// view, which is what the guard is actually protecting.
+    func startSessionBuild(ask: String) {
+        if activeProjectLink != nil {
+            startCodeRun(ask: ask)
+        } else {
+            startEngineeringRun(ask: ask)
+        }
+    }
+
     /// Whether "run this on my machine instead" is a real offer.
     ///
     /// A linked folder only. It cannot check for the `claude` binary from here

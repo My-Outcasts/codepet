@@ -124,10 +124,14 @@ struct DeveloperWorkPane: View {
     /// composer — dropping it with the transcript would have made Developer a
     /// read-only screen you could not start anything from.
     ///
-    /// It sends through `startCodeRun`, not `sendChat`: being in Developer IS the
-    /// intent, which is the whole reason the mode pill retired. No department chips
-    /// either — a code run is Engineering's verb and picking a department here would
-    /// imply a choice that does not exist.
+    /// It sends through `startSessionBuild`, not `sendChat`: being in Developer IS
+    /// the intent, which is the whole reason the mode pill retired. No department
+    /// chips either — a code run is Engineering's verb and picking a department here
+    /// would imply a choice that does not exist.
+    ///
+    /// `startSessionBuild` and not `startCodeRun`: the view must not choose the
+    /// machine. It was choosing, and choosing wrong — always local, so an awake
+    /// Developer on a cloud repo with no folder linked got `.noProject` back.
     private var composer: some View {
         VStack(spacing: 8) {
             ChatComposer(
@@ -161,7 +165,7 @@ struct DeveloperWorkPane: View {
         let ask = companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ask.isEmpty else { return }
         companyStore.chatDraft = ""
-        companyStore.startCodeRun(ask: ask)
+        companyStore.startSessionBuild(ask: ask)
     }
 
     // MARK: - Session bar
@@ -406,7 +410,7 @@ struct DeveloperWorkPane: View {
     private func retry() {
         guard let ask = coordinator.run?.ask else { return }
         coordinator.cancel()
-        companyStore.startCodeRun(ask: ask)
+        companyStore.startSessionBuild(ask: ask)
     }
 
     /// Shared chrome for the phase cards, so a new phase gets the same object rather

@@ -76,7 +76,7 @@ enum MockChat {
     /// its own, unattended. Without the fixtures behind it, it would drive the REAL
     /// Cloud Functions and spend real credits with nobody watching the ledger — and
     /// two flags where one is meaningless alone is a state you can get half-right.
-    static var flowEnabled: Bool { PrototypeMode.isOn }
+    static var flowEnabled: Bool { PrototypeMode.startsAtColdOpen }
 
     /// Flipped once onboarding completes, so the next `load` in this process
     /// returns the finished company rather than sending the founder back

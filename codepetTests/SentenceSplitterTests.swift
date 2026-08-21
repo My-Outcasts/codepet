@@ -23,9 +23,16 @@ final class SentenceSplitterTests: XCTestCase {
     }
 
     /// The core contract: repeated calls with a growing string never repeat
-    /// output. The trailing "Three." has nothing after its period while the
-    /// string is still growing, so `take` alone cannot release it — only the
-    /// closing `flush`, once the stream is known to be over, can.
+    /// output, across a take-then-flush sequence. This does NOT by itself
+    /// guard against a removed `atEnd` shortcut that released "Three." one
+    /// call early, mid-stream — the final concatenated output is identical
+    /// either way, since that shortcut only moves WHERE "Three." is
+    /// released, not what the sequence adds up to. That regression is
+    /// caught instead by `testDoesNotSplitADecimalNumberMidSentence` (its
+    /// mid-loop `out == []` assertion goes red the instant anything is
+    /// released early) and `testFlushDoesNotReEmitWhatTakeAlreadyReturned`
+    /// (a single-shot `take` would wrongly also return the second sentence,
+    /// since its terminator is the last character of that call's string).
     func testNeverRepeatsASentence() {
         var s = SentenceSplitter()
         let full = "One. Two. Three."
@@ -62,7 +69,7 @@ final class SentenceSplitterTests: XCTestCase {
             out += s.take(from: String(full.prefix(end)))
         }
         XCTAssertEqual(out, [], "take alone must never release this sentence")
-        XCTAssertEqual(s.flush(from: full), ["The price is $3.14 today."])
+        XCTAssertEqual(s.flush(from: full), [full])
     }
 
     // MARK: - flush: the seam that releases what take refused
@@ -79,11 +86,58 @@ final class SentenceSplitterTests: XCTestCase {
     /// `take` already returned.
     func testFlushDoesNotReEmitWhatTakeAlreadyReturned() {
         var s = SentenceSplitter()
-        XCTAssertEqual(s.take(from: "One. Two."), ["One."])
-        XCTAssertEqual(s.flush(from: "One. Two."), ["Two."])
+        let full = "One. Two."
+        XCTAssertEqual(s.take(from: full), ["One."])
+        XCTAssertEqual(s.flush(from: full), ["Two."])
     }
 
-    // MARK: - Markdown, because replies are markdown
+    // MARK: - Sentence count vs. character offset (the guard this type exists for)
+
+    /// The type doc's own regression case. The opener precedes a terminator
+    /// that gets emitted while the emphasis span is still unclosed (so the
+    /// asterisk is still literal in that emission); the closer only arrives
+    /// in a later delta, which retroactively shortens the rendering by
+    /// stripping both asterisks. A character offset recorded against the
+    /// first (unresolved) rendering would then point into the middle of the
+    /// second (resolved, shorter) one. A sentence COUNT does not care that
+    /// the content shifted — only that one sentence was already returned —
+    /// so the already-emitted sentence keeps its original (cosmetically
+    /// stray-asterisk) wording instead of being corrupted or duplicated.
+    func testMarkdownCloserArrivingInALaterDeltaDoesNotDesyncEmittedCount() {
+        var s = SentenceSplitter()
+        let firstDelta = "This is *bad. "
+        let fullDelta = "This is *bad. This is *worse* actually."
+
+        XCTAssertEqual(s.take(from: firstDelta), ["This is *bad."],
+                       "emitted while the span is still open — the stray asterisk is the known cosmetic cost")
+        XCTAssertEqual(s.take(from: fullDelta), [],
+                       "the closer arriving later must not re-emit the sentence it belongs to")
+        XCTAssertEqual(s.flush(from: fullDelta), ["This is worse* actually."],
+                       "must be the real remaining sentence, not a fragment sliced at a stale character offset")
+    }
+
+    // MARK: - URLs must not swallow the sentence's own terminator
+
+    /// Found by review: `\S*` is greedy, so a URL with no space before its
+    /// sentence's terminator used to consume the terminator into the match
+    /// and strip it away with the rest of the URL — merging two sentences
+    /// into one run-on utterance. Never silent, never a half-sentence, but
+    /// a real pacing defect, so this is asserted at the sentence level.
+    func testURLGreedyMatchDoesNotEatTheFollowingTerminator() {
+        var s = SentenceSplitter()
+        let full = "Visit https://codepet.app/pricing. Thanks for reading."
+        XCTAssertEqual(s.take(from: full) + s.flush(from: full),
+                       ["Visit link.", "Thanks for reading."])
+    }
+
+    /// The fix must not regress the opposite case: a URL's own trailing
+    /// slash is not sentence punctuation and must stay fully consumed.
+    func testURLWithTrailingSlashIsFullyConsumed() {
+        var s = SentenceSplitter()
+        let full = "Try https://codepet.app/. It works."
+        XCTAssertEqual(s.take(from: full) + s.flush(from: full),
+                       ["Try link.", "It works."])
+    }
 
     func testStripsEmphasisAndBackticks() {
         XCTAssertEqual(SentenceSplitter.speakable("**bold** and `code` and _soft_"),
@@ -124,10 +178,11 @@ final class SentenceSplitterTests: XCTestCase {
     /// sentence) start over from nothing.
     func testResetClearsProgress() {
         var s = SentenceSplitter()
-        _ = s.take(from: "One. Two.")
-        _ = s.flush(from: "One. Two.")
+        let full = "One. Two."
+        _ = s.take(from: full)
+        _ = s.flush(from: full)
         s.reset()
-        let out = s.take(from: "One. Two.") + s.flush(from: "One. Two.")
+        let out = s.take(from: full) + s.flush(from: full)
         XCTAssertEqual(out, ["One.", "Two."],
                        "reset must let the next reply start from nothing")
     }

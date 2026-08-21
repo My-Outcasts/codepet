@@ -117,7 +117,11 @@ struct SentenceSplitter {
         // Links become the word, not the URL.
         s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]+\\)", with: "$1",
                                    options: .regularExpression)
-        s = s.replacingOccurrences(of: "https?://[^\\s]+", with: "link",
+        // `\S*` is greedy but the trailing character class excludes sentence
+        // punctuation, so a terminator with no space before it (found by
+        // review: "Visit https://codepet.app/pricing. Thanks for reading.")
+        // is never swallowed into the URL match.
+        s = s.replacingOccurrences(of: "https?://\\S*[^\\s.,;:!?]", with: "link",
                                    options: .regularExpression)
 
         // Emphasis, inline code, headings, list bullets.

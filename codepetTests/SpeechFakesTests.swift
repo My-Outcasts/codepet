@@ -22,6 +22,15 @@ import XCTest
 @MainActor
 final class SpeechFakesTests: XCTestCase {
 
+    /// One tape both fakes write to, because two of this feature's five invariants are
+    /// about ORDER across two objects — `voice.beginReply()` before the reply's first
+    /// enqueue, `listener.endTurn()` at the send site — and a count on each fake
+    /// separately cannot tell "both happened" from "both happened in the right order".
+    final class Tape {
+        private(set) var events: [String] = []
+        func record(_ event: String) { events.append(event) }
+    }
+
     /// **Backed by the real `SpeakingQueue`, on purpose.** The reviewed defect was a
     /// fake that flipped `isSpeaking` synchronously inside `enqueue` while
     /// `SpeechSpeaker.isSpeaking` returned the synthesiser's asynchronous flag. Any
@@ -33,6 +42,7 @@ final class SpeechFakesTests: XCTestCase {
         var spoken: [String] = []
         var stopped = 0
         var unducks = 0
+        var tape: Tape?
 
         private var queue = SpeakingQueue()
         private var outstanding: [SpeakingQueue.Ticket] = []
@@ -40,12 +50,14 @@ final class SpeechFakesTests: XCTestCase {
         var isSpeaking: Bool { queue.isSpeaking }
 
         func beginReply() {
+            tape?.record("beginReply")
             outstanding.removeAll()
             // Carries `unduck` only when the previous reply stalled — R4.
             apply(queue.beginReply())
         }
 
         func enqueue(_ sentence: String, profile: VoiceProfile) {
+            tape?.record("enqueue")
             guard let accepted = queue.enqueue() else { return }
             outstanding.append(accepted.ticket)
             spoken.append(sentence)
@@ -82,6 +94,9 @@ final class SpeechFakesTests: XCTestCase {
         var onFailure: ((Error) -> Void)?
         var isRunning = false
         var startCount = 0
+        /// Turn boundaries taken. `0` is the assertion behind "silence sent nothing".
+        var endTurnCount = 0
+        var tape: Tape?
         /// Settable, because the whole finding behind `privacyLine(_:onDevice:)` is
         /// that this is a property of the installed assets and not of the language.
         var isOnDevice = true
@@ -128,6 +143,8 @@ final class SpeechFakesTests: XCTestCase {
         /// keep — and no test can catch that, because testing the real `endTurn()`
         /// needs an `SFSpeechRecognizer`.
         func endTurn() {
+            endTurnCount += 1
+            tape?.record("endTurn")
             transcript.endTurn()
             retireLiveRequest()      // `SpeechListener.endTurn()` calls `renew()`
         }
@@ -206,7 +223,7 @@ final class SpeechFakesTests: XCTestCase {
         let fake = FakeVoice()
         let voice: SpeakingVoice = fake
         var session = VoiceSession()
-        _ = session.apply(.open); _ = session.apply(.heardSilence)
+        _ = session.apply(.open); _ = session.apply(.founderSentTurn)
         voice.onFinishedAll = { _ = session.apply(.replyFinished) }
         let profile = PetVoice.profile(for: "byte")
 
@@ -216,7 +233,8 @@ final class SpeechFakesTests: XCTestCase {
         fake.speakingCaughtUp()       // spoken in ~1.1s; the fence streams for 5-15s
         XCTAssertFalse(voice.isSpeaking)
         XCTAssertEqual(session.state, .speaking,
-                       "the mic reopened mid-reply — the next silence spends a credit")
+                       "the reply was reported finished while a code fence was still "
+                       + "streaming — the mic reopens and her transcript is cleared mid-reply")
 
         voice.enqueue("That should do it.", profile: profile)
         voice.endOfReply()
@@ -232,7 +250,7 @@ final class SpeechFakesTests: XCTestCase {
         var session = VoiceSession()
         let voice = FakeVoice()
         let listener = FakeListener()
-        _ = session.apply(.open); _ = session.apply(.heardSilence)
+        _ = session.apply(.open); _ = session.apply(.founderSentTurn)
         voice.beginReply()
         voice.enqueue("A long reply that is still going.",
                       profile: PetVoice.profile(for: "byte"))
@@ -428,10 +446,10 @@ final class SpeechFakesTests: XCTestCase {
                        "turns are accumulating in the request for the whole session")
     }
 
-    /// A recognizer re-reports a string it has already reported, freely. Task 6 stamps
-    /// `lastSpeechAt` on every partial and, while the pet is speaking, treats any
-    /// partial as barge-in — so an unchanged partial cuts the pet off with words the
-    /// founder has already had answered. Only real changes reach the consumer.
+    /// A recognizer re-reports a string it has already reported, freely. The overlay
+    /// reads every partial as speech and, while the pet is speaking, treats any partial
+    /// as barge-in — so an unchanged partial cuts the pet off with words the founder
+    /// has already had answered. Only real changes reach the consumer.
     func testAnUnchangedPartialIsNotReportedAgain() {
         var t = TurnTranscript()
         XCTAssertTrue(t.update("what should we charge"))
@@ -491,7 +509,7 @@ final class SpeechFakesTests: XCTestCase {
         }
 
         _ = session.apply(.open)
-        _ = session.apply(.heardSilence)
+        _ = session.apply(.founderSentTurn)
         _ = session.apply(.replyBegan)
         XCTAssertEqual(session.state, .speaking)
         XCTAssertNoThrow(try listener.start())
@@ -541,6 +559,214 @@ final class SpeechFakesTests: XCTestCase {
         }
     }
 
+    // MARK: - A turn is taken by a tap, and by nothing else
+
+    /// The overlay's `@State partial`, as something a callback can fill and a test can
+    /// read afterwards.
+    final class Transcript {
+        var text = ""
+    }
+
+    /// One fixture for all four of the tests below: a listening session, the two fakes
+    /// sharing a tape, and the overlay's own `onPartial` wiring.
+    private struct TurnFixture {
+        let listener: FakeListener
+        let voice: FakeVoice
+        let tape: Tape
+        let partial = Transcript()
+        var session = VoiceSession()
+        var driver = VoiceReplyDriver()
+    }
+
+    /// Listening, with the microphone open and the partial handler wired.
+    private func listeningFixture() throws -> TurnFixture {
+        let tape = Tape()
+        let listener = FakeListener()
+        let voice = FakeVoice()
+        listener.tape = tape
+        voice.tape = tape
+        var fixture = TurnFixture(listener: listener, voice: voice, tape: tape)
+        _ = fixture.session.apply(.open)
+        // `wire()`'s partial handler, minus the barge-in branch, which needs
+        // `.speaking` and is covered by `testBargeInStopsTheVoiceAndReturnsToListening`.
+        // **Note what it does NOT do: there is nothing left here to arm.** It stamped
+        // `lastSpeechAt` until 21 Aug, and that stamp was the whole input to the 1.2s
+        // deadline.
+        let transcript = fixture.partial
+        listener.onPartial = { transcript.text = $0 }
+        try listener.start()
+        return fixture
+    }
+
+    /// **The guard for spec §2 decision 4, and the one that goes red if auto-send ever
+    /// comes back.**
+    ///
+    /// The founder says something the recognizer may well have mangled — §7 predicts
+    /// exactly these words — and then stops talking and reads it. Nothing may happen.
+    /// A gap of 1.6s is well past the 1.2s deadline that used to end a turn, and the
+    /// `await` hands the main actor back, so a `Task` or `Timer` watcher scheduled by a
+    /// re-added auto-send gets its chance to fire before the assertions run.
+    ///
+    /// **Verified RED, 21 Aug**, by putting the deleted watcher back into this test's
+    /// own wiring — `onPartial` stamping a date, plus a 4Hz `Task` loop calling
+    /// `takeTurn` once the gap reached 1.2s. It sends "add pricing for the beta" and
+    /// three of the four assertions below fail. The limit of that check, stated because
+    /// it matters: the watcher lived in the *view*, which no test can host, so this
+    /// proves the assertions have teeth against the mechanism rather than proving the
+    /// view cannot grow a new one. `VoiceModeOverlay.takeTurn` being the only
+    /// send-side path in the app is what makes it the right assertion to have.
+    func testSilenceAloneNeverTakesTheTurn() async throws {
+        let fixture = try listeningFixture()
+        fixture.listener.emit("add pricing for the beta")
+        XCTAssertEqual(fixture.partial.text, "add pricing for the beta")
+
+        try await Task.sleep(nanoseconds: 1_600_000_000)
+
+        XCTAssertEqual(fixture.listener.endTurnCount, 0,
+                       "silence retired the recognition request — the turn was taken")
+        XCTAssertEqual(fixture.tape.events, [],
+                       "silence began a reply: \(fixture.tape.events)")
+        XCTAssertEqual(fixture.session.state, .listening,
+                       "silence moved the session out of .listening")
+        XCTAssertEqual(fixture.partial.text, "add pricing for the beta",
+                       "her sentence was cleared while she was reading it")
+
+        // And the fixture is not simply inert: the same state, with the tap, sends.
+        var session = fixture.session
+        var driver = fixture.driver
+        XCTAssertEqual(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+                                                 session: &session,
+                                                 listener: fixture.listener,
+                                                 voice: fixture.voice,
+                                                 driver: &driver, isBusy: false),
+                       "add pricing for the beta",
+                       "nothing above was asserting anything: ✓ cannot send either")
+    }
+
+    /// ✓ takes the turn **once**, and takes both of the send site's invariants with it:
+    /// `beginReply()` before the reply's first `enqueue` (or sentence 1 of every
+    /// post-barge-in reply is dropped) and `endTurn()` at the send site (or the next
+    /// question arrives with this one glued to its front). Both fail silently.
+    ///
+    /// The second tap is not hypothetical: the button is under her finger, and it used
+    /// to be a timer that could only fire once per turn by construction.
+    func testConfirmTakesTheTurnOnceAndKeepsTheSendSiteInvariants() throws {
+        var fixture = try listeningFixture()
+        fixture.listener.emit("what should we charge for the beta")
+
+        let sent = VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+                                             session: &fixture.session,
+                                             listener: fixture.listener,
+                                             voice: fixture.voice,
+                                             driver: &fixture.driver, isBusy: false)
+        XCTAssertEqual(sent, "what should we charge for the beta")
+        XCTAssertEqual(fixture.session.state, .thinking,
+                       "the orb never stopped tracking her level — she cannot see the "
+                       + "turn was taken")
+        fixture.partial.text = ""                      // what the view does after ✓
+
+        // The reply's first sentence, to place the enqueue against `beginReply()`.
+        fixture.voice.enqueue("Charge forty.", profile: PetVoice.profile(for: "nova"))
+        XCTAssertEqual(fixture.tape.events, ["beginReply", "endTurn", "enqueue"],
+                       "the send site's order changed: \(fixture.tape.events)")
+        XCTAssertEqual(fixture.voice.spoken, ["Charge forty."],
+                       "the latch was closed when the reply's first sentence arrived")
+
+        // Tap twice — and again with a transcript still on screen, which is what a
+        // late partial from the retired request would leave.
+        XCTAssertNil(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+                                               session: &fixture.session,
+                                               listener: fixture.listener,
+                                               voice: fixture.voice,
+                                               driver: &fixture.driver, isBusy: false),
+                     "a second ✓ took a second turn")
+        XCTAssertNil(VoiceModeOverlay.takeTurn(partial: "still on screen",
+                                               session: &fixture.session,
+                                               listener: fixture.listener,
+                                               voice: fixture.voice,
+                                               driver: &fixture.driver, isBusy: false),
+                     "✓ sent again while the pet was thinking about the first question")
+        XCTAssertEqual(fixture.listener.endTurnCount, 1,
+                       "the turn was taken \(fixture.listener.endTurnCount) times")
+    }
+
+    /// **✓ with an empty transcript is impossible** (spec §5). `sendChat` drops an
+    /// empty string, so this is not a crash but a credit-shaped no-op: the orb stops
+    /// listening, the session leaves `.listening`, and no question was ever asked.
+    ///
+    /// Whitespace counts as empty. A recognizer that reports `" "` is the reachable
+    /// version of this — it was `endTurnIfSilent`'s own second guard before the change.
+    func testConfirmingAnEmptyTranscriptIsImpossible() {
+        for text in ["", " ", "\n  \t"] {
+            var session = VoiceSession()
+            _ = session.apply(.open)
+            var driver = VoiceReplyDriver()
+            let tape = Tape()
+            let listener = FakeListener()
+            let voice = FakeVoice()
+            listener.tape = tape
+            voice.tape = tape
+
+            XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: text, state: .listening,
+                                                        isBusy: false),
+                           "✓ was enabled on \(text.debugDescription)")
+            XCTAssertNil(VoiceModeOverlay.takeTurn(partial: text, session: &session,
+                                                   listener: listener, voice: voice,
+                                                   driver: &driver, isBusy: false))
+            XCTAssertEqual(session.state, .listening,
+                           "\(text.debugDescription) took the turn: the orb stops "
+                           + "listening and nothing was asked")
+            XCTAssertEqual(tape.events, [],
+                           "\(text.debugDescription) opened a reply and retired the "
+                           + "request: \(tape.events)")
+        }
+
+        // The other side of the rule, so the assertions above are not just "always
+        // false", and the two conditions that are not about emptiness at all.
+        XCTAssertTrue(VoiceModeOverlay.canTakeTurn(partial: "hi", state: .listening,
+                                                   isBusy: false))
+        XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: "hi", state: .listening,
+                                                    isBusy: true),
+                       "✓ was live while a turn was already in flight — `sendMessage` "
+                       + "drops it and there is no next tick to retry on")
+        for state in [VoiceState.idle, .thinking, .speaking] {
+            XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: "hi", state: state,
+                                                        isBusy: false),
+                           "✓ was live in \(state)")
+        }
+    }
+
+    /// **✕ spends nothing, and takes the discarded words with it.**
+    ///
+    /// The second half is the one that is easy to get wrong: clearing only the view's
+    /// `partial` leaves the live request still holding the sentence, so her *next*
+    /// partial arrives as "add pricing for the beta what about the annual plan" — the
+    /// mangled sentence she just rejected, back on screen and one tap from being sent
+    /// at 0.25 credits. Same defect as T1, reached from ✕ instead of from the send.
+    func testDiscardSpendsNothingAndTakesTheWordsWithIt() throws {
+        let fixture = try listeningFixture()
+        fixture.listener.emit("add pricing for the beta")
+
+        VoiceModeOverlay.abandonTurn(fixture.listener)
+        fixture.partial.text = ""                      // what the view does after ✕
+
+        XCTAssertEqual(fixture.session.state, .listening,
+                       "✕ left voice mode or took the turn — it must keep listening")
+        XCTAssertEqual(fixture.tape.events, ["endTurn"],
+                       "✕ began a reply: \(fixture.tape.events)")
+        XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: fixture.partial.text,
+                                                    state: fixture.session.state,
+                                                    isBusy: false),
+                       "✕ left a transcript ✓ could still charge for")
+        // The count itself moves in exactly one place — `sendTurn()`'s Task, after a
+        // non-nil `takeTurn` — and nothing above went near it.
+        XCTAssertTrue(VoiceModeOverlay.creditLine(turns: 0, .en).contains("0"))
+
+        fixture.listener.emit("what about the annual plan")
+        XCTAssertEqual(fixture.partial.text, "what about the annual plan",
+                       "the discarded sentence came back glued to the next one")
+    }
+
     // MARK: - Opening voice mode over a live typed turn
 
     /// **C3.** `SpeakingQueue` starts `accepting = true, reported = false`, so
@@ -550,9 +776,9 @@ final class SpeechFakesTests: XCTestCase {
     ///
     /// That is reachable because the overlay can be opened over a typed turn already
     /// in flight: she taps the waveform, speaks into a `.listening` overlay (so no
-    /// barge-in and the latch stays open), the 1.2s silence correctly waits on
-    /// `guard !isStreaming` — and then the TYPED reply finishes and erases her
-    /// question mid-flight, with no message, no orb change and no credit spent.
+    /// barge-in and the latch stays open), `canTakeTurn`'s `isBusy` correctly holds ✓
+    /// disabled while that reply streams — and then the TYPED reply finishes and erases
+    /// her question mid-flight, with no message, no orb change and no credit spent.
     ///
     /// The first assertion is the guard; the rest is why it must answer that way.
     func testAStreamEndInListeningIsNotThisOverlaysReply() {

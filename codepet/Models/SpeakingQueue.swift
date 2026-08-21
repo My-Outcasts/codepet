@@ -18,9 +18,10 @@ import Foundation
 ///    streams as prose, then a fenced code block, then prose;
 ///    `SentenceSplitter.speakable` deletes the fence entirely, so for the 5-15s it
 ///    takes to stream, there are zero speakable sentences and the synthesiser runs
-///    dry. Treating that as end-of-reply opens the microphone mid-reply, arms the
-///    1.2s silence timer, and sends an empty turn — spending a credit — while the
-///    real reply is still arriving. So a drain only reports finished once
+///    dry. Treating that as end-of-reply opens the microphone mid-reply and clears the
+///    founder's transcript while the real reply is still arriving — and until decision
+///    4 removed the silence timer it also sent an empty turn and spent a credit on it.
+///    So a drain only reports finished once
 ///    `endOfReply()` has said no more sentences are coming.
 /// 2. *Barge-in* is a latch, not an event. When the founder talks over the pet, the
 ///    server reply is still streaming and the consumer is still calling `enqueue`.

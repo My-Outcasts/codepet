@@ -5,7 +5,9 @@ import Foundation
 enum VoiceState: Equatable {
     /// No overlay. The mic is not running.
     case idle
-    /// Mic live, recognition streaming partials, silence timer armed.
+    /// Mic live, recognition streaming partials, ✕ and ✓ offered beneath the
+    /// transcript. **No timer** — spec §2 decision 4: silence does nothing at all,
+    /// and the mic keeps capturing until the founder decides.
     case listening
     /// The turn was sent; `sendChat` is working. Nothing is captured.
     case thinking
@@ -17,8 +19,15 @@ enum VoiceState: Equatable {
 enum VoiceEvent: Equatable {
     /// The founder tapped the waveform.
     case open
-    /// The silence threshold elapsed — the founder's turn is over.
-    case heardSilence
+    /// The founder tapped ✓ — she is taking her turn.
+    ///
+    /// **It was `heardSilence` until 21 Aug, and the name was the design.** A timer
+    /// fired this event 1.2s after she stopped talking; spec §2 decision 4 reversed
+    /// that, so the only thing that produces it now is a tap. The transition it
+    /// drives is unchanged — a turn taken is a turn taken, whoever decided it — but a
+    /// case called `heardSilence` in a file with no timer in it is the kind of stale
+    /// name that gets a silence deadline re-implemented to match it.
+    case founderSentTurn
     /// The first speakable sentence of the reply is ready.
     case replyBegan
     /// The synthesiser drained its queue and the reply is complete.
@@ -58,7 +67,7 @@ struct VoiceSession {
         switch (state, event) {
         case (.idle, .open):
             state = .listening;  return true
-        case (.listening, .heardSilence):
+        case (.listening, .founderSentTurn):
             state = .thinking;   return true
         case (.thinking, .replyBegan):
             state = .speaking;   return true

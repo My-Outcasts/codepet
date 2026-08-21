@@ -46,9 +46,9 @@ struct TurnTranscript: Equatable {
     ///
     /// **Returns whether `text` actually changed**, so a caller can tell a real
     /// revision from the recognizer re-reporting a string it has already reported.
-    /// That distinction is not cosmetic: Task 6 stamps `lastSpeechAt` on every partial
-    /// and, while the pet is speaking, treats any partial as barge-in — so a repeated
-    /// partial cuts the pet off with words the founder has already had answered. Not
+    /// That distinction is not cosmetic: while the pet is speaking the overlay treats
+    /// any partial as barge-in — so a repeated partial cuts the pet off with words the
+    /// founder has already had answered. Not
     /// `@discardableResult` on purpose: ignoring it is a decision, not a default.
     mutating func update(_ transcript: String) -> Bool {
         let before = text
@@ -117,10 +117,11 @@ protocol SpeechListening: AnyObject {
     /// `onPartial` starts from empty.
     ///
     /// **The consumer has to call this, and only the consumer can.** It owns the
-    /// end-of-turn decision (the silence timeout, the send), and that decision is not
-    /// visible from inside the listener: recognition going quiet looks identical to the
-    /// founder pausing mid-sentence. Not called, the next question arrives with the
-    /// previous one still glued to the front of it.
+    /// end-of-turn decision — the founder's ✓ or ✕ — and that decision is not visible
+    /// from inside the listener: recognition going quiet looks identical to the founder
+    /// pausing mid-sentence, which is exactly why nothing here infers a turn from
+    /// silence. Not called, the next question arrives with the previous one still glued
+    /// to the front of it.
     ///
     /// **An implementation must retire the live recognition request, not merely clear
     /// its own accumulation.** `SFSpeechAudioBufferRecognitionRequest` has no reset:
@@ -517,9 +518,9 @@ final class SpeechListener: SpeechListening {
             // condition the budget exists to detect.
             budget.sawTranscript(text)
             // Only on a real change. A recognizer re-reports the same string freely,
-            // and Task 6 reads every partial as speech — `lastSpeechAt`, and barge-in
-            // while the pet is talking — so an unchanged partial cuts the pet off with
-            // words the founder has already had answered.
+            // and the overlay reads every partial as speech — barge-in while the pet
+            // is talking — so an unchanged partial cuts the pet off with words the
+            // founder has already had answered.
             if transcript.update(text) {
                 // The whole turn, not this request's fragment of it.
                 onPartial?(transcript.text)

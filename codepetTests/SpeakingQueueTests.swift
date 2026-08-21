@@ -11,13 +11,14 @@ final class SpeakingQueueTests: XCTestCase {
 
     // MARK: - C3: a drain is not the end of a reply
 
-    /// **The credit-spending bug.** A reply streams "Here's the fix." then a fenced
+    /// **The mid-reply reset bug.** A reply streams "Here's the fix." then a fenced
     /// code block then "That should do it." `SentenceSplitter.speakable` deletes the
     /// fence entirely, so for the 5-15s it streams there are no speakable sentences
     /// and the queue is empty. If that reports finished, the overlay applies
-    /// `.replyFinished`, the mic opens, the 1.2s silence timer fires on the founder
-    /// saying nothing, and `sendChat` sends an empty turn and spends a credit — while
-    /// the real reply is still arriving.
+    /// `.replyFinished` and clears her transcript mid-reply, while the real reply is
+    /// still arriving. It was worse than that until 21 Aug: the mic reopened, the 1.2s
+    /// silence timer fired on the founder saying nothing, and an empty turn was sent
+    /// and charged. Decision 4 removed the timer; this half of the damage remains.
     func testADrainMidStreamDoesNotReportTheReplyFinished() {
         var q = SpeakingQueue()
         _ = q.beginReply()

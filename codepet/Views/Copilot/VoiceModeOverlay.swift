@@ -26,7 +26,9 @@ import SwiftUI
 ///    `SFSpeechAudioBufferRecognitionRequest` transcribes all audio ever appended to
 ///    it and the listener stays running across turns so barge-in works, so without
 ///    this the second question arrives with the first glued to its front, sent and
-///    charged, compounding all session. See `endTurnIfSilent()`.
+///    charged, compounding all session. See `takeTurn(...)` — and `abandonTurn`,
+///    which is the same fact reached from ✕: a discard that cleared only our copy
+///    would send the discarded sentence at the front of the next one.
 /// 4. `voice.stopImmediately()` on close, before dismissing — otherwise ✕ mid-sentence
 ///    leaves the pet talking to an overlay that is gone, SFX still ducked to zero.
 ///    See `close()`.
@@ -38,6 +40,16 @@ import SwiftUI
 /// **The room is unreachable from here** (spec §5): `sendChat`'s `convenesRoom`
 /// defaults to false and is deliberately not passed. Convening costs
 /// `RoomOffer.credits` (~10) and a misheard sentence must never spend it.
+///
+/// **Nothing auto-sends** (spec §2 decision 4, reversing decision 3). A turn is taken
+/// when the founder taps ✓ and discarded when she taps ✕; silence does nothing at
+/// all. The 4Hz watcher and the 1.2s threshold that used to end a turn are gone,
+/// along with `lastSpeechAt`, which existed only to arm them. §4 of the spec had
+/// already argued for this without noticing: the live transcript is here because
+/// recognition mangles "Codepet", "byte", "nova" and every pet and department name,
+/// and 1.2s is not long enough to read a sentence you have just spoken — so the
+/// remedy for the diagnosis it shipped was auto-sending the misheard sentence at
+/// 0.25 credits with no way to stop it.
 struct VoiceModeOverlay: View {
 
     @Binding var isPresented: Bool
@@ -52,9 +64,6 @@ struct VoiceModeOverlay: View {
     /// What recognition has heard this turn. Shown because a founder who cannot see
     /// what was heard will not trust the reply (spec §4).
     @State private var partial: String
-    /// Stamped on every partial. `nil` means nothing has been heard, which never
-    /// ends a turn — see `VoiceTurn.shouldEndTurn`.
-    @State private var lastSpeechAt: Date?
     /// Mic (listening) or output (speaking) level, 0…1, for the orb.
     @State private var level: Float = 0
     /// Recognition died after `start()` returned. Rendered in place of the partial.
@@ -97,6 +106,7 @@ struct VoiceModeOverlay: View {
             Spacer(minLength: 0)
             orb
             transcript
+            turnControls
             Spacer(minLength: 0)
             footer
         }
@@ -216,6 +226,77 @@ struct VoiceModeOverlay: View {
             .frame(height: 40, alignment: .top)
     }
 
+    // MARK: - ✕ and ✓
+
+    /// **The only two things that take or drop a turn** (spec §2 decision 4).
+    ///
+    /// Both are always on screen and neither is ever hidden: the row keeps a fixed
+    /// height, and ✓ *disables* rather than disappearing, because a control that comes
+    /// and goes under her pointer while she is talking is the same defect the
+    /// fixed-height transcript exists to avoid.
+    ///
+    /// ✕ stays enabled with an empty transcript on purpose. It clears, and clearing
+    /// nothing is harmless — where a disabled ✕ would grey out the moment she pauses
+    /// to think and read as an overlay that has stopped working.
+    ///
+    /// **Two ✕s are on this surface and they do different things.** The one in the
+    /// header closes voice mode; this one discards a sentence and keeps listening. The
+    /// labels underneath are what distinguish them, which is why both buttons are
+    /// labelled rather than left as bare glyphs.
+    private var turnControls: some View {
+        HStack(spacing: 56) {
+            turnButton(symbol: "xmark",
+                       label: Self.discardLabel(lang),
+                       tint: CodepetTheme.mutedText,
+                       enabled: true,
+                       action: discardTurn)
+            turnButton(symbol: "checkmark",
+                       label: Self.sendLabel(lang),
+                       tint: CodepetTheme.accentPurple,
+                       enabled: canSend,
+                       action: sendTurn)
+        }
+        .frame(height: 62)
+    }
+
+    /// Whether ✓ can do anything right now. Reads the rule rather than restating it —
+    /// see `canTakeTurn`, which the send site checks again.
+    private var canSend: Bool {
+        Self.canTakeTurn(partial: partial, state: session.state, isBusy: isBusy)
+    }
+
+    /// A turn already in flight, typed or spoken. `sendMessage` returns silently on
+    /// either flag, so this is the difference between a disabled ✓ she can see and a
+    /// tap that appears to do nothing.
+    private var isBusy: Bool {
+        companyStore.isStreaming || companyStore.isCompanionTyping
+    }
+
+    private func turnButton(symbol: String, label: String, tint: Color,
+                            enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(enabled ? tint : CodepetTheme.mutedText.opacity(0.4))
+                    .frame(width: 38, height: 38)
+                    .background {
+                        Circle().stroke(enabled ? tint.opacity(0.45)
+                                                : CodepetTheme.hairline, lineWidth: 1)
+                    }
+                Text(label)
+                    .font(CodepetTheme.inter(CodepetType.footnote))
+                    .foregroundStyle(enabled ? CodepetTheme.mutedText
+                                            : CodepetTheme.mutedText.opacity(0.4))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+
     private var footer: some View {
         VStack(spacing: 6) {
             Text(Self.privacyLine(lang, onDevice: listener.isOnDevice))
@@ -267,6 +348,19 @@ struct VoiceModeOverlay: View {
         return lang == .vi
             ? "\(turns) lượt · ~\(amount) tín dụng phiên này"
             : "\(turns) turns · ~\(amount) credits this session"
+    }
+
+    /// ✕. Bilingual because it is chrome, and following `ApprovalTier.label(_:)`.
+    ///
+    /// "Discard", not "Cancel": cancel reads as *leave voice mode*, which is what the
+    /// header ✕ does. This one throws away a sentence and keeps listening.
+    static func discardLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Loại bỏ" : "Discard"
+    }
+
+    /// ✓.
+    static func sendLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Gửi" : "Send"
     }
 
     /// The header line.
@@ -323,11 +417,14 @@ struct VoiceModeOverlay: View {
 
     // MARK: - Lifecycle
 
-    /// Wires the callbacks, opens the mic, then runs the silence check.
+    /// Wires the callbacks and opens the mic.
     ///
-    /// A `.task` rather than a `Timer` publisher: the view re-renders on every level
-    /// callback, and a publisher rebuilt on each of those churns its subscription
-    /// several times a second. Cancelled automatically when the overlay goes away.
+    /// **It used to end with a 4Hz `while` loop calling `endTurnIfSilent()`, and that
+    /// loop is the whole of what decision 4 deleted.** There is no periodic work left
+    /// here: every transition out of `.listening` is now either a tap or a callback
+    /// from the listener, so a poll would have nothing to look at. If anything ever
+    /// reintroduces a timer in this function, `SpeechFakesTests`'
+    /// `testSilenceAloneNeverTakesTheTurn` is the assertion it has to argue with.
     private func run() async {
         wire()
         do {
@@ -339,13 +436,6 @@ struct VoiceModeOverlay: View {
             return
         }
         session.apply(.open)
-
-        // 4Hz. The threshold is 1.2s, so a quarter-second granularity is invisible
-        // to the founder and costs a comparison.
-        while !Task.isCancelled {
-            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
-            endTurnIfSilent()
-        }
     }
 
     private func wire() {
@@ -355,7 +445,6 @@ struct VoiceModeOverlay: View {
         // a string it already reported cannot cut the pet off with words she has
         // already had answered.
         listener.onPartial = { text in
-            lastSpeechAt = Date()
             partial = text
             if session.state == .speaking {
                 voice.stopImmediately()
@@ -415,10 +504,15 @@ struct VoiceModeOverlay: View {
             // taken, the mic shut, and nothing to wait for.
             if session.state == .thinking { session.apply(.replyBegan) }
             session.apply(.replyFinished)
-            // A fresh turn: the previous turn's timestamp must not end this one
-            // before she has said anything.
+            // A fresh turn. **`partial` is cleared here even though nothing sends on
+            // its own any more**, and the reason is `streamEndBelongsToVoiceTurn`:
+            // that guard exists because this clear can erase a spoken question, and
+            // removing the clear to keep words she said *while the pet was talking*
+            // would leave the guard protecting almost nothing. Those words are not
+            // lost either way — `endTurn()` is not called at the end of a reply, so
+            // `TurnTranscript` still holds them and the next partial re-reports the
+            // whole turn.
             partial = ""
-            lastSpeechAt = nil
             level = 0
             // **The mic may have died during the reply.** See `onFailure`'s
             // `.speaking` branch: this is the transition that makes the header say
@@ -470,33 +564,50 @@ struct VoiceModeOverlay: View {
 
     // MARK: - The founder's turn
 
-    /// The silence check, at 4Hz. On a true it does three things in this order: send
-    /// what she said, tell the listener the turn is over, move to `.thinking`.
-    private func endTurnIfSilent() {
-        // No `failure == nil` here: a failure that is fatal applies `.close`, which
-        // leaves `.idle`, so the state check already covers it. A second guard that
-        // cannot fire is the thing this project's own rule forbids.
-        guard session.state == .listening else { return }
-        guard VoiceTurn.shouldEndTurn(lastSpeechAt: lastSpeechAt, now: Date()) else { return }
+    /// Whether ✓ can take the turn. **Three ways a tap could send nothing, and each
+    /// one fails silently.**
+    ///
+    /// 1. An empty transcript. `sendChat` drops an empty string, so the tap would
+    ///    look like a dead button, and spec §5 says ✓ is disabled while the transcript
+    ///    is empty rather than merely inert.
+    /// 2. Not `.listening`. There is no turn to take while the pet is thinking or
+    ///    talking, and `.founderSentTurn` is refused from those states anyway — but a
+    ///    tap that quietly does nothing is worse than a control that shows it cannot.
+    /// 3. A turn already in flight. `sendMessage` early-returns on its own
+    ///    `guard !isCompanionTyping, !isStreaming`, which is reachable here: barge-in
+    ///    returns to `.listening` while the interrupted reply is still streaming. The
+    ///    old 4Hz watcher answered this by waiting a tick and sending later; a tap has
+    ///    no next tick, so the button is disabled instead and her transcript is left
+    ///    intact until the stream ends and ✓ lights up again.
+    ///
+    /// Extracted rather than written inline in `.disabled`, for the same reason as
+    /// `VoicePermission.canEnterVoiceMode(_:isBusy:)`: a control that is enabled one
+    /// moment too early looks exactly like a control that is right.
+    static func canTakeTurn(partial: String, state: VoiceState, isBusy: Bool) -> Bool {
+        guard state == .listening, !isBusy else { return false }
+        return !partial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
-        let text = partial.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            // Heard something, and it rendered to nothing. Re-arm rather than send:
-            // `sendChat` would drop an empty string anyway, and this way the next
-            // tick is not still holding a stale timestamp.
-            lastSpeechAt = nil
-            return
+    /// ✓, everything but the network call — **and the order is the point.**
+    ///
+    /// Returns the text to send, or `nil` when there was nothing to take. Static, and
+    /// taking its collaborators, because two of this file's five invariants live in
+    /// these six lines (`voice.beginReply()` before any enqueue, `listener.endTurn()`
+    /// at the send site) and both fail silently: a reply that skips its first sentence,
+    /// and a question sent with the previous question glued to its front. Inside a
+    /// `View`'s private method no test can reach either.
+    ///
+    /// `sendChat` itself stays in the view: it needs the store and the language, and
+    /// the credit count must only move once the send has actually happened.
+    static func takeTurn(partial: String,
+                         session: inout VoiceSession,
+                         listener: SpeechListening,
+                         voice: SpeakingVoice,
+                         driver: inout VoiceReplyDriver,
+                         isBusy: Bool) -> String? {
+        guard canTakeTurn(partial: partial, state: session.state, isBusy: isBusy) else {
+            return nil
         }
-
-        // **`sendMessage` returns silently while a turn is in flight** (its own
-        // `guard !isCompanionTyping, !isStreaming`), which is reachable from here:
-        // barge-in returns to `.listening` while the interrupted reply is still
-        // streaming. Sending into that guard would take the turn, clear the
-        // transcript, move to `.thinking` — and never get a reply, with the founder's
-        // question gone. Waiting instead costs one more tick: `lastSpeechAt` is left
-        // alone, so the next tick after the stream ends sends it.
-        guard !companyStore.isStreaming, !companyStore.isCompanionTyping else { return }
-
         // A new reply starts from its first sentence. Without this the splitter's
         // count still stands against the PREVIOUS reply and the new one's opening
         // sentences are skipped as already spoken.
@@ -507,31 +618,57 @@ struct VoiceModeOverlay: View {
         // speakable would then never fire `onFinishedAll` and the overlay would hang
         // in `.thinking`.
         voice.beginReply()
+        // Retire the recognition request. See the protocol's note: without this the
+        // next question arrives with this one glued to its front.
+        listener.endTurn()
+        // The orb stops tracking level and breathes, so she can see the turn was taken.
+        session.apply(.founderSentTurn)
+        return partial.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-        let toSend = text
+    /// ✕. **Both copies of what she said, not just ours.**
+    ///
+    /// The live `SFSpeechAudioBufferRecognitionRequest` transcribes every buffer ever
+    /// appended to it and the listener keeps running across turns, so a discard that
+    /// cleared only `partial` would hand the *next* partial back the discarded
+    /// sentence with the new words appended — and that is the sentence ✕ exists to
+    /// stop. The words §7 predicts will be mangled ("Codepet", "byte", "nova", pet and
+    /// department names) would come straight back and get sent at 0.25 credits.
+    /// `endTurn()`'s own contract covers this: "sent as a message, or abandoned".
+    ///
+    /// No session event: ✕ leaves the state at `.listening`, which is what "keeps
+    /// listening" means, so the machine's shape is untouched.
+    static func abandonTurn(_ listener: SpeechListening) {
+        listener.endTurn()
+    }
+
+    /// ✓ in the view: take the turn, then send it.
+    private func sendTurn() {
+        guard let toSend = Self.takeTurn(partial: partial, session: &session,
+                                        listener: listener, voice: voice,
+                                        driver: &driver, isBusy: isBusy) else { return }
+        partial = ""
+        level = 0
         let language = lang
-        // 1. Send what she said. `convenesRoom` is left at its default false: the
-        //    room is unreachable by voice (spec §5) because a misheard sentence must
-        //    never spend RoomOffer.credits.
+        // `convenesRoom` is left at its default false: the room is unreachable by
+        // voice (spec §5) because a misheard sentence must never spend
+        // `RoomOffer.credits`.
         //
-        //    **`turns += 1` is inside, after the await.** The flags checked below are
-        //    checked again by `sendMessage` when this Task actually runs, so counting
-        //    the turn out here counted one that could still be dropped. No real
-        //    interleaving was constructed, so this is defensive — but it makes the
-        //    credit line honest by construction rather than by argument, and the cost
-        //    is that the count updates when the reply lands instead of when it is sent.
+        // **`turns += 1` is inside, after the await.** `sendMessage` checks
+        // `isStreaming`/`isCompanionTyping` again when this Task actually runs, so
+        // counting the turn out here counted one that could still be dropped. The cost
+        // is that the count updates when the reply lands rather than when it is sent.
         Task {
             await companyStore.sendChat(toSend, language: language)
             turns += 1
         }
-        // 2. Retire the recognition request. See the protocol's note: without this
-        //    the next question arrives with this one glued to its front.
-        listener.endTurn()
-        // 3. Move to `.thinking` — the orb stops tracking level and breathes, so she
-        //    can see the turn was taken.
-        session.apply(.heardSilence)
+    }
+
+    /// ✕ in the view. **No credit is spent and none is counted** — `turns` moves in
+    /// exactly one place, `sendTurn()`'s Task, and nothing here goes near it.
+    private func discardTurn() {
+        Self.abandonTurn(listener)
         partial = ""
-        lastSpeechAt = nil
         level = 0
     }
 
@@ -575,8 +712,10 @@ struct VoiceModeOverlay: View {
     /// `endOfReply()` is what lets `onFinishedAll` ever fire. It is NOT inferable
     /// from the queue draining: `speakable` deletes fenced code blocks entirely, so a
     /// 50-line snippet is 5–15 seconds with nothing to say. Treat that drain as the
-    /// end and the overlay reopens the mic, arms the 1.2s timer, hears silence, and
-    /// spends a credit on an empty turn while the real reply is still arriving.
+    /// end and the overlay reopens the mic and clears her transcript mid-reply, while
+    /// the real reply is still arriving. (It also used to spend a credit on an empty
+    /// turn, back when silence sent one; decision 4 removed that half of the damage
+    /// and left the rest.)
     private func replyStreamEnded() {
         // **The stream that just ended has to be OURS.** The overlay is openable at
         // any moment, including over a typed turn already in flight, and that seam is
@@ -584,15 +723,15 @@ struct VoiceModeOverlay: View {
         //
         // She sends a typed message; `isStreaming` is true. She taps the waveform —
         // the overlay opens in `.listening` with no `beginReply()` behind it. She
-        // speaks: `onPartial` fills `partial` and stamps `lastSpeechAt`, and because
-        // the state is `.listening` rather than `.speaking` this is not barge-in, so
-        // the `SpeakingQueue` latch never closes. The 1.2s silence fires,
-        // `endTurnIfSilent`'s `guard !isStreaming` correctly waits a tick. Then the
-        // TYPED reply finishes, and ungated this fired `endOfReply()` on a queue that
-        // had never begun a reply — and `SpeakingQueue` starts `accepting = true,
-        // reported = false`, so a virgin queue drains and *reports*. `onFinishedAll`
-        // then no-ops the illegal `.replyFinished` and unconditionally clears
-        // `partial`, `lastSpeechAt` and `level`.
+        // speaks: `onPartial` fills `partial`, and because the state is `.listening`
+        // rather than `.speaking` this is not barge-in, so the `SpeakingQueue` latch
+        // never closes. `canTakeTurn`'s `isBusy` correctly holds ✓ disabled while the
+        // typed reply streams, so her sentence is sitting on screen waiting for her
+        // tap. Then the TYPED reply finishes, and ungated this fired `endOfReply()` on
+        // a queue that had never begun a reply — and `SpeakingQueue` starts
+        // `accepting = true, reported = false`, so a virgin queue drains and *reports*.
+        // `onFinishedAll` then no-ops the illegal `.replyFinished` and unconditionally
+        // clears `partial` and `level`.
         //
         // **Her spoken question is erased mid-flight** — no message, no orb change,
         // no credit spent, and she has to say it all again. `VoicePermission
@@ -663,7 +802,7 @@ extension VoiceModeOverlay {
         var session = VoiceSession()
         if state != .idle {
             session.apply(.open)
-            if state == .thinking || state == .speaking { session.apply(.heardSilence) }
+            if state == .thinking || state == .speaking { session.apply(.founderSentTurn) }
             if state == .speaking { session.apply(.replyBegan) }
         }
         return VoiceModeOverlay(isPresented: .constant(true),

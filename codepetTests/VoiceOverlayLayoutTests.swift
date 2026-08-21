@@ -5,9 +5,10 @@ import XCTest
 @testable import codepet
 
 /// Measures the overlay offscreen. The founder confirms how it LOOKS; these
-/// assertions cover the two things a screenshot cannot answer from here: that it
-/// spreads to the surface it is given, and that the transcript line does not resize
-/// the surface as words arrive.
+/// assertions cover the three things a screenshot cannot answer from here: that it
+/// spreads to the surface it is given, that the transcript line does not resize the
+/// surface as words arrive, and that ✕ and ✓ are on the surface at all — which since
+/// 21 Aug is the only way a turn is taken.
 ///
 /// **Every number below was checked for vacuity before it was trusted, and the
 /// brief's draft of this file failed that check three times over.** Recorded here
@@ -28,7 +29,12 @@ import XCTest
 ///
 ///        frame + spacers          -> (900, 700)
 ///        maxHeight deleted only   -> (900, 700)   <- what the original probe saw
-///        both deleted             -> (900, 368)   <- intrinsic, correctly reported
+///        both deleted             -> (900, 426)   <- intrinsic, correctly reported
+///
+///    **426, not the 368 this note carried until 21 Aug.** ✕ and ✓ were added beneath
+///    the transcript (spec §2 decision 4), which is 62pt of row plus 22pt of `VStack`
+///    spacing, and every intrinsic number in this file moved by that 84. Re-measured
+///    rather than adjusted.
 ///
 ///    The real limitation is narrower and applies to width just as much: the
 ///    overlay's vertical fill is implemented **twice** — `.frame(maxHeight:
@@ -76,7 +82,8 @@ final class VoiceOverlayLayoutTests: XCTestCase {
     /// The other half of the takeover, and it **is** measurable — see note 2. Sized to
     /// its content the overlay would sit in a band across the middle of the pane with
     /// the transcript showing above and below it; intrinsically, with both fill
-    /// mechanisms gone, it reports 368pt of the 700 it was offered.
+    /// mechanisms gone, it reports 426pt of the 700 it was offered (measured 21 Aug,
+    /// with ✕/✓ on the surface).
     ///
     /// A property guard, deliberately: the fill is doubly implemented, so this catches
     /// "the overlay stopped filling" and does not catch "one of the two mechanisms was
@@ -93,9 +100,12 @@ final class VoiceOverlayLayoutTests: XCTestCase {
     ///
     /// Height is unproposed on purpose: handed 700 with a filling overlay both
     /// renders answer 700 whatever the transcript does, which is the vacuous version
-    /// of this test. Unconstrained, the height is the content's own — measured 389pt
-    /// for one line and 406pt for two, so a transcript without its fixed-height slot
-    /// shows up as a 17pt difference here.
+    /// of this test. Unconstrained, the height is the content's own — **496pt for one
+    /// line and 496pt for two, measured 21 Aug on this branch.** Delete the
+    /// transcript's fixed-height slot and a 17pt gap opens between them: probed at 429
+    /// against 446 in a run that had also removed the two `Spacer`s (worth 44pt of
+    /// `VStack` spacing at an unconstrained height), so the 17 is the number that
+    /// matters here, not the absolutes.
     func testAGrowingTranscriptDoesNotChangeTheSize() {
         let a = size(VoiceModeOverlay.preview(state: .listening, partial: "why"),
                      w: 900, h: nil)
@@ -109,6 +119,29 @@ final class VoiceOverlayLayoutTests: XCTestCase {
         for st in [VoiceState.listening, .thinking, .speaking] {
             let s = size(VoiceModeOverlay.preview(state: st, partial: "test"), w: 900, h: nil)
             XCTAssertGreaterThan(s.height, 100, "\(st) did not lay out")
+        }
+    }
+
+    /// **✕ and ✓ are actually on the surface**, which after 21 Aug is the only way a
+    /// turn is taken or dropped: with no row, voice mode can hear her and can never
+    /// send. Nothing else in this file would notice — every other assertion here passed
+    /// with `turnControls` deleted from `body`.
+    ///
+    /// A property guard on the intrinsic height, in the shape note 2 explains: the row
+    /// is a fixed 62pt in a 22pt-spaced `VStack`, so it is worth exactly 84pt. Measured
+    /// 21 Aug — 496 with the row, **412 with it commented out of `body`**, which is the
+    /// RED for this test.
+    ///
+    /// The number is checked against the two states that offer the row rather than
+    /// against a constant alone, so a change that moved 84pt of something *else* onto
+    /// the surface still has to be looked at.
+    func testTheTurnControlsAreOnTheSurface() {
+        for state in [VoiceState.listening, .thinking] {
+            let s = size(VoiceModeOverlay.preview(state: state, partial: "why"),
+                         w: 900, h: nil)
+            XCTAssertEqual(s.height, 496, accuracy: 2,
+                           "\(state) measured \(s.height)pt: 412 is this overlay with "
+                           + "no ✕/✓ row, and a voice mode that cannot send")
         }
     }
 
@@ -168,6 +201,36 @@ final class VoiceOverlayLayoutTests: XCTestCase {
         let live = [VoiceState.listening, .thinking, .speaking]
             .map { VoiceModeOverlay.stateCaption($0, .en) }
         XCTAssertEqual(Set(live).count, 3, "two live states share a caption: \(live)")
+    }
+
+    /// **The two labels under ✕ and ✓, and they are load-bearing.** There are two ✕s
+    /// on this surface — the header one closes voice mode, this one discards a sentence
+    /// and keeps listening — so the words underneath are the only thing that tells them
+    /// apart. Unlabelled or identically labelled, ✕ reads as "quit" and a founder who
+    /// wants to retype one misheard word leaves voice mode instead.
+    ///
+    /// Following `ApprovalTier.label(_:)`: chrome is bilingual, and a `lang == .vi`
+    /// branch that returns the same string both ways is the defect this suite has
+    /// already caught twice (`privacyLine`, `stateCaption`).
+    func testTheTurnButtonsSayWhatTheyDoInBothLanguages() {
+        for lang in [AppLanguage.en, .vi] {
+            let discard = VoiceModeOverlay.discardLabel(lang)
+            let send = VoiceModeOverlay.sendLabel(lang)
+            XCTAssertFalse(discard.isEmpty, "\(lang): ✕ is an unlabelled glyph")
+            XCTAssertFalse(send.isEmpty, "\(lang): ✓ is an unlabelled glyph")
+            XCTAssertNotEqual(discard, send,
+                              "\(lang): both buttons carry the same label — one of them "
+                              + "spends a credit and the other throws the sentence away")
+        }
+        XCTAssertNotEqual(VoiceModeOverlay.discardLabel(.en),
+                          VoiceModeOverlay.discardLabel(.vi),
+                          "✕'s label is not bilingual")
+        XCTAssertNotEqual(VoiceModeOverlay.sendLabel(.en),
+                          VoiceModeOverlay.sendLabel(.vi),
+                          "✓'s label is not bilingual")
+        // And ✕ does not read as "leave voice mode", which is what the header ✕ does.
+        XCTAssertNotEqual(VoiceModeOverlay.discardLabel(.en),
+                          VoiceModeOverlay.stateCaption(.idle, .en))
     }
 
     /// Spec §7: voice mode is the feature that makes turns cheap to spend without

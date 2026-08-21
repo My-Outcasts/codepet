@@ -86,9 +86,9 @@ enum VoicePermission {
     /// streaming; the founder then speaks into a `.listening` overlay that has never
     /// called `beginReply()`, so when that typed reply finishes, `endOfReply()` lands
     /// on a virgin `SpeakingQueue`, which drains and reports — firing
-    /// `onFinishedAll`, which unconditionally clears `partial`/`lastSpeechAt`. Her
-    /// spoken question is erased mid-flight, with no message, no orb change and no
-    /// credit spent: silence, and she has to say it again. `VoiceModeOverlay`'s
+    /// `onFinishedAll`, which unconditionally clears `partial`. Her spoken question is
+    /// erased mid-flight, with no message, no orb change and no credit spent: silence,
+    /// and she has to say it again. `VoiceModeOverlay`'s
     /// `replyStreamEnded` gate closes the same hole from the other side; this is the
     /// half that stops her getting into the situation at all.
     ///

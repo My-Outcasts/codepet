@@ -22,7 +22,10 @@ final class SentenceSplitterTests: XCTestCase {
                        ["Your pricing page buries the price."])
     }
 
-    /// The core contract: repeated calls with a growing string never repeat output.
+    /// The core contract: repeated calls with a growing string never repeat
+    /// output. The trailing "Three." has nothing after its period while the
+    /// string is still growing, so `take` alone cannot release it — only the
+    /// closing `flush`, once the stream is known to be over, can.
     func testNeverRepeatsASentence() {
         var s = SentenceSplitter()
         let full = "One. Two. Three."
@@ -30,6 +33,7 @@ final class SentenceSplitterTests: XCTestCase {
         for end in stride(from: 1, through: full.count, by: 1) {
             out += s.take(from: String(full.prefix(end)))
         }
+        out += s.flush(from: full)
         XCTAssertEqual(out, ["One.", "Two.", "Three."])
     }
 
@@ -39,12 +43,44 @@ final class SentenceSplitterTests: XCTestCase {
                        ["Why?", "Because!", "Done."])
     }
 
-    /// A terminator only ends a sentence when whitespace or the end follows it —
-    /// without that check, "$3.14" splits mid-number into "$3." and "14 today."
+    /// A terminator only ends a sentence when whitespace follows it in the
+    /// rendered text — never because it happens to be the last character
+    /// available right now. Streamed one character at a time (the real
+    /// calling pattern), the period inside "$3.14" is followed by "1" and
+    /// never qualifies; the final period never has anything after it while
+    /// still streaming, so `take` must hold the ENTIRE sentence back and
+    /// only `flush` — called once the stream ends — releases it. Without
+    /// this test, an `atEnd` shortcut that treats "last character available"
+    /// as "the reply is over" would speak "The price is $3." mid-stream and
+    /// still pass, because a single non-incremental `take` call never
+    /// exposes the difference.
     func testDoesNotSplitADecimalNumberMidSentence() {
         var s = SentenceSplitter()
-        XCTAssertEqual(s.take(from: "The price is $3.14 today."),
-                       ["The price is $3.14 today."])
+        let full = "The price is $3.14 today."
+        var out: [String] = []
+        for end in stride(from: 1, through: full.count, by: 1) {
+            out += s.take(from: String(full.prefix(end)))
+        }
+        XCTAssertEqual(out, [], "take alone must never release this sentence")
+        XCTAssertEqual(s.flush(from: full), ["The price is $3.14 today."])
+    }
+
+    // MARK: - flush: the seam that releases what take refused
+
+    /// The unterminated tail `take` refuses is exactly what `flush` releases
+    /// — this is the seam Task 6 calls when the stream ends.
+    func testFlushReleasesTheTailThatTakeRefused() {
+        var s = SentenceSplitter()
+        XCTAssertEqual(s.take(from: "Almost done"), [])
+        XCTAssertEqual(s.flush(from: "Almost done"), ["Almost done"])
+    }
+
+    /// `flush` only releases what is NEW — it must not repeat a sentence
+    /// `take` already returned.
+    func testFlushDoesNotReEmitWhatTakeAlreadyReturned() {
+        var s = SentenceSplitter()
+        XCTAssertEqual(s.take(from: "One. Two."), ["One."])
+        XCTAssertEqual(s.flush(from: "One. Two."), ["Two."])
     }
 
     // MARK: - Markdown, because replies are markdown
@@ -84,11 +120,15 @@ final class SentenceSplitterTests: XCTestCase {
         XCTAssertFalse(out.contains("let x"))
     }
 
+    /// Reset must let a fully-consumed reply (take, then flush for the final
+    /// sentence) start over from nothing.
     func testResetClearsProgress() {
         var s = SentenceSplitter()
         _ = s.take(from: "One. Two.")
+        _ = s.flush(from: "One. Two.")
         s.reset()
-        XCTAssertEqual(s.take(from: "One. Two."), ["One.", "Two."],
+        let out = s.take(from: "One. Two.") + s.flush(from: "One. Two.")
+        XCTAssertEqual(out, ["One.", "Two."],
                        "reset must let the next reply start from nothing")
     }
 

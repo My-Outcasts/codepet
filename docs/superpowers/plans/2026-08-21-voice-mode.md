@@ -932,7 +932,15 @@ MSG
     so a still-streaming reply cannot resume talking over a founder who just
     interrupted; only `beginReply` reopens it.
   - `final class SpeechSpeaker: NSObject, SpeakingVoice`
-  - `protocol SpeechListening: AnyObject { var onPartial: ((String) -> Void)? { get set }; var onLevel: ((Float) -> Void)? { get set }; var onFailure: ((Error) -> Void)? { get set }; func start() throws; func stop(); var isRunning: Bool { get } }`
+  - `protocol SpeechListening: AnyObject { var onPartial: ((String) -> Void)? { get set }; var onLevel: ((Float) -> Void)? { get set }; var onFailure: ((Error) -> Void)? { get set }; func start() throws; func endTurn(); func stop(); var isRunning: Bool { get } }`
+    — **`endTurn()` is mandatory at every send site and its omission is silent.** The
+    listener runs continuously for the whole conversation (barge-in needs the mic live
+    while the pet speaks), and one `SFSpeechAudioBufferRecognitionRequest` transcribes
+    *all* audio appended to it for its whole life — it has no reset. So without
+    `endTurn()` the founder's second question arrives as *"what should we charge for
+    the beta thanks"*, with the previous question glued to the front, and a credit is
+    spent on it. It compounds every turn for the session. The consumer owns the silence
+    decision, so only the consumer can say a turn ended.
     — **`onFailure` exists because `start() throws` only covers synchronous failure.**
     `SFSpeechRecognizer.isAvailable` reports *service* availability, not
     authorisation, so `start()` succeeds with recognition permission denied: the orb
@@ -1205,8 +1213,21 @@ protocol SpeechListening: AnyObject {
     var onPartial: ((String) -> Void)? { get set }
     /// Input level 0…1, for the orb.
     var onLevel: ((Float) -> Void)? { get set }
+    /// Recognition died AFTER start() returned — permission revoked, the network
+    /// dropped (vi-VN is server-side, spec §3), the service went away.
+    var onFailure: ((Error) -> Void)? { get set }
     var isRunning: Bool { get }
     func start() throws
+    /// **The consumer sent a turn.** Mandatory, and its omission is silent.
+    ///
+    /// One `SFSpeechAudioBufferRecognitionRequest` transcribes *all* audio appended
+    /// to it for its whole life — it has no reset — and the listener stays running
+    /// across turns because barge-in needs the mic live while the pet speaks. So
+    /// without this call the founder's second question arrives with the first still
+    /// glued to the front of it ("what should we charge for the beta thanks"), a
+    /// credit is spent on it, and it compounds every turn. Only the consumer knows a
+    /// turn ended, because the consumer owns the silence decision.
+    func endTurn()
     func stop()
 }
 
@@ -1743,9 +1764,25 @@ listener.onFailure = { error in
 ```
 
 The silence check runs on a `Timer` at 4Hz asking `VoiceTurn.shouldEndTurn`, and on
-a true it sends `partial` through `companyStore.sendChat` and applies
-`.heardSilence`. Speaking is driven by observing the last message's text with
-`.onChange`, feeding the driver below and enqueuing what comes back.
+a true it does three things **in this order**:
+
+```swift
+companyStore.sendChat(partial, …)   // 1. send what she said
+listener.endTurn()                  // 2. tell the listener the turn is over
+session.apply(.heardSilence)        // 3. move to .thinking
+partial = ""
+```
+
+**Step 2 is not optional and forgetting it fails silently.** One
+`SFSpeechAudioBufferRecognitionRequest` transcribes all audio appended to it for its
+whole life and has no reset, and the listener deliberately keeps running across turns
+because barge-in needs the mic live while the pet is speaking. Omit `endTurn()` and
+the second question arrives as *"what should we charge for the beta thanks"* — the
+previous question glued to the front, sent, and charged — compounding every turn for
+the whole session. Nothing throws and nothing logs.
+
+Speaking is driven by observing the last message's text with `.onChange`, feeding the
+driver below and enqueuing what comes back.
 
 **Three calls in this task exist to close findings the reviewer proved against the
 audio services. None of them is optional.**

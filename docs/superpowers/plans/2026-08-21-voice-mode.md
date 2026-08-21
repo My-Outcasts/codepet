@@ -1608,8 +1608,43 @@ character currently available, because mid-stream it cannot tell a pause from an
 ending: `"The price is $3."` is a complete sentence and also the first half of
 `"$3.14 today."`. That refusal means the final sentence of every reply is held back
 until something tells the splitter the reply is over, which is what `flush` is. Omit
-the flush call and every reply loses its last sentence — a defect that is invisible
-in a unit test and obvious the first time you listen.
+the flush call and every reply loses its last sentence.
+
+**That omission must be made visible, because the type fails quiet.** Confirmed
+while fixing Task 2: `take` cannot emit an unconfirmed sentence, so the splitter
+fails *safe* against speaking half a thought — but a missing `flush` drops the final
+sentence with **no exception and no log**. Nothing goes red; the suite stays green
+and the app just stops finishing its sentences. `flush` is also not safe to call
+speculatively: flush early, receive more text, and the continuation is silently
+dropped. So `isStreaming → false` has to be one-way and exactly-once per reply.
+
+Do not put that logic inline in a `.onChange` closure, where no test can reach it.
+Extract it as a pure step on the overlay's model — one function taking the reply
+text and the streaming flag and returning the sentences to enqueue:
+
+```swift
+mutating func sentencesToSpeak(replyText: String, isStreaming: Bool) -> [String] {
+    isStreaming ? splitter.take(from: replyText) : splitter.flush(from: replyText)
+}
+```
+
+Then write the test that goes red when the flush branch is deleted:
+
+```swift
+func testTheLastSentenceIsSpokenOnlyOnceStreamingStops() {
+    var driver = VoiceReplyDriver()
+    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: true),
+                   ["One."], "mid-stream, 'Two.' may still be the head of 'Two.5 million'")
+    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
+                   ["Two."], "the flush is the ONLY thing that releases the last sentence")
+    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
+                   [], "flushing twice must not repeat it")
+}
+```
+
+Replace the `flush` call with `take` and the second assertion goes red. That is the
+guard CLAUDE.md asks for, and it is the difference between a defect the suite
+catches and one only a human listening can hear.
 
 - [ ] **Step 3: Run, then commit**
 

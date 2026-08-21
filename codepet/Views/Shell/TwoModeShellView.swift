@@ -101,14 +101,17 @@ struct TwoModeShellView: View {
             }
         }
         #if DEBUG
-        // The walkthrough sits over the pane, not inside it, so no beat can be
-        // pushed off screen by the content it is narrating.
-        .overlay(alignment: .bottom) {
-            // The CONTROLS follow the mode; only AUTOPLAY follows the launch argument.
-            // Flipping the switch mid-session and having the tour start narrating on
-            // its own would take the screen away from whoever just wanted fixtures to
-            // build against — so the toggle hands them Play, and `-CODEPET_MOCK_AUTOPLAY`
-            // is still what presses it.
+        // The walkthrough DOCKS below the pane rather than floating over it. As an
+        // overlay it covered the composer — placeholder, `+` and disclaimer — and ate
+        // the clicks aimed at them; `safeAreaInset` reserves the height instead, so
+        // the composer sits above the band and both are usable.
+        //
+        // The CONTROLS follow the mode; only AUTOPLAY follows the launch argument.
+        // Flipping the switch mid-session and having the tour start narrating on its
+        // own would take the screen away from whoever just wanted fixtures to build
+        // against — so the toggle hands them Play, and `-CODEPET_MOCK_AUTOPLAY` is
+        // still what presses it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if companyStore.prototypeModeOn {
                 MockFlowCaptionBar(player: player)
             }

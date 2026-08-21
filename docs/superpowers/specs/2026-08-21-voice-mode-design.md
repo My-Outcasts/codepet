@@ -17,7 +17,7 @@ are two different features and the distinction is the whole scope of this spec:
 
 | ChatGPT icon | Feature | In scope? |
 |---|---|---|
-| 🎤 mic | **Dictation** — speak, it becomes editable text, you still read the reply | No |
+| 🎤 mic | **Record** — press-and-hold, it becomes editable text, you still read the reply | ~~No~~ **YES, added 22 Aug — see §10** |
 | ⦙⦙⦙ waveform | **Voice mode** — hands-free spoken conversation, it talks back | **Yes** |
 
 A third thing was designed first and rejected as a misreading: a per-reply `▶ listen` button that has
@@ -341,3 +341,58 @@ error code, the coexistence check, and the 7-channel format landmine the same sp
 decision 4 removed the threshold entirely. The question that replaced it is not a measurement either:
 whether tapping ✓ every turn costs more than the misheard turns it prevents. That needs the founder
 using it, and it is reversible in one place if the answer is yes.
+
+---
+
+## 10. Record — the second control, added 22 Aug
+
+Dictation was scoped **out** of this spec on 21 Aug ("In scope? No"). The founder
+brought it back in on 22 Aug after watching Claude's composer, where the mic's own
+tooltip reads **"Press and hold to record ⌘D"**. Claude ships two controls, we had
+built one.
+
+**What it is.** Press and hold the mic (or press ⌘D) and speak. The composer shows the
+same chrome voice mode uses — expanded box, live transcript, bar waveform, ✕ and ✓.
+Release stops capturing; the transcript stays so it can be judged. **✓ puts the text
+into the composer's text field as an editable draft. ✕ discards it.** Nothing sends,
+and nothing is spoken back.
+
+**Why it is nearly free.** Every piece already exists and is surface-agnostic:
+`SpeechListener` and its protocol, `TurnTranscript`, `RenewalBudget`,
+`VoicePermission`, and the two `Info.plist` usage strings. Record adds no audio work,
+no new permission, and no new failure mode — it is a second consumer of a stack six
+review rounds have already hardened.
+
+**Three properties that distinguish it from voice mode, all of them requirements:**
+
+| | Record | Voice mode |
+|---|---|---|
+| Entry | press-and-hold mic, or ⌘D | click the waveform |
+| On ✓ | text into the field, **editable** | sent immediately |
+| Credits | **none — it never sends** | 0.25 per turn |
+| Speaks back | no | yes |
+| `SpeakingVoice` | never touched | drives the reply |
+
+**Record costs no credits, and that is worth stating rather than leaving implied.** It
+does not call `sendChat`, so the credit line that voice mode carries has nothing to
+count. A founder dictating a long brief and editing it before sending should pay for
+one turn, not for the dictation.
+
+**The two controls must never run at once.** They share one `SpeechListener` and one
+recognition request, so entering either while the other is live has to be refused —
+the same shape as `VoicePermission.canEnterVoiceMode(_:isBusy:)`, extended so each
+control's rule is testable rather than inline.
+
+**The privacy line applies unchanged** (§3). Recognition is recognition: English is
+on-device, Vietnamese goes to Apple's servers. Record must say so in the same compact
+line, because the founder dictating a confidential brief has exactly the same
+question as the founder speaking one.
+
+**Not in scope for record:** the room stays unreachable (§5) — record cannot send at
+all, so it cannot convene anything; and no pet speaks, so `PetVoice` is untouched.
+
+**Evidence for the ✕, from the founder's own recording.** She spoke, it transcribed as
+*"Hey, mama"*, and Claude replied *"I think something might be getting lost in the
+transcription there."* That turn was sent and charged before she could read it. Under
+decision 4 it would have cost one tap of ✕ and nothing else.
+

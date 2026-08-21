@@ -56,6 +56,7 @@ open /Users/monatruong/Library/Developer/Xcode/DerivedData/CodePet-furbrcwvotpbs
 | `codepet/Models/SentenceSplitter.swift` | growing reply text → complete sentences not yet spoken. Pure |
 | `codepet/Models/VoiceTurn.swift` | silence-threshold arithmetic. Pure |
 | `codepet/Models/PetVoice.swift` | pet id → voice name / rate / pitch. Pure |
+| `codepet/Models/VoiceReplyDriver.swift` | reply text + isStreaming → sentences to speak. Pure |
 | `codepet/Services/SpeakingVoice.swift` | protocol + `SpeechSpeaker` (`AVSpeechSynthesizer`) |
 | `codepet/Services/SpeechListening.swift` | protocol + `SpeechListener` (`SFSpeechRecognizer` + own engine) |
 | `codepet/Models/VoicePermission.swift` | mic + recognition authorisation state, and its copy |
@@ -1565,12 +1566,41 @@ MSG
 ### Task 6: `VoiceModeOverlay` — the takeover
 
 **Files:**
+- Create: `codepet/Models/VoiceReplyDriver.swift`
 - Create: `codepet/Views/Copilot/VoiceModeOverlay.swift`
+- Create: `codepetTests/VoiceReplyDriverTests.swift`
 - Create: `codepetTests/VoiceOverlayLayoutTests.swift`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–5.
-- Produces: `VoiceModeOverlay(isPresented: Binding<Bool>, listener: SpeechListening, voice: SpeakingVoice)`.
+- Produces: `VoiceModeOverlay(isPresented: Binding<Bool>, listener: SpeechListening, voice: SpeakingVoice)`
+  and `struct VoiceReplyDriver` with `init()`, `mutating func sentencesToSpeak(replyText: String, isStreaming: Bool) -> [String]`, `mutating func reset()`.
+
+**Why the driver is its own file and its own suite.** The overlay is measured with
+`ImageRenderer`, which answers *how big is it* and nothing else. Which sentences get
+spoken, and when, is logic — it belongs in a plain unit suite where it can be
+asserted directly. Putting it in `VoiceOverlayLayoutTests` would bury a correctness
+test in a file whose every other assertion is a pixel measurement, and putting the
+logic inline in a `.onChange` closure would make it untestable altogether, which is
+what the first draft of this task did.
+
+```swift
+// codepet/Models/VoiceReplyDriver.swift
+import Foundation
+
+/// Turns "the reply text as it currently stands, and whether it is still arriving"
+/// into the sentences to hand the synthesiser. One pure step, so the flush rule
+/// below is testable rather than buried in a view closure.
+struct VoiceReplyDriver {
+    private var splitter = SentenceSplitter()
+
+    mutating func sentencesToSpeak(replyText: String, isStreaming: Bool) -> [String] {
+        isStreaming ? splitter.take(from: replyText) : splitter.flush(from: replyText)
+    }
+
+    mutating func reset() { splitter.reset() }
+}
+```
 
 - [ ] **Step 1: Write the layout measurement**
 
@@ -1672,43 +1702,69 @@ speculatively: flush early, receive more text, and the continuation is silently
 dropped. So `isStreaming → false` has to be one-way and exactly-once per reply.
 
 Do not put that logic inline in a `.onChange` closure, where no test can reach it.
-Extract it as a pure step on the overlay's model — one function taking the reply
-text and the streaming flag and returning the sentences to enqueue:
+It goes in `VoiceReplyDriver` (defined in this task's **Files** block above), and
+the overlay calls it. Write its suite as a whole file:
 
 ```swift
-mutating func sentencesToSpeak(replyText: String, isStreaming: Bool) -> [String] {
-    isStreaming ? splitter.take(from: replyText) : splitter.flush(from: replyText)
+// codepetTests/VoiceReplyDriverTests.swift
+import XCTest
+@testable import codepet
+
+/// The driver is one line of logic guarding a defect that is INVISIBLE to a suite
+/// and audible to a human: drop the flush and every reply loses its last sentence,
+/// silently. That asymmetry is the reason this file exists.
+@MainActor
+final class VoiceReplyDriverTests: XCTestCase {
+
+    func testTheLastSentenceIsSpokenOnlyOnceStreamingStops() {
+        var driver = VoiceReplyDriver()
+        XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: true),
+                       ["One."], "mid-stream, 'Two.' may still be the head of 'Two.5 million'")
+        XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
+                       ["Two."], "the flush is the ONLY thing that releases the last sentence")
+        XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
+                       [], "flushing twice must not repeat it")
+    }
+
+    /// A second voice turn must not inherit the first one's progress. Without the
+    /// reset, `emitted` still counts the previous reply's sentences and the new
+    /// reply's opening sentences are skipped — the founder asks again and hears the
+    /// answer start halfway through.
+    func testResetLetsTheNextReplyStartFromItsFirstSentence() {
+        var driver = VoiceReplyDriver()
+        XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
+                       ["One.", "Two."])
+        driver.reset()
+        XCTAssertEqual(driver.sentencesToSpeak(replyText: "Fresh. Reply.", isStreaming: false),
+                       ["Fresh.", "Reply."], "reset must clear the sentence count")
+    }
 }
 ```
 
-Then write the test that goes red when the flush branch is deleted:
+Replace the `flush` call with `take` and the second assertion of the first test goes
+red; delete the `reset` body and the second test goes red. Those are the guards
+CLAUDE.md asks for, and they are the difference between a defect the suite catches
+and one only a human listening can hear.
 
-```swift
-func testTheLastSentenceIsSpokenOnlyOnceStreamingStops() {
-    var driver = VoiceReplyDriver()
-    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: true),
-                   ["One."], "mid-stream, 'Two.' may still be the head of 'Two.5 million'")
-    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
-                   ["Two."], "the flush is the ONLY thing that releases the last sentence")
-    XCTAssertEqual(driver.sentencesToSpeak(replyText: "One. Two.", isStreaming: false),
-                   [], "flushing twice must not repeat it")
-}
-```
-
-Replace the `flush` call with `take` and the second assertion goes red. That is the
-guard CLAUDE.md asks for, and it is the difference between a defect the suite
-catches and one only a human listening can hear.
+**Verify both by deliberately breaking them** — swap `flush` for `take`, run, see
+red, restore; then empty `reset`, run, see red, restore. Record both RED outputs in
+the report. This plan has already shipped one guard whose test could not fail
+(`PetVoice`'s six-name pet list, which omitted the same pet the code omitted), so
+the check is not a formality here.
 
 - [ ] **Step 3: Run, then commit**
 
 ```bash
 xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
   -only-testing:codepetTests/VoiceOverlayLayoutTests \
+  -only-testing:codepetTests/VoiceReplyDriverTests \
   CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci -resultBundlePath build/v6.xcresult 2>&1 | tail -20
+xcrun xcresulttool get test-results summary --path build/v6.xcresult | head -20
 ```
 
-Expected: 3 tests, 3 passed. A failure here is a real layout defect — read the
-measured number in the message before touching a threshold.
+Expected: 5 tests, 5 passed — 3 layout, 2 driver. A layout failure is a real defect;
+read the measured number in the message before touching a threshold. A driver
+failure is a spoken-output defect, and the assertion messages say what breaks.
 
 ---
 

@@ -96,7 +96,20 @@ final class CompanyStore: ObservableObject {
     /// real diff-review + git-commit engine, so the flow is free to test. `MockChat` is
     /// `#if DEBUG`-only, so the flag read is guarded and always `false` in Release.
     private var codingRunBag: AnyCancellable?
-    lazy var codingRun: CodingRunCoordinator = {
+    /// Rebuildable rather than `lazy`, because prototype mode is a switch now and a
+    /// `lazy var` latches the runner it was born with. Left latched, turning the mode
+    /// on would leave the REAL `claude` adapter behind a UI insisting it was mocked —
+    /// the exact half-right state the paired flags were shaped to prevent, except
+    /// this one spends the founder's own subscription.
+    private var _codingRun: CodingRunCoordinator?
+    var codingRun: CodingRunCoordinator {
+        if let c = _codingRun { return c }
+        let c = makeCodingRun()
+        _codingRun = c
+        return c
+    }
+
+    private func makeCodingRun() -> CodingRunCoordinator {
         #if DEBUG
         let mock = MockChat.enabled
         #else
@@ -108,7 +121,7 @@ final class CompanyStore: ObservableObject {
         // CompanyStore re-render as the run progresses (otherwise the card "sticks").
         self.codingRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return c
-    }()
+    }
 
     /// The composer's in-progress text. Lives on the store, not the view, because the
     /// shell tears `CopilotChatView` down on every navigation and a roadmap dispatch
@@ -167,7 +180,14 @@ final class CompanyStore: ObservableObject {
     /// with no network. Defaulted in the init BODY (not as a default argument) so the
     /// closure is formed inside this `@MainActor` type instead of in the nonisolated
     /// default-argument context, which is what makes `chatStreamer`'s default warn.
-    private let vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
+    /// `var`, and re-resolved when prototype mode changes — see `codingRun` for why a
+    /// seam latched at init is a hazard once the mode is a switch. This one is worse:
+    /// a convened room on the live endpoint costs ~$0.20 a decision.
+    private var vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
+    /// Kept so the runner can be rebuilt. Non-nil only when the caller injected one,
+    /// in which case the injection outranks the mode — a test's stub must not be
+    /// swapped out from under it.
+    private let injectedVCRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
@@ -293,6 +313,7 @@ final class CompanyStore: ObservableObject {
         // `startVirtualCompanyRun` stopped the spend but also removed the feature from
         // every demo; swapping the runner keeps the room fully renderable with nothing
         // on the wire. Same reason `codeRunner` picks `MockCodeRunner` above.
+        self.injectedVCRunner = vcRunner
         #if DEBUG
         self.vcRunner = vcRunner ?? (MockChat.enabled
                                      ? { MockVirtualCompany.run($0) }
@@ -894,6 +915,68 @@ final class CompanyStore: ObservableObject {
                                        kind: activeThreadKind))
         }
     }
+
+    // MARK: - Prototype mode
+
+    #if DEBUG
+    /// Mirrors `PrototypeMode.isOn` as published state.
+    ///
+    /// The views cannot bind to a static that reads `UserDefaults`: SwiftUI would
+    /// only notice the change when something ELSE happened to re-render, so the
+    /// switch would usually look right and sometimes not — the worst behaviour
+    /// available to a control whose entire job is telling you which world you are in.
+    @Published private(set) var prototypeModeOn = PrototypeMode.isOn
+
+    /// Flip prototype mode and bring the whole store with it.
+    ///
+    /// **A flag flip alone would leave the app half-switched.** Most seams read
+    /// `MockChat.enabled` at the point of use and change instantly, but two were
+    /// resolved once and would keep their old runner, and the COMPANY would keep
+    /// whatever it was hydrated with — so turning the mode on would give a fixture
+    /// chat client answering questions about the founder's real roadmap, and turning
+    /// it off would leave fixture tasks on screen for a real account. Rebuilding the
+    /// runners and re-loading the company is what makes the switch mean one thing.
+    ///
+    /// Reloading is also why no snapshot of the real company is kept: `CompanyData.load`
+    /// already answers from fixtures or from Firestore depending on the mode, and
+    /// cloud writes are refused while the mode is on, so the real document is exactly
+    /// as the founder left it and re-reading it is safer than restoring a copy.
+    ///
+    /// Returns false when a launch argument has locked the mode — see `PrototypeMode`.
+    @discardableResult
+    func setPrototypeMode(_ on: Bool) async -> Bool {
+        guard !isStreaming, !isCompanionTyping else { return false }
+        guard on != PrototypeMode.isOn else { return true }
+        guard PrototypeMode.set(on) else { return false }
+        prototypeModeOn = on
+
+        // Entering from a running app skips the cold open. The walkthrough's first
+        // beat is "signed in, with a roadmap already built" — not onboarding — and
+        // dropping a founder mid-session into a first-run flow they did not ask for
+        // reads as the app losing their account. Launching with the flag still shows
+        // the cold open, which is where that story belongs.
+        if on { MockChat.flowOnboarded = true }
+
+        // Anything in flight belongs to the world being left.
+        codingRun.cancel()
+        clearEngineeringRun()
+        _codingRun = nil
+        codingRunBag = nil
+        vcRunner = injectedVCRunner ?? (on
+                                        ? { MockVirtualCompany.run($0) }
+                                        : { VirtualCompanyClient.run($0) })
+
+        chatMessages = []
+        threads = []
+        activeThreadId = nil
+        activeThreadKind = .ask
+        lastThreadIdByKind = [:]
+        activeProjectLink = nil
+
+        if let id = companyId { await hydrate(companyId: id) }
+        return true
+    }
+    #endif
 
     // MARK: - The two doors
 

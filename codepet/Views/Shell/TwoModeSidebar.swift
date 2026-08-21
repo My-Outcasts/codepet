@@ -344,6 +344,11 @@ struct TwoModeSidebar: View {
     private var account: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
+            #if DEBUG
+            // The rail's account row opens the settings modal rather than the account
+            // menu, so the switch lives here directly — this is the surface it is for.
+            PrototypeModeToggle(compact: true).padding(.horizontal, 5)
+            #endif
             Button { companyStore.settingsSection = .preferences } label: {
                 HStack(spacing: 8) {
                     // The account avatar is a gradient everywhere else it appears

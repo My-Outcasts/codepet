@@ -59,9 +59,7 @@ enum MockChat {
     /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
     /// is ONE launch argument rather than two that must agree — two flags where
     /// one is meaningless without the other is a state you can get half-right.
-    static var enabled: Bool {
-        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") || flowEnabled
-    }
+    static var enabled: Bool { PrototypeMode.isOn }
 
     /// `-CODEPET_MOCK_FLOW YES` — start at the cold open and walk the whole
     /// product, with a fake company built from whatever gets typed in.
@@ -78,10 +76,7 @@ enum MockChat {
     /// its own, unattended. Without the fixtures behind it, it would drive the REAL
     /// Cloud Functions and spend real credits with nobody watching the ledger — and
     /// two flags where one is meaningless alone is a state you can get half-right.
-    static var flowEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW")
-            || UserDefaults.standard.bool(forKey: "CODEPET_MOCK_AUTOPLAY")
-    }
+    static var flowEnabled: Bool { PrototypeMode.isOn }
 
     /// Flipped once onboarding completes, so the next `load` in this process
     /// returns the finished company rather than sending the founder back

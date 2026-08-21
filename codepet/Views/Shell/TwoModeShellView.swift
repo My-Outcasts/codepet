@@ -104,14 +104,29 @@ struct TwoModeShellView: View {
         // The walkthrough sits over the pane, not inside it, so no beat can be
         // pushed off screen by the content it is narrating.
         .overlay(alignment: .bottom) {
-            if MockFlowPlayer.enabled {
+            // The CONTROLS follow the mode; only AUTOPLAY follows the launch argument.
+            // Flipping the switch mid-session and having the tour start narrating on
+            // its own would take the screen away from whoever just wanted fixtures to
+            // build against — so the toggle hands them Play, and `-CODEPET_MOCK_AUTOPLAY`
+            // is still what presses it.
+            if companyStore.prototypeModeOn {
                 MockFlowCaptionBar(player: player)
             }
         }
         .onAppear {
-            guard MockFlowPlayer.enabled else { return }
+            guard companyStore.prototypeModeOn else { return }
             player.attach(store: companyStore, language: lang)
-            player.play()
+            if MockFlowPlayer.enabled { player.play() }
+        }
+        // Turning the mode off mid-tour must stop the clock. A paused-but-live timer
+        // would keep firing beats into a store that is now talking to real endpoints.
+        .onChange(of: companyStore.prototypeModeOn) { _, on in
+            if on {
+                player.attach(store: companyStore, language: lang)
+            } else {
+                player.pause()
+                player.restart()
+            }
         }
         // The player cannot set `mode` — it publishes a request and the shell
         // adopts it, which also means a beat that changes mode goes through the

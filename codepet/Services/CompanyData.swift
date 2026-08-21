@@ -53,6 +53,12 @@ enum CompanyData {
     /// Write companies/{uid} (brief + onboardedAt), merge. Fail-soft: false on error.
     /// First native write to companies/{uid}.
     static func saveBrief(companyId: String, brief: CompanyBrief) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         let iso = ISO8601DateFormatter().string(from: Date())
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
@@ -72,6 +78,12 @@ enum CompanyData {
     /// Write companies/{uid}.introSeenAt, merge. Fail-soft: false on error — a lost write
     /// only means the briefing shows once more, never a broken page.
     static func saveIntroSeen(_ companyId: String, _ at: Date) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(introSeenPayload(at), merge: true)
@@ -92,6 +104,12 @@ enum CompanyData {
 
     /// Write companies/{uid}.tasks, merge. Fail-soft: false on error.
     static func saveTasks(companyId: String, tasks: [RoadmapTask]) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(tasksPayload(tasks), merge: true)
@@ -112,6 +130,12 @@ enum CompanyData {
 
     /// Write companies/{uid}.library, merge. Fail-soft: false on error.
     static func saveLibrary(companyId: String, library: [Deliverable]) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(deliverablesPayload(library), merge: true)
@@ -128,6 +152,12 @@ enum CompanyData {
 
     /// Write companies/{uid}.companionId, merge. Fail-soft: false on error.
     static func saveCompanionId(companyId: String, companionId: String) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(companionIdPayload(companionId), merge: true)
@@ -185,6 +215,12 @@ enum CompanyData {
     /// write is decided somewhere a test can read it; nil from there is the skip case
     /// (documented on it).
     static func saveFounderPrefs(companyId: String, prefs: FounderPrefs) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         guard let write = founderPrefsWrite(prefs) else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
@@ -202,6 +238,12 @@ enum CompanyData {
 
     /// Write companies/{uid}.enabledTools, merge. Fail-soft: false on error.
     static func saveEnabledTools(companyId: String, tools: [String]) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(enabledToolsPayload(tools), merge: true)
@@ -222,6 +264,12 @@ enum CompanyData {
 
     /// Write companies/{uid}.decisions, merge. Fail-soft: false on error.
     static func saveDecisions(companyId: String, decisions: [DecisionEntry]) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(decisionsPayload(decisions), merge: true)

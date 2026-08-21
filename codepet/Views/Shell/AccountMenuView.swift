@@ -84,6 +84,11 @@ struct AccountMenuView: View {
                 themeButton(.light, lang == .vi ? "Sáng" : "Light")
                 themeButton(.dark, lang == .vi ? "Tối" : "Dark")
             }.padding(.horizontal, 10).padding(.bottom, 2)
+            #if DEBUG
+            Divider()
+            PrototypeModeToggle()
+                .padding(.horizontal, 10).padding(.vertical, 4)
+            #endif
             Divider()
             menuRow(lang == .vi ? "Đăng xuất" : "Log out", destructive: true) { confirmLogout = true }
         }

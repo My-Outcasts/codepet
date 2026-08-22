@@ -634,7 +634,8 @@ final class CompanyStore: ObservableObject {
     /// environment?") deliberately does not convene, because a toolkit question is not a
     /// cross-department trade-off and was quietly costing a room every time.
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
-                  founderAsk: String? = nil, convenesRoom: Bool = false) async {
+                  founderAsk: String? = nil, convenesRoom: Bool = false,
+                  pinned: [ContextPin] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -650,7 +651,7 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
                           display: words,
-                          founderAsk: words)
+                          founderAsk: words, pinned: pinned)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -1217,7 +1218,7 @@ final class CompanyStore: ObservableObject {
     /// asked."
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
-                             founderAsk: String? = nil) async {
+                             founderAsk: String? = nil, pinned: [ContextPin] = []) async {
         guard !isCompanionTyping, !isStreaming else { return }
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
         isCompanionTyping = true
@@ -1264,7 +1265,11 @@ final class CompanyStore: ObservableObject {
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text, focusDepartment: department,
-                                          memoryEnabled: company.founderPrefs.memoryEnabled),
+                                          memoryEnabled: company.founderPrefs.memoryEnabled,
+                                          // What the founder pinned on the `+` menu, rendered above the
+                                          // ranker's guesses and excluded from them. Empty for every
+                                          // caller that passes nothing.
+                                          pinned: pinned),
             history: Array(history), userMessage: text, runnable: Array(runnable),
             openTasks: Array(openTasks), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire

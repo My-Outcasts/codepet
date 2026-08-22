@@ -204,7 +204,11 @@ final class CompanyStore: ObservableObject {
     /// with the `ProjectStore` sync in the next PR — so only the `.mint` branch runs in
     /// production today. That is deliberate: an id minted now is the id forever, so nothing
     /// is lost by the cloud list arriving later.
-    private var knownCloudProjects: [CloudProject]
+    ///
+    /// `let`, not `var`: nothing mutates this in PR 1, and `var` would send the next reader
+    /// hunting for a writer that does not exist yet. PR 2's cloud sync is what turns it back
+    /// into `var` and gives it one.
+    private let knownCloudProjects: [CloudProject]
 
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
@@ -670,14 +674,24 @@ final class CompanyStore: ObservableObject {
     /// seed carries the brief only.
     @discardableResult
     func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
-        var link = ProjectProbe.probe(path: path)
+        // Canonicalised ONCE, here, and used for everything downstream — the probe, the
+        // bookmark, and (inside `resolveProjectIdentity`) both the repo-root comparison and
+        // the identity map's key. `git rev-parse --show-toplevel` canonicalises symlinks, so
+        // comparing it against a raw incoming path fails even when the folder genuinely IS
+        // the repo root (e.g. a path under a symlinked ancestor), which silently drops a
+        // legitimate remote hint. Canonicalising once at the entry point also means the same
+        // repo reached via a symlinked path and via its real path binds to the same map key
+        // instead of minting two ids for one repo — the exact failure the opaque id exists
+        // to prevent, and PR 1 is the cheapest moment to fix it because nothing has bound yet.
+        let canonicalPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        var link = ProjectProbe.probe(path: canonicalPath)
         if bootstrapClaudeMd && !link.hasClaudeMd {
             let seed = ClaudeMdBootstrap.compose(brief: company.brief,
                                                  decisions: claudeMdSeedDecisions)
-            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
-            link = ProjectProbe.probe(path: path)
+            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: canonicalPath), atomically: true, encoding: .utf8)
+            link = ProjectProbe.probe(path: canonicalPath)
         }
-        if let data = try? URL(fileURLWithPath: path)
+        if let data = try? URL(fileURLWithPath: canonicalPath)
             .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
         }
@@ -694,7 +708,9 @@ final class CompanyStore: ObservableObject {
     private func resolveProjectIdentity(for link: ProjectLink) {
         // The remote is only this folder's hint when this folder is the repo root. A folder
         // nested inside a tracked ancestor would otherwise borrow the ancestor's remote and
-        // get proposed as the ancestor's project.
+        // get proposed as the ancestor's project. `link.path` is already canonicalised by
+        // `linkProject`, and `repoRootReader` (real `git rev-parse --show-toplevel`) reports
+        // a canonicalised path too, so this comparison is symlink-safe on both sides.
         let isRoot = repoRootReader(link.path).map { $0 == link.path } ?? false
         let hints = ProjectIdentity.hints(
             folderName: URL(fileURLWithPath: link.path).lastPathComponent,
@@ -737,9 +753,14 @@ final class CompanyStore: ObservableObject {
         adopt(id: ProjectIdentity.mint(), for: pending.path)
     }
 
+    /// Only sets `activeProjectId` when the bind actually landed. `identityMap.bind` no-ops
+    /// with nobody signed in (`account == nil`) — a link before `hydrate`, or a link that
+    /// outlives a sign-out — and setting `activeProjectId` anyway would produce a live id
+    /// that no disk record backs: it would scope facts in this session to a project the map
+    /// will not remember on the next launch, or under an account nothing is signed into.
     private func adopt(id: String, for path: String) {
         identityMap.bind(path: path, to: id)
-        activeProjectId = id
+        activeProjectId = identityMap.id(forPath: path) == id ? id : nil
     }
 
     /// What the CLAUDE.md seed is allowed to say about the facts on record — the gate above,

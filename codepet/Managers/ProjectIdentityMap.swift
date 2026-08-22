@@ -22,6 +22,13 @@ import os
 // which on Xcode 26.2 stops its whole XCTest suite from executing (see CLAUDE.md landmine 3).
 // Every one of its 11 tests would compile and never run. Only ever touched from the main
 // actor in practice; if that ever stops being true, revisit this rather than the tests.
+//
+// `nonisolated` here is a statement about THIS type having no actor of its own — it is not
+// a claim that concurrent use is safe. It is main-actor use BY CONVENTION ONLY, enforced by
+// nothing the compiler checks, and it is NOT thread-safe: `byAccount` and `account` are a
+// plain dictionary and a plain var with no lock, so a call from off the main actor races
+// with every other call. Read this comment as "nonisolated so it does not fight the caller's
+// isolation," never as "safe from anywhere."
 nonisolated final class ProjectIdentityMap {
 
     private let logger = Logger(subsystem: "app.murror.codepet", category: "ProjectIdentity")
@@ -71,15 +78,13 @@ nonisolated final class ProjectIdentityMap {
 
     /// Wipe every account's bindings. Not part of sign-out — that is `account = nil`, which
     /// keeps them. This exists for a deliberate full reset.
+    ///
+    /// No caller in PR 1 either — `CompanyStore` sets `account` on hydrate/reset instead —
+    /// but unlike `reload()` (deleted; see below) this one is tested, so it stays as the
+    /// deliberate-full-reset escape hatch a later PR is expected to wire up.
     func resetAll() {
         byAccount = [:]
         defaults.removeObject(forKey: key)
-    }
-
-    /// Re-read from disk, discarding anything held in memory.
-    func reload() {
-        byAccount = [:]
-        load()
     }
 
     // MARK: - Private

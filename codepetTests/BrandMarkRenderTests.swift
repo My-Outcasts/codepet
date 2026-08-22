@@ -239,7 +239,15 @@ final class BrandMarkRenderTests: XCTestCase {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
-            XCTAssertLessThan(d, 0.06,
+            // 0.072 is the midpoint of two MEASURED values, not a guess: a flat corner
+            // reads 0.0597 (colour-management noise through ImageRenderer →
+            // NSBitmapImageRep → .usingColorSpace(.sRGB), identical at all four corners,
+            // so it is systematic and not spatial), and the wash this test was written
+            // to catch read 0.0839. The original 0.06 passed by 0.47% — a hair above the
+            // noise floor, so an OS, Xcode, or display-profile change would have failed
+            // it spuriously, most likely in CI rather than here. Do NOT tighten this
+            // toward zero: zero is not the floor, 0.0597 is.
+            XCTAssertLessThan(d, 0.072,
                               "the pane's corner is not flat pageBackground — an ambient "
                               + "wash is painting over it. See \(url.path)")
         }
@@ -255,6 +263,12 @@ final class BrandMarkRenderTests: XCTestCase {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
+            // Stays 0.06, deliberately, where dark needed widening to 0.072: cream's
+            // measured noise floor is 0.0214, so this has ~180% margin rather than dark's
+            // 0.47%. The floor differs by 2.8x between schemes, which is why these two
+            // thresholds are allowed to disagree — matching them would be tidier and
+            // wrong. There is room to tighten this one, but no measured light-mode RED
+            // to calibrate against, so it is left alone rather than guessed at.
             XCTAssertLessThan(d, 0.06,
                               "the light pane's corner is not flat cream — an ambient "
                               + "wash is painting over it. See \(url.path)")

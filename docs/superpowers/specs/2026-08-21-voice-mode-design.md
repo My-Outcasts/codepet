@@ -417,6 +417,25 @@ a running count for that reason.~~
 > §2's `2 credits · on-device` line and §3's disclosure requirement are amended in place; see the box
 > in §3 for what the slot still shows and when.
 
+> ### 🗑️ AMENDED, 22 Aug (later the same day) — both deleted; the ordering argument moved here
+>
+> Founder's call, having seen the field sit unread: delete `VoiceChrome.creditsPerTurn` and
+> `VoiceTurn.turns` outright, rather than keep carrying them against a reversal that may never come.
+> Both are gone, along with the increment site in `VoiceComposer.sendTurn()` and the one test that
+> existed only to prove ✕ never touched the counter.
+>
+> **What would otherwise be lost, so it is written down here instead:** if a per-turn count is ever
+> reintroduced, the increment belongs *inside* the `Task` that sends the turn, and specifically
+> *after* the `await`, not before it. The reason is `CompanyStore.sendMessage`: it re-checks
+> `isStreaming` / `isCompanionTyping` again at the moment the `Task` actually runs, not at the moment
+> it was scheduled, and can decline to send on that basis. Incrementing before the `await` would count
+> a turn that then never sent — charging her for a sentence that was silently dropped. Incrementing
+> after costs the opposite, smaller thing: the count would visibly update when the reply lands rather
+> than the instant she taps ✓. That trade — and the fact that it took a full review round to establish,
+> against code that has since been deleted and is therefore not re-derivable by reading it — is the
+> one piece of this feature's history worth keeping even though the field it describes no longer
+> exists.
+
 **The silence threshold is a feel, not a fact.** 1.2s will be wrong for someone who pauses mid-thought
 and wrong for someone who talks fast. One constant, tuned after use.
 

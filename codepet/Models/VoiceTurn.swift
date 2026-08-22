@@ -28,10 +28,10 @@ import os
 /// `showHistory` — and handed down as one `@Binding`. `VoiceComposer` owns no turn
 /// state at all, and a branch flip re-renders it without resetting it.
 ///
-/// **One binding rather than six.** `session`/`partial`/`level`/`failure`/`driver`/
-/// `turns` are one session's worth of state and are reset together; six separate
-/// `@State`s on `CopilotChatView` would be six things a future reset could forget one
-/// of. The failure of forgetting one is silent in every case.
+/// **One binding rather than five.** `session`/`partial`/`level`/`failure`/`driver`
+/// are one session's worth of state and are reset together; five separate `@State`s
+/// on `CopilotChatView` would be five things a future reset could forget one of. The
+/// failure of forgetting one is silent in every case.
 ///
 /// **The methods are here, not on the view, for the same reason `VoiceTurnFlow`'s are
 /// not.** Two of them carry invariants 1 and 2, and both are now reached from
@@ -51,23 +51,6 @@ struct VoiceTurn {
     /// `VoiceChrome.line`.
     var failure: Error?
     var driver = VoiceReplyDriver()
-    /// Turns sent from this composer. The running credit count is this × the per-turn
-    /// price — spec §7: talking is much faster than typing, so voice mode is the
-    /// feature that makes turns cheap to spend without noticing.
-    ///
-    /// **Hoisted with the rest, and it was visibly wrong before.** The composer was
-    /// rebuilt on the first turn of every thread, so the line read `~0 credits` on the
-    /// turn the founder had just been charged for.
-    ///
-    /// **Nothing reads this as of 22 Aug.** The founder screenshotted
-    /// `~0 credits · on-device` and asked for it removed, so `VoiceChrome.disclosure`
-    /// no longer renders a count and §7 is amended to record that. It is kept rather
-    /// than deleted with the line for one reason: the *ordering* argument at the write
-    /// site in `VoiceComposer.sendTurn()` — why the increment is inside the `Task`,
-    /// after the `await` — cost a review round to establish and is not re-derivable from
-    /// the code. Deleting the field deletes that. If the count is not put back, delete
-    /// both together.
-    var turns = 0
 
     /// Whether the microphone has been opened for **this** voice-mode session.
     ///
@@ -292,8 +275,7 @@ extension VoiceTurn {
         return toSend
     }
 
-    /// ✕. **No credit is spent and none is counted** — `turns` moves in exactly one
-    /// place, `VoiceComposer.sendTurn()`'s Task, and nothing here goes near it.
+    /// ✕. No credit is spent.
     mutating func discard(listener: SpeechListening) {
         VoiceTurnFlow.abandonTurn(listener)
         partial = ""

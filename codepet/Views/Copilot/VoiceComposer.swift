@@ -412,23 +412,12 @@ struct VoiceComposer: View {
         // voice (spec §5) because a misheard sentence must never spend
         // `RoomOffer.credits`.
         //
-        // **`turns += 1` is inside, after the await — and nothing reads it as of
-        // 22 Aug.** The credit line it fed was removed on the founder's instruction;
-        // see `VoiceTurn.turns` for why the counter and this ordering argument are kept
-        // rather than deleted with it. What the argument is:
-        //
-        // `sendMessage` checks
-        // `isStreaming`/`isCompanionTyping` again when this Task actually runs, so
-        // counting the turn out here counted one that could still be dropped. The cost
-        // is that the count updates when the reply lands rather than when it is sent.
-        //
-        // The write lands on `CopilotChatView`'s state through the binding, which is
-        // why it survives this view being rebuilt by the very send it is counting —
-        // that flip is what used to reset the credit line to `~0` on the turn the
-        // founder had just been charged for.
+        // Per-turn credit counting was removed 22 Aug along with the composer's credit
+        // line — see spec §7 for the ordering knowledge this write site used to carry
+        // (why a counter would belong here, inside the `Task`, after the `await`, if
+        // one is ever reintroduced).
         Task {
             await companyStore.sendChat(toSend, language: language)
-            turn.turns += 1
         }
     }
 

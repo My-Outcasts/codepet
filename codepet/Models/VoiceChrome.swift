@@ -13,17 +13,6 @@ import Foundation
 /// deliberate changes are each argued at their declaration.
 enum VoiceChrome {
 
-    /// 0.25 credits per spoken exchange — spec §7's "ten spoken exchanges is ~2.5
-    /// credits in about two minutes", stated as the per-turn number so the price and
-    /// the spec cannot drift.
-    ///
-    /// **Nothing on screen reads this as of 22 Aug** — see `disclosure`, where the
-    /// credit count was removed on the founder's instruction. It is kept, labelled,
-    /// rather than deleted with the line: the price is a product fact, and putting the
-    /// count back is one `Text` if she reverses. `VoiceTurn.turns` is the count itself
-    /// and carries the same note.
-    static let creditsPerTurn = 0.25
-
     // MARK: - The bottom-left slot, and the one case it still has something to say
 
     /// **What the composer's bottom-left slot says — `nil` almost always, as of
@@ -41,8 +30,10 @@ enum VoiceChrome {
     /// contradicted by this file. The cost is real and is not hidden: nothing on screen
     /// now says what talking spends, while §7's reason for the count — talking is much
     /// faster than typing, so voice makes turns cheap to spend without noticing — is
-    /// untouched by removing it. `creditsPerTurn` and `VoiceTurn.turns` are kept for
-    /// that reason.
+    /// untouched by removing it. `creditsPerTurn` and `VoiceTurn.turns` were kept for a
+    /// while for that reason and are now deleted outright (founder, 22 Aug) — see
+    /// spec §7 for the ordering knowledge that was recovered from `VoiceComposer`'s
+    /// write site before the field went away.
     ///
     /// **The disclosure stays whenever recognition is not on-device, and that is not
     /// tidiness.** §3 is a privacy disclosure. On a Mac with the en-US asset installed

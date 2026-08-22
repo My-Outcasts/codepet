@@ -758,17 +758,13 @@ final class SpeechFakesTests: XCTestCase {
                                                     state: fixture.session.state,
                                                     isBusy: false),
                        "✕ left a transcript ✓ could still charge for")
-        // The count itself moves in exactly one place — `sendTurn()`'s Task, after a
-        // non-nil `takeTurn` — and ✕ must not reach it. Asserted on `VoiceTurn.discard`
-        // directly since 22 Aug: this read the credit line back out of `VoiceChrome`,
-        // and that line was removed from the composer the same day (founder: "remove
-        // this info"), so reading it proved nothing about ✕ any more. Its own listener,
-        // so the `endTurn` it records stays off `fixture.tape`.
+        // The fixture above simulates what the view does after ✕ (line 751) rather
+        // than calling the real method — so `VoiceTurn.discard(listener:)` itself, the
+        // one thing that actually clears `partial`, is asserted directly here. Its own
+        // listener, so the `endTurn` it records stays off `fixture.tape`.
         var counted = VoiceTurn()
-        counted.turns = 3
         counted.partial = "add pricing for the beta"
         counted.discard(listener: FakeListener())
-        XCTAssertEqual(counted.turns, 3, "✕ counted a credit the founder never spent")
         XCTAssertEqual(counted.partial, "", "✕ left the discarded sentence on screen")
 
         fixture.listener.emit("what about the annual plan")

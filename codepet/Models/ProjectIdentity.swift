@@ -62,3 +62,53 @@ enum ProjectIdentity {
                             folderName: name.isEmpty ? nil : name)
     }
 }
+
+/// A project as the cloud holds it. The local path is deliberately absent — it lives in
+/// `ProjectIdentityMap` because it describes one machine.
+struct CloudProject: Codable, Hashable, Sendable {
+    let id: String
+    var hints: ProjectHints
+    var displayName: String
+}
+
+/// What to do with a folder the founder just linked.
+enum ProjectMatch: Equatable {
+    /// This machine already knows the folder. Nothing to ask.
+    case bound(String)
+    /// A hint says this is an existing project. The founder confirms before anything binds.
+    case propose(String, reason: String)
+    /// No usable hint, or an ambiguous one. Mint a new id.
+    case mint
+}
+
+extension ProjectIdentity {
+
+    /// Resolve a linked folder to a project.
+    ///
+    /// Pure, so the interesting cases — no remote, wrong remote, two projects with the
+    /// same remote — are all provable without a folder, a network, or a founder.
+    ///
+    /// A remote hit is `.propose`, never `.bound`. Adopting it silently would attach one
+    /// repo's memory to another with nothing on screen, and a duplicate project is the
+    /// cheaper mistake: it is visible, and it can be merged later. Wrongly merged memory
+    /// is neither.
+    ///
+    /// `folderName` never decides anything. Two unrelated checkouts called `api` are
+    /// ordinary, and a hint that common is not evidence — it exists only so the founder
+    /// can tell two candidates apart when asked.
+    static func match(localId: String?,
+                      hints: ProjectHints,
+                      against projects: [CloudProject]) -> ProjectMatch {
+        if let bound = localId?.trimmingCharacters(in: .whitespacesAndNewlines), !bound.isEmpty {
+            return .bound(bound)
+        }
+        guard let remote = hints.gitRemote else { return .mint }
+
+        let hits = projects.filter { $0.hints.gitRemote == remote }
+        // Exactly one, or nothing to say. Two projects claiming one remote is a state the
+        // founder has to resolve, and picking either would be a coin toss with their memory.
+        guard hits.count == 1, let hit = hits.first else { return .mint }
+
+        return .propose(hit.id, reason: remote)
+    }
+}

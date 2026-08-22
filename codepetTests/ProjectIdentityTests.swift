@@ -46,3 +46,70 @@ final class ProjectIdentityTests: XCTestCase {
         XCTAssertNil(ProjectIdentity.hints(folderName: "  ", gitRemote: nil).folderName)
     }
 }
+
+extension ProjectIdentityTests {
+
+    private func cloud(_ id: String, remote: String?, name: String) -> CloudProject {
+        CloudProject(id: id,
+                     hints: ProjectIdentity.hints(folderName: name, gitRemote: remote),
+                     displayName: name)
+    }
+
+    // Already bound on this machine: no question to ask, no hint to consult.
+    func test_match_alreadyBoundWinsOverEverything() {
+        let projects = [cloud("aaa", remote: "git@github.com:Acme/Repo.git", name: "repo")]
+        let m = ProjectIdentity.match(localId: "zzz",
+                                      hints: ProjectIdentity.hints(folderName: "repo",
+                                                                   gitRemote: "git@github.com:Acme/Repo.git"),
+                                      against: projects)
+        XCTAssertEqual(m, .bound("zzz"))
+    }
+
+    // A remote match is PROPOSED, never applied. Deleting the propose case and returning
+    // .bound here is exactly the silent mis-merge this guard exists to stop.
+    func test_match_remoteHitIsProposedNotAdopted() {
+        let projects = [cloud("aaa", remote: "https://github.com/Acme/Repo.git", name: "repo")]
+        let m = ProjectIdentity.match(localId: nil,
+                                      hints: ProjectIdentity.hints(folderName: "repo-clone",
+                                                                   gitRemote: "git@github.com:Acme/Repo.git"),
+                                      against: projects)
+        guard case .propose(let id, _) = m else { return XCTFail("expected a proposal, got \(m)") }
+        XCTAssertEqual(id, "aaa")
+    }
+
+    func test_match_noRemoteMintsRatherThanGuessingFromFolderName() {
+        let projects = [cloud("aaa", remote: "git@github.com:Acme/Repo.git", name: "repo")]
+        let m = ProjectIdentity.match(localId: nil,
+                                      hints: ProjectIdentity.hints(folderName: "repo", gitRemote: nil),
+                                      against: projects)
+        XCTAssertEqual(m, .mint)
+    }
+
+    func test_match_differentRemoteMints() {
+        let projects = [cloud("aaa", remote: "git@github.com:Acme/Repo.git", name: "repo")]
+        let m = ProjectIdentity.match(localId: nil,
+                                      hints: ProjectIdentity.hints(folderName: "other",
+                                                                   gitRemote: "git@github.com:Acme/Other.git"),
+                                      against: projects)
+        XCTAssertEqual(m, .mint)
+    }
+
+    // Two cloud projects sharing a remote is ambiguous, and ambiguity is not a proposal.
+    func test_match_ambiguousRemoteMints() {
+        let projects = [cloud("aaa", remote: "git@github.com:Acme/Repo.git", name: "one"),
+                        cloud("bbb", remote: "https://github.com/Acme/Repo", name: "two")]
+        let m = ProjectIdentity.match(localId: nil,
+                                      hints: ProjectIdentity.hints(folderName: "one",
+                                                                   gitRemote: "git@github.com:Acme/Repo.git"),
+                                      against: projects)
+        XCTAssertEqual(m, .mint)
+    }
+
+    func test_match_noCloudProjectsMints() {
+        let m = ProjectIdentity.match(localId: nil,
+                                      hints: ProjectIdentity.hints(folderName: "repo",
+                                                                   gitRemote: "git@github.com:Acme/Repo.git"),
+                                      against: [])
+        XCTAssertEqual(m, .mint)
+    }
+}

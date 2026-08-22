@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Codepet uses your microphone for voice mode, so you can talk to your company instead of typing.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Codepet turns your speech into text for voice mode. In English this happens entirely on your Mac.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

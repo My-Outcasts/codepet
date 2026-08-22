@@ -55,6 +55,10 @@ struct ContentView: View {
                 // mid-onboarding account switch can't inherit the prior draft/step.
                 OnboardingView()
                     .id(companyStore.companyId)
+            } else if TwoModeShell.enabled {
+                // The two-mode shell, opt-in via `-CODEPET_TWO_MODE YES` so main
+                // keeps shipping the web-parity shell while this is built.
+                TwoModeShellView()
             } else {
                 // Authenticated (or guest) — the company shell (web product).
                 AppShellView()

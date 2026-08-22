@@ -19,14 +19,31 @@ enum ComposerMetrics {
     /// Shown before the first measurement lands, so a field never flashes at zero height.
     static let minTextHeight: CGFloat = 21
 
+    /// The resting height of the PANE's composer — the typing area an empty composer
+    /// reserves before its control row.
+    ///
+    /// The dock's 21 is one line and nothing more, which is right at 380pt where
+    /// every point is content, and is what made the pane's version read as cramped:
+    /// a line of placeholder with a row of pills immediately beneath it.
+    ///
+    /// 24, walked down from 32 — and 32 is why this comment exists. It was chosen
+    /// while the pane's control row still held three department chips, which
+    /// justified the height; once the chips moved to `DepartmentRoster` the same
+    /// floor left a 95pt box (Claude's is 67) with `+` alone at one end of an empty
+    /// row. Rendered offscreen at both values rather than argued about.
+    static let paneMinTextHeight: CGFloat = 24
+
     /// How tall the field should be for content of the measured height.
     ///
     /// Pure so it can be tested: these views cannot be screenshotted from here, and the two ways
     /// this goes wrong are both silent — an unmeasured first frame collapsing the field to
     /// nothing, and a long paste growing it until it swallows what is above it.
+    ///
+    /// `floor` is the resting height; content taller than it still grows to `cap`.
     static func fieldHeight(forContent contentHeight: CGFloat,
-                            cap: CGFloat = maxTextHeight) -> CGFloat {
-        min(max(contentHeight, minTextHeight), cap)
+                            cap: CGFloat = maxTextHeight,
+                            floor: CGFloat = minTextHeight) -> CGFloat {
+        min(max(contentHeight, floor), cap)
     }
 
     /// Whether the content is taller than the field can show — the scrollbar, the bounce and
@@ -61,6 +78,9 @@ struct ComposerField: View {
     var font: Font = CodepetTheme.inter(15)
     var foreground: Color = CodepetTheme.primaryText
     var cap: CGFloat = ComposerMetrics.maxTextHeight
+    /// Resting height of the typing area. The dock keeps one line; the pane reserves
+    /// more so the composer does not read as a slot — see `paneMinTextHeight`.
+    var floor: CGFloat = ComposerMetrics.minTextHeight
     var onSend: () -> Void
 
     @State private var contentHeight: CGFloat = ComposerMetrics.minTextHeight
@@ -123,6 +143,6 @@ struct ComposerField: View {
             }
         }
         // The GeometryReader is greedy, so the cap lives out here on the whole field.
-        .frame(height: ComposerMetrics.fieldHeight(forContent: contentHeight, cap: cap))
+        .frame(height: ComposerMetrics.fieldHeight(forContent: contentHeight, cap: cap, floor: floor))
     }
 }

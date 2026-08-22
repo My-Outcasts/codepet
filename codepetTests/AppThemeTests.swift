@@ -21,4 +21,5 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(AppTheme.system.label(.en), "System")
         XCTAssertEqual(AppTheme.dark.label(.vi), "Tối")
     }
+
 }

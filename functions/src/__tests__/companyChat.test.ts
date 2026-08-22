@@ -313,15 +313,22 @@ const mockMessagesCreate = jest.fn(async (_args?: any): Promise<any> => ({
   usage: { input_tokens: 10, output_tokens: 5 }
 }));
 
+// Hoisted so a test can both stub it and READ the params it received. Everything
+// that injects a stream factory bypasses `defaultStreamFactory` entirely, which
+// means the request object the SSE path actually builds — the one and only place
+// tsc checks message content against the SDK's `MessageParam` — was never
+// exercised at runtime by any test. The attachment tests below reach it on purpose.
+const mockMessagesStream = jest.fn((_params?: any): any => {
+  throw new Error("real Anthropic stream() called in test — inject a stream factory");
+});
+
 jest.mock("@anthropic-ai/sdk", () => {
   return jest.fn().mockImplementation(() => ({
     messages: {
       create: mockMessagesCreate,
-      // Only reached if a test forgets to inject a stream factory — fail loudly
+      // Only reached if a test forgets to inject a stream factory — fails loudly
       // rather than making a real network call.
-      stream: jest.fn(() => {
-        throw new Error("real Anthropic stream() called in test — inject a stream factory");
-      })
+      stream: mockMessagesStream
     }
   }));
 });
@@ -372,6 +379,7 @@ describe("handleCompanyChat", () => {
   beforeEach(() => {
     __resetStreamFactoryForTests();
     mockMessagesCreate.mockClear();
+    mockMessagesStream.mockClear();
   });
 
   test("rejects non-POST methods", async () => {
@@ -1050,6 +1058,132 @@ describe("handleCompanyChat", () => {
       const body = (res as any).writes.join("");
       expect(body).toContain('"nav":{"destination":"tasks"}');
       expect(body).toContain('"remember":[{"topic":"pricing","statement":"$10/mo plan decided."}]');
+    });
+  });
+
+  // ── attachments: the wire contract the native client codes against ────────
+  //
+  // `ChatRequestBody` is applied with `as ChatRequestBody`, so a misspelled key is
+  // silently ignored — no 400, no log line, just a turn with no image. These tests
+  // therefore go through the HANDLER rather than calling buildMessages directly:
+  // buildMessagesAttachments.test.ts already proves the rendering, and proved it
+  // while `companyChat.ts` read nothing at all. Only an end-to-end assertion on the
+  // outbound request can tell the difference between "renders correctly" and
+  // "actually gets sent".
+
+  describe("attachments reach the model", () => {
+    // Valid base64, short enough to assert on byte-for-byte.
+    const PNG_B64 = "iVBORw0KGgo=";
+    const png = { kind: "image", filename: "shot.png", media_type: "image/png", data: PNG_B64 };
+    const pngBlock = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_B64 } };
+
+    /** Minimal stand-in for the SDK's MessageStream: async-iterable + finalMessage(). */
+    function fakeSdkStream(text: string) {
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } };
+        },
+        async finalMessage() {
+          return { stop_reason: "end_turn", usage: { input_tokens: 9, output_tokens: 3 } };
+        }
+      };
+    }
+
+    const lastContent = (params: any) => params.messages[params.messages.length - 1].content;
+
+    test("an image on the request body is sent as an image block ahead of the question", async () => {
+      const req = makeReq({
+        body: { ...makeReq().body, user_message: "what is this?", attachments: [png] }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      expect((res as any).statusCode).toBe(200);
+      // Media first, one text block last: the model should have seen the screenshot
+      // by the time it reads the question about it.
+      expect(lastContent(mockMessagesCreate.mock.calls[0][0])).toEqual([
+        pngBlock,
+        { type: "text", text: "what is this?" }
+      ]);
+    });
+
+    test("an image on a HISTORY turn is replayed, so a follow-up question is not blind", async () => {
+      const req = makeReq({
+        body: {
+          ...makeReq().body,
+          history: [
+            { role: "me", text: "look at this", attachments: [png] },
+            { role: "companion", text: "A login form." }
+          ],
+          user_message: "is it responsive?"
+        }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      const params = mockMessagesCreate.mock.calls[0][0] as any;
+      expect(params.messages[0]).toEqual({
+        role: "user",
+        content: [pngBlock, { type: "text", text: "look at this" }]
+      });
+      expect(lastContent(params)).toBe("is it responsive?");
+    });
+
+    test("the SSE path sends the same blocks through the REAL stream request builder", async () => {
+      // No injected factory: this runs `defaultStreamFactory`, so the params here are
+      // the object tsc type-checks against the SDK. If its message mapping ever
+      // stringified content, `[object Object]` would reach the model with no error.
+      mockMessagesStream.mockImplementationOnce(() => fakeSdkStream("It's a login form."));
+
+      const req = makeReq({
+        headers: { authorization: "Bearer good", accept: "text/event-stream" },
+        body: { ...makeReq().body, user_message: "what is this?", attachments: [png] }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      expect(mockMessagesStream).toHaveBeenCalledTimes(1);
+      expect(lastContent(mockMessagesStream.mock.calls[0][0])).toEqual([
+        pngBlock,
+        { type: "text", text: "what is this?" }
+      ]);
+      expect((res as any).writes.join("")).toContain("event: delta");
+    });
+
+    test("a turn with no attachments still sends a plain string, byte-for-byte as before", async () => {
+      const req = makeReq();
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+      expect(lastContent(mockMessagesCreate.mock.calls[0][0])).toBe("what next?");
+    });
+
+    test("camelCase mediaType drops the image and the turn still answers — the silent failure", async () => {
+      // The exact shape a Swift client produces without a CodingKeys mapping. There is
+      // no error to find anywhere: an illegal media type would be a hard 400 that costs
+      // the founder the whole turn, so the attachment goes and the question stays.
+      const req = makeReq({
+        body: {
+          ...makeReq().body,
+          user_message: "what is this?",
+          attachments: [{ kind: "image", filename: "shot.png", mediaType: "image/png", data: PNG_B64 }]
+        }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      expect((res as any).statusCode).toBe(200);
+      expect(lastContent(mockMessagesCreate.mock.calls[0][0])).toBe("what is this?");
+    });
+
+    test("an unknown body key is ignored rather than rejected, so an older or newer client never 400s", async () => {
+      const req = makeReq({
+        body: { ...makeReq().body, attachment: [png], future_field: { anything: true } }
+      });
+      const res = makeRes();
+      await handleCompanyChat(req as any, res as any);
+
+      expect((res as any).statusCode).toBe(200);
+      expect(lastContent(mockMessagesCreate.mock.calls[0][0])).toBe("what next?");
     });
   });
 });

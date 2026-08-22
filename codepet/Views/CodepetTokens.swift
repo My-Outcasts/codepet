@@ -68,16 +68,19 @@ enum CodepetTokens {
 
     // MARK: Neutrals
 
-    static let well      = Color.dyn("#f1efe9", "#26211a")   // --well
-    static let surface2  = Color.dyn("#fcfbf8", "#1b1712")   // --surface-2
-    static let faint     = Color.dyn("#a79e92", "#6f685c")   // --t-4
-    static let page      = Color.dyn("#f8f7f3", "#16130f")   // --page
+    static let well      = Color.dyn("#efecf7", "#121019")   // --app-ground: the TRACK
+    static let surface2  = Color.dyn("#faf9fd", "#171420")   // --app-rail
+    static let faint     = Color.dyn("#9a93ab", "#6b6480")   // --app-faint
+    static let page      = Color.dyn("#f5f3fa", "#121019")   // --app-ground
 
-    /// Dark mode lifts every raised card above `--surface` and warms its edge,
-    /// because on the near-black page a black shadow can't separate the two
-    /// (`[data-theme='dark'] .deptrow, .kb-card, .lib-tile, .env-card…`).
-    static let cardRaised = Color.dyn("#ffffff", "#26201a")
-    static let cardEdge   = Color.dyn("#ece9e2", "#3c352b")
+    /// `well` is the TRACK and is now DARKER than the card that sits in it, which is
+    /// the conventional direction and the prototype's. It used to be lighter: `well`
+    /// (#26211a) was brighter than `surface` (#221d17) and within one hex digit of
+    /// `cardRaised` (#26201a), so "a card lifted out of a track" had almost no
+    /// contrast to work with — part of why the active mode segment needed purple body
+    /// added before it read as selected.
+    static let cardRaised = Color.dyn("#ffffff", "#1d1928")  // --app-panel: the CARD
+    static let cardEdge   = Color.dyn("#cdc6e2", "#3a3350")  // --app-line-2
 
     // MARK: Collapsed phase rails
     //
@@ -92,11 +95,11 @@ enum CodepetTokens {
     //   railBorder  light 1.90:1  dark 2.21:1   (was ~1.05 / 1.27)
     // The border does the real work of drawing the shape; the fill stays quiet
     // because a collapsed phase is meant to be de-emphasised, not loud.
-    static let railFill   = Color.dyn("#e0dbcf", "#3a3228")
-    static let railBorder = Color.dyn("#bdb5a2", "#574c3f")
+    static let railFill   = Color.dyn("#cdc6e2", "#2a2438")
+    static let railBorder = Color.dyn("#a79ec4", "#3a3350")
     /// Hover lift for an EXPANDABLE rail — the affordance the rails never had.
-    static let railFillHover   = Color.dyn("#d3ccbc", "#483f33")
-    static let railBorderHover = Color.dyn("#a89e88", "#6d604f")
+    static let railFillHover   = Color.dyn("#bcb3d6", "#332c4a")
+    static let railBorderHover = Color.dyn("#9188b0", "#4a4268")
 
     // MARK: Accent (violet brand)
 

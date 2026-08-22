@@ -81,6 +81,75 @@ final class BrandMarkRenderTests: XCTestCase {
                              + "colours that vanish into pageBackground. See \(url.path)")
     }
 
+    /// The bloom carries the brand's second stop.
+    ///
+    /// Sampled in the mark's band only (0..<155pt), for the reason the existing
+    /// mark test records: the greeting's accented word below is a near-identical
+    /// violet and would pass a full-frame search on its own. Pink has no such twin
+    /// on this screen, but keeping the same band keeps the two assertions
+    /// comparable.
+    ///
+    /// The threshold is deliberately loose. The pink stop is laid down at 0.18 over
+    /// pageBackground and then blurred by 18pt, so no pixel is ever close to pure
+    /// accentPink — what is being asserted is that the bloom is warm on its outer
+    /// edge, not that a pink pixel exists.
+    @MainActor
+    func testTheBloomCarriesTheBrandsSecondStop() throws {
+        let dir = ProcessInfo.processInfo.environment["CODEPET_RENDER_DIR"]
+            ?? NSTemporaryDirectory()
+        var company = CompanyState.empty
+        company.brief.founderName = "Mona"
+
+        let hero = ChatEmptyState(
+            state: ChatLandingState(company: company, now: Date(), language: .en),
+            onOpenRoadmap: {}, onStarter: { _ in },
+            beaconTasks: [], onBeacon: { _, _ in }
+        ) { EmptyView() }
+            .environment(\.chatSurface, .twoMode)
+            .environmentObject(CompanyStore())
+            .frame(width: 760, height: 420)
+            .background(CodepetTheme.pageBackground)
+            .environment(\.colorScheme, .dark)
+
+        let renderer = ImageRenderer(content: hero)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            XCTFail("ImageRenderer produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        let url = URL(fileURLWithPath: dir).appendingPathComponent("hero-bloom.png")
+        try png.write(to: url)
+        print("[render] \(url.path)")
+
+        // Warm means red leads blue. `pageBackground` (#16130f) is itself already
+        // "warm" by this raw definition — R=22 > B=15, i.e. every plain-background
+        // pixel outside the bloom's cool violet core already clears `+0.02` — so a
+        // literal `60`-pixel bar (the brief's draft value) passes at RED for free:
+        // measured 219,028/235,600 sampled pixels warm with the single-stop bloom,
+        // before this test's production change existed. Adding the pink stop pushes
+        // that to 233,020: the purple-only core cools ~16,572 pixels below the
+        // background's own baseline, and the pink stop reclaims about 14,000 of
+        // them. The threshold below sits at the midpoint of that measured RED/GREEN
+        // gap (~7,000-pixel margin either side) — high enough to fail on the old
+        // single-stop bloom, low enough to pass once the pink stop is real. Do not
+        // loosen the `0.02` channel margin to "fix" a future threshold miss;
+        // remeasure RED/GREEN instead.
+        var warmPixels = 0
+        let band = 0..<Int(155 * renderer.scale)
+        for y in band {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if c.redComponent > c.blueComponent + 0.02 { warmPixels += 1 }
+            }
+        }
+        XCTAssertGreaterThan(warmPixels, 226_000,
+                             "the bloom has no warm edge — the pink stop is missing, or the "
+                             + "radial was replaced by a linear ramp. See \(url.path)")
+    }
+
     /// Renders the pane the way the shell composes it and asserts the corners are
     /// the flat `pageBackground` — no ambient wash.
     ///

@@ -119,7 +119,13 @@ struct ChatEmptyState<Composer: View>: View {
     private var brandMark: some View {
         ZStack {
             Circle()
-                .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.34), .clear],
+                // Radial, not `CodepetTheme.ramp` — a linear gradient cannot fill a
+                // bloom without changing its shape. Same hue pair as the ramp, read
+                // named directly — `brandRamp` was dropped after Task 2's review; purple reads first
+                // because this is the logo's glow, not a companion's.
+                .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.34),
+                                              CodepetTheme.accentPink.opacity(0.18),
+                                              .clear],
                                      center: .center, startRadius: 0, endRadius: 46))
                 .frame(width: 92, height: 92)
                 .blur(radius: 18)

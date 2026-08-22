@@ -51,9 +51,9 @@ xcrun xcresulttool get test-results summary --path build/task.xcresult | head -2
 | `codepet/Views/Copilot/ChatBackdrop.swift` | **deleted** | — |
 | `codepet/Views/Copilot/CopilotChatView.swift` | modify `:173` | composes the pane on flat `pageBackground` |
 | `codepet/Views/Copilot/MessageCard.swift` | modify comment `:16-19` | its reasoning no longer cites a view that exists |
-| `codepet/Views/CodepetTheme.swift` | add `brandRamp`, `ramp(_:_:)` | the single source of gradient geometry + the brand hue pair |
+| `codepet/Views/CodepetTheme.swift` | add `ramp(_:_:)` | the single source of gradient geometry |
 | `codepet/Views/Copilot/ChatComposer.swift` | modify `:634`, `:177-180` | send button and container edge both companion-hued through `ramp` |
-| `codepet/Views/Copilot/ChatEmptyState.swift` | modify `:120-126` | hero bloom is a radial built from `brandRamp` |
+| `codepet/Views/Copilot/ChatEmptyState.swift` | modify `:120-126` | hero bloom is a radial on the brand pair, named directly |
 | `codepet/Views/Shell/TwoModeSidebar.swift` | modify `:166-176` | active mode segment has purple body, not just purple text |
 | `codepetTests/BrandMarkRenderTests.swift` | extend | corner flatness (dark + light) + the bloom's pink stop |
 | `codepetTests/ComposerEdgeRenderTests.swift` | **created** | the container edge is visible at rest, and honours the companion hue |
@@ -307,7 +307,7 @@ A pure refactor with no visual change, landed on its own so that when Tasks 3–
 **Interfaces:**
 - Consumes: `CodepetTheme.accentPurple`, `CodepetTheme.accentPink` (existing).
 - Produces:
-  - `CodepetTheme.brandRamp: [Color]` — exactly `[accentPurple, accentPink]`, in that order.
+  - ~~`CodepetTheme.brandRamp: [Color]`~~ — **REMOVED after this task's review** (commit follows `6219af7`). It shipped, then came out: the review found it had exactly one consumer (Task 3's radial) and that the coupling it was supposed to provide did not exist, because `ramp()` takes its hues from the caller and never read it. Array indexing (`brandRamp[0]`/`[1]`) for a single reader is fragility with nothing on the other side of the trade. Task 3 names `accentPurple`/`accentPink` directly. The justification written below — "so both forms read from one source" — was simply wrong.
   - `CodepetTheme.ramp(_ a: Color, _ b: Color) -> LinearGradient` — `.topLeading` → `.bottomTrailing`.
   Tasks 3, 4, and 5 all call these by these exact names.
 
@@ -437,7 +437,7 @@ EOF
 - Test: `codepetTests/BrandMarkRenderTests.swift`
 
 **Interfaces:**
-- Consumes: `CodepetTheme.brandRamp` from Task 2.
+- Consumes: `CodepetTheme.accentPurple` / `accentPink` directly. **`brandRamp` no longer exists** — dropped after Task 2's review found it had one consumer and no coupling benefit, since `ramp()` takes its hues from the caller and never read it.
 - Produces: nothing later tasks depend on.
 
 - [ ] **Step 1: Write the failing test**
@@ -529,10 +529,10 @@ inside `brandMark` (`:120-126`):
             Circle()
                 // Radial, not `CodepetTheme.ramp` — a linear gradient cannot fill a
                 // bloom without changing its shape. Same hue pair as the ramp, read
-                // from `brandRamp` so the two forms cannot drift; purple reads first
+                // named directly — `brandRamp` was dropped after Task 2's review; purple reads first
                 // because this is the logo's glow, not a companion's.
-                .fill(RadialGradient(colors: [CodepetTheme.brandRamp[0].opacity(0.34),
-                                              CodepetTheme.brandRamp[1].opacity(0.18),
+                .fill(RadialGradient(colors: [CodepetTheme.accentPurple.opacity(0.34),
+                                              CodepetTheme.accentPink.opacity(0.18),
                                               .clear],
                                      center: .center, startRadius: 0, endRadius: 46))
                 .frame(width: 92, height: 92)
@@ -567,7 +567,7 @@ git add codepet/Views/Copilot/ChatEmptyState.swift \
 git commit -m "$(cat <<'EOF'
 feat(chat): the hero bloom carries both brand stops
 
-Same hue pair as the ramp, read from brandRamp so the two cannot drift, but
+Same hue pair the ramp is called with at the composer, named directly, but
 built as a RadialGradient: a linear ramp cannot fill a bloom without changing
 its shape, which is why the shared token is a pair and not a finished gradient.
 
@@ -1150,7 +1150,7 @@ EOF
 ## Self-review
 
 **Spec coverage.** Every section maps to a task: removal → 1; the ramp constructor and
-`brandRamp` → 2; the aura's radial → 3; the composer edge in both states, companion-hued
+the aura's radial → 3; the composer edge in both states, companion-hued
 → 4; the mode segment's flat purple → 5; verification → 1, 3, 4, 5 with the full suite
 and the human handoff in 6. The `MessageCard` comment correction is folded into Task 1,
 where the view it cites is deleted. The two "gradients go where there is area" negatives
@@ -1161,7 +1161,7 @@ not re-add them.
 the cinematic entry screens, and `pageBackground`'s warm cast are each named in the Global
 Constraints or Task 6 Step 4 so they are not touched by accident.
 
-**Type consistency.** `brandRamp` and `ramp(_:_:)` are defined in Task 2 and used by
+**Type consistency.** `ramp(_:_:)` is defined in Task 2 and used by
 Tasks 3, 4, and 5 under exactly those names. `renderChatPane(colorScheme:)` and
 `cornerSamples(_:inset:)` are defined in Task 1 and reused in Task 1 Step 5.
 `mostSaturated(_:)` and `renderComposer(accent:name:)` are defined in Task 4 and the

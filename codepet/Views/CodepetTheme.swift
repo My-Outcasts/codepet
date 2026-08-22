@@ -53,13 +53,6 @@ enum CodepetTheme {
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
     static let accentGreen  = Color.dyn("#16a34a", "#4ade80")
 
-    /// The two stops the brand ramp is made of, purple first. Exposed as a pair
-    /// rather than as a finished gradient because a radial bloom must stay radial —
-    /// a `LinearGradient` cannot fill one without changing its shape — so the
-    /// hero's aura and the composer's stroke read from one source and build the
-    /// geometry each needs.
-    static let brandRamp: [Color] = [accentPurple, accentPink]
-
     /// The house ramp. Every two-stop gradient in the product is this function:
     /// one geometry, one direction, hues supplied by the caller. Extracted from the
     /// composer's send button, which had it inline.

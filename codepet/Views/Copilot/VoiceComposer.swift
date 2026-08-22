@@ -183,7 +183,8 @@ struct VoiceComposer: View {
         // **And nothing measures that the circles are in this row.** Deleting
         // `controls` changes the rendered height by nothing at all — `waveformToggle`
         // is the same `controlDiameter` tall — so the obvious guard is vacuous and was
-        // measured to be (`VoiceComposerTests.testTheComposersShapeIsPinned` records
+        // measured to be (`VoiceComposerTests
+        // .testTheComposersMeasuredHeightIsPinnedWithAndWithoutTheDisclosure` records
         // it: with `controls` commented out the whole suite went green). What IS
         // asserted is which controls this state is supposed to offer —
         // `VoiceChrome.controls(for:)`, in
@@ -378,8 +379,9 @@ struct VoiceComposer: View {
     /// mid-phrase with nothing on screen saying so.
     ///
     /// **This slot vanishing is what changed the composer's measured height** — 122pt to
-    /// 99pt in the dock, re-measured 22 Aug. See `testTheComposersShapeIsPinned`, which
-    /// now pins both heights rather than one.
+    /// 99pt in the dock, re-measured 22 Aug. See
+    /// `testTheComposersMeasuredHeightIsPinnedWithAndWithoutTheDisclosure`, which now pins
+    /// both heights rather than one.
     @ViewBuilder private var disclosure: some View {
         if let text = VoiceChrome.disclosure(onDevice: listener.isOnDevice,
                                              failure: turn.failure, lang) {

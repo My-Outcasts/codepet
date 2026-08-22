@@ -45,6 +45,22 @@ enum GitRunner {
             stderr: String(data: errData, encoding: .utf8) ?? "",
             exitCode: proc.terminationStatus)
     }
+
+    /// The `origin` remote's URL, or nil when there isn't one.
+    ///
+    /// A hint for matching a folder to a project the founder already has (see
+    /// `ProjectIdentity`), never an identity on its own — a fork, a re-pointed remote, and
+    /// two clones of one upstream all disagree with it in different directions.
+    ///
+    /// Nil rather than throwing on every failure: not a repo, no remote, git absent, path
+    /// gone. A missing hint is an ordinary outcome here, and every caller treats it the
+    /// same way — fall back to asking the founder.
+    static func remoteURL(in dir: String) -> String? {
+        let result = run(["remote", "get-url", "origin"], in: dir)
+        guard result.ok else { return nil }
+        let out = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? nil : out
+    }
 }
 
 /// Pure branch/commit slug from a human title.

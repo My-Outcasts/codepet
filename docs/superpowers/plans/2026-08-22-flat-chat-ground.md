@@ -116,7 +116,13 @@ Add to `codepetTests/BrandMarkRenderTests.swift`, inside the existing class. Not
               let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
-            throw XCTSkip("ImageRenderer produced nothing for CopilotChatView")
+            // A nil render is a FAILURE, not a skip — these are guards, and a skip
+            // would let CI stay green with the guard silently gone. `XCTFail` returns
+            // Void, so a non-Void throwing helper needs both: record the failure, then
+            // throw to abort. Declare `private enum RenderFailure: Error { case producedNothing }`
+            // alongside the other helpers.
+            XCTFail("ImageRenderer produced nothing for CopilotChatView")
+            throw RenderFailure.producedNothing
         }
         let url = URL(fileURLWithPath: dir)
             .appendingPathComponent("chat-pane-\(colorScheme == .dark ? "dark" : "light").png")
@@ -170,7 +176,7 @@ confirm before proceeding, because that image is the evidence the test is measur
 the wash and not something else.
 
 Two failures that mean something different, and what to do:
-- `XCTSkip("ImageRenderer produced nothing")` — `CopilotChatView` did not render. Reduce to `ChatEmptyState(...).background(ChatBackdrop())` for this task's red state, and record in the commit message that the durable guard is weaker than intended because the composed pane would not render.
+- `ImageRenderer produced nothing` — `CopilotChatView` did not render. Reduce to `ChatEmptyState(...).background(ChatBackdrop())` for this task's red state, and record in the commit message that the durable guard is weaker than intended because the composed pane would not render. **(Did not occur: the composed pane rendered, and the RED state was a real `0.0839` vs `0.06` corner-distance failure. This branch was never taken.)**
 - Corners already flat — the wash is not reaching 40pt from the edge at this frame size. Move `inset` to `20 * 2` and re-run before concluding anything.
 
 - [ ] **Step 3: Delete the view and its application**
@@ -629,7 +635,13 @@ final class ComposerEdgeRenderTests: XCTestCase {
               let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
-            throw XCTSkip("ImageRenderer produced nothing for ChatComposer")
+            // A nil render is a FAILURE, not a skip — these are guards, and a skip
+            // would let CI stay green with the guard silently gone. `XCTFail` returns
+            // Void, so a non-Void throwing helper needs both: record the failure, then
+            // throw to abort. Declare `private enum RenderFailure: Error { case producedNothing }`
+            // alongside the other helpers.
+            XCTFail("ImageRenderer produced nothing for ChatComposer")
+            throw RenderFailure.producedNothing
         }
         let url = URL(fileURLWithPath: dir).appendingPathComponent("composer-edge-\(name).png")
         try png.write(to: url)
@@ -877,7 +889,13 @@ Add to `codepetTests/ComposerEdgeRenderTests.swift`:
               let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
-            throw XCTSkip("ImageRenderer produced nothing for TwoModeSidebar")
+            // A nil render is a FAILURE, not a skip — these are guards, and a skip
+            // would let CI stay green with the guard silently gone. `XCTFail` returns
+            // Void, so a non-Void throwing helper needs both: record the failure, then
+            // throw to abort. Declare `private enum RenderFailure: Error { case producedNothing }`
+            // alongside the other helpers.
+            XCTFail("ImageRenderer produced nothing for TwoModeSidebar")
+            throw RenderFailure.producedNothing
         }
         let url = URL(fileURLWithPath: dir).appendingPathComponent("mode-switch.png")
         try png.write(to: url)

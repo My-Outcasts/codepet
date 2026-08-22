@@ -146,18 +146,36 @@ protocol SpeechListening: AnyObject {
 /// simultaneously. Keeping the mic out of `ChiptuneEngine` also means sound effects
 /// never require microphone permission.
 ///
-/// **Voice processing changes the input format to 7ch / 48kHz / deinterleaved**, and
-/// that is what a tap on `inputNode` receives. Feeding it straight to the recognizer
-/// is the trap: `AVAudioConverter(7ch→1ch)` *constructs* — so the obvious code
-/// compiles and looks right — but reports `channelMap == [-1]`, no valid source
-/// mapping, and hands the recognizer silence. The failure mode is "voice mode hears
-/// nothing" with no error to chase. So the input goes through an
-/// `AVAudioMixerNode`, which downmixes, and the tap is on the mixer.
+/// **The tap is on `inputNode`, mono, at the input bus's own sample rate — and the
+/// intermediate `AVAudioMixerNode` this used to route through was the bug.**
 ///
-/// **The mixer's channel count is stated and its sample rate is inherited** — see
-/// `start()`, where the callback measurements are recorded. Both of the obvious
-/// alternatives ship the same silent failure, one layer down, and both have now been
-/// shipped once.
+/// Voice processing changes the input format to multi-channel (measured 3ch/24000,
+/// 5ch/48000 and 7ch/48000 on this same Mac — it is renegotiated per session, never a
+/// constant), and the recognizer needs mono. The mixer was introduced to do that
+/// downmix, on the reasoning that `AVAudioConverter(7ch→1ch)` cannot: it *constructs* —
+/// so the obvious code compiles and looks right — but reports `channelMap == [-1]`, no
+/// valid source mapping, and its output is all zeros.
+///
+/// **That converter measurement is true and reproducible; the conclusion drawn from it
+/// was not.** A mixer whose output bus is connected to nothing is never rendered, so
+/// the tap on it fired ~10×/s, at the right frame count, delivering buffers that were
+/// exactly zero in every sample — "voice mode hears nothing", no throw, nothing to
+/// chase, and `onFailure` never reached because nothing failed. `installTap` on
+/// `inputNode` with an explicit mono format does the 7ch→1ch downmix itself, which is
+/// the only thing the mixer was ever for. Measured with `say` playing: five runs, real
+/// audio, every buffer non-zero, peak 0.19–0.81.
+///
+/// **The sample rate must be the input bus's own.** Any other rate makes
+/// `engine.start()` throw `-10875` (measured at 16000 and 44100) — so the class of
+/// mistake that produced this bug can no longer be silent: `openMic` catches the throw
+/// and renders it. Do not "help" by resampling here; `SFSpeechAudioBufferRecognitionRequest`
+/// accepts the device rate and mono is the part it actually needs.
+///
+/// Two measured dead ends, so nobody re-derives them: connecting the mixer onward to
+/// `mainMixerNode` to force it to render fails `engine.start()` with `-10875` while
+/// voice processing is on — it does not even initialise, so the old "do not route the
+/// mic to the speakers" warning reached the right answer by the wrong mechanism — and
+/// dropping voice processing fails `-10868`, besides costing barge-in.
 ///
 /// **One request does not last a conversation.** Barge-in needs the microphone open
 /// while the pet speaks, so this runs continuously; `SFSpeechRecognitionTask` does
@@ -224,17 +242,20 @@ final class SpeechListener: SpeechListening {
     }
 
     private let engine = AVAudioEngine()
-    private let downmix = AVAudioMixerNode()
     private let recognizer: SFSpeechRecognizer?
     private let feed = RequestFeed()
     private var task: SFSpeechRecognitionTask?
     private(set) var isRunning = false
 
     /// Graph state, tracked so `stop()` can undo exactly what `start()` did, from
-    /// any point at which it failed. `AVAudioNode.h`: "Only one tap may be installed
-    /// on any bus" — a second `installTap` is an internal assertion, an uncatchable
-    /// crash, not a thrown error. Repeat `attach` is undocumented.
-    private var didAttach = false
+    /// any point at which it failed.
+    ///
+    /// **`AVAudioNode.h`'s "only one tap may be installed on any bus" now applies to
+    /// `inputNode`,** which is the whole reason this flag and `stop()`'s `removeTap`
+    /// have to name the same node as `installTap` does. Let them drift apart and the
+    /// second `start()` installs a second tap on the input bus — an internal assertion,
+    /// an uncatchable crash, not a thrown error. Verified: three start/stop cycles on
+    /// one engine, each delivering real non-zero audio, no assertion.
     private var tapInstalled = false
     private var voiceProcessingOn = false
 
@@ -294,6 +315,32 @@ final class SpeechListener: SpeechListening {
         stop()
     }
 
+    // MARK: - The audio graph
+
+    /// The tap format for a given input-bus format: **one channel, that bus's own
+    /// sample rate.**
+    ///
+    /// Pure and `static` so the rule is testable. It is a two-line function carrying
+    /// two separately-shipped defects, and neither was visible from a format dump:
+    ///
+    /// - **One channel** is what `SFSpeechAudioBufferRecognitionRequest` needs, and
+    ///   `installTap` performs the downmix from whatever multi-channel format voice
+    ///   processing negotiated. Inheriting the channel count instead handed the
+    ///   recognizer stereo.
+    /// - **That bus's own rate, never a chosen one.** Any other rate makes
+    ///   `engine.start()` throw `-10875` — measured at 16000 and at 44100 — so a
+    ///   resample "helpfully" added here does not degrade voice mode, it stops it dead.
+    ///   16000 would be the tempting choice; it is the one that throws.
+    ///
+    /// `nil` only if `AVAudioFormat` refuses the combination, which `start()` reports
+    /// as a thrown `engineFailed` rather than a silent fallback.
+    nonisolated static func tapFormat(for inputFormat: AVAudioFormat) -> AVAudioFormat? {
+        AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                      sampleRate: inputFormat.sampleRate,
+                      channels: 1,
+                      interleaved: false)
+    }
+
     func start() throws {
         // Liveness before availability: a redundant `start()` on a healthy running
         // listener must be a no-op, not a thrown `recognizerUnavailable` because the
@@ -341,57 +388,29 @@ final class SpeechListener: SpeechListening {
             throw VoiceAudioError.engineFailed("voice processing: \(error.localizedDescription)")
         }
 
-        if !didAttach {
-            engine.attach(downmix)
-            didAttach = true
-        }
-        // Connect at the INPUT's own format; the mixer does the downmix.
-        //
-        // **Logged before the connect, because it is not a constant.** With voice
-        // processing on, the VPIO unit renegotiates this per session — measured 3ch/24000
-        // and 7ch/48000 on the SAME Mac minutes apart — so a format recorded once in a
-        // comment is a format that is wrong on the run you are chasing.
+        // **Logged before anything uses it, because it is not a constant.** With voice
+        // processing on, the VPIO unit renegotiates this per session — measured 3ch/24000,
+        // 5ch/48000 and 7ch/48000 on the SAME Mac minutes apart — so a format recorded
+        // once in a comment is a format that is wrong on the run you are chasing. It is
+        // also the only input to `tapFormat` below, which is why it is read once here
+        // rather than at each use.
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
         VoiceLog.listener.log("""
             inputNode.outputFormat(0) = \(VoiceLog.describe(inputFormat), privacy: .public)
             """)
-        engine.connect(engine.inputNode, to: downmix, format: inputFormat)
 
-        // The mixer's OUTPUT format is what the recognizer receives, and
-        // connect(_:to:format:) does not set it — it sets the SOURCE's output bus and
-        // makes the destination's INPUT bus match. Inherited, this bus measured
-        // 2ch/44100Hz on 21 Aug: the recognizer was being handed stereo.
+        // **Mono at the input bus's OWN rate. No intermediate node — see the class
+        // comment for why one was here and why it produced silence.**
         //
-        // **Force the channel count, INHERIT the sample rate.** Measured 21 Aug by
-        // counting tap callbacks over 2s with microphone authorisation confirmed:
-        // an `AVAudioMixerNode` downmixes 7ch→1ch on a tapped output bus but will
-        // NOT resample it. 1ch/44100 and 1ch/48000 both deliver ~19 callbacks;
-        // asking for 1ch/16000 moves the bus to 1ch/16000 and then the tap NEVER
-        // FIRES — zero callbacks, no error, which is precisely the "voice mode hears
-        // nothing with nothing to chase" failure the spec names. Moving the bus and
-        // audio flowing are different facts, and only the second one matters.
-        // `SFSpeechAudioBufferRecognitionRequest` accepts the device rate; mono is
-        // the part it actually needs.
-        //
-        // Do NOT instead connect `downmix` to `mainMixerNode` to force a format:
-        // that routes the microphone to the speakers and, with voice processing on,
-        // builds a feedback loop.
-        let inherited = downmix.outputFormat(forBus: 0)
-        // Both mixer buses, because the interesting fact is the DISAGREEMENT between
-        // them: the input bus carries the input node's format and the output bus carries
-        // whatever the mixer inherited, and when those two rates differ the mixer is
-        // being asked for a conversion. Neither number is visible from anywhere else.
-        VoiceLog.listener.log("""
-            downmix.inputFormat(0) = \(VoiceLog.describe(self.downmix.inputFormat(forBus: 0)), privacy: .public) \
-            downmix.outputFormat(0) = \(VoiceLog.describe(inherited), privacy: .public) (inherited)
-            """)
-        guard let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                            sampleRate: inherited.sampleRate,
-                                            channels: 1,
-                                            interleaved: false) else {
+        // `installTap` does the multi-channel → 1ch downmix itself, and the rate must
+        // match the bus: 16000 and 44100 each make `engine.start()` throw `-10875`, so
+        // getting this wrong is loud now instead of silent. `SpeechListener.tapFormat`
+        // is the pure derivation, so a test can hold the "same rate, one channel" rule
+        // without a microphone.
+        guard let tapFormat = Self.tapFormat(for: inputFormat) else {
             VoiceLog.listener.error("""
                 could not build the mono tap format at \
-                \(inherited.sampleRate, privacy: .public)Hz — throwing
+                \(inputFormat.sampleRate, privacy: .public)Hz — throwing
                 """)
             throw VoiceAudioError.engineFailed("could not build the mono tap format")
         }
@@ -399,8 +418,10 @@ final class SpeechListener: SpeechListening {
 
         openRecognition(recognizer)
 
-        // 4800 frames is 109ms at 44100 and 100ms at 48000. `AVAudioNode.h`:
-        // "Supported range is [100, 400] ms". The shipped 1024 was 23ms, outside it.
+        // 4800 frames is 100ms at 48000 and 200ms at 24000 — both rates the input bus
+        // has been measured at. `AVAudioNode.h`: "Supported range is [100, 400] ms", so
+        // 4800 is inside it at every rate this bus has produced. The shipped 1024 was
+        // 23ms, outside it.
         //
         // `@Sendable` is deliberate: under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
         // this closure would otherwise be *inferred* main-actor while `AVAudioEngine`
@@ -419,7 +440,7 @@ final class SpeechListener: SpeechListening {
         // session.
         let counter = VoiceLog.Counter()
         self.tapCounter = counter
-        downmix.installTap(onBus: 0, bufferSize: 4800, format: tapFormat) { @Sendable [weak self] buf, _ in
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4800, format: tapFormat) { @Sendable [weak self] buf, _ in
             // **Counted first, before any guard can return.** The point of the count is
             // to distinguish "the tap never fired" from "the tap fired and the buffers
             // were wrong", so a callback that falls out of one of the guards below must
@@ -498,7 +519,9 @@ final class SpeechListener: SpeechListening {
         // becomes `callbacks=0`, which is a fact you can point at instead of a gap you
         // have to infer.
         //
-        // 2s at ~10 callbacks a second means a healthy session reports ~19. Captures the
+        // 2s at ~10 callbacks a second means a healthy session reports ~19, and the
+        // `tap` lines' `zero=` flag is what says whether those callbacks carried audio —
+        // the two facts that came apart and cost this feature a week. Captures the
         // `Counter` and nothing else: no `self`, so this cannot keep a listener alive
         // past its `deinit`, and a session torn down before the deadline simply reports
         // the count it reached. Deliberately not cancelled on `stop()` — a stopped
@@ -508,7 +531,8 @@ final class SpeechListener: SpeechListening {
             VoiceLog.listener.log("""
                 census 2s after start: callbacks=\(counter.calls, privacy: .public) \
                 frames=\(counter.frames, privacy: .public) \
-                — 0 callbacks means the tap is on a node nothing renders
+                — 0 callbacks means the tap never fired; callbacks with zero=true on the \
+                tap lines means it fired on a bus nothing renders
                 """)
         }
 
@@ -531,8 +555,11 @@ final class SpeechListener: SpeechListening {
             """)
         // Tap first, then end the audio: the other order can let one more buffer
         // reach a request that has already been closed.
+        // **`inputNode`, the same node `start()` tapped.** If these two ever name
+        // different nodes the tap is never removed and the next `start()` is an
+        // uncatchable assertion — see `tapInstalled`.
         if tapInstalled {
-            downmix.removeTap(onBus: 0)
+            engine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
         }
         engine.stop()

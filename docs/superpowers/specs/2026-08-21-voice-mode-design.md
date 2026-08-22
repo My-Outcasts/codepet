@@ -242,6 +242,38 @@ conversion would most likely hand the recognizer silence — which fails as "voi
 with no error to chase. The reliable path is an intermediate `AVAudioMixerNode` between `inputNode` and
 the tap, with the downmix format stated explicitly rather than inherited.
 
+> ### ⛔️ SUPERSEDED, 22 Aug — the mixer *was* the "voice mode hears nothing" bug
+>
+> Everything from here to the `mainMixerNode` warning below is kept as a record of how this went
+> wrong. **The shipped conclusion is: tap `inputNode` directly, mono, at the input bus's own sample
+> rate. There is no intermediate node.** A mixer whose output bus is connected to nothing is never
+> rendered, so the tap on it fired ~10×/s at the correct frame count and every buffer was zero in
+> every sample. Diagnosis: `.superpowers/sdd/voice-diagnosis.md`. Fix and verification:
+> `.superpowers/sdd/tap-fix-report.md`.
+>
+> **The `channelMap == [-1]` measurement above is true. The inference drawn from it was not, and
+> that inference is what produced the mixer.** Re-measured 22 Aug, `say` playing, mic authorised:
+>
+> | claim | measured 22 Aug | verdict |
+> |---|---|---|
+> | `AVAudioConverter(7ch→1ch)` constructs but reports `channelMap == [-1]` | constructs; `channelMap == [-1]` | **true, reproducible** |
+> | …and therefore hands the recognizer silence | fed live 7ch buffers → 40 callbacks, **peak 0.000000**, while the same raw buffers read peak 0.666 | **true** |
+> | …**therefore the input must go through an `AVAudioMixerNode`** | `inputNode.installTap(format: 1ch @ bus rate)` → 40/40 non-zero buffers, peak 0.19–0.81, five runs | **FALSE** |
+>
+> `installTap` performs the multi-channel → 1ch downmix itself. It was never necessary to reach for
+> `AVAudioConverter`, so its (real) limitation never implied a mixer. **Tapping `inputNode` would have
+> worked from the beginning.**
+>
+> This is the same failure shape as the tap-format claim two paragraphs down, and the section's own
+> closing lesson — "measured a *property* and inferred behaviour from it" — described what was about to
+> happen again. The rule that actually holds: **a graph change is verified by non-zero sample content
+> with real sound in the room, never by a format dump and never by a callback count.** The
+> `1ch/16000 → 0 callbacks` finding below is likewise real, reproducible, and a red herring.
+>
+> One property worth keeping, because it converts this whole class of mistake from silent to loud: a
+> tap format at any rate other than the input bus's own makes `engine.start()` **throw `-10875`**
+> (measured at 16000 and 44100), and `openMic` already catches, stores and renders a throw.
+
 **"Stated explicitly" is the whole load-bearing phrase, and the first implementation still missed it.**
 Task 4 shipped `engine.connect(input, to: downmix, format: input.outputFormat(forBus: 0))` and then
 tapped `downmix.outputFormat(forBus: 0)` — reading the format back instead of setting it. `connect(_:to:format:)`
@@ -294,8 +326,19 @@ Any future change to this graph must be verified by callback count, not by forma
 in that environment. Frames flow; that the *voice* survives the 7→1 downmix needs one human saying a
 sentence. That is a handoff, not a claim.
 
+> **22 Aug: that paragraph was the bug, written down and explained away.** `peak == 0.0000 in every
+> trial` was the defect itself, attributed to the room instead of to the graph. The very next trial with
+> `say` playing would have caught it. **A zero peak is never "nobody was speaking" until you have made
+> a noise and watched it stay zero.**
+
 **Do not "fix" any of this by connecting the mixer to `mainMixerNode` to force a format.** That routes
 the microphone to the speakers, and with voice processing on it builds a feedback loop.
+
+> **22 Aug: right conclusion, wrong mechanism — and it no longer applies, since there is no mixer.**
+> Measured: connecting the mixer onward to `mainMixerNode` fails `engine.start()` with **`-10875`**
+> while voice processing is on. It never initialises, so it cannot route anything anywhere and there is
+> no feedback loop to build. Dropping voice processing to make the graph render fails **`-10868`**, and
+> would cost barge-in besides — voice processing is what cancels the pet's own speech out of the mic.
 
 **Two TCC prompts on first use** — microphone and speech recognition — and the app has neither usage
 string today (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` are absent from

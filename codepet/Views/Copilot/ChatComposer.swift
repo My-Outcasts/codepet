@@ -166,16 +166,28 @@ struct ChatComposer: View {
         }
         .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 10)
         // The house card: `cardRaised` + `cardEdge` at radius 12 with `shadowS`,
-        // the same object Tasks and Roadmap are built from. Accent moves to the
-        // edge only on focus — an always-accent outline (the dock's) made the
-        // composer the loudest thing on a pane it no longer competes for.
+        // the same object Tasks and Roadmap are built from. The edge carries the
+        // accent ramp in both states — 0.35 at rest, 0.9 focused. An always-accent
+        // outline at full strength did make the composer the loudest thing on the
+        // pane, which is why this used to be cardEdge at rest; a third of the way up
+        // on flat ground is the opposite problem, since cardEdge on cream is
+        // invisible without an ambient wash behind it.
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(CodepetTokens.cardRaised)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(focus.wrappedValue ? accent.opacity(0.65) : CodepetTokens.cardEdge,
+                // Both states are the same ramp at two opacities, not two different
+                // treatments — one stroke definition cannot drift into reading as two
+                // controls. Companion-hued: `accent` is `companionColor`, so brand
+                // purple must not be hard-coded here.
+                //
+                // At rest this used to be `cardEdge`, which on cream is a hairline of
+                // almost no value. The ambient wash had been doing that separating; with
+                // flat ground the edge has to carry it.
+                .stroke(CodepetTheme.ramp(accent, accent2)
+                            .opacity(focus.wrappedValue ? 0.9 : 0.35),
                         lineWidth: 1)
         )
         .shadow(color: restShadow.color, radius: restShadow.radius, x: restShadow.x, y: restShadow.y)

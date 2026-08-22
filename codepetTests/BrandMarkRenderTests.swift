@@ -20,6 +20,12 @@ import XCTest
 /// assertion so a human can look at what was judged; the path is printed.
 final class BrandMarkRenderTests: XCTestCase {
 
+    /// A nil render is a FAILURE, not a skip. These are guards: if the hero ever ends up
+    /// inside a `ScrollView`, `ImageRenderer` yields nothing, and a skip would let CI stay
+    /// green with the guard silently gone. Matches the `XCTFail` the mark test above uses
+    /// for this same condition.
+    private enum RenderFailure: Error { case producedNothing }
+
     @MainActor
     func testTheBrandMarkIsVisibleOnTheDarkPane() throws {
         let dir = ProcessInfo.processInfo.environment["CODEPET_RENDER_DIR"]
@@ -84,8 +90,8 @@ final class BrandMarkRenderTests: XCTestCase {
     /// change. Rendering the real composition is also what keeps this a guard —
     /// re-add an ambient gradient anywhere behind the pane and this fails again.
     ///
-    /// The empty-hero path carries no `ScrollView` (the transcript's is at :484,
-    /// the history's at :693, neither reachable with no threads), which is the only
+    /// The empty-hero path carries no `ScrollView` (the transcript's is at :595,
+    /// the history's at :804, neither reachable with no threads), which is the only
     /// reason `ImageRenderer` produces anything here at all.
     @MainActor
     private func renderChatPane(colorScheme: ColorScheme) throws -> (rep: NSBitmapImageRep, url: URL) {
@@ -110,7 +116,8 @@ final class BrandMarkRenderTests: XCTestCase {
               let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
-            throw XCTSkip("ImageRenderer produced nothing for CopilotChatView")
+            XCTFail("ImageRenderer produced nothing for CopilotChatView")
+            throw RenderFailure.producedNothing
         }
         let url = URL(fileURLWithPath: dir)
             .appendingPathComponent("chat-pane-\(colorScheme == .dark ? "dark" : "light").png")

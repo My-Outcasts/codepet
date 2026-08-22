@@ -54,9 +54,11 @@ enum GitRunner {
     ///
     /// Nil rather than throwing on every failure: not a repo, no remote, git absent, path
     /// gone. A missing hint is an ordinary outcome here, and every caller treats it the
-    /// same way — fall back to asking the founder.
-    static func remoteURL(in dir: String) -> String? {
-        let result = run(["remote", "get-url", "origin"], in: dir)
+    /// same way — fall back to asking the founder. The `run` parameter is injectable only
+    /// so the exit-code gate is provable without a corrupted repo on disk.
+    static func remoteURL(in dir: String,
+                          run: ([String], String) -> GitResult = GitRunner.run) -> String? {
+        let result = run(["remote", "get-url", "origin"], dir)
         guard result.ok else { return nil }
         let out = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return out.isEmpty ? nil : out

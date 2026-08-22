@@ -80,6 +80,18 @@ final class ComposerEdgeRenderTests: XCTestCase {
     /// `mutedText` are all light (every channel's max component sits at 0.7+); the
     /// composer's dark UI chrome (`bodyText`, `mutedText`'s foreground, icon glyphs)
     /// tops out under 0.4. 0.5 sits with room on both sides of that measured gap.
+    ///
+    /// The floor is what makes this work, and it is load-bearing on two facts that
+    /// are true today and not guaranteed:
+    ///
+    /// - `CodepetTokens.cardRaised` is `#ffffff` in light mode, so any accent
+    ///   blended at 0.35 opacity over it keeps a max channel ≥0.65, comfortably
+    ///   clearing 0.5.
+    /// - no current companion accent is dark.
+    ///
+    /// Break either — a darker `cardRaised`, or a dark pet accent colour — and this
+    /// floor would start skipping the real edge pixel, and this test would then
+    /// measure something else (or nothing) while still passing.
     private func mostSaturated(_ rep: NSBitmapImageRep) -> NSColor? {
         var best: NSColor?
         var bestSat: CGFloat = 0
@@ -103,6 +115,8 @@ final class ComposerEdgeRenderTests: XCTestCase {
         }
         // `cardEdge` (#ece9e2) has saturation ~0.04. The ramp at 0.35 over cream
         // lands well above that. 0.15 sits between the two with room on both sides.
+        // Measured resting peak: ~0.199 — headroom of ~0.05 above the 0.15 floor,
+        // not razor-thin but not huge either.
         XCTAssertGreaterThan(saturation(peak), 0.15,
                              "the resting composer edge is a near-invisible hairline on cream — "
                              + "it is still cardEdge. See \(url.path)")
@@ -125,6 +139,34 @@ final class ComposerEdgeRenderTests: XCTestCase {
                              "the composer edge ignored the companion accent and drew brand "
                              + "purple — accent is companionColor, not a constant. See \(url.path)")
     }
+
+    // MARK: - Focused state: unverified offscreen
+
+    /// Neither test above exercises `.opacity(focus.wrappedValue ? 0.9 : 0.35)`'s
+    /// focused branch, so a swapped ternary (0.9 and 0.35 traded) would ship
+    /// undetected by this file. That gap was checked, not assumed:
+    ///
+    /// Tried forcing it — a host variant that set `@FocusState private var focused`
+    /// to `true` from `.onAppear` before rendering. The peak saturation measured
+    /// **identical** to the resting render, to the full precision of the float
+    /// (`0.19918614589212516` both times) — the state change had no visible effect
+    /// on the pixels at all. The console corroborates why: this suite's every run
+    /// logs `[SwiftUI] Accessing FocusState's value outside of the body of a View.
+    /// This will result in a constant Binding of the initial value and will not
+    /// update.` `@FocusState` engages through the responder chain of a real window;
+    /// `ImageRenderer` never creates one, so there is no first responder for focus
+    /// to move to, and `focus.wrappedValue` is frozen at whatever it started as
+    /// regardless of what mutates it.
+    ///
+    /// So this is a genuine, not a lazy, gap: a focused render is not achievable
+    /// offscreen with this harness, and no test here can catch the ternary being
+    /// swapped. What would catch it instead: a human opening the composer, clicking
+    /// into the field, and confirming the edge visibly brightens versus at rest —
+    /// the same manual check this suite's own doc comment says the ambient-wash
+    /// regression needed. `CLAUDE.md`'s landmine list already treats "no window in
+    /// tests" as a standing constraint (`ImageRenderer` inside a `ScrollView`
+    /// renders nothing, for the same underlying reason), so this is that same
+    /// ceiling, not a new one.
 }
 
 /// Hosts `ChatComposer` with the one `FocusState` it requires. Unfocused and empty,

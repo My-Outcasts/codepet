@@ -27,6 +27,10 @@ enum ChatContext {
     private static let bodyWeight = 1
     // Per-excerpt body clip in the rendered prior-work block.
     private static let excerptCap = 240
+    /// Per-excerpt clip for a PINNED item. Five times the automatic cap, because a
+    /// choice deserves more room than a guess — that is the entire difference
+    /// between this block and the one below it.
+    private static let pinnedExcerptCap = 1200
 
     /// Split text into lowercased, de-duped content tokens (≥3 chars, no stopwords).
     private static func tokenize(_ s: String) -> Set<String> {
@@ -46,10 +50,16 @@ enum ChatContext {
     /// deliverable's title + body — a title match counts for more than a body match.
     /// `query` nil/empty (or with no scorable tokens) falls back to most-recent by
     /// `createdAt` desc. Ties keep newest-first order (stable). Pure and deterministic.
-    static func selectPriorWork(_ library: [Deliverable], query: String? = nil, max: Int = 3) -> [Deliverable] {
+    ///
+    /// `excluding` holds `Deliverable.id`s the founder pinned explicitly. They are
+    /// rendered by `composePinned` at a longer cap, and an item in both blocks does
+    /// not read as emphasis — it reads as two documents with one title.
+    static func selectPriorWork(_ library: [Deliverable], query: String? = nil, max: Int = 3,
+                                excluding: Set<String> = []) -> [Deliverable] {
         let usable = library.filter {
             !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !excluding.contains($0.id)
         }
         let newestFirst = usable.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
 
@@ -68,6 +78,40 @@ enum ChatContext {
             a.score != b.score ? a.score > b.score : a.index < b.index
         }
         return Array(ranked.prefix(max).map { $0.item })
+    }
+
+    /// The founder's own choice of grounding, rendered above the ranked guesses.
+    ///
+    /// A pin that no longer resolves — pinned, then deleted in Library — contributes
+    /// nothing rather than sending its cached title as though the document still
+    /// existed. If none resolve, the block is empty and no heading is composed: a
+    /// heading over an empty list would instruct the model to "use it directly"
+    /// about nothing.
+    private static func composePinned(_ pins: [ContextPin],
+                                      library: [Deliverable],
+                                      tasks: [RoadmapTask]) -> String {
+        guard !pins.isEmpty else { return "" }
+        var lines: [String] = []
+        for pin in pins {
+            switch pin {
+            case .deliverable(let id, _):
+                guard let d = library.first(where: { $0.id == id }) else { continue }
+                let flattened = d.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                let excerpt = flattened.count > pinnedExcerptCap
+                    ? String(flattened.prefix(pinnedExcerptCap)) + "…"
+                    : flattened
+                lines.append("- \(d.title) (\(d.kind.rawValue)): \(excerpt)")
+            case .task(let id, _):
+                guard let t = tasks.first(where: { $0.id == id }) else { continue }
+                let detail = t.detail.trimmingCharacters(in: .whitespacesAndNewlines)
+                let state = t.done ? "done" : "open"
+                lines.append("- \(t.title) (roadmap task, \(state))"
+                             + (detail.isEmpty ? "" : ": \(detail)"))
+            }
+        }
+        guard !lines.isEmpty else { return "" }
+        return ContextPin.groundingHeading + "\n" + lines.joined(separator: "\n")
     }
 
     /// Render selected prior work as a grounding block. "" when there's nothing to
@@ -186,7 +230,8 @@ enum ChatContext {
     /// hand keep their current grounding.
     static func compose(brief: CompanyBrief, tasks: [RoadmapTask], decisions: [DecisionEntry] = [],
                          library: [Deliverable] = [], query: String? = nil,
-                         focusDepartment: Department? = nil, memoryEnabled: Bool = true) -> String {
+                         focusDepartment: Department? = nil, memoryEnabled: Bool = true,
+                         pinned: [ContextPin] = []) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
         if let dep = focusDepartment {
@@ -210,7 +255,13 @@ enum ChatContext {
         if !tasks.isEmpty { parts.append(markDoneGate) }
         let deptBlock = composeDepartments(DepartmentCatalog.summaries(tasks: tasks))
         if !deptBlock.isEmpty { parts.append(deptBlock) }
-        let priorBlock = composePriorWork(selectPriorWork(library, query: query))
+        // Pinned first: the founder's explicit choice reads before the ranker's
+        // guesses, and the guesses are filtered by it.
+        let pinnedBlock = composePinned(pinned, library: library, tasks: tasks)
+        if !pinnedBlock.isEmpty { parts.append(pinnedBlock) }
+        let priorBlock = composePriorWork(
+            selectPriorWork(library, query: query,
+                            excluding: Set(pinned.compactMap { $0.deliverableId })))
         if !priorBlock.isEmpty { parts.append(priorBlock) }
         return parts.joined(separator: "\n")
     }

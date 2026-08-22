@@ -58,6 +58,15 @@ struct VoiceTurn {
     /// **Hoisted with the rest, and it was visibly wrong before.** The composer was
     /// rebuilt on the first turn of every thread, so the line read `~0 credits` on the
     /// turn the founder had just been charged for.
+    ///
+    /// **Nothing reads this as of 22 Aug.** The founder screenshotted
+    /// `~0 credits · on-device` and asked for it removed, so `VoiceChrome.disclosure`
+    /// no longer renders a count and §7 is amended to record that. It is kept rather
+    /// than deleted with the line for one reason: the *ordering* argument at the write
+    /// site in `VoiceComposer.sendTurn()` — why the increment is inside the `Task`,
+    /// after the `await` — cost a review round to establish and is not re-derivable from
+    /// the code. Deleting the field deletes that. If the count is not put back, delete
+    /// both together.
     var turns = 0
 
     /// Whether the microphone has been opened for **this** voice-mode session.
@@ -291,11 +300,11 @@ extension VoiceTurn {
         level = 0
     }
 
-    /// Whether ✓ can do anything right now. Reads the rule rather than restating it —
-    /// see `VoiceTurnFlow.canTakeTurn`, which the send site checks again.
-    func canSend(isBusy: Bool) -> Bool {
-        VoiceTurnFlow.canTakeTurn(partial: partial, state: session.state, isBusy: isBusy)
-    }
+    // `canSend(isBusy:)` lived here until 22 Aug: a one-line pass-through to
+    // `VoiceTurnFlow.canTakeTurn`, read only by `VoiceComposer`'s ✓. It is gone because
+    // ✓ now shares one enablement expression with its ⌘⏎ hotkey — see
+    // `VoiceHotkey.isEnabled` and `VoiceComposer.isEnabled(_:)`. Two names for one rule
+    // is how a hotkey ends up gated on a different fact than the button it is printed on.
 }
 
 // MARK: - Speaking the reply

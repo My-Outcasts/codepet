@@ -16,7 +16,8 @@ import XCTest
 /// guard. See `testItExpandsWithoutTakingOverThePane`.
 ///
 /// **And one of its assertions could not be made to work at all**, which is recorded on
-/// `testTheComposersShapeIsPinned` rather than quietly dropped.
+/// `testTheComposersMeasuredHeightIsPinnedWithAndWithoutTheDisclosure` rather than
+/// quietly dropped.
 ///
 /// **Two figures from the deleted file (368 and 389) were marked irreproducible there
 /// and are not carried forward.** Every number below was measured on this branch, by
@@ -78,8 +79,9 @@ final class VoiceComposerTests: XCTestCase {
     /// this suite was the dock variant until `preview(surface:)` existed, and
     /// `cornerRadius`, `controlDiameter` and the card fill each have a `.twoMode`
     /// branch. The two differ by exactly one thing that can change a height —
-    /// `controlDiameter`, 28 in the dock and 26 in the pane — which is why the pinned
-    /// figures below are 122 and 120 rather than one number.
+    /// `controlDiameter`, 28 in the dock and 26 in the pane — which is why every pinned
+    /// figure below is a pair (99/97 with no disclosure slot, 122/120 with it) rather
+    /// than one number.
     private static let surfaces: [ChatSurface] = [.dock, .twoMode]
 
     // MARK: - Layout
@@ -89,7 +91,10 @@ final class VoiceComposerTests: XCTestCase {
     /// (`readingColumn(_:)`), so a box that shrank to its content would sit narrow in
     /// the middle of a column the transcript above it fills — visibly not the same
     /// object as the composer it replaced. Intrinsically, unconstrained, it reports
-    /// 168pt — the status line's own measure.
+    /// **120pt on-device and 261pt off-device** (re-measured 22 Aug; it was 168 either
+    /// way while the `~2 credits · on-device` line existed and set the ideal width). So
+    /// the gap this closes is now 400pt, not 352, and on-device it is the waveform row
+    /// rather than the bottom line that sets the floor.
     ///
     /// **A property guard, not a modifier guard, and measured to be one.** The width
     /// fill is implemented twice over: by the two `maxWidth: .infinity` frames, and
@@ -109,15 +114,21 @@ final class VoiceComposerTests: XCTestCase {
     /// This is the takeover's `testItFillsTheHeightItIsOffered` **inverted**, and the
     /// inversion is the whole change: that surface existed to cover the pane, and this
     /// one exists so the conversation stays visible. Offered 700pt of height it must
-    /// take its own ~122 and leave the rest to the chat. Put `.frame(maxHeight:
-    /// .infinity)` back on `body` — the one line that would quietly turn the composer
-    /// back into a takeover — and this reports 700 and goes red.
+    /// take its own ~99 (122 off-device) and leave the rest to the chat. Put
+    /// `.frame(maxHeight: .infinity)` back on `body` — the one line that would quietly
+    /// turn the composer back into a takeover — and this reports 700 and goes red.
     ///
     /// The lower bound is the other half: it has to have GROWN, or "voice lives in the
     /// composer" is just the composer with its field swapped out. Derived from
     /// `ComposerMetrics.paneMinTextHeight`, the typing area an ordinary composer
     /// reserves, so it stays a comparison against the thing it expanded from rather than
-    /// a second copy of 122.
+    /// a second copy of the pinned figure.
+    ///
+    /// **Its headroom shrank on 22 Aug and it still holds.** The bottom slot no longer
+    /// renders on-device, so the intrinsic height is 99 rather than 122 against a bound of
+    /// `24 + 40 = 64` — 35pt of margin where there were 58. Recorded because this is the
+    /// assertion that would break next if the composer got shorter again, and nothing
+    /// about the bound was touched to keep it green.
     func testItExpandsWithoutTakingOverThePane() {
         let offered = size(VoiceComposer.preview(state: .listening, partial: "why"),
                            w: Self.paneWidth, h: 700)
@@ -137,8 +148,14 @@ final class VoiceComposerTests: XCTestCase {
     /// small circles at the bottom-right of this box, so a box that reflows as she talks
     /// moves them out from under her pointer mid-sentence.
     ///
-    /// Measured 22 Aug: with `transcriptSlot`'s fixed-height slot deleted, one line
-    /// reports **99pt against two lines' 116pt** — the 17pt gap this assertion closes.
+    /// **RE-MEASURED 22 Aug, after the bottom slot stopped rendering on-device.** With
+    /// `transcriptSlot`'s fixed-height frame deleted, one line reports **76pt against two
+    /// lines' 93pt** — the same 17pt gap this assertion closes, 23pt lower than the
+    /// 99/116 pair recorded earlier the same day, because that pair was measured while
+    /// `~2 credits · on-device` was still on screen. The gap is what this test asserts;
+    /// the absolute figures are recorded so nobody reads 99 here and 99 in
+    /// `testTheComposersMeasuredHeightIsPinnedWithAndWithoutTheDisclosure` as the same
+    /// measurement.
     func testAGrowingTranscriptDoesNotChangeTheSize() {
         let a = size(VoiceComposer.preview(state: .listening, partial: "why"),
                      w: Self.paneWidth, h: nil)
@@ -182,23 +199,52 @@ final class VoiceComposerTests: XCTestCase {
     /// `controlDiameter` (28 vs 26), which is the only surface-dependent thing in the
     /// vertical stack.
     ///
-    /// **RED at 99pt** (dock) two independent ways: with `statusLine` deleted from the
-    /// `VStack`, and with the transcript's fixed slot deleted. The two land on the same
-    /// number by coincidence — the status line is worth 23pt with its spacing, and
-    /// collapsing the 40pt slot to one line costs the same 23 — so do not read either
-    /// figure as derived from the other.
-    func testTheComposersShapeIsPinned() {
-        let expected: [ChatSurface: CGFloat] = [.dock: 122, .twoMode: 120]
+    /// **RE-MEASURED 22 AUG, because the surface got shorter.** The bottom-left slot no
+    /// longer renders at all on-device (founder: "remove this info" — see
+    /// `VoiceChrome.disclosure`), so the composer the founder actually sees is **99pt in
+    /// the dock and 97pt in two-mode**, not 122/120. The old figures are recorded here
+    /// rather than overwritten silently: 122 was this same composer *with* the
+    /// `~2 credits · on-device` line, and 99 was already the documented RED for deleting
+    /// that line — so the shipped height is now the number the previous guard used to
+    /// fail at. Nothing was adjusted to make a test pass; the measurement moved because
+    /// the view did.
+    ///
+    /// **Both branches are pinned now, and that is new coverage rather than a wider
+    /// assertion.** Off-device keeps §3's escalated sentence, so it still measures
+    /// 122/120 — which makes "the disclosure slot is present" and "the disclosure slot is
+    /// absent" two distinguishable heights for the first time. Before 22 Aug the slot
+    /// rendered in both cases and the two states were 122 and 122, which is exactly what
+    /// `testTheOffDeviceDisclosureFitsTwoLinesInTheDock` was written to work around.
+    ///
+    /// Still a property guard and still not an isolating one: it goes red for the
+    /// transcript slot, the control row's height, this slot, or the padding, and does not
+    /// say which.
+    ///
+    /// **RED, 22 Aug:** with `guard !onDevice else { return nil }` deleted from
+    /// `VoiceChrome.disclosure`, every on-device render measures 122/120 against the 99/97
+    /// pinned here — 16 of this test's 32 assertions fail, and 20 across the suite: two
+    /// more in `testTheSlotIsSilentOnDeviceAndCarriesSection3sSentenceWhenItIsNot` and two
+    /// in `testNoFailureIsEverShownBesideAClaimThatRecognitionIsRunning`, whose
+    /// "no-slot" reference render is an on-device composer.
+    func testTheComposersMeasuredHeightIsPinnedWithAndWithoutTheDisclosure() {
+        let withoutSlot: [ChatSurface: CGFloat] = [.dock: 99, .twoMode: 97]
+        let withSlot: [ChatSurface: CGFloat] = [.dock: 122, .twoMode: 120]
         for surface in Self.surfaces {
             for width in [Self.paneWidth, Self.dockWidth] {
                 for state in [VoiceState.idle, .listening, .thinking, .speaking] {
-                    let s = size(VoiceComposer.preview(state: state, partial: "why",
-                                                       surface: surface),
-                                 w: width, h: nil)
-                    XCTAssertEqual(s.height, expected[surface]!, accuracy: 2,
-                                   "\(surface)/\(state) at \(width)pt measured \(s.height)pt "
-                                   + "— 99 is this composer with no status line, which is "
-                                   + "where the privacy disclosure and the credit count live")
+                    for onDevice in [true, false] {
+                        let s = size(VoiceComposer.preview(state: state, partial: "why",
+                                                           onDevice: onDevice,
+                                                           surface: surface),
+                                     w: width, h: nil)
+                        let expected = onDevice ? withoutSlot[surface]! : withSlot[surface]!
+                        XCTAssertEqual(s.height, expected, accuracy: 2,
+                                       "\(surface)/\(state)/onDevice=\(onDevice) at \(width)pt "
+                                       + "measured \(s.height)pt against \(expected) — "
+                                       + "on-device must carry NO bottom line and off-device "
+                                       + "must carry §3's disclosure, and those are the 23pt "
+                                       + "between these two numbers")
+                    }
                 }
             }
         }
@@ -206,7 +252,7 @@ final class VoiceComposerTests: XCTestCase {
 
     /// **The §3 disclosure has to fit, and `.lineLimit(2)` is not slack.**
     ///
-    /// `statusLine` escalates to the full off-device sentence — ~88 characters at 10pt —
+    /// `disclosure` returns the full off-device sentence — ~88 characters at 10pt —
     /// and the default truncation is `.tail`, so a line that needs three lines loses its
     /// end silently: "Your speech is sent to Apple for recognition. It does not stay on
     /// this…". That is the footnote §3 forbids, arrived at by layout rather than by
@@ -217,19 +263,22 @@ final class VoiceComposerTests: XCTestCase {
     /// disclosure and a fitting one render the same 122pt — which is exactly why the
     /// earlier "122 / 122, off-device vs on-device" pair proved nothing about it. This
     /// measures the string against the width instead: what it needs unconstrained
-    /// against what two lines give it.
+    /// against what two lines give it. (Since 22 Aug the on-device composer measures 99
+    /// and the off-device one 122, so those two ARE now distinguishable — but only as
+    /// "the slot rendered", never as "it rendered whole".)
     ///
     /// **What it does not cover**, stated because the shape of this test is the shape of
     /// the finding it answers: it restates the font (`inter(footnote)`) rather than
-    /// reading it off the view, so changing the font in `statusLine` alone would not go
+    /// reading it off the view, so changing the font in `disclosure` alone would not go
     /// red. The width IS shared — `VoiceComposer.horizontalPadding` and
     /// `ChatColumn.textWidth` are the view's own.
     ///
-    /// RED: raise `turns` to a number whose credit fragment pushes it over, or drop the
-    /// limit to 1 here — at `lineLimit(1)` the dock measures 13pt against 25pt needed.
-    func testTheOffDeviceDisclosureFitsTwoLinesInTheDock() {
+    /// RED: drop the limit to 1 here — at `lineLimit(1)` the dock measures 13pt against
+    /// 25pt needed. (The old form of this note said "raise `turns` until the credit
+    /// fragment pushes it over"; there is no credit fragment in this string any more.)
+    func testTheOffDeviceDisclosureFitsTwoLinesInTheDock() throws {
         for lang in [AppLanguage.en, .vi] {
-            let line = VoiceChrome.statusLine(turns: 10, onDevice: false, lang)
+            let line = try XCTUnwrap(VoiceChrome.disclosure(onDevice: false, failure: nil, lang))
             let text = Text(line).font(CodepetTheme.inter(CodepetType.footnote))
             let inner = Self.dockWidth - VoiceComposer.horizontalPadding * 2
             let needed = size(text.lineLimit(nil), w: inner, h: nil)
@@ -460,42 +509,100 @@ final class VoiceComposerTests: XCTestCase {
         }
     }
 
-    /// **The compact line has to carry BOTH requirements** — spec §2: "Both fit as one
-    /// compact line inside the expanded composer — `2 credits · on-device`".
+    /// **The slot is silent on-device and still says §3's sentence when it is not** —
+    /// the founder's 22 Aug call, and the one exception she kept.
     ///
-    /// This is the port of `testTheCreditLineCountsWhatTheTurnsCost` (§7: voice makes
-    /// turns cheap to spend without noticing — ten exchanges is ~2.5 credits in about
-    /// two minutes, so the count is on screen) fused with §3's disclosure, because the
-    /// two are now one string and a compression that dropped either would be invisible
-    /// on screen.
+    /// This replaces `testTheCompactLineCarriesBothTheCreditsAndTheDisclosure`, which
+    /// asserted the opposite of what now ships: that the line always renders and always
+    /// carries the credit count. The credit half is gone by instruction ("remove this
+    /// info") and §2/§7 are amended; the privacy half is kept because removing it is not
+    /// a tidier UI, it is telling a Vietnamese founder nothing while her voice goes to
+    /// Apple's servers.
     ///
-    /// **The off-device assertion is the one that would rot.** Compressing "Your speech
-    /// is sent to Apple for recognition" to a two-word tag is the tempting version of
-    /// this line, and it is the footnote §3 forbids; this is what goes red if someone
-    /// tries it.
-    func testTheCompactLineCarriesBothTheCreditsAndTheDisclosure() {
-        let ten = VoiceChrome.statusLine(turns: 10, onDevice: true, .en)
-        XCTAssertTrue(ten.contains("2.5"), "ten turns is ~2.5 credits: \(ten)")
-        XCTAssertTrue(ten.contains("credits"), "the credit count lost its unit: \(ten)")
-        XCTAssertTrue(ten.contains("on-device"), "the disclosure fell off: \(ten)")
-        // Not "2.50"/"0.00" — %g, so a whole number reads as one.
-        XCTAssertTrue(VoiceChrome.statusLine(turns: 0, onDevice: true, .en).contains("0"))
-        XCTAssertFalse(VoiceChrome.statusLine(turns: 4, onDevice: true, .en).contains("1.00"))
-        XCTAssertTrue(VoiceChrome.statusLine(turns: 4, onDevice: true, .en).contains("1 "))
+    /// **Both directions fail silently on screen, which is why both are asserted.** A
+    /// surviving on-device tag is the noise she asked to have removed and looks
+    /// deliberate; a suppressed off-device sentence removes §3's only disclosure and
+    /// looks like nothing at all.
+    ///
+    /// **RED, 22 Aug:** delete `guard !onDevice else { return nil }` and the first
+    /// assertion fails (`~0 credits · on-device` — actually just the sentence now, but
+    /// non-nil either way); return `privacyLine(lang, onDevice: onDevice)` unguarded and
+    /// the on-device assertions fail; hard-code `nil` and the off-device block fails.
+    func testTheSlotIsSilentOnDeviceAndCarriesSection3sSentenceWhenItIsNot() {
+        for lang in [AppLanguage.en, .vi] {
+            XCTAssertNil(VoiceChrome.disclosure(onDevice: true, failure: nil, lang),
+                         "the on-device line the founder asked to have removed is still "
+                         + "there (\(lang)): "
+                         + "\(VoiceChrome.disclosure(onDevice: true, failure: nil, lang) ?? "")")
+        }
 
-        let remote = VoiceChrome.statusLine(turns: 10, onDevice: false, .en)
-        XCTAssertTrue(remote.contains("Apple"),
-                      "the compact line dropped the one disclosure §3 exists for: \(remote)")
-        XCTAssertTrue(remote.contains("2.5"), "the credits fell off the off-device line: \(remote)")
-        XCTAssertNotEqual(remote, ten,
-                          "the status line ignored whether recognition is on-device")
+        let en = VoiceChrome.disclosure(onDevice: false, failure: nil, .en)
+        let vi = VoiceChrome.disclosure(onDevice: false, failure: nil, .vi)
+        XCTAssertEqual(en, VoiceChrome.privacyLine(.en, onDevice: false),
+                       "the off-device slot no longer shows §3's disclosure verbatim")
+        XCTAssertEqual(vi, VoiceChrome.privacyLine(.vi, onDevice: false))
+        XCTAssertTrue(en?.contains("Apple") == true,
+                      "the slot dropped the one disclosure §3 exists for: \(en ?? "nil")")
+        XCTAssertTrue(vi?.contains("Apple") == true,
+                      "the VI slot dropped the disclosure: \(vi ?? "nil")")
+        XCTAssertNotEqual(en, vi, "the disclosure is chrome and must be bilingual")
 
-        XCTAssertNotEqual(VoiceChrome.statusLine(turns: 3, onDevice: true, .vi),
-                          VoiceChrome.statusLine(turns: 3, onDevice: true, .en),
-                          "the status line is chrome and must be bilingual")
-        XCTAssertNotEqual(VoiceChrome.statusLine(turns: 3, onDevice: false, .vi),
-                          VoiceChrome.statusLine(turns: 3, onDevice: false, .en),
-                          "the status line is chrome and must be bilingual")
+        // The credit count is gone, in both languages and in the one case that still
+        // renders. Asserted on the unit rather than on a digit: "0.25" and "~2.5" both
+        // vanish with `creditFragment`, but "Apple" contains no digits either, so a
+        // digit test here would pass for the wrong reason.
+        for text in [en, vi].compactMap({ $0 }) {
+            XCTAssertFalse(text.contains("credits") || text.contains("tín dụng"),
+                           "the credit count survived into the disclosure: \(text)")
+        }
+    }
+
+    /// **A failure and a privacy claim must never share a frame — and this slot is where
+    /// `VoiceChrome.line`'s precedence does not reach.**
+    ///
+    /// `line(state:partial:failure:_:)` already puts a failure over every caption, for
+    /// the reason recorded on `testAFailureTakesTheTextSlotFromEveryCaption`: the founder
+    /// must not be told the microphone is live and dead at once. The bottom-left slot is a
+    /// *second* text slot that reads none of that — so after `RecognitionWatchdog` fired,
+    /// the composer rendered "No words came back. macOS may need its speech model…" over
+    /// "Your speech is sent to Apple **for recognition**." Removing the on-device tag
+    /// resolves it for the on-device path by leaving nothing to contradict; it does not
+    /// resolve the off-device path, and that is the likelier one — vi-VN recognition is
+    /// server-side, so a dropped network is precisely what raises `onFailure`.
+    ///
+    /// Asserted as copy AND as a measured height, because they fail independently: the
+    /// string could be suppressed while the view kept reading `listener.isOnDevice`, or
+    /// the view could stop rendering it while the string still claimed it.
+    ///
+    /// **RED, 22 Aug:** delete `guard failure == nil else { return nil }` from
+    /// `VoiceChrome.disclosure` — the four `XCTAssertNil`s fail, and the off-device
+    /// render measures 122pt against the 99 asserted here.
+    func testNoFailureIsEverShownBesideAClaimThatRecognitionIsRunning() {
+        let failures: [Error] = [VoiceAudioError.recognitionNeverAnswered,
+                                 VoiceAudioError.engineFailed("no speech detected")]
+        for failure in failures {
+            for lang in [AppLanguage.en, .vi] {
+                XCTAssertNil(VoiceChrome.disclosure(onDevice: false, failure: failure, lang),
+                             "\(lang): the composer said the microphone stopped and that "
+                             + "her speech is being sent to Apple for recognition, in one "
+                             + "frame")
+            }
+        }
+        // And the slot really is not on screen: the off-device composer with a failure
+        // measures the same as the silent on-device one.
+        for surface in Self.surfaces {
+            let dead = size(VoiceComposer.preview(state: .idle, partial: "",
+                                                  failure: VoiceAudioError.recognitionNeverAnswered,
+                                                  onDevice: false, surface: surface),
+                            w: Self.dockWidth, h: nil)
+            let silent = size(VoiceComposer.preview(state: .listening, partial: "why",
+                                                    onDevice: true, surface: surface),
+                              w: Self.dockWidth, h: nil)
+            XCTAssertEqual(dead.height, silent.height, accuracy: 2,
+                           "\(surface): a failed off-device composer measured \(dead.height)pt "
+                           + "against \(silent.height) with no slot — the disclosure is still "
+                           + "being rendered under the failure")
+        }
     }
 
     /// **PORTED** from `testTheTurnButtonsSayWhatTheyDoInBothLanguages`, with the reason

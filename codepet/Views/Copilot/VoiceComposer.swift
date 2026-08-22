@@ -104,7 +104,7 @@ struct VoiceComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             transcriptSlot
             bottomRow
-            statusLine
+            disclosure
         }
         .padding(.horizontal, Self.horizontalPadding).padding(.top, 11).padding(.bottom, 10)
         // The composer's own card, so this reads as the composer having grown rather
@@ -202,6 +202,12 @@ struct VoiceComposer: View {
     /// of its two ✕s purely to tell "close voice mode" from "discard this sentence";
     /// giving the exit its own distinct glyph removes the ambiguity instead of
     /// labelling around it.
+    /// **Esc is attached HERE, and that is the whole of change 2** (founder, 22 Aug).
+    /// Not a hidden button and not `.onExitCommand`: this Button already is the exit, so
+    /// the key routes through the one `close()` that exists rather than through a second
+    /// teardown that could forget `stopImmediately()` or `listener.stop()`. See
+    /// `VoiceHotkey.exit`, and `VoiceTurn.leave` for why the pane's `.onDisappear` still
+    /// has to carry the other half.
     private var waveformToggle: some View {
         Button(action: close) {
             Image(systemName: "waveform")
@@ -212,6 +218,7 @@ struct VoiceComposer: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(VoiceHotkey.exit.key, modifiers: VoiceHotkey.exit.modifiers)
         .help(VoiceChrome.closeLabel(lang))
         .accessibilityLabel(VoiceChrome.closeLabel(lang))
     }
@@ -277,18 +284,32 @@ struct VoiceComposer: View {
             }
             if offered.contains(.discard) {
                 circleButton(symbol: "xmark", label: VoiceChrome.label(for: .discard, lang),
-                             filled: false, enabled: true, action: discardTurn)
+                             filled: false, hotkey: .discard, action: discardTurn)
             }
             if offered.contains(.send) {
                 circleButton(symbol: "checkmark", label: VoiceChrome.label(for: .send, lang),
-                             filled: true, enabled: canSend, action: sendTurn)
+                             filled: true, hotkey: .send, action: sendTurn)
             }
         }
     }
 
-    /// Whether ✓ can do anything right now. Reads the rule rather than restating it —
-    /// see `VoiceTurnFlow.canTakeTurn`, which the send site checks again.
-    private var canSend: Bool { turn.canSend(isBusy: isBusy) }
+    /// **Whether a control — and the key on it — can do anything right now.**
+    ///
+    /// One expression for both, which is the point: ✓'s `.disabled` and ⌘⏎'s enablement
+    /// were two separate things to get right, and a hotkey that fires while the button
+    /// under it is greyed has nothing on screen to give it away. The rules themselves are
+    /// `VoiceTurnFlow.canTakeTurn` and `VoiceChrome.controls(for:)`, reached through
+    /// `VoiceHotkey.isEnabled` — see there for why `.discard` is gated on a different
+    /// fact than `.send` and why `.exit` is gated on nothing.
+    ///
+    /// This replaced `turn.canSend(isBusy:)`, a one-line pass-through to the same
+    /// `canTakeTurn` with no other consumer; keeping both would have been two names for
+    /// one rule, and the hotkey would have read one of them while the button read the
+    /// other.
+    private func isEnabled(_ hotkey: VoiceHotkey) -> Bool {
+        VoiceHotkey.isEnabled(hotkey, partial: turn.partial,
+                              state: turn.session.state, isBusy: isBusy)
+    }
 
     /// A turn already in flight, typed or spoken. `sendMessage` returns silently on
     /// either flag, so this is the difference between a disabled ✓ she can see and a
@@ -298,9 +319,19 @@ struct VoiceComposer: View {
     }
 
     /// ✕ grey and outlined, ✓ blue and filled — founder, 22 Aug.
+    ///
+    /// **The hotkey and the disabled state come from one argument** (change 3, founder,
+    /// 22 Aug: ⌘⏎ for ✓, ⌘⌫ for ✕). `hotkey` supplies the key equivalent AND, through
+    /// `isEnabled`, whether the button is live — so ⌘⏎ cannot bypass the rule that greys
+    /// ✓ while the transcript is empty or a turn is in flight. Two independent things
+    /// then have to fail for a key to send nothing: SwiftUI does not fire a disabled
+    /// Button's shortcut, and `VoiceTurnFlow.takeTurn` re-checks `canTakeTurn` at the
+    /// send site anyway.
     private func circleButton(symbol: String, label: String, filled: Bool,
-                              enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+                              hotkey: VoiceHotkey,
+                              action: @escaping () -> Void) -> some View {
+        let enabled = isEnabled(hotkey)
+        return Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(filled
@@ -319,30 +350,45 @@ struct VoiceComposer: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .keyboardShortcut(hotkey.key, modifiers: hotkey.modifiers)
         .help(label)
         .accessibilityLabel(label)
     }
 
-    // MARK: - The compact line
+    // MARK: - The bottom-left slot
 
-    /// **Spec §2's two requirements Claude's composer does not have**: the privacy
-    /// disclosure (§3) and the running credit count (§7), on one line. The escalation
-    /// when the audio is not on-device is `VoiceChrome.statusLine`'s, and the colour
-    /// follows it — a disclosure that her voice is leaving the Mac painted as grey
-    /// chrome would be the footnote §3 forbids.
+    /// **Spec §3's disclosure, and nothing else — the line is gone on 22 Aug otherwise.**
+    ///
+    /// This was `statusLine`: `~2 credits · on-device`, both of spec §2's two
+    /// requirements Claude's composer does not have. The founder screenshotted it and
+    /// asked for it removed. What survives, and why the credit count did not, is argued
+    /// at `VoiceChrome.disclosure` — including why the off-device case is a privacy
+    /// exception rather than an inconsistency, and why a failure suppresses it.
+    ///
+    /// **Unconditionally warning-coloured now, because there is only the warning case
+    /// left.** The old ternary painted the on-device tag as `CodepetTokens.faint` grey
+    /// chrome; with that branch gone, a `listener.isOnDevice` ternary here would be a
+    /// second copy of the decision `VoiceChrome.disclosure` already made — and its grey
+    /// arm would be unreachable.
     ///
     /// `.lineLimit(2)` and it is not slack: the escalated off-device sentence needs both
     /// lines at the dock's reading column, so it sits exactly on the limit. See
-    /// `VoiceComposerTests.testTheOffDeviceDisclosureFitsTheDocksTwoLines`, which is
+    /// `VoiceComposerTests.testTheOffDeviceDisclosureFitsTwoLinesInTheDock`, which is
     /// there because the default `.tail` truncation would cut the §3 disclosure
     /// mid-phrase with nothing on screen saying so.
-    private var statusLine: some View {
-        Text(VoiceChrome.statusLine(turns: turn.turns, onDevice: listener.isOnDevice, lang))
-            .font(CodepetTheme.inter(CodepetType.footnote))
-            .foregroundStyle(listener.isOnDevice ? CodepetTokens.faint
-                                                 : CodepetTheme.accentOrange)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    ///
+    /// **This slot vanishing is what changed the composer's measured height** — 122pt to
+    /// 99pt in the dock, re-measured 22 Aug. See `testTheComposersShapeIsPinned`, which
+    /// now pins both heights rather than one.
+    @ViewBuilder private var disclosure: some View {
+        if let text = VoiceChrome.disclosure(onDevice: listener.isOnDevice,
+                                             failure: turn.failure, lang) {
+            Text(text)
+                .font(CodepetTheme.inter(CodepetType.footnote))
+                .foregroundStyle(CodepetTheme.accentOrange)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     // MARK: - Leaving, and the two taps
@@ -364,7 +410,12 @@ struct VoiceComposer: View {
         // voice (spec §5) because a misheard sentence must never spend
         // `RoomOffer.credits`.
         //
-        // **`turns += 1` is inside, after the await.** `sendMessage` checks
+        // **`turns += 1` is inside, after the await — and nothing reads it as of
+        // 22 Aug.** The credit line it fed was removed on the founder's instruction;
+        // see `VoiceTurn.turns` for why the counter and this ordering argument are kept
+        // rather than deleted with it. What the argument is:
+        //
+        // `sendMessage` checks
         // `isStreaming`/`isCompanionTyping` again when this Task actually runs, so
         // counting the turn out here counted one that could still be dropped. The cost
         // is that the count updates when the reply lands rather than when it is sent.

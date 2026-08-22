@@ -14,48 +14,68 @@ import Foundation
 enum VoiceChrome {
 
     /// 0.25 credits per spoken exchange — spec §7's "ten spoken exchanges is ~2.5
-    /// credits in about two minutes", stated as the per-turn number so the line on
-    /// screen and the spec cannot drift.
+    /// credits in about two minutes", stated as the per-turn number so the price and
+    /// the spec cannot drift.
+    ///
+    /// **Nothing on screen reads this as of 22 Aug** — see `disclosure`, where the
+    /// credit count was removed on the founder's instruction. It is kept, labelled,
+    /// rather than deleted with the line: the price is a product fact, and putting the
+    /// count back is one `Text` if she reverses. `VoiceTurn.turns` is the count itself
+    /// and carries the same note.
     static let creditsPerTurn = 0.25
 
-    // MARK: - The compact line, and the one case it cannot stay compact for
+    // MARK: - The bottom-left slot, and the one case it still has something to say
 
-    /// **Spec §2's `2 credits · on-device`** — the running credit count (§7) and the
-    /// privacy disclosure (§3) on one line, because the composer has room for one line
-    /// where the takeover had room for two.
+    /// **What the composer's bottom-left slot says — `nil` almost always, as of
+    /// 22 Aug.**
     ///
-    /// **It escalates when the audio is leaving the Mac, and that is deliberate.**
-    /// On-device is the benign case and a two-word tag is enough for it. Off-device is
-    /// the case §3 exists for — her voice is going to Apple's servers — and two grey
-    /// words in footnote type would be exactly the footnote §3 forbids ("It has to be
-    /// visible, not a footnote"). So that case renders `privacyLine` in full, unchanged,
-    /// and the surface paints it as a warning rather than as chrome. Compactness is
-    /// what gets given up, in the one case where the spec says legibility outranks it.
+    /// Until 22 Aug this was `statusLine(turns:onDevice:_:)` and always rendered
+    /// something: spec §2's `~2 credits · on-device`, escalating to §3's full sentence
+    /// when the audio was leaving the Mac. The founder screenshotted that line and said
+    /// "remove this info". Both halves of what happened next are argued here, because
+    /// one is a spec requirement deliberately dropped and the other is a spec
+    /// requirement deliberately kept.
+    ///
+    /// **The credit count goes, in every case** (founder, 22 Aug) — which drops §7's
+    /// "the composer carries a running count". §7 and §2 are amended rather than left
+    /// contradicted by this file. The cost is real and is not hidden: nothing on screen
+    /// now says what talking spends, while §7's reason for the count — talking is much
+    /// faster than typing, so voice makes turns cheap to spend without noticing — is
+    /// untouched by removing it. `creditsPerTurn` and `VoiceTurn.turns` are kept for
+    /// that reason.
+    ///
+    /// **The disclosure stays whenever recognition is not on-device, and that is not
+    /// tidiness.** §3 is a privacy disclosure. On a Mac with the en-US asset installed
+    /// the tag read `on-device`, disclosed nothing, and was the noise the founder saw.
+    /// In Vietnamese the same slot says the opposite — her speech goes to Apple's
+    /// servers, because no `vi-VN` on-device asset exists (§3, measured 21 Aug) — and so
+    /// does English on a Mac where the en-US asset was never installed. Hiding *that* is
+    /// a privacy harm, not a cleaner composer. So the off-device case keeps the full
+    /// escalated sentence, unchanged, still painted as a warning rather than as chrome.
     ///
     /// **`onDevice` decides it, not `lang`.** See `privacyLine`: this is a property of
     /// which Assistant assets are installed, and a line that reads the language and
     /// ignores the fact is the `lang == .vi ? why : why` defect in a new place.
     ///
-    /// **The turn count is dropped, and that is a real loss.** The retired `creditLine`
-    /// read "8 turns · ~2 credits this session", arguing that "the number that
-    /// surprises a founder is how many turns two minutes of talking is". The founder's
-    /// measured target line is two segments, so the turns are gone; the credits — the
-    /// number that is actually spent — are not.
-    static func statusLine(turns: Int, onDevice: Bool, _ lang: AppLanguage) -> String {
-        "\(creditFragment(turns: turns, lang)) · \(privacyFragment(onDevice: onDevice, lang))"
-    }
-
-    /// `~2 credits`. `%g`, not `%.2f`: 2.5 must read "2.5" and 0 must read "0", not
-    /// "2.50"/"0.00".
-    private static func creditFragment(turns: Int, _ lang: AppLanguage) -> String {
-        let amount = String(format: "%g", Double(turns) * creditsPerTurn)
-        return lang == .vi ? "~\(amount) tín dụng" : "~\(amount) credits"
-    }
-
-    /// The compact tag, or the full disclosure — see `statusLine`.
-    private static func privacyFragment(onDevice: Bool, _ lang: AppLanguage) -> String {
-        guard onDevice else { return privacyLine(lang, onDevice: false) }
-        return lang == .vi ? "chạy trên máy này" : "on-device"
+    /// **And it is suppressed while a failure is on screen.** This is a SECOND text
+    /// slot, and `line(state:partial:failure:_:)`'s precedence — a failure outranks
+    /// every caption, because the founder must never be told the microphone is live and
+    /// dead in one frame — does not reach here. After `RecognitionWatchdog` fires, the
+    /// transcript slot said the microphone was dead while this slot asserted live
+    /// recognition ("Your speech is sent to Apple **for recognition**") in the same
+    /// frame. Dropping the on-device tag fixes that for the on-device path by leaving
+    /// nothing to contradict; it does NOT fix the off-device path, which is where a
+    /// failure is most likely — vi-VN recognition is server-side, so a dropped network
+    /// is exactly what raises `onFailure`. So the same precedence rule is stated here,
+    /// in the slot it did not reach.
+    static func disclosure(onDevice: Bool, failure: Error?,
+                           _ lang: AppLanguage) -> String? {
+        // A failure owns the surface. See above: this slot cannot claim recognition is
+        // happening over a line saying the microphone stopped.
+        guard failure == nil else { return nil }
+        // On-device discloses nothing, so there is nothing to show (founder, 22 Aug).
+        guard !onDevice else { return nil }
+        return privacyLine(lang, onDevice: false)
     }
 
     /// **Spec §3, and it is a disclosure rather than a footnote.** Unchanged from the

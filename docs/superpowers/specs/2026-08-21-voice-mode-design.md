@@ -103,6 +103,14 @@ Both fit as one compact line inside the expanded composer — `2 credits · on-d
 which is smaller than the overlay gave them but still legible and still not a
 footnote.
 
+> **📝 AMENDED, 22 Aug — one of those two is gone and the other is conditional.** The founder
+> screenshotted that exact line and said "remove this info". The credit count is removed outright (§7);
+> the privacy line is removed **only** in the on-device case, where it disclosed nothing, and still
+> renders in full whenever recognition is not on-device — which is always in Vietnamese. So the slot is
+> empty most of the time and carries §3's sentence when it has something to say. Full reasoning and the
+> failure-suppression rule that came with it: the boxes in §3 and §7. The composer's measured height
+> drops from **122pt to 99pt** in the dock (120 → 97 in two-mode) as a result.
+
 Five further calls were made in the design and are open to reversal; each is stated with its reason in
 §5 rather than buried in code. §5 formerly restated decision 3 so its constant lived somewhere findable;
 that entry is now struck through, because decision 4 leaves no constant to find.
@@ -124,6 +132,34 @@ the design was written, because each one could have killed a different part of i
 In **English** nothing leaves the Mac: recognition is on-device, synthesis is local, no network, no
 credits for the audio. In **Vietnamese** her speech goes to Apple's servers, because no on-device asset
 exists. That is a sentence in the composer, not a footnote.
+
+> ### 📝 AMENDED, 22 Aug — the disclosure is shown only when there is something to disclose
+>
+> The founder screenshotted the composer's bottom-left line (`~0 credits · on-device`) and said
+> **"remove this info"**. What ships now:
+>
+> | Recognition is… | What the composer's bottom-left slot shows |
+> |---|---|
+> | **on-device** (EN with the asset installed) | **nothing at all** |
+> | **not on-device** (VI always; EN with no en-US asset) | the full sentence above, unchanged, in warning colour |
+>
+> **The requirement in this section is unchanged for the case it was written about.** "A sentence in
+> the composer, not a footnote" was aimed at the case where something is actually leaving the Mac, and
+> that case still renders the whole sentence, still not as a footnote. What is dropped is the
+> *on-device* half — which was the two-word tag `on-device`, disclosing nothing and, in the founder's
+> own words, noise. Hiding the off-device half would be a privacy harm rather than a tidier UI, so the
+> exception is a requirement, not a leftover: it is the only place §3 appears on screen.
+>
+> **And it is suppressed while a recognition failure is on screen** (22 Aug). The disclosure is a
+> second text slot that `VoiceChrome.line`'s failure-outranks-everything precedence never reached, so
+> after `RecognitionWatchdog` fired the composer read "No words came back…" over "Your speech is sent
+> to Apple **for recognition**" in one frame. Dropping the on-device tag fixes the on-device path by
+> leaving nothing to contradict; the off-device path needed the precedence stated explicitly, and it is
+> where a failure is likeliest — vi-VN is server-side, so a dropped network is exactly what raises it.
+>
+> Code: `VoiceChrome.disclosure(onDevice:failure:_:)`. Guards:
+> `VoiceComposerTests.testTheSlotIsSilentOnDeviceAndCarriesSection3sSentenceWhenItIsNot` and
+> `…testNoFailureIsEverShownBesideAClaimThatRecognitionIsRunning`.
 
 And **the voices are `default` quality.** macOS can download `enhanced` and `premium` voices in System
 Settings, and out of the box this will sound like classic Mac TTS — serviceable, not ChatGPT-grade. A
@@ -151,6 +187,16 @@ looking for it in code.
 **Nothing leaves this loop without a tap.** ✓ sends, ✕ discards and returns to
 listening with the credit unspent. Silence does nothing at all — the mic keeps
 capturing until she decides, exactly as Claude's does.
+
+**Three keys, added 22 Aug (founder).** `Esc` leaves voice mode — routed through the
+waveform toggle's own action, so there is still exactly one exit path and one teardown.
+`⌘⏎` is ✓ and `⌘⌫` is ✕: modified rather than bare so they cannot collide with typing if
+this surface ever regains a text field, and because `⌫` reads as discard. Both respect
+the rules that gate the buttons — `⌘⏎` is dead on an empty transcript and while a turn is
+in flight (`VoiceTurnFlow.canTakeTurn`), `⌘⌫` is dead in `Connecting…` where ✕ is not
+drawn. The assignment and both gates are `VoiceHotkey`, tested rather than inline in a
+modifier; **`⌘D` stays reserved for record** (§10), and none of the three collides with
+`⌘B`, `⌘,`, `⌘1–7`, `⌘⇧T`, `⌘⇧M` or `⌘⇧H`.
 
 **The waveform button is both the toggle and the exit**, so there is one ✕, not two.
 An earlier draft of this diagram labelled the exit `tap ✕`, which was true of the
@@ -347,8 +393,29 @@ entitlement work is needed, but a denial must degrade to "voice mode unavailable
 on" rather than a dead button.
 
 **Credits.** Talking is much faster than typing, so voice mode is the feature that makes turns cheap to
-spend without noticing. Ten spoken exchanges is ~2.5 credits in about two minutes. The composer carries a
-running count for that reason.
+spend without noticing. Ten spoken exchanges is ~2.5 credits in about two minutes. ~~The composer carries
+a running count for that reason.~~
+
+> ### 📝 AMENDED, 22 Aug — the running count is removed, and the risk it answered is still open
+>
+> Founder, 22 Aug, on the composer's `~0 credits · on-device` line: **"remove this info"**, credits
+> included. So the composer carries **no** count, in either the on-device or the off-device case.
+>
+> **The risk stated above is unchanged by that.** Talking is still faster than typing and 0.25 credits
+> per spoken turn is still the price; what has changed is that nothing on screen says so while she is
+> talking. That is the founder's call on her own product and it is recorded rather than argued down, but
+> it is recorded as a *reversal of a mitigation*, not as the risk going away: the next place a founder
+> can learn what a voice session cost is the billing surface, after the fact.
+>
+> `VoiceChrome.creditsPerTurn` (0.25) and `VoiceTurn.turns` are kept, deliberately unread, so putting
+> the count back is one `Text`. The ordering argument at the write site —
+> `VoiceComposer.sendTurn()`'s `turns += 1` is inside the `Task`, after the `await`, because
+> `sendMessage` re-checks `isStreaming`/`isCompanionTyping` when the Task actually runs — cost a review
+> round and is not re-derivable from the code, which is the reason the counter outlived its display. If
+> the count is not put back, delete both together.
+>
+> §2's `2 credits · on-device` line and §3's disclosure requirement are amended in place; see the box
+> in §3 for what the slot still shows and when.
 
 **The silence threshold is a feel, not a fact.** 1.2s will be wrong for someone who pauses mid-thought
 and wrong for someone who talks fast. One constant, tuned after use.

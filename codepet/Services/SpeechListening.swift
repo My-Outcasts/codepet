@@ -9,6 +9,16 @@ import os
 enum VoiceAudioError: Error, Equatable {
     case recognizerUnavailable
     case engineFailed(String)
+    /// **Real audio flowed and recognition never said a word about it** — see
+    /// `RecognitionWatchdog`, which decides when that is true, and `VoiceChrome
+    /// .failureText`, which carries the remedy (macOS has to download its speech model,
+    /// and the only place to make it do that is System Settings → Keyboard → Dictation).
+    ///
+    /// Its own case rather than an `engineFailed(String)`: nothing about the engine
+    /// failed — it started, the tap fires, the buffers are real — and the remedy is
+    /// unguessable, so a founder cannot be handed a generic "the microphone stopped"
+    /// here. `Equatable` so a test can name which failure it means.
+    case recognitionNeverAnswered
 }
 
 /// What the founder has said this turn, across however many recognition requests it
@@ -241,6 +251,92 @@ final class SpeechListener: SpeechListening {
         }
     }
 
+    /// **The four facts `RecognitionWatchdog` decides on, gathered from the two threads
+    /// that know them.**
+    ///
+    /// Voiced buffers are counted on `AVAudioEngine`'s render thread; recognition
+    /// callbacks arrive on whatever queue `SFSpeechRecognitionTask` uses; the verdict is
+    /// read on the main actor. So this is a box, captured as a value by both closures
+    /// exactly the way `feed` and the tap's `Counter` are — **no `self`**, so neither
+    /// closure can keep a listener alive past its `deinit`, and no main-actor hop is
+    /// introduced on the render thread.
+    ///
+    /// **`OSAllocatedUnfairLock`, following `VoiceLog.Counter` rather than
+    /// `RequestFeed`.** `RequestFeed` argues its `NSLock` from measured numbers because
+    /// it has to hold a lock across `SFSpeechAudioBufferRecognitionRequest.append`; this
+    /// holds one across two integer adds, so an unfair lock — one atomic uncontended —
+    /// is the cheaper and `Sendable`-by-construction choice, and needs no `@unchecked`.
+    ///
+    /// **`nonisolated`, not merely `Sendable`.** Under
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a bare `final class` is *inferred*
+    /// main-actor, so `noteVoicedBuffer()` from the render thread would be a main-actor
+    /// call from a nonisolated context: silent in Swift 5 mode, an error in Swift 6.
+    /// Same reasoning as `RequestFeed`, `VoiceLevel` and `VoiceLog`.
+    nonisolated final class RecognitionCensus: Sendable {
+
+        /// A snapshot, so the watchdog reads all four facts from one lock acquisition
+        /// and cannot decide against a half-updated pair.
+        struct Facts: Equatable {
+            /// Appended buffers whose level was not exactly zero. Cumulative for the
+            /// session: "has real audio EVER arrived" is a session-level fact.
+            var voicedBuffers = 0
+            /// Recognition results delivered this session. Cumulative, and sticky by
+            /// design — see `RecognitionWatchdog.Verdict.recognitionAnswered`.
+            var results = 0
+            /// Whether the **current** request has errored. Cleared by
+            /// `requestOpened()`, because a renewal is a fresh chance to answer.
+            var errored = false
+            /// When the current request first saw real audio, on the monotonic clock.
+            var firstVoiced: UInt64?
+        }
+
+        private let state = OSAllocatedUnfairLock(initialState: Facts())
+
+        /// A buffer arrived carrying something other than digital silence.
+        ///
+        /// **`DispatchTime`, not `Date`.** The grace window is a duration, and
+        /// `Date` is wall-clock: an NTP correction or the founder changing her clock
+        /// mid-session would make the watchdog fire instantly or never.
+        /// `uptimeNanoseconds` is `mach_absolute_time`, monotonic and cheap enough for
+        /// the render thread.
+        func noteVoicedBuffer() {
+            let now = DispatchTime.now().uptimeNanoseconds
+            state.withLock { facts in
+                facts.voicedBuffers += 1
+                if facts.firstVoiced == nil { facts.firstVoiced = now }
+            }
+        }
+
+        /// A recognition callback arrived. **Counted before the listener's identity
+        /// guard can drop it**, for the same reason the log line is: a dropped callback
+        /// is still proof the channel is alive.
+        func noteRecognitionCallback(isError: Bool) {
+            state.withLock { facts in
+                if isError { facts.errored = true } else { facts.results += 1 }
+            }
+        }
+
+        /// A fresh request is now being fed. Clears the per-request facts and restarts
+        /// the grace clock; `results` and `voicedBuffers` deliberately survive.
+        func requestOpened() {
+            state.withLock { facts in
+                facts.errored = false
+                facts.firstVoiced = nil
+            }
+        }
+
+        var facts: Facts { state.withLock { $0 } }
+
+        /// Seconds since the current request first saw real audio; `0` if it has not.
+        /// `&-` because both readings come from the same monotonic clock and it cannot
+        /// go backwards — the wrapping subtraction states that rather than trusting it.
+        var sinceFirstVoicedBuffer: TimeInterval {
+            guard let first = facts.firstVoiced else { return 0 }
+            let now = DispatchTime.now().uptimeNanoseconds
+            return Double(now &- first) / 1_000_000_000
+        }
+    }
+
     private let engine = AVAudioEngine()
     private let recognizer: SFSpeechRecognizer?
     private let feed = RequestFeed()
@@ -285,6 +381,11 @@ final class SpeechListener: SpeechListening {
     /// a second session counts from zero. Read from the render thread and from the main
     /// actor, which is why it is a `Counter` and not an `Int`.
     private var tapCounter = VoiceLog.Counter()
+
+    /// The facts `RecognitionWatchdog` judges. Replaced on every `start()` so a second
+    /// session is judged on its own evidence, and so a watchdog left running by a
+    /// previous session can recognise that it is stale (`census === ` in `start()`).
+    private var census = RecognitionCensus()
 
     /// `contextualStrings` is why the locale is held: product nouns are exactly the
     /// words a general recognizer mishears.
@@ -416,6 +517,13 @@ final class SpeechListener: SpeechListening {
         }
         VoiceLog.listener.log("tapFormat = \(VoiceLog.describe(tapFormat), privacy: .public)")
 
+        // **Fresh per session, and before `openRecognition` so the recognition callback
+        // captures THIS session's box.** A session that inherited a previous one's
+        // `results > 0` would never police itself again — armed and permanently
+        // satisfied.
+        let census = RecognitionCensus()
+        self.census = census
+
         openRecognition(recognizer)
 
         // 4800 frames is 100ms at 48000 and 200ms at 24000 — both rates the input bus
@@ -465,6 +573,18 @@ final class SpeechListener: SpeechListening {
                 return
             }
             let level = VoiceLevel.level(from: UnsafeBufferPointer(start: channel, count: frames))
+            // **The one fact `RecognitionWatchdog` needs from this thread**, recorded
+            // here rather than up beside `counter.note` because it is the *level* that
+            // decides it and the level is not known until now. `> 0`, not a tuned floor:
+            // see `RecognitionWatchdog.verdict` — a level of exactly zero cannot come
+            // from a live microphone, so this separates "the audio path is dead" from
+            // "the audio path is alive", which is all it claims to do and all it can.
+            //
+            // A second lock acquisition per buffer on the render thread, deliberately:
+            // it keeps `counter.note` first and unguarded (the reason that ordering
+            // exists), and an uncontended `OSAllocatedUnfairLock` around one integer add
+            // is a single atomic. See `RecognitionCensus`.
+            if level > 0 { census.noteVoicedBuffer() }
             // **The first three and then silence, forever.** `os_log` is cheap but it is
             // not real-time safe, and this runs ~10 times a second on the render thread
             // for as long as voice mode is open; three calls in the life of a session is
@@ -531,13 +651,93 @@ final class SpeechListener: SpeechListening {
             VoiceLog.listener.log("""
                 census 2s after start: callbacks=\(counter.calls, privacy: .public) \
                 frames=\(counter.frames, privacy: .public) \
-                — 0 callbacks means the tap never fired; callbacks with zero=true on the \
-                tap lines means it fired on a bus nothing renders
+                voicedBuffers=\(census.facts.voicedBuffers, privacy: .public) \
+                recognitionResults=\(census.facts.results, privacy: .public) \
+                errored=\(census.facts.errored, privacy: .public) \
+                — 0 callbacks means the tap never fired; callbacks with 0 voicedBuffers \
+                means it fired on a bus nothing renders
                 """)
         }
 
+        startWatchdog(census)
+
         succeeded = true
         isRunning = true
+    }
+
+    /// **The one periodic thing on this path, and the only mechanism that can see the
+    /// failure it exists for.**
+    ///
+    /// Every other safety net here is driven by a recognition callback —
+    /// `recognitionUpdate` → `endOfTask` → `RenewalBudget` — so a recognizer that
+    /// accepts audio and answers *nothing* is invisible to all of them. Reproduced
+    /// standalone, outside the project, on this Mac: 45s, 450 real buffers appended,
+    /// zero callbacks. There is nothing to hang a check off, so the check has to ask.
+    ///
+    /// The decision is `RecognitionWatchdog`'s and every number in it is stated there.
+    /// This is the loop and nothing else — deliberately, because the loop is the part no
+    /// test may run and the decision is the part that has to be tested.
+    ///
+    /// **It is not the 4Hz silence watcher spec §2 decision 4 deleted.** That one took
+    /// the founder's turn on silence. This takes no turn, touches no transcript, and can
+    /// only report a fault — see `RecognitionWatchdog.tick`.
+    ///
+    /// **`[weak self]` and a stale-census guard.** The task must not keep a listener
+    /// alive past its `deinit`, and a task left running by session N must not fire
+    /// against session N+1's listener — so it exits when `self` is gone, when the
+    /// listener has stopped, and when `self.census` is no longer the box it was started
+    /// with. It also exits the moment the verdict is decided either way, so a healthy
+    /// conversation pays for a handful of ticks and then nothing.
+    private func startWatchdog(_ census: RecognitionCensus) {
+        Task { @MainActor [weak self] in
+            while true {
+                // **`do`/`catch`, not the `try?` the 2s census uses.** That one sleeps
+                // once; this one loops, and `Task.sleep` returns immediately when the
+                // task is cancelled — swallowed with `try?` a cancellation would turn
+                // this into a hot spin on the main actor rather than an exit.
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(RecognitionWatchdog.tick * 1_000_000_000))
+                } catch {
+                    return
+                }
+                guard let self, self.isRunning, self.census === census else { return }
+                let facts = census.facts
+                let verdict = RecognitionWatchdog.verdict(
+                    voicedBuffers: facts.voicedBuffers,
+                    results: facts.results,
+                    errored: facts.errored,
+                    sinceFirstVoicedBuffer: census.sinceFirstVoicedBuffer)
+                switch verdict {
+                case .keepWaiting:
+                    continue
+                case .recognitionAnswered:
+                    // Once, so a healthy session's trace says the watchdog stood down
+                    // rather than simply going quiet — the same reason the 2s census
+                    // exists at all.
+                    VoiceLog.recognition.log("""
+                        watchdog: standing down — recognition answered \
+                        (results=\(facts.results, privacy: .public))
+                        """)
+                    return
+                case .recognitionNeverAnswered:
+                    VoiceLog.recognition.error("""
+                        watchdog: FAILING after \
+                        \(RecognitionWatchdog.grace, privacy: .public)s — \
+                        voicedBuffers=\(facts.voicedBuffers, privacy: .public) \
+                        results=0 errored=false. Real audio flowed and recognition never \
+                        answered: macOS most likely has no speech model installed \
+                        (System Settings → Keyboard → Dictation)
+                        """)
+                    // Ordered exactly as `endOfTask`'s `.fail` branch is: stop first, so
+                    // `isRunning` is already false when the surface handles this and the
+                    // cancellation callback `retireRecognition()` may deliver is dropped
+                    // by the identity guard rather than reported twice.
+                    self.stop()
+                    self.onFailure?(VoiceAudioError.recognitionNeverAnswered)
+                    return
+                }
+            }
+        }
     }
 
     /// Idempotent and unconditional. It used to `guard isRunning`, which made it
@@ -551,7 +751,9 @@ final class SpeechListener: SpeechListening {
             tapInstalled=\(self.tapInstalled, privacy: .public) \
             voiceProcessingOn=\(self.voiceProcessingOn, privacy: .public) \
             tapCallbacks=\(self.tapCounter.calls, privacy: .public) \
-            tapFrames=\(self.tapCounter.frames, privacy: .public)
+            tapFrames=\(self.tapCounter.frames, privacy: .public) \
+            voicedBuffers=\(self.census.facts.voicedBuffers, privacy: .public) \
+            recognitionResults=\(self.census.facts.results, privacy: .public)
             """)
         // Tap first, then end the audio: the other order can let one more buffer
         // reach a request that has already been closed.
@@ -635,6 +837,14 @@ final class SpeechListener: SpeechListening {
         req.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         req.contextualStrings = hints
         feed.replace(with: req)
+        // **A renewal is a fresh chance to answer, so the grace window restarts here.**
+        // Without this the founder's own sequence stays broken: request 1 errors
+        // (`kAFAssistantErrorDomain/1110`), `RenewalBudget` renews, and request 2 answers
+        // nothing at all — with `errored` still set from request 1 the watchdog would
+        // defer to a budget that is never consulted again, which is the original bug
+        // with one more mechanism failing to notice it.
+        let census = self.census
+        census.requestOpened()
 
         VoiceLog.recognition.log("""
             openRecognition(): requiresOnDevice=\(req.requiresOnDeviceRecognition, privacy: .public) \
@@ -661,6 +871,11 @@ final class SpeechListener: SpeechListening {
             //
             // **Length, never the text.** The transcript is the founder's words.
             let n = callbacks.note(frames: text?.count ?? 0)
+            // **Recorded here for the same reason the log line is, and it is what
+            // disarms the watchdog.** A callback that `recognitionUpdate` drops as stale
+            // is still proof the recognition channel is alive, and the watchdog's whole
+            // question is whether it ever is.
+            census.noteRecognitionCallback(isError: error != nil)
             if let error {
                 VoiceLog.recognition.error("""
                     task callback #\(n, privacy: .public): ERROR \

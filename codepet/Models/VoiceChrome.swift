@@ -162,9 +162,49 @@ enum VoiceChrome {
                 : "Speech recognition is not available right now."
         case VoiceAudioError.engineFailed(let why):
             return lang == .vi ? "Micro đã dừng: \(why)" : "The microphone stopped: \(why)"
+        case VoiceAudioError.recognitionNeverAnswered:
+            return recognitionNeverAnsweredText(lang)
         default:
             return failure.localizedDescription
         }
+    }
+
+    /// **The one failure on this path whose remedy the founder cannot guess** — so the
+    /// message is mostly the remedy.
+    ///
+    /// `RecognitionWatchdog` fired: real audio flowed and recognition never answered.
+    /// The cause measured on this Mac is that macOS has **no speech assets installed**
+    /// (`~/Library/Application Support/com.apple.SpeechRecognitionCore`,
+    /// `/System/Library/AssetsV2/com_apple_MobileAsset_SpeechRecognition` and
+    /// `/private/var/db/com.apple.speech.recognition` are all empty), while
+    /// `SFSpeechRecognizer.supportsOnDeviceRecognition` still reports `true` — it is a
+    /// *capability* flag, not a "the model is downloaded" flag. There is no API to
+    /// download the asset and no in-app way to trigger it: the only thing that does is
+    /// **System Settings → Keyboard → Dictation** — turning it on, or dictating once
+    /// anywhere, pulls the asset down. A founder shown "recognition is not available"
+    /// here would have nowhere to go.
+    ///
+    /// **Named path, no jargon, and the cause is hedged on purpose.** "may need" rather
+    /// than "is missing", because the watchdog cannot prove she spoke: measured on this
+    /// Mac through the production graph, ambient room noise reads `VoiceLevel` **0.375**
+    /// median while the founder's own trace measured **0.132** while she was talking, so
+    /// no level threshold separates speech from a room and the same verdict is reachable
+    /// from a founder who tapped and said nothing. Hedging is what keeps this honest in
+    /// that case while still naming the one thing worth trying — the same discipline as
+    /// `privacyLine`, which stopped asserting on-device from a flag that did not
+    /// establish it.
+    ///
+    /// **Length is load-bearing.** This lands in the composer's transcript slot, which
+    /// is `.lineLimit(2)` at `CodepetType.body` with `truncationMode(.head)` — so a
+    /// sentence that needs three lines loses its *beginning* silently — and the slot is
+    /// a fixed 40pt, so three lines do not fit the frame either. Measured at the dock's
+    /// real 316pt inner width: two lines are 34pt and three are 51pt; both strings below
+    /// sit at 34 with ~6 characters of headroom. Asserted by
+    /// `VoiceComposerTests.testTheMissingSpeechModelRemedyFitsTheComposersTwoLines`.
+    private static func recognitionNeverAnsweredText(_ lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Không nghe được gì. macOS có thể cần mô hình giọng nói: Cài đặt Hệ thống → Bàn phím → Chính tả."
+            : "No words came back. macOS may need its speech model: System Settings → Keyboard → Dictation."
     }
 
     // MARK: - The controls

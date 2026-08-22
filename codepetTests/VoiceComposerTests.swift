@@ -367,6 +367,99 @@ final class VoiceComposerTests: XCTestCase {
         XCTAssertNotEqual(viRemote, enRemote, "both languages got the same disclosure")
     }
 
+    /// **The one failure whose remedy the founder cannot guess, so the message is
+    /// mostly the remedy.**
+    ///
+    /// `RecognitionWatchdog` fires when real audio flowed and recognition never answered.
+    /// The measured cause is that macOS has no speech assets installed while
+    /// `SFSpeechRecognizer.supportsOnDeviceRecognition` still reports `true` — a
+    /// *capability* flag, not "the model is downloaded". There is no API to download it
+    /// and nothing in the app can trigger it: the only thing that does is **System
+    /// Settings → Keyboard → Dictation**. A founder shown "recognition is not available"
+    /// would have nowhere at all to go, which is why the path is named in the string.
+    ///
+    /// Following `ApprovalTier.label(_:)`, and the `en != vi` pair is the guard this
+    /// feature has already needed twice: `lang == .vi ? why : why` inspects the language
+    /// and ignores it, and `privacyLine` shipped exactly that.
+    ///
+    /// RED: return the same string from both branches of
+    /// `recognitionNeverAnsweredText` and the bilingual assertion goes red; drop
+    /// "Dictation" from the EN string and the path assertion does; route the new case to
+    /// `default` in `failureText` and the distinctness assertions do (it would fall
+    /// through to `localizedDescription`, which for a Swift enum error is the
+    /// uninterpretable "The operation couldn't be completed.").
+    func testTheMissingSpeechModelFailureNamesTheRemedyInBothLanguages() {
+        let missing = VoiceAudioError.recognitionNeverAnswered
+        let en = VoiceChrome.failureText(missing, .en)
+        let vi = VoiceChrome.failureText(missing, .vi)
+
+        XCTAssertNotEqual(en, vi, "the remedy is chrome and it is not bilingual")
+        XCTAssertTrue(en.contains("Dictation"),
+                      "the EN message does not name the ONE place the speech model can "
+                      + "be downloaded, and nothing else in the OS hints at it: \(en)")
+        XCTAssertTrue(en.contains("System Settings"),
+                      "the EN message names Dictation without saying where it lives: \(en)")
+        XCTAssertTrue(en.contains("speech model"),
+                      "the EN message sends her to Dictation without saying what that "
+                      + "gets her, so the one thing she has to do reads as a shot in the "
+                      + "dark: \(en)")
+        XCTAssertTrue(vi.contains("Chính tả"),
+                      "the VI message does not name Dictation: \(vi)")
+        XCTAssertTrue(vi.contains("Cài đặt Hệ thống"),
+                      "the VI message does not name System Settings: \(vi)")
+        XCTAssertTrue(vi.contains("mô hình giọng nói"),
+                      "the VI message does not say what Dictation gets her: \(vi)")
+
+        // It must not read as either of the other two failures: "not available right
+        // now" invites her to wait, and "the microphone stopped" sends her to check her
+        // AirPods. Both are dead ends here.
+        for lang in [AppLanguage.en, .vi] {
+            let text = VoiceChrome.failureText(missing, lang)
+            XCTAssertNotEqual(text, VoiceChrome.failureText(VoiceAudioError.recognizerUnavailable, lang))
+            XCTAssertNotEqual(text, VoiceChrome.failureText(VoiceAudioError.engineFailed("x"), lang))
+            XCTAssertFalse(text.contains("The operation couldn’t be completed"),
+                           "\(lang): the new case fell through to localizedDescription")
+            // And it takes the text slot, over every caption — the composer has ONE line.
+            for state in [VoiceState.idle, .listening, .thinking, .speaking] {
+                let line = VoiceChrome.line(state: state, partial: "add pricing",
+                                            failure: missing, lang)
+                XCTAssertEqual(line.kind, .failure)
+                XCTAssertEqual(line.text, text)
+            }
+        }
+    }
+
+    /// **The remedy has to fit, and the slot truncates from the FRONT.**
+    ///
+    /// This lands in `transcriptSlot`, which is `.lineLimit(2)` at `CodepetType.body`
+    /// with `truncationMode(.head)` — chosen because for a live transcript the newest
+    /// words are the ones she is checking. For a failure it is the wrong end: a message
+    /// needing three lines silently loses its beginning. Either way the composer's
+    /// rendered height does not change (the slot is a fixed
+    /// `VoiceComposer.transcriptHeight`), so nothing else in this suite can see it.
+    ///
+    /// Measured the same way `testTheOffDeviceDisclosureFitsTwoLinesInTheDock` is: what
+    /// the string needs unconstrained against what two lines give it, at the dock's real
+    /// inner width. Same stated limitation — it restates the font rather than reading it
+    /// off the view.
+    ///
+    /// RED: lengthen either string past two lines (adding "to install the speech model"
+    /// to the EN one is enough) and it goes red at the dock width.
+    func testTheMissingSpeechModelRemedyFitsTheComposersTwoLines() {
+        for lang in [AppLanguage.en, .vi] {
+            let message = VoiceChrome.failureText(VoiceAudioError.recognitionNeverAnswered, lang)
+            let text = Text(message).font(CodepetTheme.inter(CodepetType.body))
+            let inner = Self.dockWidth - VoiceComposer.horizontalPadding * 2
+            let needed = size(text.lineLimit(nil), w: inner, h: nil)
+            let given = size(text.lineLimit(2), w: inner, h: nil)
+            XCTAssertEqual(given.height, needed.height, accuracy: 1,
+                           "\(lang): the remedy needs \(needed.height)pt at \(inner)pt "
+                           + "wide and .lineLimit(2) gives it \(given.height) — and the "
+                           + "slot truncates from the head, so what is lost is the front "
+                           + "of: \(message)")
+        }
+    }
+
     /// **The compact line has to carry BOTH requirements** — spec §2: "Both fit as one
     /// compact line inside the expanded composer — `2 credits · on-device`".
     ///

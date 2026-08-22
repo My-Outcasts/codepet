@@ -127,45 +127,49 @@ final class BrandMarkRenderTests: XCTestCase {
         // Warm means red leads blue. `pageBackground` (#16130f) is itself already
         // "warm" by this raw definition — R=0.0863, B=0.0588, a 0.0275 lead that
         // clears the +0.02 margin on its own. Counting it made the assertion
-        // measure the band's background AREA (94.8% of the 235,600-pixel sample at
-        // RED, 98.9% at GREEN) rather than the bloom, so the whole RED→GREEN signal
-        // was a ~1% wobble on a large number. Skipping near-background pixels
-        // leaves only what the bloom actually painted.
+        // measure the band's background AREA rather than the bloom, so skipping
+        // near-background pixels is what leaves only what the bloom actually
+        // painted.
         //
-        // The exclusion epsilon is 0.08, not the 0.03 first proposed: measuring a
-        // genuine background pixel through this same `ImageRenderer` →
-        // `NSBitmapImageRep` → `.usingColorSpace(.sRGB)` round trip gives a per-pixel
-        // distance from the ideal `#16130f` value of ~0.0597 (colour-management
-        // noise, not signal) — 0.03 excluded almost nothing, and warmPixels came
-        // back at 233,044, indistinguishable from the unfiltered count. This is the
-        // same noise floor `testTheChatGroundIsFlatInDark`/`InLight` already work
-        // around with their own 0.06 corner epsilon. 0.08 clears that floor with
-        // margin.
+        // Reference-based, so this epsilon no longer has to clear the ~0.0597
+        // colour-management floor a comparison against the ideal `#16130f` hex
+        // would carry (see `referenceGround`'s doc) — it only has to clear
+        // per-pixel dither, which is why 0.02 replaces the old 0.08 (three-quarters
+        // of which was noise budget, not signal).
         //
-        // Re-measured by actually reverting and restoring ChatEmptyState.swift
-        // (removing the `accentPink.opacity(0.18)` middle stop for RED, restoring it
-        // for GREEN), with this background-exclusion filter in place:
-        //   RED  (purple-only bloom) =  8,329 warm pixels
-        //   GREEN (production, pink stop) = 18,285 warm pixels
+        // Re-measured against THIS reference-based exclusion by actually reverting
+        // and restoring ChatEmptyState.swift (removing the `accentPink.opacity(0.18)`
+        // middle stop for RED, restoring it for GREEN), each reading taken twice and
+        // requiring the pair to be identical before trusting it (a sibling session's
+        // concurrent `xcodebuild` can kill the test host mid-run — the symptom is a
+        // run failing to finish, not a wrong number — so two consistent readings are
+        // what rule that out):
+        //   RED  (purple-only bloom)      =  8,329 warm pixels (identical x2)
+        //   GREEN (production, pink stop) = 18,285 warm pixels (identical x2)
         // RED is not the near-zero this test originally expected of a "cool"
         // bloom — the purple core's blurred edge anti-aliases into the background,
         // and that boundary carries a few thousand pixels that read warm from
-        // rendering noise alone, independent of the pink stop. The RED→GREEN gap
-        // is nonetheless a real >2x signal (18,285 / 8,329), a different shape than
-        // the old ~1% wobble on 230K, not the same failure in miniature. Threshold
-        // is the midpoint (13,300): 59.7% of headroom above RED, 27.3% of headroom
-        // below GREEN. Do not loosen the `0.02` channel margin to "fix" a future
-        // threshold miss; remeasure RED/GREEN instead.
-        let pageBackground = NSColor(srgbRed: 0x16 / 255.0, green: 0x13 / 255.0, blue: 0x0f / 255.0, alpha: 1)
-        let backgroundEpsilon: CGFloat = 0.08
+        // rendering noise alone, independent of the pink stop. These are the same
+        // two numbers the ideal-hex version measured with its 0.08 epsilon: the old
+        // epsilon already excluded true background reliably (0.0597 measured
+        // distance well under 0.08), so tightening it to 0.02 against a reference
+        // that measures ~0 for true background changes nothing about which pixels
+        // are admitted — only how much of the epsilon is honest margin versus noise
+        // budget. The RED→GREEN gap is a real 2.20x signal (18,285 / 8,329), clear
+        // of the ~2x floor. Threshold is the midpoint (13,300): 4,971 of headroom
+        // above RED (50.0% of the RED→GREEN span), 4,985 below GREEN (50.1%). Do not
+        // loosen the `0.02` channel margin to "fix" a future threshold miss;
+        // remeasure RED/GREEN instead.
+        let ground = try referenceGround(colorScheme: .dark, width: 760, height: 420)
+        let backgroundEpsilon: CGFloat = 0.02
         var warmPixels = 0
         let band = 0..<Int(155 * renderer.scale)
         for y in band {
             for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
                 guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                let backgroundDistance = abs(c.redComponent - pageBackground.redComponent)
-                    + abs(c.greenComponent - pageBackground.greenComponent)
-                    + abs(c.blueComponent - pageBackground.blueComponent)
+                let backgroundDistance = abs(c.redComponent - ground.redComponent)
+                    + abs(c.greenComponent - ground.greenComponent)
+                    + abs(c.blueComponent - ground.blueComponent)
                 if backgroundDistance < backgroundEpsilon { continue }
                 if c.redComponent > c.blueComponent + 0.02 { warmPixels += 1 }
             }
@@ -220,6 +224,38 @@ final class BrandMarkRenderTests: XCTestCase {
         return (rep, url)
     }
 
+    /// The ground's value AFTER the render pipeline has had its way with it.
+    ///
+    /// Comparing a sampled pixel against an ideal hex does not work: a flat dark
+    /// corner measures 0.0597 away from `#16130f` and flat cream 0.0214, purely from
+    /// colour management through `ImageRenderer` → `NSBitmapImageRep` →
+    /// `.usingColorSpace(.sRGB)`. Thresholds then have to straddle that floor, which
+    /// is how the dark corner guard came to pass by 0.47%.
+    ///
+    /// Pushing a bare `pageBackground` rectangle through the IDENTICAL pipeline
+    /// returns the same distorted value the real render produces, so the distortion
+    /// cancels and the comparison is against the colour as rendered. It also means
+    /// this guard no longer knows or cares what `pageBackground` actually is.
+    @MainActor
+    private func referenceGround(colorScheme: ColorScheme,
+                                width: CGFloat, height: CGFloat) throws -> NSColor {
+        let swatch = Rectangle()
+            .fill(CodepetTheme.pageBackground)
+            .frame(width: width, height: height)
+            .environment(\.colorScheme, colorScheme)
+        let renderer = ImageRenderer(content: swatch)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("reference ground render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        return c
+    }
+
     /// The four corners of the pane, 40pt in from each edge — far outside the
     /// hero's stack, and where a 420pt-radius wash centred on the pane still
     /// deposits measurable violet.
@@ -232,22 +268,19 @@ final class BrandMarkRenderTests: XCTestCase {
     @MainActor
     func testTheChatGroundIsFlatInDark() throws {
         let (rep, url) = try renderChatPane(colorScheme: .dark)
-        let ground = NSColor(srgbRed: 0x16 / 255.0, green: 0x13 / 255.0, blue: 0x0f / 255.0, alpha: 1)
+        let ground = try referenceGround(colorScheme: .dark, width: 760, height: 560)
         let corners = cornerSamples(rep, inset: 40 * 2)
         XCTAssertEqual(corners.count, 4, "could not sample four corners")
         for c in corners {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
-            // 0.072 is the midpoint of two MEASURED values, not a guess: a flat corner
-            // reads 0.0597 (colour-management noise through ImageRenderer →
-            // NSBitmapImageRep → .usingColorSpace(.sRGB), identical at all four corners,
-            // so it is systematic and not spatial), and the wash this test was written
-            // to catch read 0.0839. The original 0.06 passed by 0.47% — a hair above the
-            // noise floor, so an OS, Xcode, or display-profile change would have failed
-            // it spuriously, most likely in CI rather than here. Do NOT tighten this
-            // toward zero: zero is not the floor, 0.0597 is.
-            XCTAssertLessThan(d, 0.072,
+            // 0.01, not 0.072. The reference cancels the ~0.0597 colour-management
+            // offset the old ideal-hex comparison had to straddle, so a genuinely flat
+            // corner now measures ~0. This is roughly 8x tighter than the old
+            // threshold and catches a wash at a small fraction of the original 0.16
+            // opacity — where 0.072 needed about 70% of it.
+            XCTAssertLessThan(d, 0.01,
                               "the pane's corner is not flat pageBackground — an ambient "
                               + "wash is painting over it. See \(url.path)")
         }
@@ -256,20 +289,19 @@ final class BrandMarkRenderTests: XCTestCase {
     @MainActor
     func testTheChatGroundIsFlatInLight() throws {
         let (rep, url) = try renderChatPane(colorScheme: .light)
-        let ground = NSColor(srgbRed: 0xf8 / 255.0, green: 0xf7 / 255.0, blue: 0xf3 / 255.0, alpha: 1)
+        let ground = try referenceGround(colorScheme: .light, width: 760, height: 560)
         let corners = cornerSamples(rep, inset: 40 * 2)
         XCTAssertEqual(corners.count, 4, "could not sample four corners")
         for c in corners {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
-            // Stays 0.06, deliberately, where dark needed widening to 0.072: cream's
-            // measured noise floor is 0.0214, so this has ~180% margin rather than dark's
-            // 0.47%. The floor differs by 2.8x between schemes, which is why these two
-            // thresholds are allowed to disagree — matching them would be tidier and
-            // wrong. There is room to tighten this one, but no measured light-mode RED
-            // to calibrate against, so it is left alone rather than guessed at.
-            XCTAssertLessThan(d, 0.06,
+            // 0.01, not 0.072. The reference cancels the ~0.0597 colour-management
+            // offset the old ideal-hex comparison had to straddle, so a genuinely flat
+            // corner now measures ~0. This is roughly 8x tighter than the old
+            // threshold and catches a wash at a small fraction of the original 0.16
+            // opacity — where 0.072 needed about 70% of it.
+            XCTAssertLessThan(d, 0.01,
                               "the light pane's corner is not flat cream — an ambient "
                               + "wash is painting over it. See \(url.path)")
         }

@@ -48,6 +48,38 @@ final class ComposerEdgeRenderTests: XCTestCase {
         return (rep, url)
     }
 
+    /// The ground's value AFTER the render pipeline has had its way with it.
+    ///
+    /// Comparing a sampled pixel against an ideal hex does not work: a flat dark
+    /// corner measures 0.0597 away from `#16130f` and flat cream 0.0214, purely from
+    /// colour management through `ImageRenderer` → `NSBitmapImageRep` →
+    /// `.usingColorSpace(.sRGB)`. Thresholds then have to straddle that floor, which
+    /// is how the dark corner guard came to pass by 0.47%.
+    ///
+    /// Pushing a bare `pageBackground` rectangle through the IDENTICAL pipeline
+    /// returns the same distorted value the real render produces, so the distortion
+    /// cancels and the comparison is against the colour as rendered. It also means
+    /// this guard no longer knows or cares what `pageBackground` actually is.
+    @MainActor
+    private func referenceGround(colorScheme: ColorScheme,
+                                width: CGFloat, height: CGFloat) throws -> NSColor {
+        let swatch = Rectangle()
+            .fill(CodepetTheme.pageBackground)
+            .frame(width: width, height: height)
+            .environment(\.colorScheme, colorScheme)
+        let renderer = ImageRenderer(content: swatch)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("reference ground render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        return c
+    }
+
     /// Saturation computed from the RGB channels rather than read off the colour.
     ///
     /// `NSColor.saturationComponent` raises for colours that are not in an
@@ -215,15 +247,36 @@ final class ComposerEdgeRenderTests: XCTestCase {
         // cardRaised's zero. Purple TEXT alone at this size contributes a few dozen
         // pixels; a tinted fill plus a tinted edge contributes hundreds.
         //
-        // Measured on this exact host (240×130@2x, top-aligned, brand+modeSwitch
-        // only): RED (text only, pre-change) = 408. GREEN (tinted fill + 0.45
-        // stroke, post-change) = 1492 — 3.66x apart, not a squeezed gap. 900 sits
-        // with real headroom on both sides: +492 (120%) above RED, -592 (40% of
-        // GREEN) below GREEN.
+        // Re-measured with the reference-ground exclusion below in place, by
+        // actually removing and restoring TwoModeSidebar.swift's tinted overlay
+        // fill and stroke (leaving only the accented text), each reading taken
+        // twice and requiring the pair to be identical before trusting it (a
+        // sibling session's concurrent `xcodebuild` can kill the test host
+        // mid-run — the symptom is a run failing to finish, not a wrong number —
+        // so two consistent readings are what rule that out), on this exact host
+        // (240×130@2x, top-aligned, brand+modeSwitch only):
+        //   RED  (text only)                        =  408 (identical x2)
+        //   GREEN (tinted fill + 0.45 stroke, prod)  = 1492 (identical x2)
+        // Unchanged from the pre-exclusion measurement — today's cream ground
+        // never came close to the blue>green margin, so the exclusion currently
+        // admits everything it did before. Its purpose is future, not present: it
+        // is what stops #121019's blue lead of 0.035 from flooding this count once
+        // the retint lands. 3.66x apart, not a squeezed gap. 900 sits with real
+        // headroom on both sides: +492 (120% of RED) above RED, -592 (40% of GREEN)
+        // below GREEN.
+        let ground = try referenceGround(colorScheme: .light, width: 240, height: 130)
         var violet = 0
         for y in stride(from: 0, to: rep.pixelsHigh, by: 1) {
             for x in stride(from: 0, to: rep.pixelsWide, by: 1) {
                 guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                // Skip the ground itself. Today's cream ground is nowhere near the
+                // blue>green test, but the palette is about to become COOL — #121019
+                // has a blue lead of 0.035 against this 0.04 margin — so counting
+                // background would flood this the moment the retint lands.
+                let dg = abs(c.redComponent - ground.redComponent)
+                    + abs(c.greenComponent - ground.greenComponent)
+                    + abs(c.blueComponent - ground.blueComponent)
+                if dg < 0.02 { continue }
                 if c.blueComponent > c.greenComponent + 0.04 && saturation(c) > 0.08 {
                     violet += 1
                 }

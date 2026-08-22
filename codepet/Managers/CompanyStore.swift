@@ -56,6 +56,18 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var activeProjectLink: ProjectLink?
     private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
 
+    /// The open project's id — what `DecisionEntry.scope` will compare against once the
+    /// repo tier lands. Nil while nothing is linked, and deliberately nil while a match is
+    /// waiting on the founder: a scope resolved from an unconfirmed guess is the silent
+    /// mis-attachment this whole flow exists to prevent. The guard is the nil, not a flag
+    /// somebody has to remember to check.
+    @Published private(set) var activeProjectId: String?
+
+    /// A proposed match the founder has not answered yet. `reason` is the normalised remote
+    /// that produced it, shown so they can see WHY it was proposed rather than being asked
+    /// to trust it.
+    @Published private(set) var pendingProjectMatch: (id: String, reason: String)?
+
     /// The chat message a chat-triggered coding run anchors to, so its card renders
     /// inline right after that ask. `nil` for runs triggered outside chat (tasks/roadmap):
     /// those fall back to the transcript bottom.
@@ -176,6 +188,15 @@ final class CompanyStore: ObservableObject {
     /// must be able to prove the switch travels without mutating a process-wide singleton.
     private let codingMemoryGate: (Bool) -> Void
 
+    private let identityMap: ProjectIdentityMap
+    private let remoteURLReader: (String) -> String?
+
+    /// The founder's projects as the cloud knows them. Empty in PR 1 — the write side lands
+    /// with the `ProjectStore` sync in the next PR — so only the `.mint` branch runs in
+    /// production today. That is deliberate: an id minted now is the id forever, so nothing
+    /// is lost by the cloud list arriving later.
+    private var knownCloudProjects: [CloudProject]
+
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
     /// instead of clobbering newer state.
@@ -267,7 +288,17 @@ final class CompanyStore: ObservableObject {
          // Defaulted in the init BODY for the same reason as `vcRunner`: the real one
          // touches the `@MainActor` `PetMemoryStore.shared`, which a nonisolated
          // default-argument context cannot reference.
-         codingMemoryGate: ((Bool) -> Void)? = nil) {
+         codingMemoryGate: ((Bool) -> Void)? = nil,
+         // Defaulted in the init BODY for the same reason as `vcInterviewFlag`: the real one
+         // closes over `UserDefaults.standard`, which a nonisolated default-argument context
+         // cannot reference without warning.
+         identityMap: ProjectIdentityMap? = nil,
+         // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
+         // has a second defaulted parameter (an injectable runner, added so its exit-code
+         // gate is testable), and Swift does not apply defaults when forming a function
+         // reference. The closure is what makes the `(String) -> String?` shape available.
+         remoteURLReader: @escaping (String) -> String? = { GitRunner.remoteURL(in: $0) },
+         knownCloudProjects: [CloudProject] = []) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -286,6 +317,9 @@ final class CompanyStore: ObservableObject {
         self.decisionExtractor = decisionExtractor
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
+        self.identityMap = identityMap ?? ProjectIdentityMap()
+        self.remoteURLReader = remoteURLReader
+        self.knownCloudProjects = knownCloudProjects
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -324,6 +358,11 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // The identity map is keyed by account: a project id only means something inside one
+        // founder's companies/{uid}. Pointing the map at the incoming account is what makes
+        // this founder's existing bindings resolve again — including after a sign-out, which
+        // must never mint a second id for a folder they already linked.
+        identityMap.account = companyId
         // Re-derived from THIS company's flag on every hydrate, so signing in as
         // someone else never inherits the previous founder's asked-ness (and never
         // re-asks a founder who already answered or skipped). Read synchronously and
@@ -629,7 +668,54 @@ final class CompanyStore: ObservableObject {
             UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
         }
         activeProjectLink = link
+        resolveProjectIdentity(for: link)
         return link
+    }
+
+    /// Resolve a linked folder to a project id: reuse this machine's binding for this
+    /// account, propose a remote match for the founder to confirm, or mint a fresh id.
+    ///
+    /// `.propose` leaves `activeProjectId` nil on purpose. Everything downstream reads that
+    /// property, so an unanswered proposal cannot scope a fact by accident.
+    private func resolveProjectIdentity(for link: ProjectLink) {
+        let hints = ProjectIdentity.hints(
+            folderName: URL(fileURLWithPath: link.path).lastPathComponent,
+            gitRemote: remoteURLReader(link.path))
+
+        switch ProjectIdentity.match(localId: identityMap.id(forPath: link.path),
+                                     hints: hints,
+                                     against: knownCloudProjects) {
+        case .bound(let id):
+            pendingProjectMatch = nil
+            activeProjectId = id
+        case .propose(let id, let reason):
+            activeProjectId = nil
+            pendingProjectMatch = (id: id, reason: reason)
+        case .mint:
+            pendingProjectMatch = nil
+            adopt(id: ProjectIdentity.mint(), for: link.path)
+        }
+    }
+
+    /// The founder said yes: this folder is that project.
+    func confirmProjectMatch() {
+        guard let pending = pendingProjectMatch, let path = activeProjectLink?.path else { return }
+        pendingProjectMatch = nil
+        adopt(id: pending.id, for: path)
+    }
+
+    /// The founder said no — a different project, so it gets its own id. Minting rather than
+    /// leaving the folder unresolved: an unresolved folder scopes nothing, which looks to the
+    /// founder like the feature quietly not working.
+    func rejectProjectMatch() {
+        guard let path = activeProjectLink?.path else { return }
+        pendingProjectMatch = nil
+        adopt(id: ProjectIdentity.mint(), for: path)
+    }
+
+    private func adopt(id: String, for path: String) {
+        identityMap.bind(path: path, to: id)
+        activeProjectId = id
     }
 
     /// What the CLAUDE.md seed is allowed to say about the facts on record — the gate above,
@@ -2555,6 +2641,12 @@ final class CompanyStore: ObservableObject {
         // a settings panel over their first frame of the shell.
         settingsSection = nil
         activeProjectLink = nil
+        activeProjectId = nil
+        pendingProjectMatch = nil
+        // Only the pointer. The bindings themselves stay on disk under the outgoing
+        // account's key, so the same founder signing back in still resolves their folders
+        // to the same ids — clearing them would mint new ones and orphan their facts.
+        identityMap.account = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
         clearEngineeringRun()

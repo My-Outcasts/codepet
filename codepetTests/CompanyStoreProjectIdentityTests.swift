@@ -14,19 +14,25 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         return dir
     }
 
-    /// ONE signature. `cloud` defaults empty (PR 1's production state) and `forcedRemote`
+    /// ONE signature. `cloud` defaults empty (PR 1's production state), `forcedRemote`
     /// defaults nil (a temp folder has no git remote, and creating a repo in a test to get
-    /// one would be testing git rather than this code).
+    /// one would be testing git rather than this code), and `forcedRoot` defaults nil too —
+    /// so by default the folder looks like it has no git ancestry at all. A test that wants
+    /// a remote to actually count as a hint must also say the folder IS the repo root, via
+    /// `forcedRoot`; that is what distinguishes a root folder from one merely nested inside
+    /// a tracked ancestor.
     ///
     /// The identity map gets its own UserDefaults suite so no test can touch the founder's
     /// real bindings, and an account is set because a bind with nobody signed in is a no-op.
     private func makeStore(cloud: [CloudProject] = [],
-                           forcedRemote: String? = nil) -> CompanyStore {
+                           forcedRemote: String? = nil,
+                           forcedRoot: String? = nil) -> CompanyStore {
         let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
         let map = ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test")
         map.account = "co-test"
         return CompanyStore(identityMap: map,
                             remoteURLReader: { _ in forcedRemote },
+                            repoRootReader: { _ in forcedRoot },
                             knownCloudProjects: cloud)
     }
 
@@ -63,7 +69,8 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
                                                    hints: ProjectIdentity.hints(folderName: "repo",
                                                                                 gitRemote: remote),
                                                    displayName: "repo")],
-                              forcedRemote: remote)
+                              forcedRemote: remote,
+                              forcedRoot: dir.path)
         store.linkProject(path: dir.path, bootstrapClaudeMd: false)
 
         XCTAssertEqual(store.pendingProjectMatch?.id, "aaa")
@@ -83,7 +90,8 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
                                                    hints: ProjectIdentity.hints(folderName: "repo",
                                                                                 gitRemote: remote),
                                                    displayName: "repo")],
-                              forcedRemote: remote)
+                              forcedRemote: remote,
+                              forcedRoot: dir.path)
         store.linkProject(path: dir.path, bootstrapClaudeMd: false)
         store.rejectProjectMatch()
 
@@ -122,6 +130,7 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         let map = ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test")
         map.account = nil                            // nobody signed in
         let store = CompanyStore(identityMap: map, remoteURLReader: { _ in nil },
+                                 repoRootReader: { _ in nil },
                                  knownCloudProjects: [])
 
         store.linkProject(path: dir.path, bootstrapClaudeMd: false)
@@ -148,5 +157,41 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         XCTAssertNil(store.pendingProjectMatch)
         XCTAssertNotNil(store.activeProjectId)
         XCTAssertNotEqual(store.activeProjectId, "aaa")
+    }
+
+    // The hole the review found: a folder inside a tracked ancestor must not borrow the
+    // ancestor's remote and get proposed as the ancestor's project.
+    func test_nestedFolderDoesNotBorrowTheAncestorsRemote() throws {
+        let dir = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let remote = "git@github.com:Acme/Parent.git"
+        let store = makeStore(cloud: [CloudProject(id: "parent",
+                                                   hints: ProjectIdentity.hints(folderName: "parent",
+                                                                                gitRemote: remote),
+                                                   displayName: "parent")],
+                              forcedRemote: remote,
+                              forcedRoot: "/some/other/ancestor")   // root is NOT this folder
+        store.linkProject(path: dir.path, bootstrapClaudeMd: false)
+
+        XCTAssertNil(store.pendingProjectMatch, "a nested folder must not be proposed as its ancestor")
+        XCTAssertNotNil(store.activeProjectId)
+        XCTAssertNotEqual(store.activeProjectId, "parent")
+    }
+
+    func test_repoRootFolderStillProposes() throws {
+        let dir = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let remote = "git@github.com:Acme/Repo.git"
+        let store = makeStore(cloud: [CloudProject(id: "aaa",
+                                                   hints: ProjectIdentity.hints(folderName: "repo",
+                                                                                gitRemote: remote),
+                                                   displayName: "repo")],
+                              forcedRemote: remote,
+                              forcedRoot: dir.path)                 // root IS this folder
+        store.linkProject(path: dir.path, bootstrapClaudeMd: false)
+
+        XCTAssertEqual(store.pendingProjectMatch?.id, "aaa")
     }
 }

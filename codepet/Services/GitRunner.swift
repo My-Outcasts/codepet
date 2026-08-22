@@ -63,6 +63,19 @@ enum GitRunner {
         let out = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return out.isEmpty ? nil : out
     }
+
+    /// The repository root containing `dir`, or nil when `dir` is not inside a repo.
+    ///
+    /// Needed because `remoteURL` walks up to find a repo the way every git command does,
+    /// while `ProjectProbe.probe` only checks for `.git` in the exact folder. Without this,
+    /// a folder nested inside a tracked ancestor reports the ancestor's remote as its own.
+    static func repoRoot(in dir: String,
+                         run: ([String], String) -> GitResult = GitRunner.run) -> String? {
+        let result = run(["rev-parse", "--show-toplevel"], dir)
+        guard result.ok else { return nil }
+        let out = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? nil : out
+    }
 }
 
 /// Pure branch/commit slug from a human title.

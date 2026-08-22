@@ -65,8 +65,11 @@ final class CompanyStore: ObservableObject {
 
     /// A proposed match the founder has not answered yet. `reason` is the normalised remote
     /// that produced it, shown so they can see WHY it was proposed rather than being asked
-    /// to trust it.
-    @Published private(set) var pendingProjectMatch: (id: String, reason: String)?
+    /// to trust it. `path` is the folder the proposal was about — carried here rather than
+    /// read back off `activeProjectLink` at answer time, because the founder can link a
+    /// second folder before answering the first proposal, and the answer must land on the
+    /// folder that earned it, not on whatever is linked when they finally respond.
+    @Published private(set) var pendingProjectMatch: (id: String, reason: String, path: String)?
 
     /// The chat message a chat-triggered coding run anchors to, so its card renders
     /// inline right after that ask. `nil` for runs triggered outside chat (tasks/roadmap):
@@ -190,6 +193,12 @@ final class CompanyStore: ObservableObject {
 
     private let identityMap: ProjectIdentityMap
     private let remoteURLReader: (String) -> String?
+    /// Whether the linked folder is itself a repo root, not merely inside one. `remoteURLReader`
+    /// walks up to find a remote the way every git command does, while `ProjectProbe.probe`
+    /// only checks for `.git` in the exact folder — so without this, a folder nested inside a
+    /// tracked ancestor would borrow the ancestor's remote and get proposed as the ancestor's
+    /// project.
+    private let repoRootReader: (String) -> String?
 
     /// The founder's projects as the cloud knows them. Empty in PR 1 — the write side lands
     /// with the `ProjectStore` sync in the next PR — so only the `.mint` branch runs in
@@ -298,6 +307,10 @@ final class CompanyStore: ObservableObject {
          // gate is testable), and Swift does not apply defaults when forming a function
          // reference. The closure is what makes the `(String) -> String?` shape available.
          remoteURLReader: @escaping (String) -> String? = { GitRunner.remoteURL(in: $0) },
+         // Same shape and same reason as `remoteURLReader`: `GitRunner.repoRoot(in:)` has its
+         // own defaulted, injectable runner parameter, so a closure is what exposes the
+         // `(String) -> String?` shape here.
+         repoRootReader: @escaping (String) -> String? = { GitRunner.repoRoot(in: $0) },
          knownCloudProjects: [CloudProject] = []) {
         self.loader = loader
         self.saver = saver
@@ -319,6 +332,7 @@ final class CompanyStore: ObservableObject {
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
         self.remoteURLReader = remoteURLReader
+        self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
     }
 
@@ -678,9 +692,13 @@ final class CompanyStore: ObservableObject {
     /// `.propose` leaves `activeProjectId` nil on purpose. Everything downstream reads that
     /// property, so an unanswered proposal cannot scope a fact by accident.
     private func resolveProjectIdentity(for link: ProjectLink) {
+        // The remote is only this folder's hint when this folder is the repo root. A folder
+        // nested inside a tracked ancestor would otherwise borrow the ancestor's remote and
+        // get proposed as the ancestor's project.
+        let isRoot = repoRootReader(link.path).map { $0 == link.path } ?? false
         let hints = ProjectIdentity.hints(
             folderName: URL(fileURLWithPath: link.path).lastPathComponent,
-            gitRemote: remoteURLReader(link.path))
+            gitRemote: isRoot ? remoteURLReader(link.path) : nil)
 
         switch ProjectIdentity.match(localId: identityMap.id(forPath: link.path),
                                      hints: hints,
@@ -690,7 +708,7 @@ final class CompanyStore: ObservableObject {
             activeProjectId = id
         case .propose(let id, let reason):
             activeProjectId = nil
-            pendingProjectMatch = (id: id, reason: reason)
+            pendingProjectMatch = (id: id, reason: reason, path: link.path)
         case .mint:
             pendingProjectMatch = nil
             adopt(id: ProjectIdentity.mint(), for: link.path)
@@ -698,19 +716,25 @@ final class CompanyStore: ObservableObject {
     }
 
     /// The founder said yes: this folder is that project.
+    ///
+    /// Resolves against `pending.path`, not `activeProjectLink?.path`: the founder can link a
+    /// second folder before answering, and the answer must land on the folder that earned the
+    /// proposal, not on whatever happens to be linked when they finally respond.
     func confirmProjectMatch() {
-        guard let pending = pendingProjectMatch, let path = activeProjectLink?.path else { return }
+        guard let pending = pendingProjectMatch else { return }
         pendingProjectMatch = nil
-        adopt(id: pending.id, for: path)
+        adopt(id: pending.id, for: pending.path)
     }
 
     /// The founder said no — a different project, so it gets its own id. Minting rather than
     /// leaving the folder unresolved: an unresolved folder scopes nothing, which looks to the
     /// founder like the feature quietly not working.
+    ///
+    /// Resolves against `pending.path`, for the same reason as `confirmProjectMatch`.
     func rejectProjectMatch() {
-        guard let path = activeProjectLink?.path else { return }
+        guard let pending = pendingProjectMatch else { return }
         pendingProjectMatch = nil
-        adopt(id: ProjectIdentity.mint(), for: path)
+        adopt(id: ProjectIdentity.mint(), for: pending.path)
     }
 
     private func adopt(id: String, for path: String) {

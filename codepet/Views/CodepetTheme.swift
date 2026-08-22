@@ -53,6 +53,26 @@ enum CodepetTheme {
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
     static let accentGreen  = Color.dyn("#16a34a", "#4ade80")
 
+    /// The two stops the brand ramp is made of, purple first. Exposed as a pair
+    /// rather than as a finished gradient because a radial bloom must stay radial —
+    /// a `LinearGradient` cannot fill one without changing its shape — so the
+    /// hero's aura and the composer's stroke read from one source and build the
+    /// geometry each needs.
+    static let brandRamp: [Color] = [accentPurple, accentPink]
+
+    /// The house ramp. Every two-stop gradient in the product is this function:
+    /// one geometry, one direction, hues supplied by the caller. Extracted from the
+    /// composer's send button, which had it inline.
+    ///
+    /// The hues are a parameter and not a default for a reason. `ChatComposer`'s
+    /// stops are the *active companion's* accent (`CopilotChatView.companionColor`),
+    /// so a ramp that hard-coded brand purple would erase the founder's companion
+    /// hue at the two most visible controls on the pane.
+    static func ramp(_ a: Color, _ b: Color) -> LinearGradient {
+        LinearGradient(gradient: Gradient(colors: [a, b]),
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     // MARK: Geometry
 
     /// Default card corner radius — gentle ~14pt curve on stat cards and

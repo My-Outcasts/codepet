@@ -632,9 +632,7 @@ struct ChatComposer: View {
                 .background(
                     Circle().fill(
                         canSend
-                            ? AnyShapeStyle(LinearGradient(
-                                gradient: Gradient(colors: [accent, accent2]),
-                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            ? AnyShapeStyle(CodepetTheme.ramp(accent, accent2))
                             : AnyShapeStyle(CodepetTheme.mutedText)
                     )
                     .shadow(color: canSend ? accent.opacity(0.55) : .clear, radius: 10)

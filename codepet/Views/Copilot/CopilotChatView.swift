@@ -171,7 +171,6 @@ struct CopilotChatView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .background(ChatBackdrop())
         // Release the pair the moment voice mode collapses (`VoiceComposer.close()`
         // already called `stopImmediately()`/`stop()`) — nothing here needs to hold a
         // mic or a synthesizer open once the founder has left voice mode.

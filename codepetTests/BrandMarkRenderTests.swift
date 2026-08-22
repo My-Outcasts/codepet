@@ -74,4 +74,89 @@ final class BrandMarkRenderTests: XCTestCase {
                              "the C is not on screen — asset missing, or drawn in outline-only "
                              + "colours that vanish into pageBackground. See \(url.path)")
     }
+
+    /// Renders the pane the way the shell composes it and asserts the corners are
+    /// the flat `pageBackground` — no ambient wash.
+    ///
+    /// This renders `CopilotChatView`, not `ChatEmptyState`, and the distinction is
+    /// the whole test: the wash lived on `CopilotChatView`'s `.background`, so the
+    /// bare hero already had flat corners and would have passed this without the
+    /// change. Rendering the real composition is also what keeps this a guard —
+    /// re-add an ambient gradient anywhere behind the pane and this fails again.
+    ///
+    /// The empty-hero path carries no `ScrollView` (the transcript's is at :484,
+    /// the history's at :693, neither reachable with no threads), which is the only
+    /// reason `ImageRenderer` produces anything here at all.
+    @MainActor
+    private func renderChatPane(colorScheme: ColorScheme) throws -> (rep: NSBitmapImageRep, url: URL) {
+        let dir = ProcessInfo.processInfo.environment["CODEPET_RENDER_DIR"]
+            ?? NSTemporaryDirectory()
+        // No founder name is set: `CompanyStore.company` is `@Published private(set)`
+        // (`CompanyStore.swift:45`), so a test cannot write it even under
+        // `@testable import` — the setter is private to that file. It does not matter
+        // here. The greeting's text is not what is being sampled, and the corners are
+        // 40pt from the edge, nowhere near it.
+        let pane = CopilotChatView()
+            .environmentObject(CompanyStore())
+            .environmentObject(AppState())
+            .environment(\.chatSurface, .twoMode)
+            .frame(width: 760, height: 560)
+            .background(CodepetTheme.pageBackground)
+            .environment(\.colorScheme, colorScheme)
+
+        let renderer = ImageRenderer(content: pane)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            throw XCTSkip("ImageRenderer produced nothing for CopilotChatView")
+        }
+        let url = URL(fileURLWithPath: dir)
+            .appendingPathComponent("chat-pane-\(colorScheme == .dark ? "dark" : "light").png")
+        try png.write(to: url)
+        print("[render] \(url.path)")
+        return (rep, url)
+    }
+
+    /// The four corners of the pane, 40pt in from each edge — far outside the
+    /// hero's stack, and where a 420pt-radius wash centred on the pane still
+    /// deposits measurable violet.
+    private func cornerSamples(_ rep: NSBitmapImageRep, inset: Int) -> [NSColor] {
+        let w = rep.pixelsWide, h = rep.pixelsHigh
+        return [(inset, inset), (w - inset, inset), (inset, h - inset), (w - inset, h - inset)]
+            .compactMap { rep.colorAt(x: $0.0, y: $0.1)?.usingColorSpace(.sRGB) }
+    }
+
+    @MainActor
+    func testTheChatGroundIsFlatInDark() throws {
+        let (rep, url) = try renderChatPane(colorScheme: .dark)
+        let ground = NSColor(srgbRed: 0x16 / 255.0, green: 0x13 / 255.0, blue: 0x0f / 255.0, alpha: 1)
+        let corners = cornerSamples(rep, inset: 40 * 2)
+        XCTAssertEqual(corners.count, 4, "could not sample four corners")
+        for c in corners {
+            let d = abs(c.redComponent - ground.redComponent)
+                + abs(c.greenComponent - ground.greenComponent)
+                + abs(c.blueComponent - ground.blueComponent)
+            XCTAssertLessThan(d, 0.06,
+                              "the pane's corner is not flat pageBackground — an ambient "
+                              + "wash is painting over it. See \(url.path)")
+        }
+    }
+
+    @MainActor
+    func testTheChatGroundIsFlatInLight() throws {
+        let (rep, url) = try renderChatPane(colorScheme: .light)
+        let ground = NSColor(srgbRed: 0xf8 / 255.0, green: 0xf7 / 255.0, blue: 0xf3 / 255.0, alpha: 1)
+        let corners = cornerSamples(rep, inset: 40 * 2)
+        XCTAssertEqual(corners.count, 4, "could not sample four corners")
+        for c in corners {
+            let d = abs(c.redComponent - ground.redComponent)
+                + abs(c.greenComponent - ground.greenComponent)
+                + abs(c.blueComponent - ground.blueComponent)
+            XCTAssertLessThan(d, 0.06,
+                              "the light pane's corner is not flat cream — an ambient "
+                              + "wash is painting over it. See \(url.path)")
+        }
+    }
 }

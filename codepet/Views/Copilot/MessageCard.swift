@@ -15,8 +15,11 @@ struct MessageCard<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // Opaque surface base FIRST, then the hue tint on top — i.e. "hue @12%
             // over surface" per the spec. Without the surface base the card is only
-            // a translucent tint over ChatBackdrop's wash, washing out pale hues
-            // (gold/teal) and the reading text in light mode.
+            // a translucent tint over the page itself, washing out pale hues
+            // (gold/teal) and the reading text in light mode. This mattered more
+            // when an ambient wash sat behind the pane; it still holds on flat
+            // ground, because `pageBackground` is not what these hues were mixed
+            // against.
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(CodepetTheme.surface)

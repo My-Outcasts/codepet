@@ -5,9 +5,9 @@ import SwiftUI
 /// parent keeps ownership of draft/mode), and up to 3 LIVE roadmap cards
 /// (beacon / needs-you / awaiting-approval) — or 3 prompt-starter cards that
 /// fill the composer when there's no roadmap yet. Replaces the old
-/// company-only greeting + static `QuickAction` pill row. The ambient purple
-/// wash now lives in `ChatBackdrop` (applied by `CopilotChatView` behind both
-/// the empty and active states), not here.
+/// company-only greeting + static `QuickAction` pill row. The empty and active
+/// states now share one flat `pageBackground` (filled by the shell), not an
+/// ambient wash behind either.
 ///
 /// DOCK ADAPTATION (380pt panel, ported from the full-width feat/chat-redesign
 /// original): smaller orb (56 vs 78), smaller greeting type (22 vs 31), single-

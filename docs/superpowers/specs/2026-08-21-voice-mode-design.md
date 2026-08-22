@@ -129,17 +129,22 @@ And **the voices are `default` quality.** macOS can download `enhanced` and `pre
 Settings, and out of the box this will sound like classic Mac TTS — serviceable, not ChatGPT-grade. A
 one-time nudge pointing at System Settings is honest; pretending otherwise is not.
 
+⚠️ **The nudge was never built** — confirmed 22 Aug by checking the deleted overlay as well as the
+composer, so it is a gap this spec opened and never closed rather than something the surface move lost.
+It is not blocking: the voices work, they just sound dated. Recorded here so the next reader does not go
+looking for it in code.
+
 ## 4. The loop
 
 ```
                  ┌──────────────────────────────────────────┐
                  │                                          │
-   idle ──tap──▶ listening ─────tap ✓─────▶ thinking ───────┤
-     ▲             ▲   ▲                                    │
-     │             │   └── tap ✕ (discard, credit unspent)   │
-   tap ✕           │                        reply streams    │
-     │             └────── she starts talking ─────▼         │
-     │                      (barge-in)          speaking ◀───┘
+   idle ──tap ⦙⦙⦙──▶ listening ─────tap ✓─────▶ thinking ────┤
+     ▲                 ▲   ▲                                │
+     │                 │   └── tap ✕ (discard, unspent)      │
+  tap ⦙⦙⦙ (exit)       │                    reply streams    │
+     │                 └──── she starts talking ────▼        │
+     │                        (barge-in)        speaking ◀───┘
      └──────────────────────────────────────────────────┘
 ```
 
@@ -147,11 +152,23 @@ one-time nudge pointing at System Settings is honest; pretending otherwise is no
 listening with the credit unspent. Silence does nothing at all — the mic keeps
 capturing until she decides, exactly as Claude's does.
 
+**The waveform button is both the toggle and the exit**, so there is one ✕, not two.
+An earlier draft of this diagram labelled the exit `tap ✕`, which was true of the
+takeover overlay and became wrong when decision 5 moved voice into the composer: ✕
+discards a sentence and never leaves voice mode. Retiring the second ✕ is also what
+retired the captions those buttons used to need — with one ✕ on screen there is
+nothing to disambiguate.
+
 | State | What the founder sees | What is running |
 |---|---|---|
-| `listening` | orb pulsing with mic level, live partial transcript in small type beneath, **✕ and ✓ beneath that** | recognition task streaming partials. **No timer** — ✓ is the only thing that takes the turn |
-| `thinking` | orb stops tracking level and breathes on a slow fixed cycle — legibly *not* listening, so she knows the turn was taken | the ordinary `sendChat` — same path a typed message takes |
-| `speaking` | orb pulsing with output level | synthesiser working through a queue of complete sentences |
+| `listening` | live transcript in the composer, bar waveform tracking mic level, **✕ and ✓ beside it** | recognition task streaming partials. **No timer** — ✓ is the only thing that takes the turn |
+| `thinking` | the status line says so, and the waveform stops tracking input — legibly *not* listening, so she knows the turn was taken | the ordinary `sendChat` — same path a typed message takes |
+| `speaking` | status line says the pet is speaking | synthesiser working through a queue of complete sentences |
+
+**This table described an orb until 22 Aug.** Decision 5 removed it: there is no orb,
+and the composer's single status line carries what three rows of overlay used to. One
+consequence, tested rather than incidental: a failure always outranks the caption, so
+the line can never say "Connecting…" over a dead microphone.
 
 **The partial transcript is shown for a reason.** Recognition gets names and jargon wrong, and a founder
 who cannot see what was heard will not trust the reply. Seeing it wrong before it sends is the difference

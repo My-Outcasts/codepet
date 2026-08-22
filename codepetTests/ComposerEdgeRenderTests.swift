@@ -157,6 +157,24 @@ final class ComposerEdgeRenderTests: XCTestCase {
     func testTheActiveModeSegmentHasPurpleBody() throws {
         let dir = ProcessInfo.processInfo.environment["CODEPET_RENDER_DIR"]
             ?? NSTemporaryDirectory()
+
+        // Pin `seenDeveloperKey` to `false` to ensure the hint below the mode
+        // switch renders. Without this pin, a founder who has opened Developer
+        // mode will have the key set to `true`, causing the hint to disappear and
+        // the workspace nav content (which includes a violet-highlighted "Roadmap"
+        // row) to shift up into this crop. That contamination would make the test
+        // measure the wrong violet pixels and pass for the wrong reason. The crop
+        // height (130pt) is load-bearing on this being false.
+        let previousSeenDeveloper = UserDefaults.standard.value(forKey: WorkspaceMode.seenDeveloperKey)
+        defer {
+            if let previousSeenDeveloper {
+                UserDefaults.standard.set(previousSeenDeveloper, forKey: WorkspaceMode.seenDeveloperKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: WorkspaceMode.seenDeveloperKey)
+            }
+        }
+        UserDefaults.standard.set(false, forKey: WorkspaceMode.seenDeveloperKey)
+
         // `mode` is the ONLY binding — `railCollapsed` is `@AppStorage`
         // (`TwoModeSidebar.swift:44`), not a parameter. Passing it does not compile.
         //

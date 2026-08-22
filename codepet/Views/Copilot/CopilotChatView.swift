@@ -1,5 +1,6 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
+import os
 
 /// The Copilot column: a company-grounded chat with the founder's companion —
 /// the PR#39 redesign composed into `main`'s 380pt dock. Empty state renders the
@@ -414,6 +415,15 @@ struct CopilotChatView: View {
     }
 
     private func startVoiceMode() {
+        // **The first line of every trace, and the guard's outcome is part of it.** A tap
+        // that does nothing because `voiceRequesting` is still true is
+        // indistinguishable, on screen, from a tap the button never delivered — and it
+        // is the difference between chasing the composer and chasing the button.
+        VoiceLog.surface.log("""
+            startVoiceMode(): tapped — voiceRequesting=\(self.voiceRequesting, privacy: .public) \
+            voiceMode=\(self.voiceMode, privacy: .public) \
+            cachedAvailability=\(VoiceLog.describe(self.voiceAvailability), privacy: .public)
+            """)
         guard !voiceRequesting, !voiceMode else { return }
         voiceRequesting = true
         Task {
@@ -424,7 +434,17 @@ struct CopilotChatView: View {
             // Written whatever the answer: a refusal has to reach the button, or the
             // next tap silently does nothing forever. See `voiceAvailability`.
             voiceAvailability = availability
-            guard availability == .ready else { return }
+            // **Whether the composer is entered at all.** `.ready` is the only value that
+            // gets past here, and every other one leaves the founder looking at the
+            // typing composer with a tooltip — which is correct behaviour and reads as a
+            // dead button.
+            guard availability == .ready else {
+                VoiceLog.surface.log("""
+                    startVoiceMode(): NOT entering — \
+                    availability=\(VoiceLog.describe(availability), privacy: .public)
+                    """)
+                return
+            }
 
             let hints = DepartmentCatalog.roster.map(\.name)
                 + PetCharacter.all.values.map(\.name)
@@ -439,6 +459,11 @@ struct CopilotChatView: View {
             // Two idempotent assignments are cheap; one missed one is silent.
             voiceTurn = VoiceTurn()
             voiceMode = true
+            VoiceLog.surface.log("""
+                startVoiceMode(): entering — hints=\(hints.count, privacy: .public) \
+                locale=\(self.lang.speechLocale.identifier, privacy: .public) \
+                onDevice=\(self.voiceListener?.isOnDevice ?? false, privacy: .public)
+                """)
         }
     }
 

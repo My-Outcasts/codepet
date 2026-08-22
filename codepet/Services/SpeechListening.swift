@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 import Speech
+import os
 
 /// `Equatable` so a test can name which failure it means. Deliberately carries no
 /// founder-facing text: Task 5/6 renders it, and chrome is bilingual.
@@ -256,6 +257,14 @@ final class SpeechListener: SpeechListening {
     /// The founder's turn, accumulated across renewals. See `TurnTranscript`.
     private var transcript = TurnTranscript()
 
+    /// **Diagnostics only, and the one number that separates the two failures that
+    /// look identical on screen.** A flat waveform with no partial is either "the tap
+    /// never fired" or "the tap fired and every buffer was silence", and nothing on
+    /// this path could tell them apart — see `VoiceLog`. Replaced on every `start()` so
+    /// a second session counts from zero. Read from the render thread and from the main
+    /// actor, which is why it is a `Counter` and not an `Int`.
+    private var tapCounter = VoiceLog.Counter()
+
     /// `contextualStrings` is why the locale is held: product nouns are exactly the
     /// words a general recognizer mishears.
     private let hints: [String]
@@ -289,8 +298,26 @@ final class SpeechListener: SpeechListening {
         // Liveness before availability: a redundant `start()` on a healthy running
         // listener must be a no-op, not a thrown `recognizerUnavailable` because the
         // service happened to go away since it started.
-        guard !isRunning else { return }
+        // The whole entry state on one line, because every one of these has been the
+        // answer at some point: a redundant start, a withdrawn service, a recogniser
+        // that exists and is unauthorised (`isAvailable` is service availability, NOT
+        // authorisation — that defect shipped once), and the on-device claim the surface
+        // makes in its credit line.
+        VoiceLog.listener.log("""
+            start(): isRunning=\(self.isRunning, privacy: .public) \
+            hasRecognizer=\(self.recognizer != nil, privacy: .public) \
+            isAvailable=\(self.recognizer?.isAvailable ?? false, privacy: .public) \
+            supportsOnDevice=\(self.recognizer?.supportsOnDeviceRecognition ?? false, privacy: .public) \
+            recognitionAuth=\(VoiceLog.describe(recognition: SFSpeechRecognizer.authorizationStatus()), privacy: .public) \
+            micAuth=\(VoiceLog.describe(mic: AVCaptureDevice.authorizationStatus(for: .audio)), privacy: .public)
+            """)
+
+        guard !isRunning else {
+            VoiceLog.listener.log("start(): already running — no-op")
+            return
+        }
         guard let recognizer, recognizer.isAvailable else {
+            VoiceLog.listener.error("start(): recognizerUnavailable — throwing")
             throw VoiceAudioError.recognizerUnavailable
         }
 
@@ -305,7 +332,12 @@ final class SpeechListener: SpeechListening {
         do {
             try engine.inputNode.setVoiceProcessingEnabled(true)
             voiceProcessingOn = true
+            VoiceLog.listener.log("setVoiceProcessingEnabled(true): ok")
         } catch {
+            VoiceLog.listener.error("""
+                setVoiceProcessingEnabled(true) THREW \
+                \(VoiceLog.describe(error), privacy: .public)
+                """)
             throw VoiceAudioError.engineFailed("voice processing: \(error.localizedDescription)")
         }
 
@@ -314,8 +346,16 @@ final class SpeechListener: SpeechListening {
             didAttach = true
         }
         // Connect at the INPUT's own format; the mixer does the downmix.
-        engine.connect(engine.inputNode, to: downmix,
-                       format: engine.inputNode.outputFormat(forBus: 0))
+        //
+        // **Logged before the connect, because it is not a constant.** With voice
+        // processing on, the VPIO unit renegotiates this per session — measured 3ch/24000
+        // and 7ch/48000 on the SAME Mac minutes apart — so a format recorded once in a
+        // comment is a format that is wrong on the run you are chasing.
+        let inputFormat = engine.inputNode.outputFormat(forBus: 0)
+        VoiceLog.listener.log("""
+            inputNode.outputFormat(0) = \(VoiceLog.describe(inputFormat), privacy: .public)
+            """)
+        engine.connect(engine.inputNode, to: downmix, format: inputFormat)
 
         // The mixer's OUTPUT format is what the recognizer receives, and
         // connect(_:to:format:) does not set it — it sets the SOURCE's output bus and
@@ -337,12 +377,25 @@ final class SpeechListener: SpeechListening {
         // that routes the microphone to the speakers and, with voice processing on,
         // builds a feedback loop.
         let inherited = downmix.outputFormat(forBus: 0)
+        // Both mixer buses, because the interesting fact is the DISAGREEMENT between
+        // them: the input bus carries the input node's format and the output bus carries
+        // whatever the mixer inherited, and when those two rates differ the mixer is
+        // being asked for a conversion. Neither number is visible from anywhere else.
+        VoiceLog.listener.log("""
+            downmix.inputFormat(0) = \(VoiceLog.describe(self.downmix.inputFormat(forBus: 0)), privacy: .public) \
+            downmix.outputFormat(0) = \(VoiceLog.describe(inherited), privacy: .public) (inherited)
+            """)
         guard let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                             sampleRate: inherited.sampleRate,
                                             channels: 1,
                                             interleaved: false) else {
+            VoiceLog.listener.error("""
+                could not build the mono tap format at \
+                \(inherited.sampleRate, privacy: .public)Hz — throwing
+                """)
             throw VoiceAudioError.engineFailed("could not build the mono tap format")
         }
+        VoiceLog.listener.log("tapFormat = \(VoiceLog.describe(tapFormat), privacy: .public)")
 
         openRecognition(recognizer)
 
@@ -359,12 +412,57 @@ final class SpeechListener: SpeechListening {
         // it — `feed` is a locked box, the level maths is a pure static over a raw
         // pointer, and `self` is reached only after the hop.
         let feed = self.feed
+        // **Captured the same way `feed` is, and for the same reason.** A `Counter` is
+        // `Sendable`, so this is a value the closure owns rather than a reach back
+        // through `self` — no main-actor hop, no race, and nothing here can keep the
+        // listener alive. A fresh one per `start()` so the census below counts THIS
+        // session.
+        let counter = VoiceLog.Counter()
+        self.tapCounter = counter
         downmix.installTap(onBus: 0, bufferSize: 4800, format: tapFormat) { @Sendable [weak self] buf, _ in
+            // **Counted first, before any guard can return.** The point of the count is
+            // to distinguish "the tap never fired" from "the tap fired and the buffers
+            // were wrong", so a callback that falls out of one of the guards below must
+            // still be counted — otherwise the two failures look identical again, which
+            // is the whole reason this exists.
+            let calls = counter.note(frames: Int(buf.frameLength))
             feed.append(buf)
-            guard let channel = buf.floatChannelData?[0] else { return }
+            guard let channel = buf.floatChannelData?[0] else {
+                if calls <= 3 {
+                    VoiceLog.tap.error("""
+                        tap #\(calls, privacy: .public): no float channel data — \
+                        format=\(VoiceLog.describe(buf.format), privacy: .public)
+                        """)
+                }
+                return
+            }
             let frames = Int(buf.frameLength)
-            guard frames > 0 else { return }
+            guard frames > 0 else {
+                if calls <= 3 {
+                    VoiceLog.tap.error("tap #\(calls, privacy: .public): frameLength 0")
+                }
+                return
+            }
             let level = VoiceLevel.level(from: UnsafeBufferPointer(start: channel, count: frames))
+            // **The first three and then silence, forever.** `os_log` is cheap but it is
+            // not real-time safe, and this runs ~10 times a second on the render thread
+            // for as long as voice mode is open; three calls in the life of a session is
+            // a cost worth paying and three hundred is not. The count keeps rising after
+            // the logging stops, so the census below still has a real number.
+            //
+            // `level == 0` is reported as its own flag, not left to be read off a
+            // formatted Float. It is the single most diagnostic bit on this path: RMS
+            // over 4800 samples of a live microphone is never EXACTLY zero — a real mic
+            // has a noise floor — so `zero=true` means the buffers are zero-filled and
+            // the audio is not arriving, while a small non-zero level means it is
+            // arriving and the founder is simply not talking loudly enough.
+            if calls <= 3 {
+                VoiceLog.tap.log("""
+                    tap #\(calls, privacy: .public): frames=\(frames, privacy: .public) \
+                    level=\(level, privacy: .public) zero=\(level == 0, privacy: .public) \
+                    totalFrames=\(counter.frames, privacy: .public)
+                    """)
+            }
             // `[weak self]` on the hop as well, matching `SpeechSpeaker`: reaching the
             // outer closure's captured `self` var from inside a second concurrently
             // executing closure is a warning under complete checking and an error in
@@ -377,7 +475,42 @@ final class SpeechListener: SpeechListening {
         tapInstalled = true
 
         do { try engine.start() }
-        catch { throw VoiceAudioError.engineFailed(error.localizedDescription) }
+        catch {
+            // **Domain and code.** `-10875` (`kAudioUnitErr_FailedInitialization`) and
+            // `-10868` (`kAudioUnitErr_FormatNotSupported`) are how this graph refuses a
+            // format it cannot render, and both read as the same empty
+            // `localizedDescription` — which is what `engineFailed` carries to the
+            // surface.
+            VoiceLog.listener.error("""
+                engine.start() THREW \(VoiceLog.describe(error), privacy: .public)
+                """)
+            throw VoiceAudioError.engineFailed(error.localizedDescription)
+        }
+        VoiceLog.listener.log("""
+            engine.start(): ok — isRunning=\(self.engine.isRunning, privacy: .public)
+            """)
+
+        // **The census, and it is the whole point of the counter.**
+        //
+        // A tap that never fires produces no log lines at all, and no log lines is
+        // exactly what a working-but-quiet tap that has stopped after its third line
+        // also produces. So one line, once, that states the count out loud — an absence
+        // becomes `callbacks=0`, which is a fact you can point at instead of a gap you
+        // have to infer.
+        //
+        // 2s at ~10 callbacks a second means a healthy session reports ~19. Captures the
+        // `Counter` and nothing else: no `self`, so this cannot keep a listener alive
+        // past its `deinit`, and a session torn down before the deadline simply reports
+        // the count it reached. Deliberately not cancelled on `stop()` — a stopped
+        // listener's count is the most interesting count there is.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            VoiceLog.listener.log("""
+                census 2s after start: callbacks=\(counter.calls, privacy: .public) \
+                frames=\(counter.frames, privacy: .public) \
+                — 0 callbacks means the tap is on a node nothing renders
+                """)
+        }
 
         succeeded = true
         isRunning = true
@@ -387,6 +520,15 @@ final class SpeechListener: SpeechListening {
     /// useless as a rollback for a half-configured graph — the exact case it is
     /// most needed for.
     func stop() {
+        // The tap's lifetime total, at the one moment it is final. A session that ends
+        // with `callbacks=0` never heard anything and never could have.
+        VoiceLog.listener.log("""
+            stop(): isRunning=\(self.isRunning, privacy: .public) \
+            tapInstalled=\(self.tapInstalled, privacy: .public) \
+            voiceProcessingOn=\(self.voiceProcessingOn, privacy: .public) \
+            tapCallbacks=\(self.tapCounter.calls, privacy: .public) \
+            tapFrames=\(self.tapCounter.frames, privacy: .public)
+            """)
         // Tap first, then end the audio: the other order can let one more buffer
         // reach a request that has already been closed.
         if tapInstalled {
@@ -467,11 +609,43 @@ final class SpeechListener: SpeechListening {
         req.contextualStrings = hints
         feed.replace(with: req)
 
+        VoiceLog.recognition.log("""
+            openRecognition(): requiresOnDevice=\(req.requiresOnDeviceRecognition, privacy: .public) \
+            hints=\(self.hints.count, privacy: .public) \
+            isAvailable=\(recognizer.isAvailable, privacy: .public) \
+            auth=\(VoiceLog.describe(recognition: SFSpeechRecognizer.authorizationStatus()), privacy: .public)
+            """)
+
+        // **Count-limited per request, not per session.** Partials arrive several times a
+        // second once recognition is working, and the question this log has to answer is
+        // "did ANY partial ever arrive", which the first few settle. Errors and finals are
+        // always logged: those are the ones that end a task, and there are at most a
+        // couple per request.
+        let callbacks = VoiceLog.Counter()
         task = recognizer.recognitionTask(with: req) { @Sendable [weak self] result, error in
             // Only `String` and `Bool` cross the hop from the result:
             // `SFSpeechRecognitionResult` is not Sendable.
             let text = result?.bestTranscription.formattedString
             let isFinal = result?.isFinal ?? false
+            // **Logged HERE, before the hop and before the identity guard.** A callback
+            // that `recognitionUpdate` drops as stale is still a callback that happened,
+            // and the guard dropping every one of them is itself a candidate cause — so
+            // this has to be recorded upstream of it or the drop is invisible.
+            //
+            // **Length, never the text.** The transcript is the founder's words.
+            let n = callbacks.note(frames: text?.count ?? 0)
+            if let error {
+                VoiceLog.recognition.error("""
+                    task callback #\(n, privacy: .public): ERROR \
+                    \(VoiceLog.describe(error), privacy: .public) \
+                    isFinal=\(isFinal, privacy: .public) textLen=\(text?.count ?? -1, privacy: .public)
+                    """)
+            } else if isFinal || n <= 5 {
+                VoiceLog.recognition.log("""
+                    task callback #\(n, privacy: .public): \
+                    isFinal=\(isFinal, privacy: .public) textLen=\(text?.count ?? -1, privacy: .public)
+                    """)
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self?.recognitionUpdate(req, text: text, isFinal: isFinal, error: error)
@@ -509,7 +683,15 @@ final class SpeechListener: SpeechListening {
         // voice mode milliseconds after it opened. The same path with a result
         // delivers turn N's transcript as turn N+1's `onPartial`. `renew()` makes
         // that sequence routine rather than a race.
-        guard isRunning, feed.isCurrent(req) else { return }
+        guard isRunning, feed.isCurrent(req) else {
+            // The drop is a fact, and a session where EVERY callback is dropped looks
+            // from the surface exactly like a session where none ever arrived.
+            VoiceLog.recognition.log("""
+                recognitionUpdate: DROPPED — isRunning=\(self.isRunning, privacy: .public) \
+                isCurrentRequest=\(self.feed.isCurrent(req), privacy: .public)
+                """)
+            return
+        }
 
         if let text {
             // Non-empty only, and `RenewalBudget` enforces that rather than this call
@@ -535,7 +717,17 @@ final class SpeechListener: SpeechListening {
     /// A recognition task ended by itself. Renew unless renewing is evidently futile —
     /// the decision is `RenewalBudget`'s, and so is the reasoning for it.
     private func endOfTask(_ error: Error?) {
-        switch budget.taskEnded() {
+        let decision = budget.taskEnded()
+        // The decision AND the counter behind it. `renewalsSpent` is read after
+        // `taskEnded()` has moved it, so this line is the state the next task end will
+        // be judged against — which is the number you want when asking why a session
+        // gave up (or why it never does).
+        VoiceLog.recognition.log("""
+            endOfTask: decision=\(String(describing: decision), privacy: .public) \
+            renewalsSpent=\(self.budget.renewalsSpent, privacy: .public)/\(RenewalBudget.allowance, privacy: .public) \
+            error=\(error.map { VoiceLog.describe($0) } ?? "none", privacy: .public)
+            """)
+        switch decision {
         case .renew:
             renew()
         case .fail:
@@ -543,6 +735,7 @@ final class SpeechListener: SpeechListening {
             // handles this, and the cancellation error `retireRecognition()` may
             // deliver is dropped by the identity guard rather than reported twice.
             stop()
+            VoiceLog.recognition.error("endOfTask: reporting failure to the surface")
             onFailure?(error ?? VoiceAudioError.engineFailed("recognition ended"))
         }
     }
@@ -574,10 +767,15 @@ final class SpeechListener: SpeechListening {
             // live-looking waveform that hears nothing, the exact failure this class exists
             // to report. Stop first so `isRunning` is already false when the surface
             // reacts, matching `endOfTask`.
+            VoiceLog.recognition.error("""
+                renew(): UNREACHABLE branch taken — isRunning=\(self.isRunning, privacy: .public) \
+                hasRecognizer=\(self.recognizer != nil, privacy: .public)
+                """)
             stop()
             onFailure?(VoiceAudioError.recognizerUnavailable)
             return
         }
+        VoiceLog.recognition.log("renew(): retiring the request and opening a fresh one")
         // `retireRecognition()` commits the retiring request's transcript, so the
         // founder's turn crosses the swap intact — see `TurnTranscript`.
         retireRecognition()

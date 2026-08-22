@@ -44,6 +44,14 @@ struct RenewalBudget: Equatable {
 
     private var spent = 0
 
+    /// **Read-only, for the log line and nothing else.** `taskEnded()`'s answer alone
+    /// cannot tell "this is the first end, renewing" from "this is the tenth, and
+    /// something cleared the budget nine times" — the counter is the difference, and it
+    /// was unreadable from outside. Deliberately not settable: the decision stays this
+    /// type's, and a diagnostic that could move the number would be a diagnostic that can
+    /// change the behaviour it is reporting on.
+    var renewalsSpent: Int { spent }
+
     init() {}
 
     /// A recognition task delivered a transcript, so recognition demonstrably works

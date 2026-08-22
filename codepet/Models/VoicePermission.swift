@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 import Speech
+import os
 
 /// Whether voice mode can run right now, and why not.
 enum VoiceAvailability: Equatable {
@@ -138,21 +139,72 @@ enum VoicePermission {
     /// rather than hopping by hand inside a callback, or blocking on a semaphore
     /// while a modal TCC dialog waits for the main thread that would be blocked.
     static func request(locale: Locale) async -> VoiceAvailability {
+        // **The two statuses BEFORE anything is asked for.** The shipped defect was that
+        // recognition authorisation stayed `.notDetermined` forever because nothing ever
+        // called `requestAuthorization`, and the only way to be sure the fix is reached
+        // is to see the status go from `notDetermined` to something else across this
+        // function — which needs both ends recorded.
+        VoiceLog.permission.log("""
+            request(): entry mic=\(describe(mic: AVCaptureDevice.authorizationStatus(for: .audio)), privacy: .public) \
+            recognition=\(describe(recognition: SFSpeechRecognizer.authorizationStatus()), privacy: .public) \
+            locale=\(locale.identifier, privacy: .public)
+            """)
+
         // Nothing to ask for: no recogniser for this locale is `.unsupported`, and no
         // grant the founder can give changes it. Asking anyway would raise two
         // dialogs for a feature that still cannot run.
-        guard SFSpeechRecognizer(locale: locale) != nil else { return current(locale: locale) }
+        guard SFSpeechRecognizer(locale: locale) != nil else {
+            VoiceLog.permission.error("""
+                request(): no recogniser for \(locale.identifier, privacy: .public) — asking for nothing
+                """)
+            return logged(current(locale: locale))
+        }
 
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            VoiceLog.permission.log("request(): raising the microphone prompt")
             _ = await AVCaptureDevice.requestAccess(for: .audio)
+            VoiceLog.permission.log("""
+                request(): microphone prompt returned, now \
+                \(describe(mic: AVCaptureDevice.authorizationStatus(for: .audio)), privacy: .public)
+                """)
         }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
-            return current(locale: locale)
+            VoiceLog.permission.log("request(): microphone not authorised — short-circuiting")
+            return logged(current(locale: locale))
         }
         if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-            _ = await requestRecognition()
+            VoiceLog.permission.log("request(): raising the speech-recognition prompt")
+            let status = await requestRecognition()
+            // **The completion, honoured and visible.** This is the continuation
+            // resuming; if this line is missing from a trace while the previous one is
+            // present, the callback never came back and the `await` is still parked.
+            VoiceLog.permission.log("""
+                request(): recognition prompt returned \
+                \(describe(recognition: status), privacy: .public) \
+                (status now \(describe(recognition: SFSpeechRecognizer.authorizationStatus()), privacy: .public))
+                """)
         }
-        return current(locale: locale)
+        return logged(current(locale: locale))
+    }
+
+    /// Every `return` out of `request` goes through here, so the answer the button and
+    /// `startVoiceMode` act on is in the trace exactly once per tap — including the
+    /// early exits, which are the ones that used to leave a tap looking like a no-op.
+    private static func logged(_ availability: VoiceAvailability) -> VoiceAvailability {
+        VoiceLog.permission.log("""
+            request(): answer=\(VoiceLog.describe(availability), privacy: .public) \
+            mic=\(describe(mic: AVCaptureDevice.authorizationStatus(for: .audio)), privacy: .public) \
+            recognition=\(describe(recognition: SFSpeechRecognizer.authorizationStatus()), privacy: .public)
+            """)
+        return availability
+    }
+
+    private static func describe(mic status: AVAuthorizationStatus) -> String {
+        VoiceLog.describe(mic: status)
+    }
+
+    private static func describe(recognition status: SFSpeechRecognizerAuthorizationStatus) -> String {
+        VoiceLog.describe(recognition: status)
     }
 
     private static func requestRecognition() async -> SFSpeechRecognizerAuthorizationStatus {

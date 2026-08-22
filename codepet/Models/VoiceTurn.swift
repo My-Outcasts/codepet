@@ -1,5 +1,6 @@
 // codepet/Models/VoiceTurn.swift
 import SwiftUI
+import os
 
 /// **One voice-mode session's state, and the reason it does not live in the surface
 /// that renders it.**
@@ -94,15 +95,35 @@ extension VoiceTurn {
     /// The state stays `.idle`, which is what puts `Cancel` under it — see
     /// `VoiceChrome.controls(for:)`.
     mutating func openMic(_ listener: SpeechListening) {
+        // **`micOpened` is logged, because a second run of the composer's `.task` looks
+        // exactly like the first from outside.** A branch flip and a closed History panel
+        // both re-run it, and `skipped=true` here is the correct answer to both — but it
+        // is also what a session that wrongly inherited the flag would report, and that
+        // one sits in `Connecting…` forever.
+        //
+        // Read into locals first: `Logger`'s message is built through an escaping
+        // autoclosure, which a `mutating func` may not capture `self` into.
+        let wasOpened = micOpened
+        let stateBefore = String(describing: session.state)
+        VoiceLog.surface.log("""
+            openMic(): micOpened=\(wasOpened, privacy: .public) \
+            state=\(stateBefore, privacy: .public)
+            """)
         guard !micOpened else { return }
         micOpened = true
         do {
             try listener.start()
         } catch {
+            VoiceLog.surface.error("""
+                openMic(): listener.start() THREW \(VoiceLog.describe(error), privacy: .public) \
+                — staying .idle and showing it
+                """)
             failure = error
             return
         }
         session.apply(.open)
+        let stateAfter = String(describing: session.state)
+        VoiceLog.surface.log("openMic(): started — state=\(stateAfter, privacy: .public)")
     }
 
     /// **Installs the listener's three callbacks and the voice's completion, against
@@ -176,7 +197,17 @@ extension VoiceTurn {
             // engine for the whole reply. `VoiceTurnFlow.ensureListening` picks it up on
             // the way back to `.listening`, which is the first moment this surface
             // claims the microphone is live.
-            guard turn.wrappedValue.session.state != .speaking else { return }
+            // **Both outcomes, because the suppressed one is a silent surface by design
+            // and a silent surface is what is being chased.** Suppressed-while-speaking
+            // is correct and leaves nothing on screen; shown is the channel doing its
+            // job. Without the first line, "onFailure never fired" and "onFailure fired
+            // and was deliberately swallowed" are the same trace.
+            let suppressed = turn.wrappedValue.session.state == .speaking
+            VoiceLog.surface.log("""
+                onFailure: \(suppressed ? "SUPPRESSED (speaking)" : "showing", privacy: .public) \
+                — \(VoiceLog.describe(error), privacy: .public)
+                """)
+            guard !suppressed else { return }
             listener.stop()
             var t = turn.wrappedValue
             t.failure = error

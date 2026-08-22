@@ -275,12 +275,17 @@ final class BrandMarkRenderTests: XCTestCase {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
-            // 0.01, not 0.072. The reference cancels the ~0.0597 colour-management
-            // offset the old ideal-hex comparison had to straddle, so a genuinely flat
-            // corner now measures ~0. This is roughly 8x tighter than the old
-            // threshold and catches a wash at a small fraction of the original 0.16
-            // opacity — where 0.072 needed about 70% of it.
-            XCTAssertLessThan(d, 0.01,
+            // GREEN (production, flat ground) = 0.0 exact, all 4 corners, reference-based
+            // (see `referenceGround`'s doc). RED, measured by temporarily reconstructing the
+            // deleted `ChatBackdrop` wash (`accentPurple.opacity(0.16)` radial, blur 60, the
+            // exact view removed in 8ee9ff3) as a scratch `.overlay` on this same pane and
+            // re-rendering through the identical pipeline: 0.024193063378334045, identical
+            // across two runs. Threshold 0.012 is the RED/GREEN midpoint — 0.012 of headroom
+            // above GREEN (49.6% of the RED→GREEN span), 0.012193 below RED (50.4%). This is
+            // its own scheme's pair, not shared with light's: light's RED measured lower
+            // (0.009053230285644531, below even the old 0.01), so a single shared threshold
+            // can no longer serve both.
+            XCTAssertLessThan(d, 0.012,
                               "the pane's corner is not flat pageBackground — an ambient "
                               + "wash is painting over it. See \(url.path)")
         }
@@ -296,12 +301,21 @@ final class BrandMarkRenderTests: XCTestCase {
             let d = abs(c.redComponent - ground.redComponent)
                 + abs(c.greenComponent - ground.greenComponent)
                 + abs(c.blueComponent - ground.blueComponent)
-            // 0.01, not 0.072. The reference cancels the ~0.0597 colour-management
-            // offset the old ideal-hex comparison had to straddle, so a genuinely flat
-            // corner now measures ~0. This is roughly 8x tighter than the old
-            // threshold and catches a wash at a small fraction of the original 0.16
-            // opacity — where 0.072 needed about 70% of it.
-            XCTAssertLessThan(d, 0.01,
+            // Light's own prior threshold was 0.06 (not dark's 0.072 — the two differed
+            // because the colour-management floors they had to straddle differed: ~0.0597
+            // dark, ~0.0214 cream). GREEN (production, flat ground) = 0.0 exact, all 4
+            // corners, reference-based (see `referenceGround`'s doc) — the reference cancels
+            // that floor for both schemes alike, which is what let a shared 0.01 exist at
+            // all. RED, measured by temporarily reconstructing the deleted `ChatBackdrop`
+            // wash (`accentPurple.opacity(0.16)` radial, blur 60, the exact view removed in
+            // 8ee9ff3) as a scratch `.overlay` on this pane in light mode and re-rendering
+            // through the identical pipeline: 0.009053230285644531, identical across two
+            // runs — BELOW the old hand-written 0.01, meaning that threshold would not have
+            // caught this wash in light mode at all. Threshold 0.0045 is the RED/GREEN
+            // midpoint — 0.0045 of headroom above GREEN (49.7% of the RED→GREEN span),
+            // 0.004553 below RED (50.3%). Dark's measured RED came out higher
+            // (0.024193063378334045), so the two schemes no longer share one threshold value.
+            XCTAssertLessThan(d, 0.0045,
                               "the light pane's corner is not flat cream — an ambient "
                               + "wash is painting over it. See \(url.path)")
         }

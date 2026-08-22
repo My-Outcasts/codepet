@@ -19,12 +19,24 @@ enum WorkspaceMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// **Display only — the cases are not renamed.** `rawValue` is what
+    /// `persist(to:)` writes to `cp_workspaceMode`, so renaming `ask`/`developer`
+    /// would make every already-stored value unreadable and silently reset every
+    /// founder to Ask on next launch. Same rule the Byte → Codepet rename followed:
+    /// the label changes, the id does not.
+    ///
+    /// Vietnamese keeps "Lập trình" rather than borrowing "Code". The first draft of
+    /// this rename used "Code" for both languages, and `testModeTitlesAreBilingual`
+    /// caught it — that test asserts `en != vi` for every label precisely to catch a
+    /// branch that inspects `lang` and ignores it. Documenting an exception would
+    /// have weakened a guard that has already caught one real defect on this feature,
+    /// to save translating a word that translates fine.
     func title(_ lang: AppLanguage) -> String {
         switch (self, lang) {
-        case (.ask, .vi):       return "Hỏi"
-        case (.ask, _):         return "Ask"
+        case (.ask, .vi):       return "Trò chuyện"
+        case (.ask, _):         return "Chat"
         case (.developer, .vi): return "Lập trình"
-        case (.developer, _):   return "Developer"
+        case (.developer, _):   return "Code"
         }
     }
 
@@ -38,8 +50,8 @@ enum WorkspaceMode: String, CaseIterable, Identifiable {
     /// standing right now.
     static func hint(_ lang: AppLanguage) -> String {
         lang == .vi
-            ? "Hỏi để trò chuyện với công ty. Developer để chạm vào mã của bạn."
-            : "Ask talks to your company. Developer touches your code."
+            ? "Trò chuyện với công ty của bạn. Code để chạm vào mã của bạn."
+            : "Chat talks to your company. Code touches your code."
     }
 
     // MARK: - The sidebar's company surfaces

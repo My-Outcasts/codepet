@@ -77,8 +77,13 @@ final class WorkspaceModeTests: XCTestCase {
     // MARK: - Labels
 
     func testModeTitlesAreBilingual() {
-        XCTAssertEqual(WorkspaceMode.ask.title(.en), "Ask")
-        XCTAssertEqual(WorkspaceMode.developer.title(.en), "Developer")
+        XCTAssertEqual(WorkspaceMode.ask.title(.en), "Chat")
+        XCTAssertEqual(WorkspaceMode.developer.title(.en), "Code")
+        // The CASES keep their names because `rawValue` is the persisted value.
+        // If this ever fails, someone renamed the case and broke mode restore for
+        // every existing founder — the label is display, the rawValue is data.
+        XCTAssertEqual(WorkspaceMode.ask.rawValue, "ask")
+        XCTAssertEqual(WorkspaceMode.developer.rawValue, "developer")
         XCTAssertNotEqual(WorkspaceMode.ask.title(.vi), WorkspaceMode.ask.title(.en))
         XCTAssertNotEqual(WorkspaceMode.developer.title(.vi), WorkspaceMode.developer.title(.en))
         XCTAssertFalse(WorkspaceMode.hint(.vi).isEmpty)

@@ -95,7 +95,9 @@ Three paths, all in `CompanyStore`, none of which has a repo in hand today:
 
 The first draft of this section said the chat lane had no repo and named `ProjectStore.activeProjectPath` as the thing to wire. Half right: memory does not use a repo today, but the chat lane already has one, and it is not that property.
 
-`CompanyStore.activeProjectLink: ProjectLink?` already exists (`CompanyStore.swift:42`). `linkProject(path:bootstrapClaudeMd:)` sets it (`:558`), it survives relaunch as a security-scoped bookmark under `cp_active_project_bookmark`, it is cleared on sign-out (`:2324`), four views read it, and it carries `path`, `isGitRepo` and `hasClaudeMd`.
+`CompanyStore.activeProjectLink: ProjectLink?` already exists. `linkProject(path:bootstrapClaudeMd:)` sets it, it is cleared on sign-out (`CompanyStore.reset()`), four views read it, and it carries `path`, `isGitRepo` and `hasClaudeMd`.
+
+**Corrected 2026-08-22, during the PR 1 fix wave: it does NOT survive relaunch.** This section originally said the link survives relaunch as a security-scoped bookmark under `cp_active_project_bookmark`. `linkProject` does write that bookmark (`URL.bookmarkData(options: [.withSecurityScope], …)`), but nothing in the repo ever resolves it — `grep -rn resolvingBookmarkData codepet/` returns nothing. So `activeProjectLink`, and therefore `activeProjectId`, is `nil` at every cold start until the founder re-links the folder by hand. See **PR 2 preconditions** below for the consequence this has for repo-tier scoping.
 
 It is also the better anchor of the two, and they are different things:
 
@@ -107,6 +109,13 @@ It is also the better anchor of the two, and they are different things:
 Memory scope keys on the deliberate one. An inferred repo is a guess about what the founder is doing; a linked folder is a statement.
 
 So the prerequisite is not wiring — it is **identity**: resolving `activeProjectLink.path` to a project id per §4.3. That is what ships first, and every signal below is gated on it. `hasClaudeMd` also means §6.1 already has the probe it needs.
+
+### PR 2 preconditions
+
+Added 2026-08-22, during the PR 1 fix wave. Two hard requirements PR 2 must satisfy before it ships, both surfaced by reviewing what PR 1 actually built rather than what this document assumed:
+
+- **A founder-facing affordance for `pendingProjectMatch` must exist before `knownCloudProjects` is ever populated.** PR 1 ships with `knownCloudProjects` always empty, so `ProjectIdentity.match` can only ever return `.mint` in production — the `.propose` branch is exercised by tests only. The moment PR 2's cloud sync starts filling that list, `.propose` becomes reachable for real founders. A proposal with no way to answer it leaves `pendingProjectMatch` set and `activeProjectId` permanently `nil` — the founder's memory for that repo silently stops scoping, with no error and nothing on screen explaining why. The affordance (confirm/reject UI) has to land no later than the cloud sync that makes it necessary, not after.
+- **The security-scoped bookmark must be resolved on launch, or the repo tier is empty every cold start.** Per the correction in §5.2, `linkProject` writes `cp_active_project_bookmark` and nothing reads it back — `activeProjectLink` and `activeProjectId` are both `nil` until the founder re-links by hand. Every design decision in §6 through §8 about what reaches a prompt assumes a repo can BE open; if the bookmark is never resolved, the repo tier this whole PR exists to enable is vacant at the start of every session, and a founder who has not yet re-linked gets shared-tier-only behaviour indistinguishable from the feature not existing.
 
 ### 5.3 The signals, and the one that was dropped
 

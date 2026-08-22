@@ -5,6 +5,17 @@ import XCTest
 @MainActor
 final class CompanyStoreProjectIdentityTests: XCTestCase {
 
+    /// Task 4 mitigation attempt: hold every `CompanyStore` this class creates so none of
+    /// them deallocates before the process exits. `CompanyStore` is a `@MainActor
+    /// ObservableObject`, which gives it an isolated deinit, and this suite crashes with
+    /// `abort` -> `___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED` ->
+    /// `swift_task_deinitOnExecutorImpl` -> `CompanyStore.__deallocating_deinit` on every
+    /// run, verified fresh against this branch (see the fix-wave report for the full frame).
+    /// Deliberately never cleared — the crash is triggered by deallocation, and clearing
+    /// this array in `tearDown()` would deallocate everything it holds at exactly the point
+    /// this exists to avoid.
+    private var retained: [CompanyStore] = []
+
     /// A real folder, because `linkProject` probes the filesystem. Not a git repo, so the
     /// injected remote reader is what decides whether there is a hint.
     private func makeFolder() throws -> URL {
@@ -30,10 +41,12 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
         let map = ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test")
         map.account = "co-test"
-        return CompanyStore(identityMap: map,
-                            remoteURLReader: { _ in forcedRemote },
-                            repoRootReader: { _ in forcedRoot },
-                            knownCloudProjects: cloud)
+        let store = CompanyStore(identityMap: map,
+                                 remoteURLReader: { _ in forcedRemote },
+                                 repoRootReader: { _ in forcedRoot },
+                                 knownCloudProjects: cloud)
+        retained.append(store)
+        return store
     }
 
     func test_linkingAFolderWithNoHintMintsAndBinds() throws {
@@ -116,12 +129,15 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
     }
 
 
-    // The guard that protects every EXISTING CompanyStore suite. Four test files already
-    // call linkProject (CompanyStoreCodeRunTests, ChatModeEngineeringTests,
-    // CompanyStoreChatTests) and none of them injects an identity map, so each gets the
-    // production default pointed at UserDefaults.standard. Nothing lands there only because
-    // those tests never hydrate, so `account` is nil and `bind` no-ops. That is luck until
-    // it is a test — this is the test.
+    // The guard that protects every account-less CompanyStore. Three other test files call
+    // linkProject too (CompanyStoreCodeRunTests, ChatModeEngineeringTests's
+    // BuildDestinationTests, and CompanyStoreChatTests) and now all inject their own
+    // UserDefaults suite, the way `makeStore` above does — CompanyStoreChatTests needs to,
+    // since one of its tests DOES call `hydrate` before `linkProject` and would otherwise
+    // bind for real. This test does not depend on any of that: it constructs its own
+    // no-account store directly and covers the no-account path on its own terms — the case
+    // none of those suites exercises, because in every one of them `account` happens to be
+    // set (or, before this fix wave, happened to stay nil by accident) rather than proven nil.
     func test_linkingWritesNothingWhileNoAccountIsSet() throws {
         let dir = try makeFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -132,10 +148,13 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         let store = CompanyStore(identityMap: map, remoteURLReader: { _ in nil },
                                  repoRootReader: { _ in nil },
                                  knownCloudProjects: [])
+        retained.append(store)
 
         store.linkProject(path: dir.path, bootstrapClaudeMd: false)
 
         XCTAssertNil(map.id(forPath: dir.path), "a bind with no account must not land")
+        XCTAssertNil(store.activeProjectId,
+                     "no disk record backs this id — activeProjectId must not go live on a bind that did not land")
         map.account = "co-test"
         XCTAssertNil(map.id(forPath: dir.path), "and it must not appear once someone signs in")
     }
@@ -193,5 +212,38 @@ final class CompanyStoreProjectIdentityTests: XCTestCase {
         store.linkProject(path: dir.path, bootstrapClaudeMd: false)
 
         XCTAssertEqual(store.pendingProjectMatch?.id, "aaa")
+    }
+
+    // The case the other tests structurally cannot see: every test above injects the SAME
+    // raw string as both the linked path and `forcedRoot`, so it would pass even if
+    // `resolveProjectIdentity` compared two unresolved strings. Real `git rev-parse
+    // --show-toplevel` canonicalises symlinks, so this test links via an UNRESOLVED symlink
+    // path while `forcedRoot` stands in for what real git would report — the RESOLVED
+    // target. If `linkProject` ever stops canonicalising the incoming path once at the top,
+    // this regresses to `.mint` (the safe direction, but still a lost hint) rather than
+    // proposing.
+    func test_symlinkedPathStillMatchesTheResolvedRoot() throws {
+        let parent = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: parent) }
+
+        let real = parent.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = parent.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+        let resolved = URL(fileURLWithPath: link.path).resolvingSymlinksInPath().path
+        XCTAssertNotEqual(resolved, link.path, "the fixture must actually exercise a symlink")
+
+        let remote = "git@github.com:Acme/Repo.git"
+        let store = makeStore(cloud: [CloudProject(id: "aaa",
+                                                   hints: ProjectIdentity.hints(folderName: "real",
+                                                                                gitRemote: remote),
+                                                   displayName: "repo")],
+                              forcedRemote: remote,
+                              forcedRoot: resolved)   // what real git would report: the RESOLVED path
+        store.linkProject(path: link.path, bootstrapClaudeMd: false)   // linked via the unresolved symlink
+
+        XCTAssertEqual(store.pendingProjectMatch?.id, "aaa",
+                       "a symlinked path must still be recognised as the repo root once canonicalised")
     }
 }

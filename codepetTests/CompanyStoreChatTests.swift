@@ -491,13 +491,18 @@ final class CompanyStoreChatTests: XCTestCase {
             .appendingPathComponent("store-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
+        // `hydrate` below sets a real `account`, so `linkProject` actually binds — this
+        // store needs its own UserDefaults suite, the way `CompanyStoreProjectIdentityTests
+        // .makeStore` does, or the bind lands in the app's real `cp_project_ids_v1`.
+        let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
         let s = CompanyStore(
             loader: { _ in .empty }, saver: { _, _ in true },
             chatSender: { _ in XCTFail("must not call chat client when routed to coding agent"); return nil },
             chatStreamer: { _ in
                 XCTFail("must not call chat streamer when routed to coding agent")
                 return AsyncThrowingStream { $0.finish() }
-            })
+            },
+            identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"))
         await s.hydrate(companyId: "u")
         s.linkProject(path: dir.path, bootstrapClaudeMd: false)
         let eng = DepartmentCatalog.find("eng")!

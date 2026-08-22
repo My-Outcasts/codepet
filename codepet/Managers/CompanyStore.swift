@@ -56,6 +56,21 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var activeProjectLink: ProjectLink?
     private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
 
+    /// The open project's id — what `DecisionEntry.scope` will compare against once the
+    /// repo tier lands. Nil while nothing is linked, and deliberately nil while a match is
+    /// waiting on the founder: a scope resolved from an unconfirmed guess is the silent
+    /// mis-attachment this whole flow exists to prevent. The guard is the nil, not a flag
+    /// somebody has to remember to check.
+    @Published private(set) var activeProjectId: String?
+
+    /// A proposed match the founder has not answered yet. `reason` is the normalised remote
+    /// that produced it, shown so they can see WHY it was proposed rather than being asked
+    /// to trust it. `path` is the folder the proposal was about — carried here rather than
+    /// read back off `activeProjectLink` at answer time, because the founder can link a
+    /// second folder before answering the first proposal, and the answer must land on the
+    /// folder that earned it, not on whatever is linked when they finally respond.
+    @Published private(set) var pendingProjectMatch: (id: String, reason: String, path: String)?
+
     /// The chat message a chat-triggered coding run anchors to, so its card renders
     /// inline right after that ask. `nil` for runs triggered outside chat (tasks/roadmap):
     /// those fall back to the transcript bottom.
@@ -176,6 +191,25 @@ final class CompanyStore: ObservableObject {
     /// must be able to prove the switch travels without mutating a process-wide singleton.
     private let codingMemoryGate: (Bool) -> Void
 
+    private let identityMap: ProjectIdentityMap
+    private let remoteURLReader: (String) -> String?
+    /// Whether the linked folder is itself a repo root, not merely inside one. `remoteURLReader`
+    /// walks up to find a remote the way every git command does, while `ProjectProbe.probe`
+    /// only checks for `.git` in the exact folder — so without this, a folder nested inside a
+    /// tracked ancestor would borrow the ancestor's remote and get proposed as the ancestor's
+    /// project.
+    private let repoRootReader: (String) -> String?
+
+    /// The founder's projects as the cloud knows them. Empty in PR 1 — the write side lands
+    /// with the `ProjectStore` sync in the next PR — so only the `.mint` branch runs in
+    /// production today. That is deliberate: an id minted now is the id forever, so nothing
+    /// is lost by the cloud list arriving later.
+    ///
+    /// `let`, not `var`: nothing mutates this in PR 1, and `var` would send the next reader
+    /// hunting for a writer that does not exist yet. PR 2's cloud sync is what turns it back
+    /// into `var` and gives it one.
+    private let knownCloudProjects: [CloudProject]
+
     /// Bumped on every hydrate/reset; lets a suspended hydrate detect it has
     /// been superseded (account switch mid-flight) and discard its result
     /// instead of clobbering newer state.
@@ -267,7 +301,21 @@ final class CompanyStore: ObservableObject {
          // Defaulted in the init BODY for the same reason as `vcRunner`: the real one
          // touches the `@MainActor` `PetMemoryStore.shared`, which a nonisolated
          // default-argument context cannot reference.
-         codingMemoryGate: ((Bool) -> Void)? = nil) {
+         codingMemoryGate: ((Bool) -> Void)? = nil,
+         // Defaulted in the init BODY for the same reason as `vcInterviewFlag`: the real one
+         // closes over `UserDefaults.standard`, which a nonisolated default-argument context
+         // cannot reference without warning.
+         identityMap: ProjectIdentityMap? = nil,
+         // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
+         // has a second defaulted parameter (an injectable runner, added so its exit-code
+         // gate is testable), and Swift does not apply defaults when forming a function
+         // reference. The closure is what makes the `(String) -> String?` shape available.
+         remoteURLReader: @escaping (String) -> String? = { GitRunner.remoteURL(in: $0) },
+         // Same shape and same reason as `remoteURLReader`: `GitRunner.repoRoot(in:)` has its
+         // own defaulted, injectable runner parameter, so a closure is what exposes the
+         // `(String) -> String?` shape here.
+         repoRootReader: @escaping (String) -> String? = { GitRunner.repoRoot(in: $0) },
+         knownCloudProjects: [CloudProject] = []) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -286,6 +334,10 @@ final class CompanyStore: ObservableObject {
         self.decisionExtractor = decisionExtractor
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
+        self.identityMap = identityMap ?? ProjectIdentityMap()
+        self.remoteURLReader = remoteURLReader
+        self.repoRootReader = repoRootReader
+        self.knownCloudProjects = knownCloudProjects
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -324,6 +376,11 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // The identity map is keyed by account: a project id only means something inside one
+        // founder's companies/{uid}. Pointing the map at the incoming account is what makes
+        // this founder's existing bindings resolve again — including after a sign-out, which
+        // must never mint a second id for a folder they already linked.
+        identityMap.account = companyId
         // Re-derived from THIS company's flag on every hydrate, so signing in as
         // someone else never inherits the previous founder's asked-ness (and never
         // re-asks a founder who already answered or skipped). Read synchronously and
@@ -617,19 +674,93 @@ final class CompanyStore: ObservableObject {
     /// seed carries the brief only.
     @discardableResult
     func linkProject(path: String, bootstrapClaudeMd: Bool) -> ProjectLink {
-        var link = ProjectProbe.probe(path: path)
+        // Canonicalised ONCE, here, and used for everything downstream — the probe, the
+        // bookmark, and (inside `resolveProjectIdentity`) both the repo-root comparison and
+        // the identity map's key. `git rev-parse --show-toplevel` canonicalises symlinks, so
+        // comparing it against a raw incoming path fails even when the folder genuinely IS
+        // the repo root (e.g. a path under a symlinked ancestor), which silently drops a
+        // legitimate remote hint. Canonicalising once at the entry point also means the same
+        // repo reached via a symlinked path and via its real path binds to the same map key
+        // instead of minting two ids for one repo — the exact failure the opaque id exists
+        // to prevent, and PR 1 is the cheapest moment to fix it because nothing has bound yet.
+        let canonicalPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        var link = ProjectProbe.probe(path: canonicalPath)
         if bootstrapClaudeMd && !link.hasClaudeMd {
             let seed = ClaudeMdBootstrap.compose(brief: company.brief,
                                                  decisions: claudeMdSeedDecisions)
-            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: path), atomically: true, encoding: .utf8)
-            link = ProjectProbe.probe(path: path)
+            try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: canonicalPath), atomically: true, encoding: .utf8)
+            link = ProjectProbe.probe(path: canonicalPath)
         }
-        if let data = try? URL(fileURLWithPath: path)
+        if let data = try? URL(fileURLWithPath: canonicalPath)
             .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
         }
         activeProjectLink = link
+        resolveProjectIdentity(for: link)
         return link
+    }
+
+    /// Resolve a linked folder to a project id: reuse this machine's binding for this
+    /// account, propose a remote match for the founder to confirm, or mint a fresh id.
+    ///
+    /// `.propose` leaves `activeProjectId` nil on purpose. Everything downstream reads that
+    /// property, so an unanswered proposal cannot scope a fact by accident.
+    private func resolveProjectIdentity(for link: ProjectLink) {
+        // The remote is only this folder's hint when this folder is the repo root. A folder
+        // nested inside a tracked ancestor would otherwise borrow the ancestor's remote and
+        // get proposed as the ancestor's project. `link.path` is already canonicalised by
+        // `linkProject`, and `repoRootReader` (real `git rev-parse --show-toplevel`) reports
+        // a canonicalised path too, so this comparison is symlink-safe on both sides.
+        let isRoot = repoRootReader(link.path).map { $0 == link.path } ?? false
+        let hints = ProjectIdentity.hints(
+            folderName: URL(fileURLWithPath: link.path).lastPathComponent,
+            gitRemote: isRoot ? remoteURLReader(link.path) : nil)
+
+        switch ProjectIdentity.match(localId: identityMap.id(forPath: link.path),
+                                     hints: hints,
+                                     against: knownCloudProjects) {
+        case .bound(let id):
+            pendingProjectMatch = nil
+            activeProjectId = id
+        case .propose(let id, let reason):
+            activeProjectId = nil
+            pendingProjectMatch = (id: id, reason: reason, path: link.path)
+        case .mint:
+            pendingProjectMatch = nil
+            adopt(id: ProjectIdentity.mint(), for: link.path)
+        }
+    }
+
+    /// The founder said yes: this folder is that project.
+    ///
+    /// Resolves against `pending.path`, not `activeProjectLink?.path`: the founder can link a
+    /// second folder before answering, and the answer must land on the folder that earned the
+    /// proposal, not on whatever happens to be linked when they finally respond.
+    func confirmProjectMatch() {
+        guard let pending = pendingProjectMatch else { return }
+        pendingProjectMatch = nil
+        adopt(id: pending.id, for: pending.path)
+    }
+
+    /// The founder said no — a different project, so it gets its own id. Minting rather than
+    /// leaving the folder unresolved: an unresolved folder scopes nothing, which looks to the
+    /// founder like the feature quietly not working.
+    ///
+    /// Resolves against `pending.path`, for the same reason as `confirmProjectMatch`.
+    func rejectProjectMatch() {
+        guard let pending = pendingProjectMatch else { return }
+        pendingProjectMatch = nil
+        adopt(id: ProjectIdentity.mint(), for: pending.path)
+    }
+
+    /// Only sets `activeProjectId` when the bind actually landed. `identityMap.bind` no-ops
+    /// with nobody signed in (`account == nil`) — a link before `hydrate`, or a link that
+    /// outlives a sign-out — and setting `activeProjectId` anyway would produce a live id
+    /// that no disk record backs: it would scope facts in this session to a project the map
+    /// will not remember on the next launch, or under an account nothing is signed into.
+    private func adopt(id: String, for path: String) {
+        identityMap.bind(path: path, to: id)
+        activeProjectId = identityMap.id(forPath: path) == id ? id : nil
     }
 
     /// What the CLAUDE.md seed is allowed to say about the facts on record — the gate above,
@@ -2555,6 +2686,12 @@ final class CompanyStore: ObservableObject {
         // a settings panel over their first frame of the shell.
         settingsSection = nil
         activeProjectLink = nil
+        activeProjectId = nil
+        pendingProjectMatch = nil
+        // Only the pointer. The bindings themselves stay on disk under the outgoing
+        // account's key, so the same founder signing back in still resolves their folders
+        // to the same ids — clearing them would mint new ones and orphan their facts.
+        identityMap.account = nil
         codingRunAnchorId = nil
         codingRun.cancel()   // clear any run anchored in the just-reset conversation (no-op while running)
         clearEngineeringRun()

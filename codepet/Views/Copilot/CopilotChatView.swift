@@ -48,16 +48,17 @@ struct CopilotChatView: View {
     /// one send. PROTOTYPE: held and shown correctly; not yet threaded to the model.
     @State private var pins: [ContextPin] = []
     @State private var attachments: [ChatAttachment] = []
-    /// Voice mode's takeover — spec §2 decision 2. The overlay owns its own
-    /// `VoiceSession`; this is only the presentation flag, same as `showHistory`.
+    /// Whether the composer is in voice mode — spec §2 decision 5, which reversed the
+    /// takeover. `VoiceComposer` owns its own `VoiceSession`; this is only which
+    /// composer the slot renders, same shape as `showHistory`.
     @State private var voiceMode = false
     /// Built once per tap of the waveform button, not once per `body` — a plain
-    /// (non-`@State`) `let` on `VoiceModeOverlay` takes whatever value THIS view's
+    /// (non-`@State`) `let` on `VoiceComposer` takes whatever value THIS view's
     /// latest `body` evaluation passes it, and `body` re-runs on every streamed
     /// token; constructing a fresh `SFSpeechRecognizer`/`AVSpeechSynthesizer` on
     /// each one would be wasteful and, worse, would silently replace the
-    /// instance the overlay's already-running `.task` wired its callbacks to.
-    /// Held here instead, so the overlay is handed the SAME two objects for the
+    /// instance the surface's already-running `.task` wired its callbacks to.
+    /// Held here instead, so `VoiceComposer` is handed the SAME two objects for the
     /// life of one voice-mode session.
     @State private var voiceListener: SpeechListening?
     @State private var voiceVoice: SpeakingVoice?
@@ -83,9 +84,9 @@ struct CopilotChatView: View {
     /// Codepet will ask, which is true of the un-refreshed state and of the common one.
     @State private var voiceAvailability: VoiceAvailability = .needsPermission
     /// One tap at a time. The TCC dialogs are asynchronous, so a second tap while
-    /// they are up would run a second request chain and hand the overlay a fresh
-    /// listener/speaker pair — replacing, mid-session, the instances the overlay's
-    /// already-running `.task` wired its callbacks to.
+    /// they are up would run a second request chain and hand the composer a fresh
+    /// listener/speaker pair — replacing, mid-session, the instances
+    /// `VoiceComposer`'s already-running `.task` wired its callbacks to.
     @State private var voiceRequesting = false
 
     /// The active companion's accent hue — the composer's primary gradient stop
@@ -171,26 +172,15 @@ struct CopilotChatView: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .background(ChatBackdrop())
-        // The takeover — covers this pane, not the whole shell, so the rail and
-        // the topbar stay reachable (spec §2 decision 2). `voiceListener`/
-        // `voiceVoice` are non-nil for exactly the overlay's lifetime: set together
-        // in `startVoiceMode()`, read together here, so the two can never drift —
-        // an overlay built with `.ready`-checked availability but no engine spun up
-        // would be a silent no-op tap.
-        .overlay {
-            if voiceMode, let listener = voiceListener, let voice = voiceVoice {
-                VoiceModeOverlay(isPresented: $voiceMode, listener: listener, voice: voice)
-            }
-        }
-        // Release the pair the moment the overlay dismisses itself (its own `close()`
+        // Release the pair the moment voice mode collapses (`VoiceComposer.close()`
         // already called `stopImmediately()`/`stop()`) — nothing here needs to hold a
         // mic or a synthesizer open once the founder has left voice mode.
         .onChange(of: voiceMode) { _, isOn in
             if !isOn {
                 voiceListener = nil
                 voiceVoice = nil
-                // The founder may have revoked a grant in System Settings while the
-                // overlay was up, and a mid-session revoke is exactly what
+                // The founder may have revoked a grant in System Settings while voice
+                // mode was up, and a mid-session revoke is exactly what
                 // `onFailure` reports.
                 voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
             }
@@ -262,7 +252,27 @@ struct CopilotChatView: View {
     /// here so the same values drive both placements.
     private var composer: some View { composer(showsDeptChips: true) }
 
-    private func composer(showsDeptChips: Bool) -> some View {
+    /// **Voice mode is a state of this slot, not a layer over the pane** — spec §2
+    /// decision 5, reversing decision 2. The composer grows in place and the chat stays
+    /// visible, so the swap happens here rather than in an `.overlay`: this one function
+    /// feeds all four placements (the dock hero, the dock's active conversation, and
+    /// both two-mode docks), and a swap at any of the call sites would have been a
+    /// surface that appears in some of them.
+    ///
+    /// `voiceListener`/`voiceVoice` are non-nil for exactly voice mode's lifetime: set
+    /// together in `startVoiceMode()`, read together here, so the two can never drift —
+    /// a surface built with `.ready`-checked availability but no engine spun up would be
+    /// a silent no-op tap.
+    @ViewBuilder private func composer(showsDeptChips: Bool) -> some View {
+        if voiceMode, let listener = voiceListener, let voice = voiceVoice {
+            VoiceComposer(isActive: $voiceMode, listener: listener, voice: voice,
+                          accent: companionColor)
+        } else {
+            typingComposer(showsDeptChips: showsDeptChips)
+        }
+    }
+
+    private func typingComposer(showsDeptChips: Bool) -> some View {
         ChatComposer(
             draft: $companyStore.chatDraft,
             mode: $mode,
@@ -290,20 +300,20 @@ struct CopilotChatView: View {
     }
 
     /// The waveform button's action — **ask for the two grants, and only then** build
-    /// the session's audio pair (see the state doc comment above) and raise the
-    /// takeover.
+    /// the session's audio pair (see the state doc comment above) and expand the
+    /// composer.
     ///
     /// **The asking is the fix, not a formality.** Nothing in the app ever called
     /// `SFSpeechRecognizer.requestAuthorization`, macOS never raises that prompt by
     /// itself, and `SpeechListener.start()` succeeds without it — so the founder got a
-    /// pulsing orb, a raw `kAFAssistantErrorDomain` string, and a recognition status
-    /// still `.notDetermined` on every later tap. See `VoicePermission.request`.
+    /// live-looking surface, a raw `kAFAssistantErrorDomain` string, and a recognition
+    /// status still `.notDetermined` on every later tap. See `VoicePermission.request`.
     ///
     /// **Nothing is built before the grants land.** A `SpeechSpeaker` is an
     /// `AVSpeechSynthesizer` and a `SpeechListener` an `AVAudioEngine` plus a
     /// recogniser; spinning both up in front of a dialog the founder may refuse
-    /// leaves the overlay's own `.onChange(of: voiceMode)` release path unreached,
-    /// because the overlay was never presented.
+    /// leaves the `.onChange(of: voiceMode)` release path above unreached, because
+    /// the composer never entered voice mode.
     ///
     /// `DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\.name)
     /// + ["Codepet"]`: the recognizer's `contextualStrings` (spec §3) — product

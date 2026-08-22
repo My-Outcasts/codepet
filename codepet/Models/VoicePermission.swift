@@ -89,9 +89,9 @@ enum VoicePermission {
     /// `onFinishedAll`, i.e. the whole reply-end path, for a reply this overlay never
     /// asked for. That used to clear `partial`: her spoken question erased mid-flight,
     /// with no message, no orb change and no credit spent — silence, and she had to say
-    /// it again. `VoiceModeOverlay.replyEnded` no longer clears the transcript, so what
+    /// it again. `VoiceTurnFlow.replyEnded` no longer clears the transcript, so what
     /// is left is the orb dropping to zero and a `.replyFinished` taken on someone
-    /// else's reply. `VoiceModeOverlay`'s `replyStreamEnded` gate closes the same hole
+    /// else's reply. `VoiceComposer`'s `replyStreamEnded` gate closes the same hole
     /// from the other side; this is the half that stops her getting into the situation
     /// at all.
     ///

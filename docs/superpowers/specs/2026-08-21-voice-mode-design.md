@@ -123,7 +123,7 @@ the design was written, because each one could have killed a different part of i
 
 In **English** nothing leaves the Mac: recognition is on-device, synthesis is local, no network, no
 credits for the audio. In **Vietnamese** her speech goes to Apple's servers, because no on-device asset
-exists. That is a sentence in the overlay, not a footnote.
+exists. That is a sentence in the composer, not a footnote.
 
 And **the voices are `default` quality.** macOS can download `enhanced` and `premium` voices in System
 Settings, and out of the box this will sound like classic Mac TTS — serviceable, not ChatGPT-grade. A
@@ -192,7 +192,9 @@ real tests, and no test ever touches audio hardware.**
 | `SentenceSplitter` | streaming reply text → complete sentences fit to speak | nothing (pure) |
 | `SpeechListening` (protocol) + `SpeechListener` | `SFSpeechRecognizer` + engine tap, partial results, silence timer | Speech, AVFoundation |
 | `SpeakingVoice` (protocol) + `SpeechSpeaker` | `AVSpeechSynthesizer` + a queue of sentences, stop-mid-word | AVFoundation |
-| `VoiceModeOverlay` | the takeover surface; owns a `VoiceSession`, reads the two protocols | SwiftUI |
+| `VoiceTurnFlow` | the five rules that carry the invariants — surface-agnostic, taken as explicit inputs | nothing (pure) |
+| `VoiceChrome` | what the founder reads: the privacy line, the credit count, the one text slot | nothing (pure) |
+| `VoiceComposer` | the in-composer surface (§2 decision 5); owns a `VoiceSession`, reads the two protocols | SwiftUI |
 
 **Why the protocol boundary is not optional here.** On 21 Aug, `PetMenuIcon` drew a sprite through
 `NSImage.lockFocus()`, which needs a window-server graphics context a headless XCTest host does not
@@ -285,7 +287,7 @@ entitlement work is needed, but a denial must degrade to "voice mode unavailable
 on" rather than a dead button.
 
 **Credits.** Talking is much faster than typing, so voice mode is the feature that makes turns cheap to
-spend without noticing. Ten spoken exchanges is ~2.5 credits in about two minutes. The overlay carries a
+spend without noticing. Ten spoken exchanges is ~2.5 credits in about two minutes. The composer carries a
 running count for that reason.
 
 **The silence threshold is a feel, not a fact.** 1.2s will be wrong for someone who pauses mid-thought

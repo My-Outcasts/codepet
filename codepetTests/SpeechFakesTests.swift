@@ -524,7 +524,7 @@ final class SpeechFakesTests: XCTestCase {
         // The reply ends. This is the moment the header starts saying "Listening".
         _ = session.apply(.replyFinished)
         XCTAssertEqual(session.state, .listening)
-        XCTAssertTrue(try VoiceModeOverlay.ensureListening(listener, state: session.state),
+        XCTAssertTrue(try VoiceTurnFlow.ensureListening(listener, state: session.state),
                       "the overlay claimed to be listening with the microphone torn down")
         XCTAssertTrue(listener.isRunning)
         XCTAssertEqual(fake.startCount, startsBefore + 1)
@@ -536,13 +536,13 @@ final class SpeechFakesTests: XCTestCase {
     func testEnsureListeningOnlyActsWhenTheOverlayIsClaimingToListen() throws {
         let fake = FakeListener()
         XCTAssertNoThrow(try fake.start())
-        XCTAssertFalse(try VoiceModeOverlay.ensureListening(fake, state: .listening),
+        XCTAssertFalse(try VoiceTurnFlow.ensureListening(fake, state: .listening),
                        "a running listener was restarted")
         XCTAssertEqual(fake.startCount, 1)
 
         fake.stop()
         for st in [VoiceState.idle, .thinking, .speaking] {
-            XCTAssertFalse(try VoiceModeOverlay.ensureListening(fake, state: st))
+            XCTAssertFalse(try VoiceTurnFlow.ensureListening(fake, state: st))
             XCTAssertFalse(fake.isRunning, "\(st) restarted a mic the overlay was not promising")
         }
         XCTAssertEqual(fake.startCount, 1)
@@ -554,7 +554,7 @@ final class SpeechFakesTests: XCTestCase {
     func testARefusedRestartThrowsSoTheOverlayCanShowIt() {
         let fake = FakeListener()
         fake.refuseStart = VoiceAudioError.recognizerUnavailable
-        XCTAssertThrowsError(try VoiceModeOverlay.ensureListening(fake, state: .listening)) {
+        XCTAssertThrowsError(try VoiceTurnFlow.ensureListening(fake, state: .listening)) {
             XCTAssertEqual($0 as? VoiceAudioError, .recognizerUnavailable)
         }
     }
@@ -613,7 +613,7 @@ final class SpeechFakesTests: XCTestCase {
     /// three of the four assertions below fail. The limit of that check, stated because
     /// it matters: the watcher lived in the *view*, which no test can host, so this
     /// proves the assertions have teeth against the mechanism rather than proving the
-    /// view cannot grow a new one. `VoiceModeOverlay.takeTurn` being the only
+    /// view cannot grow a new one. `VoiceTurnFlow.takeTurn` being the only
     /// send-side path in the app is what makes it the right assertion to have.
     func testSilenceAloneNeverTakesTheTurn() async throws {
         let fixture = try listeningFixture()
@@ -634,7 +634,7 @@ final class SpeechFakesTests: XCTestCase {
         // And the fixture is not simply inert: the same state, with the tap, sends.
         var session = fixture.session
         var driver = fixture.driver
-        XCTAssertEqual(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+        XCTAssertEqual(VoiceTurnFlow.takeTurn(partial: fixture.partial.text,
                                                  session: &session,
                                                  listener: fixture.listener,
                                                  voice: fixture.voice,
@@ -654,7 +654,7 @@ final class SpeechFakesTests: XCTestCase {
         var fixture = try listeningFixture()
         fixture.listener.emit("what should we charge for the beta")
 
-        let sent = VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+        let sent = VoiceTurnFlow.takeTurn(partial: fixture.partial.text,
                                              session: &fixture.session,
                                              listener: fixture.listener,
                                              voice: fixture.voice,
@@ -674,13 +674,13 @@ final class SpeechFakesTests: XCTestCase {
 
         // Tap twice — and again with a transcript still on screen, which is what a
         // late partial from the retired request would leave.
-        XCTAssertNil(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+        XCTAssertNil(VoiceTurnFlow.takeTurn(partial: fixture.partial.text,
                                                session: &fixture.session,
                                                listener: fixture.listener,
                                                voice: fixture.voice,
                                                driver: &fixture.driver, isBusy: false),
                      "a second ✓ took a second turn")
-        XCTAssertNil(VoiceModeOverlay.takeTurn(partial: "still on screen",
+        XCTAssertNil(VoiceTurnFlow.takeTurn(partial: "still on screen",
                                                session: &fixture.session,
                                                listener: fixture.listener,
                                                voice: fixture.voice,
@@ -707,10 +707,10 @@ final class SpeechFakesTests: XCTestCase {
             listener.tape = tape
             voice.tape = tape
 
-            XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: text, state: .listening,
+            XCTAssertFalse(VoiceTurnFlow.canTakeTurn(partial: text, state: .listening,
                                                         isBusy: false),
                            "✓ was enabled on \(text.debugDescription)")
-            XCTAssertNil(VoiceModeOverlay.takeTurn(partial: text, session: &session,
+            XCTAssertNil(VoiceTurnFlow.takeTurn(partial: text, session: &session,
                                                    listener: listener, voice: voice,
                                                    driver: &driver, isBusy: false))
             XCTAssertEqual(session.state, .listening,
@@ -723,14 +723,14 @@ final class SpeechFakesTests: XCTestCase {
 
         // The other side of the rule, so the assertions above are not just "always
         // false", and the two conditions that are not about emptiness at all.
-        XCTAssertTrue(VoiceModeOverlay.canTakeTurn(partial: "hi", state: .listening,
+        XCTAssertTrue(VoiceTurnFlow.canTakeTurn(partial: "hi", state: .listening,
                                                    isBusy: false))
-        XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: "hi", state: .listening,
+        XCTAssertFalse(VoiceTurnFlow.canTakeTurn(partial: "hi", state: .listening,
                                                     isBusy: true),
                        "✓ was live while a turn was already in flight — `sendMessage` "
                        + "drops it and there is no next tick to retry on")
         for state in [VoiceState.idle, .thinking, .speaking] {
-            XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: "hi", state: state,
+            XCTAssertFalse(VoiceTurnFlow.canTakeTurn(partial: "hi", state: state,
                                                         isBusy: false),
                            "✓ was live in \(state)")
         }
@@ -747,20 +747,20 @@ final class SpeechFakesTests: XCTestCase {
         let fixture = try listeningFixture()
         fixture.listener.emit("add pricing for the beta")
 
-        VoiceModeOverlay.abandonTurn(fixture.listener)
+        VoiceTurnFlow.abandonTurn(fixture.listener)
         fixture.partial.text = ""                      // what the view does after ✕
 
         XCTAssertEqual(fixture.session.state, .listening,
                        "✕ left voice mode or took the turn — it must keep listening")
         XCTAssertEqual(fixture.tape.events, ["endTurn"],
                        "✕ began a reply: \(fixture.tape.events)")
-        XCTAssertFalse(VoiceModeOverlay.canTakeTurn(partial: fixture.partial.text,
+        XCTAssertFalse(VoiceTurnFlow.canTakeTurn(partial: fixture.partial.text,
                                                     state: fixture.session.state,
                                                     isBusy: false),
                        "✕ left a transcript ✓ could still charge for")
         // The count itself moves in exactly one place — `sendTurn()`'s Task, after a
         // non-nil `takeTurn` — and nothing above went near it.
-        XCTAssertTrue(VoiceModeOverlay.creditLine(turns: 0, .en).contains("0"))
+        XCTAssertTrue(VoiceChrome.statusLine(turns: 0, onDevice: true, .en).contains("0"))
 
         fixture.listener.emit("what about the annual plan")
         XCTAssertEqual(fixture.partial.text, "what about the annual plan",
@@ -803,7 +803,7 @@ final class SpeechFakesTests: XCTestCase {
 
         // Q1, taken by ✓.
         fixture.listener.emit("what should we charge for the beta")
-        XCTAssertEqual(VoiceModeOverlay.takeTurn(partial: fixture.partial.text,
+        XCTAssertEqual(VoiceTurnFlow.takeTurn(partial: fixture.partial.text,
                                                  session: &fixture.session,
                                                  listener: fixture.listener,
                                                  voice: fixture.voice,
@@ -829,7 +829,7 @@ final class SpeechFakesTests: XCTestCase {
         fixture.voice.onFinishedAll = {
             ended += 1
             do {
-                transcript.text = try VoiceModeOverlay.replyEnded(session: &atEnd,
+                transcript.text = try VoiceTurnFlow.replyEnded(session: &atEnd,
                                                                   pending: transcript.text,
                                                                   listener: listener)
             } catch { thrown = error }
@@ -850,7 +850,7 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertEqual(transcript.text, "and check the runway",
                        "the question she queued while the pet was thinking was erased "
                        + "when the reply ended, and no further partial can bring it back")
-        XCTAssertTrue(VoiceModeOverlay.canTakeTurn(partial: transcript.text,
+        XCTAssertTrue(VoiceTurnFlow.canTakeTurn(partial: transcript.text,
                                                    state: atEnd.state, isBusy: false),
                       "✓ is disabled, so she cannot send the sentence she is looking at")
 
@@ -880,7 +880,7 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertFalse(fake.isRunning)
         let startsBefore = fake.startCount
 
-        let kept = try VoiceModeOverlay.replyEnded(session: &session,
+        let kept = try VoiceTurnFlow.replyEnded(session: &session,
                                                    pending: "and check the runway",
                                                    listener: fake)
         XCTAssertEqual(session.state, .listening,
@@ -902,7 +902,7 @@ final class SpeechFakesTests: XCTestCase {
         _ = session.apply(.founderSentTurn)
         _ = session.apply(.replyBegan)
 
-        XCTAssertThrowsError(try VoiceModeOverlay.replyEnded(session: &session,
+        XCTAssertThrowsError(try VoiceTurnFlow.replyEnded(session: &session,
                                                              pending: "and the runway",
                                                              listener: fake)) {
             XCTAssertEqual($0 as? VoiceAudioError, .recognizerUnavailable)
@@ -926,11 +926,11 @@ final class SpeechFakesTests: XCTestCase {
     ///
     /// The first assertion is the guard; the rest is why it must answer that way.
     func testAStreamEndInListeningIsNotThisOverlaysReply() {
-        XCTAssertFalse(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.listening),
+        XCTAssertFalse(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.listening),
                        "a typed reply's stream end was treated as the spoken turn's")
-        XCTAssertFalse(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.idle))
-        XCTAssertTrue(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.thinking))
-        XCTAssertTrue(VoiceModeOverlay.streamEndBelongsToVoiceTurn(.speaking))
+        XCTAssertFalse(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.idle))
+        XCTAssertTrue(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.thinking))
+        XCTAssertTrue(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.speaking))
 
         // And what the `.listening` answer is protecting: a virgin queue reports.
         let voice = FakeVoice()

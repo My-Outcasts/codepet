@@ -19,7 +19,7 @@ import Foundation
 ///    `SentenceSplitter.speakable` deletes the fence entirely, so for the 5-15s it
 ///    takes to stream, there are zero speakable sentences and the synthesiser runs
 ///    dry. Treating that as end-of-reply reports the reply finished while it is still
-///    arriving, and the session leaves `.speaking` — so `VoiceModeOverlay.speak`
+///    arriving, and the session leaves `.speaking` — so `VoiceComposer.speak`
 ///    refuses every sentence after the fence and the founder hears half an answer.
 ///    (It also cleared her transcript until that clear was deleted, and until decision
 ///    4 removed the silence timer it sent an empty turn and spent a credit on it.)

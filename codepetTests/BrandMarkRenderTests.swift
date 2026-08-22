@@ -125,27 +125,52 @@ final class BrandMarkRenderTests: XCTestCase {
         print("[render] \(url.path)")
 
         // Warm means red leads blue. `pageBackground` (#16130f) is itself already
-        // "warm" by this raw definition — R=22 > B=15, i.e. every plain-background
-        // pixel outside the bloom's cool violet core already clears `+0.02` — so a
-        // literal `60`-pixel bar (the brief's draft value) passes at RED for free:
-        // measured 219,028/235,600 sampled pixels warm with the single-stop bloom,
-        // before this test's production change existed. Adding the pink stop pushes
-        // that to 233,020: the purple-only core cools ~16,572 pixels below the
-        // background's own baseline, and the pink stop reclaims about 14,000 of
-        // them. The threshold below sits at the midpoint of that measured RED/GREEN
-        // gap (~7,000-pixel margin either side) — high enough to fail on the old
-        // single-stop bloom, low enough to pass once the pink stop is real. Do not
-        // loosen the `0.02` channel margin to "fix" a future threshold miss;
-        // remeasure RED/GREEN instead.
+        // "warm" by this raw definition — R=0.0863, B=0.0588, a 0.0275 lead that
+        // clears the +0.02 margin on its own. Counting it made the assertion
+        // measure the band's background AREA (94.8% of the 235,600-pixel sample at
+        // RED, 98.9% at GREEN) rather than the bloom, so the whole RED→GREEN signal
+        // was a ~1% wobble on a large number. Skipping near-background pixels
+        // leaves only what the bloom actually painted.
+        //
+        // The exclusion epsilon is 0.08, not the 0.03 first proposed: measuring a
+        // genuine background pixel through this same `ImageRenderer` →
+        // `NSBitmapImageRep` → `.usingColorSpace(.sRGB)` round trip gives a per-pixel
+        // distance from the ideal `#16130f` value of ~0.0597 (colour-management
+        // noise, not signal) — 0.03 excluded almost nothing, and warmPixels came
+        // back at 233,044, indistinguishable from the unfiltered count. This is the
+        // same noise floor `testTheChatGroundIsFlatInDark`/`InLight` already work
+        // around with their own 0.06 corner epsilon. 0.08 clears that floor with
+        // margin.
+        //
+        // Re-measured by actually reverting and restoring ChatEmptyState.swift
+        // (removing the `accentPink.opacity(0.18)` middle stop for RED, restoring it
+        // for GREEN), with this background-exclusion filter in place:
+        //   RED  (purple-only bloom) =  8,329 warm pixels
+        //   GREEN (production, pink stop) = 18,285 warm pixels
+        // RED is not the near-zero this test originally expected of a "cool"
+        // bloom — the purple core's blurred edge anti-aliases into the background,
+        // and that boundary carries a few thousand pixels that read warm from
+        // rendering noise alone, independent of the pink stop. The RED→GREEN gap
+        // is nonetheless a real >2x signal (18,285 / 8,329), a different shape than
+        // the old ~1% wobble on 230K, not the same failure in miniature. Threshold
+        // is the midpoint (13,300): 59.7% of headroom above RED, 27.3% of headroom
+        // below GREEN. Do not loosen the `0.02` channel margin to "fix" a future
+        // threshold miss; remeasure RED/GREEN instead.
+        let pageBackground = NSColor(srgbRed: 0x16 / 255.0, green: 0x13 / 255.0, blue: 0x0f / 255.0, alpha: 1)
+        let backgroundEpsilon: CGFloat = 0.08
         var warmPixels = 0
         let band = 0..<Int(155 * renderer.scale)
         for y in band {
             for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
                 guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let backgroundDistance = abs(c.redComponent - pageBackground.redComponent)
+                    + abs(c.greenComponent - pageBackground.greenComponent)
+                    + abs(c.blueComponent - pageBackground.blueComponent)
+                if backgroundDistance < backgroundEpsilon { continue }
                 if c.redComponent > c.blueComponent + 0.02 { warmPixels += 1 }
             }
         }
-        XCTAssertGreaterThan(warmPixels, 226_000,
+        XCTAssertGreaterThan(warmPixels, 13_300,
                              "the bloom has no warm edge — the pink stop is missing, or the "
                              + "radial was replaced by a linear ramp. See \(url.path)")
     }

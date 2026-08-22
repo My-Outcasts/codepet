@@ -162,15 +162,28 @@ struct TwoModeSidebar: View {
                             .padding(.vertical, 8)
                             // The selected segment is a raised card sitting in a
                             // well — `cardRaised` on `well`, the pairing main uses
-                            // wherever something is lifted out of a track.
+                            // wherever something is lifted out of a track. It is now
+                            // *tinted*: still raised, but with purple body rather
+                            // than purple text alone, which is what it takes to read
+                            // as selected once the pane lost its ambient wash.
+                            //
+                            // Flat, not a ramp. At this size a two-stop gradient
+                            // resolves to one warm-shifted violet — a render path
+                            // with no signal.
                             .background(
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .fill(mode == m ? CodepetTokens.cardRaised : .clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .fill(mode == m
+                                                  ? CodepetTheme.accentPurple.opacity(0.10)
+                                                  : .clear)
+                                    )
                             )
                             .overlay(
                                 mode == m
                                     ? RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .stroke(CodepetTokens.cardEdge, lineWidth: 1)
+                                        .stroke(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1)
                                     : nil
                             )
                             .foregroundStyle(mode == m ? CodepetTheme.accentPurple : CodepetTheme.mutedText)

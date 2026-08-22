@@ -140,6 +140,82 @@ final class ComposerEdgeRenderTests: XCTestCase {
                              + "purple — accent is companionColor, not a constant. See \(url.path)")
     }
 
+    // MARK: - Sidebar mode switch: active segment body
+
+    /// The active mode segment reads as selected on flat ground.
+    ///
+    /// Flat purple, not a ramp: at this size a two-stop gradient resolves to a
+    /// single warm-shifted violet, so it would add a render path and no signal. The
+    /// spec's rule is gradient where there is area, stronger flat accent where there
+    /// is not — this is the "where there is not" side.
+    ///
+    /// Before this change the active segment was `cardRaised` filled and `cardEdge`
+    /// stroked with purple *text*: the purple was already at full strength and there
+    /// was no fill opacity to raise. So what is asserted is that the segment's BODY
+    /// became purple, which text alone cannot do.
+    @MainActor
+    func testTheActiveModeSegmentHasPurpleBody() throws {
+        let dir = ProcessInfo.processInfo.environment["CODEPET_RENDER_DIR"]
+            ?? NSTemporaryDirectory()
+        // `mode` is the ONLY binding — `railCollapsed` is `@AppStorage`
+        // (`TwoModeSidebar.swift:44`), not a parameter. Passing it does not compile.
+        //
+        // Height 130, alignment .top — NOT the plan's original 240×120 with no
+        // alignment. `TwoModeSidebar`'s body is one VStack (brand, modeSwitch,
+        // +New, search, workspace, a scrolling session list, account) far taller
+        // than 120pt; `.frame(width:height:)` defaults to `alignment: .center`,
+        // so an unaligned 120pt-tall frame centers that oversized VStack and the
+        // visible window becomes a CROPPED MIDDLE SLICE — in practice the
+        // workspace nav list (which has its own violet-highlighted active row,
+        // "Lộ trình"/Roadmap) with brand and modeSwitch scrolled off above it
+        // entirely. Measured by rendering at height 500 with alignment: .top and
+        // reading the PNG: confirmed. `alignment: .top` plus 130pt (brand ~40pt +
+        // modeSwitch ~64pt + margin) isolates brand+modeSwitch cleanly, verified
+        // by inspecting the render — no workspace content, no false-peak glyphs.
+        let host = TwoModeSidebar(mode: .constant(.ask))
+            .environmentObject(CompanyStore())
+            .environmentObject(AppState())
+            .frame(width: 240, height: 130, alignment: .top)
+            .background(CodepetTheme.pageBackground)
+            .environment(\.colorScheme, .light)
+
+        let renderer = ImageRenderer(content: host)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            // A nil render is a FAILURE, not a skip — see the class-level enum doc.
+            XCTFail("ImageRenderer produced nothing for TwoModeSidebar")
+            throw RenderFailure.producedNothing
+        }
+        let url = URL(fileURLWithPath: dir).appendingPathComponent("mode-switch.png")
+        try png.write(to: url)
+        print("[render] \(url.path)")
+
+        // Count violet-leaning pixels: blue clearly above green, saturation above
+        // cardRaised's zero. Purple TEXT alone at this size contributes a few dozen
+        // pixels; a tinted fill plus a tinted edge contributes hundreds.
+        //
+        // Measured on this exact host (240×130@2x, top-aligned, brand+modeSwitch
+        // only): RED (text only, pre-change) = 408. GREEN (tinted fill + 0.45
+        // stroke, post-change) = 1492 — 3.66x apart, not a squeezed gap. 900 sits
+        // with real headroom on both sides: +492 (120%) above RED, -592 (40% of
+        // GREEN) below GREEN.
+        var violet = 0
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 1) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 1) {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if c.blueComponent > c.greenComponent + 0.04 && saturation(c) > 0.08 {
+                    violet += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(violet, 900,
+                             "the active mode segment has no purple body — only its text is "
+                             + "accented, which is what it did before. See \(url.path)")
+    }
+
     // MARK: - Focused state: unverified offscreen
 
     /// Neither test above exercises `.opacity(focus.wrappedValue ? 0.9 : 0.35)`'s

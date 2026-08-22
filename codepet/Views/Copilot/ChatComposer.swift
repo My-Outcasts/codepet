@@ -82,6 +82,22 @@ struct ChatComposer: View {
     /// *requests* the grants, so a refusal is only visible on this button if the
     /// answer comes from there. See `CopilotChatView.voiceAvailability`.
     var voiceAvailability: VoiceAvailability? = nil
+    /// Start a capture — spec §10's second control. `nil` by default, so
+    /// `DeveloperWorkPane` and the preview host render exactly as they do today: the same
+    /// additive rule `onVoiceMode`, `tier` and `pins` follow. `micButton` needs this and
+    /// `voiceAvailability` both, exactly as `voiceButton` does.
+    var onRecord: RecordControl? = nil
+    /// **Which voice control is already live, if either** — spec §10: *"The two controls
+    /// must never run at once."*
+    ///
+    /// Handed down rather than inferred, because the fact this has to carry is not "the
+    /// other surface is on screen". Both surfaces replace this one, so from here they are
+    /// always invisible; the window that matters is `startVoiceMode()`'s two TCC dialogs,
+    /// during which this composer is still up with a live mic button and voice mode is
+    /// *about* to own the microphone. See `VoicePermission.canEnter` and
+    /// `CopilotChatView.liveVoiceControl`, which reports a control as live from the moment
+    /// its request starts.
+    var liveVoiceControl: VoiceControlKind? = nil
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -115,6 +131,7 @@ struct ChatComposer: View {
             HStack(spacing: 8) {
                 departmentControl
                 plusMenu
+                micButton
                 voiceButton
                 modeMenu
                 Spacer()
@@ -154,6 +171,7 @@ struct ChatComposer: View {
             HStack(spacing: 7) {
                 if showsDeptChips || selectedDept != nil { departmentControl }
                 plusMenu
+                micButton
                 voiceButton
                 // "The tier lives in the composer, beside `+`" (§8.2) — the session
                 // bar carries facts set once, the composer carries controls for the
@@ -573,8 +591,56 @@ struct ChatComposer: View {
                     .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(!VoicePermission.canEnterVoiceMode(availability, isBusy: isBusy))
+            .disabled(!VoicePermission.canEnter(.voiceMode, availability,
+                                                isBusy: isBusy, live: liveVoiceControl))
             .help(VoicePermission.help(availability, lang) ?? (lang == .vi ? "Chế độ giọng nói" : "Voice mode"))
+        }
+    }
+
+    /// **Record — spec §10's second control, and the glyph is the whole distinction.**
+    /// `mic` means dictation in both ChatGPT and Claude; `waveform`, beside it, means the
+    /// hands-free conversation. The founder named the waveform first and brought the mic
+    /// back on 22 Aug after reading Claude's own tooltip: *"Press and hold to record ⌘D"*.
+    ///
+    /// **It is a `Button` for the keyboard and a gesture for the mouse.** ⌘D needs a
+    /// control to hang off — a `.keyboardShortcut` on a bare `Image` does nothing — and
+    /// press-and-hold needs the two edges a `Button` action does not give you. So the
+    /// `Button` carries ⌘D and `RecordControl.toggle`, and a `DragGesture(minimumDistance:
+    /// 0)` on top carries `press`/`release`.
+    ///
+    /// **`.simultaneousGesture`, and the click firing both paths is handled rather than
+    /// hoped away.** A quick click can deliver the gesture's press and release *and* the
+    /// `Button`'s action. That order is press → start, release → stop capturing, then the
+    /// `Button` action → `startRecord()`, which is guarded on record not already being
+    /// live and is therefore a no-op. (In practice this composer has been swapped out for
+    /// `RecordComposer` by then and the action never arrives at all — both outcomes are
+    /// safe, which is why the guard is not relying on which one happens.)
+    ///
+    /// **The gate is `VoicePermission.canEnter(.record, …)` and it deliberately ignores
+    /// `isBusy`** — see `canEnterRecord`. A disabled SwiftUI view is not hit-tested, so
+    /// the same expression that greys the glyph is what stops the gesture.
+    @ViewBuilder private var micButton: some View {
+        if let onRecord, let availability = voiceAvailability {
+            let enabled = VoicePermission.canEnter(.record, availability,
+                                                   isBusy: isBusy, live: liveVoiceControl)
+            Button(action: onRecord.toggle) {
+                Image(systemName: "mic")
+                    .font(.system(size: surface == .dock ? 15 : 12, weight: .medium))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .frame(width: surface == .dock ? 30 : 26,
+                           height: surface == .dock ? 30 : 26)
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .keyboardShortcut(RecordHotkey.toggle.key, modifiers: RecordHotkey.toggle.modifiers)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in onRecord.press() }
+                    .onEnded { _ in onRecord.release() }
+            )
+            .help(VoicePermission.help(availability, lang) ?? RecordChrome.micLabel(lang))
+            .accessibilityLabel(RecordChrome.micLabel(lang))
         }
     }
 

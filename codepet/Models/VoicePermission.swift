@@ -15,6 +15,21 @@ enum VoiceAvailability: Equatable {
     case unsupported(String)
 }
 
+/// **Which of the composer's two voice controls is being talked about** — spec §10.
+///
+/// The waveform sends a turn and a pet answers aloud; the mic puts editable text in the
+/// field and nothing is spoken. They share one `SpeechListener` and one recognition
+/// request, so this exists to name them in one place: `VoicePermission.canEnter` takes it
+/// twice — once as the control being entered, once as the control already live — and
+/// "both at once" is not a value it can hold.
+enum VoiceControlKind: Equatable, CaseIterable {
+    /// The waveform. Sends the turn, spends a credit, the pet speaks back.
+    case voiceMode
+    /// The mic. Press and hold, or ⌘D. Editable text into the field, no send, no credit,
+    /// `SpeakingVoice` never touched.
+    case record
+}
+
 /// Maps the two TCC statuses onto one answer.
 ///
 /// Pure, taking raw statuses, because a test cannot drive TCC and every
@@ -101,6 +116,62 @@ enum VoicePermission {
     /// looks exactly like a button that is right.
     static func canEnterVoiceMode(_ availability: VoiceAvailability, isBusy: Bool) -> Bool {
         offersButton(availability) && !isBusy
+    }
+
+    /// **The mic button's permission rule, and it is `offersButton` and nothing else.**
+    ///
+    /// Record needs the same two grants voice mode needs — recognition is recognition
+    /// (spec §10) — so the permission half is shared. What is deliberately *not* here is
+    /// `isBusy`, and the reason is written out on `RecordFlow.canTakeDraft`: voice mode's
+    /// busy gate exists because ✓ would spend a tap on a `sendMessage` that early-returns
+    /// and because entering over a live typed stream broke the speaking pipeline. Record
+    /// calls neither `sendChat` nor anything on `SpeakingVoice`, and the founder can
+    /// already type into `chatDraft` while a reply streams — so a busy gate would take
+    /// away from the dictated draft something the typed draft has.
+    ///
+    /// Its own function rather than a `default` inside `canEnter`, so the asymmetry is
+    /// one line a reader can check rather than an absent argument they have to notice.
+    static func canEnterRecord(_ availability: VoiceAvailability) -> Bool {
+        offersButton(availability)
+    }
+
+    /// **Whether `control` can be entered right now — permission, busyness, and the one
+    /// thing neither of those covers: the other control.**
+    ///
+    /// Spec §10: *"The two controls must never run at once. They share one
+    /// `SpeechListener` and one recognition request, so entering either while the other
+    /// is live has to be refused."* `live` is that fact, and it is one optional rather
+    /// than two booleans because "both are live" is the state this function exists to
+    /// make unrepresentable.
+    ///
+    /// **`live` is not merely "the other surface is on screen", and that is what makes it
+    /// reachable.** The composer swap already keeps the two surfaces mutually invisible —
+    /// while `VoiceComposer` is up, `ChatComposer`'s mic button and its ⌘D are not in the
+    /// hierarchy at all — so at the button, this term looks like a guard with nothing to
+    /// guard. The window is the *asynchronous* one: `startVoiceMode()` awaits two TCC
+    /// dialogs before it sets `voiceMode`, and for that whole time the typing composer is
+    /// still on screen with a live mic button. Press it and record spins up an
+    /// `AVAudioEngine` and an `SFSpeechRecognizer`; the dialogs then return, `voiceMode`
+    /// goes true, the funnel renders `VoiceComposer` — and record's listener is orphaned
+    /// with the microphone open and no surface left to stop it. So
+    /// `CopilotChatView.liveVoiceControl` reports a control as live from the moment its
+    /// *request* starts, not from the moment its surface appears.
+    ///
+    /// Extracted rather than written inline in `.disabled` for the reason every other
+    /// rule on this feature was: a control that is live one moment too early looks
+    /// exactly like a control that is right.
+    static func canEnter(_ control: VoiceControlKind,
+                         _ availability: VoiceAvailability,
+                         isBusy: Bool,
+                         live: VoiceControlKind?) -> Bool {
+        // Neither may start while either is running — including itself. A second tap of
+        // the waveform while its own dialogs are up used to be `voiceRequesting`'s job
+        // and is now this one, so there is a single answer to "can this be entered".
+        guard live == nil else { return false }
+        switch control {
+        case .voiceMode: return canEnterVoiceMode(availability, isBusy: isBusy)
+        case .record:    return canEnterRecord(availability)
+        }
     }
 
     /// Live statuses, for the view. Not called by tests.

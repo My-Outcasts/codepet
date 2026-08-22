@@ -101,6 +101,29 @@ struct CopilotChatView: View {
     /// `VoiceComposer`'s already-running `.task` wired its callbacks to.
     @State private var voiceRequesting = false
 
+    /// Whether the composer is capturing a dictated draft — spec §10's second control.
+    /// Which composer the slot renders, the same shape `voiceMode` and `showHistory` have.
+    @State private var recordMode = false
+    /// **The whole capture, hoisted here for the reason `voiceTurn` is.** See `RecordTurn`:
+    /// the composer slot is rendered from inside the three-way `if/else` below, and a typed
+    /// reply arriving while she dictates flips `chatMessages.isEmpty` under her. Different
+    /// branches are different structural identities, so `@State` on `RecordComposer` would
+    /// be destroyed mid-sentence with nothing on screen saying so.
+    @State private var recordTurn = RecordTurn()
+    /// Built once per capture, not once per `body` — `voiceListener`'s argument exactly: a
+    /// plain `let` on `RecordComposer` takes whatever value this view's latest `body`
+    /// evaluation passes it, and `body` re-runs on every streamed token.
+    ///
+    /// **Its own listener rather than a shared one.** The two controls never run at once
+    /// (`liveVoiceControl`), so there is never a second engine; separate optionals are what
+    /// make "record's listener outlived record" visible as a leak in one place instead of
+    /// two features sharing a variable neither owns.
+    @State private var recordListener: SpeechListening?
+    /// One press at a time, and the reason it exists is the same as `voiceRequesting`'s: on
+    /// a Mac that has never granted the two TCC prompts the first press has to raise them,
+    /// which is asynchronous.
+    @State private var recordRequesting = false
+
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
     private var companionColor: Color {
@@ -211,6 +234,32 @@ struct CopilotChatView: View {
                 voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
             }
         }
+        // **Release the listener the moment record collapses.** Belt to
+        // `RecordComposer.close()`/`takeDraft()`, both of which call `RecordTurn.leave`
+        // before flipping the flag — but the listener is dropped on the next two lines, so
+        // anything that ever sets `recordMode = false` without stopping it first would drop
+        // the last reference to a running `AVAudioEngine` with the microphone open.
+        // `SpeechListener`'s `isolated deinit` does reach `stop()`, which is why this is
+        // belt rather than the only guard; it is not something to rely on for a device that
+        // has a light next to it.
+        //
+        // **No `stopImmediately()` here, and its absence is the feature.** The voice-mode
+        // equivalent above has to stop a synthesiser mid-sentence and un-duck the chiptune
+        // SFX. Record never touched `SpeakingVoice`, so there is nothing of the sort to
+        // undo — one microphone is the whole of its teardown.
+        .onChange(of: recordMode) { _, isOn in
+            if !isOn {
+                recordListener?.stop()
+                recordListener = nil
+                // The capture is over, so the turn goes with it. `micOpened` is the field
+                // that fails loudest while being invisible: a next capture that inherited
+                // it would never open its microphone and would read `Connecting…` forever.
+                recordTurn = RecordTurn()
+                // She may have revoked a grant in System Settings mid-capture, which is
+                // exactly what `onFailure` reports.
+                voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
+            }
+        }
         // **The two observations that drive speech, and they are up here on purpose.**
         //
         // They were on `VoiceComposer`'s body, which is inside the `if/else` above.
@@ -256,9 +305,17 @@ struct CopilotChatView: View {
         // Not `voiceMode = false`: writing state during teardown, and this view's
         // `@State` is destroyed with it anyway (both routes remove it from the
         // hierarchy rather than hiding it).
+        // **Record needs this half too, and for one of the two reasons voice mode does.**
+        // ⌘B (`AppShellView`'s `showsCopilot && !collapsed`) and the Developer pill
+        // (`TwoModeShellView` swapping this view out) both remove the pane without anything
+        // calling `close()`, so the microphone would be left open with no surface left to
+        // stop it — and unlike voice mode's synthesiser this one has a hardware indicator
+        // next to it. The other reason does not apply: there is no `SpeakingVoice` to keep
+        // talking, which is why record has one line here and voice mode has two.
         .onDisappear {
             voiceVoice?.stopImmediately()
             voiceListener?.stop()
+            recordListener?.stop()
         }
         // Read once per appearance, and again when the language changes — the locale
         // is what decides whether a recogniser exists at all. NOT in `body`: see
@@ -338,11 +395,36 @@ struct CopilotChatView: View {
     /// together in `startVoiceMode()`, read together here, so the two can never drift —
     /// a surface built with `.ready`-checked availability but no engine spun up would be
     /// a silent no-op tap.
+    /// **Record joins the same swap, and the naive swap turns out to be right here** —
+    /// which is worth writing down, because spec §10's requirement is that ✓ lands the
+    /// text in "the composer's text field", and this branch replaces the view that draws
+    /// that field.
+    ///
+    /// It survives because **`ChatComposer` does not own the draft.** Its `draft` is bound
+    /// to `companyStore.chatDraft`, which lives in the store — above this `if/else`, above
+    /// this view, above the whole pane. So swapping `RecordComposer` in destroys a text
+    /// *field*, not a text *value*: ✓ writes `chatDraft` and flips `recordMode`, the else
+    /// branch renders a `ChatComposer` reading that same published property, and the words
+    /// are in it. Nothing had to be restructured, and the reason it did not is a property
+    /// of where `chatDraft` lives rather than of this function.
+    ///
+    /// **`voiceMode` is tested first, and the order is load-bearing rather than
+    /// arbitrary.** The two flags cannot both be true — `liveVoiceControl` refuses either
+    /// control while the other is live or merely *requesting* — so the order is
+    /// unreachable in production; put first, voice mode is the branch that would win if a
+    /// future edit ever made both true, and voice mode is the one holding a synthesiser
+    /// mid-sentence.
     @ViewBuilder private func composer(showsDeptChips: Bool) -> some View {
         if voiceMode, let listener = voiceListener, let voice = voiceVoice {
             VoiceComposer(isActive: $voiceMode, turn: $voiceTurn,
                           listener: listener, voice: voice,
                           accent: companionColor)
+        } else if recordMode, let listener = recordListener {
+            RecordComposer(isActive: $recordMode, turn: $recordTurn,
+                           listener: listener,
+                           onStopCapture: endRecordCapture,
+                           onDraft: applyDictatedDraft,
+                           accent: companionColor)
         } else {
             typingComposer(showsDeptChips: showsDeptChips)
         }
@@ -371,8 +453,34 @@ struct CopilotChatView: View {
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
             onVoiceMode: startVoiceMode,
-            voiceAvailability: voiceAvailability
+            voiceAvailability: voiceAvailability,
+            onRecord: RecordControl(press: startRecord,
+                                    release: endRecordCapture,
+                                    toggle: startRecord),
+            liveVoiceControl: liveVoiceControl
         )
+    }
+
+    /// **Which of the two voice controls owns the microphone right now** — spec §10, read
+    /// by both buttons' `.disabled` and by both entry functions.
+    ///
+    /// **A control counts as live from the moment its *request* starts, not from the moment
+    /// its surface appears**, and that is the whole reason this is not simply
+    /// `voiceMode ? .voiceMode : (recordMode ? .record : nil)`. `startVoiceMode()` awaits
+    /// two TCC dialogs before it sets `voiceMode`; for that whole time the typing composer
+    /// is still on screen with a live mic button. Press it and record spins up an
+    /// `AVAudioEngine` and an `SFSpeechRecognizer`, the dialogs return, `voiceMode` goes
+    /// true, and `composer(showsDeptChips:)` renders `VoiceComposer` — leaving record's
+    /// listener orphaned with the microphone open and no surface left to stop it. Nothing
+    /// throws and nothing logs.
+    ///
+    /// It also subsumes what `voiceRequesting`/`recordRequesting` were guarding on their
+    /// own (a second tap while the dialogs are up), so there is one answer to "can this be
+    /// entered" rather than two that can disagree.
+    private var liveVoiceControl: VoiceControlKind? {
+        if voiceMode || voiceRequesting { return .voiceMode }
+        if recordMode || recordRequesting { return .record }
+        return nil
     }
 
     /// The waveform button's action — **ask for the two grants, and only then** build
@@ -424,7 +532,14 @@ struct CopilotChatView: View {
             voiceMode=\(self.voiceMode, privacy: .public) \
             cachedAvailability=\(VoiceLog.describe(self.voiceAvailability), privacy: .public)
             """)
-        guard !voiceRequesting, !voiceMode else { return }
+        // **One rule, in a function a test can reach** — `!voiceRequesting, !voiceMode`
+        // used to be here inline. `liveVoiceControl` covers both of those (it reports
+        // `.voiceMode` while either is set) and adds spec §10's mutual exclusion, so
+        // pressing the waveform while a capture is live, or while record's own TCC dialogs
+        // are up, is refused rather than starting a second engine on the same microphone.
+        guard VoicePermission.canEnter(.voiceMode, voiceAvailability,
+                                       isBusy: isChatBusy, live: liveVoiceControl)
+        else { return }
         voiceRequesting = true
         Task {
             // `await` on the main actor: the TCC dialogs run without the main thread
@@ -465,6 +580,124 @@ struct CopilotChatView: View {
                 onDevice=\(self.voiceListener?.isOnDevice ?? false, privacy: .public)
                 """)
         }
+    }
+
+    // MARK: - Record (spec §10)
+
+    /// **Begin a capture. Synchronous when it can be, and it has to be.**
+    ///
+    /// This is where record diverges from `startVoiceMode()` in shape rather than in
+    /// policy, and the reason is the gesture: **a press-and-hold cannot survive a modal
+    /// dialog.** `startVoiceMode` awaits the two TCC prompts and then enters, which works
+    /// because the waveform is a click. If this awaited, the founder would press the mic,
+    /// a system dialog would take the focus, she would let go of the mouse to click
+    /// "Allow", and the capture would begin *after* the gesture that was meant to hold it
+    /// had already ended — a surface recording with nothing holding it.
+    ///
+    /// So: when the cached availability is already `.ready` — every press after the first
+    /// on any Mac — this enters with no `await` at all and the hold means what it looks
+    /// like. When it is not, the press raises the prompts and enters nothing; the founder
+    /// presses again once she has granted them. That is a real first-run cost and it is
+    /// stated rather than hidden: the first ever press of the mic asks for permission and
+    /// records nothing.
+    ///
+    /// **Idempotent, because `RecordControl.press` fires repeatedly.** `DragGesture`'s
+    /// `onChanged` is delivered again on every movement while the mouse is down, and ⌘D's
+    /// `toggle` can arrive right behind a completed click (see `ChatComposer.micButton`).
+    /// `liveVoiceControl` is what makes all of those a no-op.
+    private func startRecord() {
+        VoiceLog.surface.log("""
+            startRecord(): pressed — live=\(String(describing: self.liveVoiceControl), privacy: .public) \
+            cachedAvailability=\(VoiceLog.describe(self.voiceAvailability), privacy: .public)
+            """)
+        guard VoicePermission.canEnter(.record, voiceAvailability,
+                                       isBusy: isChatBusy, live: liveVoiceControl)
+        else { return }
+
+        // Already granted: enter now, on this turn of the run loop, so the hold is a hold.
+        if voiceAvailability == .ready {
+            enterRecord()
+            return
+        }
+
+        // Not granted yet. Raise the prompts and enter nothing — see above.
+        recordRequesting = true
+        Task {
+            let availability = await VoicePermission.request(locale: lang.speechLocale)
+            recordRequesting = false
+            // Written whatever the answer, for `voiceAvailability`'s reason: a refusal has
+            // to reach the button, or every later press is a silent no-op.
+            voiceAvailability = availability
+            VoiceLog.surface.log("""
+                startRecord(): asked for the grants — \
+                answer=\(VoiceLog.describe(availability), privacy: .public), not entering
+                """)
+        }
+    }
+
+    /// The listener and a clean turn, then the surface.
+    ///
+    /// `RecordTurn()` explicitly rather than by luck: the state is hoisted so it survives
+    /// re-renders, which means it also survives the previous capture ending, and a session
+    /// that inherited `micOpened == true` would never open its microphone and would read
+    /// `Connecting…` forever with no error. Two idempotent assignments (here and in
+    /// `.onChange(of: recordMode)`) are cheap; one missed one is silent.
+    private func enterRecord() {
+        let hints = DepartmentCatalog.roster.map(\.name)
+            + PetCharacter.all.values.map(\.name)
+            + ["Codepet"]
+        recordListener = SpeechListener(locale: lang.speechLocale, hints: hints)
+        recordTurn = RecordTurn()
+        recordMode = true
+        VoiceLog.surface.log("""
+            startRecord(): entering — hints=\(hints.count, privacy: .public) \
+            locale=\(self.lang.speechLocale.identifier, privacy: .public) \
+            onDevice=\(self.recordListener?.isOnDevice ?? false, privacy: .public)
+            """)
+    }
+
+    /// **Release, or ⌘D on the record surface: stop capturing, keep the words.** One
+    /// funnel for both, so a release and a keystroke cannot end a capture two different
+    /// ways.
+    ///
+    /// Guarded inside `RecordTurn.endCapture` on the phase rather than here, because
+    /// `RecordControl.release` fires on every mouse-up over the mic — including the one
+    /// that follows a press the availability gate refused, when there is no listener at
+    /// all.
+    private func endRecordCapture() {
+        guard let listener = recordListener else { return }
+        recordTurn.endCapture(listener)
+    }
+
+    /// **✓ — the dictated text into the field, and nothing else happens.**
+    ///
+    /// Spec §10: it never calls `sendChat`, so there is no credit to spend, no turn to
+    /// convene the room with, and nothing to speak back. This function is the whole of ✓'s
+    /// effect, and every line of it is a local write.
+    ///
+    /// `RecordFlow.merge` rather than an assignment: replacing would silently destroy
+    /// typing the founder has no other copy of, and while she was dictating the record
+    /// surface was covering the field, so she could not see what she was about to lose.
+    ///
+    /// The caret follows the text. The point of record is that she edits it, and a draft
+    /// that lands in an unfocused field asks her to click before she can.
+    ///
+    /// **The focus request is deferred one main-actor turn, and `armDepartment`'s
+    /// synchronous version is not the precedent it looks like.** That one puts the caret in
+    /// a `ComposerField` that is already on screen. This runs while `RecordComposer` is
+    /// still the composer: the field does not exist yet, and `@FocusState` set against a
+    /// view that is not in the hierarchy is dropped. Hopping once lets
+    /// `composer(showsDeptChips:)` fall back to `typingComposer` first.
+    ///
+    /// **Not verifiable from this target.** `ImageRenderer` fires no lifecycle hooks and no
+    /// test here hosts `CopilotChatView`, so whether the caret actually lands is a handoff —
+    /// the words being in the field is what `RecordFlowTests` covers, through
+    /// `RecordFlow.merge`. If the caret does not appear, this hop is the line to look at
+    /// before anything else.
+    private func applyDictatedDraft(_ text: String) {
+        companyStore.chatDraft = RecordFlow.merge(draft: companyStore.chatDraft,
+                                                 dictated: text)
+        Task { @MainActor in inputFocused = true }
     }
 
     /// Convene the Virtual Company on what is in the composer.

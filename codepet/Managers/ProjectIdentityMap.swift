@@ -17,8 +17,12 @@ import os
 /// `defaults` and `key` are injectable ONLY so a test can point an instance at its own
 /// suite. The app always uses `.standard` with `cp_project_ids_v1`; a test writing there
 /// could have its cleanup clobbered by a running app and eat real bindings.
-@MainActor
-final class ProjectIdentityMap {
+// Deliberately `nonisolated`, not `@MainActor`. This type is a UserDefaults wrapper with no
+// need for actor isolation, and a `@MainActor` class here would give it an isolated deinit —
+// which on Xcode 26.2 stops its whole XCTest suite from executing (see CLAUDE.md landmine 3).
+// Every one of its 11 tests would compile and never run. Only ever touched from the main
+// actor in practice; if that ever stops being true, revisit this rather than the tests.
+nonisolated final class ProjectIdentityMap {
 
     private let logger = Logger(subsystem: "app.murror.codepet", category: "ProjectIdentity")
     private let defaults: UserDefaults

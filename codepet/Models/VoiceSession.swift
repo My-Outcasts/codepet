@@ -3,7 +3,7 @@ import Foundation
 
 /// Where a voice-mode conversation is — spec §4.
 enum VoiceState: Equatable {
-    /// No overlay. The mic is not running.
+    /// Voice mode is off. The mic is not running.
     case idle
     /// Mic live, recognition streaming partials, ✕ and ✓ offered beneath the
     /// transcript. **No timer** — spec §2 decision 4: silence does nothing at all,
@@ -34,17 +34,17 @@ enum VoiceEvent: Equatable {
     case replyFinished
     /// The founder started talking over the reply.
     case founderInterrupted
-    /// The founder dismissed the overlay.
+    /// The founder left voice mode.
     case close
 }
 
 /// The loop, as a value type.
 ///
-/// **Why this is not just `@State` in the overlay.** The interesting behaviour is
+/// **Why this is not just `@State` in the surface.** The interesting behaviour is
 /// what it REFUSES. Audio callbacks are asynchronous and arrive late: a recognition
-/// result after the founder closed the overlay, a synthesiser `didFinish` for a
+/// result after the founder closed the surface, a synthesiser `didFinish` for a
 /// reply that was already interrupted. `apply` returns whether the transition was
-/// legal so a late callback is a no-op instead of a reopened overlay with a dead
+/// legal so a late callback is a no-op instead of a reopened surface with a dead
 /// microphone — and a test can assert the refusal, which it cannot do to a view.
 struct VoiceSession {
     private(set) var state: VoiceState = .idle

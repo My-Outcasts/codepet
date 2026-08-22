@@ -46,7 +46,7 @@ struct TurnTranscript: Equatable {
     ///
     /// **Returns whether `text` actually changed**, so a caller can tell a real
     /// revision from the recognizer re-reporting a string it has already reported.
-    /// That distinction is not cosmetic: while the pet is speaking the overlay treats
+    /// That distinction is not cosmetic: while the pet is speaking the surface treats
     /// any partial as barge-in — so a repeated partial cuts the pet off with words the
     /// founder has already had answered. Not
     /// `@discardableResult` on purpose: ignoring it is a decision, not a default.
@@ -92,22 +92,22 @@ protocol SpeechListening: AnyObject {
     /// alternative is two recognition tasks running on one recognizer, which is
     /// undocumented and cannot be measured without a microphone.
     var onPartial: ((String) -> Void)? { get set }
-    /// Input level 0…1, for the orb.
+    /// Input level 0…1, for the waveform.
     var onLevel: ((Float) -> Void)? { get set }
     /// Recognition died after start() returned — permission revoked, the network
-    /// dropped (vi-VN is server-side; see spec §3), the service went away. The overlay
-    /// must show this, because the alternative is a live-looking orb that hears nothing.
+    /// dropped (vi-VN is server-side; see spec §3), the service went away. The surface
+    /// must show this, because the alternative is a live-looking waveform that hears nothing.
     var onFailure: ((Error) -> Void)? { get set }
     var isRunning: Bool { get }
     /// **Whether the founder's audio stays on this Mac.** On the protocol because the
-    /// overlay states it as a privacy disclosure (spec §3) and the listener is the only
+    /// surface states it as a privacy disclosure (spec §3) and the listener is the only
     /// thing that knows: it is the value handed to
     /// `SFSpeechAudioBufferRecognitionRequest.requiresOnDeviceRecognition`.
     ///
-    /// It is **not** a property of the language. The overlay's line switched on `lang`
+    /// It is **not** a property of the language. The surface's line switched on `lang`
     /// alone and said flatly "Recognition runs on this Mac. Nothing you say leaves
     /// it." — so on any Mac where the en-US Assistant asset is not installed the
-    /// audio went to Apple's servers while the overlay said the opposite. Same shape
+    /// audio went to Apple's servers while the surface said the opposite. Same shape
     /// as the `lang == .vi ? why : why` defect: a decision that inspects one input and
     /// ignores the one that determines the answer.
     var isOnDevice: Bool { get }
@@ -454,8 +454,8 @@ final class SpeechListener: SpeechListening {
     /// **The error is not discardable.** `SFSpeechRecognizer.isAvailable` reflects
     /// service availability, not authorisation — that is the separate static
     /// `authorizationStatus` — so `start()` succeeds with recognition
-    /// `.notDetermined` or `.denied`, the tap fires, the orb pulses, and the task
-    /// fails. Swallowed, the founder watches a live-looking orb that never produces
+    /// `.notDetermined` or `.denied`, the tap fires, the waveform pulses, and the task
+    /// fails. Swallowed, the founder watches a live-looking waveform that never produces
     /// one word, with nothing logged. Same path for a mid-session permission revoke,
     /// and for any network drop under vi-VN, which spec §3 measured as server-side.
     private func openRecognition(_ recognizer: SFSpeechRecognizer) {
@@ -505,7 +505,7 @@ final class SpeechListener: SpeechListening {
         // DIFFERENT request". `SFSpeechRecognitionTask.cancel()` delivers its error
         // asynchronously, so with `isRunning` alone: stop(), start(), then the old
         // task's cancellation error arrives, sees a live listener, and tears the
-        // brand-new turn down — the overlay renders "recognition died" and closes
+        // brand-new turn down — the surface renders "recognition died" and closes
         // voice mode milliseconds after it opened. The same path with a result
         // delivers turn N's transcript as turn N+1's `onPartial`. `renew()` makes
         // that sequence routine rather than a race.
@@ -518,7 +518,7 @@ final class SpeechListener: SpeechListening {
             // condition the budget exists to detect.
             budget.sawTranscript(text)
             // Only on a real change. A recognizer re-reports the same string freely,
-            // and the overlay reads every partial as speech — barge-in while the pet
+            // and the surface reads every partial as speech — barge-in while the pet
             // is talking — so an unchanged partial cuts the pet off with words the
             // founder has already had answered.
             if transcript.update(text) {
@@ -539,7 +539,7 @@ final class SpeechListener: SpeechListening {
         case .renew:
             renew()
         case .fail:
-            // Ordered: stop first, so `isRunning` is already false when the overlay
+            // Ordered: stop first, so `isRunning` is already false when the surface
             // handles this, and the cancellation error `retireRecognition()` may
             // deliver is dropped by the identity guard rather than reported twice.
             stop()
@@ -571,8 +571,8 @@ final class SpeechListener: SpeechListening {
             // returns early when it is not; and a nil recognizer makes `start()` throw
             // before anything can renew. If it ever is reached, returning quietly
             // leaves no task and no request with `isRunning` still true — a
-            // live-looking orb that hears nothing, the exact failure this class exists
-            // to report. Stop first so `isRunning` is already false when the overlay
+            // live-looking waveform that hears nothing, the exact failure this class exists
+            // to report. Stop first so `isRunning` is already false when the surface
             // reacts, matching `endOfTask`.
             stop()
             onFailure?(VoiceAudioError.recognizerUnavailable)

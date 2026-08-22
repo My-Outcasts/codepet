@@ -1,9 +1,9 @@
 import XCTest
 @testable import codepet
 
-/// The orb's number. It was `min(1, rms * 12)` inline in the audio tap, annotated
+/// The waveform's number. It was `min(1, rms * 12)` inline in the audio tap, annotated
 /// "empirical" and asserted nowhere — the gain could have become 120 and the suite
-/// would have stayed green while the orb sat pinned at full deflection on room noise.
+/// would have stayed green while the waveform sat pinned at full deflection on room noise.
 final class VoiceLevelTests: XCTestCase {
 
     func testSilenceReadsZero() {
@@ -23,13 +23,13 @@ final class VoiceLevelTests: XCTestCase {
     }
 
     /// **The reason the gain is not 120.** Measured speaking-voice RMS on a built-in
-    /// mic is roughly 0.02–0.08 full-scale; across that whole span the orb has to
+    /// mic is roughly 0.02–0.08 full-scale; across that whole span the waveform has to
     /// still be moving, not clipped.
-    func testOrdinarySpeechMovesTheOrbWithoutPinningIt() {
+    func testOrdinarySpeechMovesTheWaveformWithoutPinningIt() {
         for rms in [Float(0.02), 0.04, 0.08] {
             let level = VoiceLevel.level(from: [Float](repeating: rms, count: 256))
-            XCTAssertGreaterThan(level, 0.1, "speech at RMS \(rms) barely moved the orb")
-            XCTAssertLessThan(level, 1, "speech at RMS \(rms) pinned the orb at full")
+            XCTAssertGreaterThan(level, 0.1, "speech at RMS \(rms) barely moved the waveform")
+            XCTAssertLessThan(level, 1, "speech at RMS \(rms) pinned the waveform at full")
         }
     }
 
@@ -40,7 +40,7 @@ final class VoiceLevelTests: XCTestCase {
         XCTAssertGreaterThan(loud, quiet)
     }
 
-    /// Clamped: a shout must not hand the orb a scale factor above 1.
+    /// Clamped: a shout must not hand the waveform a scale factor above 1.
     func testAShoutIsClampedToOne() {
         XCTAssertEqual(VoiceLevel.level(from: [Float](repeating: 0.9, count: 256)), 1)
         XCTAssertEqual(VoiceLevel.level(from: [Float](repeating: -1, count: 256)), 1)

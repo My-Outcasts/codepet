@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// The composer grows in place and the chat stays visible: the live transcript sits
 /// top-left reading like a draft, a bar waveform runs along the bottom, and ✕ and ✓ are
-/// two small circles bottom-right. No overlay and no orb.
+/// two small circles bottom-right. No takeover and no orb.
 ///
 /// **The tradeoff is deliberate.** What is given up is focus; what is bought is being
 /// able to see the conversation you are having — which matters more here than it does
@@ -19,32 +19,35 @@ import SwiftUI
 /// still lands in the ordinary transcript as ordinary messages (spec §1); nothing about
 /// `sendChat` changes.
 ///
-/// **Five calls here exist only because review proved defects against the audio
-/// services, and every one of them fails SILENTLY if it is dropped.** They are
-/// annotated at their call sites rather than listed once, because a list at the top of
-/// a file is what someone deletes a call under:
+/// **This view owns no turn state, and that is the fix for the defect the move
+/// introduced.** `session`/`partial`/`level`/`failure`/`driver`/`turns` live on
+/// `CopilotChatView` as one `VoiceTurn`, handed down here as a `@Binding` — because the
+/// composer slot is rendered from inside a three-way `if/else`, and the founder's own
+/// first spoken turn in every thread flips that `if/else` (`CompanyStore.sendMessage`
+/// appends her message synchronously, before its first await). Different branches are
+/// different structural identities, so `@State` here was destroyed mid-turn and rebuilt
+/// at `.idle`: the question was sent and charged and the pet said nothing. The whole
+/// argument, and what each field costs when it resets, is on `VoiceTurn`.
 ///
-/// 1. `voice.beginReply()` before the reply's **first** `enqueue` — not "on
-///    `.replyBegan`", which is applied *when* the first sentence is enqueued and so
-///    would leave the barge-in latch closed for sentence 1 of every post-interruption
-///    reply. See `speak(_:streaming:)` and `VoiceTurnFlow.takeTurn`.
-/// 2. `voice.endOfReply()` when `isStreaming` goes false — `onFinishedAll` fires only
-///    when the queue is empty AND this was called, because a mid-stream drain is
-///    ordinary (a fenced code block is 5–15 seconds of nothing speakable). See
-///    `replyStreamEnded()`.
-/// 3. `listener.endTurn()` on ✓ **and** on ✕ — one
-///    `SFSpeechAudioBufferRecognitionRequest` transcribes all audio ever appended to
-///    it and the listener stays running across turns so barge-in works, so without
-///    this the second question arrives with the first glued to its front, sent and
-///    charged, compounding all session. See `VoiceTurnFlow.takeTurn` and
-///    `.abandonTurn` — the same fact reached from ✕, where clearing only the view's
-///    state leaves the live request holding the sentence she just rejected.
-/// 4. `voice.stopImmediately()` on close **and** in `.onDisappear` — ⌘B and a mode
-///    switch both remove this view without calling `close()`. See both.
-/// 5. `listener.onFailure` rendered, gated on `state != .speaking` — `start()`
-///    returning does not mean recognition works, and `endOfTask` stops the listener
-///    *before* reporting, so swallowing the failure leaves a live-looking surface that
-///    hears nothing. See `wire()`.
+/// **Five calls exist only because review proved defects against the audio services,
+/// and every one of them fails SILENTLY if it is dropped.** Four of the five now live
+/// on `VoiceTurn` with the state they mutate; they are annotated at their call sites
+/// there rather than listed once, because a list at the top of a file is what someone
+/// deletes a call under. What is left here is where each one is *reached from*:
+///
+/// 1. `voice.beginReply()` before the reply's **first** `enqueue` — inside
+///    `VoiceTurnFlow.takeTurn`, reached from `sendTurn()` below.
+/// 2. `voice.endOfReply()` when `isStreaming` goes false — `VoiceTurn.replyStreamEnded`,
+///    reached from an `.onChange` on **`CopilotChatView`**, not on this body. It was on
+///    this body, and that is the second half of the same defect: the History panel
+///    removes this view while a reply is being spoken, so the observation went with it.
+/// 3. `listener.endTurn()` on ✓ **and** on ✕ — `VoiceTurn.take` and `.discard`, both
+///    reached from `controls` below.
+/// 4. `voice.stopImmediately()` on close **and** when the pane goes away — `close()`
+///    here, and `CopilotChatView`'s `.onDisappear`. **Deliberately not this view's
+///    `.onDisappear`:** this view disappears on a branch flip and whenever History
+///    opens, neither of which means voice mode is over.
+/// 5. `listener.onFailure` rendered, gated on `state != .speaking` — `VoiceTurn.wire`.
 ///
 /// **The room is unreachable from here** (spec §5): `sendChat`'s `convenesRoom`
 /// defaults to false and is deliberately not passed. Convening costs
@@ -60,6 +63,8 @@ struct VoiceComposer: View {
     /// for `ChatComposer` — the composer growing in place rather than an overlay
     /// covering the pane.
     @Binding var isActive: Bool
+    /// The whole turn, owned by `CopilotChatView`. See `VoiceTurn`.
+    @Binding var turn: VoiceTurn
     let listener: SpeechListening
     let voice: SpeakingVoice
     /// The companion's hue, for ✓. Handed down for the same reason `ChatComposer` takes
@@ -71,41 +76,6 @@ struct VoiceComposer: View {
     @Environment(\.chatSurface) private var surface
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    @State private var session: VoiceSession
-    /// What recognition has heard this turn. Shown because a founder who cannot see
-    /// what was heard will not trust the reply (spec §4).
-    @State private var partial: String
-    /// Mic (listening) or output (speaking) level, 0…1, for the waveform.
-    @State private var level: Float = 0
-    /// Recognition died after `start()` returned. Takes the text slot — see
-    /// `VoiceChrome.line`.
-    @State private var failure: Error?
-    @State private var driver = VoiceReplyDriver()
-    /// Turns sent from this composer. The running credit count is this × the per-turn
-    /// price — spec §7: talking is much faster than typing, so voice mode is the
-    /// feature that makes turns cheap to spend without noticing.
-    @State private var turns = 0
-
-    init(isActive: Binding<Bool>, listener: SpeechListening, voice: SpeakingVoice,
-         accent: Color = CodepetTheme.accentPurple) {
-        self.init(isActive: isActive, listener: listener, voice: voice, accent: accent,
-                  session: VoiceSession(), partial: "", failure: nil)
-    }
-
-    /// Seeded, for `preview` — `ImageRenderer` fires no `.onAppear` and no `.task`,
-    /// so a host that armed itself in a lifecycle hook would measure a connecting
-    /// composer and make every layout assertion vacuous.
-    private init(isActive: Binding<Bool>, listener: SpeechListening, voice: SpeakingVoice,
-                 accent: Color, session: VoiceSession, partial: String, failure: Error?) {
-        _isActive = isActive
-        self.listener = listener
-        self.voice = voice
-        self.accent = accent
-        _session = State(initialValue: session)
-        _partial = State(initialValue: partial)
-        _failure = State(initialValue: failure)
-    }
 
     // MARK: - Metrics
 
@@ -119,6 +89,12 @@ struct VoiceComposer: View {
     /// second, independent constant that could disagree with it.
     static let transcriptHeight: CGFloat = 40
 
+    /// The card's own inset. Stated because the §3 disclosure has to fit two lines of
+    /// the width this leaves, and the test that checks that has to be measuring the
+    /// same width the founder gets — see
+    /// `VoiceComposerTests.testTheOffDeviceDisclosureFitsTwoLinesInTheDock`.
+    static let horizontalPadding: CGFloat = 14
+
     private var cornerRadius: CGFloat { surface == .dock ? 16 : 12 }
     private var controlDiameter: CGFloat { surface == .dock ? 28 : 26 }
 
@@ -130,7 +106,7 @@ struct VoiceComposer: View {
             bottomRow
             statusLine
         }
-        .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 10)
+        .padding(.horizontal, Self.horizontalPadding).padding(.top, 11).padding(.bottom, 10)
         // The composer's own card, so this reads as the composer having grown rather
         // than as a different object in the composer's place. Accent-edged
         // unconditionally: the field is gone, so there is no focus ring left to say
@@ -144,30 +120,24 @@ struct VoiceComposer: View {
                 .stroke(accent.opacity(0.65), lineWidth: 1)
         )
         .shadow(color: reduceTransparency ? .clear : accent.opacity(0.22), radius: 16)
-        // The two observations that drive speech. On `body` rather than on a state
-        // branch, so neither can be lost to whichever branch is on screen.
-        .onChange(of: replyText) { _, text in
-            speak(text, streaming: companyStore.isStreaming)
-        }
-        .onChange(of: companyStore.isStreaming) { was, now in
-            if was && !now { replyStreamEnded() }
-        }
-        .task { await run() }
-        // **The only teardown that covers a dismissal which is not the ✕.** `close()`
-        // runs on the waveform toggle and nowhere else — so ⌘B (`AppShellView`'s
-        // `showsCopilot && !collapsed`) and the Developer pill (`TwoModeShellView`
-        // swapping `CopilotChatView` out) both remove this view without it ever being
-        // told. `SpeechListener`'s `isolated deinit` still reaches `listener.stop()`,
-        // but `SpeechSpeaker.deinit` only restores the SFX volume — it never calls
-        // `synth.stopSpeaking(at:)`, and `AVSpeechSynthesizer`'s behaviour on dealloc
-        // mid-utterance is undocumented. So: press ⌘B mid-sentence and the pet may keep
-        // talking with no surface left to stop it, which is invariant 4's stated failure
-        // by a route the invariant does not cover.
+        // **Wire, then open the mic — and this runs again on every rebuild.** A branch
+        // flip and a closed History panel both re-create this view, so neither half may
+        // assume it is the first: `wire` re-installs the same closures against a binding
+        // that was already writing through, and `openMic` is guarded by
+        // `turn.micOpened`.
         //
-        // **Not `close()`** — that writes `isActive` during teardown.
-        .onDisappear {
-            voice.stopImmediately()
-            listener.stop()
+        // The mic is opened HERE rather than in `startVoiceMode()` for one
+        // founder-visible reason: `listener.start()` is a ~200ms synchronous engine
+        // spin-up, and spec §2 wants the composer on screen reading `Connecting…` while
+        // it happens. Started before `voiceMode = true` there would be no frame in
+        // which `.idle` is ever seen.
+        //
+        // **The teardown is NOT here.** See `close()` and `CopilotChatView`'s
+        // `.onDisappear` — a `.onDisappear` on this view fires on a branch flip and
+        // would stop a microphone the next instance is about to keep using.
+        .task {
+            VoiceTurn.wire($turn, listener: listener, voice: voice)
+            turn.openMic(listener)
         }
     }
 
@@ -178,8 +148,8 @@ struct VoiceComposer: View {
     /// precedence is what replaced the takeover's separate caption row and its failure
     /// is silent — a founder told the mic is live and dead in the same frame.
     private var transcriptSlot: some View {
-        let line = VoiceChrome.line(state: session.state, partial: partial,
-                                    failure: failure, lang)
+        let line = VoiceChrome.line(state: turn.session.state, partial: turn.partial,
+                                    failure: turn.failure, lang)
         return Text(line.text)
             .font(CodepetTheme.inter(CodepetType.body))
             .italic(line.kind == .transcript)
@@ -208,10 +178,19 @@ struct VoiceComposer: View {
         // **No explicit height, deliberately.** The row is as tall as its tallest
         // control, which is the circles (26/28pt) against the waveform's 18pt ceiling.
         // A stated constant here would have been a second copy of `controlDiameter`
-        // that could disagree with it — and, worse, it would hold the row's height up
-        // after the circles were deleted, which is the one thing about this row that
-        // fails silently: voice mode that can hear her and can never send. That is what
-        // `VoiceComposerTests.testTheTurnCirclesAreOnTheSurface` measures.
+        // that could disagree with it.
+        //
+        // **And nothing measures that the circles are in this row.** Deleting
+        // `controls` changes the rendered height by nothing at all — `waveformToggle`
+        // is the same `controlDiameter` tall — so the obvious guard is vacuous and was
+        // measured to be (`VoiceComposerTests.testTheComposersShapeIsPinned` records
+        // it: with `controls` commented out the whole suite went green). What IS
+        // asserted is which controls this state is supposed to offer —
+        // `VoiceChrome.controls(for:)`, in
+        // `testTheCancelButtonIsOfferedOnlyWhileTheComposerIsConnecting` — and the
+        // composer's total height, which goes red for a padding or slot change and
+        // does NOT isolate this row. Voice mode that can hear her and can never send
+        // is a state no test here can see.
     }
 
     /// **The exit, and it is where the founder pressed to get in.** `ChatComposer`'s
@@ -244,16 +223,16 @@ struct VoiceComposer: View {
     /// Flat during `.thinking`: nothing is being captured and nothing is being spoken,
     /// and spec §4 wants that legibly *not* listening.
     private var waveform: some View {
-        let showsLevel = session.state == .listening || session.state == .speaking
+        let showsLevel = turn.session.state == .listening || turn.session.state == .speaking
         return HStack(alignment: .center, spacing: 2) {
-            ForEach(Array(VoiceWaveform.barHeights(level: showsLevel ? level : 0)
+            ForEach(Array(VoiceWaveform.barHeights(level: showsLevel ? turn.level : 0)
                             .enumerated()), id: \.offset) { _, height in
                 Capsule()
                     .fill(accent.opacity(showsLevel ? 0.75 : 0.35))
                     .frame(width: 2.5, height: height)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: level)
+        .animation(.easeOut(duration: 0.12), value: turn.level)
         .accessibilityHidden(true)
     }
 
@@ -271,28 +250,37 @@ struct VoiceComposer: View {
     /// sentence — and needed a caption under each purely to tell them apart. The
     /// waveform button in the control row is the toggle now, so the ambiguity is gone
     /// rather than labelled around.
+    ///
+    /// **Which controls a state offers is `VoiceChrome.controls(for:)`, not an `if`
+    /// here.** It was an `if session.state == .idle` inside this `@ViewBuilder`, where
+    /// nothing could reach it — a pure state→copy mapping hidden in a view, which is
+    /// exactly the shape `VoiceChrome.line` was extracted out of.
     @ViewBuilder private var controls: some View {
-        // Before the mic is up (and after it has died) neither circle can do anything:
-        // nothing has been heard, so ✓ is disabled and ✕ has nothing to discard. The
-        // one useful control is out. Founder, 22 Aug: "`Cancel` appears only during
-        // `Connecting…`".
-        if session.state == .idle {
-            Button(action: close) {
-                Text(VoiceChrome.cancelLabel(lang))
-                    .font(CodepetTheme.inter(CodepetType.subheadline))
-                    .foregroundStyle(CodepetTheme.mutedText)
-                    .padding(.horizontal, 8)
-                    .frame(height: controlDiameter)
-                    .contentShape(Rectangle())
+        let offered = VoiceChrome.controls(for: turn.session.state)
+        HStack(spacing: 8) {
+            // Before the mic is up (and after it has died) neither circle can do
+            // anything: nothing has been heard, so ✓ is disabled and ✕ has nothing to
+            // discard. The one useful control is out. Founder, 22 Aug: "`Cancel`
+            // appears only during `Connecting…`".
+            if offered.contains(.cancel) {
+                Button(action: close) {
+                    Text(VoiceChrome.label(for: .cancel, lang))
+                        .font(CodepetTheme.inter(CodepetType.subheadline))
+                        .foregroundStyle(CodepetTheme.mutedText)
+                        .padding(.horizontal, 8)
+                        .frame(height: controlDiameter)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(VoiceChrome.label(for: .cancel, lang))
+                .accessibilityLabel(VoiceChrome.label(for: .cancel, lang))
             }
-            .buttonStyle(.plain)
-            .help(VoiceChrome.cancelLabel(lang))
-            .accessibilityLabel(VoiceChrome.cancelLabel(lang))
-        } else {
-            HStack(spacing: 8) {
-                circleButton(symbol: "xmark", label: VoiceChrome.discardLabel(lang),
+            if offered.contains(.discard) {
+                circleButton(symbol: "xmark", label: VoiceChrome.label(for: .discard, lang),
                              filled: false, enabled: true, action: discardTurn)
-                circleButton(symbol: "checkmark", label: VoiceChrome.sendLabel(lang),
+            }
+            if offered.contains(.send) {
+                circleButton(symbol: "checkmark", label: VoiceChrome.label(for: .send, lang),
                              filled: true, enabled: canSend, action: sendTurn)
             }
         }
@@ -300,9 +288,7 @@ struct VoiceComposer: View {
 
     /// Whether ✓ can do anything right now. Reads the rule rather than restating it —
     /// see `VoiceTurnFlow.canTakeTurn`, which the send site checks again.
-    private var canSend: Bool {
-        VoiceTurnFlow.canTakeTurn(partial: partial, state: session.state, isBusy: isBusy)
-    }
+    private var canSend: Bool { turn.canSend(isBusy: isBusy) }
 
     /// A turn already in flight, typed or spoken. `sendMessage` returns silently on
     /// either flag, so this is the difference between a disabled ✓ she can see and a
@@ -344,8 +330,14 @@ struct VoiceComposer: View {
     /// when the audio is not on-device is `VoiceChrome.statusLine`'s, and the colour
     /// follows it — a disclosure that her voice is leaving the Mac painted as grey
     /// chrome would be the footnote §3 forbids.
+    ///
+    /// `.lineLimit(2)` and it is not slack: the escalated off-device sentence needs both
+    /// lines at the dock's reading column, so it sits exactly on the limit. See
+    /// `VoiceComposerTests.testTheOffDeviceDisclosureFitsTheDocksTwoLines`, which is
+    /// there because the default `.tail` truncation would cut the §3 disclosure
+    /// mid-phrase with nothing on screen saying so.
     private var statusLine: some View {
-        Text(VoiceChrome.statusLine(turns: turns, onDevice: listener.isOnDevice, lang))
+        Text(VoiceChrome.statusLine(turns: turn.turns, onDevice: listener.isOnDevice, lang))
             .font(CodepetTheme.inter(CodepetType.footnote))
             .foregroundStyle(listener.isOnDevice ? CodepetTokens.faint
                                                  : CodepetTheme.accentOrange)
@@ -353,140 +345,20 @@ struct VoiceComposer: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - The reply being spoken
+    // MARK: - Leaving, and the two taps
 
-    /// The reply in flight — the newest companion message. Its text is filled in
-    /// place, delta by delta, by `CompanyStore`, so this is the same string growing.
-    private var replyText: String {
-        companyStore.chatMessages.last { $0.role == .companion }?.text ?? ""
-    }
-
-    /// Whose voice speaks: whoever signs the reply (spec §5). `nil` is the host,
-    /// which `PetVoice.profile` answers with byte's profile.
-    private var speakingPet: String? {
-        companyStore.chatMessages.last { $0.role == .companion }?.companionId
-    }
-
-    // MARK: - Lifecycle
-
-    /// Wires the callbacks and opens the mic. **No periodic work** — every transition
-    /// out of `.listening` is a tap or a callback from the listener, so a poll would
-    /// have nothing to look at.
-    private func run() async {
-        wire()
-        do {
-            try listener.start()
-        } catch {
-            // Nothing useful can happen without recognition, so this is terminal —
-            // but it is SHOWN, not swallowed, and the composer stays expanded to show
-            // it. The state stays `.idle`, which is what puts `Cancel` under it.
-            failure = error
-            return
-        }
-        session.apply(.open)
-    }
-
-    private func wire() {
-        // Remember the text and — while the pet is talking — treat any speech as
-        // barge-in. The listener only calls this when the transcript actually CHANGED
-        // (see `TurnTranscript.update`), so a recognizer re-reporting a string it
-        // already reported cannot cut the pet off with words she has already had
-        // answered.
-        listener.onPartial = { text in
-            partial = text
-            if session.state == .speaking {
-                voice.stopImmediately()
-                session.apply(.founderInterrupted)
-            }
-        }
-
-        listener.onLevel = { level = $0 }
-
-        // Recognition died AFTER start() returned — permission revoked, the service
-        // went away, or (vi-VN is server-side) the network dropped.
-        // `SFSpeechRecognizer.isAvailable` reports SERVICE availability, not
-        // authorisation, so a clean `start()` is no promise that a word will ever
-        // arrive. Unshown, the founder watches a composer that says "Listening…" and
-        // hears nothing.
-        listener.onFailure = { error in
-            // **A failure while the pet is speaking is expected, not fatal.** Voice
-            // processing cancels the pet's own audio out of the microphone — that is
-            // what makes barge-in possible — so a recognition request opened at a
-            // turn boundary and left running while the founder merely LISTENS hears
-            // genuine silence. A buffer task that self-terminates on silence
-            // (`kAFAssistantErrorDomain`, "no speech detected") then dies through no
-            // fault of hers, renews, dies again, and exhausts `RenewalBudget`.
-            // Closing on that would shut voice mode down mid-answer.
-            //
-            // The guard CAN fire because the listener stays running through
-            // `.speaking` on purpose: barge-in needs the mic open while the pet talks.
-            // Every other state is a real failure and must be shown.
-            //
-            // **But the listener is already dead by the time this runs.** `endOfTask`'s
-            // `.fail` branch calls `stop()` *before* `onFailure?(error)` — tap removed,
-            // voice processing off, engine stopped, `isRunning == false` — and nothing
-            // ever restarts it: `start()` is called once, in `run()`, and `endTurn()`
-            // early-returns on `guard isRunning`. So a long reply whose own audio the
-            // voice processing cancels out of the mic exhausts `RenewalBudget` on
-            // genuine silence, falls through here, and leaves the founder in a
-            // `.listening` composer reading "Listening…" with the bars flat — talking
-            // to a microphone that is gone, with nothing shown and nothing logged.
-            //
-            // Still return, and still show nothing: closing mid-answer is wrong, and
-            // restarting *here* re-enters the same silence-death loop and churns the
-            // engine for the whole reply. `VoiceTurnFlow.ensureListening` picks it up on
-            // the way back to `.listening`, which is the first moment this surface
-            // claims the microphone is live.
-            guard session.state != .speaking else { return }
-            listener.stop()
-            failure = error
-            session.apply(.close)
-        }
-
-        // The reply is over: drained AND `endOfReply()` was called.
-        voice.onFinishedAll = {
-            // The bars stop tracking anything. `onLevel` is what feeds them and the tap
-            // fires ~10 times a second, so this is one frame of honesty and not a
-            // latched value — which is why it is here and not inside `replyEnded`,
-            // where a returned constant asserted against its own literal would be a
-            // test that cannot fail.
-            level = 0
-            // Everything else — the stepping, the mic, and what must survive — is in
-            // `VoiceTurnFlow.replyEnded`, which a test can drive. Only the failure path
-            // stays here, because it writes `failure`.
-            do {
-                partial = try VoiceTurnFlow.replyEnded(session: &session, pending: partial,
-                                                       listener: listener)
-            } catch {
-                // The restart itself refused — that is a real, fatal failure, and it
-                // takes the normal path rather than being swallowed a second time.
-                listener.stop()
-                failure = error
-                session.apply(.close)
-            }
-        }
-    }
-
-    /// Leaving voice mode. **`stopImmediately()` first, then collapse.** Without it the
-    /// pet keeps talking to a composer that is gone, with the chiptune SFX still ducked
-    /// to zero for the rest of the process.
+    /// Leaving voice mode, by the waveform toggle or by `Cancel`.
+    ///
+    /// **Not `.onDisappear`** — see `body`'s `.task` and `CopilotChatView`.
     private func close() {
-        voice.stopImmediately()
-        listener.stop()
-        session.apply(.close)
+        turn.leave(listener: listener, voice: voice)
         isActive = false
     }
 
-    // MARK: - The founder's turn
-
     /// ✓: take the turn, then send it.
     private func sendTurn() {
-        guard let toSend = VoiceTurnFlow.takeTurn(partial: partial, session: &session,
-                                                  listener: listener, voice: voice,
-                                                  driver: &driver, isBusy: isBusy)
+        guard let toSend = turn.take(listener: listener, voice: voice, isBusy: isBusy)
         else { return }
-        partial = ""
-        level = 0
         let language = lang
         // `convenesRoom` is left at its default false: the room is unreachable by
         // voice (spec §5) because a misheard sentence must never spend
@@ -496,97 +368,20 @@ struct VoiceComposer: View {
         // `isStreaming`/`isCompanionTyping` again when this Task actually runs, so
         // counting the turn out here counted one that could still be dropped. The cost
         // is that the count updates when the reply lands rather than when it is sent.
+        //
+        // The write lands on `CopilotChatView`'s state through the binding, which is
+        // why it survives this view being rebuilt by the very send it is counting —
+        // that flip is what used to reset the credit line to `~0` on the turn the
+        // founder had just been charged for.
         Task {
             await companyStore.sendChat(toSend, language: language)
-            turns += 1
+            turn.turns += 1
         }
     }
 
-    /// ✕. **No credit is spent and none is counted** — `turns` moves in exactly one
-    /// place, `sendTurn()`'s Task, and nothing here goes near it.
+    /// ✕.
     private func discardTurn() {
-        VoiceTurnFlow.abandonTurn(listener)
-        partial = ""
-        level = 0
-    }
-
-    // MARK: - Speaking the reply
-
-    /// Feeds the driver and enqueues what comes back.
-    ///
-    /// Called from two `.onChange`es on `body`: the growing reply text, and
-    /// `isStreaming` going false. The second is the one that matters — see
-    /// `replyStreamEnded`.
-    private func speak(_ text: String, streaming: Bool) {
-        guard session.state == .thinking || session.state == .speaking else {
-            // `.listening` here is barge-in: the stream is still arriving and this is
-            // still being called, and the rest of the interrupted reply must stay
-            // unspoken. (`SpeakingQueue`'s latch would refuse it too; not relying on
-            // one of the two is deliberate.)
-            return
-        }
-        let sentences = driver.sentencesToSpeak(replyText: text, isStreaming: streaming)
-        // Nothing speakable yet is ordinary — mid-sentence, or a fenced code block
-        // that `speakable` deletes entirely. It is not the reply beginning.
-        guard !sentences.isEmpty else { return }
-        for sentence in sentences {
-            voice.enqueue(sentence, profile: PetVoice.profile(for: speakingPet))
-        }
-        // Applied AFTER the enqueues, which is why `beginReply()` cannot be hung off
-        // this event: `.replyBegan` is what moves `.thinking` → `.speaking`, so
-        // "call beginReply on .replyBegan" reopens the latch one sentence too late
-        // and drops sentence 1 of every post-barge-in reply.
-        session.apply(.replyBegan)
-    }
-
-    /// `isStreaming` went false. **Flush, then `endOfReply()`.**
-    ///
-    /// The flush is the only thing that releases the reply's last sentence: `take`
-    /// refuses a terminator that is merely the last character currently available,
-    /// because mid-stream `"The price is $3."` is both a complete sentence and the
-    /// first half of `"$3.14 today."`. Omit it and every reply loses its last
-    /// sentence — with no exception and no log.
-    ///
-    /// `endOfReply()` is what lets `onFinishedAll` ever fire. It is NOT inferable
-    /// from the queue draining: `speakable` deletes fenced code blocks entirely, so a
-    /// 50-line snippet is 5–15 seconds with nothing to say. Treat that drain as the
-    /// end and the composer reopens the mic and drops the bars to zero mid-reply, while
-    /// the real reply is still arriving — and the session takes `.replyFinished`, which
-    /// leaves `.speaking`, so the *rest* of the reply is then spoken from `.listening`,
-    /// which `speak()` refuses outright: **the founder hears half an answer.**
-    private func replyStreamEnded() {
-        // **The stream that just ended has to be OURS.** Voice mode is openable at any
-        // moment, including over a typed turn already in flight, and that seam is what
-        // this guard closes:
-        //
-        // She sends a typed message; `isStreaming` is true. She taps the waveform —
-        // the composer expands in `.listening` with no `beginReply()` behind it. She
-        // speaks: `onPartial` fills `partial`, and because the state is `.listening`
-        // rather than `.speaking` this is not barge-in, so the `SpeakingQueue` latch
-        // never closes. `canTakeTurn`'s `isBusy` correctly holds ✓ disabled while the
-        // typed reply streams, so her sentence is sitting on screen waiting for her
-        // tap. Then the TYPED reply finishes, and ungated this fired `endOfReply()` on
-        // a queue that had never begun a reply — and `SpeakingQueue` starts
-        // `accepting = true, reported = false`, so a virgin queue drains and *reports*.
-        // `onFinishedAll` then runs the whole reply-end path for a reply that was never
-        // this surface's.
-        //
-        // **It used to erase her spoken question mid-flight** — no message, no credit
-        // spent, and she had to say it all again. That half is fixed at the source:
-        // `VoiceTurnFlow.replyEnded` no longer clears the transcript, and this guard is
-        // no longer the only thing standing between her sentence and the bin.
-        //
-        // **It is still the right guard, and it still fires.** What is left ungated is
-        // not cosmetic: `endOfReply()` marks the queue `reported`, `level` drops to
-        // zero mid-sentence, and `ensureListening` runs against a `.listening` state it
-        // was never asked about. Keeping it also means the two facts stay independent —
-        // a later change that gives the reply-end path something new to reset does not
-        // silently acquire this seam along with it. `VoicePermission.canEnterVoiceMode`
-        // keeps her out of the situation; this keeps the situation harmless if she is
-        // in it.
-        guard VoiceTurnFlow.streamEndBelongsToVoiceTurn(session.state) else { return }
-        speak(replyText, streaming: false)
-        voice.endOfReply()
+        turn.discard(listener: listener)
     }
 }
 
@@ -636,24 +431,31 @@ extension VoiceComposer {
     /// The state is reached by driving the real machine rather than by writing to it,
     /// so a `state` this suite asks for that the transition table does not allow would
     /// show up here instead of being silently accepted.
+    ///
+    /// **`surface` is a parameter because `ChatSurface.defaultValue` is `.dock`.**
+    /// Without it every render was the dock variant, and `cornerRadius`,
+    /// `controlDiameter` and the card fill each have a `.twoMode` branch that no test
+    /// had ever rendered.
     static func preview(state: VoiceState, partial: String,
-                        failure: Error? = nil, onDevice: Bool = true) -> some View {
-        var session = VoiceSession()
+                        failure: Error? = nil, onDevice: Bool = true,
+                        surface: ChatSurface = .dock) -> some View {
+        var turn = VoiceTurn()
         if state != .idle {
-            session.apply(.open)
-            if state == .thinking || state == .speaking { session.apply(.founderSentTurn) }
-            if state == .speaking { session.apply(.replyBegan) }
+            turn.session.apply(.open)
+            if state == .thinking || state == .speaking { turn.session.apply(.founderSentTurn) }
+            if state == .speaking { turn.session.apply(.replyBegan) }
         }
+        turn.partial = partial
+        turn.failure = failure
         let listener = InertSpeechListening()
         listener.isOnDevice = onDevice
         return VoiceComposer(isActive: .constant(true),
+                             turn: .constant(turn),
                              listener: listener,
                              voice: InertSpeakingVoice(),
-                             accent: CodepetTheme.accentPurple,
-                             session: session,
-                             partial: partial,
-                             failure: failure)
+                             accent: CodepetTheme.accentPurple)
             .environmentObject(previewStore)
+            .environment(\.chatSurface, surface)
     }
 }
 

@@ -80,10 +80,10 @@ final class VoicePermissionTests: XCTestCase {
 
     /// **C3, the button half.** The waveform button was enabled while a typed turn
     /// was still streaming, and that one fact cost the founder a whole spoken
-    /// question: she opens the overlay over the live stream, it comes up `.listening`
+    /// question: she opens the surface over the live stream, it comes up `.listening`
     /// with no `beginReply()` behind it, she speaks — and when the TYPED reply
     /// finishes, `endOfReply()` lands on a virgin `SpeakingQueue`, which drains and
-    /// reports, so `onFinishedAll` clears her partial. No message, no orb change, no
+    /// reports, so `onFinishedAll` clears her partial. No message, no waveform change, no
     /// credit spent: silence, and she says it again.
     ///
     /// Worth its own test precisely because the failure is invisible on screen — a

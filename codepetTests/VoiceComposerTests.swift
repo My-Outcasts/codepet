@@ -32,6 +32,14 @@ import XCTest
 /// `SFSpeechRecognizer`.** `InertSpeechListening`/`InertSpeakingVoice` do nothing at
 /// all; the behaviour they would otherwise stand in for is asserted through the two
 /// protocols in `SpeechFakesTests`.
+///
+/// **And nothing here can see where the turn state lives.** The defect that made the
+/// pet silent on the first spoken turn of every thread was `@State` on `VoiceComposer`
+/// being destroyed by a change of branch in `CopilotChatView`'s `if/else`. Every render
+/// below hands the composer a `.constant` binding and measures one frame, so a composer
+/// that reset itself between frames measures identically to one that does not. Nothing
+/// in this target hosts `CopilotChatView` — see `hoist-fix-report.md`; that half is a
+/// handoff, not coverage.
 @MainActor
 final class VoiceComposerTests: XCTestCase {
 
@@ -57,6 +65,22 @@ final class VoiceComposerTests: XCTestCase {
     /// The composer's own width, so the numbers below are read at the width the pane
     /// actually gives it rather than at a round number.
     private static let paneWidth: CGFloat = 520
+
+    /// **The dock's real composer width, which is not 380.** `composerDock`/`composer`
+    /// both go through `readingColumn(_:)`, so the composer gets
+    /// `ChatColumn.textWidth(forBox:)` — 344 inside a 380pt dock, after 18pt of inset a
+    /// side. Derived rather than stated: a review round claimed a figure "at the 380pt
+    /// dock" that had never been rendered at any dock width, and a hard 380 here would
+    /// be the same mistake with a number attached.
+    private static let dockWidth = ChatColumn.textWidth(forBox: 380, surface: .dock)
+
+    /// Both surfaces, because `ChatSurface.defaultValue` is `.dock`: every render in
+    /// this suite was the dock variant until `preview(surface:)` existed, and
+    /// `cornerRadius`, `controlDiameter` and the card fill each have a `.twoMode`
+    /// branch. The two differ by exactly one thing that can change a height —
+    /// `controlDiameter`, 28 in the dock and 26 in the pane — which is why the pinned
+    /// figures below are 122 and 120 rather than one number.
+    private static let surfaces: [ChatSurface] = [.dock, .twoMode]
 
     // MARK: - Layout
 
@@ -144,20 +168,76 @@ final class VoiceComposerTests: XCTestCase {
     /// the one thing nothing here can see, and saying so is better than a green test that
     /// implies otherwise.
     ///
-    /// Measured 22 Aug at 520pt: **122pt**, in every state and at both surfaces (the
-    /// 380pt dock reports the same height). **RED at 99pt** two independent ways: with
-    /// `statusLine` deleted from the `VStack`, and with the transcript's fixed slot
-    /// deleted. The two land on the same number by coincidence — the status line is worth
-    /// 23pt with its spacing, and collapsing the 40pt slot to one line costs the same 23
-    /// — so do not read either figure as derived from the other.
+    /// **Measured 22 Aug, and the comment this replaced overstated what was measured.**
+    /// It claimed 122pt "in every state and at both surfaces (the 380pt dock reports the
+    /// same height)". Both halves were wrong: `ChatSurface.defaultValue` is `.dock` and
+    /// `preview` injected no surface, so all nine renders in the suite were the dock
+    /// variant — one surface at two widths — and no test had ever rendered the
+    /// `.twoMode` branch of either ternary. The dock's composer is also 344pt wide, not
+    /// 380 (`readingColumn` insets it), so "the 380pt dock" was not a width anything
+    /// rendered at either.
+    ///
+    /// What is measured now: **122pt in the dock and 120pt in two-mode**, at the pane's
+    /// 520 and at the dock's real 344, in all four states — sixteen renders. The 2pt is
+    /// `controlDiameter` (28 vs 26), which is the only surface-dependent thing in the
+    /// vertical stack.
+    ///
+    /// **RED at 99pt** (dock) two independent ways: with `statusLine` deleted from the
+    /// `VStack`, and with the transcript's fixed slot deleted. The two land on the same
+    /// number by coincidence — the status line is worth 23pt with its spacing, and
+    /// collapsing the 40pt slot to one line costs the same 23 — so do not read either
+    /// figure as derived from the other.
     func testTheComposersShapeIsPinned() {
-        for state in [VoiceState.idle, .listening, .thinking, .speaking] {
-            let s = size(VoiceComposer.preview(state: state, partial: "why"),
-                         w: Self.paneWidth, h: nil)
-            XCTAssertEqual(s.height, 122, accuracy: 2,
-                           "\(state) measured \(s.height)pt — 99 is this composer with no "
-                           + "status line, which is where the privacy disclosure and the "
-                           + "credit count live")
+        let expected: [ChatSurface: CGFloat] = [.dock: 122, .twoMode: 120]
+        for surface in Self.surfaces {
+            for width in [Self.paneWidth, Self.dockWidth] {
+                for state in [VoiceState.idle, .listening, .thinking, .speaking] {
+                    let s = size(VoiceComposer.preview(state: state, partial: "why",
+                                                       surface: surface),
+                                 w: width, h: nil)
+                    XCTAssertEqual(s.height, expected[surface]!, accuracy: 2,
+                                   "\(surface)/\(state) at \(width)pt measured \(s.height)pt "
+                                   + "— 99 is this composer with no status line, which is "
+                                   + "where the privacy disclosure and the credit count live")
+                }
+            }
+        }
+    }
+
+    /// **The §3 disclosure has to fit, and `.lineLimit(2)` is not slack.**
+    ///
+    /// `statusLine` escalates to the full off-device sentence — ~88 characters at 10pt —
+    /// and the default truncation is `.tail`, so a line that needs three lines loses its
+    /// end silently: "Your speech is sent to Apple for recognition. It does not stay on
+    /// this…". That is the footnote §3 forbids, arrived at by layout rather than by
+    /// wording.
+    ///
+    /// **Measured, not asserted from the composer's height.** The composer's height is
+    /// pinned by the transcript slot and by this very `lineLimit`, so a truncated
+    /// disclosure and a fitting one render the same 122pt — which is exactly why the
+    /// earlier "122 / 122, off-device vs on-device" pair proved nothing about it. This
+    /// measures the string against the width instead: what it needs unconstrained
+    /// against what two lines give it.
+    ///
+    /// **What it does not cover**, stated because the shape of this test is the shape of
+    /// the finding it answers: it restates the font (`inter(footnote)`) rather than
+    /// reading it off the view, so changing the font in `statusLine` alone would not go
+    /// red. The width IS shared — `VoiceComposer.horizontalPadding` and
+    /// `ChatColumn.textWidth` are the view's own.
+    ///
+    /// RED: raise `turns` to a number whose credit fragment pushes it over, or drop the
+    /// limit to 1 here — at `lineLimit(1)` the dock measures 13pt against 25pt needed.
+    func testTheOffDeviceDisclosureFitsTwoLinesInTheDock() {
+        for lang in [AppLanguage.en, .vi] {
+            let line = VoiceChrome.statusLine(turns: 10, onDevice: false, lang)
+            let text = Text(line).font(CodepetTheme.inter(CodepetType.footnote))
+            let inner = Self.dockWidth - VoiceComposer.horizontalPadding * 2
+            let needed = size(text.lineLimit(nil), w: inner, h: nil)
+            let given = size(text.lineLimit(2), w: inner, h: nil)
+            XCTAssertEqual(given.height, needed.height, accuracy: 1,
+                           "\(lang): the off-device disclosure needs \(needed.height)pt at "
+                           + "\(inner)pt wide and .lineLimit(2) gives it \(given.height) — "
+                           + "spec §3's sentence is being truncated mid-phrase: \(line)")
         }
     }
 
@@ -165,11 +245,20 @@ final class VoiceComposerTests: XCTestCase {
     /// `.idle` surface worth rendering, and this one does: `Connecting…` with `Cancel`
     /// under it is what the founder sees for the ~200ms of engine spin-up, and it is
     /// also what a fatal `start()` failure leaves on screen.
+    /// Both surfaces and both privacy branches, at the dock's real width — the
+    /// off-device render is the one the suite had never done at a dock width, and it is
+    /// where the escalated §3 sentence has to lay out.
     func testEveryStateRenders() {
-        for st in [VoiceState.idle, .listening, .thinking, .speaking] {
-            let s = size(VoiceComposer.preview(state: st, partial: "test"),
-                         w: Self.paneWidth, h: nil)
-            XCTAssertGreaterThan(s.height, 60, "\(st) did not lay out")
+        for surface in Self.surfaces {
+            for onDevice in [true, false] {
+                for st in [VoiceState.idle, .listening, .thinking, .speaking] {
+                    let s = size(VoiceComposer.preview(state: st, partial: "test",
+                                                       onDevice: onDevice, surface: surface),
+                                 w: Self.dockWidth, h: nil)
+                    XCTAssertGreaterThan(s.height, 60,
+                                         "\(surface)/\(st)/onDevice=\(onDevice) did not lay out")
+                }
+            }
         }
     }
 
@@ -345,12 +434,55 @@ final class VoiceComposerTests: XCTestCase {
             XCTAssertNotEqual(discard, close,
                               "\(lang): ✕ reads as 'leave voice mode', so a founder who "
                               + "wants to retype one misheard word leaves instead")
+            // `Cancel` and the waveform toggle both call `close()` and sit 8pt apart in
+            // `.idle`, so they are the pair most likely to be given one label — and
+            // that label would be the only thing a screen reader has to tell two
+            // adjacent controls apart that do the same thing for different reasons.
+            XCTAssertNotEqual(cancel, close,
+                              "\(lang): the two controls that both leave voice mode carry "
+                              + "the same label, 8pt apart")
         }
         for (name, label) in [("✕", VoiceChrome.discardLabel),
                               ("✓", VoiceChrome.sendLabel),
                               ("the waveform toggle", VoiceChrome.closeLabel),
                               ("Cancel", VoiceChrome.cancelLabel)] {
             XCTAssertNotEqual(label(.en), label(.vi), "\(name)'s label is not bilingual")
+        }
+    }
+
+    /// **`Cancel` appears only during `Connecting…`** (founder, 22 Aug), and until now
+    /// that rule lived as an `if session.state == .idle` inside a private `@ViewBuilder`
+    /// where nothing could reach it.
+    ///
+    /// **This is not the vacuous case** — the reason `testTheTurnControlsAreOnTheSurface`
+    /// could not be ported is that the circles are the same height as the waveform
+    /// toggle they sit beside, so *presence* is unmeasurable from a rendered size. Which
+    /// controls a state OFFERS is a pure state→controls mapping, the same shape as
+    /// `VoiceChrome.line`, and it is the nearest available substitute for the guard that
+    /// genuinely could not be ported.
+    ///
+    /// It fails in both directions and neither shows up in a layout figure: `Cancel`
+    /// surviving into `.listening` is a second exit sitting where ✕/✓ go, and ✕/✓ in
+    /// `.idle` is two controls that can do nothing — nothing has been heard, so ✓ is
+    /// disabled, and ✕ has nothing to discard.
+    ///
+    /// RED: delete `state == .idle` from `VoiceChrome.controls(for:)`.
+    func testTheCancelButtonIsOfferedOnlyWhileTheComposerIsConnecting() {
+        XCTAssertEqual(VoiceChrome.controls(for: .idle), [.cancel],
+                       "Connecting… offered something other than the one control that "
+                       + "can do anything")
+        for state in [VoiceState.listening, .thinking, .speaking] {
+            XCTAssertEqual(VoiceChrome.controls(for: state), [.discard, .send],
+                           "\(state) did not offer exactly ✕ and ✓")
+            XCTAssertFalse(VoiceChrome.controls(for: state).contains(.cancel),
+                           "\(state) still offers Cancel — a second exit next to ✕")
+        }
+        // The labels are the only thing telling these apart on screen, and they are
+        // chrome. Same rule as `ApprovalTier.label(_:)`.
+        for control in [VoiceChrome.Control.cancel, .discard, .send] {
+            XCTAssertNotEqual(VoiceChrome.label(for: control, .en),
+                              VoiceChrome.label(for: control, .vi),
+                              "\(control)'s label is not bilingual")
         }
     }
 

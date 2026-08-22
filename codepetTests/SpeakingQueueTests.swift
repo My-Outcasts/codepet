@@ -14,7 +14,7 @@ final class SpeakingQueueTests: XCTestCase {
     /// **The mid-reply reset bug.** A reply streams "Here's the fix." then a fenced
     /// code block then "That should do it." `SentenceSplitter.speakable` deletes the
     /// fence entirely, so for the 5-15s it streams there are no speakable sentences
-    /// and the queue is empty. If that reports finished, the overlay applies
+    /// and the queue is empty. If that reports finished, the surface applies
     /// `.replyFinished` and leaves `.speaking` while the real reply is still arriving —
     /// so `VoiceComposer.speak` refuses every sentence after the fence and the
     /// founder hears half an answer. It was worse than that: it also cleared her
@@ -63,7 +63,7 @@ final class SpeakingQueueTests: XCTestCase {
 
     /// The founder interrupts, but the server reply is still streaming and the
     /// consumer keeps offering sentences. Refusing them has to happen HERE — if it
-    /// depends on the overlay breaking its own loop, the founder gets ~200ms of
+    /// depends on the surface breaking its own loop, the founder gets ~200ms of
     /// silence and then the pet talks over her again.
     func testEnqueueAfterAStopIsRefusedUntilTheNextReply() {
         var q = SpeakingQueue()

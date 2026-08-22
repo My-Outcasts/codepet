@@ -201,6 +201,44 @@ enum VoiceChrome {
     static func closeLabel(_ lang: AppLanguage) -> String {
         lang == .vi ? "Tắt chế độ giọng nói" : "Leave voice mode"
     }
+
+    /// The controls the turn row offers. `close` is not one of them — the waveform
+    /// toggle is always there, in the row's other corner.
+    enum Control: Equatable {
+        /// Leave, while there is nothing else worth doing.
+        case cancel
+        /// ✕ — throw this sentence away and keep listening.
+        case discard
+        /// ✓ — take the turn. Offered but disabled while `canTakeTurn` is false.
+        case send
+    }
+
+    /// **Which controls a state offers** — founder, 22 Aug: "`Cancel` appears only
+    /// during `Connecting…`".
+    ///
+    /// Extracted for the same reason `line(state:partial:failure:_:)` was: this was an
+    /// `if session.state == .idle` inside a private `@ViewBuilder` on the composer,
+    /// which nothing could reach, and it is a pure state→controls mapping rather than
+    /// anything about layout. Its failure is not cosmetic in either direction — `Cancel`
+    /// in `.listening` puts a second exit next to ✕/✓ and steals the width they sit in,
+    /// and ✕/✓ in `.idle` offers a founder two controls that can do nothing: nothing
+    /// has been heard yet, so ✓ is disabled and ✕ has nothing to discard.
+    static func controls(for state: VoiceState) -> [Control] {
+        state == .idle ? [.cancel] : [.discard, .send]
+    }
+
+    /// The tooltip and accessibility label for one control.
+    ///
+    /// A single entry point so the composer cannot label ✕ with `closeLabel` — the two
+    /// read almost the same and the takeover needed captions purely to tell them
+    /// apart. Bilingual, like everything else here.
+    static func label(for control: Control, _ lang: AppLanguage) -> String {
+        switch control {
+        case .cancel:  return cancelLabel(lang)
+        case .discard: return discardLabel(lang)
+        case .send:    return sendLabel(lang)
+        }
+    }
 }
 
 /// The bar waveform along the bottom of the expanded composer (founder, 22 Aug:

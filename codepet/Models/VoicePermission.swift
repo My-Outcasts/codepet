@@ -82,15 +82,15 @@ enum VoicePermission {
     /// The waveform button's whole rule: permission **and** an idle conversation.
     ///
     /// **`isBusy` is here because of what happens without it, and it is not a
-    /// cosmetic dim.** The overlay can be opened while a typed turn is still
-    /// streaming; the founder then speaks into a `.listening` overlay that has never
+    /// cosmetic dim.** The surface can be opened while a typed turn is still
+    /// streaming; the founder then speaks into a `.listening` surface that has never
     /// called `beginReply()`, so when that typed reply finishes, `endOfReply()` lands
     /// on a virgin `SpeakingQueue`, which drains and reports — firing
-    /// `onFinishedAll`, i.e. the whole reply-end path, for a reply this overlay never
+    /// `onFinishedAll`, i.e. the whole reply-end path, for a reply this surface never
     /// asked for. That used to clear `partial`: her spoken question erased mid-flight,
-    /// with no message, no orb change and no credit spent — silence, and she had to say
+    /// with no message, no waveform change and no credit spent — silence, and she had to say
     /// it again. `VoiceTurnFlow.replyEnded` no longer clears the transcript, so what
-    /// is left is the orb dropping to zero and a `.replyFinished` taken on someone
+    /// is left is the waveform dropping to zero and a `.replyFinished` taken on someone
     /// else's reply. `VoiceComposer`'s `replyStreamEnded` gate closes the same hole
     /// from the other side; this is the half that stops her getting into the situation
     /// at all.
@@ -118,7 +118,7 @@ enum VoicePermission {
     /// `authorizationStatus()` stayed `.notDetermined` for every founder forever. The
     /// button offered a prompt the app never asked for, `SpeechListener.start()`
     /// succeeded anyway (`isAvailable` is service availability, not authorisation),
-    /// the orb pulsed, and the recognition task failed with a raw
+    /// the waveform pulsed, and the recognition task failed with a raw
     /// `kAFAssistantErrorDomain` string. Voice mode could not work for anyone.
     ///
     /// **Microphone first, and it short-circuits.** Recognition cannot do anything
@@ -129,7 +129,7 @@ enum VoicePermission {
     ///
     /// The microphone is requested explicitly rather than left to the implicit prompt
     /// macOS raises when the input node is touched: that one arrives *after* the
-    /// overlay is on screen and the engine is starting, so the order the founder sees
+    /// surface is on screen and the engine is starting, so the order the founder sees
     /// would depend on how fast `start()` got that far.
     ///
     /// `SFSpeechRecognizer.requestAuthorization`'s completion arrives on an arbitrary

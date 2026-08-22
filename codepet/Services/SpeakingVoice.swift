@@ -84,7 +84,7 @@ final class SpeechSpeaker: NSObject, SpeakingVoice, AVSpeechSynthesizerDelegate 
 
     /// **Our own bookkeeping, not `synth.isSpeaking`.** The framework's flag is
     /// asynchronous: it is very likely still false immediately after `speak()` and
-    /// may still be true immediately after `stopSpeaking`. Overlay logic validated
+    /// may still be true immediately after `stopSpeaking`. Surface logic validated
     /// against a fake that flips synchronously would then behave differently in
     /// production. Reporting the queue makes the fake and this class agree.
     var isSpeaking: Bool { queue.isSpeaking }

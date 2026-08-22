@@ -49,9 +49,20 @@ struct CopilotChatView: View {
     @State private var pins: [ContextPin] = []
     @State private var attachments: [ChatAttachment] = []
     /// Whether the composer is in voice mode — spec §2 decision 5, which reversed the
-    /// takeover. `VoiceComposer` owns its own `VoiceSession`; this is only which
-    /// composer the slot renders, same shape as `showHistory`.
+    /// takeover. Which composer the slot renders, same shape as `showHistory`.
     @State private var voiceMode = false
+    /// **The whole voice turn, hoisted here — and it had to be.** See `VoiceTurn`: the
+    /// composer slot is rendered from inside the three-way `if/else` below, the founder's
+    /// own first spoken turn flips that `if/else` (`CompanyStore.sendMessage` appends her
+    /// message synchronously, before its first await), and different branches of an
+    /// `if/else` are different structural identities — so `@State` on `VoiceComposer` was
+    /// destroyed mid-turn and rebuilt at `.idle`. The question was sent and charged, the
+    /// reply arrived as text, and the pet said nothing.
+    ///
+    /// Held next to `voiceListener`/`voiceVoice` because it is the same fact about this
+    /// file that those two were hoisted for: nothing about one voice-mode session may be
+    /// owned by a view that the transcript's own contents can replace.
+    @State private var voiceTurn = VoiceTurn()
     /// Built once per tap of the waveform button, not once per `body` — a plain
     /// (non-`@State`) `let` on `VoiceComposer` takes whatever value THIS view's
     /// latest `body` evaluation passes it, and `body` re-runs on every streamed
@@ -176,13 +187,77 @@ struct CopilotChatView: View {
         // mic or a synthesizer open once the founder has left voice mode.
         .onChange(of: voiceMode) { _, isOn in
             if !isOn {
+                // Belt to `VoiceComposer.close()`'s braces. Every exit the founder can
+                // press goes through `close()`, which stops both before flipping this
+                // flag — but the pair is released on the next two lines, so anything
+                // that ever sets `voiceMode = false` without stopping them first would
+                // drop the last reference to a talking synthesiser with the chiptune
+                // SFX still ducked to zero, and nothing left able to stop it.
+                voiceVoice?.stopImmediately()
+                voiceListener?.stop()
                 voiceListener = nil
                 voiceVoice = nil
+                // **The session is over, so the turn goes with it.** `VoiceTurn` is
+                // hoisted precisely so it survives this view's own re-renders, which
+                // means it also survives voice mode ending — and every field of it is
+                // wrong for the next session. `micOpened` is the one that fails loudest
+                // while being invisible: a second session that inherited it would never
+                // open its microphone and would read `Connecting…` forever.
+                voiceTurn = VoiceTurn()
                 // The founder may have revoked a grant in System Settings while voice
                 // mode was up, and a mid-session revoke is exactly what
                 // `onFailure` reports.
                 voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
             }
+        }
+        // **The two observations that drive speech, and they are up here on purpose.**
+        //
+        // They were on `VoiceComposer`'s body, which is inside the `if/else` above.
+        // Two ordinary things remove that view without voice mode ending: the branch
+        // flip on the founder's first spoken turn of a thread, and opening History from
+        // the rail. Losing them costs invariants 1 and 2 — the reply's sentences are
+        // never enqueued and `endOfReply()` is never called, so `onFinishedAll` never
+        // fires and the session stays stuck in `.thinking`/`.speaking` with the mic
+        // shut, silently. `CopilotChatView` is above the `if/else` and above
+        // `showHistory`, so from here neither can happen.
+        //
+        // Both are inert outside voice mode: `speak` refuses anything that is not
+        // `.thinking`/`.speaking`, and `replyStreamEnded`'s first line is
+        // `streamEndBelongsToVoiceTurn`. That guard is now reached on every typed turn
+        // too, which is a reason to keep it, not to move it.
+        .onChange(of: voiceReplyText) { _, text in
+            guard let voice = voiceVoice else { return }
+            voiceTurn.speak(text, streaming: companyStore.isStreaming,
+                            as: PetVoice.profile(for: voiceSpeakingPet), voice: voice)
+        }
+        .onChange(of: companyStore.isStreaming) { was, now in
+            guard was, !now, let voice = voiceVoice else { return }
+            voiceTurn.replyStreamEnded(voiceReplyText,
+                                       as: PetVoice.profile(for: voiceSpeakingPet),
+                                       voice: voice)
+        }
+        // **Invariant 4, for the dismissals that are not the ✕.** `close()` runs on the
+        // waveform toggle and on `Cancel` and nowhere else — so ⌘B (`AppShellView`'s
+        // `showsCopilot && !collapsed`) and the Developer pill (`TwoModeShellView`
+        // swapping this view out) both remove voice mode without it ever being told.
+        // `SpeechListener`'s `isolated deinit` still reaches `listener.stop()`, but
+        // `SpeechSpeaker.deinit` only restores the SFX volume — it never calls
+        // `synth.stopSpeaking(at:)`, and `AVSpeechSynthesizer`'s behaviour on dealloc
+        // mid-utterance is undocumented. So: press ⌘B mid-sentence and the pet may keep
+        // talking with no surface left to stop it.
+        //
+        // **This is on the pane, not on `VoiceComposer`.** It was on the composer, and
+        // there it also fired on a branch flip and on History opening — stopping a
+        // microphone the next instance was about to keep using, unordered against that
+        // instance's `.task` restarting it. This view's disappearance is the one that
+        // actually means the surface is gone.
+        //
+        // Not `voiceMode = false`: writing state during teardown, and this view's
+        // `@State` is destroyed with it anyway (both routes remove it from the
+        // hierarchy rather than hiding it).
+        .onDisappear {
+            voiceVoice?.stopImmediately()
+            voiceListener?.stop()
         }
         // Read once per appearance, and again when the language changes — the locale
         // is what decides whether a recogniser exists at all. NOT in `body`: see
@@ -264,7 +339,8 @@ struct CopilotChatView: View {
     /// a silent no-op tap.
     @ViewBuilder private func composer(showsDeptChips: Bool) -> some View {
         if voiceMode, let listener = voiceListener, let voice = voiceVoice {
-            VoiceComposer(isActive: $voiceMode, listener: listener, voice: voice,
+            VoiceComposer(isActive: $voiceMode, turn: $voiceTurn,
+                          listener: listener, voice: voice,
                           accent: companionColor)
         } else {
             typingComposer(showsDeptChips: showsDeptChips)
@@ -318,6 +394,25 @@ struct CopilotChatView: View {
     /// + ["Codepet"]`: the recognizer's `contextualStrings` (spec §3) — product
     /// nouns are exactly the words a general recognizer mishears, and every name
     /// the founder might say to address someone is one of these three sources.
+    /// The reply being spoken — the newest companion message. Its text is filled in
+    /// place, delta by delta, by `CompanyStore`, so this is the same string growing.
+    ///
+    /// **Empty unless voice mode is on**, so the `.onChange` above compares a constant
+    /// on every one of the hundreds of body evaluations a typed reply causes. Entering
+    /// voice mode over a live typed stream flips this from `""` to the reply text, which
+    /// calls `speak` in `.listening` — refused, which is the correct answer for a reply
+    /// this surface never asked for.
+    private var voiceReplyText: String {
+        guard voiceMode else { return "" }
+        return companyStore.chatMessages.last { $0.role == .companion }?.text ?? ""
+    }
+
+    /// Whose voice speaks: whoever signs the reply (spec §5). `nil` is the host,
+    /// which `PetVoice.profile` answers with byte's profile.
+    private var voiceSpeakingPet: String? {
+        companyStore.chatMessages.last { $0.role == .companion }?.companionId
+    }
+
     private func startVoiceMode() {
         guard !voiceRequesting, !voiceMode else { return }
         voiceRequesting = true
@@ -336,6 +431,13 @@ struct CopilotChatView: View {
                 + ["Codepet"]
             voiceListener = SpeechListener(locale: lang.speechLocale, hints: hints)
             voiceVoice = SpeechSpeaker()
+            // A clean turn for a clean session — the second half of the reset in
+            // `.onChange(of: voiceMode)` above, deliberately duplicated. The state is
+            // hoisted so it survives re-renders, so the only thing that can make it
+            // fresh is an explicit assignment, and a session that started on a stale
+            // `micOpened` never opens its microphone: `Connecting…` forever, no error.
+            // Two idempotent assignments are cheap; one missed one is silent.
+            voiceTurn = VoiceTurn()
             voiceMode = true
         }
     }

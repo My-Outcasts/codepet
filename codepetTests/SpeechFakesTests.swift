@@ -3,7 +3,7 @@ import XCTest
 
 /// **No test in this file touches audio hardware.** The protocols exist so the
 /// suite can drive fakes, and this suite is the proof that the protocols are
-/// sufficient — if a fake cannot express the behaviour the overlay needs, the
+/// sufficient — if a fake cannot express the behaviour the surface needs, the
 /// boundary is in the wrong place.
 ///
 /// The rule is not style. On 21 Aug, `PetMenuIcon` drew a sprite through
@@ -18,7 +18,7 @@ import XCTest
 /// are pure and have their own suites; `FakeVoice` below is built on the same
 /// `SpeakingQueue` the real speaker uses, so it can no longer answer a question
 /// differently from production (I7) — and these tests are the protocol's own
-/// contract: the shapes the overlay will be written against.
+/// contract: the shapes the surface will be written against.
 @MainActor
 final class SpeechFakesTests: XCTestCase {
 
@@ -34,7 +34,7 @@ final class SpeechFakesTests: XCTestCase {
     /// **Backed by the real `SpeakingQueue`, on purpose.** The reviewed defect was a
     /// fake that flipped `isSpeaking` synchronously inside `enqueue` while
     /// `SpeechSpeaker.isSpeaking` returned the synthesiser's asynchronous flag. Any
-    /// overlay logic validated only against that fake would behave differently when
+    /// surface logic validated only against that fake would behave differently when
     /// it shipped. Sharing the bookkeeping makes the two agree by construction; all
     /// the fake adds is the audio the test host cannot have.
     final class FakeVoice: SpeakingVoice {
@@ -211,12 +211,12 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertEqual(v.unducks, 1, "the SFX were left ducked after the reply")
     }
 
-    /// **C3 through the protocol.** The overlay cannot infer end-of-reply from a
+    /// **C3 through the protocol.** The surface cannot infer end-of-reply from a
     /// drain, so the protocol must not let it: a gap while a code fence streams
     /// leaves the queue empty and the reply unfinished.
     ///
     /// **Driven through the protocol existential on purpose.** The point of the
-    /// finding is that the PROTOCOL gave the overlay no way to tell a drain from an
+    /// finding is that the PROTOCOL gave the surface no way to tell a drain from an
     /// end-of-reply, so deleting `beginReply`/`endOfReply` from it must fail to
     /// compile rather than be quietly absorbed by the fake's own methods.
     func testAGapWhileACodeFenceStreamsIsNotTheEndOfTheReply() {
@@ -307,8 +307,8 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertEqual(voice.spoken, ["First point.", "Second point.", "Third."])
     }
 
-    /// A listener that fails to start must be visible, not silent — the overlay
-    /// shows an error instead of a live-looking orb that hears nothing.
+    /// A listener that fails to start must be visible, not silent — the surface
+    /// shows an error instead of a live-looking waveform that hears nothing.
     func testAListenerThatCannotStartReportsIt() {
         let l = FakeListener()
         l.refuseStart = VoiceAudioError.recognizerUnavailable
@@ -327,9 +327,9 @@ final class SpeechFakesTests: XCTestCase {
     /// **C2.** `start()` succeeding is not the same as recognition working.
     /// `SFSpeechRecognizer.isAvailable` reports service availability, not
     /// authorisation, so `start()` returns cleanly with speech recognition denied,
-    /// the tap fires, the orb pulses — and the recognition task fails. Swallowed
+    /// the tap fires, the waveform pulses — and the recognition task fails. Swallowed
     /// (which is what shipped: the callback's error was bound to `_`) the founder
-    /// watches a live orb that never produces one word, with nothing logged. Same
+    /// watches a live waveform that never produces one word, with nothing logged. Same
     /// path for a mid-session permission revoke, and for any network drop under
     /// vi-VN, which spec §3 measured as server-side.
     ///
@@ -351,14 +351,14 @@ final class SpeechFakesTests: XCTestCase {
 
         fake.failMidSession(VoiceAudioError.engineFailed("the network dropped"))
         XCTAssertEqual(reported as? VoiceAudioError, .engineFailed("the network dropped"),
-                       "recognition died and the overlay was never told")
-        XCTAssertFalse(listener.isRunning, "a dead recognizer left the orb looking live")
+                       "recognition died and the surface was never told")
+        XCTAssertFalse(listener.isRunning, "a dead recognizer left the waveform looking live")
         XCTAssertEqual(partials, ["hello"])
     }
 
     // MARK: - The turn survives a renewal
 
-    /// **The one the overlay depends on.** A recognition request lasts about a minute
+    /// **The one the surface depends on.** A recognition request lasts about a minute
     /// and a question does not have to, so a long question is heard by two requests in
     /// succession. The consumer takes the latest partial as the founder's message, and
     /// it cannot compensate for a renewal because nothing tells it one happened — so
@@ -446,7 +446,7 @@ final class SpeechFakesTests: XCTestCase {
                        "turns are accumulating in the request for the whole session")
     }
 
-    /// A recognizer re-reports a string it has already reported, freely. The overlay
+    /// A recognizer re-reports a string it has already reported, freely. The surface
     /// reads every partial as speech and, while the pet is speaking, treats any partial
     /// as barge-in — so an unchanged partial cuts the pet off with words the founder
     /// has already had answered. Only real changes reach the consumer.
@@ -478,10 +478,10 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertEqual(partials.last, "a new question")
     }
 
-    // MARK: - The microphone is alive whenever the overlay says it is
+    // MARK: - The microphone is alive whenever the surface says it is
 
     /// **C2.** A recognition failure raised while the pet is speaking is expected
-    /// rather than broken, so the overlay deliberately shows nothing — but
+    /// rather than broken, so the surface deliberately shows nothing — but
     /// `SpeechListener.endOfTask`'s `.fail` branch calls `stop()` **before**
     /// `onFailure`, so the listener is already fully torn down by then, and nothing
     /// ever called `start()` a second time: `run()` calls it once and `endTurn()`
@@ -492,19 +492,19 @@ final class SpeechFakesTests: XCTestCase {
     /// request left open while the founder merely LISTENS to a long reply hears
     /// genuine silence, self-terminates, renews, does it again and exhausts
     /// `RenewalBudget`. The reply then ends, the session returns to `.listening`, the
-    /// header reads "Listening", the orb sits at 0, **and the founder talks into a
+    /// header reads "Listening", the waveform sits at 0, **and the founder talks into a
     /// microphone that is gone with no error displayed, for the rest of the session.**
     ///
     /// So the rule is not "restart on failure" (that re-enters the same silence-death
     /// loop and churns the engine for the whole reply) but "the mic is running
-    /// whenever the overlay claims to be listening", checked at the transition back.
+    /// whenever the surface claims to be listening", checked at the transition back.
     func testAMicThatDiedWhileThePetSpokeIsRunningAgainOnceListening() throws {
         let fake = FakeListener()
         let listener: SpeechListening = fake
         var session = VoiceSession()
         var shown: Error?
         listener.onFailure = { error in
-            guard session.state != .speaking else { return }   // the overlay's guard
+            guard session.state != .speaking else { return }   // the surface's guard
             shown = error
         }
 
@@ -515,7 +515,7 @@ final class SpeechFakesTests: XCTestCase {
         XCTAssertNoThrow(try listener.start())
         let startsBefore = fake.startCount
 
-        // `SpeechListener` stops before it reports, which is exactly why the overlay's
+        // `SpeechListener` stops before it reports, which is exactly why the surface's
         // guard is not enough on its own.
         fake.failMidSession(VoiceAudioError.engineFailed("no speech detected"))
         XCTAssertNil(shown, "a silence-terminated request was shown as a failure mid-answer")
@@ -525,7 +525,7 @@ final class SpeechFakesTests: XCTestCase {
         _ = session.apply(.replyFinished)
         XCTAssertEqual(session.state, .listening)
         XCTAssertTrue(try VoiceTurnFlow.ensureListening(listener, state: session.state),
-                      "the overlay claimed to be listening with the microphone torn down")
+                      "the surface claimed to be listening with the microphone torn down")
         XCTAssertTrue(listener.isRunning)
         XCTAssertEqual(fake.startCount, startsBefore + 1)
     }
@@ -533,7 +533,7 @@ final class SpeechFakesTests: XCTestCase {
     /// The other three cases, so the ensure is a check and not an unconditional
     /// restart: a healthy listener must not be churned, and `.speaking`/`.thinking`
     /// must be left alone — `.speaking` tolerates a dead request on purpose.
-    func testEnsureListeningOnlyActsWhenTheOverlayIsClaimingToListen() throws {
+    func testEnsureListeningOnlyActsWhenTheSurfaceIsClaimingToListen() throws {
         let fake = FakeListener()
         XCTAssertNoThrow(try fake.start())
         XCTAssertFalse(try VoiceTurnFlow.ensureListening(fake, state: .listening),
@@ -543,7 +543,7 @@ final class SpeechFakesTests: XCTestCase {
         fake.stop()
         for st in [VoiceState.idle, .thinking, .speaking] {
             XCTAssertFalse(try VoiceTurnFlow.ensureListening(fake, state: st))
-            XCTAssertFalse(fake.isRunning, "\(st) restarted a mic the overlay was not promising")
+            XCTAssertFalse(fake.isRunning, "\(st) restarted a mic the surface was not promising")
         }
         XCTAssertEqual(fake.startCount, 1)
     }
@@ -551,7 +551,7 @@ final class SpeechFakesTests: XCTestCase {
     /// If the restart itself refuses, that is a real failure and must be surfaced —
     /// the one thing worse than a dead mic under a "Listening" header is a dead mic
     /// under a "Listening" header that the app tried and failed to revive silently.
-    func testARefusedRestartThrowsSoTheOverlayCanShowIt() {
+    func testARefusedRestartThrowsSoTheSurfaceCanShowIt() {
         let fake = FakeListener()
         fake.refuseStart = VoiceAudioError.recognizerUnavailable
         XCTAssertThrowsError(try VoiceTurnFlow.ensureListening(fake, state: .listening)) {
@@ -561,14 +561,14 @@ final class SpeechFakesTests: XCTestCase {
 
     // MARK: - A turn is taken by a tap, and by nothing else
 
-    /// The overlay's `@State partial`, as something a callback can fill and a test can
+    /// The surface's `@State partial`, as something a callback can fill and a test can
     /// read afterwards.
     final class Transcript {
         var text = ""
     }
 
     /// One fixture for all four of the tests below: a listening session, the two fakes
-    /// sharing a tape, and the overlay's own `onPartial` wiring.
+    /// sharing a tape, and the surface's own `onPartial` wiring.
     private struct TurnFixture {
         let listener: FakeListener
         let voice: FakeVoice
@@ -661,7 +661,7 @@ final class SpeechFakesTests: XCTestCase {
                                              driver: &fixture.driver, isBusy: false)
         XCTAssertEqual(sent, "what should we charge for the beta")
         XCTAssertEqual(fixture.session.state, .thinking,
-                       "the orb never stopped tracking her level — she cannot see the "
+                       "the waveform never stopped tracking her level — she cannot see the "
                        + "turn was taken")
         fixture.partial.text = ""                      // what the view does after ✓
 
@@ -691,7 +691,7 @@ final class SpeechFakesTests: XCTestCase {
     }
 
     /// **✓ with an empty transcript is impossible** (spec §5). `sendChat` drops an
-    /// empty string, so this is not a crash but a credit-shaped no-op: the orb stops
+    /// empty string, so this is not a crash but a credit-shaped no-op: the waveform stops
     /// listening, the session leaves `.listening`, and no question was ever asked.
     ///
     /// Whitespace counts as empty. A recognizer that reports `" "` is the reachable
@@ -714,7 +714,7 @@ final class SpeechFakesTests: XCTestCase {
                                                    listener: listener, voice: voice,
                                                    driver: &driver, isBusy: false))
             XCTAssertEqual(session.state, .listening,
-                           "\(text.debugDescription) took the turn: the orb stops "
+                           "\(text.debugDescription) took the turn: the waveform stops "
                            + "listening and nothing was asked")
             XCTAssertEqual(tape.events, [],
                            "\(text.debugDescription) opened a reply and retired the "
@@ -773,7 +773,7 @@ final class SpeechFakesTests: XCTestCase {
     ///
     /// `onFinishedAll` used to clear `partial`, and the sequence that made that a
     /// silent loss is ordinary: she asks Q1 and taps ✓ (`sendTurn` clears `partial`
-    /// itself, so the state the overlay reaches `.thinking` in is already empty);
+    /// itself, so the state the surface reaches `.thinking` in is already empty);
     /// while the pet is thinking she adds *"and check the runway"*; `onPartial` fires
     /// and — the state being `.thinking` rather than `.speaking` — this is **not**
     /// barge-in, so `partial` and `TurnTranscript` now both hold that sentence; the
@@ -867,7 +867,7 @@ final class SpeechFakesTests: XCTestCase {
     ///
     /// Both in one test on purpose: they are the two things `replyEnded` does besides
     /// leaving `pending` alone, and each of them fails silently — a hang in
-    /// `.thinking` with the mic shut, and a live-looking orb that hears nothing.
+    /// `.thinking` with the mic shut, and a live-looking waveform that hears nothing.
     func testANothingSpeakableReplyStillLandsInListeningWithTheMicAlive() throws {
         let fake = FakeListener()
         var session = VoiceSession()
@@ -884,7 +884,7 @@ final class SpeechFakesTests: XCTestCase {
                                                    pending: "and check the runway",
                                                    listener: fake)
         XCTAssertEqual(session.state, .listening,
-                       "the overlay hung in .thinking with the turn taken and the mic shut")
+                       "the surface hung in .thinking with the turn taken and the mic shut")
         XCTAssertTrue(fake.isRunning, "the header says Listening with the microphone gone")
         XCTAssertEqual(fake.startCount, startsBefore + 1)
         XCTAssertEqual(kept, "and check the runway")
@@ -893,7 +893,7 @@ final class SpeechFakesTests: XCTestCase {
 
     /// A refused restart is thrown, not swallowed — and the machine has already
     /// reached `.listening` by then, so the caller's `.close` is a legal transition
-    /// rather than a no-op that leaves the overlay claiming to listen.
+    /// rather than a no-op that leaves the surface claiming to listen.
     func testAReplyEndWhoseMicRefusesToRestartThrowsFromListening() {
         let fake = FakeListener()
         fake.refuseStart = VoiceAudioError.recognizerUnavailable
@@ -918,14 +918,14 @@ final class SpeechFakesTests: XCTestCase {
     /// reports** — firing `onFinishedAll`, which unconditionally clears the partial,
     /// the timestamp and the level.
     ///
-    /// That is reachable because the overlay can be opened over a typed turn already
-    /// in flight: she taps the waveform, speaks into a `.listening` overlay (so no
+    /// That is reachable because the surface can be opened over a typed turn already
+    /// in flight: she taps the waveform, speaks into a `.listening` surface (so no
     /// barge-in and the latch stays open), `canTakeTurn`'s `isBusy` correctly holds ✓
     /// disabled while that reply streams — and then the TYPED reply finishes and erases
-    /// her question mid-flight, with no message, no orb change and no credit spent.
+    /// her question mid-flight, with no message, no waveform change and no credit spent.
     ///
     /// The first assertion is the guard; the rest is why it must answer that way.
-    func testAStreamEndInListeningIsNotThisOverlaysReply() {
+    func testAStreamEndInListeningIsNotThisSurfacesReply() {
         XCTAssertFalse(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.listening),
                        "a typed reply's stream end was treated as the spoken turn's")
         XCTAssertFalse(VoiceTurnFlow.streamEndBelongsToVoiceTurn(.idle))

@@ -1,13 +1,13 @@
 // codepet/Models/VoiceLevel.swift
 import Foundation
-// NO `import AVFoundation`. The orb's number is arithmetic over samples; pulling a
+// NO `import AVFoundation`. The waveform's number is arithmetic over samples; pulling a
 // buffer apart is the listener's job and one line of it.
 
-/// How loud the founder is, 0…1, for the orb.
+/// How loud the founder is, 0…1, for the waveform.
 ///
 /// **Extracted because the gain was unmeasured and unasserted.** It lived inline in
 /// the audio tap as `min(1, rms * 12)` annotated "empirical", where no test could
-/// see it: the constant could become `120` — pinning the orb at full deflection on
+/// see it: the constant could become `120` — pinning the waveform at full deflection on
 /// room noise — and the suite would stay green.
 ///
 /// **Every member is `nonisolated`, and that is load-bearing.** Under

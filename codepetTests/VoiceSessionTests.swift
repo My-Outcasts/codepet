@@ -8,11 +8,11 @@ import XCTest
 /// is renamed and nothing else about this machine moves: the transition is still
 /// `listening → thinking`, and the refusals below are still the interesting part.
 ///
-/// It is a separate type rather than `@State` in the overlay for one reason: the
+/// It is a separate type rather than `@State` in the surface for one reason: the
 /// illegal transitions are the interesting ones, and a view cannot be asked what
 /// it refuses to do. `apply` returns a Bool so a caller that fires an event at the
 /// wrong moment — a late recognition callback, a synthesiser finishing after the
-/// founder closed the overlay — is a no-op rather than a state corruption.
+/// founder closed the surface — is a no-op rather than a state corruption.
 final class VoiceSessionTests: XCTestCase {
 
     func testStartsIdle() {
@@ -45,7 +45,7 @@ final class VoiceSessionTests: XCTestCase {
     }
 
     /// **The late-callback case, and why `apply` returns Bool.** A recognition or
-    /// synthesis callback can arrive after the founder has closed the overlay. It
+    /// synthesis callback can arrive after the founder has closed the surface. It
     /// must not reopen it.
     func testEventsAfterCloseAreRefused() {
         var s = VoiceSession()

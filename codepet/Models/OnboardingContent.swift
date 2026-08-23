@@ -78,10 +78,16 @@ enum OnboardingContent {
     static let defaultStageIndex = 2
 
     /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.
+    /// Web CSS theme vars mapped 1:1. Three of these used to be re-declared here with
+    /// their own hex literals, duplicating `CodepetTokens` — the comment claimed
+    /// `CodepetTheme` did not expose them, which was not true. A retint of one and not
+    /// the other would have split the palette silently, so they now alias the shared
+    /// tokens. The accent trio below IS still duplicated; it is out of scope for the
+    /// surface retint and left as-is deliberately.
     enum Palette {
-        static let surface2   = Color.dyn("#fcfbf8", "#1b1712")   // --surface-2
-        static let well       = Color.dyn("#f1efe9", "#26211a")   // --well
-        static let faint      = Color.dyn("#a79e92", "#6f685c")   // --t-4
+        static let surface2   = CodepetTokens.surface2
+        static let well       = CodepetTokens.well
+        static let faint      = CodepetTokens.faint
         static let accentDeep = Color.dyn("#5b27b0", "#7c3aed")   // --accent-deep
         static let accentTint = Color.dyn("#eee6fd", "#271f3a")   // --accent-tint
         static let accentLine = Color.dyn("#d9c9f7", "#43356b")   // --accent-line

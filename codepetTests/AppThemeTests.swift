@@ -82,4 +82,42 @@ final class AppThemeTests: XCTestCase {
         XCTAssertGreaterThan(g.blueComponent, g.redComponent,
                              "the dark ground went warm again — blue must lead red")
     }
+
+    /// The onboarding palette must BE the shared tokens, not merely look like them.
+    ///
+    /// These three used to be re-declared in `OnboardingContent.Palette` with hex
+    /// literals byte-identical to `CodepetTokens`', under a comment claiming
+    /// `CodepetTheme` did not expose them. It did. A retint of one and not the other
+    /// would have split the palette with nothing failing to say so.
+    ///
+    /// Renders both sides rather than comparing `Color` values: two `Color`s can compare
+    /// unequal while rendering identically, and bridging a SwiftUI `Color` to `NSColor`
+    /// can resolve eagerly outside an appearance block and return the LIGHT value while
+    /// claiming to test dark. Rendering is the only comparison that reflects what is
+    /// actually drawn.
+    ///
+    /// This catches the alias pointing at the WRONG token — the one failure a compile
+    /// and the existing suites both wave through.
+    @MainActor
+    func testOnboardingPaletteAliasesTheSharedTokens() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let pairs: [(String, Color, Color)] = [
+                ("surface2", OnboardingContent.Palette.surface2, CodepetTokens.surface2),
+                ("well",     OnboardingContent.Palette.well,     CodepetTokens.well),
+                ("faint",    OnboardingContent.Palette.faint,    CodepetTokens.faint),
+            ]
+            for (name, alias, source) in pairs {
+                let a = try rendered(alias, scheme)
+                let s = try rendered(source, scheme)
+                let d = abs(a.redComponent - s.redComponent)
+                    + abs(a.greenComponent - s.greenComponent)
+                    + abs(a.blueComponent - s.blueComponent)
+                XCTAssertLessThan(d, 0.001,
+                                  "OnboardingContent.Palette.\(name) does not render as "
+                                  + "CodepetTokens.\(name) in \(scheme) — distance \(d). "
+                                  + "Either it is still a duplicate literal, or it is "
+                                  + "aliased to the wrong token.")
+            }
+        }
+    }
 }

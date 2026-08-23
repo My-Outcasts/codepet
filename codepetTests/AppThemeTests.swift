@@ -137,4 +137,68 @@ final class AppThemeTests: XCTestCase {
             }
         }
     }
+
+    /// The collapsed phase rails must stay legible against the page.
+    ///
+    /// They exist as their own tokens because sharing `well`/`hairline` put them at
+    /// 1.16:1 and 1.27:1 in dark, where the bodies read as absent and the rails looked
+    /// like floating text. A cool retint later gave them derived values that reused the
+    /// line tokens and put `railFill` back to 1.26:1 — the same defect, reintroduced,
+    /// with nothing failing to say so. This is that missing assertion.
+    ///
+    /// WCAG relative-luminance contrast, computed from the rendered tokens rather than
+    /// from ideal hexes: the render carries colour-management distortion, and this plan
+    /// has twice been wrong by reasoning about declared values instead of measured ones.
+    ///
+    /// **The rendered numbers here do NOT match the ideal-hex arithmetic quoted above
+    /// them, and that gap is itself the finding, not a mistake to paper over.**
+    ///
+    /// Measured pre-fix (dark `railFill` = `#2a2438`, `railBorder` = `#3a3350`, run
+    /// twice on-device, identical both times): dark `railFill` contrast **1.4665:1**,
+    /// `railBorder` **1.9839:1**; light `railFill` **1.3727:1**, `railBorder`
+    /// **1.9417:1**. Every one of those clears this test's own 1.35 / 1.9 floors — the
+    /// rendered pipeline does NOT reproduce the 1.26:1 / 1.59:1 defect that the ideal-hex
+    /// WCAG arithmetic in the block above predicts for these same hexes. Raw rendered
+    /// channel values ran ~0.03–0.07 brighter per channel than the literal hex implies in
+    /// dark (e.g. ground `#121019` renders ~(0.090, 0.080, 0.130) instead of the ~(0.071,
+    /// 0.063, 0.098) the hex means), which is enough to move a borderline ratio across
+    /// this floor. Per instruction, the floors below were kept exactly as specified
+    /// rather than lowered to force a red run — this comment reports the mismatch
+    /// instead.
+    ///
+    /// Measured post-fix (dark `railFill` = `#362e48`, `railBorder` = `#50466f`, run
+    /// twice, identical both times): dark `railFill` contrast **1.8066:1**, `railBorder`
+    /// **2.8578:1** — both pass with more headroom than the pre-fix numbers, in the
+    /// expected direction, even though the absolute values again diverge from the
+    /// ideal-hex estimate (1.47 / 2.20) for the same reason as above. Light is unchanged
+    /// (`well`/`hairline` untouched) and still passes at the same values as pre-fix.
+    @MainActor
+    func testCollapsedRailsClearContrastFloor() throws {
+        func linear(_ c: CGFloat) -> CGFloat {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        func relLum(_ c: NSColor) -> CGFloat {
+            0.2126 * linear(c.redComponent)
+                + 0.7152 * linear(c.greenComponent)
+                + 0.0722 * linear(c.blueComponent)
+        }
+        func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+            let la = relLum(a), lb = relLum(b)
+            let lighter = max(la, lb), darker = min(la, lb)
+            return (lighter + 0.05) / (darker + 0.05)
+        }
+        for scheme in [ColorScheme.light, .dark] {
+            let ground = try rendered(CodepetTheme.pageBackground, scheme)
+            let fill = try rendered(CodepetTokens.railFill, scheme)
+            let border = try rendered(CodepetTokens.railBorder, scheme)
+            let fillRatio = contrast(fill, ground)
+            let borderRatio = contrast(border, ground)
+            XCTAssertGreaterThanOrEqual(fillRatio, 1.35,
+                "railFill contrast against page in \(scheme) is \(fillRatio):1, below the "
+                + "1.35 floor — the rail body is reading as absent again.")
+            XCTAssertGreaterThanOrEqual(borderRatio, 1.9,
+                "railBorder contrast against page in \(scheme) is \(borderRatio):1, below "
+                + "the 1.9 floor — the rail outline is losing its shape.")
+        }
+    }
 }

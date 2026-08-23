@@ -97,4 +97,39 @@ final class RoadmapPaletteTests: XCTestCase {
     func testBoardPaletteIsNotTheDepartmentPalette() {
         XCTAssertNotEqual(RoadmapPalette.tint(for: .done), taskStatusTint(.done))
     }
+
+    /// The board's three surfaces must be COOL in dark mode — blue leading red — not the
+    /// warm brown family Task 5 retinted away from. Luminance (`testTheBoardCardIsLighterThanTheAppSurfaces`)
+    /// cannot see this: the old warm card was already lighter than the new cool app
+    /// surface, so that ladder held before and after this retint. Only a hue comparison
+    /// catches a regression back to brown. Modelled on
+    /// `AppThemeTests.testTheDarkGroundIsCoolNotWarm`.
+    ///
+    /// Reads `RoadmapTokens.cardBG` / `.chipBG` / `.chipBorder` (the `Color.dyn` values)
+    /// through the same `rendered(_:_:)` pipeline used above, not the raw hex — the render
+    /// carries colour-management distortion the declared hex does not, so only rendered
+    /// channels are comparable.
+    ///
+    /// Measured (current, cool tokens — PASSES, run twice, identical both times):
+    /// - card:     r=0.19378742575645447  b=0.27457794547080994  (blue leads red)
+    /// - chip:     r=0.2427642047405243   b=0.34540417790412903  (blue leads red)
+    /// - chipEdge: r=0.32013463973999023  b=0.4203273355960846   (blue leads red)
+    ///
+    /// Measured (dark hex reverted to the old warm values `#2a241c` / `#342d23` /
+    /// `#473e31` — FAILS, run twice, identical both times):
+    /// - card:     r=0.21841543912887573  b=0.14601293206214905  (red leads blue)
+    /// - chip:     r=0.2658689320087433   b=0.18263909220695496  (red leads blue)
+    /// - chipEdge: r=0.35024142265319824  b=0.25088223814964294  (red leads blue)
+    @MainActor
+    func testTheBoardSurfacesAreCoolNotWarm() throws {
+        let card     = try rendered(RoadmapTokens.cardBG, .dark)
+        let chip     = try rendered(RoadmapTokens.chipBG, .dark)
+        let chipEdge = try rendered(RoadmapTokens.chipBorder, .dark)
+        XCTAssertGreaterThan(card.blueComponent, card.redComponent,
+                             "the board card went warm again — blue must lead red")
+        XCTAssertGreaterThan(chip.blueComponent, chip.redComponent,
+                             "the status chip went warm again — blue must lead red")
+        XCTAssertGreaterThan(chipEdge.blueComponent, chipEdge.redComponent,
+                             "the chip edge went warm again — blue must lead red")
+    }
 }

@@ -69,7 +69,7 @@ enum CodepetTokens {
     // MARK: Neutrals
 
     static let well      = Color.dyn("#efecf7", "#121019")   // --app-ground: the TRACK
-    static let surface2  = Color.dyn("#faf9fd", "#171420")   // --app-rail
+    static let surface2  = Color.dyn("#faf9fd", "#171420")   // dark: --app-rail (verbatim); light: derived: interpolated between --ground/--panel
     static let faint     = Color.dyn("#9a93ab", "#6b6480")   // --app-faint
     static let page      = Color.dyn("#f5f3fa", "#121019")   // --app-ground
 
@@ -90,16 +90,25 @@ enum CodepetTokens {
     // rails looked like floating text. Their own tokens rather than a change to
     // `well`, which three other surfaces share.
     //
-    // Measured against `page` — dark `#16130f`, light `#f8f7f3`:
-    //   railFill    light 1.29:1  dark 1.47:1   (was 1.07 / 1.16)
-    //   railBorder  light 1.90:1  dark 2.21:1   (was ~1.05 / 1.27)
+    // Measured against `page` — dark #121019, light #f5f3fa:
+    //   railFill        light 1.49:1  dark 1.47:1
+    //   railBorder      light 2.29:1  dark 2.20:1
+    //   railFillHover   light 1.81:1  dark 1.79:1
+    //   railBorderHover light 3.00:1  dark 3.08:1
     // The border does the real work of drawing the shape; the fill stays quiet
     // because a collapsed phase is meant to be de-emphasised, not loud.
-    static let railFill   = Color.dyn("#cdc6e2", "#2a2438")
-    static let railBorder = Color.dyn("#a79ec4", "#3a3350")
+    //
+    // The dark values below were RE-DERIVED after a cool retint gave the rails
+    // derived values that reused the line tokens (`railFill` = `--app-line`'s value,
+    // `railBorder` = `--app-line-2`'s) — the exact sharing this block exists to avoid
+    // — which put them back to 1.26:1 / 1.59:1 against the new `#121019` ground. All
+    // four are now derived: contrast-derived, not palette-derived — no `--app-*`
+    // reference level exists for them.
+    static let railFill   = Color.dyn("#cdc6e2", "#362e48")   // derived: contrast-derived, no --app-* reference level
+    static let railBorder = Color.dyn("#a79ec4", "#50466f")   // derived: contrast-derived, no --app-* reference level
     /// Hover lift for an EXPANDABLE rail — the affordance the rails never had.
-    static let railFillHover   = Color.dyn("#bcb3d6", "#332c4a")
-    static let railBorderHover = Color.dyn("#9188b0", "#4a4268")
+    static let railFillHover   = Color.dyn("#bcb3d6", "#413a5f")   // derived: contrast-derived, no --app-* reference level
+    static let railBorderHover = Color.dyn("#9188b0", "#665a90")   // derived: contrast-derived, no --app-* reference level
 
     // MARK: Accent (violet brand)
 
@@ -319,9 +328,9 @@ struct HoverAffordance<S: InsettableShape>: ViewModifier {
 enum RoadmapTokens {
     typealias HexPair = (light: String, dark: String)
 
-    static let cardBGHex: HexPair      = ("#ffffff", "#252036")   // --rm-card-bg
-    static let chipBGHex: HexPair      = ("#efecf7", "#2f2846")   // --rm-chip-bg
-    static let chipBorderHex: HexPair  = ("#e0dced", "#403858")   // --rm-chip-border
+    static let cardBGHex: HexPair      = ("#ffffff", "#252036")   // --rm-card-bg (light verbatim; dark derived: no board-card level in reference)
+    static let chipBGHex: HexPair      = ("#efecf7", "#2f2846")   // --rm-chip-bg (light verbatim; dark derived: no board-card level in reference)
+    static let chipBorderHex: HexPair  = ("#e0dced", "#403858")   // --rm-chip-border (light verbatim; dark derived: no board-card level in reference)
 
     /// Board card fill. In dark this is LIGHTER than both `CodepetTheme.surface` and
     /// `CodepetTokens.cardRaised` (both `#1d1928`) — the board gets its own slightly-raised

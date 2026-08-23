@@ -98,6 +98,23 @@ final class AppThemeTests: XCTestCase {
     ///
     /// This catches the alias pointing at the WRONG token — the one failure a compile
     /// and the existing suites both wave through.
+    ///
+    /// Measured (correctly-aliased case): with the real aliases in place, distance is
+    /// exactly `0.0` for all three tokens in both schemes — same underlying `Color.dyn`
+    /// value through the same render pipeline.
+    ///
+    /// Measured (wrong-token probes, each run twice for reproducibility):
+    /// - `well` pointed at `CodepetTokens.surface2` (a FAR pair) — light `0.09293878…`,
+    ///   dark `0.09171904…` (not `0.917` — that's a 10x transcription error in the
+    ///   `025a090` commit message, uncorrected there since amending a shared,
+    ///   possibly-already-pushed commit is not worth the force-push).
+    /// - `well` pointed at `CodepetTokens.page` (the closest real mistake: `well` and
+    ///   `page` are `Color.dyn("#efecf7", "#121019")` vs `Color.dyn("#f5f3fa",
+    ///   "#121019")` — byte-identical in dark) — light `0.04967308044433594`, dark
+    ///   `0.0`. The DARK leg cannot distinguish `well` from `page` at all: a `well →
+    ///   page` mis-alias renders identically in dark and is invisible to that half of
+    ///   this loop. It is the LIGHT leg alone that catches it, at ~50x the `0.001`
+    ///   bound — still comfortably real, just carried by one scheme instead of two.
     @MainActor
     func testOnboardingPaletteAliasesTheSharedTokens() throws {
         for scheme in [ColorScheme.light, .dark] {

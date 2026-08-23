@@ -77,13 +77,14 @@ enum OnboardingContent {
     static let total = 8
     static let defaultStageIndex = 2
 
-    /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.
-    /// Web CSS theme vars mapped 1:1. Three of these used to be re-declared here with
-    /// their own hex literals, duplicating `CodepetTokens` — the comment claimed
-    /// `CodepetTheme` did not expose them, which was not true. A retint of one and not
-    /// the other would have split the palette silently, so they now alias the shared
-    /// tokens. The accent trio below IS still duplicated; it is out of scope for the
-    /// surface retint and left as-is deliberately.
+    /// Web CSS theme vars, mapped 1:1. `surface2`/`well`/`faint` alias the shared
+    /// `CodepetTokens` values directly — they used to be re-declared here with their
+    /// own hex literals under a comment claiming `CodepetTheme` didn't already expose
+    /// them, which was false: it did, and the duplication meant a retint of one and not
+    /// the other would have split the palette silently. The accent trio below IS still
+    /// duplicated; it is out of scope for the surface retint and left as-is
+    /// deliberately. `coldBg` is a genuine one-off (cold-open / splash, stays dark) and
+    /// is correct as-is.
     enum Palette {
         static let surface2   = CodepetTokens.surface2
         static let well       = CodepetTokens.well

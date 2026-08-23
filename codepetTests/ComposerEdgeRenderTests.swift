@@ -329,9 +329,17 @@ final class ComposerEdgeRenderTests: XCTestCase {
     /// which this task's one-line edit does not affect, so it passed identically before
     /// and after and tested nothing about this change.
     ///
-    /// The sample is the MODAL colour of the right-hand strip, which is sidebar padding:
-    /// no text, no card, no mode switch. Taking the most common value by area rather
-    /// than a single pixel keeps it robust against sub-pixel antialiasing.
+    /// The sample is the MODAL colour of a right-hand strip chosen to sit entirely
+    /// OUTSIDE the content column's own inset, so no badge or selection fill drawn
+    /// inside that inset can ever reach it — not merely "nothing rendered there in
+    /// this fixture."
+    ///
+    /// This is coupled to `TwoModeSidebar.swift`'s `.padding(.horizontal, 11)`
+    /// (`TwoModeSidebar.swift:75`): on this 240pt-wide render the content column's
+    /// right edge sits at `240 - 11 = 229`, i.e. 95.4% of the width. The strip below
+    /// starts at 96%, clearing that edge with ~1pt margin, and ends at 99%, staying
+    /// inside the frame. If that padding value ever changes, this bound needs
+    /// re-deriving from the new value — it is not an independent magic number.
     @MainActor
     func testTheSidebarIsDrawnAtTheRailLevel() throws {
         let host = TwoModeSidebar(mode: .constant(.ask))
@@ -347,9 +355,11 @@ final class ComposerEdgeRenderTests: XCTestCase {
             throw RenderFailure.producedNothing
         }
 
-        // Right-hand strip: x from 92% to 98% of the width, full height.
+        // Right-hand strip: x from 96% to 99% of the width, full height. See the
+        // doc comment above for why 96% (not the old 92%) and its coupling to
+        // TwoModeSidebar's horizontal padding.
         var counts: [Int: Int] = [:]
-        let x0 = Int(Double(rep.pixelsWide) * 0.92), x1 = Int(Double(rep.pixelsWide) * 0.98)
+        let x0 = Int(Double(rep.pixelsWide) * 0.96), x1 = Int(Double(rep.pixelsWide) * 0.99)
         for y in 0..<rep.pixelsHigh {
             for x in x0..<x1 {
                 guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
@@ -373,6 +383,26 @@ final class ComposerEdgeRenderTests: XCTestCase {
                           "the sidebar rendered closer to `surface` (\(toCard)) than to "
                           + "`surface2` (\(toRail)) — it is still drawn at the card level, "
                           + "so the mode switch has no visible lifted card")
+
+        // Absolute ceiling, on top of the relative check above. `toRail < toCard`
+        // alone only proves "closer to the rail than to the card" — a third colour
+        // that happened to sit nearer the rail would satisfy that without actually
+        // BEING the rail. This proves the stronger claim: the sampled strip is
+        // close to `surface2` in absolute terms, not merely closer to it than to
+        // `surface`.
+        //
+        // Measured on this strip (96%-99% of width, post Finding-1 fix), two runs
+        // required identical before trusting either (no concurrent `xcodebuild`
+        // either time — `pgrep -fl xcodebuild` empty):
+        //   GREEN (surface2 background, prod today)      toRail = 0.006913624148742831
+        //   RED   (surface background, pre-fix, from the
+        //          original task-3 report)                toRail = 0.09896872879243365
+        // 0.03 sits with real headroom on both sides: ~4.3x above the measured
+        // GREEN, and RED is ~3.3x above it — neither number is close to the line.
+        XCTAssertLessThan(toRail, 0.03,
+                          "the sidebar strip measured \(toRail) from `surface2` — too far to "
+                          + "call this the rail even though it is closer to the rail than to "
+                          + "the card")
     }
 
     // MARK: - Focused state: unverified offscreen

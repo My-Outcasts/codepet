@@ -90,25 +90,33 @@ enum CodepetTokens {
     // rails looked like floating text. Their own tokens rather than a change to
     // `well`, which three other surfaces share.
     //
-    // Measured against `page` — dark #121019, light #f5f3fa:
-    //   railFill        light 1.49:1  dark 1.47:1
-    //   railBorder      light 2.29:1  dark 2.20:1
-    //   railFillHover   light 1.81:1  dark 1.79:1
-    //   railBorderHover light 3.00:1  dark 3.08:1
+    // RENDERED against `page` — dark #121019, light #f5f3fa — through the same
+    // ImageRenderer pipeline AppThemeTests.rendered(_:_:) uses, run twice, byte-identical
+    // both times. These are NOT ideal-hex arithmetic:
+    //   railFill        light 1.3727:1  dark 1.4665:1
+    //   railBorder      light 1.9417:1  dark 1.9839:1
+    //   railFillHover   light 1.5992:1  dark 1.7505:1
+    //   railBorderHover light 2.4368:1  dark 2.6383:1
     // The border does the real work of drawing the shape; the fill stays quiet
     // because a collapsed phase is meant to be de-emphasised, not loud.
     //
-    // The dark values below were RE-DERIVED after a cool retint gave the rails
-    // derived values that reused the line tokens (`railFill` = `--app-line`'s value,
-    // `railBorder` = `--app-line-2`'s) — the exact sharing this block exists to avoid
-    // — which put them back to 1.26:1 / 1.59:1 against the new `#121019` ground. All
-    // four are now derived: contrast-derived, not palette-derived — no `--app-*`
-    // reference level exists for them.
-    static let railFill   = Color.dyn("#cdc6e2", "#362e48")   // derived: contrast-derived, no --app-* reference level
-    static let railBorder = Color.dyn("#a79ec4", "#50466f")   // derived: contrast-derived, no --app-* reference level
+    // Ideal-hex WCAG arithmetic on these same hexes reads ~0.2-0.3 LOWER than the
+    // rendered numbers above — e.g. railFill/railBorder compute to ~1.26:1 / 1.59:1 by
+    // hand but render at 1.4665:1 / 1.9839:1 in dark. The rendered pipeline measures
+    // near-black channels ~0.03–0.07 brighter per channel than their hex implies, and
+    // that gap is large enough to make a perfectly healthy value look like a regression
+    // on paper. A cool retint's ideal-hex arithmetic was once misread this way as a
+    // 1.26:1/1.59:1 regression and "fixed" by louder dark values — the values were
+    // already on target on screen, and the louder fix overshot the design intent stated
+    // above (it made `railFill` ~23% louder than "quiet"). That fix was reverted; the
+    // lesson is procedural: RE-DERIVE these by measuring through `rendered(_:_:)`, never
+    // by computing from the hex literals. All four are derived: contrast-derived, not
+    // palette-derived — no `--app-*` reference level exists for them.
+    static let railFill   = Color.dyn("#cdc6e2", "#2a2438")   // derived: contrast-derived, no --app-* reference level
+    static let railBorder = Color.dyn("#a79ec4", "#3a3350")   // derived: contrast-derived, no --app-* reference level
     /// Hover lift for an EXPANDABLE rail — the affordance the rails never had.
-    static let railFillHover   = Color.dyn("#bcb3d6", "#413a5f")   // derived: contrast-derived, no --app-* reference level
-    static let railBorderHover = Color.dyn("#9188b0", "#665a90")   // derived: contrast-derived, no --app-* reference level
+    static let railFillHover   = Color.dyn("#bcb3d6", "#332c4a")   // derived: contrast-derived, no --app-* reference level
+    static let railBorderHover = Color.dyn("#9188b0", "#4a4268")   // derived: contrast-derived, no --app-* reference level
 
     // MARK: Accent (violet brand)
 

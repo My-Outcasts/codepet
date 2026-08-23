@@ -319,13 +319,13 @@ struct HoverAffordance<S: InsettableShape>: ViewModifier {
 enum RoadmapTokens {
     typealias HexPair = (light: String, dark: String)
 
-    static let cardBGHex: HexPair      = ("#ffffff", "#2a241c")   // --rm-card-bg
-    static let chipBGHex: HexPair      = ("#f1efe9", "#342d23")   // --rm-chip-bg
-    static let chipBorderHex: HexPair  = ("#ece9e2", "#473e31")   // --rm-chip-border
+    static let cardBGHex: HexPair      = ("#ffffff", "#252036")   // --rm-card-bg
+    static let chipBGHex: HexPair      = ("#efecf7", "#2f2846")   // --rm-chip-bg
+    static let chipBorderHex: HexPair  = ("#e0dced", "#403858")   // --rm-chip-border
 
-    /// Board card fill. In dark this is LIGHTER than both `--surface` (#221d17) and the list
-    /// cards' `cardRaised` (#26201a) — web gives the board its own slightly-raised surface so
-    /// cards keep a visible edge on the near-black page.
+    /// Board card fill. In dark this is LIGHTER than both `CodepetTheme.surface` and
+    /// `CodepetTokens.cardRaised` (both `#1d1928`) — the board gets its own slightly-raised
+    /// surface so cards keep a visible edge on the near-black page.
     static let cardBG = Color.dyn(cardBGHex.light, cardBGHex.dark)
     /// The status-icon box inside a card.
     static let chipBG = Color.dyn(chipBGHex.light, chipBGHex.dark)

@@ -3,7 +3,7 @@ import Foundation
 
 /// What kind of thing is being reported. Deliberately a small, closed vocabulary:
 /// an admin reading `companies/*/diagnostics` sorts by this before anything else.
-enum DiagnosticKind: String, Equatable, CaseIterable {
+nonisolated enum DiagnosticKind: String, Equatable, CaseIterable {
     /// A failure the app caught and recovered from. The founder may or may not have
     /// seen it; either way the app kept running.
     case handledError
@@ -24,7 +24,7 @@ enum DiagnosticKind: String, Equatable, CaseIterable {
 /// The call site a diagnostic came from. A closed enum rather than `#function`, because
 /// `#function` would let a refactor silently rename a series that someone is watching,
 /// and because a free-form string is a place for a path or a prompt to leak in.
-enum DiagnosticSite: String, Equatable, CaseIterable {
+nonisolated enum DiagnosticSite: String, Equatable, CaseIterable {
     case narrativeEnrich = "NarrativeEnricher.recordFailure"
     case chatThreadLoad = "SessionChatStore.loadFromDisk"
     case chatTurn = "CompanyStore.sendMessage"
@@ -37,7 +37,7 @@ enum DiagnosticSite: String, Equatable, CaseIterable {
 /// `DecodingError.dataCorrupted`'s `debugDescription` quotes the offending bytes, and
 /// `URLError.userInfo` carries `NSURLErrorFailingURLStringErrorKey`, i.e. a URL with
 /// whatever query string was on it. Both are content.
-struct DiagnosticErrorShape: Equatable {
+nonisolated struct DiagnosticErrorShape: Equatable {
     /// A type name, and for the error types we own, the case: `"URLError"`,
     /// `"DecodingError.dataCorrupted"`, `"CompanyChatStreamError.http"`.
     let type: String
@@ -100,7 +100,7 @@ struct DiagnosticErrorShape: Equatable {
 
 /// One thing worth telling us about, as pure data. Built at the call site, turned into
 /// a Firestore document by `payload(...)`, written by `DiagnosticsReporter`.
-struct DiagnosticEvent: Equatable {
+nonisolated struct DiagnosticEvent: Equatable {
     let kind: DiagnosticKind
     let site: DiagnosticSite
     let shape: DiagnosticErrorShape
@@ -176,7 +176,7 @@ struct DiagnosticEvent: Equatable {
 /// is an absolute path under the founder's home directory, and any `String(describing:)`
 /// of an error that touched a file carries one. Rather than trusting every call site to
 /// remember, every string in a diagnostics payload goes through here.
-enum DiagnosticRedaction {
+nonisolated enum DiagnosticRedaction {
     static let redacted = "<redacted>"
     static let maxLength = 120
 

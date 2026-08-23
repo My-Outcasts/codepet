@@ -35,6 +35,12 @@ enum DiagnosticsBootstrap {
         // — `FontRegistrar`, `FirebaseApp.configure()` — is invisible to this scheme,
         // and that is a real gap, not a rounding error.
         let outcome = tracker.claimLaunch(launchId: reporter.currentLaunchId)
+        // Logged BEFORE the Firestore report and independently of it. Unclean-exit
+        // detection is purely local, so this line survives a down network, a signed-out
+        // founder and a rejected write — it is the only part of this feature that cannot
+        // be defeated by the destination being wrong, and therefore the way to verify
+        // crash detection without a round trip.
+        DiagnosticsLog.note(DiagnosticsLog.lifecycle, DiagnosticsLog.previousSession(outcome))
         report(outcome, to: reporter)
 
         // `willTerminateNotification` is the graceful path: ⌘Q, the Quit menu item, and
@@ -125,6 +131,13 @@ enum DiagnosticsBootstrap {
         let nonce = UUID().uuidString
         DiagnosticsReporter.shared.record(
             kind: .selfTest, site: .sessionLifecycle, context: ["nonce": nonce])
+        // `Logger` first, `print` second. The `print` costs nothing and is convenient
+        // when the app happens to be attached to a debugger, but it is NOT the record —
+        // a GUI app's stdout is discarded by `open` and comes back as a 0-byte file
+        // under a redirect, so the `Logger` line is the only thing a human can read
+        // after the fact.
+        DiagnosticsLog.note(DiagnosticsLog.selfTest,
+                            "self-test wrote nonce=\(nonce); reading back in 3s")
         print("[Diagnostics] self-test wrote nonce=\(nonce); reading back in 3s…")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -133,20 +146,26 @@ enum DiagnosticsBootstrap {
                 .collection(FirestoreDiagnosticsSink.collection)
                 .whereField("ctx_nonce", isEqualTo: nonce)
                 .getDocuments { snapshot, error in
+                    let message: String
+                    let failed: Bool
                     if let error {
-                        print("[Diagnostics] SELF-TEST FAIL — read back errored: \(error)")
+                        message = DiagnosticsLog.selfTestFailedOnRead(error)
+                        failed = true
                     } else if (snapshot?.documents.count ?? 0) >= 1 {
-                        print("""
-                            [Diagnostics] SELF-TEST PASS — the write landed and was read \
-                            back at companies/\(uid)/diagnostics
-                            """)
+                        message = DiagnosticsLog.selfTestPassed(uid: uid)
+                        failed = false
                     } else {
-                        print("""
-                            [Diagnostics] SELF-TEST FAIL — no document with nonce=\(nonce). \
-                            The write was rejected (check firestore.rules for the \
-                            companies/{uid}/{sub} write allow) or has not replicated.
-                            """)
+                        message = DiagnosticsLog.selfTestFailedNoDocument(nonce: nonce)
+                        failed = true
                     }
+                    // A FAIL goes out at error level so it is greppable as a failure;
+                    // both levels are visible to `log show` with no extra flags.
+                    if failed {
+                        DiagnosticsLog.failure(DiagnosticsLog.selfTest, message)
+                    } else {
+                        DiagnosticsLog.note(DiagnosticsLog.selfTest, message)
+                    }
+                    print("[Diagnostics] \(message)")
                 }
         }
     }

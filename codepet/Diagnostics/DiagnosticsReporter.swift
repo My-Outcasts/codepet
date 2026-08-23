@@ -2,7 +2,7 @@
 import Foundation
 
 /// Where a diagnostic goes. One method, and its return value is the whole contract.
-protocol DiagnosticsSink: AnyObject {
+nonisolated protocol DiagnosticsSink: AnyObject {
     /// Returns false when the destination is not reachable YET — no `FirebaseApp`, or
     /// nobody signed in. False is not an error; the reporter buffers and retries on the
     /// next `flush()`. A sink that returns true has taken responsibility for delivery.
@@ -31,7 +31,7 @@ protocol DiagnosticsSink: AnyObject {
 /// unclean exit, and a chat-thread file that failed to load — both happen before anyone
 /// is signed in, which is before there is a Firestore path to write to. Dropping them
 /// would mean the system reports nothing about exactly the failures it was built for.
-final class DiagnosticsReporter {
+nonisolated final class DiagnosticsReporter {
     static let shared = DiagnosticsReporter()
 
     /// Ceiling on buffered events. Reached only when nobody ever signs in, in which
@@ -42,6 +42,9 @@ final class DiagnosticsReporter {
     private var budget = DiagnosticsBudget()
     private var buffer: [[String: Any]] = []
     private var installedSink: DiagnosticsSink?
+    /// Guards the buffer-overflow log line to one per launch. Read and written only
+    /// under `lock`, from `appendToBufferLocked`.
+    private var didLogBufferFull = false
 
     private let launchId: String
     private let appVersion: String
@@ -133,6 +136,10 @@ final class DiagnosticsReporter {
         for payload in queued where !sink.send(payload) {
             stillWaiting.append(payload)
         }
+        DiagnosticsLog.note(DiagnosticsLog.reporter, """
+            flush: \(queued.count - stillWaiting.count) of \(queued.count) handed to the \
+            sink, \(stillWaiting.count) still waiting
+            """)
         guard !stillWaiting.isEmpty else { return }
         lock.lock()
         // Put the unsent ones BACK IN FRONT of anything recorded while we were sending,
@@ -145,7 +152,30 @@ final class DiagnosticsReporter {
     }
 
     private func appendToBufferLocked(_ payload: [String: Any]) {
-        guard buffer.count < Self.maxBuffered else { return }
+        guard buffer.count < Self.maxBuffered else {
+            // A real, silent loss until this line existed: the cap is reached only when
+            // nobody ever signs in, which is also when there is no destination to notice
+            // the gap. The unified log is the only place it can be recorded, for the same
+            // reason as a rejected write.
+            //
+            // ONCE per launch, not once per dropped event. The first version logged
+            // every drop, and reading the actual `log show` output showed what that
+            // means: one test produced twenty identical error lines, and a real session
+            // that overflowed would bury every other diagnostics line under hundreds of
+            // copies of the same sentence. The overflow is one fact, so it gets one line
+            // — and the line says the rest will be silent, because a reader counting
+            // lines to estimate the loss would otherwise be counting wrong.
+            if !didLogBufferFull {
+                didLogBufferFull = true
+                DiagnosticsLog.failure(DiagnosticsLog.reporter, """
+                    buffer full at \(Self.maxBuffered) — DROPPING this and every later \
+                    event until someone signs in; first dropped was \
+                    \(payload["kind"] as? String ?? "unknown")/\
+                    \(payload["site"] as? String ?? "unknown"). Further drops are silent.
+                    """)
+            }
+            return
+        }
         buffer.append(payload)
     }
 }

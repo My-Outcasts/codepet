@@ -10,7 +10,7 @@ import Darwin
 /// `applicationWillTerminate`" is worse than no report — it converts an unknown into a
 /// wrong number that someone will act on. So the cause is always recorded alongside the
 /// fact, and only `.uncaughtException` is a crash we can prove.
-enum UncleanCause: String, Equatable, CaseIterable {
+nonisolated enum UncleanCause: String, Equatable, CaseIterable {
     /// `NSSetUncaughtExceptionHandler` fired and got its record written before the
     /// process died. This IS a crash, and we know its exception name.
     case uncaughtException
@@ -35,7 +35,7 @@ enum UncleanCause: String, Equatable, CaseIterable {
 }
 
 /// The record one launch leaves behind, so the NEXT launch can say what happened.
-struct SessionRecord: Codable, Equatable {
+nonisolated struct SessionRecord: Codable, Equatable {
     var launchId: String
     var pid: Int32
     /// `kern.boottime` in seconds. Distinguishes a reboot from a process death.
@@ -59,7 +59,7 @@ struct SessionRecord: Codable, Equatable {
     var endedCleanly: Bool?
 }
 
-enum PreviousSessionOutcome: Equatable {
+nonisolated enum PreviousSessionOutcome: Equatable {
     /// No record at all — a first launch, or a fresh container.
     case firstLaunch
     /// The last session reached `willTerminate` and cleared its flag.
@@ -76,7 +76,7 @@ enum PreviousSessionOutcome: Equatable {
 /// exception handler on an arbitrary thread, and a `@MainActor ObservableObject`
 /// deallocating takes the XCTest host down on Xcode 26.2. `VirtualCompanyClient`
 /// documents the same reasoning.
-final class SessionLifecycleTracker {
+nonisolated final class SessionLifecycleTracker {
     static let defaultsKey = "cp_diag_session_v1"
 
     /// Installed by `DiagnosticsBootstrap`. A static, because the uncaught-exception

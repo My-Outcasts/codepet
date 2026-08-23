@@ -20,7 +20,7 @@ import Foundation
 /// flush) has to answer "what about the events still in the buffer when the app dies",
 /// and the answer is always "they are gone" — which is the worst possible property for
 /// a system whose job is reporting deaths.
-struct DiagnosticsBudget: Equatable {
+nonisolated struct DiagnosticsBudget: Equatable {
     /// The occurrence numbers that get written. After the last one, every
     /// `repeatInterval`-th occurrence.
     static let ladder = [1, 2, 5, 10, 25, 50, 100]

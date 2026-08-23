@@ -14,7 +14,7 @@ import Foundation
 /// every transient network blip in a beta. The turn that matters is the one that ends
 /// with "I cannot reach your departments right now", because that is a founder typing a
 /// question and getting nothing.
-enum ChatTurnDiagnostic {
+nonisolated enum ChatTurnDiagnostic {
     /// `streamError` is what the SSE stream threw, if it threw. `fallbackReplyWasNil`
     /// is true when the non-streaming retry also came back with nothing.
     static func event(streamError: Error?, fallbackReplyWasNil: Bool) -> DiagnosticEvent? {

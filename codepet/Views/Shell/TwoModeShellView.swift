@@ -3,8 +3,11 @@ import SwiftUI
 
 /// The two-mode shell: a rail, a conversation, and (later) an inspector.
 ///
-/// Replaces `AppShellView` only when launched with `-CODEPET_TWO_MODE YES`, so
-/// `main` keeps shipping the web-parity shell while this is built.
+/// **Replaces `AppShellView` by default since 23 Aug.** It was opt-in via
+/// `-CODEPET_TWO_MODE YES` while being built, which meant that for two days the
+/// shell, the composer controls, voice mode, record and the attachment wiring were
+/// all unreachable without launch arguments. `-CODEPET_LEGACY_SHELL YES` returns to
+/// the web-parity shell without a rebuild.
 ///
 /// **Adapted, not ported.** The prototype is dark and hand-drawn; this uses
 /// `CodepetTheme` so it follows the app's light/dark tokens, and it COMPOSES

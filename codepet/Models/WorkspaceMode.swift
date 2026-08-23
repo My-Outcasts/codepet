@@ -99,14 +99,29 @@ enum WorkspaceMode: String, CaseIterable, Identifiable {
 
 /// Whether the two-mode shell replaces `AppShellView`.
 ///
-/// Off by default, so `main` keeps shipping the web-parity shell while this is
-/// built. Launch with `-CODEPET_TWO_MODE YES`.
+/// **ON by default since 23 Aug.** It was opt-in via `-CODEPET_TWO_MODE YES` while
+/// it was being built, which meant that for two days everything shipped — the shell,
+/// the composer controls, voice mode, record, the attachment wiring — was
+/// unreachable without launch arguments. Beta runs 22–28 Aug; a feature nobody can
+/// open is not in the beta.
+///
+/// **The old shell is kept, not deleted, and reachable without a rebuild.**
+/// `-CODEPET_LEGACY_SHELL YES` returns to `AppShellView`. Flipping the default for
+/// every existing founder five days before launch is worth doing; doing it with no
+/// way back is not — if the two-mode shell turns out to be wrong on someone's
+/// machine, the answer should be one launch argument, not a new build.
 ///
 /// GOTCHA (measured Aug 13): `defaults write app.murror.codepet …` does NOT reach
 /// a sandboxed build — a stale container eats the write and `defaults read` still
-/// reports success. Pass the flag as a launch ARGUMENT:
-/// `open -n <app> --args -CODEPET_TWO_MODE YES`.
+/// reports success. Pass either flag as a launch ARGUMENT:
+/// `open -n <app> --args -CODEPET_LEGACY_SHELL YES`.
 enum TwoModeShell {
+    /// Kept so the historical opt-in argument is still recognised and so anything
+    /// that referenced it keeps compiling. It no longer gates anything.
     static let flagKey = "CODEPET_TWO_MODE"
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: flagKey) }
+
+    /// The escape hatch back to the web-parity shell.
+    static let legacyFlagKey = "CODEPET_LEGACY_SHELL"
+
+    static var enabled: Bool { !UserDefaults.standard.bool(forKey: legacyFlagKey) }
 }

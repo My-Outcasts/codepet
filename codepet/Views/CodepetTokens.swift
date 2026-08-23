@@ -69,7 +69,7 @@ enum CodepetTokens {
     // MARK: Neutrals
 
     static let well      = Color.dyn("#efecf7", "#121019")   // --app-ground: the TRACK
-    static let surface2  = Color.dyn("#faf9fd", "#171420")   // --app-rail
+    static let surface2  = Color.dyn("#faf9fd", "#171420")   // dark: --app-rail (verbatim); light: derived: interpolated between --ground/--panel
     static let faint     = Color.dyn("#9a93ab", "#6b6480")   // --app-faint
     static let page      = Color.dyn("#f5f3fa", "#121019")   // --app-ground
 
@@ -90,16 +90,33 @@ enum CodepetTokens {
     // rails looked like floating text. Their own tokens rather than a change to
     // `well`, which three other surfaces share.
     //
-    // Measured against `page` — dark `#16130f`, light `#f8f7f3`:
-    //   railFill    light 1.29:1  dark 1.47:1   (was 1.07 / 1.16)
-    //   railBorder  light 1.90:1  dark 2.21:1   (was ~1.05 / 1.27)
+    // RENDERED against `page` — dark #121019, light #f5f3fa — through the same
+    // ImageRenderer pipeline AppThemeTests.rendered(_:_:) uses, run twice, byte-identical
+    // both times. These are NOT ideal-hex arithmetic:
+    //   railFill        light 1.3727:1  dark 1.4665:1
+    //   railBorder      light 1.9417:1  dark 1.9839:1
+    //   railFillHover   light 1.5992:1  dark 1.7505:1
+    //   railBorderHover light 2.4368:1  dark 2.6383:1
     // The border does the real work of drawing the shape; the fill stays quiet
     // because a collapsed phase is meant to be de-emphasised, not loud.
-    static let railFill   = Color.dyn("#cdc6e2", "#2a2438")
-    static let railBorder = Color.dyn("#a79ec4", "#3a3350")
+    //
+    // Ideal-hex WCAG arithmetic on these same hexes reads ~0.2-0.3 LOWER than the
+    // rendered numbers above — e.g. railFill/railBorder compute to ~1.26:1 / 1.59:1 by
+    // hand but render at 1.4665:1 / 1.9839:1 in dark. The rendered pipeline measures
+    // near-black channels ~0.03–0.07 brighter per channel than their hex implies, and
+    // that gap is large enough to make a perfectly healthy value look like a regression
+    // on paper. A cool retint's ideal-hex arithmetic was once misread this way as a
+    // 1.26:1/1.59:1 regression and "fixed" by louder dark values — the values were
+    // already on target on screen, and the louder fix overshot the design intent stated
+    // above (it made `railFill` ~23% louder than "quiet"). That fix was reverted; the
+    // lesson is procedural: RE-DERIVE these by measuring through `rendered(_:_:)`, never
+    // by computing from the hex literals. All four are derived: contrast-derived, not
+    // palette-derived — no `--app-*` reference level exists for them.
+    static let railFill   = Color.dyn("#cdc6e2", "#2a2438")   // derived: contrast-derived, no --app-* reference level
+    static let railBorder = Color.dyn("#a79ec4", "#3a3350")   // derived: contrast-derived, no --app-* reference level
     /// Hover lift for an EXPANDABLE rail — the affordance the rails never had.
-    static let railFillHover   = Color.dyn("#bcb3d6", "#332c4a")
-    static let railBorderHover = Color.dyn("#9188b0", "#4a4268")
+    static let railFillHover   = Color.dyn("#bcb3d6", "#332c4a")   // derived: contrast-derived, no --app-* reference level
+    static let railBorderHover = Color.dyn("#9188b0", "#4a4268")   // derived: contrast-derived, no --app-* reference level
 
     // MARK: Accent (violet brand)
 
@@ -319,9 +336,9 @@ struct HoverAffordance<S: InsettableShape>: ViewModifier {
 enum RoadmapTokens {
     typealias HexPair = (light: String, dark: String)
 
-    static let cardBGHex: HexPair      = ("#ffffff", "#252036")   // --rm-card-bg
-    static let chipBGHex: HexPair      = ("#efecf7", "#2f2846")   // --rm-chip-bg
-    static let chipBorderHex: HexPair  = ("#e0dced", "#403858")   // --rm-chip-border
+    static let cardBGHex: HexPair      = ("#ffffff", "#252036")   // --rm-card-bg (light verbatim; dark derived: no board-card level in reference)
+    static let chipBGHex: HexPair      = ("#efecf7", "#2f2846")   // --rm-chip-bg (light verbatim; dark derived: no board-card level in reference)
+    static let chipBorderHex: HexPair  = ("#e0dced", "#403858")   // --rm-chip-border (light verbatim; dark derived: no board-card level in reference)
 
     /// Board card fill. In dark this is LIGHTER than both `CodepetTheme.surface` and
     /// `CodepetTokens.cardRaised` (both `#1d1928`) — the board gets its own slightly-raised

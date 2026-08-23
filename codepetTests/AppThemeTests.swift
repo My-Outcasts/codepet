@@ -137,4 +137,78 @@ final class AppThemeTests: XCTestCase {
             }
         }
     }
+
+    /// The collapsed phase rails must stay legible against the page.
+    ///
+    /// They exist as their own tokens because sharing `well`/`hairline` put them at
+    /// 1.16:1 and 1.27:1 in dark, where the bodies read as absent and the rails looked
+    /// like floating text. A cool retint later gave them derived values that reused the
+    /// line tokens and put `railFill` back to 1.26:1 — the same defect, reintroduced,
+    /// with nothing failing to say so. This is that missing assertion.
+    ///
+    /// WCAG relative-luminance contrast, computed from the rendered tokens rather than
+    /// from ideal hexes: the render carries colour-management distortion, and this plan
+    /// has twice been wrong by reasoning about declared values instead of measured ones.
+    ///
+    /// **The rendered numbers here do NOT match the ideal-hex arithmetic quoted above
+    /// them, and that gap is itself the finding, not a mistake to paper over.** A prior
+    /// version of this fix computed a "regression" from ideal hexes (1.26:1 / 1.59:1 in
+    /// dark) and retinted the tokens to compensate — before discovering, by rendering
+    /// both the accused values and the "fixed" ones through this same helper, that the
+    /// accused values were already on target on screen and the retint made `railFill`
+    /// 23% louder than the design intent calls for. That retint was reverted; these are
+    /// the values now in force.
+    ///
+    /// Measured (dark `railFill` = `#2a2438`, `railBorder` = `#3a3350`, run twice
+    /// on-device, byte-identical both times): dark `railFill` contrast **1.4665:1**,
+    /// `railBorder` **1.9839:1**; light `railFill` **1.3727:1**, `railBorder`
+    /// **1.9417:1**. Raw rendered channel values ran ~0.03–0.07 brighter per channel than
+    /// the literal hex implies in dark (e.g. ground `#121019` renders ~(0.090, 0.080,
+    /// 0.130) instead of the ~(0.071, 0.063, 0.098) the hex means), which is exactly the
+    /// gap that made the ideal-hex arithmetic call a healthy value a regression.
+    ///
+    /// The floors below are re-based on these measured values, not on hex arithmetic:
+    ///
+    /// | token | measured (min of light/dark) | floor | margin above the 1.16/1.27 defect band |
+    /// |---|---|---|---|
+    /// | railFill   | 1.3727:1 (light) | **1.25:1** | +0.09 |
+    /// | railBorder | 1.9417:1 (light) | **1.65:1** | +0.38 |
+    ///
+    /// What this guard catches and what it does not: it catches a collapse back toward
+    /// the 1.16:1 / 1.27:1 defect band the block comment above describes (the state where
+    /// "the bodies read as absent and only the labels registered"). It does **not** catch
+    /// a smaller drift — `railFill`'s margin below its measured value is only ~0.12, so a
+    /// retint that quietly shaves a tenth or two off contrast can still pass. That margin
+    /// is thin because the honest gap between "on target" and "defective" is itself only
+    /// ~0.21 for `railFill`; `railBorder` has more room (~0.29 margin below measured) and
+    /// is correspondingly harder to regress past unnoticed.
+    @MainActor
+    func testCollapsedRailsClearContrastFloor() throws {
+        func linear(_ c: CGFloat) -> CGFloat {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        func relLum(_ c: NSColor) -> CGFloat {
+            0.2126 * linear(c.redComponent)
+                + 0.7152 * linear(c.greenComponent)
+                + 0.0722 * linear(c.blueComponent)
+        }
+        func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+            let la = relLum(a), lb = relLum(b)
+            let lighter = max(la, lb), darker = min(la, lb)
+            return (lighter + 0.05) / (darker + 0.05)
+        }
+        for scheme in [ColorScheme.light, .dark] {
+            let ground = try rendered(CodepetTheme.pageBackground, scheme)
+            let fill = try rendered(CodepetTokens.railFill, scheme)
+            let border = try rendered(CodepetTokens.railBorder, scheme)
+            let fillRatio = contrast(fill, ground)
+            let borderRatio = contrast(border, ground)
+            XCTAssertGreaterThanOrEqual(fillRatio, 1.25,
+                "railFill contrast against page in \(scheme) is \(fillRatio):1, below the "
+                + "1.25 floor — the rail body is reading as absent again.")
+            XCTAssertGreaterThanOrEqual(borderRatio, 1.65,
+                "railBorder contrast against page in \(scheme) is \(borderRatio):1, below "
+                + "the 1.65 floor — the rail outline is losing its shape.")
+        }
+    }
 }

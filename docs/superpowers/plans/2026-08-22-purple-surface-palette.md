@@ -299,35 +299,68 @@ git diff --cached --name-only   # must be empty
 Add to `codepetTests/AppThemeTests.swift`. This asserts the ordering that makes the palette work, not just the values — a hex assertion alone would pass on a typo that broke the hierarchy:
 
 ```swift
-    /// The dark surfaces must form a strict ladder, because the mode switch depends on
-    /// it: a track darker than the rail, a card lighter than the rail. Before this
-    /// retint the app inset by going LIGHTER (`well` #26211a was brighter than
-    /// `surface` #221d17, and `cardRaised` #26201a was within one hex digit of `well`),
-    /// which is why the active segment needed purple body added to read as selected.
-    func testDarkSurfacesFormALadder() {
-        func lum(_ hex: String) -> CGFloat {
-            let c = NSColor(hex: hex).usingColorSpace(.sRGB)!
-            return 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+    /// Renders a token through the SAME `ImageRenderer` pipeline the app draws with and
+    /// returns the pixel that came out. This is the only trustworthy way to read a
+    /// `Color.dyn` value in a test: bridging a SwiftUI `Color` to `NSColor` can resolve
+    /// eagerly, outside any appearance block, and would silently hand back the LIGHT
+    /// value while the test claims to check dark.
+    @MainActor
+    private func rendered(_ color: Color, _ scheme: ColorScheme) throws -> NSColor {
+        let swatch = Rectangle().fill(color)
+            .frame(width: 20, height: 20)
+            .environment(\.colorScheme, scheme)
+        let r = ImageRenderer(content: swatch)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("token swatch render produced nothing")
+            throw RenderFailure.producedNothing
         }
-        // well (track) < rail < panel (card)
-        XCTAssertLessThan(lum("#121019"), lum("#171420"), "the track must be darker than the rail")
-        XCTAssertLessThan(lum("#171420"), lum("#1d1928"), "the card must be lighter than the rail")
-        XCTAssertLessThan(lum("#1d1928"), lum("#2a2438"), "the hairline must be lighter than the card")
-        XCTAssertLessThan(lum("#2a2438"), lum("#3a3350"), "the strong line must be lighter than the hairline")
+        return c
     }
 
-    /// The ground is COOL now, not warm. This is the single assertion that would catch
-    /// a revert to the brown family: `#16130f` had red leading blue by 0.0275;
-    /// `#121019` has blue leading red.
-    func testTheDarkGroundIsCoolNotWarm() {
-        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
-            let g = CodepetTheme.dynamicNSColor(light: "#f5f3fa", dark: "#121019")
-                .usingColorSpace(.sRGB)!
-            XCTAssertGreaterThan(g.blueComponent, g.redComponent,
-                                 "the dark ground went warm again — blue must lead red")
-        }
+    private func lum(_ c: NSColor) -> CGFloat {
+        0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+    }
+
+    /// The dark surfaces must form a strict ladder, because the mode switch depends on it:
+    /// a track darker than the rail, a card lighter than the rail. Before this retint the
+    /// app inset by going LIGHTER (`well` #26211a was brighter than `surface` #221d17, and
+    /// `cardRaised` #26201a sat within one hex digit of `well`), which is why the active
+    /// segment needed purple body added before it read as selected.
+    ///
+    /// Reads the REAL TOKENS through the real pipeline. An earlier draft of this test
+    /// asserted `lum("#121019") < lum("#171420")` on hex literals — which tests hex
+    /// arithmetic and would pass no matter what the tokens contained.
+    @MainActor
+    func testDarkSurfacesFormALadder() throws {
+        let track = lum(try rendered(CodepetTokens.well, .dark))
+        let rail  = lum(try rendered(CodepetTokens.surface2, .dark))
+        let card  = lum(try rendered(CodepetTokens.cardRaised, .dark))
+        let line  = lum(try rendered(CodepetTheme.hairline, .dark))
+        let line2 = lum(try rendered(CodepetTokens.cardEdge, .dark))
+        XCTAssertLessThan(track, rail,  "the track must be darker than the rail")
+        XCTAssertLessThan(rail,  card,  "the card must be lighter than the rail")
+        XCTAssertLessThan(card,  line,  "the hairline must be lighter than the card")
+        XCTAssertLessThan(line,  line2, "the strong line must be lighter than the hairline")
+    }
+
+    /// The ground is COOL now, not warm — the single assertion that catches a revert to
+    /// the brown family. `#16130f` had red leading blue by 0.0275; `#121019` has blue
+    /// leading red. Reads `CodepetTheme.pageBackground` itself, not a literal.
+    @MainActor
+    func testTheDarkGroundIsCoolNotWarm() throws {
+        let g = try rendered(CodepetTheme.pageBackground, .dark)
+        XCTAssertGreaterThan(g.blueComponent, g.redComponent,
+                             "the dark ground went warm again — blue must lead red")
     }
 ```
+
+**These two tests DO drive the change** — that is the point of reading the real tokens. Before Step 3 the ladder fails (today `well` is brighter than `surface`) and the cool check fails (`#16130f` is warm). Expect a genuine RED, and report the measured luminances from the failing run.
+
+`RenderFailure` may not exist in `AppThemeTests.swift`; add `private enum RenderFailure: Error { case producedNothing }` inside the class if so. `AppThemeTests` may also need `import SwiftUI` and `import AppKit`.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
@@ -340,9 +373,9 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet \
   -resultBundlePath build/task.xcresult 2>&1 | tail -25
 ```
 
-Expected: `testDarkSurfacesFormALadder` **PASSES** (it asserts on literals, not on the tokens — it is a guard for later, documenting the intended ladder). `testTheDarkGroundIsCoolNotWarm` also **PASSES** for the same reason. Both are guards against future regression rather than drivers of this change.
+Expected: **BOTH FAIL.** They now read the real tokens through the render pipeline, so today's warm palette makes them fail for the right reasons — `well` is currently brighter than `surface` so the ladder is inverted, and `#16130f` has red leading blue so the cool check fails. Record the measured luminances from the failing run; they are the RED half of this task's evidence.
 
-That is deliberate and was ruled on during the previous plan: a test that guards a silent failure with no other detector is worth keeping even when it does not drive the implementation. Note it in your report; do not restructure them to force a red state.
+An earlier draft of these tests asserted on hex literals and would have passed here — testing hex arithmetic rather than the tokens, and guarding nothing. That was corrected before dispatch.
 
 - [ ] **Step 3: Retint `CodepetTheme.swift`**
 
@@ -479,42 +512,95 @@ The one view edit in this plan. Read the spec's "rail level the app does not hav
 Without this edit the sidebar and the lifted card are the same colour, so the mode switch has a visible track and an invisible card. Add to `codepetTests/ComposerEdgeRenderTests.swift`:
 
 ```swift
-    /// The mode switch needs THREE distinct surfaces: the rail it sits on, the track
-    /// beneath it, and the card lifted above. The prototype has all three
-    /// (--app-rail / --app-ground / --app-panel); this app collapsed "sidebar" and
-    /// "card" into one `surface` token, so after the retint the lifted card would be
-    /// byte-identical to the sidebar behind it — a track you can see and a card you
+    /// Renders a token through the same pipeline the app draws with. Not
+    /// `NSColor(someColor)` — bridging a SwiftUI `Color` can resolve eagerly, outside
+    /// any appearance block, and would hand back the LIGHT value while claiming dark.
+    @MainActor
+    private func rendered(_ color: Color, _ scheme: ColorScheme) throws -> NSColor {
+        let swatch = Rectangle().fill(color)
+            .frame(width: 20, height: 20)
+            .environment(\.colorScheme, scheme)
+        let r = ImageRenderer(content: swatch)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("token swatch render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        return c
+    }
+
+    private func dist(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        abs(a.redComponent - b.redComponent)
+            + abs(a.greenComponent - b.greenComponent)
+            + abs(a.blueComponent - b.blueComponent)
+    }
+
+    /// The sidebar must be drawn at the RAIL level, not the card level.
+    ///
+    /// This is the only assertion that can catch this task's actual change. The mode
+    /// switch needs three distinct surfaces — the rail it sits on, the track beneath
+    /// it, the card lifted above — and the prototype has all three
+    /// (`--app-rail` / `--app-ground` / `--app-panel`). This app collapsed "sidebar"
+    /// and "card" into one `surface` token, so after the retint the lifted card is
+    /// byte-identical to the sidebar behind it: a track you can see and a card you
     /// cannot.
     ///
-    /// Asserts the three are pairwise distinct in DARK, where they collide. In light
-    /// `surface`/`cardRaised` are #ffffff and `surface2` is #faf9fd, which never
-    /// collided.
-    func testTheSidebarRailIsDistinctFromTrackAndCard() {
-        func lum(_ c: NSColor) -> CGFloat {
-            let s = c.usingColorSpace(.sRGB)!
-            return 0.2126 * s.redComponent + 0.7152 * s.greenComponent + 0.0722 * s.blueComponent
+    /// **It renders the sidebar and asks what colour it came out.** An earlier draft
+    /// asserted the token LADDER instead — which `AppThemeTests` already covers, and
+    /// which this task's one-line edit does not affect, so it passed identically before
+    /// and after and tested nothing about this change.
+    ///
+    /// The sample is the MODAL colour of the right-hand strip, which is sidebar padding:
+    /// no text, no card, no mode switch. Taking the most common value by area rather
+    /// than a single pixel keeps it robust against sub-pixel antialiasing.
+    @MainActor
+    func testTheSidebarIsDrawnAtTheRailLevel() throws {
+        let host = TwoModeSidebar(mode: .constant(.ask))
+            .environmentObject(CompanyStore())
+            .environmentObject(AppState())
+            .frame(width: 240, height: 130, alignment: .top)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: host)
+        renderer.scale = 2
+        guard let img = renderer.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else {
+            XCTFail("sidebar render produced nothing")
+            throw RenderFailure.producedNothing
         }
-        // Resolve via `dynamicNSColor` with the hex pair, NOT `NSColor(someColor)`.
-        // Bridging a SwiftUI `Color` to `NSColor` can resolve eagerly, outside the
-        // appearance block, and would then silently read the LIGHT value while
-        // claiming to test dark. `DynamicColorTests` established this pattern.
-        func darkLum(light: String, dark: String) -> CGFloat {
-            var v: CGFloat = -1
-            NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
-                v = lum(CodepetTheme.dynamicNSColor(light: light, dark: dark))
+
+        // Right-hand strip: x from 92% to 98% of the width, full height.
+        var counts: [Int: Int] = [:]
+        let x0 = Int(Double(rep.pixelsWide) * 0.92), x1 = Int(Double(rep.pixelsWide) * 0.98)
+        for y in 0..<rep.pixelsHigh {
+            for x in x0..<x1 {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let key = Int(c.redComponent * 255) << 16
+                    | Int(c.greenComponent * 255) << 8 | Int(c.blueComponent * 255)
+                counts[key, default: 0] += 1
             }
-            return v
         }
-        let rail  = darkLum(light: "#faf9fd", dark: "#171420")   // surface2
-        let track = darkLum(light: "#efecf7", dark: "#121019")   // well
-        let card  = darkLum(light: "#ffffff", dark: "#1d1928")   // cardRaised
-        XCTAssertLessThan(track, rail, "the track must be darker than the rail it sits on")
-        XCTAssertLessThan(rail, card, "the card must be lighter than the rail behind it")
-        XCTAssertGreaterThan(abs(card - rail), 0.005,
-                             "the card is indistinguishable from the rail — the sidebar "
-                             + "is still on `surface`, so the mode switch has no visible card")
+        guard let modal = counts.max(by: { $0.value < $1.value })?.key else {
+            XCTFail("no pixels sampled from the sidebar strip")
+            throw RenderFailure.producedNothing
+        }
+        let actual = NSColor(srgbRed: CGFloat((modal >> 16) & 0xff) / 255,
+                             green: CGFloat((modal >> 8) & 0xff) / 255,
+                             blue: CGFloat(modal & 0xff) / 255, alpha: 1)
+
+        let rail = try rendered(CodepetTokens.surface2, .dark)
+        let card = try rendered(CodepetTheme.surface, .dark)
+        let toRail = dist(actual, rail), toCard = dist(actual, card)
+        XCTAssertLessThan(toRail, toCard,
+                          "the sidebar rendered closer to `surface` (\(toCard)) than to "
+                          + "`surface2` (\(toRail)) — it is still drawn at the card level, "
+                          + "so the mode switch has no visible lifted card")
     }
 ```
+
+`RenderFailure` already exists in this file from an earlier task; reuse it rather than redeclaring. The file may need `import SwiftUI` if it lacks one.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
@@ -527,7 +613,7 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet \
   -resultBundlePath build/task.xcresult 2>&1 | tail -25
 ```
 
-Expected: **PASSES**, because it asserts on the token ladder Task 2 already established, not on which token the sidebar uses. It is a guard for the ladder, and the *sidebar's* use of it cannot be asserted from tokens alone — see Step 4.
+Expected: **FAILS**, with the sidebar measuring closer to `surface` than to `surface2`. Report both distances from the failing run — they are this task's RED. If it passes here, the test is not reading a sidebar-background pixel and the sampled strip needs moving before you touch production code.
 
 - [ ] **Step 3: Point the sidebar at the rail level**
 
@@ -704,7 +790,21 @@ git diff --cached --name-only   # must be empty
 
 - [ ] **Step 1: Replace the hex assertions with the relationship they stand for**
 
-`RoadmapPaletteTests` asserts `chipBGHex.light == "#f1efe9"` and `chipBorderHex.light == "#ece9e2"`, and that `cardBGHex.dark != "#26201a"`. Those literals break on this change, but the *invariant* behind them is what matters — `RoadmapTokens`' own comment says the board card is deliberately lighter than both `surface` and `cardRaised` so cards keep a visible edge. Assert that instead. Find the tests with `grep -n "chipBGHex\|cardBGHex" codepetTests/RoadmapPaletteTests.swift`:
+`RoadmapPaletteTests` asserts **all six** hex literals plus one inequality — verified by grep, and the plan's first draft under-counted them as three:
+
+```
+:22  cardBGHex.light     == "#ffffff"    (survives — light card stays white)
+:23  cardBGHex.dark      == "#2a241c"    (FAILS)
+:24  chipBGHex.light     == "#f1efe9"    (FAILS)
+:25  chipBGHex.dark      == "#342d23"    (FAILS)
+:26  chipBorderHex.light == "#ece9e2"    (FAILS)
+:27  chipBorderHex.dark  == "#473e31"    (FAILS)
+:33  cardBGHex.dark      != "#26201a"    (survives — still true)
+```
+
+Five fail, two survive. Replace the five failing equality assertions with the relationship test below; the `#ffffff` one may stay as a literal since light `cardBG` genuinely does not change, and the `!=` at `:33` is already relationship-shaped.
+
+Only ONE production file consumes these — `codepet/Views/Overview/RoadmapCardView.swift:100` uses `RoadmapTokens.chipBG` — so the blast radius is small. Those literals break on this change, but the *invariant* behind them is what matters — `RoadmapTokens`' own comment says the board card is deliberately lighter than both `surface` and `cardRaised` so cards keep a visible edge. Assert that instead. Find the tests with `grep -n "chipBGHex\|cardBGHex" codepetTests/RoadmapPaletteTests.swift`:
 
 ```swift
     /// The board's card is deliberately LIGHTER than the app's own surfaces, so a card

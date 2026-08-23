@@ -55,9 +55,21 @@ enum AttachmentPicker {
         // screenshot acceptable — rejecting it before we shrink it would refuse the
         // most common attachment there is.
         let payload: Data
+        // **The declared media type has to describe the bytes we END UP with.**
+        // `downscaledImageData` re-encodes every non-JPEG source as PNG, so a resized
+        // .webp or .gif is PNG bytes — and it was being declared `image/webp` /
+        // `image/gif`, a header that contradicts its own payload. Both are legal values,
+        // so nothing drops it here or in `functions/`; it fails at the API, on a turn
+        // that looks ordinary from every log we own.
+        var mediaType = ChatAttachment.mediaType(for: kind, pathExtension: ext)
         switch kind {
         case .image:
-            payload = downscaledImageData(raw, pathExtension: ext) ?? raw
+            if let smaller = downscaledImageData(raw, pathExtension: ext) {
+                payload = smaller
+                mediaType = ChatAttachment.downscaledMediaType(pathExtension: ext)
+            } else {
+                payload = raw   // already small enough, or undecodable — original bytes, original type
+            }
         case .pdf, .text:
             payload = raw
         }
@@ -69,7 +81,7 @@ enum AttachmentPicker {
             id: "\(url.path)#\(payload.count)",
             kind: kind,
             filename: url.lastPathComponent,
-            mediaType: ChatAttachment.mediaType(for: kind, pathExtension: ext),
+            mediaType: mediaType,
             // `.base64EncodedString()` with no options emits ONE line. Do not pass
             // `.lineLength64Characters` — the API rejects wrapped base64.
             data: payload.base64EncodedString(),

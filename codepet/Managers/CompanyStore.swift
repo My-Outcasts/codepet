@@ -635,7 +635,8 @@ final class CompanyStore: ObservableObject {
     /// cross-department trade-off and was quietly costing a room every time.
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
                   founderAsk: String? = nil, convenesRoom: Bool = false,
-                  pinned: [ContextPin] = []) async {
+                  pinned: [ContextPin] = [],
+                  attachments: [ChatAttachment] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -651,7 +652,7 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
                           display: words,
-                          founderAsk: words, pinned: pinned)
+                          founderAsk: words, pinned: pinned, attachments: attachments)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -1218,12 +1219,32 @@ final class CompanyStore: ObservableObject {
     /// asked."
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
-                             founderAsk: String? = nil, pinned: [ContextPin] = []) async {
+                             founderAsk: String? = nil, pinned: [ContextPin] = [],
+                             attachments: [ChatAttachment] = []) async {
         guard !isCompanionTyping, !isStreaming else { return }
-        chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
+        // The same total-base64 rule the composer refuses with, applied again at the
+        // wire. Not belt-and-braces for its own sake: the composer is only ONE caller,
+        // and the failure this prevents is a bare 413 from Cloud Run that never reaches
+        // the function, so it produces no log line, no drop-table entry, and nothing
+        // the founder or we could read. A caller that never went through the composer
+        // gets the same ceiling.
+        let outgoing = AttachmentBudget.admit(attachments, to: []).accepted
+        // Stamped onto her own bubble BEFORE `history` is built from `dropLast()`, so
+        // this turn's files ride the TOP-LEVEL `attachments` only and reach
+        // `history[].attachments` on the next turn — never both at once, which would
+        // send and bill the same image twice in one request.
+        chatMessages.append(CopilotMessage(role: .me, text: display ?? text,
+                                            attachments: outgoing))
         isCompanionTyping = true
-        let history = chatMessages.dropLast().suffix(20).map {
-            ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
+        let prior = Array(chatMessages.dropLast().suffix(20))
+        // Which past turns keep their files on the wire. `functions/` replays only the
+        // last `ATTACHMENT_REPLAY_WINDOW` history entries, so base64 on an older turn is
+        // paid for in transport and then discarded — and two large turns in a row would
+        // 413 while each looked fine alone.
+        let replayed = AttachmentBudget.replay(prior.map(\.attachments), alongside: outgoing)
+        let history = zip(prior, replayed).map { msg, atts in
+            ChatTurnDTO(role: msg.role == .me ? "me" : "companion", text: msg.text,
+                        attachments: AttachmentDTO.wire(atts))
         }
         let cid = companyId
         // Tasks byte is allowed to run this turn — mirrors the web's openTasks
@@ -1275,7 +1296,10 @@ final class CompanyStore: ObservableObject {
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
             styleFragment: company.founderPrefs.style.promptFragment(),
-            enabledSkills: enabledSkills, deptKey: deptKey)
+            enabledSkills: enabledSkills, deptKey: deptKey,
+            // nil rather than [] when nothing is attached: the key stays off the wire
+            // for every request the app has ever sent, unchanged.
+            attachments: AttachmentDTO.wire(outgoing))
 
         // The reply bubble's identity — the same `specialist` the request above was built
         // from, so the "Name · Dept" header now names whoever actually wrote the words.

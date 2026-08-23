@@ -124,44 +124,38 @@ final class BrandMarkRenderTests: XCTestCase {
         try png.write(to: url)
         print("[render] \(url.path)")
 
-        // Warm means red leads blue. `pageBackground` (#16130f) is itself already
-        // "warm" by this raw definition — R=0.0863, B=0.0588, a 0.0275 lead that
-        // clears the +0.02 margin on its own. Counting it made the assertion
-        // measure the band's background AREA rather than the bloom, so skipping
-        // near-background pixels is what leaves only what the bloom actually
-        // painted.
+        // Warmth measured RELATIVE TO THE GROUND, not against an absolute red>blue bar.
+        // The old absolute test assumed a warm ground: on #16130f red led blue by 0.0275,
+        // so background pixels cleared it and pink pixels cleared it further. On the cool
+        // #121019 ground blue leads red by 0.0503 (measured), so NOTHING clears an
+        // absolute bar and the count collapsed to 0 — the guard failed while the bloom
+        // was perfectly correct. Task 1's `referenceGround`-based background EXCLUSION
+        // was already palette-independent; this warmth METRIC was the piece left absolute.
         //
-        // Reference-based, so this epsilon no longer has to clear the ~0.0597
-        // colour-management floor a comparison against the ideal `#16130f` hex
-        // would carry (see `referenceGround`'s doc) — it only has to clear
-        // per-pixel dither, which is why 0.02 replaces the old 0.08 (three-quarters
-        // of which was noise budget, not signal).
+        // What the test actually wants to know is whether the bloom's outer edge is
+        // WARMER THAN THE GROUND IT SITS ON, which is what the pink stop produces on any
+        // palette. `groundLead` is negative on a cool ground and positive on a warm one;
+        // either way a pink-shifted pixel sits above it.
         //
-        // Re-measured against THIS reference-based exclusion by actually reverting
-        // and restoring ChatEmptyState.swift (removing the `accentPink.opacity(0.18)`
-        // middle stop for RED, restoring it for GREEN), each reading taken twice and
-        // requiring the pair to be identical before trusting it (a sibling session's
-        // concurrent `xcodebuild` can kill the test host mid-run — the symptom is a
-        // run failing to finish, not a wrong number — so two consistent readings are
-        // what rule that out):
-        //   RED  (purple-only bloom)      =  8,329 warm pixels (identical x2)
-        //   GREEN (production, pink stop) = 18,285 warm pixels (identical x2)
-        // RED is not the near-zero this test originally expected of a "cool"
-        // bloom — the purple core's blurred edge anti-aliases into the background,
-        // and that boundary carries a few thousand pixels that read warm from
-        // rendering noise alone, independent of the pink stop. These are the same
-        // two numbers the ideal-hex version measured with its 0.08 epsilon: the old
-        // epsilon already excluded true background reliably (0.0597 measured
-        // distance well under 0.08), so tightening it to 0.02 against a reference
-        // that measures ~0 for true background changes nothing about which pixels
-        // are admitted — only how much of the epsilon is honest margin versus noise
-        // budget. The RED→GREEN gap is a real 2.20x signal (18,285 / 8,329), clear
-        // of the ~2x floor. Threshold is the midpoint (13,300): 4,971 of headroom
-        // above RED (50.0% of the RED→GREEN span), 4,985 below GREEN (50.1%). Do not
-        // loosen the `0.02` channel margin to "fix" a future threshold miss;
-        // remeasure RED/GREEN instead.
+        // Re-measured against this ground-relative metric by actually reverting and
+        // restoring ChatEmptyState.swift (removing the `accentPink.opacity(0.18)` middle
+        // stop for RED, restoring it for GREEN), each reading taken twice and requiring
+        // the pair to be identical before trusting it (a sibling session's concurrent
+        // `xcodebuild` can kill the test host mid-run — the symptom is a run failing to
+        // finish, not a wrong number — so two consistent readings are what rule that out):
+        //   RED  (purple-only bloom)     =     0 warm pixels (identical x2)
+        //   GREEN (production, pink stop) = 8,125 warm pixels (identical x2)
+        // RED is exactly zero: with no pink stop the bloom's blurred edge is purple
+        // shading to the ground, and against a ground-relative bar purple never reads
+        // warmer than the ground it blends into — the metric is isolating the pink stop
+        // and nothing else. The RED→GREEN gap is unbounded (any pink contribution at all
+        // clears zero), far past the ~2x floor. Threshold is the midpoint (4,062): 4,062
+        // of headroom above RED (exactly 50% of the span), 4,063 below GREEN (50.0%). Do
+        // not loosen the `+ 0.02` delta to "fix" a future threshold miss; remeasure
+        // RED/GREEN instead.
         let ground = try referenceGround(colorScheme: .dark, width: 760, height: 420)
         let backgroundEpsilon: CGFloat = 0.02
+        let groundLead = ground.redComponent - ground.blueComponent
         var warmPixels = 0
         let band = 0..<Int(155 * renderer.scale)
         for y in band {
@@ -171,10 +165,10 @@ final class BrandMarkRenderTests: XCTestCase {
                     + abs(c.greenComponent - ground.greenComponent)
                     + abs(c.blueComponent - ground.blueComponent)
                 if backgroundDistance < backgroundEpsilon { continue }
-                if c.redComponent > c.blueComponent + 0.02 { warmPixels += 1 }
+                if (c.redComponent - c.blueComponent) > groundLead + 0.02 { warmPixels += 1 }
             }
         }
-        XCTAssertGreaterThan(warmPixels, 13_300,
+        XCTAssertGreaterThan(warmPixels, 4_062,
                              "the bloom has no warm edge — the pink stop is missing, or the "
                              + "radial was replaced by a linear ramp. See \(url.path)")
     }

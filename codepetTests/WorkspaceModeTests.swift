@@ -66,11 +66,21 @@ final class WorkspaceModeTests: XCTestCase {
 
     // MARK: - The flag
 
-    /// `main` must keep shipping the web-parity shell while this is built, so the
-    /// two-mode shell is opt-in. A test that fails if someone flips the default.
-    func testTwoModeShellIsOffUnlessLaunchedWithTheFlag() {
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwoModeShell.flagKey),
-                       "the test runner is not launched with -CODEPET_TWO_MODE")
+    /// **The default flipped on 23 Aug** and this test flipped with it, deliberately.
+    /// Its previous form asserted the shell was OFF unless launched with a flag, and
+    /// its comment said it existed to fail if someone flipped the default — so it did
+    /// its job: the flip had to be made on purpose, here, rather than noticed later.
+    ///
+    /// What it guards now is the escape hatch. The two-mode shell is the product, but
+    /// `AppShellView` is still reachable via `-CODEPET_LEGACY_SHELL YES` — delete that
+    /// and every founder is one bad build away from having no way back.
+    func testTheTwoModeShellIsTheDefaultAndLegacyIsStillReachable() {
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: TwoModeShell.legacyFlagKey),
+                       "the test runner is not launched with -CODEPET_LEGACY_SHELL")
+        XCTAssertTrue(TwoModeShell.enabled,
+                      "the two-mode shell is the default; nothing should be needed to reach it")
+        XCTAssertEqual(TwoModeShell.legacyFlagKey, "CODEPET_LEGACY_SHELL")
+        // The historical argument still exists so an old launch command is not an error.
         XCTAssertEqual(TwoModeShell.flagKey, "CODEPET_TWO_MODE")
     }
 

@@ -3,10 +3,87 @@ import Foundation
 import FirebaseAuth
 import os
 
+/// One attached file on the wire — mirrors `AttachmentDTO` in
+/// `functions/src/companyChatCore.ts`, name for name.
+///
+/// **Separate from `ChatAttachment` on purpose.** `ChatAttachment` carries two fields
+/// that must never leave the app: `id` (an absolute filesystem path, so the founder's
+/// home directory and folder names) and `byteCount` (the pre-encode size, which the
+/// backend has no use for). A model type that is also the wire type leaks both the
+/// day someone adds a field.
+///
+/// **`media_type` is snake_case and that is load-bearing.** `companyChat.ts` applies
+/// `ChatRequestBody` with an `as` cast, so an unexpected or misspelled key is
+/// **silently ignored**: `mediaType` here would produce no error, no 400 and no
+/// image — just a normal-looking reply that never saw the file. The backend's whole
+/// error policy is "drop the attachment, answer the turn", which means there is
+/// nothing in `functions:log` to find either. `AttachmentDTOWireTests` asserts the
+/// four key spellings against the JSON rather than against this declaration.
+struct AttachmentDTO: Codable, Equatable {
+    /// `"image" | "pdf" | "text"`. Anything else and the backend drops the attachment.
+    let kind: String
+    let filename: String
+    /// One of `image/jpeg`, `image/png`, `image/gif`, `image/webp` for an image — the
+    /// four the API accepts, and the only four `ChatAttachment.mediaType(for:pathExtension:)`
+    /// produces. A pdf's value is ignored and forced to `application/pdf` server-side.
+    let mediaType: String
+    /// Base64, no line breaks.
+    let data: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case filename
+        case mediaType = "media_type"
+        case data
+    }
+
+    init(_ a: ChatAttachment) {
+        self.kind = a.kind.rawValue
+        self.filename = a.filename
+        self.mediaType = a.mediaType
+        self.data = a.data
+    }
+
+    /// For tests and fixtures — production builds these from a `ChatAttachment`.
+    init(kind: String, filename: String, mediaType: String, data: String) {
+        self.kind = kind
+        self.filename = filename
+        self.mediaType = mediaType
+        self.data = data
+    }
+
+    /// `nil` for an empty list, never `[]`. Both places `attachments` appears use
+    /// `encodeIfPresent`, so nil omits the key entirely — and the contract is to omit
+    /// it rather than send an empty array, on the request AND on every history turn.
+    static func wire(_ list: [ChatAttachment]) -> [AttachmentDTO]? {
+        list.isEmpty ? nil : list.map(AttachmentDTO.init)
+    }
+}
+
 /// One prior chat turn sent to the CF as history.
 struct ChatTurnDTO: Codable, Equatable {
     let role: String   // "me" | "companion"
     let text: String
+    /// The files that rode this turn when it was sent — replayed so a follow-up
+    /// question about an image is not asked of a model that cannot see it.
+    ///
+    /// **This field is the difference between the feature working once and working.**
+    /// With only `role` + `text` here, the first question about a screenshot is
+    /// answered and every follow-up reaches a model with no image in its context, which
+    /// presents as the model "forgetting" rather than as anything broken. The backend
+    /// half of the replay (`ATTACHMENT_REPLAY_WINDOW`) has been live and tested since
+    /// `fe2e767`; this is the client half.
+    ///
+    /// nil (omitted) for the overwhelming majority of turns — see `AttachmentDTO.wire`.
+    let attachments: [AttachmentDTO]?
+
+    /// `attachments` defaults to nil so every existing caller and fixture keeps
+    /// compiling and keeps sending the byte-identical turn it sent before.
+    init(role: String, text: String, attachments: [AttachmentDTO]? = nil) {
+        self.role = role
+        self.text = text
+        self.attachments = attachments
+    }
 }
 
 /// One task byte is allowed to run, sent alongside the request so the CF can
@@ -91,6 +168,15 @@ struct CompanyChatRequest: Codable {
     /// nil when no department is in focus, which omits `dept_key` from the JSON entirely
     /// (Optional + synthesised `encodeIfPresent`) — an ordinary chat turn costs nothing.
     let deptKey: String?
+    /// The files riding THIS message. nil rather than `[]` when there are none, which
+    /// omits the key entirely (Optional + synthesised `encodeIfPresent`) — the
+    /// contract says omit, and `[]` would otherwise appear on every request the app
+    /// has ever sent.
+    ///
+    /// The past turns' files ride `history[].attachments` instead; both are the same
+    /// `attachments` key with the same shape, which is what lets the backend replay
+    /// one screenshot across a short conversation without the client resending it.
+    let attachments: [AttachmentDTO]?
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -105,6 +191,7 @@ struct CompanyChatRequest: Codable {
         case styleFragment = "style_fragment"
         case enabledSkills = "enabled_skills"
         case deptKey = "dept_key"
+        case attachments
     }
 
     /// `runnable`/`envSetup`/`enabledSkills` default to empty and
@@ -115,7 +202,8 @@ struct CompanyChatRequest: Codable {
          history: [ChatTurnDTO], userMessage: String, runnable: [RunnableRef] = [],
          openTasks: [RunnableRef] = [],
          envSetup: [SetupItemDTO] = [], styleFragment: String? = nil,
-         enabledSkills: [String] = [], deptKey: String? = nil) {
+         enabledSkills: [String] = [], deptKey: String? = nil,
+         attachments: [AttachmentDTO]? = nil) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -128,6 +216,7 @@ struct CompanyChatRequest: Codable {
         self.styleFragment = styleFragment
         self.enabledSkills = enabledSkills
         self.deptKey = deptKey
+        self.attachments = attachments
     }
 }
 

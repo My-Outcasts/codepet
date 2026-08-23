@@ -986,8 +986,19 @@ struct CopilotChatView: View {
         let dept = selectedDept
         selectedDept = nil
         // Same rule, same reason as the chip above: one message, one handoff. A pin
-        // or an attachment that survived its send would re-send — and, once the wire
+        // or an attachment that survived its send would re-send — and, now that the wire
         // carries them, re-bill — the same context on every later turn.
+        //
+        // **Captured BEFORE the clear, and that is the whole bug this fixes.** These two
+        // lines used to sit here with the `sendChat` call below reading `pins` and
+        // `attachments` after they had already been emptied — so a founder could attach a
+        // screenshot, watch its pill appear, press send, and have the file silently not
+        // exist by the time the request was composed. Nothing on screen said so: the pill
+        // vanishing is what a consumed attachment looks like. The clear stays HERE rather
+        // than moving after the send, because the send is a `Task` and the pills have to
+        // go on this turn of the main actor; what moves is the read.
+        let sendPins = pins
+        let sendAttachments = attachments
         pins = []
         attachments = []
         switch mode {
@@ -998,11 +1009,20 @@ struct CopilotChatView: View {
             Task {
                 await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
                                             department: dept, founderAsk: text,
-                                            convenesRoom: mode.convenesRoom)
+                                            convenesRoom: mode.convenesRoom,
+                                            pinned: sendPins,
+                                            attachments: sendAttachments)
             }
         case .build:
             // One code mode. WHERE it runs is the run's business, not the
             // founder's — `startBuild` decides and says so on the card.
+            //
+            // **Pins and attachments are dropped on this path and that is stated rather
+            // than hidden.** `startBuild` stages a local coding run, which reads the linked
+            // folder and not a chat request, so there is nowhere for a pinned deliverable or
+            // a base64 screenshot to go. Attaching a file and pressing Build discards it.
+            // Fixing it means a route into `CodingRunCoordinator`, which is a different
+            // change than wiring the chat wire.
             companyStore.startBuild(ask: text)
         }
     }

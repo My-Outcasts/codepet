@@ -242,7 +242,6 @@ final class ComposerEdgeRenderTests: XCTestCase {
         let url = URL(fileURLWithPath: dir).appendingPathComponent("mode-switch.png")
         try png.write(to: url)
         print("[render] \(url.path)")
-
         // Count violet-leaning pixels: blue clearly above green, saturation above
         // cardRaised's zero. Purple TEXT alone at this size contributes a few dozen
         // pixels; a tinted fill plus a tinted edge contributes hundreds.
@@ -285,6 +284,125 @@ final class ComposerEdgeRenderTests: XCTestCase {
         XCTAssertGreaterThan(violet, 900,
                              "the active mode segment has no purple body — only its text is "
                              + "accented, which is what it did before. See \(url.path)")
+    }
+
+    // MARK: - Sidebar surface level
+
+    /// Renders a token through the same pipeline the app draws with. Not
+    /// `NSColor(someColor)` — bridging a SwiftUI `Color` can resolve eagerly, outside
+    /// any appearance block, and would hand back the LIGHT value while claiming dark.
+    @MainActor
+    private func rendered(_ color: Color, _ scheme: ColorScheme) throws -> NSColor {
+        let swatch = Rectangle().fill(color)
+            .frame(width: 20, height: 20)
+            .environment(\.colorScheme, scheme)
+        let r = ImageRenderer(content: swatch)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("token swatch render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        return c
+    }
+
+    private func dist(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        abs(a.redComponent - b.redComponent)
+            + abs(a.greenComponent - b.greenComponent)
+            + abs(a.blueComponent - b.blueComponent)
+    }
+
+    /// The sidebar must be drawn at the RAIL level, not the card level.
+    ///
+    /// This is the only assertion that can catch this task's actual change. The mode
+    /// switch needs three distinct surfaces — the rail it sits on, the track beneath
+    /// it, the card lifted above — and the prototype has all three
+    /// (`--app-rail` / `--app-ground` / `--app-panel`). This app collapsed "sidebar"
+    /// and "card" into one `surface` token, so after the retint the lifted card is
+    /// byte-identical to the sidebar behind it: a track you can see and a card you
+    /// cannot.
+    ///
+    /// **It renders the sidebar and asks what colour it came out.** An earlier draft
+    /// asserted the token LADDER instead — which `AppThemeTests` already covers, and
+    /// which this task's one-line edit does not affect, so it passed identically before
+    /// and after and tested nothing about this change.
+    ///
+    /// The sample is the MODAL colour of a right-hand strip chosen to sit entirely
+    /// OUTSIDE the content column's own inset, so no badge or selection fill drawn
+    /// inside that inset can ever reach it — not merely "nothing rendered there in
+    /// this fixture."
+    ///
+    /// This is coupled to `TwoModeSidebar.swift`'s `.padding(.horizontal, 11)`
+    /// (`TwoModeSidebar.swift:75`): on this 240pt-wide render the content column's
+    /// right edge sits at `240 - 11 = 229`, i.e. 95.4% of the width. The strip below
+    /// starts at 96%, clearing that edge with ~1pt margin, and ends at 99%, staying
+    /// inside the frame. If that padding value ever changes, this bound needs
+    /// re-deriving from the new value — it is not an independent magic number.
+    @MainActor
+    func testTheSidebarIsDrawnAtTheRailLevel() throws {
+        let host = TwoModeSidebar(mode: .constant(.ask))
+            .environmentObject(CompanyStore())
+            .environmentObject(AppState())
+            .frame(width: 240, height: 130, alignment: .top)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: host)
+        renderer.scale = 2
+        guard let img = renderer.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else {
+            XCTFail("sidebar render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+
+        // Right-hand strip: x from 96% to 99% of the width, full height. See the
+        // doc comment above for why 96% (not the old 92%) and its coupling to
+        // TwoModeSidebar's horizontal padding.
+        var counts: [Int: Int] = [:]
+        let x0 = Int(Double(rep.pixelsWide) * 0.96), x1 = Int(Double(rep.pixelsWide) * 0.99)
+        for y in 0..<rep.pixelsHigh {
+            for x in x0..<x1 {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let key = Int(c.redComponent * 255) << 16
+                    | Int(c.greenComponent * 255) << 8 | Int(c.blueComponent * 255)
+                counts[key, default: 0] += 1
+            }
+        }
+        guard let modal = counts.max(by: { $0.value < $1.value })?.key else {
+            XCTFail("no pixels sampled from the sidebar strip")
+            throw RenderFailure.producedNothing
+        }
+        let actual = NSColor(srgbRed: CGFloat((modal >> 16) & 0xff) / 255,
+                             green: CGFloat((modal >> 8) & 0xff) / 255,
+                             blue: CGFloat(modal & 0xff) / 255, alpha: 1)
+
+        let rail = try rendered(CodepetTokens.surface2, .dark)
+        let card = try rendered(CodepetTheme.surface, .dark)
+        let toRail = dist(actual, rail), toCard = dist(actual, card)
+        XCTAssertLessThan(toRail, toCard,
+                          "the sidebar rendered closer to `surface` (\(toCard)) than to "
+                          + "`surface2` (\(toRail)) — it is still drawn at the card level, "
+                          + "so the mode switch has no visible lifted card")
+
+        // Absolute ceiling, on top of the relative check above. `toRail < toCard`
+        // alone only proves "closer to the rail than to the card" — a third colour
+        // that happened to sit nearer the rail would satisfy that without actually
+        // BEING the rail. This proves the stronger claim: the sampled strip is
+        // close to `surface2` in absolute terms, not merely closer to it than to
+        // `surface`.
+        //
+        // Measured on this strip (96%-99% of width, post Finding-1 fix), two runs
+        // required identical before trusting either (no concurrent `xcodebuild`
+        // either time — `pgrep -fl xcodebuild` empty):
+        //   GREEN (surface2 background, prod today)      toRail = 0.006913624148742831
+        //   RED   (surface background, pre-fix, from the
+        //          original task-3 report)                toRail = 0.09896872879243365
+        // 0.03 sits with real headroom on both sides: ~4.3x above the measured
+        // GREEN, and RED is ~3.3x above it — neither number is close to the line.
+        XCTAssertLessThan(toRail, 0.03,
+                          "the sidebar strip measured \(toRail) from `surface2` — too far to "
+                          + "call this the rail even though it is closer to the rail than to "
+                          + "the card")
     }
 
     // MARK: - Focused state: unverified offscreen

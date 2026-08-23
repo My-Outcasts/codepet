@@ -114,6 +114,12 @@ enum Toolkit {
     /// Deliberately NOT filtered to "skills we've built": the CF is the
     /// authority on that (see `IMPLEMENTED_SKILLS`), so shipping a skill is a
     /// backend deploy, not a client release.
+    /// The one skill id a view names directly — the `🌐` row in `plusMenu` flips it,
+    /// and it is the REAL gate on web search: `companyChat.ts` adds `WEB_SEARCH_TOOL`
+    /// only when this id arrives in `enabled_skills`. Named here so the string is not
+    /// typed into a view, where a typo would silently toggle nothing.
+    static let webResearchId = "web-research"
+
     static func enabledSkillIds(in enabled: Set<String>) -> [String] {
         items(in: .skills).map(\.id).filter(enabled.contains).sorted()
     }

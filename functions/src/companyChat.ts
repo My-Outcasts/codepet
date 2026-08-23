@@ -36,6 +36,7 @@ import {
   REMEMBER_TOOL,
   ChatTurn,
   ClaudeMessage,
+  type AttachmentDTO,
   RunnableTaskRef,
   EnvSetupItem,
   SetupCategory,
@@ -102,6 +103,14 @@ interface ChatRequestBody {
   // reason a toggle now means something. Backward-compatible in the same way:
   // omitted by older clients → treated as none → no skill block, no extra tool.
   enabled_skills?: unknown;
+  // Files riding THIS message. Every field is client-supplied and this body is applied
+  // with an `as` cast, so nothing here has been validated: `buildMessages` drops what it
+  // cannot use rather than 400ing the turn (see AttachmentDTO in companyChatCore).
+  // Backward-compatible: omitted by every client that predates attachments -> undefined ->
+  // `renderTurn` returns the plain string it always returned. Note the consequence of the
+  // cast: a MISSPELLED key here is silently ignored, so `attachments` and `media_type`
+  // (snake_case) are a wire contract the native client must match exactly.
+  attachments?: AttachmentDTO[];
 }
 
 const MAX_RUNNABLE_TASKS = 60;
@@ -345,7 +354,14 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     buildOpenTasksBlock(openTasks) +
     buildSetupBlock(envSetup) +
     buildSkillsBlock(skills);
-  const messages = buildMessages(Array.isArray(body.history) ? body.history : [], userMessage);
+  // History turns carry their own `attachments` and pass through untouched; buildMessages
+  // replays only the most recent ones (ATTACHMENT_REPLAY_WINDOW) so one screenshot is not
+  // re-uploaded on every turn of a long thread.
+  const messages = buildMessages(
+    Array.isArray(body.history) ? body.history : [],
+    userMessage,
+    Array.isArray(body.attachments) ? body.attachments : undefined,
+  );
 
   // Two system blocks in both paths: the static companion prompt carries the
   // cache_control breakpoint (the pricing spec's cheap-chat lever); the volatile

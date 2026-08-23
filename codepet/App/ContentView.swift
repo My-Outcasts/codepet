@@ -56,8 +56,10 @@ struct ContentView: View {
                 OnboardingView()
                     .id(companyStore.companyId)
             } else if TwoModeShell.enabled {
-                // The two-mode shell, opt-in via `-CODEPET_TWO_MODE YES` so main
-                // keeps shipping the web-parity shell while this is built.
+                // The two-mode shell — **the default since 23 Aug.** It was opt-in
+                // while being built, which meant two days of shipped work nobody
+                // could open. `-CODEPET_LEGACY_SHELL YES` falls through to the
+                // web-parity shell below without needing a new build.
                 TwoModeShellView()
             } else {
                 // Authenticated (or guest) — the company shell (web product).

@@ -77,11 +77,18 @@ enum OnboardingContent {
     static let total = 8
     static let defaultStageIndex = 2
 
-    /// Web CSS theme vars that CodepetTheme doesn't already expose, mapped 1:1.
+    /// Web CSS theme vars, mapped 1:1. `surface2`/`well`/`faint` alias the shared
+    /// `CodepetTokens` values directly — they used to be re-declared here with their
+    /// own hex literals under a comment claiming `CodepetTheme` didn't already expose
+    /// them, which was false: it did, and the duplication meant a retint of one and not
+    /// the other would have split the palette silently. The accent trio below IS still
+    /// duplicated; it is out of scope for the surface retint and left as-is
+    /// deliberately. `coldBg` is a genuine one-off (cold-open / splash, stays dark) and
+    /// is correct as-is.
     enum Palette {
-        static let surface2   = Color.dyn("#fcfbf8", "#1b1712")   // --surface-2
-        static let well       = Color.dyn("#f1efe9", "#26211a")   // --well
-        static let faint      = Color.dyn("#a79e92", "#6f685c")   // --t-4
+        static let surface2   = CodepetTokens.surface2
+        static let well       = CodepetTokens.well
+        static let faint      = CodepetTokens.faint
         static let accentDeep = Color.dyn("#5b27b0", "#7c3aed")   // --accent-deep
         static let accentTint = Color.dyn("#eee6fd", "#271f3a")   // --accent-tint
         static let accentLine = Color.dyn("#d9c9f7", "#43356b")   // --accent-line

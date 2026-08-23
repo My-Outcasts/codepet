@@ -10,12 +10,13 @@ import SwiftUI
 /// selection came from that overflow), and `plusMenu` is the capability door: what
 /// this turn gets to see, and how hard it should work.
 ///
-/// **PROTOTYPE STATE, 21 Aug.** The controls, the picker, the pills and the caps are
-/// all live. What is NOT wired is the last hop for pins and attachments — neither
-/// reaches the model yet, because that needs `ChatContext.compose(pinned:)` and a
-/// widened `ClaudeMessage.content` in `functions/`. Both are on the plan and neither
-/// is in this change, which is why the `🌐 Web search` row is absent rather than
-/// present and lying: a toggle that does not change the request is worse than none.
+/// **Wired, 22 Aug.** Pins reach the model through `ChatContext.compose(pinned:)` and
+/// attachments through `CompanyChatRequest.attachments` — the last hop is
+/// `CopilotChatView.send()`, which captures both before it clears the pills. The
+/// `🌐 Web search` row is present at last, and it is honest for a reason worth
+/// recording: it does not set a field on the request. Nothing on the wire reads one.
+/// It toggles the `web-research` SKILL, which rides `enabled_skills` (already there,
+/// already read) and is what `companyChat.ts` actually gates `WEB_SEARCH_TOOL` on.
 ///
 /// The mode control still shapes the outgoing message via `ChatMode` (no backend
 /// mode exists), and it is dock-only — `Ask` and `Developer` are places in the rail.
@@ -98,6 +99,16 @@ struct ChatComposer: View {
     /// `CopilotChatView.liveVoiceControl`, which reports a control as live from the moment
     /// its request starts.
     var liveVoiceControl: VoiceControlKind? = nil
+
+    /// Why the last pick was turned away, or nil. Local `@State` because it is
+    /// ephemeral chrome with no owner outside this control, and because the rule it
+    /// reports (`AttachmentBudget`) is pure and tested on its own — what lives here is
+    /// only whether a sentence is on screen.
+    ///
+    /// Cleared by the next pick (a clean pick assigns nil) or by its own ✕. It does not
+    /// clear on send: a refusal is about a file that never made it in, so the send that
+    /// follows is not an answer to it.
+    @State private var attachNotice: String?
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -222,21 +233,53 @@ struct ChatComposer: View {
     @ViewBuilder private var pillRow: some View {
         let pinList = pins?.wrappedValue ?? []
         let attList = attachments?.wrappedValue ?? []
-        if !pinList.isEmpty || !attList.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(attList) { att in
-                    pill(icon: att.icon, title: att.filename, gloss: att.gloss) {
-                        attachments?.wrappedValue = ChatAttachment.removing(att, from: attList)
+        if !pinList.isEmpty || !attList.isEmpty || attachNotice != nil {
+            VStack(alignment: .leading, spacing: 5) {
+                if !pinList.isEmpty || !attList.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(attList) { att in
+                            pill(icon: att.icon, title: att.filename, gloss: att.gloss) {
+                                attachments?.wrappedValue = ChatAttachment.removing(att, from: attList)
+                            }
+                        }
+                        ForEach(pinList) { pin in
+                            pill(icon: pin.icon, title: pin.title, gloss: pin.gloss) {
+                                pins?.wrappedValue = ContextPin.removing(pin, from: pinList)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
-                ForEach(pinList) { pin in
-                    pill(icon: pin.icon, title: pin.title, gloss: pin.gloss) {
-                        pins?.wrappedValue = ContextPin.removing(pin, from: pinList)
-                    }
-                }
-                Spacer(minLength: 0)
+                if let attachNotice { noticeRow(attachNotice) }
             }
         }
+    }
+
+    /// **A refused file has to say so here, in the composer, and this is why.**
+    ///
+    /// The cap it reports is on total base64 bytes, and the thing it prevents is a bare
+    /// 413 from Cloud Run: the request never reaches `handleCompanyChat`, so there is no
+    /// log line, no entry in the backend's drop table, and nothing anyone could look up
+    /// afterwards. If the refusal were silent too, an oversized screenshot would be
+    /// indistinguishable from the model choosing not to mention the picture.
+    ///
+    /// Outside the `Menu`, deliberately. A `Menu` flattens whatever it is handed to
+    /// (title, image) and discards layout modifiers, so a two-line notice inside
+    /// `plusMenu` would render as its first string and nothing else.
+    private func noticeRow(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "exclamationmark.circle").font(.system(size: 9))
+            Text(text)
+                .font(CodepetTheme.inter(CodepetType.subheadline))
+                .fixedSize(horizontal: false, vertical: true)
+            Button { attachNotice = nil } label: {
+                Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .help(lang == .vi ? "Bỏ qua" : "Dismiss")
+            Spacer(minLength: 0)
+        }
+        .foregroundColor(CodepetTheme.mutedText)
     }
 
     private func pill(icon: String, title: String, gloss: String,
@@ -440,11 +483,10 @@ struct ChatComposer: View {
     /// menu that mixes "say this for me" with "let the model see this" has no
     /// organising idea. `CopilotChatView` still builds them for the hero.
     ///
-    /// **PROTOTYPE STATE (21 Aug).** Pinning and attaching are live here — the picker
-    /// runs, the pills appear, the caps hold. What is not wired is the last hop:
-    /// neither reaches the model yet, because that needs `ChatContext.compose` and
-    /// `functions/`. The `🌐 Web search` row is therefore absent rather than present
-    /// and lying: a toggle that does not change the request is worse than no toggle.
+    /// **Wired (22 Aug).** Pinning and attaching now reach the model: pins through
+    /// `ChatContext.compose(pinned:)`, attachments through `CompanyChatRequest.attachments`
+    /// and `history[].attachments`. The `🌐 Web search` row is present because it can
+    /// finally be honest — see its comment below, which is the whole argument.
     private var plusMenu: some View {
         Menu {
             Section(PlusMenu.bringInLabel(lang)) {
@@ -454,9 +496,19 @@ struct ChatComposer: View {
                         let room = ChatAttachment.max - atts.wrappedValue.count
                         guard room > 0 else { return }
                         let picked = AttachmentPicker.pickAndEncode(limit: room)
+                        // `AttachmentBudget` owns BOTH caps, so the file count and the
+                        // total encoded size are decided in one pure place that a test
+                        // can reach — and the store applies the same call at the wire.
+                        let admission = AttachmentBudget.admit(picked.attachments,
+                                                               to: atts.wrappedValue)
                         var next = atts.wrappedValue
-                        for a in picked.attachments { next = ChatAttachment.adding(a, to: next) }
+                        for a in admission.accepted { next = ChatAttachment.adding(a, to: next) }
                         atts.wrappedValue = next
+                        // Assigned every time, so a clean pick clears a stale refusal.
+                        let lines = [AttachmentBudget.refusalMessage(admission, lang),
+                                     AttachmentBudget.unsupportedMessage(picked.rejected, lang)]
+                            .compactMap { $0 }
+                        attachNotice = lines.isEmpty ? nil : lines.joined(separator: " ")
                     } label: {
                         menuRow(PlusMenu.attachLabel(lang),
                                 full ? PlusMenu.attachFullDetail(lang)
@@ -504,6 +556,24 @@ struct ChatComposer: View {
                     menuRow(PlusMenu.knowsLabel(lang), PlusMenu.knowsDetail(lang),
                             icon: companyStore.company.founderPrefs.memoryEnabled
                                 ? "checkmark" : "brain")
+                }
+                // **The 🌐 row, and it is a skill toggle rather than a request field.**
+                //
+                // The brief for this task specified `CompanyChatRequest.webSearch`. There is
+                // nothing on the backend that reads it: `companyChat.ts` gates
+                // `WEB_SEARCH_TOOL` on `skills.has("web-research")`, i.e. on the
+                // `enabled_skills` array this request already carries. And because
+                // `ChatRequestBody` is applied with an `as` cast, an unread `web_search` key
+                // would be silently ignored — a toggle the founder flips that changes the
+                // answer not at all, which is the exact thing the previous version of this
+                // file removed the row to avoid. So this flips the real switch, and the tool
+                // appears or disappears from the request because of it.
+                Button {
+                    Task { await companyStore.toggleTool(id: Toolkit.webResearchId) }
+                } label: {
+                    menuRow(PlusMenu.webSearchLabel(lang), PlusMenu.webSearchDetail(lang),
+                            icon: companyStore.company.enabledTools.contains(Toolkit.webResearchId)
+                                ? "checkmark" : "globe")
                 }
                 Menu {
                     Button(PlusMenu.changeFolderLabel(lang)) {

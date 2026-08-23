@@ -75,7 +75,12 @@ struct TwoModeSidebar: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 12)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(CodepetTheme.surface)
+        // The sidebar is the RAIL, not a card. `surface2` is `--app-rail`, one step
+        // between the track (`well`) beneath the mode switch and the card
+        // (`cardRaised`) lifted inside it. On `surface` the sidebar and the lifted
+        // card were the same value, so the switch had a visible track and an
+        // invisible card.
+        .background(CodepetTokens.surface2)
     }
 
     /// Find a conversation by name — the magnifier Claude Code anchors its sidebar

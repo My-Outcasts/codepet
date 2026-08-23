@@ -11,11 +11,12 @@ enum AttachmentKind: String, Equatable {
 
 /// A file the founder attached to the next message — spec §7.
 ///
-/// **PROTOTYPE STATE (21 Aug).** Picking, downscaling, and encoding are real; the
-/// pill is real. What is NOT wired is the wire: `CompanyChatRequest` has no
-/// `attachments` field yet and `ClaudeMessage.content` in `functions/` is still a
-/// `String`. So an attachment is *held* correctly and does not yet reach the model.
-/// Those are Tasks 9-11 and they touch `functions/`, which this prototype does not.
+/// **Wired (22 Aug).** `CompanyChatRequest.attachments` and `ChatTurnDTO.attachments`
+/// carry this to `companyChat`, which turns it into image/document content blocks
+/// (`fe2e767`, `a75570c`) and replays it across the last `ATTACHMENT_REPLAY_WINDOW`
+/// history entries. The wire shape is `AttachmentDTO`, not this type — see there for
+/// why, and for the `media_type` spelling that silently decides whether any of it
+/// happens.
 ///
 /// **Why base64 lives in this type.** The client has no Anthropic key (deployed
 /// functions read it from Secret Manager), so the Files API is unreachable from
@@ -38,8 +39,18 @@ struct ChatAttachment: Identifiable, Equatable {
     /// different ceilings for one pill row would be arbitrary.
     static let max = 3
 
-    /// Per file, before base64. The API's request ceiling is 32MB and base64 adds
-    /// ~33%, so three 8MB files still fit with room for the prompt.
+    /// Per file, before base64 — a sanity limit, and **no longer the binding one.**
+    ///
+    /// Its old comment read "the API's request ceiling is 32MB and base64 adds ~33%, so
+    /// three 8MB files still fit with room for the prompt", and the arithmetic in that
+    /// sentence disproves it: 3 × 8 MB raw is 24 MB, which base64 inflates to ~32 MB —
+    /// ON the Cloud Run gen2 ceiling, not under it, with nothing left for the prompt.
+    /// Over the line the founder gets a bare 413 that never reaches the function, so
+    /// there is no log line and no drop-table entry to explain it.
+    ///
+    /// The real ceiling is total ENCODED bytes across the whole request, because that is
+    /// what the transport measures — `AttachmentBudget.maxTotalBase64Bytes`. This stays
+    /// as a per-file guard so one absurd file is refused before it is even encoded.
     static let maxBytes = 8 * 1024 * 1024
 
     /// **Sonnet 5's high-resolution long edge.** `CHAT_MODEL` in
@@ -61,6 +72,23 @@ struct ChatAttachment: Identifiable, Equatable {
         guard longest > longEdge else { return original }   // never upscale
         let scale = longEdge / longest
         return CGSize(width: (w * scale).rounded(), height: (h * scale).rounded())
+    }
+
+    /// **The media type of an image AFTER it has been downscaled**, which is not always
+    /// the media type of the file the founder picked.
+    ///
+    /// `AttachmentPicker.downscaledImageData` re-encodes everything that is not a JPEG
+    /// as PNG (re-encoding a photo as PNG can multiply its size, so JPEG sources stay
+    /// JPEG). A resized `.webp` or `.gif` is therefore PNG bytes — and declaring those
+    /// as `image/webp` sends the API a header that contradicts the payload. Both are in
+    /// the four types the backend accepts, so nothing is dropped client-side or
+    /// server-side; the mismatch surfaces at the API as a failed turn with no local
+    /// trace, which is the same silent class as the `media_type` spelling.
+    ///
+    /// Only called when a downscale actually happened. An untouched file keeps
+    /// `mediaType(for:pathExtension:)`.
+    static func downscaledMediaType(pathExtension ext: String) -> String {
+        ["jpg", "jpeg"].contains(ext.lowercased()) ? "image/jpeg" : "image/png"
     }
 
     /// nil for an extension we don't handle — deliberately, rather than defaulting

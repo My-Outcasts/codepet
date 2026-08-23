@@ -726,7 +726,63 @@ Record the list. Every one must still compile after Step 2.
 
 `coldBg` (`#100a26`) is already a deep purple and stays exactly as it is — it was the one part of the app that had the right hue family all along.
 
-- [ ] **Step 3: Build to confirm every consumer still compiles**
+- [ ] **Step 3: Write the test that a build cannot replace**
+
+Steps 3–5 originally verified this task with a build and the existing suites. Neither can catch the failure that actually matters: aliasing to the **wrong** token. `Palette.well = CodepetTokens.surface2` compiles perfectly and every existing test still passes, while onboarding silently renders at the rail level instead of the track level.
+
+Add to `codepetTests/AppThemeTests.swift`, which already has the `rendered(_:_:)` helper from an earlier task in this plan:
+
+```swift
+    /// The onboarding palette must BE the shared tokens, not merely look like them.
+    ///
+    /// These three used to be re-declared in `OnboardingContent.Palette` with hex
+    /// literals byte-identical to `CodepetTokens`', under a comment claiming
+    /// `CodepetTheme` did not expose them. It did. A retint of one and not the other
+    /// would have split the palette with nothing failing to say so.
+    ///
+    /// Renders both sides rather than comparing `Color` values: two `Color`s can compare
+    /// unequal while rendering identically, and bridging a SwiftUI `Color` to `NSColor`
+    /// can resolve eagerly outside an appearance block and return the LIGHT value while
+    /// claiming to test dark. Rendering is the only comparison that reflects what is
+    /// actually drawn.
+    ///
+    /// This catches the alias pointing at the WRONG token — the one failure a compile
+    /// and the existing suites both wave through.
+    @MainActor
+    func testOnboardingPaletteAliasesTheSharedTokens() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let pairs: [(String, Color, Color)] = [
+                ("surface2", OnboardingContent.Palette.surface2, CodepetTokens.surface2),
+                ("well",     OnboardingContent.Palette.well,     CodepetTokens.well),
+                ("faint",    OnboardingContent.Palette.faint,    CodepetTokens.faint),
+            ]
+            for (name, alias, source) in pairs {
+                let a = try rendered(alias, scheme)
+                let s = try rendered(source, scheme)
+                let d = abs(a.redComponent - s.redComponent)
+                    + abs(a.greenComponent - s.greenComponent)
+                    + abs(a.blueComponent - s.blueComponent)
+                XCTAssertLessThan(d, 0.001,
+                                  "OnboardingContent.Palette.\(name) does not render as "
+                                  + "CodepetTokens.\(name) in \(scheme) — distance \(d). "
+                                  + "Either it is still a duplicate literal, or it is "
+                                  + "aliased to the wrong token.")
+            }
+        }
+    }
+```
+
+The `0.001` bound is not a tuned threshold: both sides go through the identical render, so an alias to the same token measures exactly `0.0`, and any other token in the ladder is at least an order of magnitude away. Confirm that when you run it — report the actual distances.
+
+- [ ] **Step 4: Run it BEFORE the change and confirm it fails**
+
+Run it against the current duplicated literals. Because the duplicates are byte-identical to the tokens today, **this may PASS** — the values agree even though the duplication is real.
+
+**If it passes, that is expected and not a reason to skip it.** Its value is forward-looking: it is what makes the next retint safe. Say so in your report, and do not restructure it to force a red state.
+
+To prove it can fail, do this once as a throwaway: temporarily point `Palette.well` at `CodepetTokens.surface2` (the wrong token), run, confirm it FAILS with a real distance, then restore. Report both numbers. That is the RED this test would catch, demonstrated rather than asserted.
+
+- [ ] **Step 5: Build to confirm every consumer still compiles**
 
 ```bash
 xcodebuild build -project CodePet.xcodeproj -scheme codepet \
@@ -737,7 +793,7 @@ xcodebuild build -project CodePet.xcodeproj -scheme codepet \
 
 Expected: `** BUILD SUCCEEDED **`, no `error:` lines.
 
-- [ ] **Step 4: Run the onboarding suite**
+- [ ] **Step 6: Run the onboarding suite**
 
 ```bash
 xcodebuild test -project CodePet.xcodeproj -scheme codepet \
@@ -752,7 +808,7 @@ xcrun xcresulttool get test-results summary --path build/task.xcresult | head -2
 
 Expected: all pass, 0 failed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add codepet/Models/OnboardingContent.swift
@@ -807,23 +863,62 @@ Five fail, two survive. Replace the five failing equality assertions with the re
 Only ONE production file consumes these — `codepet/Views/Overview/RoadmapCardView.swift:100` uses `RoadmapTokens.chipBG` — so the blast radius is small. Those literals break on this change, but the *invariant* behind them is what matters — `RoadmapTokens`' own comment says the board card is deliberately lighter than both `surface` and `cardRaised` so cards keep a visible edge. Assert that instead. Find the tests with `grep -n "chipBGHex\|cardBGHex" codepetTests/RoadmapPaletteTests.swift`:
 
 ```swift
+    /// Renders a colour through the same pipeline the app draws with, so two values are
+    /// comparable. Raw hex and rendered pixels are NOT comparable — the render carries
+    /// colour-management distortion the raw value does not — so both sides go through here.
+    @MainActor
+    private func rendered(_ color: Color, _ scheme: ColorScheme) throws -> NSColor {
+        let swatch = Rectangle().fill(color)
+            .frame(width: 20, height: 20)
+            .environment(\.colorScheme, scheme)
+        let r = ImageRenderer(content: swatch)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let c = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+                  .usingColorSpace(.sRGB) else {
+            XCTFail("swatch render produced nothing")
+            throw RenderFailure.producedNothing
+        }
+        return c
+    }
+
+    private func lum(_ c: NSColor) -> CGFloat {
+        0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+    }
+
     /// The board's card is deliberately LIGHTER than the app's own surfaces, so a card
     /// keeps a visible edge on the near-black page. That relationship is the invariant;
-    /// the specific hex is not, and asserting the hex is why this test broke on a
-    /// palette change that preserved every relationship it cared about.
-    func testTheBoardCardIsLighterThanTheAppSurfaces() {
-        func lum(_ hex: String) -> CGFloat {
-            let c = NSColor(hex: hex).usingColorSpace(.sRGB)!
-            return 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
-        }
-        XCTAssertGreaterThan(lum(RoadmapTokens.cardBGHex.dark), lum("#1d1928"),
+    /// the specific hex is not, and asserting the hex is why this test broke on a palette
+    /// change that preserved every relationship it cared about.
+    ///
+    /// **Reads `CodepetTheme.surface` itself rather than a hardcoded `"#1d1928"`.** An
+    /// earlier draft hardcoded it — which is the same defect this plan just repaired one
+    /// task earlier: `OnboardingContent.Palette` duplicated three token values as
+    /// literals, the retint moved the tokens without moving the copies, and the palette
+    /// was genuinely split for three commits. A literal here would go stale the same way,
+    /// and the invariant would quietly stop being tested.
+    ///
+    /// Every value is rendered, so all four are measured through one pipeline and are
+    /// comparable.
+    @MainActor
+    func testTheBoardCardIsLighterThanTheAppSurfaces() throws {
+        let appSurface = lum(try rendered(CodepetTheme.surface, .dark))
+        let card       = lum(try rendered(RoadmapTokens.cardBG, .dark))
+        let chip       = lum(try rendered(RoadmapTokens.chipBG, .dark))
+        let chipEdge   = lum(try rendered(RoadmapTokens.chipBorder, .dark))
+        XCTAssertGreaterThan(card, appSurface,
                              "the board card must be lighter than `surface`/`cardRaised`")
-        XCTAssertGreaterThan(lum(RoadmapTokens.chipBGHex.dark), lum(RoadmapTokens.cardBGHex.dark),
+        XCTAssertGreaterThan(chip, card,
                              "the status chip sits ON the card, so it must be lighter still")
-        XCTAssertGreaterThan(lum(RoadmapTokens.chipBorderHex.dark), lum(RoadmapTokens.chipBGHex.dark),
+        XCTAssertGreaterThan(chipEdge, chip,
                              "the chip's edge must be lighter than its fill")
     }
 ```
+
+`RenderFailure` may not exist in `RoadmapPaletteTests.swift`; add `private enum RenderFailure: Error { case producedNothing }` inside the class if so, and `import SwiftUI` / `import AppKit` if absent.
+
+`RoadmapTokens.cardBG`, `.chipBG` and `.chipBorder` are the `Color.dyn` values built from the hex pairs (find them with `grep -n "static let cardBG" codepet/Views/CodepetTokens.swift`) — render those, not the `HexPair` strings.
 
 - [ ] **Step 2: Run it and confirm it fails**
 

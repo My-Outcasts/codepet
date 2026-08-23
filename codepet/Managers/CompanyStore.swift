@@ -370,6 +370,14 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // The moment an identity exists, and therefore the first moment a
+        // `companies/{uid}/diagnostics` write can be authorised. Everything recorded
+        // before now — the previous session's unclean exit, a chat-thread file that
+        // would not decode at init — has been sitting in the reporter's buffer waiting
+        // for exactly this. Without this line those two reports, the most valuable ones,
+        // would never leave the machine.
+        DiagnosticsReporter.shared.flush()
+        DiagnosticsBootstrap.runSelfTestIfRequested(uid: companyId)
         // Re-derived from THIS company's flag on every hydrate, so signing in as
         // someone else never inherits the previous founder's asked-ness (and never
         // re-asks a founder who already answered or skipped). Read synchronously and
@@ -1321,6 +1329,7 @@ final class CompanyStore: ObservableObject {
 
         var streamedText = ""
         var streamThrew = false
+        var streamError: Error?
         var receivedDone = false
         // The `.done` frame's actions, CAPTURED here and dispatched below — after the
         // tail has written this reply's text. Dispatching from inside the loop (the
@@ -1358,6 +1367,12 @@ final class CompanyStore: ObservableObject {
             }
         } catch {
             streamThrew = true
+            // The error object used to end here, unexamined: `streamThrew` is a Bool, so
+            // "network died" and "the function answered 500" were the same fact. Kept for
+            // the diagnostic below, which is reported only if the fallback ALSO fails —
+            // one document per turn that genuinely never got answered, not one per
+            // recovered hiccup.
+            streamError = error
         }
         guard companyId == cid else { return }
 
@@ -1385,6 +1400,13 @@ final class CompanyStore: ObservableObject {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
+            // The turn the founder experiences as a reply that never comes: the stream
+            // failed AND the non-streaming retry came back empty. Reported here rather
+            // than in the `catch`, so a recovered stream costs nothing.
+            if let event = ChatTurnDiagnostic.event(streamError: streamError,
+                                                    fallbackReplyWasNil: reply == nil) {
+                DiagnosticsReporter.shared.record(event)
+            }
             // The spec's refusal grammar, which this line did not follow: say what
             // happened, say what you did NOT do, and never bill a failure. The old
             // copy — "I can't reach my brain right now, try again in a bit" — did

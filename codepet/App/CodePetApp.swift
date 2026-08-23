@@ -32,6 +32,11 @@ struct CodePetApp: App {
         if !AppEnvironment.isRunningTests {
             FirebaseApp.configure()
             print("[Firebase] Configured successfully")
+            // After `configure()`, because the Firestore sink it installs needs an app
+            // to exist; and skipped under XCTest for the same reason Firebase is —
+            // which is also what keeps `DiagnosticsReporter.shared` sink-less, and
+            // therefore inert, in every other suite.
+            DiagnosticsBootstrap.start()
         }
 
         let composition = ReflectionComposition()

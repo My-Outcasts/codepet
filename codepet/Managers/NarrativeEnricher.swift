@@ -221,6 +221,13 @@ final class NarrativeEnricher: ObservableObject {
         let detail = error.map { String(describing: $0) } ?? "no_error"
         logger.error("turn enrich failed: turn=\(turnId) reason=\(reason.rawValue) error=\(detail)")
         print("[NarrativeEnricher] ✗ turn=\(turnId) reason=\(reason.rawValue) error=\(detail)")
+        // `reason` is the whole point of reporting this: `quota` across a beta is a
+        // capacity decision, `network` is not a bug, and `badResponse` is ours. `turnId`
+        // is deliberately NOT sent — it identifies one of the founder's coding turns and
+        // adds nothing a count does not, and turn ids embed a hash of the project path.
+        DiagnosticsReporter.shared.record(
+            kind: .handledError, site: .narrativeEnrich, error: error,
+            context: ["reason": reason.rawValue])
         enrichingTurns.remove(turnId)
         failedTurns[turnId] = reason
         return .failed(reason: reason)

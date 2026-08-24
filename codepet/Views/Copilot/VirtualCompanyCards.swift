@@ -868,51 +868,58 @@ struct VCRunCards: View {
                 // half a trade-off is not ending on the either/or — it is ending on one option,
                 // which is the "it's up to you" the rule exists to forbid. So the either/or is the
                 // one long thing that stays on the card.
-                label(lang == .vi ? "ĐÁNH ĐỔI CHỈ BẠN QUYẾT ĐƯỢC" : "THE TRADE-OFF ONLY YOU CAN MAKE")
+                // The trade-off keeps its position — LAST of the reading content, rule 5 —
+                // and loses its eyebrow. THE CALL is the only label this card needs; a
+                // second one directly above the closing paragraph was competing with it
+                // rather than orienting anyone. The extra top padding is what now says
+                // "this is the part you must decide".
                 Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
                 // The recommendation in full, the next action, the kill criteria and what nobody
                 // knew — in the reader every other document in the app opens into (founder's
                 // call: "the call should read like every other document").
-                if BriefDocument.hasMore(brief) {
-                    Button { readingCall = BriefDocument.document(brief, language: lang) } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text").font(.system(size: 11, weight: .semibold))
-                            Text(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call")
-                        }
-                        .font(CodepetTheme.inter(12.5, weight: .semibold))
-                        .foregroundColor(CodepetTheme.bodyText)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(CodepetTheme.hairline, lineWidth: 1))
-                        .hoverAffordance(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .cursorOnHover(.pointingHand)
-                    .padding(.top, 2)
-                }
                 // The cost line is NOT here: a run that failed or was budget-stopped
                 // still cost the founder money and never reaches this card. It renders
                 // once, for every outcome, at the bottom of the stack (`costRow`).
-                if lockedIn {
-                    Text("📌 " + (lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
-                                              : "Locked in — this decision now grounds the rest of the app."))
-                        .font(CodepetTheme.inter(12, weight: .medium))
-                        .foregroundColor(CodepetTheme.accentTeal)
-                } else if state.canLockIn {
-                    // Only offered when there is something to record — see `canLockIn`.
-                    Button(action: onLockIn) {
-                        Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
-                            .font(CodepetTheme.inter(13, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(CodepetTheme.accentPurple))
-                            .hoverAffordance(RoundedRectangle(cornerRadius: 8))
+                //
+                // One row, primary first. `Read the full call` used to be a FULL-WIDTH
+                // bordered button stacked ABOVE `Lock this decision in` — two competing
+                // blocks with the secondary action on top. It is a link now.
+                HStack(spacing: 14) {
+                    if lockedIn {
+                        Text("📌 " + (lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
+                                                  : "Locked in — this decision now grounds the rest of the app."))
+                            .font(CodepetTheme.inter(12, weight: .medium))
+                            .foregroundColor(CodepetTheme.accentTeal)
+                    } else if state.canLockIn {
+                        Button(action: onLockIn) {
+                            Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
+                                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(CodepetTheme.accentPurple))
+                        }
+                        .buttonStyle(.plain)
+                        .cursorOnHover(.pointingHand)
                     }
-                    .buttonStyle(.plain)
+                    if BriefDocument.hasMore(brief) {
+                        Button { readingCall = BriefDocument.document(brief, language: lang) } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text").font(.system(size: 11, weight: .semibold))
+                                Text(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call")
+                            }
+                            .font(CodepetTheme.inter(12.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.accentPurple)
+                        }
+                        .buttonStyle(.plain)
+                        .cursorOnHover(.pointingHand)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .padding(.top, 4)
             }
         }
     }

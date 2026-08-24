@@ -1402,13 +1402,15 @@ EOF
 
 **Files:** none — verification only.
 
-- [ ] **Step 1: Quit any running app**
+- [ ] **Step 1: Check for a running app — do NOT kill it**
 
 ```bash
-pkill -x codepet 2>/dev/null; ps -Ao args | grep -c "[c]odepet.app"
+ps -Ao pid,args | grep "[c]odepet.app" || echo "none running"
 ```
 
-Expected: `0`. A live instance holds the Firestore lock and kills the test host mid-run, with a different victim each time.
+A live instance holds the Firestore lock and can kill the test host mid-run, with a different victim each time. But **never `pkill`**: on this machine the running instance is frequently a *concurrent session's* app from another worktree, and killing it knocks over someone else's work.
+
+If an instance is running, read the path in its argv. If it is from **another worktree**, leave it alone and run the suite anyway — note in the report that a sibling instance was live, so a mid-run host death has a known cause. If it is from **this** worktree, ask Mona to quit it and wait; do not kill it yourself.
 
 - [ ] **Step 2: Run the whole suite**
 

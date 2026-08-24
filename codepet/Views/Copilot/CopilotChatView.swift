@@ -44,6 +44,20 @@ struct CopilotChatView: View {
     /// The department chip selected in the composer (nil = no focus). Threads into
     /// `sendChat(department:)` for the specialist handoff.
     @State private var selectedDept: Department?
+    /// The router's guess for the current draft, and the evidence behind it. Separate from
+    /// `selectedDept` so an explicit pick is never silently overwritten (spec §3.4).
+    ///
+    /// ONE value, not three parallel optionals — `DepartmentRouter.Suggestion` already bundles
+    /// `deptKey`, `tier` and `matched`, so a present guess with a missing tier is impossible
+    /// rather than papered over at the chip. Matches `ChatComposer.suggestion`.
+    @State private var suggestion: DepartmentRouter.Suggestion?
+    /// The founder pressed ✕. Holds for the current draft only — refusing once must not mean
+    /// re-refusing after every keystroke.
+    @State private var suggestionDismissed = false
+    /// Which department actually took the last turn, so a keyword-free follow-up can stay with
+    /// it. Reset on thread switch; this is the ONLY sticky state, and `selectedDept` still
+    /// clears on every send exactly as it does today.
+    @State private var lastActedDeptKey: String?
     /// Pinned context and attached files for the next message. Live here rather than
     /// in the store for the same reason `selectedDept` does — both are consumed by
     /// one send. PROTOTYPE: held and shown correctly; not yet threaded to the model.
@@ -330,6 +344,21 @@ struct CopilotChatView: View {
             showHistory = true
             companyStore.historyRequested = false
         }
+        // **The guess is re-derived, never accumulated.** Every keystroke re-runs the router
+        // against the whole draft, so the chip can only ever describe the words currently in
+        // the composer — there is no state to go stale between them.
+        .onChange(of: companyStore.chatDraft) { _, _ in refreshSuggestion() }
+        // `.build` suppresses the chip entirely (see `refreshSuggestion`), so switching modes
+        // has to re-run it in both directions: leaving `.build` must bring the guess back.
+        .onChange(of: mode) { _, _ in refreshSuggestion() }
+        .onChange(of: companyStore.activeThreadId) { _, _ in
+            // A new conversation owns nobody. Carry-over resets with the thread — otherwise a
+            // department that answered in the old thread would inherit the first turn of the
+            // new one. A ✕ belongs to the draft it refused, and that draft is gone too.
+            lastActedDeptKey = nil
+            suggestionDismissed = false
+            refreshSuggestion()
+        }
     }
 
     /// The dock's only chrome: a trailing pair of icon buttons — history (thread
@@ -453,6 +482,15 @@ struct CopilotChatView: View {
             pins: $pins,
             attachments: $attachments,
             selectedDept: $selectedDept,
+            suggestion: suggestion,
+            onDismissSuggestion: {
+                // An explicit refusal ends the conversation's ownership too — otherwise the
+                // dismissed department returns as carry-over on the very next keystroke, and
+                // the ✕ would read as broken.
+                suggestionDismissed = true
+                lastActedDeptKey = nil
+                suggestion = nil
+            },
             onSend: send,
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
@@ -777,6 +815,23 @@ struct CopilotChatView: View {
         inputFocused = true
     }
 
+    /// Re-derive the guess from the current draft. Cheap, pure, and called on every draft
+    /// change — there is no network and no persistence behind it.
+    ///
+    /// Suppressed in `.build`: that send does not read the department at all, so arming a chip
+    /// there would promise a handoff that cannot happen. Suppressed after a ✕ too, for the
+    /// current draft — see `suggestionDismissed`.
+    private func refreshSuggestion() {
+        guard mode != .build, !suggestionDismissed else {
+            suggestion = nil
+            return
+        }
+        suggestion = DepartmentRouter.suggest(text: companyStore.chatDraft,
+                                              tasks: companyStore.company.tasks,
+                                              lastActed: lastActedDeptKey,
+                                              language: lang)
+    }
+
     /// The hero card's buttons. Each is wired to something that already exists —
     /// no button here promises a surface the app does not have.
     ///
@@ -987,8 +1042,17 @@ struct CopilotChatView: View {
         // message it was made for can't go stale, so the sticky-focus problem stops existing
         // rather than needing to be signposted. Cleared for `.build` too — that send doesn't read
         // the department, and leaving one armed chip behind is the exact state this removes.
-        let dept = selectedDept
+        //
+        // An explicit pick outranks a guess, always. `selectedDept` still clears on every
+        // send — "one message, one handoff" is unchanged for a pick. Only the SUGGESTION
+        // carries over, and only via `lastActedDeptKey`, which the router re-derives against
+        // the next draft and any winner displaces (spec §5).
+        let dept = selectedDept ?? DepartmentCatalog.find(suggestion?.deptKey)
         selectedDept = nil
+        suggestion = nil
+        // The refusal belonged to the draft that just left the composer.
+        suggestionDismissed = false
+        if let dept { lastActedDeptKey = dept.key }
         // Same rule, same reason as the chip above: one message, one handoff. A pin
         // or an attachment that survived its send would re-send — and, now that the wire
         // carries them, re-bill — the same context on every later turn.

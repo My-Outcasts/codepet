@@ -8,9 +8,15 @@ final class DepartmentTopicsTests: XCTestCase {
     /// A single-word entry shorter than 3 characters, or one that is a stopword, is DEAD:
     /// `TextRelevance.tokenize` drops it, so it can never match and nothing says so. This is
     /// why the lexicon has no "ux", "ui" or "ci".
+    ///
+    /// Both this and `testNoEntryIsADepartmentName` walk `en + vi`, not `en`. The entire case
+    /// for shipping an empty `vi` table is that filling it later is "a data fill, not a
+    /// refactor" (spec §2.6) — which is only true if the two guards that stop the lexicon
+    /// rotting into dead entries and stolen turns actually SEE that fill. Iterating `en` alone
+    /// meant the Vietnamese table would arrive unguarded.
     func testEverySingleWordEntrySurvivesTheTokenizer() {
         for (key, vocab) in DepartmentTopics.map {
-            for term in vocab.en where !term.contains(" ") {
+            for term in (vocab.en + vocab.vi) where !term.contains(" ") {
                 XCTAssertGreaterThanOrEqual(term.count, 3,
                     "\(key): \"\(term)\" is under 3 chars — tokenize() drops it, so it can never match")
                 XCTAssertFalse(TextRelevance.stopwords.contains(term),
@@ -27,7 +33,7 @@ final class DepartmentTopicsTests: XCTestCase {
     func testNoEntryIsADepartmentName() {
         let names = Set(DepartmentCatalog.all.map { $0.name.lowercased() })
         for (key, vocab) in DepartmentTopics.map {
-            for term in vocab.en {
+            for term in (vocab.en + vocab.vi) {
                 XCTAssertFalse(names.contains(term),
                     "\(key): \"\(term)\" is a department name — tier 1 owns that word")
             }

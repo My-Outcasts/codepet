@@ -8,7 +8,12 @@ final class TextRelevanceTests: XCTestCase {
     func testTokenizeLowercasesDedupesAndDropsShortWords() {
         let tokens = TextRelevance.tokenize("Pricing pricing PRICING at $19 ok")
         XCTAssertTrue(tokens.contains("pricing"))
-        XCTAssertEqual(tokens.filter { $0 == "pricing" }.count, 1)
+        // Hand-traced: lowercasing folds the three spellings of "pricing" into one Set member,
+        // and "at"/""/"19"/"ok" are all under three characters — so the WHOLE set is one token.
+        // (The previous line here counted "pricing" inside a `Set<String>`, which is 1 or 0 by
+        // definition and could not fail whatever `tokenize` did. This one can: drop the
+        // lowercasing and the count is 3, drop the ≥3 filter and it is 4.)
+        XCTAssertEqual(tokens.count, 1, "expected exactly {pricing}; got \(tokens)")
         // Under three characters never survives — this is why the lexicon has no "ux"/"ui".
         XCTAssertFalse(tokens.contains("at"))
         XCTAssertFalse(tokens.contains("19"))

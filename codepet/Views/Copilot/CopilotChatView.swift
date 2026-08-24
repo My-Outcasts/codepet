@@ -427,8 +427,15 @@ struct CopilotChatView: View {
         companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty
     }
 
-    /// **Whether the tentative chip can be SEEN on the screen currently rendered** — and
-    /// therefore whether a guess applies at all.
+    /// **Whether the composer, when it is what the slot renders, gives the tentative chip a
+    /// place to appear** — and therefore whether a guess applies at all.
+    ///
+    /// It is deliberately NOT "is the chip on screen right now": while `showHistory` is true
+    /// the slot renders `ThreadListView` INSTEAD of the composer and this still returns true.
+    /// That is harmless rather than wrong — the thread list has no composer to type in, so
+    /// neither `send()` nor a draft change can be reached from it — but the property must not
+    /// be read as a live visibility answer by the next caller, which is what this paragraph is
+    /// here to stop.
     ///
     /// `ChatComposer` renders `departmentControl` only when `showsDeptChips || selectedDept
     /// != nil`, so on the two-mode hero the dashed chip and its ✕ never appear. The send
@@ -883,7 +890,17 @@ struct CopilotChatView: View {
 
     /// Re-derive the chip's guess from the current draft. Called on every draft change —
     /// the guess is re-derived, never accumulated.
+    ///
+    /// **An emptied draft ends the refusal.** `suggestionDismissed` is scoped to the draft it
+    /// was made against (spec §6: it clears "on send or when the draft empties"), but it was
+    /// only ever reset in `send()` and on thread switch. So ✕ → select-all-delete → type a
+    /// completely different message left routing silently OFF for the rest of the session,
+    /// with the flag's own comment claiming otherwise. Clearing it here is the second half of
+    /// that scope: a refusal cannot outlive the words it refused.
     private func refreshSuggestion() {
+        if companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            suggestionDismissed = false
+        }
         suggestion = guess(for: companyStore.chatDraft, visible: showsDeptChips)
     }
 

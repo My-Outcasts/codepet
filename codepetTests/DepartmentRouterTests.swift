@@ -13,6 +13,36 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertEqual(s?.tier, .addressed)
     }
 
+    /// Spec §8 asks for a tier-order test proving tier 1 wins **even when tier 2 would pick a
+    /// DIFFERENT department**. `testAddressedWins` cannot: "ask marketing about the launch"
+    /// has tier 1 and tier 2 both landing on `mkt` ("launch" is in mkt's lexicon), so it stays
+    /// green with the tiers swapped. This fixture genuinely splits them.
+    ///
+    /// Arithmetic for "ask design about the pricing page". Tier 1: `mentionedDeptKey` finds the
+    /// addressed name "design". Tier 2, had it run: tokens are {ask, design, pricing, page}
+    /// ("about"/"the" are stopwords). "design" is a department NAME and so is absent from every
+    /// lexicon by construction (`testNoEntryIsADepartmentName`); "pricing" is fin's, scoring
+    /// `lexiconWeight` = 3. "page" is not a term — mkt's entry is the PHRASE "landing page",
+    /// which is not present. So fin 3, every other department 0, clearing floor (3) and margin
+    /// (3 - 0 >= 2): tier 2 alone returns **fin**, asserted below rather than asserted about.
+    ///
+    /// Reorder `suggest` to score before it checks the name and the first assertion goes red
+    /// with `fin`/`.topical` — which is the entire claim.
+    func testAddressedWinsOverADifferentTopicalWinner() {
+        let s = DepartmentRouter.suggest(text: "ask design about the pricing page",
+                                         tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(s?.deptKey, "design")
+        XCTAssertEqual(s?.tier, .addressed)
+
+        // The other half of the proof: the same words, minus the address, really do go
+        // somewhere else. Without this the test would pass on a fixture nobody checked.
+        let topicalOnly = DepartmentRouter.suggest(text: "what about the pricing page",
+                                                   tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(topicalOnly?.deptKey, "fin",
+                       "fixture is void unless tier 2 picks a DIFFERENT department")
+        XCTAssertEqual(topicalOnly?.tier, .topical)
+    }
+
     func testNothingToGoOnYieldsNoSuggestion() {
         XCTAssertNil(DepartmentRouter.suggest(text: "hello",
                                               tasks: [], lastActed: nil, language: .en))
@@ -194,6 +224,54 @@ final class DepartmentRouterTests: XCTestCase {
 
         XCTAssertNil(DepartmentRouter.suggest(text: text, tasks: [], lastActed: nil, language: .vi),
                      "identical tokens must not score once language is .vi")
+    }
+
+    /// Nested vocabulary entries are ONE concept and must score once — spec §4.1 defines the
+    /// lexicon score as a set intersection, and three pairs nest: "burn"/"burn rate",
+    /// "terms"/"terms of service", "privacy"/"privacy policy".
+    ///
+    /// Each fixture below sets a nested phrase against a rival department holding exactly ONE
+    /// ordinary lexicon hit, so it asserts the score through the only observable the router
+    /// has: the margin.
+    ///   • "our burn rate versus the layout" — fin {burn rate} = 3, design {layout} = 3. Tied,
+    ///     so the margin (2) refuses both. Counted per term, fin is {burn, burn rate} = 6
+    ///     against design's 3, a 3-point lead that clears the margin and routes to fin.
+    ///   • "do the terms of service need a pricing clause" — legal {terms of service} = 3 vs
+    ///     fin {pricing} = 3. Per term, legal is {terms, terms of service} = 6 and wins by 3.
+    ///     This is the sentence the review named: a genuine two-department question that a
+    ///     double count turned into a confident wrong answer.
+    ///   • "does the privacy policy mention pricing" — legal {privacy policy} = 3 vs fin
+    ///     {pricing} = 3. Per term, legal = 6.
+    ///
+    /// LOAD-BEARING: delete the `fired.contains(where:)` skip in `score` and all three go red,
+    /// each returning the nesting department where there must be no suggestion. Verified by
+    /// reverting the dedupe and running the suite, not by reasoning about it.
+    func testNestedVocabularyEntriesScoreAsOneConcept() {
+        XCTAssertNil(
+            DepartmentRouter.suggest(text: "our burn rate versus the layout",
+                                     tasks: [], lastActed: nil, language: .en),
+            "\"burn\" + \"burn rate\" is one concept; fin must tie design, not beat it")
+        XCTAssertNil(
+            DepartmentRouter.suggest(text: "do the terms of service need a pricing clause",
+                                     tasks: [], lastActed: nil, language: .en),
+            "\"terms\" + \"terms of service\" is one concept; legal must tie fin, not beat it")
+        XCTAssertNil(
+            DepartmentRouter.suggest(text: "does the privacy policy mention pricing",
+                                     tasks: [], lastActed: nil, language: .en),
+            "\"privacy\" + \"privacy policy\" is one concept; legal must tie fin, not beat it")
+    }
+
+    /// The dedupe must not silence the phrase — it still fires, once, and it is the LONGER
+    /// term that gets reported. `matched` is founder-facing ("you mentioned …"), so naming
+    /// "burn rate" rather than the bare "burn" the table happens to list first is the point of
+    /// walking longest-first rather than merely counting a set.
+    func testANestedPhraseStillFiresAndReportsTheSpecificTerm() {
+        let s = DepartmentRouter.suggest(text: "our burn rate is high",
+                                         tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(s?.deptKey, "fin")
+        XCTAssertEqual(s?.tier, .topical)
+        XCTAssertEqual(s?.matched, "burn rate",
+                       "the hover must name the specific phrase, not the substring")
     }
 
     // MARK: - Tier 3: carry-over

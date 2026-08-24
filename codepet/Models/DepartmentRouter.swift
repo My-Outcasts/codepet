@@ -101,30 +101,48 @@ enum DepartmentRouter {
         return false
     }
 
-    /// Score one department, returning the total and the first term that fired.
+    /// Score one department, returning the total and the most specific term that fired.
     ///
     /// `taskTokens` is the tokenized titles of this department's own tasks, computed once per
     /// `suggest` call rather than once per department per call — see `suggest`.
+    ///
+    /// **One concept, one hit.** Spec §4.1 defines the lexicon score as a set INTERSECTION, and
+    /// three vocabulary pairs nest — `"burn"` / `"burn rate"`, `"terms"` / `"terms of service"`,
+    /// `"privacy"` / `"privacy policy"`. Counting per term made a single phrase score twice:
+    /// "our burn rate is high" gave fin 6 off one idea. That is not just a bigger number, it is
+    /// a false MARGIN — "do the terms of service need a pricing clause" scored legal 6 vs fin 3
+    /// and routed, where a genuine near-tie should have stayed with byte. So terms are walked
+    /// longest-first and a shorter term contained in one already matched does not score again.
+    /// The vocabulary is not the bug and is deliberately untouched; the counting was.
+    ///
+    /// Longest-first also fixes what `matched` reports: the founder-facing hover names the more
+    /// specific phrase ("burn rate") rather than whichever term the table happened to list
+    /// first ("burn").
     private static func score(deptKey: String,
                               tokens: Set<String>,
                               raw: String,
                               taskTokens: Set<String>,
                               language: AppLanguage) -> (total: Int, matched: String?) {
-        var hits = 0
-        var matched: String?
-        for term in DepartmentTopics.terms(for: deptKey, language: language) {
+        // Length descending, then alphabetical, so the walk order is total and deterministic —
+        // a scoring pass whose answer depended on dictionary order would make the margin
+        // untestable, exactly as the ranking sort below already argues.
+        let terms = DepartmentTopics.terms(for: deptKey, language: language)
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
+
+        var fired: [String] = []
+        for term in terms {
             let hit = term.contains(" ")
                 ? contains(phrase: term, in: raw)
                 : tokens.contains(term)
-            if hit {
-                hits += 1
-                if matched == nil { matched = term }
-            }
+            guard hit else { continue }
+            // Subsumed by a longer term already counted — same concept, already paid for.
+            if fired.contains(where: { $0.contains(term) }) { continue }
+            fired.append(term)
         }
 
         let taskScore = min(TextRelevance.overlap(tokens, taskTokens), taskScoreCap)
 
-        return (lexiconWeight * hits + taskWeight * taskScore, matched)
+        return (lexiconWeight * fired.count + taskWeight * taskScore, fired.first)
     }
 
     /// The department to suggest, or nil to leave the turn with the host.

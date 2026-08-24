@@ -357,7 +357,17 @@ struct ChatComposer: View {
                 // "Anyone" over a pick that already isn't there. Without this, clicking the
                 // already-checked-looking "Anyone" row while a suggestion is showing did
                 // nothing at all, and the guess survived a founder explicitly rejecting it.
+                //
+                // The `shown` guard is the other half, and it is why this row branches on
+                // `shown` exactly as its own checkmark two lines below does. The `✕` gets the
+                // guard for free — it is only BUILT when `shown != nil` — but this row is
+                // always present, so branching on `armed` alone made an idle poke at the
+                // already-checked "Anyone" refuse a guess that was never there: it set
+                // `suggestionDismissed` and nilled `lastActedDeptKey`, killing carry-over and
+                // suppressing routing for the rest of the draft. With nothing shown, "Anyone"
+                // is already the answer and clicking it is a no-op.
                 Button {
+                    guard shown != nil else { return }
                     if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
                 } label: {
                     if shown == nil {
@@ -422,8 +432,11 @@ struct ChatComposer: View {
                 // The `✕` dismisses a guess or clears a pick — two different acts, and the
                 // tooltip has to say which. The innermost `.help()` wins over the capsule's,
                 // so without this ternary the founder hovering the `✕` on a suggestion (the
-                // control they reach for exactly when the guess looks wrong) always read
-                // "Clear the department" and never the reason the pet was suggested.
+                // control they reach for exactly when the guess looks wrong) read "Clear the
+                // department" — a description of the OTHER act. The ternary makes it say
+                // "Dismiss this suggestion". It does not restore the reason the pet was
+                // suggested: that sentence lives on the capsule's own `.help` below, and
+                // hovering the `✕` still shadows it.
                 .help(armed == nil ? DepartmentMenu.dismissSuggestionHelp(lang)
                                     : DepartmentMenu.clearHelp(lang))
             }
@@ -436,8 +449,11 @@ struct ChatComposer: View {
         .overlay(
             Capsule().strokeBorder(
                 shown?.accent ?? CodepetTheme.hairline,
-                // `suggestedDept` is already nil whenever `armed != nil` (see its definition
-                // above), so that conjunct could never be false when this one is true.
+                // `suggestedDept` alone is the whole dashed test: it is derived from
+                // `activeSuggestion`, which is already nil whenever `armed != nil` (see its
+                // definition above). So "a guess is showing" and "nothing is armed" are the
+                // same condition here, and writing the second one out again would only
+                // suggest they could disagree.
                 style: suggestedDept != nil
                     ? StrokeStyle(lineWidth: 1, dash: [3, 2])
                     : StrokeStyle(lineWidth: 1)

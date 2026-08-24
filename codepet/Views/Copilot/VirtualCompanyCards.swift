@@ -1,6 +1,26 @@
 // codepet/Views/Copilot/VirtualCompanyCards.swift
 import SwiftUI
 
+/// Contract rule 7: confidence as dots, never a number — a number implies false
+/// precision. File scope (not nested in `VCRunCards`) so `DepartmentRow` — its own
+/// nested struct — can use it too, giving rule 7 one implementation rather than two
+/// that can drift.
+struct VCConfidenceDots: View {
+    let value: Int
+
+    var body: some View {
+        // Clamped defensively; the wire contract guarantees 1..5.
+        let n = max(0, min(5, value))
+        HStack(spacing: 3) {
+            ForEach(0..<5, id: \.self) { i in
+                Circle()
+                    .fill(i < n ? CodepetTheme.accentPurple : CodepetTheme.hairline)
+                    .frame(width: 6, height: 6)
+            }
+        }
+    }
+}
+
 /// The room, rendered inside the chat. Stacked vertically because the dock is
 /// 380pt wide — positions cannot sit in columns here, so they read as a sequence.
 struct VCRunCards: View {
@@ -11,6 +31,12 @@ struct VCRunCards: View {
     /// cannot un-consume it.
     let lockedIn: Bool
     let onLockIn: () -> Void
+    /// Test seam only. `Disclosure`'s `open` is `@State`, seeded once at first render —
+    /// a render test builds a fresh view hierarchy every time, so there is no other way
+    /// to observe the "What each department said" disclosure's *contents* without a
+    /// production change reaching in this far. Every real call site omits it and gets the
+    /// normal folded-closed behaviour.
+    var openDepartmentsForTesting: Bool = false
 
     @Environment(\.uiLanguage) private var lang
     /// The call, opened in the reader every other document in the app opens into.
@@ -62,7 +88,8 @@ struct VCRunCards: View {
                 // in-flight rendering only, where there is no narrative to duplicate.
                 landedDisagreement(brief)
                 Disclosure(title: (lang == .vi ? "Từng phòng ban đã nói gì" : "What each department said")
-                            + " · \(state.agents.count)") {
+                            + " · \(state.agents.count)",
+                           initiallyOpen: openDepartmentsForTesting) {
                     departmentsSaid
                 }
                 if let routing = state.routing {
@@ -352,7 +379,7 @@ struct VCRunCards: View {
                 }
                 Spacer(minLength: 6)
                 // Contract rule 7: dots, never a number.
-                if let position { confidenceDots(position.confidence) } else { statusPill(entry.status) }
+                if let position { VCConfidenceDots(value: position.confidence) } else { statusPill(entry.status) }
             }
             if let position {
                 // One line at rest, the whole thing on tap.
@@ -384,10 +411,13 @@ struct VCRunCards: View {
     /// summarising them into one paragraph, and a disclosure is a place to put them, not a
     /// licence to condense them.
     private var departmentsSaid: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(state.agents, id: \.agentId) { meta in
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(state.agents.enumerated()), id: \.element.agentId) { i, meta in
+                if i > 0 {
+                    Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                }
                 if let position = state.positions[meta.agentId] {
-                    positionCard(meta, position)
+                    positionRow(meta, position)
                 }
                 if let error = state.agentErrors[meta.agentId] {
                     errorRow(meta, error)
@@ -514,7 +544,16 @@ struct VCRunCards: View {
     private struct Disclosure<Content: View>: View {
         let title: String
         @ViewBuilder var content: Content
-        @State private var open = false
+        @State private var open: Bool
+
+        /// `initiallyOpen` defaults closed for every real call site. It exists so a
+        /// render test can seed a disclosure open without reaching into `@State` from
+        /// outside the view — see `VCRunCards.openDepartmentsForTesting`.
+        init(title: String, initiallyOpen: Bool = false, @ViewBuilder content: () -> Content) {
+            self.title = title
+            self.content = content()
+            self._open = State(initialValue: initiallyOpen)
+        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
@@ -632,33 +671,88 @@ struct VCRunCards: View {
         }
     }
 
-    private func positionCard(_ meta: VCAgentMeta, _ position: VCPosition) -> some View {
-        MessageCard(hue: accent(meta)) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(displayName(meta)).font(CodepetTheme.sectionName())
-                        .foregroundColor(CodepetTheme.primaryText)
-                    Text(stanceLabel(position.stance))
-                        .font(CodepetTheme.inter(11, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Capsule().fill(accent(meta).opacity(0.12)))
-                        .foregroundColor(accent(meta))
-                    Spacer()
-                    // Contract rule 7: confidence as dots, not a number — a number
-                    // implies false precision.
-                    confidenceDots(position.confidence)
+    /// One department, one line until asked.
+    ///
+    /// It was a `MessageCard(hue:)` carrying five things at once: name, stance pill,
+    /// confidence dots, the position, "costs their department", and sometimes a
+    /// blocker. Three of those stacked read denser than the call they sat beneath.
+    ///
+    /// Rule 2 — never summarise the positions — is better served by this, not worse. The
+    /// three stances now sit adjacent instead of separated by paragraphs, so the split is
+    /// legible at a glance rather than after reading three panels. Nothing is summarised:
+    /// every word is one click away, and the stance and confidence never move.
+    private func positionRow(_ meta: VCAgentMeta, _ position: VCPosition) -> some View {
+        DepartmentRow(
+            name: displayName(meta),
+            stance: stanceLabel(position.stance),
+            hue: accent(meta),
+            confidence: position.confidence,
+            position: position.position,
+            cost: (lang == .vi ? "Cái này khiến họ mất: " : "Costs their department: ")
+                  + position.costToMyDept,
+            blocker: position.hardBlocker)
+    }
+
+    /// Chevron, name, stance, dots — then everything else behind the row.
+    ///
+    /// A separate small view rather than reusing `Disclosure`: that one draws its header
+    /// as a bordered `surface` pill, which would put a border back on every department
+    /// and undo the point of this change.
+    private struct DepartmentRow: View {
+        let name: String
+        let stance: String
+        let hue: Color
+        let confidence: Int
+        let position: String
+        let cost: String
+        let blocker: String?
+        @State private var open = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 7) {
+                Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: open ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                        // NOT `sectionName()` — that is `inter(25)`, and a 25pt department
+                        // name is a large part of why the current cards feel heavy. In the
+                        // screenshots "Finance" renders bigger than the decision headline
+                        // above it, which inverts the hierarchy. A row needs a row-sized name.
+                        Text(name).font(CodepetTheme.inter(13.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                        Text(stance)
+                            .font(CodepetTheme.inter(11, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(hue.opacity(0.12)))
+                            .foregroundColor(hue)
+                        Spacer(minLength: 8)
+                        // Rule 7: dots, never a number.
+                        VCConfidenceDots(value: confidence)
+                    }
+                    .contentShape(Rectangle())
                 }
-                Text(position.position).font(CodepetTheme.inter(14.5)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.bodyText)
-                Text((lang == .vi ? "Cái này khiến họ mất: " : "Costs their department: ")
-                     + position.costToMyDept)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
-                if let blocker = position.hardBlocker {
-                    Text("🔒 " + blocker)
-                        .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
+                .buttonStyle(.plain)
+                .cursorOnHover(.pointingHand)
+                if open {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(position).font(CodepetTheme.inter(14.5)).lineSpacing(6)
+                            .foregroundColor(CodepetTheme.bodyText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(cost).font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let blocker {
+                            Text("🔒 " + blocker)
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.primaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.leading, 17)
                 }
             }
+            .padding(.horizontal, 12).padding(.vertical, 9)
         }
     }
 
@@ -851,7 +945,7 @@ struct VCRunCards: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // Contract rule 7: confidence as dots, not a number. The REASON moves to the
                 // reader — it was 55 words of grey text indented under the dots.
-                confidenceDots(brief.confidence)
+                VCConfidenceDots(value: brief.confidence)
                 if brief.unresolved {
                     // Contract rule 6: unresolved is a valid outcome, not an error —
                     // present it as an honest answer, the trade-off is the founder's to make.
@@ -950,19 +1044,6 @@ struct VCRunCards: View {
     private func label(_ text: String) -> some View {
         Text(text).font(CodepetTheme.inter(10, weight: .semibold)).tracking(0.5)
             .foregroundColor(CodepetTheme.mutedText)
-    }
-
-    // Contract rule 7: dots, not a number — a number implies false precision.
-    // Clamped defensively; the wire contract guarantees 1..5.
-    private func confidenceDots(_ confidence: Int) -> some View {
-        let n = max(0, min(5, confidence))
-        return HStack(spacing: 3) {
-            ForEach(0..<5, id: \.self) { i in
-                Circle()
-                    .fill(i < n ? CodepetTheme.accentPurple : CodepetTheme.hairline)
-                    .frame(width: 6, height: 6)
-            }
-        }
     }
 
     /// A founder-facing name for an agent we have only an id for — the `excluded`

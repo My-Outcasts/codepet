@@ -23,12 +23,42 @@ final class VCRoomLayoutTests: XCTestCase {
     /// screenshots. Built through `apply` like `VirtualCompanyInterviewTests.finishedRun`.
     private func landedRoom() -> VirtualCompanyRunState {
         var s = VirtualCompanyRunState()
+        // Without this, `state.runId` stays nil, `canLockIn` is false, and every render
+        // this fixture produces is missing `theCall`'s primary action ("Lock this
+        // decision in"). Placed first to match the real event order (runStarted before
+        // routing before positions before the brief).
+        s.apply(.runStarted(runId: "r1"))
         let routing: [String: Any] = ["decision": "multi_agent",
                                       "agents": ["finance", "marketing", "engineering"],
                                       "real_question": "Should we ship the paywall before launch?",
                                       "request_type": "DECISION"]
         s.apply(.routing(try! JSONDecoder().decode(
             VCRouting.self, from: try! JSONSerialization.data(withJSONObject: routing))))
+        // Without agent_start/agent_position, `state.agents` and `state.positions` stay
+        // empty and `departmentsSaid` renders nothing REGARDLESS of the disclosure's
+        // open/closed state — a "no department card" measurement would be meaningless in
+        // the other direction: green with nothing rendered to test. Three real positions,
+        // matching the conflicts declared below and the docstring's claim that this room
+        // has "three departments that disagree".
+        s.apply(.agentStart(VCAgentMeta(agentId: "finance", departmentKey: "fin")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "finance", departmentKey: "fin"),
+            VCPosition(stance: "do_not_proceed",
+                       position: "We need revenue proof before turning billing on.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 4,
+                       costToMyDept: "Delays the quarter's revenue forecast.", hardBlocker: nil)))
+        s.apply(.agentStart(VCAgentMeta(agentId: "marketing", departmentKey: "mkt")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "marketing", departmentKey: "mkt"),
+            VCPosition(stance: "proceed",
+                       position: "Launch day is the only day the product gets free press attention.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 3,
+                       costToMyDept: "Loses the press hook if the date slips.", hardBlocker: nil)))
+        s.apply(.agentStart(VCAgentMeta(agentId: "engineering", departmentKey: "eng")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "engineering", departmentKey: "eng"),
+            VCPosition(stance: "proceed_with_conditions",
+                       position: "We can ship the price page now but won't commit a billing-on date yet.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 3,
+                       costToMyDept: "Blocks the next two sprints' roadmap items.",
+                       hardBlocker: "Stripe webhook integration is untested end to end.")))
         // Populates `pairs` (non-ALIGNED conflicts) so the block actually renders the
         // disagreement (orange) branch rather than the agreement (teal) one — without
         // this, `state.conflicts` stays empty, `pairs.isEmpty` is true, and the block
@@ -49,6 +79,9 @@ final class VCRoomLayoutTests: XCTestCase {
             nextAction: VCNextAction(action: "a", owner: "Founder"),
             whatWeDontKnow: "u", unresolved: true)))
         s.apply(.done(runId: "r1", unresolved: true, skipped: nil))
+        // The fixture must stay representative: assert the primary action is offered so
+        // it can never silently regress back to the unrepresentative version.
+        XCTAssertTrue(s.canLockIn, "landedRoom() must offer the lock-in action to be representative")
         return s
     }
 
@@ -73,8 +106,9 @@ final class VCRoomLayoutTests: XCTestCase {
     /// The room, rendered at a width close to the chat column.
     @MainActor
     func renderRoom(_ state: VirtualCompanyRunState, scheme: ColorScheme,
-                    name: String) throws -> (rep: NSBitmapImageRep, url: URL) {
-        let room = VCRunCards(state: state, lockedIn: false, onLockIn: {})
+                    name: String, openDepartments: Bool = false) throws -> (rep: NSBitmapImageRep, url: URL) {
+        let room = VCRunCards(state: state, lockedIn: false, onLockIn: {},
+                              openDepartmentsForTesting: openDepartments)
             .frame(width: 620, alignment: .topLeading)
             .background(CodepetTheme.pageBackground)
             .environment(\.colorScheme, scheme)
@@ -131,5 +165,40 @@ final class VCRoomLayoutTests: XCTestCase {
         XCTAssertLessThan(n, 500,
                           "the disagreement block still renders as an orange tinted card "
                           + "(\(n) matching pixels). See \(url.path)")
+    }
+
+    /// No department renders as a tinted card.
+    ///
+    /// `positionCard` wrapped each department in `MessageCard(hue: accent(meta))` — a
+    /// tinted, bordered panel carrying a name, a stance pill, confidence dots, the
+    /// position, a "costs their department" line and an optional blocker. Three stacked
+    /// were denser than the summary above them.
+    ///
+    /// Checked against every department hue the room can use, because a single hue would
+    /// pass while the other two still drew cards.
+    @MainActor
+    func testNoDepartmentRendersAsACard() throws {
+        let (rep, url) = try renderRoom(landedRoom(), scheme: .dark, name: "room-depts-dark",
+                                        openDepartments: true)
+        for (name, hue) in [("gold", CodepetTheme.accentGold),
+                            ("orange", CodepetTheme.accentOrange),
+                            ("blue", CodepetTheme.accentBlue),
+                            ("teal", CodepetTheme.accentTeal),
+                            ("green", CodepetTheme.accentGreen),
+                            ("pink", CodepetTheme.accentPink)] {
+            let fill = try cardFill(hue: hue, scheme: .dark)
+            let n = count(rep, matching: fill, tolerance: 0.02)
+            print("[measure] \(name) card-fill pixels = \(n)")
+            // Measured with the disclosure forced open (`openDepartments: true` — without
+            // that the disclosure defaults closed and every count is a vacuous 0 whether
+            // or not `MessageCard` wraps the row): RED gold 54999 / orange 54385 /
+            // blue 63893 (the three departments this fixture actually uses; teal/green/pink
+            // stay 0 in both states — this fixture never routes to ops/product/support) /
+            // GREEN 0 across all six. Threshold sits far below the smallest meaningful RED
+            // (54385, ~272x headroom) and comfortably above 0 to absorb antialiasing noise.
+            XCTAssertLessThan(n, 200,
+                              "a department still renders as a \(name) tinted card "
+                              + "(\(n) matching pixels). See \(url.path)")
+        }
     }
 }

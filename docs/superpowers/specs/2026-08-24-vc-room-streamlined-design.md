@@ -2,6 +2,9 @@
 
 **Date:** 2026-08-24
 **Status:** approved, not implemented
+**Amended:** 2026-08-24 — §1 originally merged the two summary cards. Reading `theCall`'s own
+doc comment showed that split was a *deliberate* decision with a rationale that speaks to the
+founder's own complaint, so the merge is withdrawn. Marked **[A1]** below.
 **Surface:** `codepet/Views/Copilot/VirtualCompanyCards.swift` (1018 lines)
 
 ## Why
@@ -58,31 +61,67 @@ Rule 5 is the non-obvious one. The intuitive order — decision, trade-off, then
 that caused it — is forbidden, because the card would then end on conflict rather than on the
 founder's choice.
 
-## 1. Merge the two summary cards into one
+## 1. One border, two blocks — the merge is withdrawn **[A1]**
 
-`theCall(brief)` and `landedDisagreement(brief)` become a single card.
+`theCall(brief)` and `landedDisagreement(brief)` stay **separate blocks**. `theCall` keeps its
+`MessageCard`; the disagreement block loses its border and tint and sits directly beneath as a
+continuation.
+
+**Why the merge was withdrawn.** `theCall`'s doc comment records the split as deliberate:
+
+> `the_real_disagreement` deliberately does NOT live here — it has its own always-visible block
+> (rule 3) so this card stays the size of a decision rather than a document.
+
+Three things make that decision right, and all three were missed when this spec was first
+approved:
+
+1. **The rationale is the founder's own complaint.** Merging makes one document-sized card out
+   of two moderate ones. "Too cluttered" is not answered by a bigger card.
+2. **Both blocks carry a long unclamped paragraph.** `tradeoffFounderMustOwn` runs ~100 words
+   and is deliberately never clamped — a note records the founder's Aug 7 ruling that clamping
+   it "cuts before the 'or'", which is the "it's up to you" rule 5 forbids. `theRealDisagreement`
+   is verbatim under rule 3, also unclamped. One card would carry both.
+3. **The disagreement block is polymorphic.** Its label flips to `WHERE THEY AGREE` and its hue
+   from orange to **teal** when `state.conflicts` has no non-ALIGNED pairs. Folding it into a
+   purple card destroys that signal and means `THE CALL` sometimes contains an agreement.
+
+**What actually changes**, since the founder's complaint was competing panels rather than card
+count: the second panel stops competing. It keeps its position and its content and loses only
+its border and fill.
 
 ```
-┌─────────────────────────────────────────────────┐
-│ THE CALL                                        │
-│ Put the price on the page at launch and switch  │
-│ billing on two weeks later.                     │
-│                                                 │
-│ ●●●○○   UNRESOLVED — YOUR CALL                  │
-│                                                 │
-│ Finance ↔ Marketing · blocker                   │
-│ Engineering ↔ Marketing · tension               │
-│ Whether a price is a promise you must be able   │
-│ to keep, or a positioning statement you are     │
-│ allowed to revise.                   (verbatim) │
-│                                                 │
-│ Either you launch with a number you may have to │
-│ change, or you launch without one and give up   │
-│ the only day the product gets free attention.   │
-│                                                 │
-│ [ Lock this decision in ]    Read the full call │
-└─────────────────────────────────────────────────┘
+┌─ THE CALL ──────────────────────────────────────┐
+│ Put the price on the page at launch and switch   │
+│ billing on two weeks later.                      │
+│                                                  │
+│ ●●●○○   UNRESOLVED — YOUR CALL                   │
+│                                                  │
+│ Either you launch with a number you may have to  │
+│ change, or you launch without one and give up    │
+│ the only day the product gets free attention.    │
+│                                                  │
+│ [ Lock this decision in ]    Read the full call  │
+└──────────────────────────────────────────────────┘
+  Finance ↔ Marketing · blocker
+  Engineering ↔ Marketing · tension
+  Whether a price is a promise you must be able to
+  keep, or a positioning statement you are allowed
+  to revise.                             (verbatim)
 ```
+
+The trade-off still sits last inside the card — rule 5. The disagreement follows *outside* it,
+which does not violate rule 5 because the rule governs where the presentation of the **call**
+ends, and the call is the card.
+
+**Colour carries the polymorphism now that the border is gone.** Orange text for a
+disagreement, teal for `WHERE THEY AGREE`.
+
+**⚠️ The one risk this introduces.** Dropping both the border *and* the label leaves the block
+identified only by its pairs line and its hue. `Finance ↔ Marketing · blocker` reads
+unambiguously as disagreement; the ALIGNED case — `agreedLine(agreed)` — may not read as
+agreement without its `WHERE THEY AGREE` label. **If it does not, restore the label for that
+case only.** This is a handoff question, not an assumption to ship: the aligned outcome is
+documented in the contract as a normal flow, not an edge case.
 
 **One eyebrow, not three.** Today `THE CALL`, `THE TRADE-OFF ONLY YOU CAN MAKE` and
 `THE REAL DISAGREEMENT` compete as three ALL-CAPS labels across two cards. Only `THE CALL`
@@ -150,9 +189,11 @@ property the change did not affect.
 
 What to assert:
 
-1. **The resting landed state renders exactly one card.** Count bordered regions in a render
-   of the landed room with all disclosures closed. Fails before this change (two), passes
-   after (one). This is the only assertion that directly proves the merge.
+1. **The resting landed state renders exactly one bordered region.** Count bordered regions in
+   a render of the landed room with all disclosures closed. Fails before this change (two —
+   `theCall` and `landedDisagreement` are both `MessageCard`s), passes after (one). This proves
+   the second panel stopped competing without proving anything about a merge, which no longer
+   happens.
 2. **The department list renders no per-department card border.** Sample the region a
    department row occupies and assert it is the pane surface, not a tinted fill.
 3. **Rule 3 is not violated by the merge** — `the_real_disagreement` text appears in full in

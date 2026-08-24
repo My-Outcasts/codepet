@@ -176,7 +176,23 @@ enum DepartmentRouter {
             }
         }
 
-        // Tier 4 — nothing to go on. Tier 3 lands above this in Task 5.
+        // Tier 3 — carry-over. Nothing in this draft, but a department owns the conversation.
+        //
+        // This is the narrow half of a rule that was deliberately removed once. The chip is
+        // cleared on every send under "One message, one handoff" (CopilotChatView) because a
+        // durable, silent selection had Nova answering pricing questions with nothing on
+        // screen saying why. That bug had two halves — the pick was never re-derived, and
+        // nothing displaced it. A suggestion is re-derived from the current draft every turn
+        // and is displaced by any winner above, so only the useful half survives here. The
+        // caller keeps explicit picks one-message-one-handoff.
+        //
+        // A key with no pet is not carried forward: it could never be suggested anyway, and
+        // carrying it would keep a dead department "in charge" invisibly.
+        if let lastActed, DepartmentCompanions.companionId(for: lastActed) != nil {
+            return Suggestion(deptKey: lastActed, tier: .carryOver, matched: nil)
+        }
+
+        // Tier 4 — nothing to go on.
         return nil
     }
 }

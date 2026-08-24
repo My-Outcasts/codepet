@@ -195,4 +195,49 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertNil(DepartmentRouter.suggest(text: text, tasks: [], lastActed: nil, language: .vi),
                      "identical tokens must not score once language is .vi")
     }
+
+    // MARK: - Tier 3: carry-over
+
+    func testKeywordFreeFollowUpStaysWithTheLastDepartment() {
+        let s = DepartmentRouter.suggest(text: "make it shorter",
+                                         tasks: [], lastActed: "fin", language: .en)
+        XCTAssertEqual(s?.deptKey, "fin")
+        XCTAssertEqual(s?.tier, .carryOver)
+        XCTAssertNil(s?.matched, "carry-over matched no word — the view says 'continuing with'")
+    }
+
+    func testAClearWinnerDisplacesCarryOver() {
+        let s = DepartmentRouter.suggest(text: "the landing page needs work",
+                                         tasks: [], lastActed: "fin", language: .en)
+        XCTAssertEqual(s?.deptKey, "mkt")
+        XCTAssertEqual(s?.tier, .topical)
+    }
+
+    func testAddressingDisplacesCarryOver() {
+        let s = DepartmentRouter.suggest(text: "ask design about this",
+                                         tasks: [], lastActed: "fin", language: .en)
+        XCTAssertEqual(s?.deptKey, "design")
+        XCTAssertEqual(s?.tier, .addressed)
+    }
+
+    func testNoLastActedMeansNoCarryOver() {
+        XCTAssertNil(DepartmentRouter.suggest(text: "make it shorter",
+                                              tasks: [], lastActed: nil, language: .en))
+    }
+
+    /// A department that lost its pet — or a stale key — must not be carried forward.
+    func testCarryOverIgnoresAnUnroutableKey() {
+        XCTAssertNil(DepartmentRouter.suggest(text: "make it shorter",
+                                              tasks: [], lastActed: "product", language: .en))
+        XCTAssertNil(DepartmentRouter.suggest(text: "make it shorter",
+                                              tasks: [], lastActed: "nonsense", language: .en))
+    }
+
+    /// Carry-over is language-agnostic: it is memory, not vocabulary.
+    func testCarryOverWorksInVietnamese() {
+        let s = DepartmentRouter.suggest(text: "ngắn hơn được không",
+                                         tasks: [], lastActed: "fin", language: .vi)
+        XCTAssertEqual(s?.deptKey, "fin")
+        XCTAssertEqual(s?.tier, .carryOver)
+    }
 }

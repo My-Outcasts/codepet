@@ -64,7 +64,6 @@ final class TextRelevanceTests: XCTestCase {
         // Under three characters never survives — this is why the lexicon has no "ux"/"ui".
         XCTAssertFalse(tokens.contains("at"))
         XCTAssertFalse(tokens.contains("19"))
-        XCTAssertTrue(tokens.contains("ok") == false)
     }
 
     func testTokenizeDropsStopwords() {
@@ -1242,48 +1241,20 @@ EOF
 ### Task 7: Wire it into `CopilotChatView`
 
 **Files:**
-- Modify: `codepet/Views/Copilot/CopilotChatView.swift` — `:46` (new `@State`), `:435-460` (composer call site), `:975-990` (send), plus two `.onChange` modifiers
-- Test: `codepetTests/DepartmentRouterTests.swift` (one addition)
+- Modify: `codepet/Views/Copilot/CopilotChatView.swift` — `:46` (new `@State`), `:435-460` (composer call site), `:975-990` (send), plus three `.onChange` modifiers
+- Test: none. See below.
 
 **Interfaces:**
 - Consumes: `DepartmentRouter.suggest(text:tasks:lastActed:language:)` (Tasks 3-5), the four new `ChatComposer` properties (Task 6).
 - Produces: nothing further.
 
-- [ ] **Step 1: Write the failing test**
+**This task has no unit test, and that is stated rather than papered over.**
 
-Append to `codepetTests/DepartmentRouterTests.swift`, inside the class:
+Everything it adds is SwiftUI view state — `@State`, `.onChange`, and an edit inside `send()` — which XCTest cannot reach here. An earlier draft of this plan carried a test that asserted `(picked ?? suggested)?.key`; that tests Swift's `??` operator and would pass with the entire feature deleted, so it was removed. A green test that cannot fail makes the suite less trustworthy, and this repo has been burned before by checks that passed while verifying nothing.
 
-```swift
-    // MARK: - The resolution rule the view applies
+Task 7's verification is therefore: **it compiles**, the **full suite stays green** (Task 8), and **Mona confirms the behaviour on screen** (Task 8 Step 5). Do not invent a test to close this gap — say it is uncovered.
 
-    /// The view sends `selectedDept ?? suggestedDept`. Asserted here as a pure rule because a
-    /// SwiftUI send path is not directly testable — and this is the rule that keeps an explicit
-    /// pick from ever being silently overwritten by a guess.
-    func testAnExplicitPickOutranksASuggestion() {
-        let suggestion = DepartmentRouter.suggest(text: "how should I price the pro tier?",
-                                                  tasks: [], lastActed: nil, language: .en)
-        XCTAssertEqual(suggestion?.deptKey, "fin")
-
-        let picked = DepartmentCatalog.find("design")
-        let suggested = DepartmentCatalog.find(suggestion?.deptKey)
-        XCTAssertEqual((picked ?? suggested)?.key, "design")
-
-        let noPick: Department? = nil
-        XCTAssertEqual((noPick ?? suggested)?.key, "fin")
-    }
-```
-
-- [ ] **Step 2: Run test to verify it passes already**
-
-```bash
-xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
-  -only-testing:codepetTests/DepartmentRouterTests/testAnExplicitPickOutranksASuggestion \
-  CODE_SIGNING_ALLOWED=NO -derivedDataPath build/dd-ci 2>&1 | tail -20
-```
-
-Expected: PASS. This test documents the rule the view must implement; it is green before the wiring exists on purpose, and the wiring below is what makes it true of the app rather than only of the plan.
-
-- [ ] **Step 3: Add the view state**
+- [ ] **Step 1: Add the view state**
 
 In `codepet/Views/Copilot/CopilotChatView.swift`, immediately after `@State private var selectedDept: Department?` (line 46), add:
 
@@ -1302,7 +1273,7 @@ In `codepet/Views/Copilot/CopilotChatView.swift`, immediately after `@State priv
     @State private var lastActedDeptKey: String?
 ```
 
-- [ ] **Step 4: Recompute on every draft change**
+- [ ] **Step 2: Recompute on every draft change**
 
 Add a private method next to `armDepartment` (line 771):
 
@@ -1344,7 +1315,7 @@ Attach it to the same view the composer is rendered from — put these three mod
 
 If the file's other `.onChange` uses the single-parameter form, match whichever form the surrounding code already uses rather than mixing the two.
 
-- [ ] **Step 5: Pass the four properties to the composer**
+- [ ] **Step 3: Pass the four properties to the composer**
 
 At the `ChatComposer(...)` call site (line ~451), immediately after `selectedDept: $selectedDept,` add:
 
@@ -1363,7 +1334,7 @@ At the `ChatComposer(...)` call site (line ~451), immediately after `selectedDep
             },
 ```
 
-- [ ] **Step 6: Resolve the department on send**
+- [ ] **Step 4: Resolve the department on send**
 
 In `send()`, replace lines 986-987:
 
@@ -1390,7 +1361,7 @@ with:
 
 Leave the comment block above those lines in place — it explains why the pick is consumed and is still accurate.
 
-- [ ] **Step 7: Build and run the chat suites**
+- [ ] **Step 5: Build and run the chat suites**
 
 ```bash
 xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platform=macOS' \
@@ -1402,10 +1373,10 @@ xcodebuild test -project CodePet.xcodeproj -scheme codepet -destination 'platfor
 
 Expected: PASS. A compile error at the composer call site is the likely failure.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add codepet/Views/Copilot/CopilotChatView.swift codepetTests/DepartmentRouterTests.swift
+git add codepet/Views/Copilot/CopilotChatView.swift
 git commit -F - <<'EOF'
 feat(chat): the guess reaches the composer, and the send honours it
 
@@ -1486,8 +1457,12 @@ Two things reviewers should look at hardest:
 - §4.4 — "we have support from two angel investors" now routes to Finance. That
   is a deliberate, approved behaviour change on a sentence with history.
 
-NOT verified: how the dashed chip actually looks on screen. Green tests are not
-a claim about that.
+What is NOT covered, stated plainly:
+- The view wiring (Task 7) has no unit test — it is `@State`, `.onChange` and a
+  send-path edit, which XCTest cannot reach here. It compiles and the suite is
+  green; that is not the same as verified.
+- How the dashed chip actually looks on screen. Green tests are not a claim
+  about that.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF

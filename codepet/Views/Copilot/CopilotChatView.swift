@@ -174,7 +174,7 @@ struct CopilotChatView: View {
                 }
                 if showHistory {
                     ThreadListView(showHistory: $showHistory)
-                } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
+                } else if isEmptyState {
                     ChatEmptyState(
                         state: ChatLandingState(company: companyStore.company, now: Date(),
                                                 language: lang, accountName: appState.displayName),
@@ -202,8 +202,10 @@ struct CopilotChatView: View {
                         // its own chip and nothing else would say so — see
                         // `ChatComposer.showsDeptChips`. Every other chat surface
                         // carries the control permanently; this screen is the only
-                        // exception, and only while nothing is picked.
-                        composerDock(column: column, showsDeptChips: false)
+                        // exception, and only while nothing is picked. The `false` is
+                        // not written here any more: `showsDeptChips` computes it, and
+                        // `guess(for:)` reads the SAME property (see FIX-4 there).
+                        composerDock(column: column)
                     }
                 } else {
                     messageList(column: column)
@@ -351,7 +353,18 @@ struct CopilotChatView: View {
         // `.build` suppresses the chip entirely (see `refreshSuggestion`), so switching modes
         // has to re-run it in both directions: leaving `.build` must bring the guess back.
         .onChange(of: mode) { _, _ in refreshSuggestion() }
-        .onChange(of: companyStore.activeThreadId) { _, _ in
+        // Same reason, other suppression: a screen where the chip cannot be drawn holds no
+        // guess (see `guess(for:)`), so a draft that survives the hero — the first reply
+        // landing, or a run starting — has to have its guess derived once the chip can say so.
+        .onChange(of: showsDeptChips) { _, _ in refreshSuggestion() }
+        .onChange(of: companyStore.activeThreadId) { old, _ in
+            // **`nil -> id` is the LAZY MINT, not a switch.** `activeThreadId` starts nil and is
+            // only minted at the END of the first turn (`CompanyStore.flushActiveThread`), so
+            // without this guard the very send that set `lastActedDeptKey` immediately nils it
+            // again and carry-over never works on message 2 of the FIRST thread of every launch.
+            // Later threads hid it: `newChat()` mints eagerly, so only the first one goes
+            // nil -> id. Do not "simplify" this guard away.
+            guard old != nil else { return }
             // A new conversation owns nobody. Carry-over resets with the thread — otherwise a
             // department that answered in the old thread would inherit the first turn of the
             // new one. A ✕ belongs to the draft it refused, and that draft is gone too.
@@ -407,12 +420,39 @@ struct CopilotChatView: View {
         .padding(.top, 6)
     }
 
+    /// The hero screen: nothing said yet and nothing running. The `body` picks the hero
+    /// branch on exactly this, and `showsDeptChips` below reads it too — one predicate, so
+    /// the two cannot describe different screens.
+    private var isEmptyState: Bool {
+        companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty
+    }
+
+    /// **Whether the tentative chip can be SEEN on the screen currently rendered** — and
+    /// therefore whether a guess applies at all.
+    ///
+    /// `ChatComposer` renders `departmentControl` only when `showsDeptChips || selectedDept
+    /// != nil`, so on the two-mode hero the dashed chip and its ✕ never appear. The send
+    /// still honoured the guess, which meant a pet took the founder's very first turn with
+    /// nothing on screen explaining why — the same failure sticky department selection was
+    /// removed for. Founder decision: **if the founder cannot see the guess, it does not
+    /// apply.**
+    ///
+    /// It is ONE property rather than a `showsDeptChips:` argument at each call site
+    /// precisely so the suppression cannot drift from the rendering condition: `typingComposer`
+    /// hands this exact value to `ChatComposer`, and `guess(for:)` gates on this exact value.
+    /// An explicit `selectedDept` pick is unaffected — it outranks the guess everywhere and
+    /// draws its own solid chip, which is what makes suppressing the hero's guess safe (the
+    /// `DepartmentRoster` sits directly above it as the explicit picker).
+    private var showsDeptChips: Bool {
+        !(surface == .twoMode && !showHistory && isEmptyState)
+    }
+
     /// The shared composer — one `ChatComposer` instance used in BOTH the empty
     /// hero (injected via `ChatEmptyState`'s trailing closure) and the active
     /// conversation (at the bottom). Owns no state: draft/mode/selectedDept live
-    /// here so the same values drive both placements.
-    private var composer: some View { composer(showsDeptChips: true) }
-
+    /// here so the same values drive both placements — including `showsDeptChips`, which
+    /// used to be an argument each call site chose for itself.
+    ///
     /// **Voice mode is a state of this slot, not a layer over the pane** — spec §2
     /// decision 5, reversing decision 2. The composer grows in place and the chat stays
     /// visible, so the swap happens here rather than in an `.overlay`: this one function
@@ -443,7 +483,7 @@ struct CopilotChatView: View {
     /// unreachable in production; put first, voice mode is the branch that would win if a
     /// future edit ever made both true, and voice mode is the one holding a synthesiser
     /// mid-sentence.
-    @ViewBuilder private func composer(showsDeptChips: Bool) -> some View {
+    @ViewBuilder private var composer: some View {
         if voiceMode, let listener = voiceListener, let voice = voiceVoice {
             VoiceComposer(isActive: $voiceMode, turn: $voiceTurn,
                           listener: listener, voice: voice,
@@ -455,11 +495,11 @@ struct CopilotChatView: View {
                            onDraft: applyDictatedDraft,
                            accent: companionColor)
         } else {
-            typingComposer(showsDeptChips: showsDeptChips)
+            typingComposer
         }
     }
 
-    private func typingComposer(showsDeptChips: Bool) -> some View {
+    private var typingComposer: some View {
         ChatComposer(
             draft: $companyStore.chatDraft,
             mode: $mode,
@@ -512,7 +552,7 @@ struct CopilotChatView: View {
     /// two TCC dialogs before it sets `voiceMode`; for that whole time the typing composer
     /// is still on screen with a live mic button. Press it and record spins up an
     /// `AVAudioEngine` and an `SFSpeechRecognizer`, the dialogs return, `voiceMode` goes
-    /// true, and `composer(showsDeptChips:)` renders `VoiceComposer` — leaving record's
+    /// true, and `composer` renders `VoiceComposer` — leaving record's
     /// listener orphaned with the microphone open and no surface left to stop it. Nothing
     /// throws and nothing logs.
     ///
@@ -729,7 +769,7 @@ struct CopilotChatView: View {
     /// a `ComposerField` that is already on screen. This runs while `RecordComposer` is
     /// still the composer: the field does not exist yet, and `@FocusState` set against a
     /// view that is not in the hierarchy is dropped. Hopping once lets
-    /// `composer(showsDeptChips:)` fall back to `typingComposer` first.
+    /// `composer` fall back to `typingComposer` first.
     ///
     /// **Not verifiable from this target.** `ImageRenderer` fires no lifecycle hooks and no
     /// test here hosts `CopilotChatView`, so whether the caret actually lands is a handoff —
@@ -782,9 +822,9 @@ struct CopilotChatView: View {
         }
     }
 
-    private func composerDock(column: CGFloat, showsDeptChips: Bool = true) -> some View {
+    private func composerDock(column: CGFloat) -> some View {
         VStack(spacing: 8) {
-            composer(showsDeptChips: showsDeptChips).readingColumn(column)
+            composer.readingColumn(column)
             Text(lang == .vi
                  ? "Codepet là AI và có thể mắc lỗi. Hãy kiểm tra lại nội dung quan trọng."
                  : "Codepet is AI and can make mistakes. Please double-check its work.")
@@ -815,21 +855,31 @@ struct CopilotChatView: View {
         inputFocused = true
     }
 
-    /// Re-derive the guess from the current draft. Cheap, pure, and called on every draft
-    /// change — there is no network and no persistence behind it.
+    /// **The one definition of "what does the router guess for these words".** The chip's
+    /// stored `suggestion` and `send()`'s department both come from HERE, so what the founder
+    /// sees and what the pet acts on cannot describe different guesses — and the three
+    /// suppressions below apply to both by construction rather than by being repeated.
     ///
     /// Suppressed in `.build`: that send does not read the department at all, so arming a chip
     /// there would promise a handoff that cannot happen. Suppressed after a ✕ too, for the
-    /// current draft — see `suggestionDismissed`.
+    /// current draft — see `suggestionDismissed`. And suppressed wherever the chip cannot be
+    /// drawn (`showsDeptChips`): a pet may not take a turn off a guess the founder was never
+    /// shown, which is the whole rail sticky selection was removed for.
+    ///
+    /// Cheap and pure — no network, no persistence — which is what makes calling it a second
+    /// time at send cost nothing.
+    private func guess(for text: String) -> DepartmentRouter.Suggestion? {
+        guard mode != .build, !suggestionDismissed, showsDeptChips else { return nil }
+        return DepartmentRouter.suggest(text: text,
+                                        tasks: companyStore.company.tasks,
+                                        lastActed: lastActedDeptKey,
+                                        language: lang)
+    }
+
+    /// Re-derive the chip's guess from the current draft. Called on every draft change —
+    /// the guess is re-derived, never accumulated.
     private func refreshSuggestion() {
-        guard mode != .build, !suggestionDismissed else {
-            suggestion = nil
-            return
-        }
-        suggestion = DepartmentRouter.suggest(text: companyStore.chatDraft,
-                                              tasks: companyStore.company.tasks,
-                                              lastActed: lastActedDeptKey,
-                                              language: lang)
+        suggestion = guess(for: companyStore.chatDraft)
     }
 
     /// The hero card's buttons. Each is wired to something that already exists —
@@ -1047,12 +1097,27 @@ struct CopilotChatView: View {
         // send — "one message, one handoff" is unchanged for a pick. Only the SUGGESTION
         // carries over, and only via `lastActedDeptKey`, which the router re-derives against
         // the next draft and any winner displaces (spec §5).
-        let dept = selectedDept ?? DepartmentCatalog.find(suggestion?.deptKey)
+        //
+        // **The guess is RESOLVED FROM `text` here, not read off the stored `suggestion`, and
+        // that is the whole bug this fixes** — the same shape as the pins/attachments capture
+        // documented below. `suggestion` is maintained by `.onChange(of: chatDraft)`, and
+        // SwiftUI does not run that observer before this action closure: `onStarter` assigns
+        // `chatDraft` and calls `send()` on the same turn, so the stored guess still described
+        // the PREVIOUS draft. Type "how should we price this?", tap a starter card instead of
+        // sending, and the starter went to Finance. Recomputing from the captured `text` (which
+        // `guess(for:)` makes cheap and pure) removes the silent dependency on that ordering
+        // instead of leaving it undocumented — the stored `suggestion` still drives what the
+        // chip DISPLAYS, and only this resolve changed.
+        let dept = selectedDept ?? DepartmentCatalog.find(guess(for: text)?.deptKey)
         selectedDept = nil
         suggestion = nil
         // The refusal belonged to the draft that just left the composer.
         suggestionDismissed = false
-        if let dept { lastActedDeptKey = dept.key }
+        // **Not on `.build`.** Nothing clears `selectedDept` on a mode change, so a chip armed
+        // in Ask and sent in Build leaves `dept` non-nil on a path that never reads it —
+        // installing a carry-over owner for the next Ask turn out of a turn no department
+        // took, which is exactly what this property's doc comment says it never holds.
+        if mode != .build, let dept { lastActedDeptKey = dept.key }
         // Same rule, same reason as the chip above: one message, one handoff. A pin
         // or an attachment that survived its send would re-send — and, now that the wire
         // carries them, re-bill — the same context on every later turn.

@@ -417,35 +417,42 @@ struct VCRunCards: View {
         let real = brief.theRealDisagreement.trimmingCharacters(in: .whitespacesAndNewlines)
         let pairs = state.conflicts.filter { $0.kind != "ALIGNED" }
         let agreed = state.conflicts.filter { $0.kind == "ALIGNED" }
-        return MessageCard(hue: pairs.isEmpty ? CodepetTheme.accentTeal : CodepetTheme.accentOrange) {
-            VStack(alignment: .leading, spacing: 8) {
-                label(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
-                                    : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
-                if !pairs.isEmpty {
-                    // One line per pair: who, and how hard. `id: \.offset` because `reason` is
-                    // free text and two identical reasons silently collapsed into one row.
-                    VStack(alignment: .leading, spacing: 3) {
-                        ForEach(Array(pairs.enumerated()), id: \.offset) { _, c in
-                            Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b))"
-                                 + " · \(kindLabel(c.kind))")
-                                .font(CodepetTheme.inter(12.5, weight: .semibold))
-                                .foregroundColor(CodepetTheme.mutedText)
-                        }
+        // NOT a MessageCard any more. The founder's complaint about a landed room was
+        // competing panels, and this was the second one — same border weight, same tint
+        // strength, directly under the card it belongs to. It keeps every word it had:
+        // the pairs, `the_real_disagreement` VERBATIM (rule 3), and the aligned line.
+        //
+        // The hue moved from the container to the pairs text, because it was carrying
+        // information the border cannot carry once the border is gone: orange for a real
+        // disagreement, teal for WHERE THEY AGREE. Losing that flip was the reason this
+        // block is not merged into THE CALL — see the spec's [A1].
+        let hue = pairs.isEmpty ? CodepetTheme.accentTeal : CodepetTheme.accentOrange
+        return VStack(alignment: .leading, spacing: 8) {
+            label(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
+                                : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
+            if !pairs.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(pairs.enumerated()), id: \.offset) { _, c in
+                        Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b))"
+                             + " · \(kindLabel(c.kind))")
+                            .font(CodepetTheme.inter(12.5, weight: .semibold))
+                            .foregroundColor(hue)
                     }
                 }
-                if !real.isEmpty {
-                    Text(real).font(CodepetTheme.inter(14)).lineSpacing(6)
-                        .foregroundColor(CodepetTheme.bodyText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !agreed.isEmpty {
-                    Text(agreedLine(agreed))
-                        .font(CodepetTheme.inter(12.5))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            }
+            if !real.isEmpty {
+                Text(real).font(CodepetTheme.inter(14)).lineSpacing(6)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !agreed.isEmpty {
+                Text(agreedLine(agreed))
+                    .font(CodepetTheme.inter(12.5))
+                    .foregroundColor(hue)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(.horizontal, 12)
     }
 
     /// A department's position: one line at rest, the full text on tap.

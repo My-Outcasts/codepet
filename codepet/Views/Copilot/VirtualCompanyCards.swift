@@ -31,12 +31,16 @@ struct VCRunCards: View {
     /// cannot un-consume it.
     let lockedIn: Bool
     let onLockIn: () -> Void
+    #if DEBUG
     /// Test seam only. `Disclosure`'s `open` is `@State`, seeded once at first render —
     /// a render test builds a fresh view hierarchy every time, so there is no other way
     /// to observe the "What each department said" disclosure's *contents* without a
     /// production change reaching in this far. Every real call site omits it and gets the
-    /// normal folded-closed behaviour.
+    /// normal folded-closed behaviour. DEBUG-only, not just comment-guarded: this property
+    /// (and the `Disclosure.initiallyOpen` parameter it forwards to) does not exist in a
+    /// release build, so no real call site can ever pass it by accident.
     var openDepartmentsForTesting: Bool = false
+    #endif
 
     @Environment(\.uiLanguage) private var lang
     /// The call, opened in the reader every other document in the app opens into.
@@ -87,11 +91,19 @@ struct VCRunCards: View {
                 // ONE card, not two — see `landedDisagreement`. `conflictCard` is now the
                 // in-flight rendering only, where there is no narrative to duplicate.
                 landedDisagreement(brief)
-                Disclosure(title: (lang == .vi ? "Từng phòng ban đã nói gì" : "What each department said")
-                            + " · \(state.agents.count)",
+                let departmentsSaidTitle = (lang == .vi ? "Từng phòng ban đã nói gì"
+                                                         : "What each department said")
+                                            + " · \(state.agents.count)"
+                #if DEBUG
+                Disclosure(title: departmentsSaidTitle,
                            initiallyOpen: openDepartmentsForTesting) {
                     departmentsSaid
                 }
+                #else
+                Disclosure(title: departmentsSaidTitle) {
+                    departmentsSaid
+                }
+                #endif
                 if let routing = state.routing {
                     Disclosure(title: (lang == .vi ? "Ai ở trong phòng, và vì sao" : "Who was in the room, and why")
                                 + " · \(routing.agents.count)") {
@@ -546,14 +558,24 @@ struct VCRunCards: View {
         @ViewBuilder var content: Content
         @State private var open: Bool
 
+        #if DEBUG
         /// `initiallyOpen` defaults closed for every real call site. It exists so a
         /// render test can seed a disclosure open without reaching into `@State` from
-        /// outside the view — see `VCRunCards.openDepartmentsForTesting`.
+        /// outside the view — see `VCRunCards.openDepartmentsForTesting`. DEBUG-only: the
+        /// parameter itself does not exist in a release build, rather than trusting the
+        /// default to keep every call site closed.
         init(title: String, initiallyOpen: Bool = false, @ViewBuilder content: () -> Content) {
             self.title = title
             self.content = content()
             self._open = State(initialValue: initiallyOpen)
         }
+        #else
+        init(title: String, @ViewBuilder content: () -> Content) {
+            self.title = title
+            self.content = content()
+            self._open = State(initialValue: false)
+        }
+        #endif
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
@@ -698,6 +720,13 @@ struct VCRunCards: View {
     /// A separate small view rather than reusing `Disclosure`: that one draws its header
     /// as a bordered `surface` pill, which would put a border back on every department
     /// and undo the point of this change.
+    ///
+    /// Founder ruling: department detail is now two clicks deep (open "What each
+    /// department said", then open the one row you care about) where it used to be one.
+    /// Asked directly whether that's acceptable, the founder confirmed: keep two clicks.
+    /// Three departments read as three lines, and you open only the one you came for —
+    /// the cost is that reading all three positions now takes three more clicks than
+    /// before, and that is the trade for the list not being a wall.
     private struct DepartmentRow: View {
         let name: String
         let stance: String

@@ -29,7 +29,8 @@ final class VCRoomLayoutTests: XCTestCase {
         // routing before positions before the brief).
         s.apply(.runStarted(runId: "r1"))
         let routing: [String: Any] = ["decision": "multi_agent",
-                                      "agents": ["finance", "marketing", "engineering"],
+                                      "agents": ["finance", "marketing", "engineering",
+                                                 "operations", "product", "support"],
                                       "real_question": "Should we ship the paywall before launch?",
                                       "request_type": "DECISION"]
         s.apply(.routing(try! JSONDecoder().decode(
@@ -37,9 +38,13 @@ final class VCRoomLayoutTests: XCTestCase {
         // Without agent_start/agent_position, `state.agents` and `state.positions` stay
         // empty and `departmentsSaid` renders nothing REGARDLESS of the disclosure's
         // open/closed state — a "no department card" measurement would be meaningless in
-        // the other direction: green with nothing rendered to test. Three real positions,
-        // matching the conflicts declared below and the docstring's claim that this room
-        // has "three departments that disagree".
+        // the other direction: green with nothing rendered to test. Six real positions:
+        // the three that conflict (below) plus operations/product/support, added so
+        // `testNoDepartmentRendersAsACard` exercises all six department hues
+        // (`accent(_:)` maps `fin`→gold, `mkt`→orange, `eng`→blue, `ops`→teal,
+        // `product`→green, `support`→pink — see `DepartmentCatalog.all` in
+        // Models/Department.swift) instead of leaving teal/green/pink structurally
+        // incapable of failing.
         s.apply(.agentStart(VCAgentMeta(agentId: "finance", departmentKey: "fin")))
         s.apply(.agentPosition(VCAgentMeta(agentId: "finance", departmentKey: "fin"),
             VCPosition(stance: "do_not_proceed",
@@ -59,6 +64,28 @@ final class VCRoomLayoutTests: XCTestCase {
                        reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 3,
                        costToMyDept: "Blocks the next two sprints' roadmap items.",
                        hardBlocker: "Stripe webhook integration is untested end to end.")))
+        // The three added purely to exercise teal/green/pink (Finding 1). None of them
+        // appear in the `conflicts` list below — the docstring's "three departments that
+        // disagree" and the orange-branch reasoning stay about finance/marketing/engineering
+        // only; these three just need to land a position so `departmentsSaid` renders them.
+        s.apply(.agentStart(VCAgentMeta(agentId: "operations", departmentKey: "ops")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "operations", departmentKey: "ops"),
+            VCPosition(stance: "proceed",
+                       position: "Billing infrastructure can flip on any day we pick; ops just needs 48 hours notice.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 3,
+                       costToMyDept: "Requires an on-call swap the week of launch.", hardBlocker: nil)))
+        s.apply(.agentStart(VCAgentMeta(agentId: "product", departmentKey: "product")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "product", departmentKey: "product"),
+            VCPosition(stance: "proceed_with_conditions",
+                       position: "Ship the price page now, but hold the roadmap slot for billing until it's proven.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 3,
+                       costToMyDept: "Keeps a roadmap slot reserved that could go to something else.", hardBlocker: nil)))
+        s.apply(.agentStart(VCAgentMeta(agentId: "support", departmentKey: "support")))
+        s.apply(.agentPosition(VCAgentMeta(agentId: "support", departmentKey: "support"),
+            VCPosition(stance: "do_not_proceed",
+                       position: "We have no billing-failure macros written yet; support will be improvising on day one.",
+                       reasoning: "r", evidenceNeeded: [], risksIOwn: [], confidence: 4,
+                       costToMyDept: "Ticket volume spikes with no playbook to hand new hires.", hardBlocker: nil)))
         // Populates `pairs` (non-ALIGNED conflicts) so the block actually renders the
         // disagreement (orange) branch rather than the agreement (teal) one — without
         // this, `state.conflicts` stays empty, `pairs.isEmpty` is true, and the block
@@ -191,11 +218,17 @@ final class VCRoomLayoutTests: XCTestCase {
             print("[measure] \(name) card-fill pixels = \(n)")
             // Measured with the disclosure forced open (`openDepartments: true` — without
             // that the disclosure defaults closed and every count is a vacuous 0 whether
-            // or not `MessageCard` wraps the row): RED gold 54999 / orange 54385 /
-            // blue 63893 (the three departments this fixture actually uses; teal/green/pink
-            // stay 0 in both states — this fixture never routes to ops/product/support) /
-            // GREEN 0 across all six. Threshold sits far below the smallest meaningful RED
-            // (54385, ~272x headroom) and comfortably above 0 to absorb antialiasing noise.
+            // or not `MessageCard` wraps the row), and with the fixture now landing all
+            // six departments (fin/mkt/eng/ops/product/support — see `landedRoom()`), by
+            // temporarily restoring `MessageCard(hue: accent(meta))` around `DepartmentRow`
+            // in `positionRow` and re-running, then reverting exactly (confirmed via
+            // `git diff --stat` before re-measuring GREEN): RED gold 33303 / orange 33429 /
+            // blue 32532 / teal 33400 / green 32725 / pink 33287 — all six now genuinely
+            // reachable, closing the "structurally incapable of failing" gap teal/green/pink
+            // had when the fixture only routed to fin/mkt/eng. GREEN 0 across all six,
+            // identical on two consecutive runs. Threshold sits far below the smallest
+            // meaningful RED (32532, ~162x headroom) and comfortably above 0 to absorb
+            // antialiasing noise.
             XCTAssertLessThan(n, 200,
                               "a department still renders as a \(name) tinted card "
                               + "(\(n) matching pixels). See \(url.path)")

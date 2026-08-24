@@ -199,8 +199,14 @@ lexicon plus the founder's real tasks, nothing else.
 
 ### 4.2 Two thresholds
 
-- **Floor** — `total ≥ 3`. One solid lexicon hit, minimum. A stray token cannot route a turn.
+- **Floor** — `total ≥ 3`. A stray token cannot route a turn.
 - **Margin** — the winner must beat the runner-up by **≥ 2**.
+
+**The floor is on the TOTAL, not on the lexicon** — decided 24 Aug, after implementation showed the two readings come apart. Since `taskScoreCap == floor == 3`, three overlapping words from the founder's own dept-tagged task titles clear the floor with **zero vocabulary hits**. That is intended: a founder whose roadmap says "Make the checkout flow smoother" has told us that phrasing belongs to Design, and that is better evidence than any word list we could write for them.
+
+An earlier draft of this section read *"one solid lexicon hit, minimum"*, which describes a stricter gate the code never implemented. The prose was wrong, not the code.
+
+One consequence to carry: on a tasks-only match there is no vocabulary term that fired, so `Suggestion.matched` is nil and the hover cannot say *"you mentioned …"*. `DepartmentSuggestionLabel` falls back to naming the department alone (§6).
 
 The margin is where "strongest wins, near-ties go to byte" lives. *"the pricing page copy feels off and I'm
 not sure $19 is right"* scores Design and Finance close together, fails the margin, and stays with byte —

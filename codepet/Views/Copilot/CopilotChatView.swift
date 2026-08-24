@@ -868,8 +868,13 @@ struct CopilotChatView: View {
     ///
     /// Cheap and pure — no network, no persistence — which is what makes calling it a second
     /// time at send cost nothing.
-    private func guess(for text: String) -> DepartmentRouter.Suggestion? {
-        guard mode != .build, !suggestionDismissed, showsDeptChips else { return nil }
+    /// `visible` is passed rather than read, because the two callers ask about different
+    /// moments. `refreshSuggestion` asks "can the chip be seen right now"; `send()` asks "could
+    /// the founder see it when they pressed send" — and `send()` mutates `showHistory`, which
+    /// `showsDeptChips` is derived from, before it gets to the resolve. Same value in the
+    /// ordinary case; the parameter is what stops the two questions being silently fused again.
+    private func guess(for text: String, visible: Bool) -> DepartmentRouter.Suggestion? {
+        guard mode != .build, !suggestionDismissed, visible else { return nil }
         return DepartmentRouter.suggest(text: text,
                                         tasks: companyStore.company.tasks,
                                         lastActed: lastActedDeptKey,
@@ -879,7 +884,7 @@ struct CopilotChatView: View {
     /// Re-derive the chip's guess from the current draft. Called on every draft change —
     /// the guess is re-derived, never accumulated.
     private func refreshSuggestion() {
-        suggestion = guess(for: companyStore.chatDraft)
+        suggestion = guess(for: companyStore.chatDraft, visible: showsDeptChips)
     }
 
     /// The hero card's buttons. Each is wired to something that already exists —
@@ -1082,6 +1087,16 @@ struct CopilotChatView: View {
     private func send() {
         let text = companyStore.chatDraft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Captured HERE, beside `text`, and for the same reason. `showsDeptChips` is derived
+        // from live store state — `surface`, `showHistory`, `isEmptyState` — and this function
+        // mutates the second of those on the very next line. Reading it further down would ask
+        // "is the chip visible?" of a view that has already moved, and the guess is only allowed
+        // to apply where the founder could SEE it (spec §6): a pet must not take a turn off a
+        // guess that was never on screen. Capturing the answer the founder actually had in
+        // front of them makes that independent of everything `send()` does afterwards —
+        // including a future edit that appends the outgoing message before the resolve below,
+        // which would otherwise flip `isEmptyState` and silently undo the rule.
+        let guessWasVisible = showsDeptChips
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
         // One message, one handoff. The chip used to survive the send — and `newChat()` and a
@@ -1108,7 +1123,7 @@ struct CopilotChatView: View {
         // `guess(for:)` makes cheap and pure) removes the silent dependency on that ordering
         // instead of leaving it undocumented — the stored `suggestion` still drives what the
         // chip DISPLAYS, and only this resolve changed.
-        let dept = selectedDept ?? DepartmentCatalog.find(guess(for: text)?.deptKey)
+        let dept = selectedDept ?? DepartmentCatalog.find(guess(for: text, visible: guessWasVisible)?.deptKey)
         selectedDept = nil
         suggestion = nil
         // The refusal belonged to the draft that just left the composer.

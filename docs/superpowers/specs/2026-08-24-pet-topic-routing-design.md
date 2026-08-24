@@ -135,7 +135,19 @@ reason: `actingSpecialist` → `actingDeptKey` (`CompanyStore.swift:721`), whose
 "cost the answer". *Who speaks*, *what they know*, and *how sure we are* are three questions. The third gets
 its own file.
 
-### 3.4 `codepet/Views/Copilot/CopilotChatView.swift` — two new `@State`
+### 3.3b `codepet/Models/DepartmentSuggestionLabel.swift` — new, pure
+
+*Added during implementation; this section is a record, not a plan.* The chip's hover sentence —
+"Suggested — you mentioned "pricing"", or "Continuing with sage · Finance" for carry-over.
+
+This spec originally put those strings inline in the view. They belong in a type for the same reason
+`DepartmentMenu` is a type: a SwiftUI `.help()` string cannot be read from a test, and the sentence is
+what makes a wrong guess legible instead of spooky. Being able to assert it matters more than saving a
+file. `DepartmentMenu` also gained `dismissSuggestionHelp(_:)`, because the ✕'s own tooltip sits inside
+the capsule and wins over it — so without a distinct string, the reason a pet was suggested became
+unreachable at exactly the moment the founder reaches for the ✕ to refuse it.
+
+### 3.4 `codepet/Views/Copilot/CopilotChatView.swift` — new `@State`
 
 ```swift
 @State private var suggestedDept: Department?     // recomputed on draft change
@@ -327,7 +339,12 @@ therefore cannot be a regression.
 | No department clears the floor | no suggestion |
 | Two departments within the margin | no suggestion |
 | Winner maps to no companion | no suggestion (mirrors `mentionedDeptKey`'s skip) |
-| Winner maps to the founder's OWN companion | `deptKey` still resolves, chip stays empty — no handoff to announce, but the expertise still reaches the model. This is the exact case `CompanyChatClient.swift:157-170` exists to protect. |
+| Winner maps to the founder's OWN companion | `deptKey` still resolves and the expertise still reaches the model — the case `CompanyChatClient.swift:157-170` exists to protect. The chip renders the **department alone**, with no pet name and no sprite. |
+| The chip cannot be rendered at all | **no suggestion, and no resolve on send.** See below. |
+
+**Amended 24 Aug, after implementation.** This table originally said the chip "stays empty" when the winner maps to the founder's own companion. It does not: `departmentControl` resolves the chip from the department, not from the pet, so it shows "Finance" without a sprite — exactly as an explicit pick of that department already behaves. Matching the pick was the right call (§6's governing rule is that a suggestion and a pick differ only in weight), so the code stands and this row was wrong.
+
+**A guess the founder cannot see does not get to act.** The composer hides the department control entirely on the two-mode hero (`showsDeptChips == false`, because `DepartmentRoster` sits directly above it as the better picker on that screen). Resolving a suggestion there would put a pet on a turn with nothing on screen explaining why — the precise failure that removing the sticky chip was meant to end. So visibility gates both drawing and acting, from **one** predicate, and `send()` captures its value up front alongside the draft text rather than re-reading a property the send itself mutates. An explicit `selectedDept` pick still works on that surface, unchanged.
 | Language is `.vi` | `vi` table empty → no lexicon hits → tier 1 and tier 3 still work |
 | `.build` mode | suppressed entirely |
 

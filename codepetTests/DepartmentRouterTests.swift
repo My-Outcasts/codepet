@@ -47,7 +47,7 @@ final class DepartmentRouterTests: XCTestCase {
     /// it proves nothing about the floor. This one does: with `floor` at 0, `best.total (2)
     /// - runnerUp (0) = 2 >= margin (2)` would clear BOTH gates and return a suggestion, so
     /// the test only stays green because `floor` is 3.
-    func testASingleNonLexiconTokenYieldsNothing() {
+    func testBelowFloorTotalYieldsNothing() {
         let s = DepartmentRouter.suggest(
             text: "can we rearrange the closet somehow",
             tasks: [task("Rearrange the storage closet shelving", dept: "ops")],
@@ -126,24 +126,45 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertEqual(withWork?.tier, .topical)
     }
 
-    /// `testTasksBoostTheirDepartment`'s overlap of 3 is exactly `taskScoreCap` == `floor`,
-    /// so it proves task overlap CAN clear the floor alone but says nothing about the
-    /// weighted combination the 3-vs-1 weighting exists for. This test isolates that: a
-    /// 2-word title overlap is below the floor by itself (taskScore = 2), and the SAME
-    /// overlap plus a single lexicon hit (worth `lexiconWeight` = 3) clears it together
-    /// (2 + 3 = 5 >= floor), which neither alone would.
+    /// `testTasksBoostTheirDepartment`'s overlap of 3 is exactly `taskScoreCap` == `floor`, so
+    /// it proves task overlap CAN clear the floor alone but says nothing about the weighted
+    /// combination the 3-vs-1 weighting exists for. A fixture that only clears the FLOOR can't
+    /// prove that either: one lexicon hit already scores `lexiconWeight` = 3 = floor, so a
+    /// department never needs task overlap on top of a lexicon hit just to reach the floor —
+    /// only to beat a rival that also reached it. This test forces that: the message has one
+    /// eng lexicon hit ("bug") and one design lexicon hit ("icon"), tying both at 3 — which
+    /// fails the margin (needs a 2-point lead) and returns nil. Tagging a task to eng whose
+    /// title shares two OTHER words with the message ("need", "new") adds
+    /// `taskWeight` * 2 = 2, taking eng to 5 against design's unchanged 3 — a 2-point lead,
+    /// exactly `margin`. Only the task overlap wins this; the tied lexicon hit alone could
+    /// not (proof: set `taskWeight = 0` and this test goes red — see task-4-report.md).
     func testTaskOverlapPlusLexiconHitCombine() {
-        let workTasks = [task("Tidy the archive folder", dept: "eng")]
+        let tiedMessage = "there's a bug and we need a new icon soon"
 
-        // Task-title overlap alone: {"tidy", "folder"} = 2. Below floor (3).
-        XCTAssertNil(DepartmentRouter.suggest(text: "can we tidy the folder soon",
-                                              tasks: workTasks, lastActed: nil, language: .en))
+        // eng ("bug") and design ("icon") each score exactly one lexicon hit: 3 vs 3. Tied,
+        // so the margin gate refuses both.
+        XCTAssertNil(DepartmentRouter.suggest(text: tiedMessage, tasks: [],
+                                              lastActed: nil, language: .en))
 
-        // Same overlap, plus one eng lexicon hit ("backend"): 2 + (1 * lexiconWeight) = 5.
-        let s = DepartmentRouter.suggest(text: "can we tidy the folder in the backend soon",
-                                         tasks: workTasks, lastActed: nil, language: .en)
+        // eng gets a task overlapping the message on "need" and "new": taskScore =
+        // min(2, taskScoreCap) = 2. eng total = 3 + 2 = 5; design stays at 3. 5 - 3 = 2 =
+        // margin, so eng now wins the tie it could not win on the lexicon hit alone.
+        let workTasks = [task("We need new server backups", dept: "eng")]
+        let s = DepartmentRouter.suggest(text: tiedMessage, tasks: workTasks,
+                                         lastActed: nil, language: .en)
         XCTAssertEqual(s?.deptKey, "eng")
         XCTAssertEqual(s?.tier, .topical)
+    }
+
+    /// The word-boundary check in `contains(phrase:in:)` must reject an adjacent DIGIT, not
+    /// just an adjacent letter — otherwise "page2" reads as a match for the phrase "landing
+    /// page". Revert `isWordChar` to `ch.isLetter` alone and this goes red: the phrase is
+    /// accepted, mkt scores `lexiconWeight` = 3 >= floor with no rival, and a suggestion comes
+    /// back where there must be none.
+    func testDigitImmediatelyAfterPhraseDoesNotCountAsAWordBoundary() {
+        let s = DepartmentRouter.suggest(text: "the landing page2 mock",
+                                         tasks: [], lastActed: nil, language: .en)
+        XCTAssertNil(s, "\"landing page2\" must not match the phrase \"landing page\"; got \(String(describing: s))")
     }
 
     /// Spec §4.4's third example — an approved behaviour CHANGE. Tier 1 still refuses to hand

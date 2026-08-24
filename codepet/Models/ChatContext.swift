@@ -12,13 +12,6 @@ import Foundation
 /// just asked, so new output stays consistent with naming/pricing/positioning already
 /// locked in instead of re-inventing it from a one-line brief.
 enum ChatContext {
-    // Words too common to carry signal for relevance matching (mirrors web STOPWORDS).
-    private static let stopwords: Set<String> = [
-        "the", "and", "for", "our", "your", "their", "this", "that", "with", "from",
-        "into", "about", "are", "was", "were", "will", "has", "have", "not", "you",
-        "each", "per", "its", "via", "onto",
-    ]
-
     // Only the head of each deliverable body is scanned for relevance — enough to
     // capture the subject without letting a long body dominate the token overlap.
     private static let scoreScanChars = 600
@@ -31,19 +24,6 @@ enum ChatContext {
     /// choice deserves more room than a guess — that is the entire difference
     /// between this block and the one below it.
     private static let pinnedExcerptCap = 1200
-
-    /// Split text into lowercased, de-duped content tokens (≥3 chars, no stopwords).
-    private static func tokenize(_ s: String) -> Set<String> {
-        var out: Set<String> = []
-        for raw in s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted) {
-            if raw.count >= 3 && !stopwords.contains(raw) { out.insert(raw) }
-        }
-        return out
-    }
-
-    private static func overlap(_ a: Set<String>, _ b: Set<String>) -> Int {
-        a.filter { b.contains($0) }.count
-    }
 
     /// Choose which shipped deliverables to ground the current chat turn on. Ranks by
     /// token-overlap relevance between `query` (the founder's latest message) and each
@@ -66,12 +46,12 @@ enum ChatContext {
         let q = (query ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return Array(newestFirst.prefix(max)) }
 
-        let queryTokens = tokenize(q)
+        let queryTokens = TextRelevance.tokenize(q)
         guard !queryTokens.isEmpty else { return Array(newestFirst.prefix(max)) }
 
         let scored = newestFirst.enumerated().map { (i, item) -> (index: Int, item: Deliverable, score: Int) in
-            let titleScore = titleWeight * overlap(queryTokens, tokenize(item.title))
-            let bodyScore = bodyWeight * overlap(queryTokens, tokenize(String(item.body.prefix(scoreScanChars))))
+            let titleScore = titleWeight * TextRelevance.overlap(queryTokens, TextRelevance.tokenize(item.title))
+            let bodyScore = bodyWeight * TextRelevance.overlap(queryTokens, TextRelevance.tokenize(String(item.body.prefix(scoreScanChars))))
             return (i, item, titleScore + bodyScore)
         }
         let ranked = scored.sorted { a, b in

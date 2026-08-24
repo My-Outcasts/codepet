@@ -39,7 +39,13 @@ enum DepartmentRouter {
     private static let taskWeight = 1
     // A department with many tasks must not win on volume alone.
     private static let taskScoreCap = 3
-    /// One solid lexicon hit, minimum. A stray token cannot route a turn.
+    /// The minimum total score to suggest a department at all. Lexicon hits and task-title
+    /// overlap both count toward it, and either can clear it alone: one lexicon hit is
+    /// enough (`lexiconWeight` = 3 = floor), and so is a task-title overlap of
+    /// `taskScoreCap` words with ZERO lexicon hits (`taskScoreCap` * `taskWeight` = 3 =
+    /// floor) — the founder's own roadmap is real signal, on purpose. When a department
+    /// clears the floor on task overlap alone, `matched` is nil: no lexicon term fired, so
+    /// there is nothing to name in a "you mentioned …" hover for that suggestion.
     private static let floor = 3
     /// The winner must beat the runner-up by this much. This is where "strongest wins,
     /// near-ties go to byte" lives: a genuinely two-department sentence fails here, and byte
@@ -66,6 +72,10 @@ enum DepartmentRouter {
         var inQuote = false
         for ch in unquoted {
             if ch == "\"" || ch == "\u{201C}" || ch == "\u{201D}" {
+                // An unbalanced quote (a lone `"` or curly quote) toggles `inQuote` and never
+                // toggles back, so everything after it is dropped from scoring for the rest
+                // of the message. That is accepted, not overlooked: it fails toward tier 2
+                // going silent, never toward routing on words the founder didn't really send.
                 inQuote.toggle()
                 continue
             }
@@ -74,25 +84,31 @@ enum DepartmentRouter {
         return out
     }
 
-    /// Whole-phrase containment, the same discipline `DepartmentCompanions.isAddressed` uses:
-    /// a phrase must not match inside a longer word.
+    /// Whole-phrase containment. Same discipline as `DepartmentCompanions.isAddressed` — a
+    /// phrase must not match inside a longer word — tightened to also reject an adjacent
+    /// digit, since `isAddressed`'s letter-only check would let "landing page2" match
+    /// "landing page".
     private static func contains(phrase: String, in text: String) -> Bool {
+        func isWordChar(_ ch: Character) -> Bool { ch.isLetter || ch.isNumber }
         var search = text.startIndex
         while let r = text.range(of: phrase, range: search..<text.endIndex) {
             defer { search = r.upperBound }
             let beforeOK = r.lowerBound == text.startIndex
-                || !text[text.index(before: r.lowerBound)].isLetter
-            let afterOK = r.upperBound == text.endIndex || !text[r.upperBound].isLetter
+                || !isWordChar(text[text.index(before: r.lowerBound)])
+            let afterOK = r.upperBound == text.endIndex || !isWordChar(text[r.upperBound])
             if beforeOK && afterOK { return true }
         }
         return false
     }
 
     /// Score one department, returning the total and the first term that fired.
+    ///
+    /// `taskTokens` is the tokenized titles of this department's own tasks, computed once per
+    /// `suggest` call rather than once per department per call — see `suggest`.
     private static func score(deptKey: String,
                               tokens: Set<String>,
                               raw: String,
-                              tasks: [RoadmapTask],
+                              taskTokens: Set<String>,
                               language: AppLanguage) -> (total: Int, matched: String?) {
         var hits = 0
         var matched: String?
@@ -106,8 +122,7 @@ enum DepartmentRouter {
             }
         }
 
-        let titles = tasks.filter { $0.dept == deptKey }.map { $0.title }.joined(separator: " ")
-        let taskScore = min(TextRelevance.overlap(tokens, TextRelevance.tokenize(titles)), taskScoreCap)
+        let taskScore = min(TextRelevance.overlap(tokens, taskTokens), taskScoreCap)
 
         return (lexiconWeight * hits + taskWeight * taskScore, matched)
     }
@@ -131,9 +146,23 @@ enum DepartmentRouter {
         // Tier 2 — topical. Scored on the founder's own words, with quoted text removed.
         let raw = stripQuoted(trimmed).lowercased()
         let tokens = TextRelevance.tokenize(raw)
+
+        // Group task titles by department once, not once per department per call — `score`
+        // used to re-run `tasks.filter/map/joined` + `TextRelevance.tokenize` per department
+        // (8x per `suggest` call, which runs on a live draft on every keystroke pause).
+        var titlesByDept: [String: [String]] = [:]
+        for t in tasks {
+            guard let dept = t.dept else { continue }
+            titlesByDept[dept, default: []].append(t.title)
+        }
+        let taskTokensByDept: [String: Set<String>] = titlesByDept.mapValues {
+            TextRelevance.tokenize($0.joined(separator: " "))
+        }
+
         let ranked = DepartmentTopics.map.keys
             .map { (key: $0, result: score(deptKey: $0, tokens: tokens, raw: raw,
-                                           tasks: tasks, language: language)) }
+                                           taskTokens: taskTokensByDept[$0] ?? [],
+                                           language: language)) }
             // Sorted by score, then by key, so a tie is broken the same way every run —
             // a non-deterministic winner would make the margin check untestable.
             .sorted { $0.result.total != $1.result.total

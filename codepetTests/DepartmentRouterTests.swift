@@ -41,10 +41,18 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertEqual(s?.matched, "price")
     }
 
-    /// The floor. One weak token must not route a turn.
+    /// The floor. A 2-word task-title overlap with zero lexicon hits scores 2 — above zero,
+    /// below the floor (3) — and must not route. This is deliberately NOT a fixture that
+    /// scores 0 everywhere: a 0-everywhere fixture passes even with `floor` lowered to 0, so
+    /// it proves nothing about the floor. This one does: with `floor` at 0, `best.total (2)
+    /// - runnerUp (0) = 2 >= margin (2)` would clear BOTH gates and return a suggestion, so
+    /// the test only stays green because `floor` is 3.
     func testASingleNonLexiconTokenYieldsNothing() {
-        XCTAssertNil(DepartmentRouter.suggest(text: "can you look at this thing tomorrow",
-                                              tasks: [], lastActed: nil, language: .en))
+        let s = DepartmentRouter.suggest(
+            text: "can we rearrange the closet somehow",
+            tasks: [task("Rearrange the storage closet shelving", dept: "ops")],
+            lastActed: nil, language: .en)
+        XCTAssertNil(s, "a 2-word task-title overlap is below the floor; got \(String(describing: s))")
     }
 
     /// The margin, and the "near-ties stay with byte" decision. This sentence is genuinely
@@ -71,11 +79,18 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertNil(s)
     }
 
-    /// Guard 2 — whole words only, inherited from the tokenizer.
+    /// Guard 2 — whole words only, inherited from the tokenizer. Each fixture contains a REAL
+    /// vocabulary term as a substring of a longer token, not as its own token: "apiary"
+    /// contains "api" (eng), "brandish" contains "brand" (mkt), "screenshot" contains
+    /// "screen" (design). A naive `raw.contains(term)` implementation would fire on all
+    /// three and return a suggestion; `TextRelevance.tokenize`'s whole-word split does not,
+    /// because `tokens.contains("api")` is false when the only token present is "apiary".
     func testSubstringsDoNotFire() {
-        XCTAssertNil(DepartmentRouter.suggest(text: "the app is well designed",
+        XCTAssertNil(DepartmentRouter.suggest(text: "she keeps bees in an apiary",
                                               tasks: [], lastActed: nil, language: .en))
-        XCTAssertNil(DepartmentRouter.suggest(text: "our operational costs are high",
+        XCTAssertNil(DepartmentRouter.suggest(text: "the salesman began to brandish his badge",
+                                              tasks: [], lastActed: nil, language: .en))
+        XCTAssertNil(DepartmentRouter.suggest(text: "he sent me a screenshot of the issue",
                                               tasks: [], lastActed: nil, language: .en))
     }
 
@@ -111,6 +126,26 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertEqual(withWork?.tier, .topical)
     }
 
+    /// `testTasksBoostTheirDepartment`'s overlap of 3 is exactly `taskScoreCap` == `floor`,
+    /// so it proves task overlap CAN clear the floor alone but says nothing about the
+    /// weighted combination the 3-vs-1 weighting exists for. This test isolates that: a
+    /// 2-word title overlap is below the floor by itself (taskScore = 2), and the SAME
+    /// overlap plus a single lexicon hit (worth `lexiconWeight` = 3) clears it together
+    /// (2 + 3 = 5 >= floor), which neither alone would.
+    func testTaskOverlapPlusLexiconHitCombine() {
+        let workTasks = [task("Tidy the archive folder", dept: "eng")]
+
+        // Task-title overlap alone: {"tidy", "folder"} = 2. Below floor (3).
+        XCTAssertNil(DepartmentRouter.suggest(text: "can we tidy the folder soon",
+                                              tasks: workTasks, lastActed: nil, language: .en))
+
+        // Same overlap, plus one eng lexicon hit ("backend"): 2 + (1 * lexiconWeight) = 5.
+        let s = DepartmentRouter.suggest(text: "can we tidy the folder in the backend soon",
+                                         tasks: workTasks, lastActed: nil, language: .en)
+        XCTAssertEqual(s?.deptKey, "eng")
+        XCTAssertEqual(s?.tier, .topical)
+    }
+
     /// Spec §4.4's third example — an approved behaviour CHANGE. Tier 1 still refuses to hand
     /// this to Support off the bare word "support"; tier 2 gives it to Finance, which is who
     /// should hold a sentence about investors.
@@ -122,9 +157,21 @@ final class DepartmentRouterTests: XCTestCase {
                      "tier 1 must still refuse this — the Aug 10 regression")
     }
 
-    /// Vietnamese has no vocabulary yet, so tier 2 is silent rather than wrong.
+    /// Vietnamese has no vocabulary yet, so tier 2 is silent rather than wrong. A Vietnamese
+    /// FIXTURE proves nothing on its own — it also hits nothing in the English lexicon, so
+    /// it would come back nil even if `terms(for:language:)` ignored `language` entirely.
+    /// The pair below is the actual proof: the SAME English-vocabulary text scores under
+    /// `.en` (finding "runway" and "burn" and routing to finance) but must score nothing
+    /// once the only thing that changed is `language: .vi`, because
+    /// `DepartmentTopics.map["fin"]!.vi` is empty.
     func testVietnameseYieldsNoTopicalSuggestion() {
-        XCTAssertNil(DepartmentRouter.suggest(text: "định giá cho pro tier thế nào?",
-                                              tasks: [], lastActed: nil, language: .vi))
+        let text = "we need to talk about runway and burn"
+
+        let en = DepartmentRouter.suggest(text: text, tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(en?.deptKey, "fin", "sanity check: this text must score under English")
+        XCTAssertEqual(en?.tier, .topical)
+
+        XCTAssertNil(DepartmentRouter.suggest(text: text, tasks: [], lastActed: nil, language: .vi),
+                     "identical tokens must not score once language is .vi")
     }
 }

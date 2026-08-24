@@ -20,9 +20,12 @@ final class DepartmentSuggestionLabelTests: XCTestCase {
     /// with `.carryOver` instead, an addressed guess would claim to be continuing a
     /// conversation that never happened — this goes red on that.
     func testAddressedAlsoNamesTheWordThatFired() {
-        let s = DepartmentSuggestionLabel.help(tier: .addressed, matched: "design",
+        // "design" would collide with the department's own name ("Design") and make this
+        // assertion pass on case-sensitivity alone rather than on the matched term actually
+        // appearing — "hero" cannot be confused with anything else in the sentence.
+        let s = DepartmentSuggestionLabel.help(tier: .addressed, matched: "hero",
                                                pet: "luna", department: design, lang: .en)
-        XCTAssertTrue(s.contains("design"), s)
+        XCTAssertTrue(s.contains("hero"), s)
         XCTAssertTrue(s.lowercased().contains("mentioned"), s)
         XCTAssertFalse(s.lowercased().contains("continuing"), s)
     }
@@ -104,5 +107,22 @@ final class DepartmentSuggestionLabelTests: XCTestCase {
         let s = DepartmentSuggestionLabel.help(tier: .carryOver, matched: nil,
                                                pet: "luna", department: design, lang: .en)
         XCTAssertTrue(s.contains(DepartmentMenu.rowTitle(design, host: "byte")), s)
+    }
+
+    /// The `✕`'s tooltip has to say something different when it is dismissing a GUESS than
+    /// when it is clearing a PICK — see `DepartmentMenu.dismissSuggestionHelp`, added beside
+    /// `clearHelp` for exactly that reason.
+    ///
+    /// **This only pins the two pure strings apart — it does NOT reach `ChatComposer`'s
+    /// ternary.** A SwiftUI `.help()` string cannot be asserted on (the same reason this whole
+    /// file exists), so reverting `ChatComposer`'s `armed == nil ? dismissSuggestionHelp(lang)
+    /// : clearHelp(lang)` back to always using `clearHelp` would NOT turn this test red. What
+    /// this test protects is narrower: that `dismissSuggestionHelp` cannot quietly collapse
+    /// into `clearHelp`'s copy, or its VI branch into its own EN branch.
+    func testDismissSuggestionHelpDiffersFromClearHelp() {
+        XCTAssertNotEqual(DepartmentMenu.dismissSuggestionHelp(.en), DepartmentMenu.clearHelp(.en))
+        XCTAssertNotEqual(DepartmentMenu.dismissSuggestionHelp(.vi), DepartmentMenu.clearHelp(.vi))
+        XCTAssertNotEqual(DepartmentMenu.dismissSuggestionHelp(.vi),
+                          DepartmentMenu.dismissSuggestionHelp(.en))
     }
 }

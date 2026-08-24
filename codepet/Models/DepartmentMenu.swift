@@ -57,4 +57,12 @@ enum DepartmentMenu {
     static func clearHelp(_ lang: AppLanguage) -> String {
         lang == .vi ? "Bỏ chọn phòng ban" : "Clear the department"
     }
+
+    /// The `✕`'s tooltip when it is dismissing a GUESS rather than clearing a PICK — distinct
+    /// copy because the two acts are distinct: a pick is undone, a suggestion is refused. Read
+    /// beside `clearHelp` at the moment of maximum need — the founder reaches for the `✕`
+    /// exactly when the guess looks wrong, and "Clear the department" describes the other act.
+    static func dismissSuggestionHelp(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Bỏ qua gợi ý này" : "Dismiss this suggestion"
+    }
 }

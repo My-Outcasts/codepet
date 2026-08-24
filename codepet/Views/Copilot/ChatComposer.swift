@@ -67,9 +67,12 @@ struct ChatComposer: View {
     /// The department the router guessed from the draft, rendered tentatively. Distinct from
     /// `selectedDept` on purpose: an explicit pick must never be silently overwritten, and a
     /// guess must never look like a choice. Shown only when `selectedDept == nil`.
-    var suggestedDept: Department?
-    var suggestionTier: DepartmentRouter.Tier?
-    var suggestionMatched: String?
+    ///
+    /// One value, not three parallel optionals (`suggestedDept`/`suggestionTier`/
+    /// `suggestionMatched`) — `DepartmentRouter.Suggestion` already bundles `deptKey`, `tier`
+    /// and `matched`, so a missing tier on a present guess is impossible rather than papered
+    /// over with `?? .topical`.
+    var suggestion: DepartmentRouter.Suggestion?
     /// The founder refusing the guess. Clears it for the current draft; the owner decides how
     /// long the refusal holds.
     var onDismissSuggestion: () -> Void = {}
@@ -344,11 +347,19 @@ struct ChatComposer: View {
         // A guess only renders when the founder has not chosen. `shown` drives the label, the
         // sprite and the ✕; `armed` alone drives the SOLID treatment, so a suggestion and a
         // pick can never look alike.
-        let suggested = armed == nil ? suggestedDept : nil
-        let shown = armed ?? suggested
+        let activeSuggestion = armed == nil ? suggestion : nil
+        let suggestedDept = activeSuggestion.flatMap { DepartmentCatalog.find($0.deptKey) }
+        let shown = armed ?? suggestedDept
         return HStack(spacing: 0) {
             Menu {
-                Button { selectedDept = nil } label: {
+                // Two acts, one row — the same rule the `✕` already follows: with nothing
+                // armed, this row is refusing a GUESS (`onDismissSuggestion`), not picking
+                // "Anyone" over a pick that already isn't there. Without this, clicking the
+                // already-checked-looking "Anyone" row while a suggestion is showing did
+                // nothing at all, and the guess survived a founder explicitly rejecting it.
+                Button {
+                    if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
+                } label: {
                     if shown == nil {
                         Label(DepartmentMenu.anyoneLabel(lang), systemImage: "checkmark")
                     } else {
@@ -379,8 +390,8 @@ struct ChatComposer: View {
                         // Same string as a pick, dimmed. Accepting a suggestion must change
                         // nothing on screen except the chip firming up — a suggestion that
                         // read differently would look like a second feature.
-                        .foregroundColor(shown == nil ? CodepetTheme.bodyText
-                                         : (shown!.accent.opacity(armed == nil ? 0.75 : 1.0)))
+                        .foregroundColor(shown.map { $0.accent.opacity(armed == nil ? 0.75 : 1.0) }
+                                         ?? CodepetTheme.bodyText)
                         .lineLimit(1)
                     if shown == nil {
                         Image(systemName: "chevron.down")
@@ -408,7 +419,13 @@ struct ChatComposer: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(DepartmentMenu.clearHelp(lang))
+                // The `✕` dismisses a guess or clears a pick — two different acts, and the
+                // tooltip has to say which. The innermost `.help()` wins over the capsule's,
+                // so without this ternary the founder hovering the `✕` on a suggestion (the
+                // control they reach for exactly when the guess looks wrong) always read
+                // "Clear the department" and never the reason the pet was suggested.
+                .help(armed == nil ? DepartmentMenu.dismissSuggestionHelp(lang)
+                                    : DepartmentMenu.clearHelp(lang))
             }
         }
         // The armed treatment is the retired chip's treatment, unchanged. The suggested
@@ -419,17 +436,21 @@ struct ChatComposer: View {
         .overlay(
             Capsule().strokeBorder(
                 shown?.accent ?? CodepetTheme.hairline,
-                style: armed == nil && suggested != nil
+                // `suggestedDept` is already nil whenever `armed != nil` (see its definition
+                // above), so that conjunct could never be false when this one is true.
+                style: suggestedDept != nil
                     ? StrokeStyle(lineWidth: 1, dash: [3, 2])
                     : StrokeStyle(lineWidth: 1)
             )
         )
         .hoverAffordance(Capsule(), accent: shown?.accent ?? CodepetTheme.accentPurple)
-        .help(suggested.map {
-            DepartmentSuggestionLabel.help(tier: suggestionTier ?? .topical,
-                                           matched: suggestionMatched,
-                                           pet: DepartmentMenu.pet(for: $0, host: host),
-                                           department: $0, lang: lang)
+        .help(activeSuggestion.flatMap { s in
+            suggestedDept.map { dep in
+                DepartmentSuggestionLabel.help(tier: s.tier,
+                                               matched: s.matched,
+                                               pet: DepartmentMenu.pet(for: dep, host: host),
+                                               department: dep, lang: lang)
+            }
         } ?? "")
     }
 
@@ -936,9 +957,9 @@ private struct ChatComposerPreviewHost: View {
             ],
             accent: CodepetTheme.accentPurple, accent2: CodepetTheme.accentPink,
             isBusy: false, selectedDept: $dept,
-            suggestedDept: suggested,
-            suggestionTier: .topical,
-            suggestionMatched: "layout",
+            suggestion: suggested.map {
+                DepartmentRouter.Suggestion(deptKey: $0.key, tier: .topical, matched: "layout")
+            },
             onSend: {}, onQuickAction: { _ in }
         )
         .frame(width: 380)

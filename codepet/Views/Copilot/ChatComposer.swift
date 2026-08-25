@@ -199,7 +199,13 @@ struct ChatComposer: View {
                           floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
-                if showsDeptChips || selectedDept != nil { departmentControl }
+                // `suggestion != nil` is the third condition and it carries the rail: a guess
+                // is never made without the chip that shows it. The two-mode hero keeps its
+                // clean rest state — no bare "Departments" button while nothing is picked or
+                // guessed — but the moment the router has an opinion, the dashed chip appears
+                // to state it. Suppressing the guess there instead (the earlier design) meant
+                // the FIRST message of every new conversation silently got no pet.
+                if showsDeptChips || selectedDept != nil || suggestion != nil { departmentControl }
                 plusMenu
                 micButton
                 voiceButton

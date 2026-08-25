@@ -200,11 +200,14 @@ struct CopilotChatView: View {
                         //
                         // An ARMED department still draws, because the roster lights
                         // its own chip and nothing else would say so — see
-                        // `ChatComposer.showsDeptChips`. Every other chat surface
-                        // carries the control permanently; this screen is the only
-                        // exception, and only while nothing is picked. The `false` is
-                        // not written here any more: `showsDeptChips` computes it, and
-                        // `guess(for:)` reads the SAME property (see FIX-4 there).
+                        // `ChatComposer.showsDeptChips`. A SUGGESTED department draws
+                        // here too, for the same reason: the guess has to be visible
+                        // to be honoured, and this is the top of every new
+                        // conversation, not a one-off first-run screen. Every other
+                        // chat surface carries the control permanently; this screen is
+                        // the only exception, and only while nothing is picked or
+                        // guessed. The `false` is not written here any more —
+                        // `showsDeptChips` computes it.
                         composerDock(column: column)
                     }
                 } else {
@@ -353,10 +356,6 @@ struct CopilotChatView: View {
         // `.build` suppresses the chip entirely (see `refreshSuggestion`), so switching modes
         // has to re-run it in both directions: leaving `.build` must bring the guess back.
         .onChange(of: mode) { _, _ in refreshSuggestion() }
-        // Same reason, other suppression: a screen where the chip cannot be drawn holds no
-        // guess (see `guess(for:)`), so a draft that survives the hero — the first reply
-        // landing, or a run starting — has to have its guess derived once the chip can say so.
-        .onChange(of: showsDeptChips) { _, _ in refreshSuggestion() }
         .onChange(of: companyStore.activeThreadId) { old, _ in
             // **`nil -> id` is the LAZY MINT, not a switch.** `activeThreadId` starts nil and is
             // only minted at the END of the first turn (`CompanyStore.flushActiveThread`), so
@@ -437,19 +436,18 @@ struct CopilotChatView: View {
     /// be read as a live visibility answer by the next caller, which is what this paragraph is
     /// here to stop.
     ///
-    /// `ChatComposer` renders `departmentControl` only when `showsDeptChips || selectedDept
-    /// != nil`, so on the two-mode hero the dashed chip and its ✕ never appear. The send
-    /// still honoured the guess, which meant a pet took the founder's very first turn with
-    /// nothing on screen explaining why — the same failure sticky department selection was
-    /// removed for. Founder decision: **if the founder cannot see the guess, it does not
-    /// apply.**
+    /// **This governs the REST state only, and no longer gates the guess.** `ChatComposer`
+    /// draws `departmentControl` when `showsDeptChips || selectedDept != nil || suggestion !=
+    /// nil`, so the two-mode empty state keeps its clean opening — no bare "Departments"
+    /// button while nothing is picked or guessed — and the `DepartmentRoster` above it stays
+    /// the explicit picker it was put there to be.
     ///
-    /// It is ONE property rather than a `showsDeptChips:` argument at each call site
-    /// precisely so the suppression cannot drift from the rendering condition: `typingComposer`
-    /// hands this exact value to `ChatComposer`, and `guess(for:)` gates on this exact value.
-    /// An explicit `selectedDept` pick is unaffected — it outranks the guess everywhere and
-    /// draws its own solid chip, which is what makes suppressing the hero's guess safe (the
-    /// `DepartmentRoster` sits directly above it as the explicit picker).
+    /// It briefly gated the guess as well, under "if the founder cannot see it, it does not
+    /// apply". That rail is right, but hanging it here was wrong: this screen is not a one-off
+    /// first-run hero, it is the top of **every new conversation**, so the effect was that the
+    /// first message of each one silently got no pet — the single most common message there
+    /// is. The rail now holds in the composer instead, where a guess cannot exist without the
+    /// chip that states it, so nothing has to be kept in sync.
     private var showsDeptChips: Bool {
         !(surface == .twoMode && !showHistory && isEmptyState)
     }
@@ -869,19 +867,21 @@ struct CopilotChatView: View {
     ///
     /// Suppressed in `.build`: that send does not read the department at all, so arming a chip
     /// there would promise a handoff that cannot happen. Suppressed after a ✕ too, for the
-    /// current draft — see `suggestionDismissed`. And suppressed wherever the chip cannot be
-    /// drawn (`showsDeptChips`): a pet may not take a turn off a guess the founder was never
-    /// shown, which is the whole rail sticky selection was removed for.
+    /// current draft — see `suggestionDismissed`.
+    ///
+    /// **The rail — a pet never takes a turn off a guess the founder was not shown — is now
+    /// held by the COMPOSER, not by a third suppression here.** It used to be gated on
+    /// `showsDeptChips`, which is `false` on the two-mode empty state; that screen is not a
+    /// one-off first-run hero but the top of *every new conversation*, so the effect was that
+    /// the first message of each one silently got no pet. `ChatComposer` now draws
+    /// `departmentControl` whenever `suggestion != nil`, so a guess cannot exist unseen and
+    /// there is nothing left to suppress. The hero keeps its clean rest state: no bare
+    /// "Departments" button until something is picked or guessed.
     ///
     /// Cheap and pure — no network, no persistence — which is what makes calling it a second
     /// time at send cost nothing.
-    /// `visible` is passed rather than read, because the two callers ask about different
-    /// moments. `refreshSuggestion` asks "can the chip be seen right now"; `send()` asks "could
-    /// the founder see it when they pressed send" — and `send()` mutates `showHistory`, which
-    /// `showsDeptChips` is derived from, before it gets to the resolve. Same value in the
-    /// ordinary case; the parameter is what stops the two questions being silently fused again.
-    private func guess(for text: String, visible: Bool) -> DepartmentRouter.Suggestion? {
-        guard mode != .build, !suggestionDismissed, visible else { return nil }
+    private func guess(for text: String) -> DepartmentRouter.Suggestion? {
+        guard mode != .build, !suggestionDismissed else { return nil }
         return DepartmentRouter.suggest(text: text,
                                         tasks: companyStore.company.tasks,
                                         lastActed: lastActedDeptKey,
@@ -901,7 +901,7 @@ struct CopilotChatView: View {
         if companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             suggestionDismissed = false
         }
-        suggestion = guess(for: companyStore.chatDraft, visible: showsDeptChips)
+        suggestion = guess(for: companyStore.chatDraft)
     }
 
     /// The hero card's buttons. Each is wired to something that already exists —
@@ -1104,16 +1104,6 @@ struct CopilotChatView: View {
     private func send() {
         let text = companyStore.chatDraft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // Captured HERE, beside `text`, and for the same reason. `showsDeptChips` is derived
-        // from live store state — `surface`, `showHistory`, `isEmptyState` — and this function
-        // mutates the second of those on the very next line. Reading it further down would ask
-        // "is the chip visible?" of a view that has already moved, and the guess is only allowed
-        // to apply where the founder could SEE it (spec §6): a pet must not take a turn off a
-        // guess that was never on screen. Capturing the answer the founder actually had in
-        // front of them makes that independent of everything `send()` does afterwards —
-        // including a future edit that appends the outgoing message before the resolve below,
-        // which would otherwise flip `isEmptyState` and silently undo the rule.
-        let guessWasVisible = showsDeptChips
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
         // One message, one handoff. The chip used to survive the send — and `newChat()` and a
@@ -1140,7 +1130,7 @@ struct CopilotChatView: View {
         // `guess(for:)` makes cheap and pure) removes the silent dependency on that ordering
         // instead of leaving it undocumented — the stored `suggestion` still drives what the
         // chip DISPLAYS, and only this resolve changed.
-        let dept = selectedDept ?? DepartmentCatalog.find(guess(for: text, visible: guessWasVisible)?.deptKey)
+        let dept = selectedDept ?? DepartmentCatalog.find(guess(for: text)?.deptKey)
         selectedDept = nil
         suggestion = nil
         // The refusal belonged to the draft that just left the composer.

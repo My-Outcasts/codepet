@@ -318,4 +318,44 @@ final class DepartmentRouterTests: XCTestCase {
         XCTAssertEqual(s?.deptKey, "fin")
         XCTAssertEqual(s?.tier, .carryOver)
     }
+    // MARK: - Plurals
+
+    /// **The sentence that found this, typed on a live demo.** "the onboarding screens feel
+    /// cluttered" went to Finance. `screens` is not `screen`, Design scored 0, and carry-over
+    /// kept the previous department — every component behaving as designed while the
+    /// vocabulary could not see the word. Goes RED without `matchesIgnoringPlural`.
+    func testTheDemoSentenceReachesDesign() {
+        let s = DepartmentRouter.suggest(text: "the onboarding screens feel cluttered",
+                                         tasks: [], lastActed: "fin", language: .en)
+        XCTAssertEqual(s?.deptKey, "design",
+                       "plural `screens` must match the `screen` term; got \(String(describing: s))")
+        XCTAssertEqual(s?.tier, .topical, "a real winner must displace carry-over, not defer to it")
+    }
+
+    /// The general case the demo sentence is one instance of. Every plural used to miss.
+    func testAPluralTokenMatchesItsSingularTerm() {
+        let s = DepartmentRouter.suggest(text: "we have three tickets open this week",
+                                         tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(s?.deptKey, "support")
+        XCTAssertEqual(s?.matched, "ticket", "the CURATED term is reported, not the founder's plural")
+    }
+
+    /// No regression: exact matches still work, and still stack.
+    func testSingularTokensStillMatch() {
+        let s = DepartmentRouter.suggest(text: "the screen contrast is too low",
+                                         tasks: [], lastActed: nil, language: .en)
+        XCTAssertEqual(s?.deptKey, "design")
+    }
+
+    /// **Guards the RULE, not the feature — and it is honest about that.** Reverting
+    /// `matchesIgnoringPlural` leaves this green, because "focus" fails an exact match too.
+    /// It goes red under the WRONG implementation: strip a trailing `s` from the founder's
+    /// token and "focus" becomes "focu", "terms" becomes "term", and the lexicon starts
+    /// matching things nobody wrote. Widening from the curated side is what makes that
+    /// impossible, and this test is what stops someone "simplifying" it to the other side.
+    func testAWordMerelyEndingInSIsNotTreatedAsAPlural() {
+        XCTAssertNil(DepartmentRouter.suggest(text: "our focus is unclear",
+                                              tasks: [], lastActed: nil, language: .en))
+    }
+
 }

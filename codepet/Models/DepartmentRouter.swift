@@ -101,6 +101,33 @@ enum DepartmentRouter {
         return false
     }
 
+    /// Whether any draft token is `term`, allowing for a plural.
+    ///
+    /// **The rule, in one sentence: a token matches a term if they are equal, or if the token
+    /// is the term plus `s` or `es`.** Nothing else — no stemming, no suffix-stripping of the
+    /// token, no irregular plurals. This is a keyword lexicon, not an NLP pipeline, and the
+    /// asymmetry is deliberate: we widen from the CURATED side (a term we wrote, pluralised)
+    /// rather than guessing at the founder's side, so a token can never be trimmed into an
+    /// accidental match. "focus" cannot become "focu"; "terms" still matches the legal term
+    /// `terms` by plain equality, and does not reach for anything else.
+    ///
+    /// **Why this exists.** Found on video, not in tests: the founder typed "the onboarding
+    /// screens feel cluttered" and got Finance. `screens` is not `screen`, Design scored 0,
+    /// and carry-over kept the previous department — every component behaving exactly as
+    /// designed while the vocabulary could not see the word. Every plural missed the same way:
+    /// `tickets`, `invoices`, `mockups`, `campaigns`, `wireframes`.
+    ///
+    /// Deliberately NOT in `TextRelevance.tokenize`: that is shared with chat grounding
+    /// (`ChatContext.selectPriorWork`), where a widened match changes which documents ground a
+    /// reply. This widens scoring only.
+    ///
+    /// Phrases are unaffected. They match raw text through `contains(phrase:in:)`, where a
+    /// trailing plural would need boundary rules of its own for no case anyone has hit —
+    /// "landing pages" is not currently a miss worth new machinery.
+    private static func matchesIgnoringPlural(_ term: String, in tokens: Set<String>) -> Bool {
+        tokens.contains(term) || tokens.contains(term + "s") || tokens.contains(term + "es")
+    }
+
     /// Score one department, returning the total and the most specific term that fired.
     ///
     /// `taskTokens` is the tokenized titles of this department's own tasks, computed once per
@@ -133,7 +160,7 @@ enum DepartmentRouter {
         for term in terms {
             let hit = term.contains(" ")
                 ? contains(phrase: term, in: raw)
-                : tokens.contains(term)
+                : matchesIgnoringPlural(term, in: tokens)
             guard hit else { continue }
             // Subsumed by a longer term already counted — same concept, already paid for.
             if fired.contains(where: { $0.contains(term) }) { continue }

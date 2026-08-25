@@ -9,7 +9,6 @@ import { handleGeneratePlan } from "./generatePlan";
 import { handleDistillReference } from "./distillReference";
 import { handleSynthesizeBrief } from "./synthesizeBrief";
 import { handleRevenueCatWebhook } from "./revenueCatWebhook";
-import { handleExtractKnowledge } from "./extractKnowledge";
 import { handleGenerateDictionary } from "./generateDictionary";
 import { handleVirtualCompanyRun } from "./company/virtualCompany";
 // Consolidated in from the Murror/CodePet-Clean checkout, which until now was a
@@ -277,14 +276,6 @@ export const revenueCatWebhook = onRequest(
     cors: false
   },
   handleRevenueCatWebhook
-);
-
-export const extractKnowledge = onRequest(
-  {
-    cors: false,
-    secrets: ["ANTHROPIC_API_KEY"]
-  },
-  handleExtractKnowledge
 );
 
 // Project-aware Dictionary: detected terms from the user's own code → plain,

@@ -113,6 +113,7 @@ struct SettingsModal: View {
         case .support: SupportPanel()
         case .advanced: AdvancedPanel()
         case .aiSettings: AISettingsPanel()
+        case .claudeCode: ClaudeCodePanel()
         case .memory: MemoryPanel()
         case .notifications: NotificationsPanel()
         }

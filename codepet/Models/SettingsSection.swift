@@ -8,7 +8,7 @@ import Foundation
 /// when closed, so closing it returns the founder to the view they were already on —
 /// there is no route to restore. The `String` raw values give chat cards a deep link.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case preferences, aiSettings, company, memory,
+    case preferences, aiSettings, claudeCode, company, memory,
          notifications, billing, usage, support, advanced
 
     var id: String { rawValue }
@@ -17,6 +17,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .preferences:   return lang == .vi ? "Tuỳ chọn" : "Preferences"
         case .aiSettings:    return lang == .vi ? "Cài đặt AI" : "AI Settings"
+        case .claudeCode:    return "Claude Code"
         case .company:       return lang == .vi ? "Công ty" : "Company"
         case .memory:        return lang == .vi ? "Ghi nhớ" : "Memory"
         case .notifications: return lang == .vi ? "Thông báo" : "Notifications"
@@ -36,6 +37,13 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .aiSettings:
             return lang == .vi ? "Cách đội của bạn nói chuyện với bạn."
                                : "How your team talks to you."
+        // Says "your own plan", not "your API key" — the entire point of connecting here
+        // is that Codepet spends the founder's Claude subscription and never holds a
+        // credential of its own. A subtitle mentioning keys would describe the design we
+        // rejected.
+        case .claudeCode:
+            return lang == .vi ? "Nối gói Claude của bạn, để Codepet chạy trên đó."
+                               : "Connect your own Claude plan, and Codepet runs on it."
         case .company:
             return lang == .vi ? "Bạn đồng hành và hồ sơ công ty."
                                : "Your companion and your company brief."
@@ -69,6 +77,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .preferences:   return "slider.horizontal.3"
         case .aiSettings:    return "sparkles"
+        case .claudeCode:    return "terminal"
         case .company:       return "building.2"
         case .memory:        return "brain"
         case .notifications: return "bell"

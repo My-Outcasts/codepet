@@ -508,7 +508,12 @@ enum CompanyChatClient {
     ///   log show --last 15m --predicate 'subsystem == "app.murror.codepet"' --info
     static let streamLog = Logger(subsystem: "app.murror.codepet", category: "ChatStream")
 
-    private static func handleStreamFrame(
+    /// Internal, not private, since 2026-08-25: `LocalChatStreamer` runs the same turn on
+    /// the founder's own Claude Code and emits the same frames, so it must decode them the
+    /// same way. Duplicating this would mean two definitions of what a `done` frame means
+    /// — and the careful failure logging below, written from two real truncation reports,
+    /// would only cover one transport.
+    static func handleStreamFrame(
         frame: SSEFrame,
         continuation: AsyncThrowingStream<CompanyChatStreamEvent, Error>.Continuation
     ) throws {

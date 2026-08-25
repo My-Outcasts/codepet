@@ -62,7 +62,10 @@ enum LocalChatStreamer {
 
     /// Run the turn. Mirrors `CompanyChatClient.sendStream`'s signature so it can be
     /// injected as `chatStreamer` without touching a call site.
-    static func sendStream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+    static func sendStream(
+        _ req: CompanyChatRequest,
+        modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
+    ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             guard let sidecar = resolveSidecarPath() else {
                 log.error("no sidecar on disk — local chat unavailable")
@@ -87,6 +90,13 @@ enum LocalChatStreamer {
                 .first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
             var env = ProcessInfo.processInfo.environment
             for key in LoginShellRunner.strippedEnvironmentKeys { env.removeValue(forKey: key) }
+            // The founder's model choice, as an alias so it tracks the latest of that tier.
+            // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at
+            // all and leave the decision to their own Claude Code.
+            if let companyId = req.companyId,
+               let alias = modelPreference.model(companyId).alias {
+                env["CODEPET_CHAT_MODEL"] = alias
+            }
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: shell)

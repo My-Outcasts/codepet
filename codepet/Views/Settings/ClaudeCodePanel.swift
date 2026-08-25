@@ -38,9 +38,11 @@ struct ClaudeCodePanel: View {
     /// accident this removes rather than relies on.
     @State private var granted = false
     @State private var neverUseApiKey = false
+    @State private var model: ClaudeCodeModel = .inherit
 
     /// Injected so a test or preview never touches the real defaults domain.
     var authorisation = ClaudeCodeAuthorisation()
+    var modelPreference = ClaudeCodeModelPreference()
 
     /// The documented native installer. Shown for copying, never run on the founder's
     /// behalf: they should see what is about to be put on their machine.
@@ -184,6 +186,31 @@ struct ClaudeCodePanel: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
             }
+            // Only meaningful once turns actually run on their plan. Offering a model
+            // picker while chat still goes to the Cloud Function would be a control that
+            // changes nothing.
+            if granted {
+                SettingsDivider()
+                SettingsRow(
+                    label: lang == .vi ? "Model" : "Model",
+                    description: model.note(lang)
+                ) {
+                    Picker("", selection: Binding(
+                        get: { model },
+                        set: { picked in
+                            model = picked
+                            modelPreference.setModel(companyId, picked)
+                        }
+                    )) {
+                        ForEach(ClaudeCodeModel.all) { m in
+                            Text(m.title(lang)).tag(m)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
+                }
+            }
+
             // Only offered once the grant is on. Turning the key off before there is any
             // local path would leave the founder with an app that cannot answer anything.
             if granted {
@@ -332,9 +359,11 @@ struct ClaudeCodePanel: View {
         if let companyId {
             granted = authorisation.isAuthorised(companyId)
             neverUseApiKey = CloudAIBlock.isEnabled(companyId: companyId)
+            model = modelPreference.model(companyId)
         } else {
             granted = false
             neverUseApiKey = false
+            model = .inherit
         }
         probing = true
         // No company id means no grant can exist yet, so the probe is told `false` rather

@@ -27,6 +27,11 @@ struct CodePetApp: App {
 
     init() {
         FontRegistrar.registerBundledFonts()
+        // Before anything can make a request. DEBUG-only and off unless the launch
+        // argument is present; it exists so "nothing still uses the API key" can be
+        // PROVEN rather than asserted — a silent fallback produces a correct-looking
+        // reply, which is exactly what makes it hard to notice.
+        CloudBackendBlock.installIfRequested()
         // Skip Firebase under XCTest — Firestore aborts when its store isn't
         // available in the test runner, which would crash the whole test host.
         if !AppEnvironment.isRunningTests {

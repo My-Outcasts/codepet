@@ -167,9 +167,23 @@ export function ingestLine(
  * ROLE STRUCTURE is flattened, and a model reads a transcript slightly differently from a
  * real turn history.
  *
- * The faithful alternative is `--input-format stream-json`, which accepts realtime
- * structured input. It is more machinery and it is unverified for pre-seeding history, so
- * it is the follow-up, not the first cut.
+ * **There is no better shape available, and that was measured rather than assumed.**
+ * `--input-format stream-json` looked like the faithful alternative and is not:
+ *
+ *   - A seeded `assistant` message costs no turn but is DROPPED. Sent one followed by a
+ *     question about it, the model answered "I don't have any prior context in this
+ *     conversation establishing a company name."
+ *   - Every `user` message triggers its own generation. Three input messages produced two
+ *     `result` frames, so replaying an N-turn history would cost N generations of the
+ *     founder's quota and N× the latency.
+ *
+ *   An earlier reading of the first experiment concluded it DID work — the model repeated a
+ *   name from the injected history. It knew the name because the first user turn had
+ *   actually run and answered it; the injected assistant message played no part. The
+ *   minimal two-message case is what separated those.
+ *
+ * So flattening is not a first cut to be improved later. It is the only shape `claude -p`
+ * supports, and the divergence from the HTTP path is permanent for this transport.
  *
  * Attachments cannot ride a text prompt. They are named rather than dropped silently, so a
  * founder who attached a screenshot sees that it was not read instead of wondering why the

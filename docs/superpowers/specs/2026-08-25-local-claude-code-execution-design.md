@@ -342,6 +342,22 @@ is a business decision to take deliberately, not a side effect.
 
 ## Known losses
 
+- **Multi-turn role structure, permanently, on this transport.** `claude -p` takes one
+  prompt, not a messages array, so a conversation the HTTP path sends as structured
+  user/assistant turns reaches Claude Code as a labelled transcript. The words are
+  identical — `buildChatRequest` produced them — but the roles are flattened.
+
+  `--input-format stream-json` was the obvious fix and does not work. Measured on 2.1.241:
+  a seeded `assistant` message costs no turn but is **dropped** (asked about it immediately
+  after, the model said it had no prior context), and every `user` message triggers its own
+  generation — three input messages produced two `result` frames. Replaying an N-turn
+  history would therefore cost N generations of the founder's quota. A first reading of
+  that experiment concluded it worked, because the model repeated a name from the injected
+  history; it knew the name because the first user turn had actually run and answered it.
+  The two-message minimal case is what separated those, and it is the one to repeat before
+  anyone tries this again.
+
+
 - **Prompt caching.** `AgentCaller.system` is a `SystemBlock[]` carrying
   `cache_control`, guarded by `companyCachePrefix.test.ts`. The CLI does not
   expose it. Costs latency and founder rate limit; unmeasured until phase 5.

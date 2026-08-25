@@ -27,10 +27,17 @@ import {
   type ChatRequestBody,
   type ClaudeMessage,
 } from "../companyChatCore";
-import { toMcpTools, allowedToolNames } from "./mcpToolServer";
+import { toMcpTools, allowedToolNames, serveMcp } from "./mcpToolServer";
 
-/** Where this file's compiled sibling lives, so we can point `claude` at it. */
-const MCP_SERVER_JS = path.join(__dirname, "mcpToolServer.js");
+/**
+ * The flag that turns this same file into the MCP tool server.
+ *
+ * One file, not two, because of PACKAGING: Xcode's synchronized resource group FLATTENS
+ * whatever it bundles, so a compiled sibling loses its path and `require("../…")` loses
+ * its target. A single self-contained file that re-invokes itself is the only shape that
+ * survives being dropped into `Contents/Resources/`.
+ */
+const MCP_SERVER_FLAG = "--mcp-server";
 
 function frame(event: string, payload: unknown): void {
   process.stdout.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -234,7 +241,10 @@ async function main(): Promise<void> {
   fs.writeFileSync(
     mcpConfigPath,
     JSON.stringify({
-      mcpServers: { codepet: { command: process.execPath, args: [MCP_SERVER_JS, toolsPath] } },
+      // `__filename` — this very file, re-invoked in server mode.
+      mcpServers: {
+        codepet: { command: process.execPath, args: [__filename, MCP_SERVER_FLAG, toolsPath] },
+      },
     })
   );
 
@@ -317,5 +327,11 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
-  main().catch((err) => frame("error", { error: "sidecar_failure", detail: String(err) }));
+  const flagAt = process.argv.indexOf(MCP_SERVER_FLAG);
+  if (flagAt !== -1) {
+    // Server mode: `claude` spawned us to serve tools, not to run a turn.
+    serveMcp(process.argv[flagAt + 1]);
+  } else {
+    main().catch((err) => frame("error", { error: "sidecar_failure", detail: String(err) }));
+  }
 }

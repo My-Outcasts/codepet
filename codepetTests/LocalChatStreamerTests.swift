@@ -9,6 +9,12 @@ final class LocalChatStreamerTests: XCTestCase {
     private var suiteName = ""
     private var defaults: UserDefaults!
 
+    /// The TEST bundle, which never carries the sidecar — `.main` is the app bundle and,
+    /// since packaging landed, genuinely does. Two cases here asserted "nothing anywhere"
+    /// against `.main` and went red the moment the resource started shipping, which is the
+    /// packaging working rather than a regression.
+    private var emptyBundle: Bundle { Bundle(for: LocalChatStreamerTests.self) }
+
     override func setUp() {
         super.setUp()
         suiteName = "local-chat-tests-\(UUID().uuidString)"
@@ -30,14 +36,14 @@ final class LocalChatStreamerTests: XCTestCase {
     /// different messages, and only one of them is actionable.
     func testNoSidecarAnywhereMeansUnavailable() {
         XCTAssertNil(LocalChatStreamer.resolveSidecarPath(
-            defaults: defaults, bundle: .main, fileExists: { _ in false }))
-        XCTAssertFalse(LocalChatStreamer.isAvailable(defaults: defaults, bundle: .main))
+            defaults: defaults, bundle: emptyBundle, fileExists: { _ in false }))
+        XCTAssertFalse(LocalChatStreamer.isAvailable(defaults: defaults, bundle: emptyBundle))
     }
 
     func testDevOverrideIsUsedWhenTheFileIsThere() {
         defaults.set("/tmp/chatSidecar.js", forKey: LocalChatStreamer.sidecarPathKey)
         let found = LocalChatStreamer.resolveSidecarPath(
-            defaults: defaults, bundle: .main, fileExists: { $0 == "/tmp/chatSidecar.js" })
+            defaults: defaults, bundle: emptyBundle, fileExists: { $0 == "/tmp/chatSidecar.js" })
         XCTAssertEqual(found, "/tmp/chatSidecar.js")
     }
 
@@ -47,13 +53,31 @@ final class LocalChatStreamerTests: XCTestCase {
     func testAStaleOverrideIsIgnoredRatherThanReturned() {
         defaults.set("/tmp/gone.js", forKey: LocalChatStreamer.sidecarPathKey)
         XCTAssertNil(LocalChatStreamer.resolveSidecarPath(
-            defaults: defaults, bundle: .main, fileExists: { _ in false }))
+            defaults: defaults, bundle: emptyBundle, fileExists: { _ in false }))
     }
 
     func testAnEmptyOverrideIsNotAPath() {
         defaults.set("", forKey: LocalChatStreamer.sidecarPathKey)
         XCTAssertNil(LocalChatStreamer.resolveSidecarPath(
-            defaults: defaults, bundle: .main, fileExists: { _ in true }))
+            defaults: defaults, bundle: emptyBundle, fileExists: { _ in true }))
+    }
+
+    /// The packaging guard, and it exists BECAUSE two tests above broke when packaging
+    /// started working. Without it, a broken `scripts/build-sidecar.sh` or a resource that
+    /// stops being copied would make local chat quietly unavailable for every founder —
+    /// the router would report localUnavailable forever and nothing would say why.
+    ///
+    /// Skips rather than fails when the resource is absent: a developer who has not run the
+    /// build script yet has a legitimately incomplete bundle, and failing here would punish
+    /// them for a step that is not part of `xcodebuild test`.
+    func testTheBundledSidecarIsReachableWhenItHasBeenBuilt() throws {
+        guard Bundle.main.path(forResource: "chatSidecar", ofType: "js") != nil else {
+            throw XCTSkip("no bundled sidecar — run scripts/build-sidecar.sh")
+        }
+        let resolved = LocalChatStreamer.resolveSidecarPath(defaults: defaults, bundle: .main)
+        XCTAssertNotNil(resolved, "the bundle has it, so resolution must find it")
+        XCTAssertTrue(resolved?.hasSuffix("chatSidecar.js") ?? false)
+        XCTAssertTrue(LocalChatStreamer.isAvailable(defaults: defaults, bundle: .main))
     }
 
     // MARK: - What gets sent

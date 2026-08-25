@@ -89,3 +89,7 @@ dist/
 codepet-mcp-server/test-*.mjs
 codepet-mcp-server/test-project/
 .superpowers/
+
+# Build output: the bundled local chat sidecar. Regenerate with scripts/build-sidecar.sh.
+# Committing it would put a second, staleable copy of companyChatCore in the repo.
+codepet/Resources/chatSidecar.js

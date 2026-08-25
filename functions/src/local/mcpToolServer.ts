@@ -117,9 +117,15 @@ export function handleRpc(req: any, tools: McpTool[]): void {
   }
 }
 
+/**
+ * Serve tools from `toolsPath` on stdio until stdin closes.
+ *
+ * Exported rather than run from a `main()` of its own: the sidecar re-invokes ITSELF with
+ * `--mcp-server` instead of spawning a sibling file, because an app bundle flattens its
+ * resources and a sibling would lose both its path and its relative imports.
+ */
 /* istanbul ignore next -- process wiring, exercised by the sidecar's own run */
-function main(): void {
-  const toolsPath = process.argv[2];
+export function serveMcp(toolsPath: string | undefined): void {
   if (!toolsPath) {
     process.stderr.write("mcpToolServer: missing tools.json path\n");
     process.exit(2);
@@ -145,5 +151,3 @@ function main(): void {
     }
   });
 }
-
-if (require.main === module) main();

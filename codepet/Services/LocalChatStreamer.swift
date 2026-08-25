@@ -15,9 +15,9 @@ enum LocalChatStreamer {
 
     static let log = Logger(subsystem: "app.murror.codepet", category: "LocalChat")
 
-    /// Dev override for the compiled sidecar's location. `functions/lib` is gitignored, so
-    /// a checkout has no sidecar until `npm run build` has run — which is exactly why this
-    /// is a settable path rather than a hardcoded one.
+    /// Dev override for the sidecar's location. The bundled copy is build output and
+    /// gitignored, so a fresh checkout has none until `scripts/build-sidecar.sh` has run —
+    /// which is exactly why this is settable rather than hardcoded.
     static let sidecarPathKey = "cp_claudeSidecarPath"
 
     /// Where the compiled sidecar is, or nil when this build cannot reach one.
@@ -31,6 +31,10 @@ enum LocalChatStreamer {
         bundle: Bundle = .main,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> String? {
+        // Copied into Contents/Resources/ by the synchronized group with no project-file
+        // change. Built by scripts/build-sidecar.sh, which is also where the trap is
+        // written down: two DerivedData directories can exist, and checking the stale one
+        // makes a correctly-copied resource look missing.
         if let bundled = bundle.path(forResource: "chatSidecar", ofType: "js"), fileExists(bundled) {
             return bundled
         }

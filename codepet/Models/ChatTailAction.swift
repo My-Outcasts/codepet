@@ -22,6 +22,15 @@ enum ChatTailAction: Equatable {
     case leadIn(LeadIn)
     /// Leave the placeholder exactly as it stands.
     case none
+    /// The turn failed AND retrying it on the other transport would be wrong. Write this
+    /// reason into the placeholder instead.
+    ///
+    /// Exists because `.fallback` calls `chatSender`, whose default is the CLOUD sender —
+    /// so a founder who granted their Claude plan and hit an unavailable local runner
+    /// would have been quietly answered by the Cloud Function, spending the API key they
+    /// had just said should not be spent. `ChatTransportRouter` refuses that routing, and
+    /// without this case the refusal was undone one layer up, in the tail.
+    case stop(reason: String)
 
     /// Which promise the lead-in is allowed to make. Only a run is "putting that
     /// together now": that one line used to be written for EVERY textless reply, so a
@@ -47,10 +56,19 @@ enum ChatTailAction: Equatable {
         case nothing
     }
 
+    /// `streamError` is examined, not just counted. Every other failure here is worth
+    /// retrying on the non-streaming path; exactly one is not, and telling them apart is
+    /// the difference between an honest message and a silent charge.
     static func decide(streamThrew: Bool,
                        receivedDone: Bool,
                        streamedText: String,
-                       action: ChatDoneAction?) -> ChatTailAction {
+                       action: ChatDoneAction?,
+                       streamError: Error? = nil) -> ChatTailAction {
+        // Checked BEFORE the `.fallback` rule below, because that rule is precisely what
+        // this must prevent.
+        if case .localUnavailable(let reason)? = streamError as? CompanyChatStreamError {
+            return .stop(reason: reason)
+        }
         if streamThrew || !receivedDone { return .fallback }
         // Gated on "no `done`", NOT on empty text: byte can legitimately reply with
         // only a run-task decision, and falling back there would fire a second

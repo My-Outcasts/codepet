@@ -151,11 +151,14 @@ struct ClaudeCodePanel: View {
         SettingsGroup {
             SettingsRow(
                 label: lang == .vi ? "Cho Codepet dùng gói này" : "Let Codepet use this plan",
-                // Names the actual cost, because that is what the founder is agreeing to.
-                // "Uses your quota" is the honest version of "connected".
+                // Names the actual cost, because that is what the founder is agreeing to —
+                // "uses your quota" is the honest version of "connected". And names WHAT it
+                // reaches, because the switch silently pulled chat over the moment it
+                // existed, and a permission whose scope is invisible is not informed
+                // consent. Every feature moved onto this path gets added to this line.
                 description: lang == .vi
-                    ? "Mỗi lần chạy sẽ tiêu hạn mức Claude của bạn. Tắt là Codepet ngừng dùng — Claude Code trong terminal không bị ảnh hưởng."
-                    : "Runs spend your Claude quota. Turn it off and Codepet stops using it — your terminal's Claude Code is unaffected."
+                    ? "Chat sẽ chạy trên gói Claude của bạn, và mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
+                    : "Chat runs on your Claude plan, and each turn spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
             ) {
                 Toggle("", isOn: Binding(
                     get: { authorisation.isAuthorised(companyId) },

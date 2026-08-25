@@ -263,6 +263,10 @@ struct ClaudeCodeStatus: Equatable {
         let email: String?
         /// "claude.ai" for a subscription, "console" for API billing.
         let authMethod: String?
+        /// "firstParty", or a cloud provider. Carried because it is how Codepet
+        /// detects that an exported ANTHROPIC_API_KEY has quietly taken over the
+        /// founder's runs — see Task 5 and the spec's landmine section.
+        let apiProvider: String?
         /// "pro", "max", "team", … — how the model picker learns which models
         /// this founder's plan can actually reach.
         let subscriptionType: String?
@@ -390,6 +394,7 @@ extension ClaudeCodeEnvironmentTests {
         XCTAssertEqual(auth, .loggedIn(.init(
             email: "giang@murror.app",
             authMethod: "claude.ai",
+            apiProvider: "firstParty",
             subscriptionType: "team",
             orgName: "Murror App"
         )))
@@ -473,6 +478,7 @@ Add to `ClaudeCodeEnvironment`:
         return .loggedIn(.init(
             email: obj["email"] as? String,
             authMethod: obj["authMethod"] as? String,
+            apiProvider: obj["apiProvider"] as? String,
             subscriptionType: obj["subscriptionType"] as? String,
             orgName: obj["orgName"] as? String
         ))
@@ -663,6 +669,203 @@ cannot each invent their own definition of ready."
 
 ---
 
+### Task 5: Refuse to let an exported API key hijack the founder's runs
+
+**Files:**
+- Modify: `codepet/Services/ShellRunning.swift`
+- Modify: `codepet/Services/ClaudeCodeEnvironment.swift`
+- Modify: `codepetTests/ClaudeCodeEnvironmentTests.swift`
+
+**Interfaces:**
+- Consumes: `ShellRunning`, `ClaudeCodeStatus`.
+- Produces: `LoginShellRunner.strippedEnvironmentKeys`, a `scrubbedEnvironment` the runner applies to every spawn, and `ClaudeCodeStatus.billingWarning: BillingWarning?` with `enum BillingWarning { case apiKeyInEnvironment, consoleAccount }`.
+
+This is the task the whole project turns on and it is four lines of environment handling. Codepet spawns through a login shell so PATH resolves; that same login shell sources the founder's profile. Claude Code's credential precedence puts `ANTHROPIC_API_KEY` above subscription OAuth, and the docs are explicit that under `-p` — every call Codepet makes — the key always wins when present. A founder with a key in `.zshrc` would have every run billed to their API account, silently, with no error to notice, which is the exact outcome this migration exists to prevent.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `ClaudeCodeEnvironmentTests.swift`:
+
+```swift
+extension ClaudeCodeEnvironmentTests {
+
+    func testRunnerStripsCredentialEnvironmentVariables() {
+        // The list is the contract: precedence puts both of these above the
+        // founder's subscription, so both must go.
+        XCTAssertEqual(
+            Set(LoginShellRunner.strippedEnvironmentKeys),
+            Set(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"])
+        )
+    }
+
+    func testScrubbedEnvironmentRemovesOnlyThoseKeys() {
+        let input = [
+            "PATH": "/usr/bin",
+            "ANTHROPIC_API_KEY": "sk-ant-should-not-survive",
+            "ANTHROPIC_AUTH_TOKEN": "bearer-should-not-survive",
+            "HOME": "/Users/someone"
+        ]
+        let scrubbed = LoginShellRunner.scrubbedEnvironment(input)
+        XCTAssertNil(scrubbed["ANTHROPIC_API_KEY"])
+        XCTAssertNil(scrubbed["ANTHROPIC_AUTH_TOKEN"])
+        // Everything else must survive untouched — PATH especially, since
+        // stripping it is how you get "command not found: claude".
+        XCTAssertEqual(scrubbed["PATH"], "/usr/bin")
+        XCTAssertEqual(scrubbed["HOME"], "/Users/someone")
+    }
+
+    func testBillingWarningWhenAuthStatusReportsAnApiKey() async {
+        let shell = FakeShell()
+        shell.stub("--version", stdout: "2.1.241 (Claude Code)")
+        // apiProvider is how the CLI tells us a key is in play rather than the
+        // subscription we expected.
+        shell.stub("auth status", stdout: """
+        {"loggedIn": true, "authMethod": "console", "apiProvider": "firstParty", "subscriptionType": null}
+        """)
+        let status = await ClaudeCodeEnvironment.probe(shell: shell)
+        XCTAssertTrue(status.isReady, "a console account still works — this is a warning, not a blocker")
+        XCTAssertEqual(status.billingWarning, .consoleAccount)
+    }
+
+    func testNoBillingWarningForAPlainSubscription() async {
+        let shell = FakeShell()
+        shell.stub("--version", stdout: "2.1.241 (Claude Code)")
+        shell.stub("auth status", stdout: """
+        {"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "team"}
+        """)
+        let status = await ClaudeCodeEnvironment.probe(shell: shell)
+        XCTAssertNil(status.billingWarning)
+    }
+
+    func testBillingWarningIsNilWhenNotSignedIn() async {
+        let shell = FakeShell()
+        let status = await ClaudeCodeEnvironment.probe(shell: shell)
+        // Nothing to warn about yet; the blocker already says what is wrong.
+        XCTAssertNil(status.billingWarning)
+        XCTAssertEqual(status.blocker, .notInstalled)
+    }
+}
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run:
+```bash
+cd /Users/williamdominich/Documents/Murror/codepet
+xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
+```
+Expected: FAIL — no member `strippedEnvironmentKeys`, no member `billingWarning`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `LoginShellRunner`:
+
+```swift
+    /// Credential variables removed from every spawn.
+    ///
+    /// Claude Code's precedence puts both of these ABOVE the founder's
+    /// subscription OAuth, and under `-p` — every call Codepet makes — a present
+    /// key is always used. Codepet spawns through a login shell so PATH
+    /// resolves, and that same shell sources the founder's profile: a key
+    /// exported in `.zshrc` would silently bill their API account for work this
+    /// project exists to put on their subscription. Removing them here is the
+    /// only place that cannot be forgotten by a later call site.
+    static let strippedEnvironmentKeys = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+
+    /// `environment` minus the credential keys, everything else intact.
+    static func scrubbedEnvironment(_ environment: [String: String]) -> [String: String] {
+        var scrubbed = environment
+        for key in strippedEnvironmentKeys { scrubbed.removeValue(forKey: key) }
+        return scrubbed
+    }
+```
+
+In `LoginShellRunner.run`, immediately after `proc.arguments = ["-lc", command]`:
+
+```swift
+        // Inherit the founder's environment, minus anything that would outrank
+        // their subscription. A login shell can still re-export a key from their
+        // profile; that is what `billingWarning` is for.
+        proc.environment = Self.scrubbedEnvironment(ProcessInfo.processInfo.environment)
+```
+
+Add to `ClaudeCodeStatus`:
+
+```swift
+    /// Codepet works, but the founder may not be paying the way they think.
+    /// Deliberately NOT a `Blocker`: both cases run fine.
+    enum BillingWarning: Equatable {
+        /// A key is in the environment despite the scrub — a login shell can
+        /// re-export one from the founder's profile.
+        case apiKeyInEnvironment
+        /// Signed in with a Console account, so runs are billed per token
+        /// rather than covered by a subscription.
+        case consoleAccount
+    }
+
+    var billingWarning: BillingWarning? {
+        guard case .loggedIn(let account) = auth else { return nil }
+        if account.authMethod == "console" { return .consoleAccount }
+        return nil
+    }
+```
+
+`.apiKeyInEnvironment` has no producer yet — it is reached in phase 3, where the first real run can compare the account `auth status` reports against the one that actually served the request. Declared here because `BillingWarning` is the type phase 3 will extend, and a case added later to a type the UI already switches over is a silent non-exhaustive branch.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run:
+```bash
+cd /Users/williamdominich/Documents/Murror/codepet
+xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
+```
+Expected: all eighteen tests PASS.
+
+- [ ] **Step 5: Verify the scrub against the real shell, by hand**
+
+Run:
+```bash
+cd /Users/williamdominich/Documents/Murror/codepet
+ANTHROPIC_API_KEY=sk-ant-canary /bin/zsh -lc 'echo "key in child: ${ANTHROPIC_API_KEY:-<absent>}"'
+```
+Expected: `key in child: sk-ant-canary` — proving the variable *does* reach a login-shell child when set, which is the hazard this task removes. Then confirm the founder's own profile does not export one:
+
+```bash
+/bin/zsh -lc 'echo "profile exports: ${ANTHROPIC_API_KEY:-<absent>}"'
+```
+Expected: `<absent>`. If it prints a key, the scrub in Step 3 is load-bearing today and not merely defensive — say so in the commit.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add codepet/Services/ShellRunning.swift codepet/Services/ClaudeCodeEnvironment.swift codepetTests/ClaudeCodeEnvironmentTests.swift
+git commit -m "fix(local-claude): strip credential env vars from every spawn
+
+The project's whole purpose fails silently without this. Claude Code's
+credential precedence puts ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN
+ABOVE subscription OAuth, and the docs are explicit that under -p — every
+call Codepet makes — a present key is always used. Codepet spawns through
+a login shell so the founder's PATH resolves, and that same shell sources
+their profile: a key exported in .zshrc means every run is billed to their
+API account instead of the subscription this migration exists to use. No
+error, no log line, nothing to notice.
+
+Scrubbing in LoginShellRunner rather than at call sites because it is the
+one place a later caller cannot forget.
+
+billingWarning is a warning and not a Blocker on purpose: a Console
+account works fine, it just bills per token, and refusing to run would be
+Codepet overruling a founder about their own billing. Surfacing it lets
+them see which account pays; deciding is theirs.
+
+.apiKeyInEnvironment has no producer until phase 3, where a real run can
+compare the account auth status claims against the one that served the
+request. Declared now so phase 3 does not add a case to a type the UI
+already switches over."
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage.** This phase covers the spec's *Credentials* section (the probe reads `auth status --json` and never touches a token, with a test that goes red if anyone tries) and the preflight half of *Installing Claude Code* (detection; the guiding UI is phase 2). It deliberately covers none of: the model picker (`subscriptionType` is captured here and consumed in phase 4), `--safe-mode` isolation (phase 3, where the first real run happens), version pinning (phase 3), or the Node sidecar (phase 5). The spec's *Testing constraints* are enforced as Global Constraints above.
@@ -671,4 +874,4 @@ cannot each invent their own definition of ready."
 
 **Type consistency.** `ClaudeCodeStatus.Install`, `.Auth`, `.Account`, `.Blocker` are defined in Tasks 2–4 and referenced under those names throughout. `ShellResult.trimmedOut` and `.succeeded` are defined in Task 1 and used in Tasks 2–3. `FakeShell.stub(_:stdout:stderr:exit:)` is defined once in Task 2 and reused with the same signature in Tasks 3–4.
 
-**One known gap, on purpose.** Nothing in this phase reads `apiProvider`, and `Account` does not carry it. It matters only when Codepet needs to distinguish a Console (API-billed) account from a subscription — which is phase 4's model-picker problem. Adding the field now would be a property no test could justify.
+**`apiProvider` is carried, and that is a reversal.** An earlier draft of this plan left `apiProvider` out as a phase 4 concern. That was wrong, and the spec's *Landmine: an exported `ANTHROPIC_API_KEY` silently wins* is why: credential precedence puts `ANTHROPIC_API_KEY` above the subscription, and in non-interactive mode — every call Codepet makes — the key always wins when present. Because Codepet spawns through a login shell, it loads the founder's profile and would pick up an exported key, billing their API account instead of their subscription, silently. `apiProvider` is the field that detects it, so preflight is exactly where it belongs. Task 3 captures it and Task 5 acts on it.

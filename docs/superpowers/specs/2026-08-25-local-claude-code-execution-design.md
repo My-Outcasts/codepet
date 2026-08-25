@@ -125,6 +125,51 @@ Codepet spawns processes and reads `claude auth status --json`.
 model picker knows which models the founder's plan can actually reach, so a
 model they cannot use is never offered.
 
+### Signing in without a terminal
+
+`claude auth login` opens the browser itself and runs a **local callback
+server**; the browser redirects back to it and login completes. Codepet
+therefore spawns `claude auth login` with pipes — no Terminal window, no
+clipboard step — and polls `claude auth status --json` until `loggedIn` flips.
+The process may print `Login successful` and wait for Enter; Codepet writes a
+newline to stdin.
+
+Two fallbacks the UI must carry, because the docs name both:
+
+- **The browser shows a code instead of redirecting.** This happens when it
+  cannot reach the local callback server — documented for WSL2, SSH, and
+  containers, so rare on a Mac desktop but not impossible. Codepet needs a field
+  to paste that code into, written through to the child's stdin.
+- **The browser does not open.** Codepet shows the login URL with a copy button.
+
+`claude setup-token` is **rejected**, despite looking like the tidier fit for a
+GUI. It prints a one-year OAuth token to stdout and saves it nowhere, so Codepet
+would become the holder of a long-lived credential — the thing this design
+exists to avoid. It also enforces only `forceLoginMethod` and not
+`forceLoginOrgUUID`, so it can mint a token in an organization an enterprise
+admin meant to exclude.
+
+### Landmine: an exported `ANTHROPIC_API_KEY` silently wins
+
+Claude Code's credential precedence puts `ANTHROPIC_API_KEY` **above** the
+subscription OAuth credential, and the documentation is explicit that in
+non-interactive mode — which is every call Codepet makes, since they all pass
+`-p` — "the key is always used when present."
+
+Codepet spawns through a **login shell** so the founder's PATH resolves, which
+means it also loads their profile. A founder who has `ANTHROPIC_API_KEY`
+exported in `.zshrc` would have every Codepet run billed to their API account
+instead of the subscription — the precise opposite of this project's purpose,
+happening silently and with no error to notice.
+
+Two defences, both required:
+
+1. Every spawn removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the
+   child's environment.
+2. The probe reads `apiProvider` from `auth status --json` and surfaces it, so
+   the founder can see which account their runs are actually charged to rather
+   than having to trust that they know.
+
 ### Version pinning
 
 Codepet pins a version range it has tested. The native installer accepts an

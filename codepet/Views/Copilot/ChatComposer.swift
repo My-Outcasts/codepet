@@ -493,26 +493,31 @@ struct ChatComposer: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(model.wrappedValue.shortName)
-                    .font(CodepetTheme.inter(CodepetType.subheadline))
-                // Only shown when it was actually chosen. Printing "Auto" beside the model
-                // would add a word that says nothing on every turn.
-                if effort.wrappedValue != .inherit {
-                    Text(effort.wrappedValue.shortName)
-                        .font(CodepetTheme.inter(CodepetType.subheadline))
-                        .foregroundColor(CodepetTheme.mutedText)
-                }
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-            }
-            .foregroundColor(CodepetTheme.bodyText)
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(Capsule().fill(CodepetTokens.well))
+            // ONE flat string, because a `Menu` flattens its label to `(title, image)` —
+            // the trap `plusMenu` and `departmentControl` both document. An HStack here
+            // rendered as the first Text and nothing else: no chevron of mine, no capsule,
+            // and macOS drew its own indicator on the left instead.
+            //
+            // So the label is text, and the capsule and chevron are applied to the MENU
+            // rather than inside it. That keeps one hit target, unlike `departmentControl`,
+            // which needs two because its ✕ does something different.
+            Text(labelText(model.wrappedValue, effort.wrappedValue))
+                .font(CodepetTheme.inter(CodepetType.subheadline))
         }
         .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .fixedSize()
+        .foregroundColor(CodepetTheme.bodyText)
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(CodepetTokens.well))
+        .overlay(Capsule().stroke(CodepetTokens.cardEdge))
+        .contentShape(Capsule())
         .help(lang == .vi ? "Model chạy trên gói Claude của bạn" : "The model your Claude plan answers with")
+    }
+
+    /// The composer label. Effort is appended only when it was actually chosen — printing
+    /// "Auto" beside the model would add a word that says nothing on every turn.
+    private func labelText(_ model: ClaudeCodeModel, _ effort: ClaudeCodeEffort) -> String {
+        effort == .inherit ? model.shortName : "\(model.shortName) · \(effort.shortName)"
     }
 
     private func tierMenu(_ tier: Binding<ApprovalTier>) -> some View {

@@ -43,6 +43,10 @@ nonisolated enum ChatTurnDiagnostic {
             case .notSignedIn: return "notSignedIn"
             case .http: return "http"
             case .malformedResponse: return "malformedResponse"
+            // Distinct in diagnostics too: a beta week full of these means the local
+            // runner is not reaching founders, which is a packaging problem, not a
+            // network one — and the two would be indistinguishable folded together.
+            case .localUnavailable: return "localUnavailable"
             }
         case let urlError as URLError:
             return urlError.code == .notConnectedToInternet ? "offline" : "network"

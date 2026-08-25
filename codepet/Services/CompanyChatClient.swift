@@ -357,6 +357,11 @@ struct CompanyChatStreamErrorBody: Codable, Equatable {
 /// Typed error for `CompanyChatClient.sendStream`, mirroring `ReflectionAPIError`.
 enum CompanyChatStreamError: Error, Equatable {
     case notSignedIn
+    /// The founder granted Codepet their Claude plan, and this machine cannot honour it.
+    /// Its own case because the honest response is NOT to try the cloud — that would spend
+    /// an API key they had just said should not be spent — so this must be tellable apart
+    /// from every failure where a retry makes sense.
+    case localUnavailable(String)
     case http(status: Int, body: CompanyChatStreamErrorBody?)
     case malformedResponse
 }

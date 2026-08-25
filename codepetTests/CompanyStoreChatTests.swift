@@ -199,13 +199,26 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.last?.text, "Hello founder")
         XCTAssertFalse(s.isCompanionTyping)
     }
+    /// The refusal must follow the spec's grammar: say what happened, say what you
+    /// did NOT do, and never bill a failure.
+    ///
+    /// This pinned the phrase "reach my brain" — the old copy, which did only the
+    /// first of the three and left the founder to guess whether the question was
+    /// half-processed and whether it had cost anything. The copy was deliberately
+    /// rewritten; the test was not updated with it, and nothing noticed because the
+    /// suite was only ever run one `-only-testing:` slice at a time. It now asserts
+    /// the CONTRACT rather than the wording, so the next rewrite is free to change
+    /// the sentences and is still held to the three promises.
     func testFailOpenAppendsOfflineMessage() async {
         let s = store { _ in nil }
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         XCTAssertEqual(s.chatMessages.count, 2)
         XCTAssertEqual(s.chatMessages.last?.role, .companion)
-        XCTAssertTrue(s.chatMessages.last?.text.contains("reach my brain") ?? false)
+        let text = (s.chatMessages.last?.text ?? "").lowercased()
+        XCTAssertTrue(text.contains("cannot reach"), "it does not say what happened: \(text)")
+        XCTAssertTrue(text.contains("nothing ran"), "it does not say what did NOT happen: \(text)")
+        XCTAssertTrue(text.contains("not charged"), "it does not say the failure was free: \(text)")
         XCTAssertFalse(s.isCompanionTyping)
     }
     func testEmptyInputIsNoOp() async {

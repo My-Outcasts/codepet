@@ -311,7 +311,31 @@ enum VirtualCompanyEvent: Equatable {
             return try JSONDecoder().decode(type, from: data)
         } catch {
             print("virtualCompanyRun: event \(event) did not decode as \(type) — \(error)")
+            // One renamed backend field drops every frame of every run, and because a
+            // run that hands off and then goes quiet is sealed as `stream_lost`, the
+            // founder sees a red error card on every SUCCESS with nothing to say why.
+            // A deploy-skew detector: `codingPath` on the shape names the field that
+            // broke, which is the whole fix.
+            DiagnosticsReporter.shared.record(
+                kind: .handledError, site: .roomEventDecode, error: error,
+                context: ["event": Self.knownEventName(event)])
             return nil
         }
+    }
+
+    /// The SSE event name, but only if we recognise it.
+    ///
+    /// The name arrives from the server, so it is not ours to trust — a garbled or
+    /// hostile stream could put anything in this field, and this one lands in a
+    /// Firestore document. Whitelisted against the contract in
+    /// `docs/superpowers/specs/virtual-company-sse-contract.md`; anything else becomes
+    /// `unrecognised`, which is itself the useful answer.
+    static func knownEventName(_ event: String) -> String {
+        let known: Set<String> = [
+            "run_started", "routing", "agent_start", "agent_position", "agent_error",
+            "conflicts", "negotiation_round", "devils_advocate", "brief", "run_stopped",
+            "telemetry", "done", "error"
+        ]
+        return known.contains(event) ? event : "unrecognised"
     }
 }

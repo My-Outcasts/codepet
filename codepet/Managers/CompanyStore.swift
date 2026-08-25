@@ -16,6 +16,18 @@ final class CompanyStore: ObservableObject {
     /// overlay rather than an `AppView`, so opening it never changes `view` and closing
     /// it needs no route to restore.
     @Published var settingsSection: SettingsSection?
+
+    /// A request to open the full conversation list, raised from OUTSIDE the chat.
+    ///
+    /// `showHistory` is `@State` inside `CopilotChatView` and was toggled from one
+    /// place: the dock's header icon. The two-mode shell hides that header — there is
+    /// no dock to collapse and the rail carries Recent — so `ThreadListView` became
+    /// unreachable there, and `Recent` shows `prefix(4)`. Conversations five and older
+    /// could not be opened at all.
+    ///
+    /// A signal rather than the state itself, so the nine `showHistory` sites in
+    /// `CopilotChatView` keep one owner. Same shape as `MockFlowPlayer.requestedMode`.
+    @Published var historyRequested = false
     /// The engineering run whose diff is under review, or `nil`.
     ///
     /// Deliberately NOT an `AppView` case, for the same reason `settingsSection`
@@ -99,7 +111,20 @@ final class CompanyStore: ObservableObject {
     /// real diff-review + git-commit engine, so the flow is free to test. `MockChat` is
     /// `#if DEBUG`-only, so the flag read is guarded and always `false` in Release.
     private var codingRunBag: AnyCancellable?
-    lazy var codingRun: CodingRunCoordinator = {
+    /// Rebuildable rather than `lazy`, because prototype mode is a switch now and a
+    /// `lazy var` latches the runner it was born with. Left latched, turning the mode
+    /// on would leave the REAL `claude` adapter behind a UI insisting it was mocked —
+    /// the exact half-right state the paired flags were shaped to prevent, except
+    /// this one spends the founder's own subscription.
+    private var _codingRun: CodingRunCoordinator?
+    var codingRun: CodingRunCoordinator {
+        if let c = _codingRun { return c }
+        let c = makeCodingRun()
+        _codingRun = c
+        return c
+    }
+
+    private func makeCodingRun() -> CodingRunCoordinator {
         #if DEBUG
         let mock = MockChat.enabled
         #else
@@ -111,7 +136,7 @@ final class CompanyStore: ObservableObject {
         // CompanyStore re-render as the run progresses (otherwise the card "sticks").
         self.codingRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return c
-    }()
+    }
 
     /// The composer's in-progress text. Lives on the store, not the view, because the
     /// shell tears `CopilotChatView` down on every navigation and a roadmap dispatch
@@ -170,7 +195,14 @@ final class CompanyStore: ObservableObject {
     /// with no network. Defaulted in the init BODY (not as a default argument) so the
     /// closure is formed inside this `@MainActor` type instead of in the nonisolated
     /// default-argument context, which is what makes `chatStreamer`'s default warn.
-    private let vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
+    /// `var`, and re-resolved when prototype mode changes — see `codingRun` for why a
+    /// seam latched at init is a hazard once the mode is a switch. This one is worse:
+    /// a convened room on the live endpoint costs ~$0.20 a decision.
+    private var vcRunner: (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>
+    /// Kept so the runner can be rebuilt. Non-nil only when the caller injected one,
+    /// in which case the injection outranks the mode — a test's stub must not be
+    /// swapped out from under it.
+    private let injectedVCRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
@@ -322,7 +354,21 @@ final class CompanyStore: ObservableObject {
         self.tasksSaver = tasksSaver
         self.chatSender = chatSender
         self.chatStreamer = chatStreamer
+        // The room's runner is chosen HERE, at the seam, not refused at the call site.
+        // `VirtualCompanyClient` was the one client with no mock path, so convening
+        // under a mock flag reached the live `virtualCompanyRun` and spent (~$0.20 a
+        // room) unattended while every surface around it claimed to be free. Gating
+        // `startVirtualCompanyRun` stopped the spend but also removed the feature from
+        // every demo; swapping the runner keeps the room fully renderable with nothing
+        // on the wire. Same reason `codeRunner` picks `MockCodeRunner` above.
+        self.injectedVCRunner = vcRunner
+        #if DEBUG
+        self.vcRunner = vcRunner ?? (MockChat.enabled
+                                     ? { MockVirtualCompany.run($0) }
+                                     : { VirtualCompanyClient.run($0) })
+        #else
         self.vcRunner = vcRunner ?? { VirtualCompanyClient.run($0) }
+        #endif
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
@@ -380,7 +426,20 @@ final class CompanyStore: ObservableObject {
         // founder's companies/{uid}. Pointing the map at the incoming account is what makes
         // this founder's existing bindings resolve again — including after a sign-out, which
         // must never mint a second id for a folder they already linked.
+        //
+        // FIRST, ahead of the diagnostics flush below: both landed here independently and
+        // both belong, but this one decides which account's bindings resolve, and a report
+        // written while the map still points at the previous founder would carry their
+        // project ids. The flush needs only `companyId`, which is already set.
         identityMap.account = companyId
+        // The moment an identity exists, and therefore the first moment a
+        // `companies/{uid}/diagnostics` write can be authorised. Everything recorded
+        // before now — the previous session's unclean exit, a chat-thread file that
+        // would not decode at init — has been sitting in the reporter's buffer waiting
+        // for exactly this. Without this line those two reports, the most valuable ones,
+        // would never leave the machine.
+        DiagnosticsReporter.shared.flush()
+        DiagnosticsBootstrap.runSelfTestIfRequested(uid: companyId)
         // Re-derived from THIS company's flag on every hydrate, so signing in as
         // someone else never inherits the previous founder's asked-ness (and never
         // re-asks a founder who already answered or skipped). Read synchronously and
@@ -645,7 +704,9 @@ final class CompanyStore: ObservableObject {
     /// environment?") deliberately does not convene, because a toolkit question is not a
     /// cross-department trade-off and was quietly costing a room every time.
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
-                  founderAsk: String? = nil, convenesRoom: Bool = false) async {
+                  founderAsk: String? = nil, convenesRoom: Bool = false,
+                  pinned: [ContextPin] = [],
+                  attachments: [ChatAttachment] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -661,7 +722,7 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
                           display: words,
-                          founderAsk: words)
+                          founderAsk: words, pinned: pinned, attachments: attachments)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -822,6 +883,30 @@ final class CompanyStore: ObservableObject {
     /// balance is read — and the connect-or-create sheet opens.
     func startBuild(ask: String) {
         startEngineeringRun(ask: ask)
+    }
+
+    /// The build entry point for a two-mode Developer SESSION.
+    ///
+    /// `DeveloperWorkPane` called `startCodeRun` directly, which
+    /// `EngineeringReachabilityTests` correctly failed: *"a view calling either
+    /// directly would pick a machine behind the founder's back — same button,
+    /// different bill."* It was picking one, and picking it wrong — always local, so
+    /// a founder whose Developer was awake on a CLOUD repo with no folder linked
+    /// typed a task and got `.noProject` staring back.
+    ///
+    /// Not routed through `startBuild`, which is cloud-first with a "run it locally
+    /// instead" escape on the resulting card. That shape belongs to the dock, where a
+    /// per-message ask has not declared a machine. A two-mode session HAS declared
+    /// one — the session bar says `Local · 0 credits` or `Cloud · credits` — so
+    /// sending a local session to the cloud would contradict the chip above the
+    /// composer and bill for it. The decision still lives here rather than in the
+    /// view, which is what the guard is actually protecting.
+    func startSessionBuild(ask: String) {
+        if activeProjectLink != nil {
+            startCodeRun(ask: ask)
+        } else {
+            startEngineeringRun(ask: ask)
+        }
     }
 
     /// Whether "run this on my machine instead" is a real offer.
@@ -996,8 +1081,113 @@ final class CompanyStore: ObservableObject {
             if threads[i].title == nil { threads[i].title = deriveThreadTitle(chatMessages) }
         } else {
             threads.append(ChatThread(id: id, title: deriveThreadTitle(chatMessages),
-                                       messages: chatMessages, createdAt: now, updatedAt: now))
+                                       messages: chatMessages, createdAt: now, updatedAt: now,
+                                       kind: activeThreadKind))
         }
+    }
+
+    // MARK: - Prototype mode
+
+    #if DEBUG
+    /// Mirrors `PrototypeMode.isOn` as published state.
+    ///
+    /// The views cannot bind to a static that reads `UserDefaults`: SwiftUI would
+    /// only notice the change when something ELSE happened to re-render, so the
+    /// switch would usually look right and sometimes not — the worst behaviour
+    /// available to a control whose entire job is telling you which world you are in.
+    @Published private(set) var prototypeModeOn = PrototypeMode.isOn
+
+    /// Flip prototype mode and bring the whole store with it.
+    ///
+    /// **A flag flip alone would leave the app half-switched.** Most seams read
+    /// `MockChat.enabled` at the point of use and change instantly, but two were
+    /// resolved once and would keep their old runner, and the COMPANY would keep
+    /// whatever it was hydrated with — so turning the mode on would give a fixture
+    /// chat client answering questions about the founder's real roadmap, and turning
+    /// it off would leave fixture tasks on screen for a real account. Rebuilding the
+    /// runners and re-loading the company is what makes the switch mean one thing.
+    ///
+    /// Reloading is also why no snapshot of the real company is kept: `CompanyData.load`
+    /// already answers from fixtures or from Firestore depending on the mode, and
+    /// cloud writes are refused while the mode is on, so the real document is exactly
+    /// as the founder left it and re-reading it is safer than restoring a copy.
+    ///
+    /// Returns false when a launch argument has locked the mode — see `PrototypeMode`.
+    @discardableResult
+    func setPrototypeMode(_ on: Bool) async -> Bool {
+        guard !isStreaming, !isCompanionTyping else { return false }
+        guard on != PrototypeMode.isOn else { return true }
+        guard PrototypeMode.set(on) else { return false }
+        prototypeModeOn = on
+
+        // Entering from a running app skips the cold open. The walkthrough's first
+        // beat is "signed in, with a roadmap already built" — not onboarding — and
+        // dropping a founder mid-session into a first-run flow they did not ask for
+        // reads as the app losing their account. Launching with the flag still shows
+        // the cold open, which is where that story belongs.
+        if on { MockChat.flowOnboarded = true }
+
+        // Anything in flight belongs to the world being left.
+        codingRun.cancel()
+        clearEngineeringRun()
+        _codingRun = nil
+        codingRunBag = nil
+        vcRunner = injectedVCRunner ?? (on
+                                        ? { MockVirtualCompany.run($0) }
+                                        : { VirtualCompanyClient.run($0) })
+
+        chatMessages = []
+        threads = []
+        activeThreadId = nil
+        activeThreadKind = .ask
+        lastThreadIdByKind = [:]
+        activeProjectLink = nil
+
+        if let id = companyId { await hydrate(companyId: id) }
+        return true
+    }
+    #endif
+
+    /// How much rope THIS session gets — spec §8.2, "per-session, not global".
+    ///
+    /// On the store rather than in the view, so it survives the pane being rebuilt,
+    /// and reset whenever the session changes below. Spec §10 files it on the dev
+    /// thread; that waits for threads to persist at all (they are in-memory only —
+    /// see `ChatThread`), because persisting a tier onto something that does not
+    /// itself survive a relaunch would buy nothing and imply otherwise.
+    @Published var sessionApprovalTier: ApprovalTier = .standard
+
+    // MARK: - The two doors
+
+    /// Which door the working buffer currently belongs to.
+    @Published private(set) var activeThreadKind: ChatThreadKind = .ask
+
+    /// The conversation each door was last in, so switching back returns you to the
+    /// session you left rather than the newest one.
+    private var lastThreadIdByKind: [ChatThreadKind: String] = [:]
+
+    /// Move the working buffer to the other door — spec §10.
+    ///
+    /// **This is not `switchThread`.** That one cancels the coding run, because a run
+    /// anchored in the outgoing conversation would otherwise float to the bottom of
+    /// the incoming one. A MODE switch is different: a Developer session owns a
+    /// branch and keeps working while the founder reads something in Ask, so the run
+    /// survives and is still there when they come back. Cancelling it here would make
+    /// glancing at the roadmap mid-run destroy the run.
+    func switchWorkspace(to kind: ChatThreadKind) {
+        guard !isStreaming, !isCompanionTyping else { return }
+        guard kind != activeThreadKind else { return }
+        flushActiveThread()
+        if let current = activeThreadId { lastThreadIdByKind[activeThreadKind] = current }
+        activeThreadKind = kind
+
+        // Where this door was, else its most recent conversation, else a fresh one.
+        let target = lastThreadIdByKind[kind].flatMap { id in
+            threads.first { $0.id == id && $0.kind == kind }?.id
+        } ?? sortThreadsByRecent(threadsOfKind(kind, in: threads)).first?.id
+
+        activeThreadId = target ?? UUID().uuidString
+        chatMessages = target.flatMap { id in threads.first { $0.id == id }?.messages } ?? []
     }
 
     /// Start a fresh, empty conversation: flush the outgoing thread (if it ever
@@ -1019,6 +1209,7 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = UUID().uuidString
         chatMessages = []
+        sessionApprovalTier = .standard
         // A run anchored in (or floating at the bottom of) the outgoing thread must
         // not leak into this fresh, empty one — clear it (no-op while running).
         codingRunAnchorId = nil
@@ -1038,6 +1229,7 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
         activeThreadId = id
         chatMessages = threads.first(where: { $0.id == id })?.messages ?? []
+        sessionApprovalTier = .standard
         // A run anchored in the outgoing thread must not float to the bottom of
         // the incoming one — clear it (no-op while running).
         codingRunAnchorId = nil
@@ -1171,12 +1363,32 @@ final class CompanyStore: ObservableObject {
     /// asked."
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
-                             founderAsk: String? = nil) async {
+                             founderAsk: String? = nil, pinned: [ContextPin] = [],
+                             attachments: [ChatAttachment] = []) async {
         guard !isCompanionTyping, !isStreaming else { return }
-        chatMessages.append(CopilotMessage(role: .me, text: display ?? text))
+        // The same total-base64 rule the composer refuses with, applied again at the
+        // wire. Not belt-and-braces for its own sake: the composer is only ONE caller,
+        // and the failure this prevents is a bare 413 from Cloud Run that never reaches
+        // the function, so it produces no log line, no drop-table entry, and nothing
+        // the founder or we could read. A caller that never went through the composer
+        // gets the same ceiling.
+        let outgoing = AttachmentBudget.admit(attachments, to: []).accepted
+        // Stamped onto her own bubble BEFORE `history` is built from `dropLast()`, so
+        // this turn's files ride the TOP-LEVEL `attachments` only and reach
+        // `history[].attachments` on the next turn — never both at once, which would
+        // send and bill the same image twice in one request.
+        chatMessages.append(CopilotMessage(role: .me, text: display ?? text,
+                                            attachments: outgoing))
         isCompanionTyping = true
-        let history = chatMessages.dropLast().suffix(20).map {
-            ChatTurnDTO(role: $0.role == .me ? "me" : "companion", text: $0.text)
+        let prior = Array(chatMessages.dropLast().suffix(20))
+        // Which past turns keep their files on the wire. `functions/` replays only the
+        // last `ATTACHMENT_REPLAY_WINDOW` history entries, so base64 on an older turn is
+        // paid for in transport and then discarded — and two large turns in a row would
+        // 413 while each looked fine alone.
+        let replayed = AttachmentBudget.replay(prior.map(\.attachments), alongside: outgoing)
+        let history = zip(prior, replayed).map { msg, atts in
+            ChatTurnDTO(role: msg.role == .me ? "me" : "companion", text: msg.text,
+                        attachments: AttachmentDTO.wire(atts))
         }
         let cid = companyId
         // Tasks byte is allowed to run this turn — mirrors the web's openTasks
@@ -1218,13 +1430,20 @@ final class CompanyStore: ObservableObject {
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           library: company.library, query: text, focusDepartment: department,
-                                          memoryEnabled: company.founderPrefs.memoryEnabled),
+                                          memoryEnabled: company.founderPrefs.memoryEnabled,
+                                          // What the founder pinned on the `+` menu, rendered above the
+                                          // ranker's guesses and excluded from them. Empty for every
+                                          // caller that passes nothing.
+                                          pinned: pinned),
             history: Array(history), userMessage: text, runnable: Array(runnable),
             openTasks: Array(openTasks), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire
             // and nothing to the prompt.
             styleFragment: company.founderPrefs.style.promptFragment(),
-            enabledSkills: enabledSkills, deptKey: deptKey)
+            enabledSkills: enabledSkills, deptKey: deptKey,
+            // nil rather than [] when nothing is attached: the key stays off the wire
+            // for every request the app has ever sent, unchanged.
+            attachments: AttachmentDTO.wire(outgoing))
 
         // The reply bubble's identity — the same `specialist` the request above was built
         // from, so the "Name · Dept" header now names whoever actually wrote the words.
@@ -1246,6 +1465,7 @@ final class CompanyStore: ObservableObject {
 
         var streamedText = ""
         var streamThrew = false
+        var streamError: Error?
         var receivedDone = false
         // The `.done` frame's actions, CAPTURED here and dispatched below — after the
         // tail has written this reply's text. Dispatching from inside the loop (the
@@ -1283,6 +1503,12 @@ final class CompanyStore: ObservableObject {
             }
         } catch {
             streamThrew = true
+            // The error object used to end here, unexamined: `streamThrew` is a Bool, so
+            // "network died" and "the function answered 500" were the same fact. Kept for
+            // the diagnostic below, which is reported only if the fallback ALSO fails —
+            // one document per turn that genuinely never got answered, not one per
+            // recovered hiccup.
+            streamError = error
         }
         guard companyId == cid else { return }
 
@@ -1310,9 +1536,34 @@ final class CompanyStore: ObservableObject {
         case .fallback:
             let reply = await chatSender(req)
             guard companyId == cid else { return }
+            // The turn the founder experiences as a reply that never comes: the stream
+            // failed AND the non-streaming retry came back empty. Reported here rather
+            // than in the `catch`, so a recovered stream costs nothing.
+            if let event = ChatTurnDiagnostic.event(streamError: streamError,
+                                                    fallbackReplyWasNil: reply == nil) {
+                DiagnosticsReporter.shared.record(event)
+            }
+            // The spec's refusal grammar, which this line did not follow: say what
+            // happened, say what you did NOT do, and never bill a failure. The old
+            // copy — "I can't reach my brain right now, try again in a bit" — did
+            // only the first, leaving the founder to wonder whether the question was
+            // half-processed and whether it cost anything. Both answers are "no", and
+            // saying so is the difference between an outage and a scare.
             let offline = language == .vi
-                ? "Mình không kết nối được lúc này — thử lại sau nhé."
-                : "I can't reach my brain right now — try again in a bit."
+                ? """
+                  Mình không liên lạc được với các phòng ban lúc này.
+
+                  Chưa có gì chạy cả: không có tác vụ nào bắt đầu, không có gì được ghi vào \
+                  quyết định hay lộ trình, và bạn không bị tính phí. Câu hỏi vẫn còn nguyên \
+                  trong ô soạn — gửi lại khi có mạng.
+                  """
+                : """
+                  I cannot reach your departments right now.
+
+                  Nothing ran: no task was started, nothing was written to your decisions or \
+                  your roadmap, and you were not charged. Your question is still in the \
+                  composer — send it again when the connection is back.
+                  """
             // Every field the reply can carry, or the non-streaming path silently drops half a
             // turn. `complete_task`/`add_task` were added on Aug 8 and missed here first time:
             // the streaming path decoded them and this one did not, so the founder would have

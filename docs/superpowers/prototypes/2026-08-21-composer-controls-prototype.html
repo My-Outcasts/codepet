@@ -1,0 +1,923 @@
+<title>Codepet — composer controls</title>
+<style>
+  /* ── Document chrome ───────────────────────────────────────────────────────
+     Same two-layer scheme as 2026-08-17-two-mode-prototype.html: a light,
+     purple-tinted document that CONTAINS a dark simulated app. The app stage
+     keeps its own --app-* palette in both themes, because it is a picture of a
+     dark app, not a themed component. */
+  :root {
+    --ground: #f5f3fa; --ground-2: #efecf7; --panel: #ffffff;
+    --hairline: #e0dced; --hairline-2: #cdc6e2;
+    --ink: #2d2b26; --ink-2: #4d4859; --muted: #746d87; --faint: #9a93ab;
+    --accent: #6a56cf; --accent-wash: #ebe6fa;
+    --good: #2f7d5e; --warn: #b26a0a; --gone: #a4415e;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --maxw: 1120px;
+
+    /* app stage — fixed across themes */
+    --app-void: #0b0910; --app-ground: #121019; --app-panel: #1d1928;
+    --app-well: #16121f;
+    --app-line: #2a2438; --app-line-2: #3a3350;
+    --app-ink: #f2eefb; --app-ink-2: #cec7e0; --app-muted: #8f88a3; --app-faint: #6b6480;
+    --app-byte: #8b7be8; --app-byte-2: #a89bf2;
+    --d-eng: #6ea8ff; --d-design: #b57bf5; --d-mkt: #fdb022; --d-sales: #b57bf5;
+    --d-support: #e0508c; --d-fin: #fdb022; --d-ops: #2dd4bf; --d-legal: #b57bf5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14121c; --ground-2: #1a1725; --panel: #1d1a29;
+      --hairline: #2b2740; --hairline-2: #3b3555;
+      --ink: #ece9f6; --ink-2: #c7c1da; --muted: #9a93ab; --faint: #7a7390;
+      --accent: #a89bf2; --accent-wash: #241f38;
+      --good: #6cc39a; --warn: #e0a44a; --gone: #e0708c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14121c; --ground-2: #1a1725; --panel: #1d1a29;
+    --hairline: #2b2740; --hairline-2: #3b3555;
+    --ink: #ece9f6; --ink-2: #c7c1da; --muted: #9a93ab; --faint: #7a7390;
+    --accent: #a89bf2; --accent-wash: #241f38;
+    --good: #6cc39a; --warn: #e0a44a; --gone: #e0708c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 400 15px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 44px 24px 96px; }
+
+  /* ── Masthead ───────────────────────────────────────────────────────────── */
+  .eyebrow {
+    font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(28px, 4.4vw, 42px); line-height: 1.1; margin: 0 0 14px;
+    letter-spacing: -.022em; font-weight: 600; text-wrap: balance;
+  }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 60ch; margin: 0 0 6px; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .meta {
+    font: 400 11.5px/1.7 var(--mono); color: var(--faint);
+    margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hairline);
+    display: flex; flex-wrap: wrap; gap: 4px 22px;
+  }
+  .meta b { color: var(--muted); font-weight: 500; }
+
+  h2 {
+    font-size: 20px; letter-spacing: -.012em; font-weight: 600;
+    margin: 56px 0 6px; text-wrap: balance;
+  }
+  h2 .num {
+    font: 500 11px/1 var(--mono); color: var(--accent);
+    letter-spacing: .1em; display: block; margin-bottom: 9px;
+  }
+  .sub { color: var(--muted); font-size: 14.5px; max-width: 62ch; margin: 0 0 22px; }
+  p { max-width: 64ch; }
+
+  /* ── Stage: the simulated app ───────────────────────────────────────────── */
+  .stagebar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 14px;
+  }
+  .seg {
+    display: inline-flex; background: var(--ground-2); border: 1px solid var(--hairline);
+    border-radius: 9px; padding: 2px; gap: 2px;
+  }
+  .seg button {
+    font: 500 12px/1 var(--sans); color: var(--muted); background: none; border: 0;
+    padding: 7px 13px; border-radius: 7px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(45,43,38,.07); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .stagehint { font: 400 11.5px/1.5 var(--mono); color: var(--faint); margin-left: auto; }
+
+  .stage {
+    background: var(--app-void); border: 1px solid var(--hairline-2); border-radius: 14px;
+    padding: 30px 26px 34px; display: flex; gap: 28px; align-items: flex-start;
+    flex-wrap: wrap; overflow-x: auto;
+  }
+  .frame { flex: 1 1 420px; min-width: 340px; }
+  .frame.dock { flex: 0 0 380px; min-width: 380px; max-width: 380px; }
+  .framelabel {
+    font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--app-faint); margin-bottom: 11px; display: flex; gap: 8px; align-items: baseline;
+  }
+  .framelabel i { font-style: normal; color: var(--app-byte-2); }
+
+  /* the composer card — house card: cardRaised + cardEdge, radius 12 */
+  .composer {
+    background: var(--app-panel); border: 1px solid var(--app-line-2); border-radius: 12px;
+    padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 9px;
+    position: relative;
+  }
+  .composer:focus-within { border-color: color-mix(in srgb, var(--app-byte-2) 65%, transparent); }
+  .field {
+    font: 400 13px/1.45 var(--sans); color: var(--app-ink);
+    background: none; border: 0; padding: 3px 2px; width: 100%; min-height: 34px;
+    resize: none; font-family: var(--sans);
+  }
+  .field::placeholder { color: var(--app-faint); }
+  .field:focus { outline: none; }
+
+  .row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .row.chips { gap: 6px; }
+  .grow { margin-left: auto; }
+
+  /* generic control pill */
+  .ctl {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--app-ink-2);
+    background: var(--app-panel); border: 1px solid var(--app-line);
+    border-radius: 999px; padding: 0 10px; height: 26px; white-space: nowrap;
+  }
+  .ctl:hover { color: var(--app-ink); border-color: var(--app-line-2); }
+  .ctl:focus-visible { outline: 2px solid var(--app-byte-2); outline-offset: 1px; }
+  .ctl .caret { font-size: 8px; color: var(--app-faint); }
+  .ctl.sq { border-radius: 9px; width: 26px; padding: 0; justify-content: center; font-size: 14px; font-weight: 400; }
+  .ctl.tier { background: var(--app-well); }
+  .ctl.mode { border-radius: 9px; height: 26px; }
+  .ctl.quiet { border-color: transparent; background: none; color: var(--app-muted); font-weight: 500; }
+  .ctl.quiet:hover { border-color: var(--app-line); }
+
+  /* armed departments control — one capsule, two hit targets */
+  .armed { display: inline-flex; align-items: stretch; border-radius: 999px; overflow: hidden; }
+  .armed .lbl, .armed .clr {
+    background: none; border: 0; cursor: pointer; font-family: var(--sans);
+    display: inline-flex; align-items: center; height: 26px;
+  }
+  .armed .lbl { gap: 5px; padding: 0 6px 0 8px; font: 600 12px/1 var(--sans); }
+  .armed .clr { padding: 0 8px 0 4px; font-size: 9px; font-weight: 700; }
+  .armed .lbl:focus-visible, .armed .clr:focus-visible { outline: 2px solid var(--app-byte-2); outline-offset: -2px; }
+
+  /* pet face — pixel-ish, matching the app's .interpolation(.none) sprites */
+  .face {
+    width: 16px; height: 16px; border-radius: 4px; flex: none; position: relative;
+    image-rendering: pixelated;
+  }
+  .face::after {
+    content: ""; position: absolute; inset: 0; border-radius: 4px;
+    background:
+      radial-gradient(circle at 33% 42%, rgba(11,9,16,.92) 15%, transparent 16%),
+      radial-gradient(circle at 67% 42%, rgba(11,9,16,.92) 15%, transparent 16%),
+      linear-gradient(160deg, rgba(255,255,255,.34), transparent 62%);
+  }
+  .face.lg { width: 22px; height: 22px; border-radius: 5px; }
+
+  /* attachment + pin pills, above the field */
+  .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 4px 0 8px;
+    font: 500 11px/1 var(--sans); color: var(--app-ink-2);
+    background: var(--app-well); border: 1px solid var(--app-line); border-radius: 999px;
+    max-width: 220px;
+  }
+  .pill .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill .g { color: var(--app-faint); font-family: var(--mono); font-size: 9.5px; }
+  .pill button {
+    background: none; border: 0; cursor: pointer; color: var(--app-faint);
+    font-size: 9px; font-weight: 700; padding: 0 4px; line-height: 1;
+  }
+  .pill button:hover { color: var(--app-ink); }
+  .pill button:focus-visible { outline: 2px solid var(--app-byte-2); outline-offset: 1px; }
+  .pill.cap { border-style: dashed; color: var(--app-faint); padding-right: 8px; }
+
+  .send {
+    width: 30px; height: 30px; border-radius: 999px; border: 0; cursor: pointer;
+    background: linear-gradient(135deg, var(--app-byte), var(--app-byte-2));
+    color: #fff; font-size: 13px; flex: none;
+  }
+  .send:focus-visible { outline: 2px solid var(--app-byte-2); outline-offset: 2px; }
+  .send.off { background: var(--app-line-2); cursor: default; }
+
+  /* menus */
+  .menuhost { position: relative; }
+  .menu {
+    position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 40; min-width: 274px;
+    background: var(--app-panel); border: 1px solid var(--app-line-2); border-radius: 11px;
+    padding: 5px; box-shadow: 0 22px 48px -14px rgba(0,0,0,.75);
+  }
+  .menu[hidden] { display: none; }
+  .menu.wide { min-width: 322px; }
+  .mrow {
+    display: flex; align-items: flex-start; gap: 9px; width: 100%;
+    background: none; border: 0; cursor: pointer; text-align: left;
+    padding: 6px 9px; border-radius: 7px; font-family: var(--sans);
+  }
+  .mrow:hover, .mrow:focus-visible { background: var(--app-well); outline: none; }
+  .mrow:focus-visible { box-shadow: inset 0 0 0 1px var(--app-byte-2); }
+  .mrow .ic { width: 17px; text-align: center; font-size: 12px; flex: none; margin-top: 1px; color: var(--app-muted); }
+  .mrow .tx { min-width: 0; }
+  .mrow .t1 { font: 500 12.5px/1.35 var(--sans); color: var(--app-ink); }
+  .mrow .t2 { font: 400 11px/1.35 var(--sans); color: var(--app-faint); margin-top: 1px; }
+  .mrow .tick { margin-left: auto; color: var(--app-byte-2); font-size: 11px; flex: none; }
+  .mrow .arrow { margin-left: auto; color: var(--app-faint); font-size: 10px; flex: none; }
+  .mrow[aria-disabled="true"] { opacity: .42; cursor: default; }
+  .mrow[aria-disabled="true"]:hover { background: none; }
+  .msec {
+    font: 500 9.5px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase;
+    color: var(--app-faint); padding: 9px 10px 5px;
+  }
+  .mdiv { height: 1px; background: var(--app-line); margin: 4px 6px; }
+  .mnote { font: 400 10px/1.45 var(--mono); color: var(--app-faint); padding: 7px 10px 5px; border-top: 1px solid var(--app-line); margin-top: 4px; }
+
+  .underline { font: 400 10.5px/1.5 var(--mono); color: var(--app-faint); margin-top: 9px; padding-left: 2px; }
+  .underline b { color: var(--app-muted); font-weight: 500; }
+
+  /* ── Notes / decisions ──────────────────────────────────────────────────── */
+  .notes { display: grid; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; margin-top: 26px; }
+  .note { background: var(--panel); padding: 15px 18px; display: grid; gap: 4px; }
+  .note .k { font: 500 9.5px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--accent); }
+  .note .h { font-size: 14px; font-weight: 600; }
+  .note .d { font-size: 13.5px; color: var(--ink-2); max-width: 70ch; }
+  .note .d code { font: 400 12px/1 var(--mono); background: var(--ground-2); padding: 2px 5px; border-radius: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 22px; }
+  .scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font: 500 9.5px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  td b { font-weight: 600; }
+  td.was { color: var(--gone); }
+  td code { font: 400 12px/1 var(--mono); background: var(--ground-2); padding: 2px 5px; border-radius: 4px; }
+  tr:last-child td { border-bottom: 0; }
+
+  .flag {
+    margin-top: 26px; border: 1px solid var(--hairline-2); border-radius: 12px;
+    background: var(--panel); padding: 18px 20px;
+  }
+  .flag h3 { margin: 0 0 8px; font-size: 14.5px; font-weight: 600; }
+  .flag ul { margin: 0; padding-left: 20px; }
+  .flag li { font-size: 13.5px; color: var(--ink-2); margin-bottom: 7px; max-width: 68ch; }
+  .flag li:last-child { margin-bottom: 0; }
+  .flag li b { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--hairline);
+    font: 400 11.5px/1.7 var(--mono); color: var(--faint);
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @media (max-width: 720px) {
+    .stage { padding: 20px 14px 24px; }
+    .frame.dock { flex: 1 1 100%; min-width: 0; max-width: none; }
+    .stagehint { margin-left: 0; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="eyebrow">Prototype · 21 Aug 2026</div>
+  <h1>Two controls instead of four.</h1>
+  <p class="lede">
+    The composer's control row had <b>three department chips, a <code>•••</code> overflow, and a
+    fourth chip that only appeared when you picked from that overflow</b> — so the row had no fixed
+    shape and eight departments had three separate doors. This collapses it to one button, and turns
+    <code>＋</code> into a real capability door.
+  </p>
+  <p class="lede" style="margin-top:12px">Everything below is live. Click it.</p>
+
+  <div class="meta">
+    <span><b>Spec</b> 2026-08-21-composer-controls-design.md</span>
+    <span><b>Branch</b> feat/composer-controls</span>
+    <span><b>Model</b> claude-sonnet-5</span>
+    <span><b>Status</b> designed, not built</span>
+  </div>
+
+  <h2><span class="num">01</span>The control row</h2>
+  <p class="sub">
+    Switch between what ships today and what's proposed. The proposed row is one control narrower
+    and — the part that matters — always the same width.
+  </p>
+
+  <div class="stagebar">
+    <div class="seg" role="group" aria-label="Which design">
+      <button type="button" id="v-now" aria-pressed="false">Today</button>
+      <button type="button" id="v-new" aria-pressed="true">Proposed</button>
+    </div>
+    <div class="seg" role="group" aria-label="Which surface">
+      <button type="button" id="w-both" aria-pressed="true">Both widths</button>
+      <button type="button" id="w-pane" aria-pressed="false">Pane only</button>
+    </div>
+    <div class="stagehint" id="hint">Pick a department, open ＋, add a file</div>
+  </div>
+
+  <div class="stage" id="stage"></div>
+
+  <div class="notes">
+    <div class="note">
+      <div class="k">Why one button</div>
+      <div class="h">The chip row changed shape depending on what was selected</div>
+      <div class="d">
+        <code>deptChips</code> renders the first 3 of the roster (2 in the 380pt dock). A department
+        armed from the overflow menu was invisible, so it got <em>promoted to its own extra chip</em>
+        — a patch that exists only because a menu selection had nowhere to show. The row was 3 chips,
+        or 4, and you couldn't learn its shape. An armed <em>button</em> is visible, so the patch stops
+        being needed.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Why the menu is cast-signed</div>
+      <div class="h">The row reads in the same order the answer is signed</div>
+      <div class="d">
+        <code>crash · Engineering</code>, pet first — because the reply arrives as
+        <code>Nova · Marketing</code>. Three pets cover six departments, and the repeat is shown
+        rather than hidden: one person wearing two hats is what happens in a small company. Every
+        row's pet comes from <code>DepartmentCompanions.specialistId</code>, the same function the
+        send calls, so the menu can never promise a pet the reply then doesn't sign.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Why "Anyone" is a row</div>
+      <div class="h">The off state finally has a name</div>
+      <div class="d">
+        Deselecting today means clicking an armed chip a second time. Letting byte route it is a real
+        choice, so it's a row you can pick, with a checkmark saying it's what you have.
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">02</span>What the <code>＋</code> is for</h2>
+  <p class="sub">
+    It held three prompt starters that are already cards on the empty hero, plus the room, plus the
+    department leftovers. Its own code comment defends it as "a quick-actions menu (NOT a file
+    picker — the app has no attachments)" — an accurate description of a control with no idea what
+    it's for. It now answers one question: <b>what does this turn get to see, and how hard should it
+    work?</b>
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>ChatGPT / Claude have</th><th>Codepet's answer</th><th>Where it was</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>Add photos &amp; files</b><br><span style="color:var(--muted)">both lead with it</span></td>
+          <td><b>Attach a file or image</b></td>
+          <td class="was">Nowhere — the one real gap</td>
+        </tr>
+        <tr>
+          <td>Add from library / Add to project</td>
+          <td><b>From your Library</b> · <b>Linked folder</b></td>
+          <td>Existed, two navigations away</td>
+        </tr>
+        <tr>
+          <td>Skills · Connectors · Add plugins</td>
+          <td><b>Set up skills &amp; connectors…</b> — one link</td>
+          <td><code>Toolkit.swift</code>, in Environment</td>
+        </tr>
+        <tr>
+          <td>Ask [your app]</td>
+          <td><b>What Codepet knows</b> — a toggle</td>
+          <td>Second Brain, already gated by one boolean</td>
+        </tr>
+        <tr>
+          <td>Research / Deep research</td>
+          <td><b>Convene the room</b> — priced, ~10 credits</td>
+          <td>Existed; unreachable in the pane</td>
+        </tr>
+        <tr>
+          <td>Web search ✓</td>
+          <td><b>Web search</b> — now a real toggle</td>
+          <td>Ran server-side at the model's discretion</td>
+        </tr>
+        <tr>
+          <td><span style="color:var(--muted)">no analog</span></td>
+          <td><b>A roadmap task</b> — pin what you're on</td>
+          <td>Ours alone</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <div class="k">The finding</div>
+      <div class="h">Codepet already had 5 of Claude's 8 rows and 5 of ChatGPT's 9</div>
+      <div class="d">
+        They weren't missing — they were parked in the Environment page, two navigations from the only
+        place you'd want them. That's what this redesign is actually for. The one genuine absence was
+        the file row, which both competitors put first.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Why every row has a second line</div>
+      <div class="h">You had to ask what "Convene the room · ~10 credits" meant</div>
+      <div class="d">
+        The answer had been sitting in <code>RoomOffer.detail()</code> the whole time — "4 departments
+        argue this question and hand you a recommendation" — reachable only by hovering, which nobody
+        does before spending 10 credits. ChatGPT captions every row; Claude captions none. ChatGPT is
+        right, and that question is the evidence.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Why attaching is cheap now</div>
+      <div class="h">The chat runs on Sonnet 5, not the Haiku I assumed</div>
+      <div class="d">
+        <code>CHAT_MODEL = "claude-sonnet-5"</code> — the first Sonnet in the high-resolution vision
+        tier. 2576px on the long edge, 600-page PDFs, and <b>no beta header</b>. A screenshot gets a
+        real read, not a downgraded one. Images are downscaled to that tier client-side before
+        encoding, which is where the cost is decided — so tuning it never needs a deploy.
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">03</span>What this doesn't show</h2>
+  <p class="sub">Worth saying out loud before the team reacts to it.</p>
+
+  <div class="flag">
+    <h3>Honest gaps in this prototype</h3>
+    <ul>
+      <li><b>The pets are CSS, not the real sprites.</b> The app draws <code>char-crash</code> and
+      friends as pixel art. Whether macOS renders a pixel-art sprite inside a native menu row is
+      genuinely unknown and only settles on screen — the documented fallback is a text-only
+      <code>crash · Engineering</code>, still cast-signed.</li>
+      <li><b>These are HTML menus, not <code>NSMenu</code>.</b> Two-line rows and the exact metrics
+      are what macOS decides. Treat the layout as intent, not a screenshot.</li>
+      <li><b>Nothing here is wired.</b> The spec and a 12-task plan are written and committed;
+      no Swift or TypeScript has been implemented yet. The freeze slips for the attachment work — that
+      was a deliberate call with the cost stated.</li>
+      <li><b>The real risk isn't visual.</b> <code>ClaudeMessage.content</code> is a
+      <code>string</code>, and <code>buildMessages</code> merges same-role turns by concatenating
+      them. Widen it for attachments without fixing that line and you get
+      <code>"[object Object]"</code> in the prompt — no error, no crash. That's the one thing most
+      likely to ship broken, and it's invisible in any mockup.</li>
+    </ul>
+  </div>
+
+  <h2><span class="num">04</span>Open for the team</h2>
+  <div class="notes">
+    <div class="note">
+      <div class="k">Decide</div>
+      <div class="h">Does the armed button keep the <code>✕</code>?</div>
+      <div class="d">
+        It means one capsule with two hit targets. The alternative is clearing via the menu's
+        "Anyone" row — one target, but a hidden gesture.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Decide</div>
+      <div class="h">Is <code>~10 credits</code> in the label enough, now there's a caption too?</div>
+      <div class="d">
+        The price and the explanation are both on the row now. That may be the right emphasis for the
+        most expensive tap in the app, or it may be the only row that needs two lines.
+      </div>
+    </div>
+    <div class="note">
+      <div class="k">Still blocking launch</div>
+      <div class="h">Product has no pet and no art</div>
+      <div class="d">
+        It stays filtered out of the roster, so it's absent from this menu too. Unrelated to this
+        change, but visible in it: seven of eight departments speak, and one can't.
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Codepet · composer controls prototype · docs/superpowers/prototypes/2026-08-21-composer-controls-prototype.html
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Roster order and accents are DepartmentCatalog.roster verbatim (product is
+  // filtered out: no pet, placeholder art). Pet mapping is DepartmentCompanions.
+  var ROSTER = [
+    { key: "eng",     dept: "Engineering", pet: "crash",  accent: "var(--d-eng)" },
+    { key: "design",  dept: "Design",      pet: "luna",   accent: "var(--d-design)" },
+    { key: "mkt",     dept: "Marketing",   pet: "nova",   accent: "var(--d-mkt)" },
+    { key: "sales",   dept: "Sales",       pet: "nova",   accent: "var(--d-sales)" },
+    { key: "support", dept: "Support",     pet: "sage",   accent: "var(--d-support)" },
+    { key: "fin",     dept: "Finance",     pet: "sage",   accent: "var(--d-fin)" },
+    { key: "ops",     dept: "Operations",  pet: "glitch", accent: "var(--d-ops)" },
+    { key: "legal",   dept: "Legal",       pet: "glitch", accent: "var(--d-legal)" }
+  ];
+  var PETFACE = {
+    crash:  "linear-gradient(150deg,#7fb4ff,#3f6fd8)",
+    luna:   "linear-gradient(150deg,#c79bf8,#7f4fd0)",
+    nova:   "linear-gradient(150deg,#ffc85e,#e07a2a)",
+    sage:   "linear-gradient(150deg,#7fe0c4,#2f9e86)",
+    glitch: "linear-gradient(150deg,#6ee7dd,#1d9ab0)",
+    byte:   "linear-gradient(150deg,#a89bf2,#6a56cf)"
+  };
+
+  var LIBRARY = ["Pricing page v2", "ICP — early adopters", "Launch checklist", "Support macros"];
+  var TASKS = ["Ship billing", "Write the pricing page", "Set up Stripe", "Draft launch email"];
+  var FILES = [
+    { n: "onboarding.png", g: "IMG", k: "image" },
+    { n: "q3-runway.pdf",  g: "PDF", k: "pdf" },
+    { n: "PRD.md",         g: "MD",  k: "text" }
+  ];
+
+  var st = {
+    variant: "new",       // "now" | "new"
+    widths: "both",       // "both" | "pane"
+    dept: null,           // index into ROSTER
+    pins: [],             // { icon, name, gloss }
+    memory: true,
+    web: true,
+    typed: true,
+    open: null            // "dept" | "plus" | null, plus the frame id
+  };
+
+  var stage = document.getElementById("stage");
+  var hint = document.getElementById("hint");
+
+  function el(tag, cls, txt) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt != null) n.textContent = txt;
+    return n;
+  }
+  function face(pet, big) {
+    var f = el("span", "face" + (big ? " lg" : ""));
+    f.style.background = PETFACE[pet] || PETFACE.byte;
+    return f;
+  }
+  function petName(p) { return p.charAt(0).toUpperCase() + p.slice(1); }
+
+  // ── menu rows ─────────────────────────────────────────────────────────────
+  function mrow(opts) {
+    var b = el("button", "mrow");
+    b.type = "button";
+    if (opts.disabled) b.setAttribute("aria-disabled", "true");
+    if (opts.icon != null) {
+      var ic = el("span", "ic");
+      if (opts.iconNode) ic.appendChild(opts.iconNode); else ic.textContent = opts.icon;
+      b.appendChild(ic);
+    }
+    var tx = el("span", "tx");
+    tx.appendChild(el("span", "t1", opts.title));
+    if (opts.detail) tx.appendChild(el("span", "t2", opts.detail));
+    b.appendChild(tx);
+    if (opts.tick) b.appendChild(el("span", "tick", "✓"));
+    else if (opts.arrow) b.appendChild(el("span", "arrow", "›"));
+    if (opts.onClick && !opts.disabled) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); opts.onClick(); });
+    }
+    return b;
+  }
+
+  function deptMenu() {
+    var m = el("div", "menu");
+    m.appendChild(mrow({
+      icon: "◍", title: "Anyone — byte routes it",
+      detail: "Let Codepet pick who answers",
+      tick: st.dept === null,
+      onClick: function () { st.dept = null; st.open = null; render(); }
+    }));
+    m.appendChild(el("div", "mdiv"));
+    ROSTER.forEach(function (d, i) {
+      m.appendChild(mrow({
+        iconNode: face(d.pet), icon: "",
+        title: petName(d.pet) + " · " + d.dept,
+        tick: st.dept === i,
+        onClick: function () { st.dept = i; st.open = null; render(); }
+      }));
+    });
+    var note = el("div", "mnote", "8 rows — Product is off the roster: no pet, placeholder art");
+    m.appendChild(note);
+    return m;
+  }
+
+  function addPin(icon, name, gloss) {
+    if (st.pins.length >= 3) return;
+    if (st.pins.some(function (p) { return p.name === name; })) return;
+    st.pins.push({ icon: icon, name: name, gloss: gloss });
+    st.open = null;
+    render();
+  }
+
+  function plusMenu() {
+    var m = el("div", "menu wide");
+    var full = st.pins.length >= 3;
+
+    m.appendChild(el("div", "msec", "Bring something in"));
+    m.appendChild(mrow({
+      icon: "📎", title: "Attach a file or image",
+      detail: full ? "3 already attached — remove one first" : "Screenshots, PDFs, notes",
+      disabled: full,
+      onClick: function () {
+        var f = FILES[st.pins.length % FILES.length];
+        addPin(f.k === "image" ? "🖼" : f.k === "pdf" ? "📄" : "📝", f.n, f.g);
+      }
+    }));
+    m.appendChild(mrow({
+      icon: "📚", title: "From your Library",
+      detail: "Ground this answer in work you've shipped", arrow: true,
+      disabled: full,
+      onClick: function () { addPin("📚", LIBRARY[st.pins.length % LIBRARY.length], "DOC"); }
+    }));
+    m.appendChild(mrow({
+      icon: "🗺", title: "A roadmap task",
+      detail: "Pin what you're working on", arrow: true,
+      disabled: full,
+      onClick: function () { addPin("🗺", TASKS[st.pins.length % TASKS.length], "TASK"); }
+    }));
+    m.appendChild(mrow({
+      icon: "🧠", title: "What Codepet knows",
+      detail: "Let it use your saved decisions",
+      tick: st.memory,
+      onClick: function () { st.memory = !st.memory; st.open = null; render(); }
+    }));
+    m.appendChild(mrow({
+      icon: "📁", title: "Linked folder — codepet",
+      detail: "The folder the agent may touch", arrow: true,
+      onClick: function () { st.open = null; render(); }
+    }));
+
+    m.appendChild(el("div", "msec", "Go deeper"));
+    m.appendChild(mrow({
+      icon: "👥", title: "Convene the room · ~10 credits",
+      detail: st.typed ? "4 departments argue this and hand you a recommendation"
+                       : "Type a question first — a room needs something to argue",
+      disabled: !st.typed,
+      onClick: function () { st.open = null; render(); }
+    }));
+    m.appendChild(mrow({
+      icon: "🌐", title: "Web search",
+      detail: "Let it look things up as it answers",
+      tick: st.web,
+      onClick: function () { st.web = !st.web; st.open = null; render(); }
+    }));
+
+    m.appendChild(el("div", "mdiv"));
+    m.appendChild(mrow({
+      icon: "⚙", title: "Set up skills & connectors…",
+      detail: "Opens Environment"
+    }));
+    return m;
+  }
+
+  // ── the composer ──────────────────────────────────────────────────────────
+  function composer(surface) {
+    var isDock = surface === "dock";
+    var wrapEl = el("div", "frame" + (isDock ? " dock" : ""));
+
+    var lab = el("div", "framelabel");
+    lab.appendChild(el("span", null, isDock ? "Docked copilot" : "Two-mode pane"));
+    lab.appendChild(el("i", null, isDock ? "380pt" : "flexible"));
+    wrapEl.appendChild(lab);
+
+    var c = el("div", "composer");
+
+    // pills above the field — attachments and pins are one gesture
+    if (st.variant === "new" && st.pins.length) {
+      var pr = el("div", "pills");
+      st.pins.forEach(function (p, i) {
+        var pill = el("span", "pill");
+        pill.appendChild(el("span", null, p.icon));
+        pill.appendChild(el("span", "nm", p.name));
+        pill.appendChild(el("span", "g", p.gloss));
+        var x = el("button", null, "✕");
+        x.type = "button";
+        x.setAttribute("aria-label", "Remove " + p.name);
+        x.addEventListener("click", function () { st.pins.splice(i, 1); render(); });
+        pill.appendChild(x);
+        pr.appendChild(pill);
+      });
+      if (st.pins.length >= 3) pr.appendChild(el("span", "pill cap", "3 is the cap"));
+      c.appendChild(pr);
+    }
+
+    var ta = el("textarea", "field");
+    ta.rows = 2;
+    ta.placeholder = "Ask anything about your company…";
+    ta.value = st.typed ? "Why is onboarding losing people at step three?" : "";
+    ta.addEventListener("input", function () {
+      var next = ta.value.trim().length > 0;
+      if (next !== st.typed) { st.typed = next; render(); }
+    });
+    c.appendChild(ta);
+
+    // ── TODAY: chip row, then controls ──
+    if (st.variant === "now") {
+      var chipRow = el("div", "row chips");
+      var visible = isDock ? 2 : 3;
+      ROSTER.slice(0, visible).forEach(function (d, i) {
+        var on = st.dept === i;
+        var b = el("button", "ctl");
+        b.type = "button";
+        if (on) {
+          b.style.borderColor = d.accent;
+          b.style.color = d.accent;
+          b.style.background = "color-mix(in srgb, " + d.accent + " 15%, transparent)";
+          b.appendChild(face(d.pet));
+        }
+        b.appendChild(el("span", null, d.dept));
+        b.addEventListener("click", function () { st.dept = on ? null : i; render(); });
+        chipRow.appendChild(b);
+      });
+      // the promoted chip — the patch this redesign deletes
+      if (st.dept !== null && st.dept >= visible) {
+        var d2 = ROSTER[st.dept];
+        var pb = el("button", "ctl");
+        pb.type = "button";
+        pb.style.borderColor = d2.accent;
+        pb.style.color = d2.accent;
+        pb.style.background = "color-mix(in srgb, " + d2.accent + " 15%, transparent)";
+        pb.appendChild(face(d2.pet));
+        pb.appendChild(el("span", null, d2.dept));
+        pb.title = "The promoted chip — it exists only because the ••• selection was invisible";
+        pb.addEventListener("click", function () { st.dept = null; render(); });
+        chipRow.appendChild(pb);
+      }
+      var ov = el("button", "ctl");
+      ov.type = "button";
+      ov.appendChild(el("span", null, "•••"));
+      ov.addEventListener("click", function () {
+        // cycle through an overflow department, which is what makes the row grow
+        var start = visible;
+        st.dept = (st.dept === null || st.dept < start) ? start
+                : (st.dept + 1 >= ROSTER.length ? null : st.dept + 1);
+        render();
+      });
+      chipRow.appendChild(ov);
+      if (isDock) {
+        var proj = el("span", "ctl quiet");
+        proj.appendChild(el("span", null, "⑂ codepet"));
+        chipRow.appendChild(proj);
+      }
+      c.appendChild(chipRow);
+
+      var r0 = el("div", "row");
+      var plusOld = el("button", "ctl sq");
+      plusOld.type = "button";
+      plusOld.textContent = "＋";
+      plusOld.title = "Three prompt starters, the room, and the department leftovers";
+      r0.appendChild(plusOld);
+      var modeOld = el("button", "ctl mode");
+      modeOld.type = "button";
+      modeOld.appendChild(el("span", null, "Ask"));
+      modeOld.appendChild(el("span", "caret", "▾"));
+      r0.appendChild(modeOld);
+      var sOld = el("button", "send" + (st.typed ? "" : " off"));
+      sOld.type = "button";
+      sOld.textContent = "↑";
+      sOld.setAttribute("aria-label", "Send");
+      var sp0 = el("span", "grow");
+      r0.appendChild(sp0);
+      r0.appendChild(sOld);
+      c.appendChild(r0);
+    }
+
+    // ── PROPOSED: one row ──
+    if (st.variant === "new") {
+      var r = el("div", "row");
+
+      // departments control
+      var host = el("span", "menuhost");
+      if (st.dept === null) {
+        var db = el("button", "ctl");
+        db.type = "button";
+        db.setAttribute("aria-expanded", st.open === "dept:" + surface ? "true" : "false");
+        db.appendChild(el("span", null, "Departments"));
+        db.appendChild(el("span", "caret", "▾"));
+        db.addEventListener("click", function (e) {
+          e.stopPropagation();
+          st.open = st.open === "dept:" + surface ? null : "dept:" + surface;
+          render();
+        });
+        host.appendChild(db);
+      } else {
+        var d3 = ROSTER[st.dept];
+        var armed = el("span", "armed");
+        armed.style.background = "color-mix(in srgb, " + d3.accent + " 15%, transparent)";
+        armed.style.boxShadow = "inset 0 0 0 1px " + d3.accent;
+        var lb = el("button", "lbl");
+        lb.type = "button";
+        lb.style.color = d3.accent;
+        lb.appendChild(face(d3.pet));
+        lb.appendChild(el("span", null, petName(d3.pet) + " · " + d3.dept));
+        lb.addEventListener("click", function (e) {
+          e.stopPropagation();
+          st.open = st.open === "dept:" + surface ? null : "dept:" + surface;
+          render();
+        });
+        var cl = el("button", "clr", "✕");
+        cl.type = "button";
+        cl.style.color = d3.accent;
+        cl.setAttribute("aria-label", "Clear the department");
+        cl.addEventListener("click", function (e) {
+          e.stopPropagation(); st.dept = null; render();
+        });
+        armed.appendChild(lb);
+        armed.appendChild(cl);
+        host.appendChild(armed);
+      }
+      if (st.open === "dept:" + surface) host.appendChild(deptMenu());
+      r.appendChild(host);
+
+      // plus
+      var phost = el("span", "menuhost");
+      var pb2 = el("button", "ctl sq");
+      pb2.type = "button";
+      pb2.textContent = "＋";
+      pb2.setAttribute("aria-label", "Bring something in");
+      pb2.setAttribute("aria-expanded", st.open === "plus:" + surface ? "true" : "false");
+      pb2.addEventListener("click", function (e) {
+        e.stopPropagation();
+        st.open = st.open === "plus:" + surface ? null : "plus:" + surface;
+        render();
+      });
+      phost.appendChild(pb2);
+      if (st.open === "plus:" + surface) phost.appendChild(plusMenu());
+      r.appendChild(phost);
+
+      // tier (pane) or mode pill (dock)
+      if (isDock) {
+        var md = el("button", "ctl mode");
+        md.type = "button";
+        md.appendChild(el("span", null, "Ask"));
+        md.appendChild(el("span", "caret", "▾"));
+        r.appendChild(md);
+      } else {
+        var tier = el("button", "ctl tier");
+        tier.type = "button";
+        tier.appendChild(el("span", null, "▷"));
+        tier.appendChild(el("span", null, "Works on its own"));
+        tier.appendChild(el("span", "caret", "▾"));
+        r.appendChild(tier);
+      }
+
+      r.appendChild(el("span", "grow"));
+      var s = el("button", "send" + (st.typed ? "" : " off"));
+      s.type = "button";
+      s.textContent = "↑";
+      s.setAttribute("aria-label", "Send");
+      r.appendChild(s);
+      c.appendChild(r);
+    }
+
+    wrapEl.appendChild(c);
+
+    // dock keeps the project chip on its own row now the chip row is gone
+    if (st.variant === "new" && isDock) {
+      var pr2 = el("div", "row chips");
+      pr2.style.marginTop = "8px";
+      var pj = el("span", "ctl quiet");
+      pj.appendChild(el("span", null, "⑂ codepet"));
+      pj.title = "The folder the agent will touch";
+      pr2.appendChild(pj);
+      wrapEl.appendChild(pr2);
+    }
+
+    var u = el("div", "underline");
+    if (st.variant === "now") {
+      var n = 1 + (isDock ? 2 : 3) + (st.dept !== null && st.dept >= (isDock ? 2 : 3) ? 1 : 0);
+      u.innerHTML = "<b>" + n + " controls</b> in the chip row" +
+        (st.dept !== null && st.dept >= (isDock ? 2 : 3)
+          ? " — including the promoted chip, which only exists because the ••• selection was invisible"
+          : " — try ••• and watch the row grow");
+    } else {
+      u.innerHTML = "<b>2 controls</b>, same width armed or not" +
+        (st.memory ? "" : " · memory off") + (st.web ? "" : " · web search off");
+    }
+    wrapEl.appendChild(u);
+
+    return wrapEl;
+  }
+
+  function render() {
+    stage.textContent = "";
+    if (st.widths === "both") stage.appendChild(composer("dock"));
+    stage.appendChild(composer("pane"));
+
+    document.getElementById("v-now").setAttribute("aria-pressed", String(st.variant === "now"));
+    document.getElementById("v-new").setAttribute("aria-pressed", String(st.variant === "new"));
+    document.getElementById("w-both").setAttribute("aria-pressed", String(st.widths === "both"));
+    document.getElementById("w-pane").setAttribute("aria-pressed", String(st.widths === "pane"));
+
+    hint.textContent = st.variant === "now"
+      ? "Click ••• — the row changes width"
+      : (st.pins.length ? "Remove a pill, or open ＋ again" : "Pick a department, open ＋, add a file");
+  }
+
+  document.getElementById("v-now").addEventListener("click", function () {
+    st.variant = "now"; st.open = null; render();
+  });
+  document.getElementById("v-new").addEventListener("click", function () {
+    st.variant = "new"; st.open = null; render();
+  });
+  document.getElementById("w-both").addEventListener("click", function () {
+    st.widths = "both"; st.open = null; render();
+  });
+  document.getElementById("w-pane").addEventListener("click", function () {
+    st.widths = "pane"; st.open = null; render();
+  });
+
+  document.addEventListener("click", function () {
+    if (st.open) { st.open = null; render(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && st.open) { st.open = null; render(); }
+  });
+
+  render();
+})();
+</script>

@@ -21,27 +21,26 @@ enum CodepetTheme {
 
     // MARK: Surfaces
 
-    /// Page background — warm cream that the marketing site uses across hero,
-    /// product, and footer sections.
-    static let pageBackground = Color.dyn("#f8f7f3", "#16130f")
+    /// Page background — the prototype's cool near-black purple (`--app-ground`),
+    /// replacing a warm brown-black that made every purple element on it read muddy.
+    static let pageBackground = Color.dyn("#f5f3fa", "#121019")
 
-    /// Card / panel surface. Light: white on cream; dark: warm charcoal.
-    static let surface = Color.dyn("#ffffff", "#221d17")
+    /// Card / panel surface — `--app-panel`.
+    static let surface = Color.dyn("#ffffff", "#1d1928")
 
-    /// Subtle hairline used inside cards for dividers when a stronger
-    /// boundary is needed than whitespace alone.
-    static let hairline = Color.dyn("#ece9e2", "#2f2820")
+    /// Subtle hairline — `--app-line`.
+    static let hairline = Color.dyn("#e0dced", "#2a2438")
 
     // MARK: Text
 
-    /// Headline / primary text — near-black (light) / near-white (dark).
-    static let primaryText = Color.dyn("#1f1b15", "#f4f1ea")
+    /// Headline / primary text — `--app-ink`.
+    static let primaryText = Color.dyn("#2d2b26", "#f2eefb")
 
-    /// Body copy — slightly softer than headlines.
-    static let bodyText = Color.dyn("#332e27", "#d8d2c7")
+    /// Body copy — `--app-ink-2`.
+    static let bodyText = Color.dyn("#4d4859", "#cec7e0")
 
-    /// Muted text — labels, captions, helper copy.
-    static let mutedText = Color.dyn("#776f65", "#9e9789")
+    /// Muted text — `--app-muted`.
+    static let mutedText = Color.dyn("#746d87", "#8f88a3")
 
     // MARK: Brand accents (mirrors the web; accent lightens in dark)
 
@@ -52,6 +51,19 @@ enum CodepetTheme {
     static let accentOrange = Color.dyn("#ff8c42", "#ff9b5e")
     static let accentBlue   = Color.dyn("#2563eb", "#6ea8ff")
     static let accentGreen  = Color.dyn("#16a34a", "#4ade80")
+
+    /// The house ramp. Every two-stop gradient in the product is this function:
+    /// one geometry, one direction, hues supplied by the caller. Extracted from the
+    /// composer's send button, which had it inline.
+    ///
+    /// The hues are a parameter and not a default for a reason. `ChatComposer`'s
+    /// stops are the *active companion's* accent (`CopilotChatView.companionColor`),
+    /// so a ramp that hard-coded brand purple would erase the founder's companion
+    /// hue at the two most visible controls on the pane.
+    static func ramp(_ a: Color, _ b: Color) -> LinearGradient {
+        LinearGradient(gradient: Gradient(colors: [a, b]),
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
 
     // MARK: Geometry
 

@@ -59,6 +59,14 @@ final class ChiptuneEngine {
         isRunning = false
     }
 
+    /// Read/write the SFX mixer's volume, so voice mode can duck bleeps while a
+    /// sentence is being spoken. Deliberately not exposing `sfxMixer` itself: the
+    /// only thing another subsystem needs is this one number.
+    var sfxVolume: Float {
+        get { sfxMixer.outputVolume }
+        set { sfxMixer.outputVolume = newValue }
+    }
+
     // MARK: - Note Frequency Helper
 
     private static let noteNames = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]

@@ -51,13 +51,15 @@ import Foundation
 ///
 /// `-CODEPET_MOCK_CHAT YES` sidesteps all of it: `NSArgumentDomain` outranks
 /// every preference file and touches no disk.
+/// The failure `forcesFailure` injects. Its own type so a reader of a log can tell
+/// a deliberately mocked outage from a real decoding error.
+enum MockChatFailure: Error { case unreachable }
+
 enum MockChat {
     /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
     /// is ONE launch argument rather than two that must agree — two flags where
     /// one is meaningless without the other is a state you can get half-right.
-    static var enabled: Bool {
-        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_CHAT") || flowEnabled
-    }
+    static var enabled: Bool { PrototypeMode.isOn }
 
     /// `-CODEPET_MOCK_FLOW YES` — start at the cold open and walk the whole
     /// product, with a fake company built from whatever gets typed in.
@@ -69,7 +71,12 @@ enum MockChat {
     /// until the founder finishes, `enrichBrief` and `fetchRoadmap` answer from
     /// fixtures instead of the network, and the shell that follows is the same
     /// populated company plain mock mode has always given.
-    static var flowEnabled: Bool { UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW") }
+    /// `CODEPET_MOCK_AUTOPLAY` implies this, for the same reason this implies
+    /// `enabled`: the autoplaying walkthrough sends chat turns and runs a task on
+    /// its own, unattended. Without the fixtures behind it, it would drive the REAL
+    /// Cloud Functions and spend real credits with nobody watching the ledger — and
+    /// two flags where one is meaningless alone is a state you can get half-right.
+    static var flowEnabled: Bool { PrototypeMode.startsAtColdOpen }
 
     /// Flipped once onboarding completes, so the next `load` in this process
     /// returns the finished company rather than sending the founder back
@@ -112,8 +119,47 @@ enum MockChat {
 
     /// Decide the reply text + which `.done` action fires, from the message text
     /// and the request's own `runnable`/`envSetup` lists (so echoed ids are valid).
+    /// The most recent decision the founder has locked in, read back out of the
+    /// context the client already composes.
+    ///
+    /// `Decisions.composeDecisions` renders them as `- topic: statement` lines, so
+    /// the mock can quote one without inventing it — which is the whole point. Use
+    /// case 6 is "stay consistent over weeks", and its success signal is that a
+    /// captured fact CHANGES a later answer. A canned reply saying "I read your
+    /// decisions" demonstrates nothing: it reads identically whether or not one was
+    /// ever recorded.
+    private static func lockedDecision(in context: String) -> String? {
+        guard let header = context.range(of: "Decisions the founder has locked in") else { return nil }
+        for line in context[header.upperBound...].split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("- ") else { continue }
+            let body = String(t.dropFirst(2))
+            // `- topic: statement` — the statement is the part worth quoting back.
+            if let colon = body.firstIndex(of: ":") {
+                let statement = body[body.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if !statement.isEmpty { return statement }
+            }
+            return body
+        }
+        return nil
+    }
+
     private static func route(_ req: CompanyChatRequest) -> (text: String, action: ChatDoneAction) {
         let msg = req.userMessage.lowercased()
+
+        // A lookup, when something has actually been decided → quote it back.
+        // Placed FIRST so it beats the generic fallthrough, and gated on a real
+        // recorded decision so it can never claim one that does not exist.
+        if msg.contains("settle") || msg.contains("decide") || msg.contains("consistent"),
+           let decision = lockedDecision(in: req.context) {
+            return ("""
+            From your decisions — **\(decision)** — that still holds this week, and nothing on the \
+            roadmap contradicts it.
+
+            That is the whole point of recording it: every department reads the same line before it \
+            answers, so you are not re-litigating it on Thursday.
+            """, ChatDoneAction())
+        }
 
         // summarize → a grounded read of where the project stands (guided flow start).
         if msg.contains("summar") {
@@ -257,8 +303,22 @@ enum MockChat {
     }
 
     /// Non-streaming counterpart of `stream`.
+    /// The one word that makes a mocked turn FAIL.
+    ///
+    /// Deliberately a real failure rather than a canned "this is what an outage looks
+    /// like" reply: returning nil here and throwing from `stream` drives the store's
+    /// actual fallback, so the walkthrough shows the copy a founder would really get
+    /// during an outage — and the beat regression-tests that path instead of
+    /// illustrating it. A fixture that merely *depicts* a refusal can drift from the
+    /// refusal the app performs, which is the whole failure mode this session kept
+    /// running into.
+    static func forcesFailure(_ message: String) -> Bool {
+        message.lowercased().contains("offline")
+    }
+
     static func reply(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         try? await Task.sleep(nanoseconds: 300_000_000)
+        if forcesFailure(req.userMessage) { return nil }
         let (raw, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
         let text = fill(raw).replacingOccurrences(of: "**", with: "")
@@ -270,6 +330,12 @@ enum MockChat {
     /// frame carrying the routed action — mirroring the real CF's SSE shape so
     /// the store's streaming path is exercised end-to-end.
     static func stream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        if forcesFailure(req.userMessage) {
+            // Throw rather than finish empty: an empty stream reads as a completed
+            // turn that said nothing, and the store would seal it as a blank reply
+            // instead of falling back.
+            return AsyncThrowingStream { $0.finish(throwing: MockChatFailure.unreachable) }
+        }
         let (rawFull, action) = route(req)
         // Chat bubbles render plain text (not markdown), so drop bold markers.
         let full = fill(rawFull).replacingOccurrences(of: "**", with: "")

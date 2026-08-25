@@ -26,6 +26,12 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable, Hashable {
         case .en: return "🇺🇸"
         }
     }
+
+    /// The locale for speech recognition. `vi-VN` has a recognizer but no on-device
+    /// asset, which the overlay discloses; see the voice-mode spec §3.
+    var speechLocale: Locale {
+        Locale(identifier: self == .vi ? "vi-VN" : "en-US")
+    }
 }
 
 /// A pair of strings (Vietnamese + English) used to attach UI copy to a

@@ -149,6 +149,31 @@ service cloud.firestore {
       //                    spend cap. It lives here rather than under engineering/
       //                    precisely because engineering/ is read-denied and this value
       //                    is displayed.
+      //
+      // diagnostics/     crash and handled-error reports written by the app
+      //                  (companies/{uid}/diagnostics/{autoId} — see
+      //                  FirestoreDiagnosticsSink). It rides this wildcard DELIBERATELY
+      //                  and must never be added to either carve-out list above:
+      //
+      //                    · WRITE is the whole feature. The app is the only writer, and
+      //                      a denied write here is the exact failure mode this file's
+      //                      header warns about — something that looks configured and
+      //                      reports nothing. A top-level `diagnostics/` collection was
+      //                      rejected for needing a rules DEPLOY before it would work at
+      //                      all, i.e. an unreported beta that looked instrumented.
+      //                    · READ is load-bearing too, and is the reason this beats the
+      //                      `feedback` collection as a destination. `feedback` denies
+      //                      clients read, so nothing writing there can ever confirm a
+      //                      write landed. Here the owner can read their own reports
+      //                      back, which is what `-CODEPET_DIAG_SELFTEST YES` does.
+      //
+      //                  Nothing here holds a secret and nothing here is money or
+      //                  authorization: the payload is an error TYPE, a call site, a
+      //                  count and a timestamp. No message text, no prompt, no
+      //                  deliverable body, no absolute path — see DiagnosticRedaction,
+      //                  which refuses any string carrying a path separator. A client
+      //                  that forged a diagnostic would be lying to us about its own
+      //                  health, which costs it nothing and gains it nothing.
       match /{sub}/{document=**} {
         allow read: if (ownsByConvention(companyId) || isMember(companyId))
           && sub != 'connectors'

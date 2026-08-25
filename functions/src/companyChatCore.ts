@@ -506,23 +506,179 @@ export function coerceRememberFacts(rawInput: unknown): RememberedFact[] {
   return out;
 }
 
+/**
+ * How many of the most recent HISTORY turns may still carry their attachments.
+ *
+ * Counted in turns (user AND assistant entries, as the client sends them), so 6 is
+ * roughly three exchanges. This is a WINDOW, deliberately, not "the most recent N
+ * turns that carry an attachment": an inlined image re-uploads on every turn it
+ * survives, and under the latter rule one screenshot attached at turn 0 replays for
+ * the entire 20-turn history and is billed ~20 times. Storage + the Files API is the
+ * real fix; this is the bound until then.
+ */
+export const ATTACHMENT_REPLAY_WINDOW = 6;
+
+/** The only image types the Messages API accepts on a base64 image block. */
+export type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+const IMAGE_MEDIA_TYPES: readonly ImageMediaType[] = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+const isImageMediaType = (v: string): v is ImageMediaType =>
+  (IMAGE_MEDIA_TYPES as readonly string[]).includes(v);
+
+/** A document block accepts exactly one media type, so it is not client-supplied. */
+const PDF_MEDIA_TYPE = "application/pdf";
+
+/** Base64 alphabet, no whitespace — the API rejects wrapped base64. */
+const BASE64_CHARS = /^[A-Za-z0-9+/]+={0,2}$/;
+const MAX_FILENAME = 200;
+
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: ImageMediaType; data: string } }
+  | { type: "document"; source: { type: "base64"; media_type: typeof PDF_MEDIA_TYPE; data: string } };
+
+/**
+ * One file the founder attached, as it arrives on the wire (`attachments` on the
+ * request body, and `attachments` on a history turn).
+ *
+ * Every field is client-supplied and therefore untrusted: `ChatRequestBody` is
+ * applied with an `as` cast, so nothing has validated any of this before it gets
+ * here. `renderTurn` drops what it cannot use rather than passing it through — a
+ * malformed block is a 400 that kills the whole turn, which costs the founder more
+ * than a missing image does.
+ */
+export interface AttachmentDTO {
+  kind: "image" | "pdf" | "text";
+  filename: string;
+  media_type: string;
+  /** base64, no newlines — the API rejects wrapped base64. */
+  data: string;
+}
+
 export interface ChatTurn {
   role: string;
   text: string;
+  /** Present only on turns the client chose to replay; see ATTACHMENT_REPLAY_WINDOW. */
+  attachments?: AttachmentDTO[];
 }
 export interface ClaudeMessage {
   role: "user" | "assistant";
-  content: string;
+  /**
+   * A plain string on every turn without a media attachment — which is every turn
+   * the app has ever sent until now, so the common case is byte-identical to what
+   * it was when this was declared `string`.
+   */
+  content: string | ContentBlock[];
 }
 
-export function buildMessages(history: ChatTurn[], userMessage: string): ClaudeMessage[] {
-  const mapped: ClaudeMessage[] = (Array.isArray(history) ? history : [])
-    .filter((t) => t && typeof t.text === "string" && t.text.trim().length > 0)
-    .map((t) => ({
+const ATTACHMENT_KINDS = new Set(["image", "pdf", "text"]);
+
+/** Shape check on one untrusted attachment. An unrecognised `kind` is dropped here. */
+function isAttachmentDTO(a: unknown): a is AttachmentDTO {
+  const o = a as AttachmentDTO | null | undefined;
+  return !!o && typeof o === "object" && ATTACHMENT_KINDS.has(o.kind as string) && typeof o.data === "string";
+}
+
+/**
+ * Whitespace-strip and charset-check base64. Returns "" for anything the API would
+ * reject, which the caller treats as "drop this attachment".
+ *
+ * The strip is not tidying: a client that encoded with a line length (Foundation's
+ * `.lineLength64Characters`, `base64 -w 76`) produces wrapped base64 that the API
+ * refuses, and the founder sees "attachment failed" with nothing explaining why.
+ */
+function normalizeBase64(raw: string): string {
+  const packed = raw.replace(/\s+/g, "");
+  if (!packed || !BASE64_CHARS.test(packed)) return "";
+  return packed;
+}
+
+/** null when the declared media type is not one the API accepts for that block. */
+function mediaBlock(a: AttachmentDTO, data: string): ContentBlock | null {
+  if (a.kind === "pdf") {
+    return { type: "document", source: { type: "base64", media_type: PDF_MEDIA_TYPE, data } };
+  }
+  const mt = typeof a.media_type === "string" ? a.media_type.trim().toLowerCase() : "";
+  if (!isImageMediaType(mt)) return null; // image/jpg, image/bmp, image/svg+xml … all 400s
+  return { type: "image", source: { type: "base64", media_type: mt, data } };
+}
+
+/**
+ * Render one turn's attachments + text into message content.
+ *
+ * **Media blocks come BEFORE the text.** The text asks about the attachment, so the
+ * model should have seen it by the time it reads the question.
+ *
+ * A `text` attachment is inlined into the text rather than given a block: no block
+ * type exists for a source file, and none is needed. A turn whose attachments are
+ * all text therefore stays a plain string.
+ *
+ * A media turn with no text returns the media blocks alone — an empty text block is
+ * a 400 ("text content blocks must be non-empty").
+ */
+function renderTurn(text: string, attachments?: AttachmentDTO[]): string | ContentBlock[] {
+  const atts = (Array.isArray(attachments) ? attachments : []).filter(isAttachmentDTO);
+  if (atts.length === 0) return text;
+
+  const media: ContentBlock[] = [];
+  const inlined: string[] = [];
+  for (const a of atts) {
+    const data = normalizeBase64(a.data);
+    if (!data) continue;
+    if (a.kind === "text") {
+      const decoded = Buffer.from(data, "base64").toString("utf8").trim();
+      if (!decoded) continue;
+      inlined.push(`--- ${clip(a.filename, MAX_FILENAME) || "attachment"} ---\n${decoded}`);
+      continue;
+    }
+    const block = mediaBlock(a, data);
+    if (block) media.push(block);
+  }
+
+  const combined = [...inlined, text].filter((s) => s.length > 0).join("\n\n");
+  if (media.length === 0) return combined;
+  return combined.length > 0 ? [...media, { type: "text", text: combined }] : media;
+}
+
+/**
+ * Merge two turns' content without ever stringifying a block array.
+ *
+ * This function is the whole reason `buildMessages` needed rewriting rather than
+ * retyping. The line it replaces was `${last.content}\n\n${msg.content}`, which is
+ * correct for two strings and silently interpolates "[object Object]" the moment
+ * either side is an array — no error, no crash, and a prompt that mentions an image
+ * the model was never sent.
+ */
+function mergeContent(
+  a: string | ContentBlock[],
+  b: string | ContentBlock[],
+): string | ContentBlock[] {
+  if (typeof a === "string" && typeof b === "string") return `${a}\n\n${b}`;
+  const toBlocks = (c: string | ContentBlock[]): ContentBlock[] =>
+    typeof c === "string" ? [{ type: "text", text: c }] : c;
+  return [...toBlocks(a), ...toBlocks(b)];
+}
+
+export function buildMessages(
+  history: ChatTurn[],
+  userMessage: string,
+  attachments?: AttachmentDTO[],
+): ClaudeMessage[] {
+  const turns = Array.isArray(history) ? history : [];
+  // Which past turns keep their attachments. `replayFrom` and the index `i` below are
+  // both in the UNFILTERED `turns` index space — computing the cut here and then
+  // indexing a filtered array would silently shift the window by however many blank
+  // turns the client sent.
+  const replayFrom = Math.max(0, turns.length - ATTACHMENT_REPLAY_WINDOW);
+
+  const mapped: ClaudeMessage[] = [];
+  turns.forEach((t, i) => {
+    if (!t || typeof t.text !== "string" || t.text.trim().length === 0) return;
+    mapped.push({
       role: t.role === "me" ? ("user" as const) : ("assistant" as const),
-      content: t.text.trim(),
-    }));
-  mapped.push({ role: "user", content: userMessage.trim() });
+      content: renderTurn(t.text.trim(), i >= replayFrom ? t.attachments : undefined),
+    });
+  });
+  mapped.push({ role: "user", content: renderTurn(userMessage.trim(), attachments) });
 
   // Keep the last 20 turns, then normalize: drop leading assistant turns and
   // coalesce consecutive same-role turns so the sequence strictly alternates and
@@ -533,7 +689,7 @@ export function buildMessages(history: ChatTurn[], userMessage: string): ClaudeM
     if (out.length === 0 && msg.role === "assistant") continue; // drop leading assistant
     const last = out[out.length - 1];
     if (last && last.role === msg.role) {
-      last.content = `${last.content}\n\n${msg.content}`;
+      last.content = mergeContent(last.content, msg.content); // NOT string concat
     } else {
       out.push({ ...msg });
     }

@@ -1,6 +1,19 @@
 // codepet/Managers/ChatThreads.swift
 import Foundation
 
+/// Which door a conversation belongs to — spec §10, "one thread collection, one
+/// new field".
+///
+/// Ask's `RECENT` and Developer's `SESSIONS` are two filters over one collection,
+/// not two collections. The app had neither: one shared buffer meant a code run
+/// described in Developer appended its ask and its result card to the ASK
+/// conversation, where the founder found them afterwards sitting between two
+/// unrelated questions.
+enum ChatThreadKind: String, Codable, Equatable {
+    case ask
+    case dev
+}
+
 /// One session-only chat conversation — a named bucket of `CopilotMessage`s.
 /// Deliberately NOT Codable: Level 1 multi-thread history is in-memory only,
 /// same as `chatMessages` itself (see `CopilotMessage`'s doc comment). Native
@@ -14,6 +27,15 @@ struct ChatThread: Identifiable, Equatable {
     var messages: [CopilotMessage]
     let createdAt: Date
     var updatedAt: Date
+    /// Defaulted so every existing call site keeps meaning what it meant.
+    var kind: ChatThreadKind = .ask
+}
+
+/// The two filters §10 describes. Pure, because "which list does this thread
+/// appear in" is the whole of the data model change and deserves a test that does
+/// not need a store.
+func threadsOfKind(_ kind: ChatThreadKind, in all: [ChatThread]) -> [ChatThread] {
+    all.filter { $0.kind == kind }
 }
 
 // Pure, unit-testable helpers behind the thread switcher — ported from the

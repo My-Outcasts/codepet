@@ -87,6 +87,19 @@ struct CopilotMessage: Identifiable, Equatable {
     /// in Firestore, this is only what the row draws.
     var vote: MessageVote?
 
+    /// The files the founder attached to THIS turn, when she attached any.
+    ///
+    /// Session-only, like the rest of the transcript — threads are not persisted, and
+    /// this is base64 in memory, which is exactly what must not be written into a
+    /// Firestore document. It exists so `CompanyStore.sendMessage` can rebuild
+    /// `history[].attachments` on the next turn: the model's memory of an image is the
+    /// replay, and the replay is built from the transcript.
+    ///
+    /// `ChatAttachment` rather than the wire `AttachmentDTO`: what the pill row and a
+    /// future re-send would want is the whole attachment (`byteCount` for the pill,
+    /// `id` for de-dupe), and the wire shape is derived at the wire.
+    var attachments: [ChatAttachment] = []
+
     /// The founder's own typed ask this reply answers, when it was produced by one — nil for
     /// every store-initiated append (a run proposal, a finished draft, a fan-out row, an
     /// interview question, the first-run greeting, ...).
@@ -121,7 +134,7 @@ struct CopilotMessage: Identifiable, Equatable {
          execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
          drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil,
-         founderAsk: String? = nil) {
+         founderAsk: String? = nil, attachments: [ChatAttachment] = []) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -145,5 +158,6 @@ struct CopilotMessage: Identifiable, Equatable {
         self.drafts = drafts
         self.vote = vote
         self.founderAsk = founderAsk
+        self.attachments = attachments
     }
 }

@@ -1,5 +1,6 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
+import os
 
 /// The Copilot column: a company-grounded chat with the founder's companion —
 /// the PR#39 redesign composed into `main`'s 380pt dock. Empty state renders the
@@ -9,7 +10,13 @@ import SwiftUI
 /// `ThreadListView` history switcher are preserved from `main`.
 struct CopilotChatView: View {
     @EnvironmentObject var companyStore: CompanyStore
+    /// The signed-in account's display name — the greeting's second source for who
+    /// the founder is when the brief carries no name. See `FounderName`.
+    @EnvironmentObject var appState: AppState
     @Environment(\.uiLanguage) private var lang
+    /// Which shell is hosting this — the dock, or the two-mode pane. Decides the
+    /// header row, where the composer sits, and whether the mode pill exists.
+    @Environment(\.chatSurface) private var surface
     @FocusState private var inputFocused: Bool
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
@@ -37,6 +44,85 @@ struct CopilotChatView: View {
     /// The department chip selected in the composer (nil = no focus). Threads into
     /// `sendChat(department:)` for the specialist handoff.
     @State private var selectedDept: Department?
+    /// Pinned context and attached files for the next message. Live here rather than
+    /// in the store for the same reason `selectedDept` does — both are consumed by
+    /// one send. PROTOTYPE: held and shown correctly; not yet threaded to the model.
+    @State private var pins: [ContextPin] = []
+    @State private var attachments: [ChatAttachment] = []
+    /// Whether the composer is in voice mode — spec §2 decision 5, which reversed the
+    /// takeover. Which composer the slot renders, same shape as `showHistory`.
+    @State private var voiceMode = false
+    /// **The whole voice turn, hoisted here — and it had to be.** See `VoiceTurn`: the
+    /// composer slot is rendered from inside the three-way `if/else` below, the founder's
+    /// own first spoken turn flips that `if/else` (`CompanyStore.sendMessage` appends her
+    /// message synchronously, before its first await), and different branches of an
+    /// `if/else` are different structural identities — so `@State` on `VoiceComposer` was
+    /// destroyed mid-turn and rebuilt at `.idle`. The question was sent and charged, the
+    /// reply arrived as text, and the pet said nothing.
+    ///
+    /// Held next to `voiceListener`/`voiceVoice` because it is the same fact about this
+    /// file that those two were hoisted for: nothing about one voice-mode session may be
+    /// owned by a view that the transcript's own contents can replace.
+    @State private var voiceTurn = VoiceTurn()
+    /// Built once per tap of the waveform button, not once per `body` — a plain
+    /// (non-`@State`) `let` on `VoiceComposer` takes whatever value THIS view's
+    /// latest `body` evaluation passes it, and `body` re-runs on every streamed
+    /// token; constructing a fresh `SFSpeechRecognizer`/`AVSpeechSynthesizer` on
+    /// each one would be wasteful and, worse, would silently replace the
+    /// instance the surface's already-running `.task` wired its callbacks to.
+    /// Held here instead, so `VoiceComposer` is handed the SAME two objects for the
+    /// life of one voice-mode session.
+    @State private var voiceListener: SpeechListening?
+    @State private var voiceVoice: SpeakingVoice?
+    /// **Whether voice mode can run, cached — and the SAME value the button reads and
+    /// `startVoiceMode()` writes.** Two things depend on it being one value:
+    ///
+    /// 1. `VoicePermission.current` constructs an `SFSpeechRecognizer`, which is an
+    ///    XPC handshake with the speech daemon. Computed in `ChatComposer.body` it ran
+    ///    on **every streamed token** — `ChatComposer` holds `@EnvironmentObject
+    ///    companyStore`, so `chatMessages[i].text` invalidates it on every delta, and
+    ///    a 400-word reply built and tore down several hundred recognisers on the main
+    ///    actor while a stream was being parsed. It also put an `SFSpeechRecognizer`
+    ///    one `ImageRenderer` test away from a headless XCTest host.
+    /// 2. A refusal has to reach the button. `request(locale:)` learns the answer, and
+    ///    if the button computed its own copy the founder who granted the microphone
+    ///    and refused recognition would keep an enabled button whose tooltip promises
+    ///    a prompt that will never appear again — every tap a no-op, because
+    ///    `requestAuthorization` after a denial returns immediately and raises
+    ///    nothing. Writing the result here is what turns that into a disabled button
+    ///    carrying `VoicePermission.help`'s "turn it on in System Settings".
+    ///
+    /// `.needsPermission` until read: the button is offered and its tooltip says
+    /// Codepet will ask, which is true of the un-refreshed state and of the common one.
+    @State private var voiceAvailability: VoiceAvailability = .needsPermission
+    /// One tap at a time. The TCC dialogs are asynchronous, so a second tap while
+    /// they are up would run a second request chain and hand the composer a fresh
+    /// listener/speaker pair — replacing, mid-session, the instances
+    /// `VoiceComposer`'s already-running `.task` wired its callbacks to.
+    @State private var voiceRequesting = false
+
+    /// Whether the composer is capturing a dictated draft — spec §10's second control.
+    /// Which composer the slot renders, the same shape `voiceMode` and `showHistory` have.
+    @State private var recordMode = false
+    /// **The whole capture, hoisted here for the reason `voiceTurn` is.** See `RecordTurn`:
+    /// the composer slot is rendered from inside the three-way `if/else` below, and a typed
+    /// reply arriving while she dictates flips `chatMessages.isEmpty` under her. Different
+    /// branches are different structural identities, so `@State` on `RecordComposer` would
+    /// be destroyed mid-sentence with nothing on screen saying so.
+    @State private var recordTurn = RecordTurn()
+    /// Built once per capture, not once per `body` — `voiceListener`'s argument exactly: a
+    /// plain `let` on `RecordComposer` takes whatever value this view's latest `body`
+    /// evaluation passes it, and `body` re-runs on every streamed token.
+    ///
+    /// **Its own listener rather than a shared one.** The two controls never run at once
+    /// (`liveVoiceControl`), so there is never a second engine; separate optionals are what
+    /// make "record's listener outlived record" visible as a leak in one place instead of
+    /// two features sharing a variable neither owns.
+    @State private var recordListener: SpeechListening?
+    /// One press at a time, and the reason it exists is the same as `voiceRequesting`'s: on
+    /// a Mac that has never granted the two TCC prompts the first press has to raise them,
+    /// which is asynchronous.
+    @State private var recordRequesting = false
 
     /// The active companion's accent hue — the composer's primary gradient stop
     /// (accent) and the empty hero orb tint. `accent2` pairs it with pink.
@@ -64,33 +150,186 @@ struct CopilotChatView: View {
         // each site would be asking two different questions and getting two different
         // answers — and these two must line up exactly.
         GeometryReader { geo in
-            let column = ChatColumn.textWidth(forBox: geo.size.width)
+            let column = ChatColumn.textWidth(forBox: geo.size.width, surface: surface)
             VStack(spacing: 0) {
-                header(column: column)
+                // Two-mode has no dock to collapse and no history icon: the rail's
+                // Recent list IS the thread switcher, so the row would be two
+                // controls that duplicate or lie about what the shell can do.
+                if surface.showsDockChrome {
+                    header(column: column)
+                }
                 if showHistory {
                     ThreadListView(showHistory: $showHistory)
                 } else if companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty {
                     ChatEmptyState(
-                        state: ChatLandingState(company: companyStore.company, now: Date(), language: lang),
+                        state: ChatLandingState(company: companyStore.company, now: Date(),
+                                                language: lang, accountName: appState.displayName),
                         onOpenRoadmap: { companyStore.select(.roadmap) },
                         onStarter: { starter in
                             companyStore.chatDraft = starter
                             mode = .ask
                             send()
-                        }
-                    ) { composer }
+                        },
+                        beaconTasks: companyStore.company.tasks,
+                        onBeacon: runBeacon,
+                        selectedDept: $selectedDept,
+                        onDepartment: armDepartment
+                    ) { if surface == .dock { composer } }
+                    // Two-mode docks the composer at the bottom of the pane instead
+                    // of stacking it inside the hero — that is what keeps the beacon's
+                    // buttons on screen when the greeting or the card grows.
+                    if surface == .twoMode {
+                        // Not AT REST here: `DepartmentRoster` is directly above and
+                        // is the better picker on this screen — eight portraits with
+                        // their pets, versus one button. It is also where the founder
+                        // LEARNS the cast (two-mode §4 puts it on the first screen).
+                        //
+                        // An ARMED department still draws, because the roster lights
+                        // its own chip and nothing else would say so — see
+                        // `ChatComposer.showsDeptChips`. Every other chat surface
+                        // carries the control permanently; this screen is the only
+                        // exception, and only while nothing is picked.
+                        composerDock(column: column, showsDeptChips: false)
+                    }
                 } else {
                     messageList(column: column)
                     // No rule above the composer — it carries its own bordered container,
                     // so the seam was redundant chrome. Matches the header's no-divider
                     // direction. It shares the transcript's reading column, so the composer
                     // and the words above it start and end on the same two vertical lines.
-                    composer.readingColumn(column).padding(.bottom, 12)
+                    if surface == .twoMode {
+                        composerDock(column: column)
+                    } else {
+                        composer.readingColumn(column).padding(.bottom, 12)
+                    }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .background(ChatBackdrop())
+        // Release the pair the moment voice mode collapses (`VoiceComposer.close()`
+        // already called `stopImmediately()`/`stop()`) — nothing here needs to hold a
+        // mic or a synthesizer open once the founder has left voice mode.
+        .onChange(of: voiceMode) { _, isOn in
+            if !isOn {
+                // Belt to `VoiceComposer.close()`'s braces. Every exit the founder can
+                // press goes through `close()`, which stops both before flipping this
+                // flag — but the pair is released on the next two lines, so anything
+                // that ever sets `voiceMode = false` without stopping them first would
+                // drop the last reference to a talking synthesiser with the chiptune
+                // SFX still ducked to zero, and nothing left able to stop it.
+                voiceVoice?.stopImmediately()
+                voiceListener?.stop()
+                voiceListener = nil
+                voiceVoice = nil
+                // **The session is over, so the turn goes with it.** `VoiceTurn` is
+                // hoisted precisely so it survives this view's own re-renders, which
+                // means it also survives voice mode ending — and every field of it is
+                // wrong for the next session. `micOpened` is the one that fails loudest
+                // while being invisible: a second session that inherited it would never
+                // open its microphone and would read `Connecting…` forever.
+                voiceTurn = VoiceTurn()
+                // The founder may have revoked a grant in System Settings while voice
+                // mode was up, and a mid-session revoke is exactly what
+                // `onFailure` reports.
+                voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
+            }
+        }
+        // **Release the listener the moment record collapses.** Belt to
+        // `RecordComposer.close()`/`takeDraft()`, both of which call `RecordTurn.leave`
+        // before flipping the flag — but the listener is dropped on the next two lines, so
+        // anything that ever sets `recordMode = false` without stopping it first would drop
+        // the last reference to a running `AVAudioEngine` with the microphone open.
+        // `SpeechListener`'s `isolated deinit` does reach `stop()`, which is why this is
+        // belt rather than the only guard; it is not something to rely on for a device that
+        // has a light next to it.
+        //
+        // **No `stopImmediately()` here, and its absence is the feature.** The voice-mode
+        // equivalent above has to stop a synthesiser mid-sentence and un-duck the chiptune
+        // SFX. Record never touched `SpeakingVoice`, so there is nothing of the sort to
+        // undo — one microphone is the whole of its teardown.
+        .onChange(of: recordMode) { _, isOn in
+            if !isOn {
+                recordListener?.stop()
+                recordListener = nil
+                // The capture is over, so the turn goes with it. `micOpened` is the field
+                // that fails loudest while being invisible: a next capture that inherited
+                // it would never open its microphone and would read `Connecting…` forever.
+                recordTurn = RecordTurn()
+                // She may have revoked a grant in System Settings mid-capture, which is
+                // exactly what `onFailure` reports.
+                voiceAvailability = VoicePermission.current(locale: lang.speechLocale)
+            }
+        }
+        // **The two observations that drive speech, and they are up here on purpose.**
+        //
+        // They were on `VoiceComposer`'s body, which is inside the `if/else` above.
+        // Two ordinary things remove that view without voice mode ending: the branch
+        // flip on the founder's first spoken turn of a thread, and opening History from
+        // the rail. Losing them costs invariants 1 and 2 — the reply's sentences are
+        // never enqueued and `endOfReply()` is never called, so `onFinishedAll` never
+        // fires and the session stays stuck in `.thinking`/`.speaking` with the mic
+        // shut, silently. `CopilotChatView` is above the `if/else` and above
+        // `showHistory`, so from here neither can happen.
+        //
+        // Both are inert outside voice mode: `speak` refuses anything that is not
+        // `.thinking`/`.speaking`, and `replyStreamEnded`'s first line is
+        // `streamEndBelongsToVoiceTurn`. That guard is now reached on every typed turn
+        // too, which is a reason to keep it, not to move it.
+        .onChange(of: voiceReplyText) { _, text in
+            guard let voice = voiceVoice else { return }
+            voiceTurn.speak(text, streaming: companyStore.isStreaming,
+                            as: PetVoice.profile(for: voiceSpeakingPet), voice: voice)
+        }
+        .onChange(of: companyStore.isStreaming) { was, now in
+            guard was, !now, let voice = voiceVoice else { return }
+            voiceTurn.replyStreamEnded(voiceReplyText,
+                                       as: PetVoice.profile(for: voiceSpeakingPet),
+                                       voice: voice)
+        }
+        // **Invariant 4, for the dismissals that are not the ✕.** `close()` runs on the
+        // waveform toggle and on `Cancel` and nowhere else — so ⌘B (`AppShellView`'s
+        // `showsCopilot && !collapsed`) and the Developer pill (`TwoModeShellView`
+        // swapping this view out) both remove voice mode without it ever being told.
+        // `SpeechListener`'s `isolated deinit` still reaches `listener.stop()`, but
+        // `SpeechSpeaker.deinit` only restores the SFX volume — it never calls
+        // `synth.stopSpeaking(at:)`, and `AVSpeechSynthesizer`'s behaviour on dealloc
+        // mid-utterance is undocumented. So: press ⌘B mid-sentence and the pet may keep
+        // talking with no surface left to stop it.
+        //
+        // **This is on the pane, not on `VoiceComposer`.** It was on the composer, and
+        // there it also fired on a branch flip and on History opening — stopping a
+        // microphone the next instance was about to keep using, unordered against that
+        // instance's `.task` restarting it. This view's disappearance is the one that
+        // actually means the surface is gone.
+        //
+        // Not `voiceMode = false`: writing state during teardown, and this view's
+        // `@State` is destroyed with it anyway (both routes remove it from the
+        // hierarchy rather than hiding it).
+        // **Record needs this half too, and for one of the two reasons voice mode does.**
+        // ⌘B (`AppShellView`'s `showsCopilot && !collapsed`) and the Developer pill
+        // (`TwoModeShellView` swapping this view out) both remove the pane without anything
+        // calling `close()`, so the microphone would be left open with no surface left to
+        // stop it — and unlike voice mode's synthesiser this one has a hardware indicator
+        // next to it. The other reason does not apply: there is no `SpeakingVoice` to keep
+        // talking, which is why record has one line here and voice mode has two.
+        .onDisappear {
+            voiceVoice?.stopImmediately()
+            voiceListener?.stop()
+            recordListener?.stop()
+        }
+        // Read once per appearance, and again when the language changes — the locale
+        // is what decides whether a recogniser exists at all. NOT in `body`: see
+        // `voiceAvailability`.
+        .task { voiceAvailability = VoicePermission.current(locale: lang.speechLocale) }
+        .onChange(of: lang) { _, next in
+            voiceAvailability = VoicePermission.current(locale: next.speechLocale)
+        }
+        // The rail asks; the chat opens. `showHistory` stays owned here.
+        .onChange(of: companyStore.historyRequested) { _, requested in
+            guard requested else { return }
+            showHistory = true
+            companyStore.historyRequested = false
+        }
     }
 
     /// The dock's only chrome: a trailing pair of icon buttons — history (thread
@@ -143,7 +382,55 @@ struct CopilotChatView: View {
     /// hero (injected via `ChatEmptyState`'s trailing closure) and the active
     /// conversation (at the bottom). Owns no state: draft/mode/selectedDept live
     /// here so the same values drive both placements.
-    private var composer: some View {
+    private var composer: some View { composer(showsDeptChips: true) }
+
+    /// **Voice mode is a state of this slot, not a layer over the pane** — spec §2
+    /// decision 5, reversing decision 2. The composer grows in place and the chat stays
+    /// visible, so the swap happens here rather than in an `.overlay`: this one function
+    /// feeds all four placements (the dock hero, the dock's active conversation, and
+    /// both two-mode docks), and a swap at any of the call sites would have been a
+    /// surface that appears in some of them.
+    ///
+    /// `voiceListener`/`voiceVoice` are non-nil for exactly voice mode's lifetime: set
+    /// together in `startVoiceMode()`, read together here, so the two can never drift —
+    /// a surface built with `.ready`-checked availability but no engine spun up would be
+    /// a silent no-op tap.
+    /// **Record joins the same swap, and the naive swap turns out to be right here** —
+    /// which is worth writing down, because spec §10's requirement is that ✓ lands the
+    /// text in "the composer's text field", and this branch replaces the view that draws
+    /// that field.
+    ///
+    /// It survives because **`ChatComposer` does not own the draft.** Its `draft` is bound
+    /// to `companyStore.chatDraft`, which lives in the store — above this `if/else`, above
+    /// this view, above the whole pane. So swapping `RecordComposer` in destroys a text
+    /// *field*, not a text *value*: ✓ writes `chatDraft` and flips `recordMode`, the else
+    /// branch renders a `ChatComposer` reading that same published property, and the words
+    /// are in it. Nothing had to be restructured, and the reason it did not is a property
+    /// of where `chatDraft` lives rather than of this function.
+    ///
+    /// **`voiceMode` is tested first, and the order is load-bearing rather than
+    /// arbitrary.** The two flags cannot both be true — `liveVoiceControl` refuses either
+    /// control while the other is live or merely *requesting* — so the order is
+    /// unreachable in production; put first, voice mode is the branch that would win if a
+    /// future edit ever made both true, and voice mode is the one holding a synthesiser
+    /// mid-sentence.
+    @ViewBuilder private func composer(showsDeptChips: Bool) -> some View {
+        if voiceMode, let listener = voiceListener, let voice = voiceVoice {
+            VoiceComposer(isActive: $voiceMode, turn: $voiceTurn,
+                          listener: listener, voice: voice,
+                          accent: companionColor)
+        } else if recordMode, let listener = recordListener {
+            RecordComposer(isActive: $recordMode, turn: $recordTurn,
+                           listener: listener,
+                           onStopCapture: endRecordCapture,
+                           onDraft: applyDictatedDraft,
+                           accent: companionColor)
+        } else {
+            typingComposer(showsDeptChips: showsDeptChips)
+        }
+    }
+
+    private func typingComposer(showsDeptChips: Bool) -> some View {
         ChatComposer(
             draft: $companyStore.chatDraft,
             mode: $mode,
@@ -151,16 +438,364 @@ struct CopilotChatView: View {
             focus: $inputFocused,
             // "Codepet", not the pet's name: the founder is talking to the product, and
             // the pet's own name belongs to the moment it answers (`headerName`).
-            placeholder: lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
-                                     : "Ask Codepet anything about your company…",
+            // Two-mode says "your company" instead: the rail already says Codepet, and
+            // Ask is defined as the door that talks to the company.
+            placeholder: placeholderText,
             quickActions: quickActions,
             accent: companionColor,
             accent2: CodepetTheme.accentPink,
             isBusy: isChatBusy,
+            showsDeptChips: showsDeptChips,
+            pins: $pins,
+            attachments: $attachments,
             selectedDept: $selectedDept,
             onSend: send,
-            onQuickAction: handleQuickAction
+            onQuickAction: handleQuickAction,
+            onConveneRoom: conveneRoom,
+            onVoiceMode: startVoiceMode,
+            voiceAvailability: voiceAvailability,
+            onRecord: RecordControl(press: startRecord,
+                                    release: endRecordCapture,
+                                    toggle: startRecord),
+            liveVoiceControl: liveVoiceControl
         )
+    }
+
+    /// **Which of the two voice controls owns the microphone right now** — spec §10, read
+    /// by both buttons' `.disabled` and by both entry functions.
+    ///
+    /// **A control counts as live from the moment its *request* starts, not from the moment
+    /// its surface appears**, and that is the whole reason this is not simply
+    /// `voiceMode ? .voiceMode : (recordMode ? .record : nil)`. `startVoiceMode()` awaits
+    /// two TCC dialogs before it sets `voiceMode`; for that whole time the typing composer
+    /// is still on screen with a live mic button. Press it and record spins up an
+    /// `AVAudioEngine` and an `SFSpeechRecognizer`, the dialogs return, `voiceMode` goes
+    /// true, and `composer(showsDeptChips:)` renders `VoiceComposer` — leaving record's
+    /// listener orphaned with the microphone open and no surface left to stop it. Nothing
+    /// throws and nothing logs.
+    ///
+    /// It also subsumes what `voiceRequesting`/`recordRequesting` were guarding on their
+    /// own (a second tap while the dialogs are up), so there is one answer to "can this be
+    /// entered" rather than two that can disagree.
+    private var liveVoiceControl: VoiceControlKind? {
+        if voiceMode || voiceRequesting { return .voiceMode }
+        if recordMode || recordRequesting { return .record }
+        return nil
+    }
+
+    /// The waveform button's action — **ask for the two grants, and only then** build
+    /// the session's audio pair (see the state doc comment above) and expand the
+    /// composer.
+    ///
+    /// **The asking is the fix, not a formality.** Nothing in the app ever called
+    /// `SFSpeechRecognizer.requestAuthorization`, macOS never raises that prompt by
+    /// itself, and `SpeechListener.start()` succeeds without it — so the founder got a
+    /// live-looking surface, a raw `kAFAssistantErrorDomain` string, and a recognition
+    /// status still `.notDetermined` on every later tap. See `VoicePermission.request`.
+    ///
+    /// **Nothing is built before the grants land.** A `SpeechSpeaker` is an
+    /// `AVSpeechSynthesizer` and a `SpeechListener` an `AVAudioEngine` plus a
+    /// recogniser; spinning both up in front of a dialog the founder may refuse
+    /// leaves the `.onChange(of: voiceMode)` release path above unreached, because
+    /// the composer never entered voice mode.
+    ///
+    /// `DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\.name)
+    /// + ["Codepet"]`: the recognizer's `contextualStrings` (spec §3) — product
+    /// nouns are exactly the words a general recognizer mishears, and every name
+    /// the founder might say to address someone is one of these three sources.
+    /// The reply being spoken — the newest companion message. Its text is filled in
+    /// place, delta by delta, by `CompanyStore`, so this is the same string growing.
+    ///
+    /// **Empty unless voice mode is on**, so the `.onChange` above compares a constant
+    /// on every one of the hundreds of body evaluations a typed reply causes. Entering
+    /// voice mode over a live typed stream flips this from `""` to the reply text, which
+    /// calls `speak` in `.listening` — refused, which is the correct answer for a reply
+    /// this surface never asked for.
+    private var voiceReplyText: String {
+        guard voiceMode else { return "" }
+        return companyStore.chatMessages.last { $0.role == .companion }?.text ?? ""
+    }
+
+    /// Whose voice speaks: whoever signs the reply (spec §5). `nil` is the host,
+    /// which `PetVoice.profile` answers with byte's profile.
+    private var voiceSpeakingPet: String? {
+        companyStore.chatMessages.last { $0.role == .companion }?.companionId
+    }
+
+    private func startVoiceMode() {
+        // **The first line of every trace, and the guard's outcome is part of it.** A tap
+        // that does nothing because `voiceRequesting` is still true is
+        // indistinguishable, on screen, from a tap the button never delivered — and it
+        // is the difference between chasing the composer and chasing the button.
+        VoiceLog.surface.log("""
+            startVoiceMode(): tapped — voiceRequesting=\(self.voiceRequesting, privacy: .public) \
+            voiceMode=\(self.voiceMode, privacy: .public) \
+            cachedAvailability=\(VoiceLog.describe(self.voiceAvailability), privacy: .public)
+            """)
+        // **One rule, in a function a test can reach** — `!voiceRequesting, !voiceMode`
+        // used to be here inline. `liveVoiceControl` covers both of those (it reports
+        // `.voiceMode` while either is set) and adds spec §10's mutual exclusion, so
+        // pressing the waveform while a capture is live, or while record's own TCC dialogs
+        // are up, is refused rather than starting a second engine on the same microphone.
+        guard VoicePermission.canEnter(.voiceMode, voiceAvailability,
+                                       isBusy: isChatBusy, live: liveVoiceControl)
+        else { return }
+        voiceRequesting = true
+        Task {
+            // `await` on the main actor: the TCC dialogs run without the main thread
+            // blocked, and both writes below are already back on it.
+            let availability = await VoicePermission.request(locale: lang.speechLocale)
+            voiceRequesting = false
+            // Written whatever the answer: a refusal has to reach the button, or the
+            // next tap silently does nothing forever. See `voiceAvailability`.
+            voiceAvailability = availability
+            // **Whether the composer is entered at all.** `.ready` is the only value that
+            // gets past here, and every other one leaves the founder looking at the
+            // typing composer with a tooltip — which is correct behaviour and reads as a
+            // dead button.
+            guard availability == .ready else {
+                VoiceLog.surface.log("""
+                    startVoiceMode(): NOT entering — \
+                    availability=\(VoiceLog.describe(availability), privacy: .public)
+                    """)
+                return
+            }
+
+            let hints = DepartmentCatalog.roster.map(\.name)
+                + PetCharacter.all.values.map(\.name)
+                + ["Codepet"]
+            voiceListener = SpeechListener(locale: lang.speechLocale, hints: hints)
+            voiceVoice = SpeechSpeaker()
+            // A clean turn for a clean session — the second half of the reset in
+            // `.onChange(of: voiceMode)` above, deliberately duplicated. The state is
+            // hoisted so it survives re-renders, so the only thing that can make it
+            // fresh is an explicit assignment, and a session that started on a stale
+            // `micOpened` never opens its microphone: `Connecting…` forever, no error.
+            // Two idempotent assignments are cheap; one missed one is silent.
+            voiceTurn = VoiceTurn()
+            voiceMode = true
+            VoiceLog.surface.log("""
+                startVoiceMode(): entering — hints=\(hints.count, privacy: .public) \
+                locale=\(self.lang.speechLocale.identifier, privacy: .public) \
+                onDevice=\(self.voiceListener?.isOnDevice ?? false, privacy: .public)
+                """)
+        }
+    }
+
+    // MARK: - Record (spec §10)
+
+    /// **Begin a capture. Synchronous when it can be, and it has to be.**
+    ///
+    /// This is where record diverges from `startVoiceMode()` in shape rather than in
+    /// policy, and the reason is the gesture: **a press-and-hold cannot survive a modal
+    /// dialog.** `startVoiceMode` awaits the two TCC prompts and then enters, which works
+    /// because the waveform is a click. If this awaited, the founder would press the mic,
+    /// a system dialog would take the focus, she would let go of the mouse to click
+    /// "Allow", and the capture would begin *after* the gesture that was meant to hold it
+    /// had already ended — a surface recording with nothing holding it.
+    ///
+    /// So: when the cached availability is already `.ready` — every press after the first
+    /// on any Mac — this enters with no `await` at all and the hold means what it looks
+    /// like. When it is not, the press raises the prompts and enters nothing; the founder
+    /// presses again once she has granted them. That is a real first-run cost and it is
+    /// stated rather than hidden: the first ever press of the mic asks for permission and
+    /// records nothing.
+    ///
+    /// **Idempotent, because `RecordControl.press` fires repeatedly.** `DragGesture`'s
+    /// `onChanged` is delivered again on every movement while the mouse is down, and ⌘D's
+    /// `toggle` can arrive right behind a completed click (see `ChatComposer.micButton`).
+    /// `liveVoiceControl` is what makes all of those a no-op.
+    private func startRecord() {
+        VoiceLog.surface.log("""
+            startRecord(): pressed — live=\(String(describing: self.liveVoiceControl), privacy: .public) \
+            cachedAvailability=\(VoiceLog.describe(self.voiceAvailability), privacy: .public)
+            """)
+        guard VoicePermission.canEnter(.record, voiceAvailability,
+                                       isBusy: isChatBusy, live: liveVoiceControl)
+        else { return }
+
+        // Already granted: enter now, on this turn of the run loop, so the hold is a hold.
+        if voiceAvailability == .ready {
+            enterRecord()
+            return
+        }
+
+        // Not granted yet. Raise the prompts and enter nothing — see above.
+        recordRequesting = true
+        Task {
+            let availability = await VoicePermission.request(locale: lang.speechLocale)
+            recordRequesting = false
+            // Written whatever the answer, for `voiceAvailability`'s reason: a refusal has
+            // to reach the button, or every later press is a silent no-op.
+            voiceAvailability = availability
+            VoiceLog.surface.log("""
+                startRecord(): asked for the grants — \
+                answer=\(VoiceLog.describe(availability), privacy: .public), not entering
+                """)
+        }
+    }
+
+    /// The listener and a clean turn, then the surface.
+    ///
+    /// `RecordTurn()` explicitly rather than by luck: the state is hoisted so it survives
+    /// re-renders, which means it also survives the previous capture ending, and a session
+    /// that inherited `micOpened == true` would never open its microphone and would read
+    /// `Connecting…` forever with no error. Two idempotent assignments (here and in
+    /// `.onChange(of: recordMode)`) are cheap; one missed one is silent.
+    private func enterRecord() {
+        let hints = DepartmentCatalog.roster.map(\.name)
+            + PetCharacter.all.values.map(\.name)
+            + ["Codepet"]
+        recordListener = SpeechListener(locale: lang.speechLocale, hints: hints)
+        recordTurn = RecordTurn()
+        recordMode = true
+        VoiceLog.surface.log("""
+            startRecord(): entering — hints=\(hints.count, privacy: .public) \
+            locale=\(self.lang.speechLocale.identifier, privacy: .public) \
+            onDevice=\(self.recordListener?.isOnDevice ?? false, privacy: .public)
+            """)
+    }
+
+    /// **Release, or ⌘D on the record surface: stop capturing, keep the words.** One
+    /// funnel for both, so a release and a keystroke cannot end a capture two different
+    /// ways.
+    ///
+    /// Guarded inside `RecordTurn.endCapture` on the phase rather than here, because
+    /// `RecordControl.release` fires on every mouse-up over the mic — including the one
+    /// that follows a press the availability gate refused, when there is no listener at
+    /// all.
+    private func endRecordCapture() {
+        guard let listener = recordListener else { return }
+        recordTurn.endCapture(listener)
+    }
+
+    /// **✓ — the dictated text into the field, and nothing else happens.**
+    ///
+    /// Spec §10: it never calls `sendChat`, so there is no credit to spend, no turn to
+    /// convene the room with, and nothing to speak back. This function is the whole of ✓'s
+    /// effect, and every line of it is a local write.
+    ///
+    /// `RecordFlow.merge` rather than an assignment: replacing would silently destroy
+    /// typing the founder has no other copy of, and while she was dictating the record
+    /// surface was covering the field, so she could not see what she was about to lose.
+    ///
+    /// The caret follows the text. The point of record is that she edits it, and a draft
+    /// that lands in an unfocused field asks her to click before she can.
+    ///
+    /// **The focus request is deferred one main-actor turn, and `armDepartment`'s
+    /// synchronous version is not the precedent it looks like.** That one puts the caret in
+    /// a `ComposerField` that is already on screen. This runs while `RecordComposer` is
+    /// still the composer: the field does not exist yet, and `@FocusState` set against a
+    /// view that is not in the hierarchy is dropped. Hopping once lets
+    /// `composer(showsDeptChips:)` fall back to `typingComposer` first.
+    ///
+    /// **Not verifiable from this target.** `ImageRenderer` fires no lifecycle hooks and no
+    /// test here hosts `CopilotChatView`, so whether the caret actually lands is a handoff —
+    /// the words being in the field is what `RecordFlowTests` covers, through
+    /// `RecordFlow.merge`. If the caret does not appear, this hop is the line to look at
+    /// before anything else.
+    private func applyDictatedDraft(_ text: String) {
+        companyStore.chatDraft = RecordFlow.merge(draft: companyStore.chatDraft,
+                                                 dictated: text)
+        Task { @MainActor in inputFocused = true }
+    }
+
+    /// Convene the Virtual Company on what is in the composer.
+    ///
+    /// Goes through the same `sendChat` every message does, with `convenesRoom: true`
+    /// — so the founder's words become both the room's question and her own bubble,
+    /// and the router still holds its escape hatch to decline. The draft is cleared
+    /// the way `send` clears it, because the words have been committed.
+    private func conveneRoom() {
+        let ask = companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RoomOffer.canConvene(draft: ask), !isChatBusy else { return }
+        showHistory = false
+        companyStore.chatDraft = ""
+        Task { await companyStore.sendChat(ask, language: lang, convenesRoom: true) }
+    }
+
+    /// The pane's composer and the line under it.
+    ///
+    /// The composer was sitting ~6pt off the window's bottom edge, which is most of why
+    /// it read as cramped — Claude leaves ~22pt and then a line of text below that, and
+    /// Codex leaves ~10. The disclaimer is not filler: this product hands the founder
+    /// drafts they file and act on, and Claude carries the same sentence under the same
+    /// control. It doubles as the air the composer was missing.
+    /// The dissolve at the upper edge of the transcript.
+    ///
+    /// A scroll view clips its content on a hard line, so a message scrolling out
+    /// gets sliced mid-glyph against the window's top edge. Claude fades it — the
+    /// dimmed first line in its transcript — and the fade is what makes the space
+    /// above read as deliberate rather than as content that ran out of room.
+    ///
+    /// Painted in `pageBackground`, not black or a material: the pane's own colour
+    /// is the only thing that can dissolve INTO the pane in both themes.
+    @ViewBuilder private var topFade: some View {
+        if surface == .twoMode {
+            LinearGradient(colors: [CodepetTheme.pageBackground,
+                                    CodepetTheme.pageBackground.opacity(0)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: ChatRhythm.topFade)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func composerDock(column: CGFloat, showsDeptChips: Bool = true) -> some View {
+        VStack(spacing: 8) {
+            composer(showsDeptChips: showsDeptChips).readingColumn(column)
+            Text(lang == .vi
+                 ? "Codepet là AI và có thể mắc lỗi. Hãy kiểm tra lại nội dung quan trọng."
+                 : "Codepet is AI and can make mistakes. Please double-check its work.")
+                .font(CodepetTheme.inter(CodepetType.footnote))
+                .foregroundColor(CodepetTokens.faint)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.bottom, 14)
+    }
+
+    private var placeholderText: String {
+        switch surface {
+        case .dock:
+            return lang == .vi ? "Hỏi Codepet bất cứ điều gì về công ty…"
+                               : "Ask Codepet anything about your company…"
+        case .twoMode:
+            return lang == .vi ? "Hỏi công ty của bạn bất cứ điều gì…"
+                               : "Ask your company anything…"
+        }
+    }
+
+    /// A roster tap arms the department and puts the caret in the composer. It does
+    /// NOT send: the founder came to ask their own question, and a tap that spends a
+    /// chat turn on "where would you start?" bills them for a question they did not
+    /// write. Toggles, so tapping the armed pet disarms it — same as its chip.
+    private func armDepartment(_ dep: Department) {
+        selectedDept = (selectedDept?.key == dep.key) ? nil : dep
+        inputFocused = true
+    }
+
+    /// The hero card's buttons. Each is wired to something that already exists —
+    /// no button here promises a surface the app does not have.
+    ///
+    /// `walkthrough` sends the ask rather than opening a dedicated flow: the
+    /// native app has no walkthrough surface (the web app's `#125` never ported),
+    /// and a chat turn that explains the step and captures what was learned is the
+    /// honest version of it. `review` navigates to the roadmap, where the draft
+    /// actually is; generating a second draft would spend credits to show the
+    /// founder something they already have.
+    private func runBeacon(_ primary: BeaconOffer.Primary, _ task: RoadmapTask) {
+        showHistory = false
+        switch primary {
+        case .run:
+            Task { await companyStore.runTask(task, language: lang) }
+        case .walkthrough:
+            companyStore.chatDraft = lang == .vi
+                ? "Hướng dẫn tôi làm: \(task.title)"
+                : "Walk me through: \(task.title)"
+            mode = .ask
+            send()
+        case .review:
+            companyStore.select(.roadmap)
+        }
     }
 
     /// The `+` menu quick-actions. "Run my next moves" fans out parallel
@@ -228,7 +863,8 @@ struct CopilotChatView: View {
                                       scrollGeneration: scrollGeneration)
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
-                        if companyStore.codingRun.run != nil,
+                        if surface.showsCodingRunCard,
+                           companyStore.codingRun.run != nil,
                            companyStore.codingRunAnchorId == m.id {
                             CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                         }
@@ -257,7 +893,8 @@ struct CopilotChatView: View {
                     // Anchored runs render ONLY inline (above, next to their anchor message) —
                     // if the anchor isn't in this thread's buffer (a switch/leak), nothing
                     // renders here for it.
-                    if companyStore.codingRun.run != nil,
+                    if surface.showsCodingRunCard,
+                       companyStore.codingRun.run != nil,
                        companyStore.codingRunAnchorId == nil {
                         CodeRunCardView(coordinator: companyStore.codingRun).id("coding-run")
                     }
@@ -270,9 +907,10 @@ struct CopilotChatView: View {
                     if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
                 }
                 .readingColumn(column)
-                .padding(.top, ChatRhythm.transcriptTop)
+                .padding(.top, ChatRhythm.transcriptTop(surface))
                 .padding(.bottom, ChatRhythm.transcriptBottom)
             }
+            .overlay(alignment: .top) { topFade }
             .onChange(of: companyStore.chatMessages.count) { _, _ in
                 scrollGeneration &+= 1
                 withAnimation { proxy.scrollTo(companyStore.chatMessages.last?.id, anchor: .bottom) }
@@ -347,6 +985,22 @@ struct CopilotChatView: View {
         // the department, and leaving one armed chip behind is the exact state this removes.
         let dept = selectedDept
         selectedDept = nil
+        // Same rule, same reason as the chip above: one message, one handoff. A pin
+        // or an attachment that survived its send would re-send — and, now that the wire
+        // carries them, re-bill — the same context on every later turn.
+        //
+        // **Captured BEFORE the clear, and that is the whole bug this fixes.** These two
+        // lines used to sit here with the `sendChat` call below reading `pins` and
+        // `attachments` after they had already been emptied — so a founder could attach a
+        // screenshot, watch its pill appear, press send, and have the file silently not
+        // exist by the time the request was composed. Nothing on screen said so: the pill
+        // vanishing is what a consumed attachment looks like. The clear stays HERE rather
+        // than moving after the send, because the send is a `Task` and the pills have to
+        // go on this turn of the main actor; what moves is the read.
+        let sendPins = pins
+        let sendAttachments = attachments
+        pins = []
+        attachments = []
         switch mode {
         case .ask, .plan:
             // `founderAsk` is the unshaped text: byte should see the mode's framing
@@ -355,11 +1009,20 @@ struct CopilotChatView: View {
             Task {
                 await companyStore.sendChat(mode.shape(text, language: lang), language: lang,
                                             department: dept, founderAsk: text,
-                                            convenesRoom: mode.convenesRoom)
+                                            convenesRoom: mode.convenesRoom,
+                                            pinned: sendPins,
+                                            attachments: sendAttachments)
             }
         case .build:
             // One code mode. WHERE it runs is the run's business, not the
             // founder's — `startBuild` decides and says so on the card.
+            //
+            // **Pins and attachments are dropped on this path and that is stated rather
+            // than hidden.** `startBuild` stages a local coding run, which reads the linked
+            // folder and not a chat request, so there is nowhere for a pinned deliverable or
+            // a base64 screenshot to go. Attaching a file and pressing Build discards it.
+            // Fixing it means a route into `CodingRunCoordinator`, which is a different
+            // change than wiring the chat wire.
             companyStore.startBuild(ask: text)
         }
     }
@@ -513,6 +1176,8 @@ struct CopilotBubble: View {
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
     @Environment(\.colorScheme) private var scheme
+    /// Decides how loud the founder's own turn is — see `textBubble`.
+    @Environment(\.chatSurface) private var surface
     /// For the identity fields on a thumb — the same ones `FeatureFeedbackManager` sends.
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var appState: AppState
@@ -1238,8 +1903,8 @@ struct CopilotBubble: View {
             .cursorOnHover(.pointingHand)
             if showFirstTake {
                 Text(message.text)
-                    .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(ChatRhythm.lineSpacing)
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1258,16 +1923,37 @@ struct CopilotBubble: View {
         } else if message.supersededByRoom && !isMe {
             firstTakeRow
         } else if isMe {
+            // The founder's own words, quietly.
+            //
+            // In the dock this is a solid accent bubble, and at 380pt that earns its
+            // volume: the column is too narrow for an attribution row on every turn, so
+            // colour is what separates the two speakers.
+            //
+            // The pane does not have that problem — the reply carries an avatar and a
+            // name row — and there the accent bubble makes the loudest object on screen
+            // the one sentence the founder already knows, on every single turn. Claude
+            // gives the question a quiet grey and spends no accent in the transcript at
+            // all. `well` is this app's own version of that: the neutral it already uses
+            // for a recessed track.
+            let quiet = surface == .twoMode
+            let pad: CGFloat = 14
             HStack {
                 Spacer(minLength: 24)
                 Text(message.text)
-                    .font(CodepetTheme.inter(13.5))
-                    .lineSpacing(ChatRhythm.lineSpacing)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
+                    .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
+                    .padding(.horizontal, pad).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(CodepetTheme.accentPurple))
+                        .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
                     .fixedSize(horizontal: false, vertical: true)
+                    // The bubble's TEXT lands on the column's right edge, not its
+                    // border — so the founder's words and the reply's words end on
+                    // the same vertical line, and only the bubble's padding
+                    // overhangs it. This is what Claude does, and without it the
+                    // question sits ~7pt inside the answer for no reason a reader
+                    // could name.
+                    .padding(.trailing, quiet ? -pad : 0)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
@@ -1292,22 +1978,43 @@ struct CopilotBubble: View {
                         .foregroundColor(CodepetTheme.primaryText)
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
-                    // Blanks are tinted here as well as in the message viewers. When the
-                    // companion writes a message conversationally rather than producing a
-                    // deliverable, this prose IS the draft — and a `[name]` buried mid-sentence
-                    // is the one thing in it the founder has to act on before sending (Aug 10).
-                    Text(MessagePlaceholders.tinted(message.text,
-                                                    tint: MessageDraftStyle.blankTint,
-                                                    ink: MessageDraftStyle.blankInk))
-                        .font(CodepetTheme.inter(13.5))
-                        .lineSpacing(ChatRhythm.lineSpacing)
-                        .foregroundColor(CodepetTheme.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    prose(message.text)
                     inlineActions
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The reply's prose, one block per paragraph.
+    ///
+    /// Split on blank lines rather than handed to a single `Text`. A `Text` renders
+    /// `\n\n` as a real empty line — measured at 1.94× the line height against a
+    /// convention of 0.5–0.75× — which is why the transcript read airier and longer
+    /// than its word count deserved. Spacing the blocks lands the gap near 0.6×.
+    ///
+    /// Blanks are still tinted per paragraph: when the companion writes
+    /// conversationally rather than producing a deliverable, this prose IS the draft,
+    /// and a `[name]` buried mid-sentence is the one thing in it the founder has to
+    /// act on before sending (Aug 10). Tinting after the split keeps that, because
+    /// a placeholder never spans a paragraph break.
+    @ViewBuilder private func prose(_ text: String) -> some View {
+        let paragraphs = text
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        VStack(alignment: .leading, spacing: ChatRhythm.paragraphGap) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(MessagePlaceholders.tinted(paragraph,
+                                                tint: MessageDraftStyle.blankTint,
+                                                ink: MessageDraftStyle.blankInk))
+                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                    .lineSpacing(ChatRhythm.proseLeading(surface))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The finished run's steps, collapsed behind a disclosure on the deliverable card.
@@ -1570,16 +2277,35 @@ enum ChatColumn {
     /// width is now a constant rather than half the window.
     static let measureCap: CGFloat = 640
 
+    /// The cap for the two-mode PANE, which is a different problem from the dock.
+    ///
+    /// 640 was chosen when a dragged-wide dock was the only way the box got large; in
+    /// the pane the box starts large, so the cap is what decides the column at every
+    /// size above ~700pt rather than an edge case. At a ~995pt window it barely binds
+    /// (the pane is ~787 and the margins land near 73), which is why this reads fine
+    /// today — but maximised on an external display the same constant leaves the app's
+    /// widest surface carrying its narrowest column.
+    ///
+    /// `DeliverableStyle.measure` — the app's own reading measure, 620.
+    ///
+    /// This was 760, chosen while the prose was still 13.5pt, with a comment
+    /// admitting 760 was "already ~110 characters". Measured on screen it was ~115,
+    /// against a convention of 45–75 and a ceiling near 90. Widening the column was
+    /// treating the symptom: the type was a dock size in a pane-sized column, and
+    /// the fix is the pair, not either half. See `ChatRhythm.prose`.
+    static var paneMeasureCap: CGFloat { DeliverableStyle.measure }
+
     /// The reading column's width inside a chat box of `box` points. Rounded, because a
     /// fractional width makes the text's leading edge land off-pixel and the glyphs blur.
-    static func textWidth(forBox box: CGFloat) -> CGFloat {
-        max(0, min(box - inset * 2, measureCap).rounded())
+    static func textWidth(forBox box: CGFloat, surface: ChatSurface = .dock) -> CGFloat {
+        let cap = surface == .dock ? measureCap : paneMeasureCap
+        return max(0, min(box - inset * 2, cap).rounded())
     }
 
     /// The margin each side — whatever the column leaves, split in two. Derived rather than
     /// stated so it can never disagree with the column.
-    static func margin(forBox box: CGFloat) -> CGFloat {
-        max(0, (box - textWidth(forBox: box)) / 2)
+    static func margin(forBox box: CGFloat, surface: ChatSurface = .dock) -> CGFloat {
+        max(0, (box - textWidth(forBox: box, surface: surface)) / 2)
     }
 }
 
@@ -1629,6 +2355,48 @@ enum ChatRhythm {
     /// Extra leading between lines. SwiftUI's `lineSpacing` adds to the font's natural ~1.2em,
     /// so 6 on 13.5pt lands at ~1.64em — the references' ratio.
     static let lineSpacing: CGFloat = 6
+
+    /// The transcript's reading standard, per surface.
+    ///
+    /// The dock keeps 13.5/6 — correct at 380pt, where the column is too narrow for
+    /// anything larger. The pane adopts **`DeliverableStyle`**, which is this app's
+    /// own answer to "how should a document be set": body 14 at a 620pt measure,
+    /// with 7 of extra leading.
+    ///
+    /// Measured, which is why it changed: at 13.5pt across the pane's 739pt column
+    /// the transcript ran ~115 characters a line. The convention is 45–75 and the
+    /// hard ceiling ~90; Claude's chat sits at ~88. `DeliverableStyle`'s pair —
+    /// 620 ÷ (14 × 0.5) — is 88 exactly. The app had already solved this for its
+    /// deliverables and the transcript was the one surface not using it, which is
+    /// how the *card* ended up set LARGER (14) in a NARROWER measure (620) than the
+    /// prose introducing it (13.5 at 739). Adopting the standard closes that
+    /// backwards gap instead of inventing a third scale.
+    static func prose(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? 13.5 : DeliverableStyle.body
+    }
+
+    static func proseLeading(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? lineSpacing : DeliverableStyle.leading
+    }
+
+    /// Paragraph separation inside one reply — the EXTRA space beyond a line break.
+    ///
+    /// The replies arrive with `\n\n`, and a single `Text` renders that as a
+    /// genuinely empty line: measured at 1.94× the line height, where the
+    /// convention is a paragraph sitting 1.5–1.75× baseline-to-baseline. So the
+    /// paragraphs are split and spaced instead.
+    ///
+    /// **8 was too little and shipped.** Measured on screen it produced a 35px gap
+    /// against a 34px line — the paragraphs merged into one block, which is a worse
+    /// failure than the airiness it replaced, because now nothing separates a new
+    /// thought from a wrapped line. 16 is ~0.67 of the 23.8pt line height, which
+    /// puts the baselines at ~1.67×.
+    ///
+    /// The reason the first value looked fine on paper: `lineSpacing` already adds
+    /// its 7pt below every line INCLUDING the last one of a block, so it is inside
+    /// the line height and must not be counted again as part of the paragraph gap.
+    /// The test asserting this ratio made exactly that mistake and passed 8.
+    static let paragraphGap: CGFloat = 16
     /// Between consecutive messages from the SAME speaker.
     static let messageGap: CGFloat = 12
     /// Added on top of `messageGap` when the speaker changes, so a turn boundary reads as
@@ -1640,6 +2408,30 @@ enum ChatRhythm {
     static let proseToAction: CGFloat = 12
     /// Head of the transcript, so the first message doesn't touch the dock's chrome.
     static let transcriptTop: CGFloat = 20
+
+    /// The pane's head, which has to do a job the dock's does not.
+    ///
+    /// In the dock, 20 sits under a header row (collapse + history) that already
+    /// held the top of the window open. The pane has no header — I removed that row
+    /// for this surface and never replaced the space it occupied — so the transcript
+    /// began 23pt below the titlebar with nothing above it, and the first card read
+    /// as jammed against the top edge.
+    ///
+    /// Claude's equivalent space is ~70pt, and it is not empty: it is the header
+    /// carrying the conversation's title. 44 is the space without the title, which
+    /// is the smaller half of that fix — see `topFade`, and the note that the pane
+    /// still names no thread.
+    static let paneTranscriptTop: CGFloat = 44
+
+    static func transcriptTop(_ surface: ChatSurface) -> CGFloat {
+        surface == .dock ? transcriptTop : paneTranscriptTop
+    }
+
+    /// How far the top fade reaches. Content passing the upper edge dissolves into
+    /// the page instead of being sliced off — the dimmed first line in Claude's
+    /// transcript. Shorter than the head padding, so at rest (nothing scrolled) the
+    /// fade covers only empty space and touches nothing.
+    static let topFade: CGFloat = 28
     /// Tail of the transcript — larger than the head so the last message clears the composer.
     static let transcriptBottom: CGFloat = 24
 
@@ -1652,11 +2444,16 @@ enum ChatRhythm {
     }
 }
 
-private extension View {
+extension View {
     /// Sized to the column and centred in whatever is left. Two frames, in this order: the
     /// first sets the content to the column width and left-aligns inside it — so a companion
     /// reply and a right-hand founder pill anchor to the same two edges — and the second
     /// expands to the available width and centres that column in it.
+    ///
+    /// Internal rather than `private`, because the Developer pane needs the same column
+    /// and the ORDER of these two frames is the whole subtlety — a second copy is a
+    /// second chance to write them the other way round and get a left-aligned pane
+    /// that looks almost right.
     func readingColumn(_ column: CGFloat) -> some View {
         self
             .frame(width: column, alignment: .leading)

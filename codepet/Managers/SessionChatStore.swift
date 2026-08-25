@@ -98,11 +98,30 @@ final class SessionChatStore: ObservableObject {
 
     // MARK: - Persistence
 
+    /// A bucket, never the byte count. An exact file size is a proxy for how much the
+    /// founder has written; the bucket answers the only question a diagnostic needs to
+    /// answer — empty, truncated, or full.
+    static func sizeBucket(_ bytes: Int?) -> String {
+        guard let bytes else { return "unread" }
+        if bytes == 0 { return "empty" }
+        if bytes < 1_024 { return "under1k" }
+        if bytes < 65_536 { return "under64k" }
+        if bytes < 1_048_576 { return "under1m" }
+        return "over1m"
+    }
+
     private func loadFromDisk() {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        // Hoisted out of the `do` only so the failure report can carry a size bucket.
+        // That bucket is the actionable half of this diagnostic: 0 bytes means a
+        // truncated write (our bug, and fixable), a full file that will not decode
+        // means a schema break (also ours, differently), and there is no way to tell
+        // them apart from the `DecodingError` alone.
+        var byteCount: Int?
         do {
             let data = try Data(contentsOf: fileURL)
+            byteCount = data.count
             let decoded = try decoder.decode([String: SessionChatThread].self, from: data)
             self.threads = decoded
         } catch CocoaError.fileReadNoSuchFile {
@@ -110,6 +129,13 @@ final class SessionChatStore: ObservableObject {
             self.threads = [:]
         } catch {
             logger.error("Failed to load chat threads, starting fresh: \(String(describing: error))")
+            // Silent data loss: the founder's entire thread list is gone and the app
+            // shows them a clean slate. Nothing in the UI says so, nothing retries, and
+            // the file is about to be overwritten by the next save. This is the highest
+            // consequence-per-occurrence failure in the app.
+            DiagnosticsReporter.shared.record(
+                kind: .handledError, site: .chatThreadLoad, error: error,
+                context: ["bytes": SessionChatStore.sizeBucket(byteCount)])
             self.threads = [:]
         }
     }

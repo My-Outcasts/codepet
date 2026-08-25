@@ -343,6 +343,16 @@ final class CompanyStore: ObservableObject {
     var isSettingsOpen: Bool { settingsSection != nil }
 
     /// Open settings, optionally on a specific section (chat cards deep-link this way).
+    /// Point `CloudAIBlock`'s mirror at this account's setting.
+    ///
+    /// The mirror exists because `URLProtocol.canInit` is a class function and cannot reach
+    /// the signed-in company, so someone who knows it has to say. Called on load and on
+    /// account switch — miss either and a founder who turned the key off would find it
+    /// quietly back on next launch.
+    func applyCloudAIBlock() {
+        CloudAIBlock.apply(companyId: companyId)
+    }
+
     func openSettings(_ section: SettingsSection = .preferences) {
         settingsSection = section
     }
@@ -374,6 +384,9 @@ final class CompanyStore: ObservableObject {
             runError = nil
         }
         self.companyId = companyId
+        // Before anything can make a request for this account. A founder who turned the key
+        // off must not find it back on because the mirror was still pointing at nobody.
+        applyCloudAIBlock()
         // The moment an identity exists, and therefore the first moment a
         // `companies/{uid}/diagnostics` write can be authorised. Everything recorded
         // before now — the previous session's unclean exit, a chat-thread file that
@@ -2783,6 +2796,9 @@ final class CompanyStore: ObservableObject {
     func reset() {
         hydrationToken &+= 1
         companyId = nil
+        // Signed out: the mirror must stop reflecting the previous account, or their
+        // refusal would silently govern whoever signs in next.
+        applyCloudAIBlock()
         company = .empty
         // Read off the company we just reset to (so it can't drift from what `reset()`
         // assigns), which means the default: memory ON. The NEXT account therefore never

@@ -32,6 +32,10 @@ struct CodePetApp: App {
         // PROVEN rather than asserted — a silent fallback produces a correct-looking
         // reply, which is exactly what makes it hard to notice.
         CloudBackendBlock.installIfRequested()
+        // Registered unconditionally; the protocol asks per request, so it costs nothing
+        // while the founder's switch is off. Registering here rather than when the switch
+        // flips is what lets it take effect with no relaunch.
+        CloudAIBlock.install()
         // Skip Firebase under XCTest — Firestore aborts when its store isn't
         // available in the test runner, which would crash the whole test host.
         if !AppEnvironment.isRunningTests {

@@ -25,6 +25,19 @@ struct ClaudeCodePanel: View {
     @State private var probing = true
     @State private var pastedCode = ""
     @State private var copied = false
+    /// The two switches are `@State`, not read straight from storage on every render.
+    ///
+    /// Reading storage inside `Toggle`'s `get:` looks simpler and does not work: nothing is
+    /// published, so SwiftUI has no reason to re-render after a write and the switch snaps
+    /// back to its old position while the value it wrote is sitting in `UserDefaults`. The
+    /// founder sees a switch that refuses to move, flips it again, and writes the opposite.
+    ///
+    /// Measured exactly that: `cp_neverUseApiKey_…` read `true` in the plist while the row
+    /// rendered off. The grant switch above it only appeared to work because `setAuthorised`
+    /// is followed by `refresh()`, whose `@State` writes re-render the view by accident — an
+    /// accident this removes rather than relies on.
+    @State private var granted = false
+    @State private var neverUseApiKey = false
 
     /// Injected so a test or preview never touches the real defaults domain.
     var authorisation = ClaudeCodeAuthorisation()
@@ -161,11 +174,45 @@ struct ClaudeCodePanel: View {
                     : "Chat runs on your Claude plan, and each turn spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
             ) {
                 Toggle("", isOn: Binding(
-                    get: { authorisation.isAuthorised(companyId) },
-                    set: { authorisation.setAuthorised(companyId, $0); Task { await refresh() } }
+                    get: { granted },
+                    set: { on in
+                        granted = on
+                        authorisation.setAuthorised(companyId, on)
+                        Task { await refresh() }
+                    }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
+            }
+            // Only offered once the grant is on. Turning the key off before there is any
+            // local path would leave the founder with an app that cannot answer anything.
+            if granted {
+                SettingsDivider()
+                SettingsRow(
+                    label: lang == .vi ? "Không dùng API key của Codepet" : "Never use Codepet's API key",
+                    // Names what BREAKS, not just what it prevents. Only chat runs on the
+                    // founder's plan today; the other seventeen model calls still go through
+                    // the key, and a switch that turned them off without saying so would read
+                    // as the app falling apart.
+                    description: lang == .vi
+                        ? "Hiện chỉ chat chạy trên gói của bạn. Bật cái này thì lộ trình, nhiệm vụ, quyết định và brief sẽ ngừng hoạt động — chúng chưa có đường local. Dùng để kiểm tra, chưa dùng hằng ngày."
+                        : "Only chat runs on your plan so far. Turn this on and roadmap, tasks, decisions and briefs stop working — they have no local path yet. For checking, not for daily use."
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { neverUseApiKey },
+                        set: { on in
+                            neverUseApiKey = on
+                            CloudAIBlock.setEnabled(on, companyId: companyId)
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(CloudAIBlock.forcedOn)
+                    .help(CloudAIBlock.forcedOn
+                          ? (lang == .vi ? "Đang bị buộc bật bởi tham số khởi động."
+                                         : "Forced on by a launch argument.")
+                          : "")
+                }
             }
         }
     }
@@ -280,6 +327,15 @@ struct ClaudeCodePanel: View {
     }
 
     private func refresh() async {
+        // Reload both switches from storage, so the rendered position is always what was
+        // actually persisted — including after an account switch.
+        if let companyId {
+            granted = authorisation.isAuthorised(companyId)
+            neverUseApiKey = CloudAIBlock.isEnabled(companyId: companyId)
+        } else {
+            granted = false
+            neverUseApiKey = false
+        }
         probing = true
         // No company id means no grant can exist yet, so the probe is told `false` rather
         // than guessing — the panel then shows the machine facts and offers no toggle.

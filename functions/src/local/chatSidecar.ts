@@ -65,6 +65,7 @@ export function claudeArgs(opts: {
   mcpConfigPath: string;
   allowed: string[];
   model?: string;
+  effort?: string;
   webSearch: boolean;
   systemPrompt: string;
 }): string[] {
@@ -82,6 +83,10 @@ export function claudeArgs(opts: {
     "--include-partial-messages",
     "--tools", opts.webSearch ? "WebSearch" : "",
     ...(opts.model ? ["--model", opts.model] : []),
+    // Verified on 2.1.241 that --effort is accepted alongside every model Codepet offers,
+    // Haiku 4.5 included: the API rejects `effort` on some models but the CLI absorbs that
+    // rather than passing the error through.
+    ...(opts.effort ? ["--effort", opts.effort] : []),
     ...(opts.allowed.length ? ["--allowedTools", ...opts.allowed] : []),
   ];
 }
@@ -267,6 +272,7 @@ async function main(): Promise<void> {
     mcpConfigPath,
     allowed,
     model: process.env.CODEPET_CHAT_MODEL,
+    effort: process.env.CODEPET_CHAT_EFFORT,
     webSearch,
     systemPrompt: built.systemBlocks.map((b) => b.text).join("\n\n"),
   });

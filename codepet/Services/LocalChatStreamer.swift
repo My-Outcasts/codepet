@@ -66,7 +66,10 @@ enum LocalChatStreamer {
         _ req: CompanyChatRequest,
         modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
     ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
-        AsyncThrowingStream { continuation in
+        // Generic parameters spelled out: with a defaulted second argument above, inference
+        // resolved this to `AsyncThrowingStream(unfolding:)` — whose closure takes no
+        // arguments — instead of the builder form.
+        AsyncThrowingStream<CompanyChatStreamEvent, Error> { continuation in
             guard let sidecar = resolveSidecarPath() else {
                 log.error("no sidecar on disk — local chat unavailable")
                 continuation.finish(throwing: CompanyChatStreamError.malformedResponse)
@@ -93,9 +96,13 @@ enum LocalChatStreamer {
             // The founder's model choice, as an alias so it tracks the latest of that tier.
             // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at
             // all and leave the decision to their own Claude Code.
-            if let companyId = req.companyId,
-               let alias = modelPreference.model(companyId).alias {
-                env["CODEPET_CHAT_MODEL"] = alias
+            if let companyId = req.companyId {
+                if let model = modelPreference.model(companyId).flag {
+                    env["CODEPET_CHAT_MODEL"] = model
+                }
+                if let effort = modelPreference.effort(companyId).flag {
+                    env["CODEPET_CHAT_EFFORT"] = effort
+                }
             }
 
             let proc = Process()

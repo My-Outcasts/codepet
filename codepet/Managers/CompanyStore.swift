@@ -387,6 +387,8 @@ final class CompanyStore: ObservableObject {
         // Before anything can make a request for this account. A founder who turned the key
         // off must not find it back on because the mirror was still pointing at nobody.
         applyCloudAIBlock()
+        claudeModel = modelPreference.model(companyId)
+        claudeEffort = modelPreference.effort(companyId)
         // The moment an identity exists, and therefore the first moment a
         // `companies/{uid}/diagnostics` write can be authorised. Everything recorded
         // before now — the previous session's unclean exit, a chat-thread file that
@@ -1037,6 +1039,37 @@ final class CompanyStore: ObservableObject {
     /// see `ChatThread`), because persisting a tier onto something that does not
     /// itself survive a relaunch would buy nothing and imply otherwise.
     @Published var sessionApprovalTier: ApprovalTier = .standard
+
+    /// The model and effort the NEXT local turn runs with, mirrored so the composer can
+    /// bind to them and written straight through to storage on change.
+    ///
+    /// Published rather than read from `UserDefaults` in the view for the reason the panel's
+    /// switches recorded: a `Binding` whose `get` reads storage never re-renders after its
+    /// own write, so the control snaps back while the value is saved.
+    @Published var claudeModel: ClaudeCodeModel = .inherit {
+        didSet {
+            guard let companyId, oldValue != claudeModel else { return }
+            modelPreference.setModel(companyId, claudeModel)
+        }
+    }
+
+    @Published var claudeEffort: ClaudeCodeEffort = .inherit {
+        didSet {
+            guard let companyId, oldValue != claudeEffort else { return }
+            modelPreference.setEffort(companyId, claudeEffort)
+        }
+    }
+
+    let modelPreference = ClaudeCodeModelPreference()
+
+    /// Whether the NEXT chat turn will run on the founder's own Claude plan.
+    ///
+    /// The composer's model control is shown only when this is true: on the cloud path the
+    /// founder has no say over the model, and offering a picker that changes nothing is
+    /// worse than offering none.
+    var localChatActive: Bool {
+        ChatTransportRouter.transport(companyId: companyId) == .local
+    }
 
     // MARK: - The two doors
 

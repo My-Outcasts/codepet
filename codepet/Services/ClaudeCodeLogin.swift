@@ -188,11 +188,15 @@ final class ClaudeCodeLogin: ObservableObject {
 
     /// `auth status` is the authority, not the prose. This is what makes a changed cue
     /// string a cosmetic problem instead of a false failure.
+    ///
+    /// Asks `probeAuth` rather than the full `probe`: signing in and being authorised to
+    /// spend the plan are different questions, and this flow has no business knowing the
+    /// founder's grant. Conflating them would let a successful sign-in read as a failure
+    /// purely because the toggle happened to be off.
     private func confirmWithProbe() async {
         // Already resolved by whichever of the two paths got here first.
         if case .signedIn = phase { return }
-        let status = await ClaudeCodeEnvironment.probe()
-        switch status.auth {
+        switch await ClaudeCodeEnvironment.probeAuth(shell: LoginShellRunner()) {
         case .loggedIn(let account):
             phase = .signedIn(account)
         case .loggedOut:

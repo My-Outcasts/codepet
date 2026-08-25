@@ -43,6 +43,10 @@ struct ClaudeCodeStatus: Equatable {
         /// Installed, and possibly signed in, but the CLI is too old to say. The fix is
         /// updating Claude Code, not signing in.
         case versionUnknown
+        /// Everything works; the founder just has not agreed to let Codepet spend their
+        /// plan. Last in the order because being asked to authorise software that is not
+        /// installed, or a login that does not exist, is an instruction nobody can follow.
+        case notAuthorised
     }
 
     /// Codepet works, but the founder may not be paying the way they think.
@@ -58,13 +62,18 @@ struct ClaudeCodeStatus: Equatable {
 
     let install: Install
     let auth: Auth
+    /// Whether the founder has agreed to let Codepet spend this plan. NOT a fact about
+    /// the Mac — it is Codepet's own gate, and it is deliberately NOT defaulted: a
+    /// defaulted permission is how `sendChat`'s `convenesRoom:` left eight tests red for
+    /// a day, and this one guards the founder's money rather than a render path.
+    let authorised: Bool
 
     var blocker: Blocker? {
         if install == .missing { return .notInstalled }
         switch auth {
-        case .loggedIn: return nil
         case .loggedOut: return .notSignedIn
         case .unknown: return .versionUnknown
+        case .loggedIn: return authorised ? nil : .notAuthorised
         }
     }
 
@@ -83,7 +92,7 @@ struct ClaudeCodeStatus: Equatable {
     }
 
     /// Nothing probed yet. Distinct from a probe that ran and found nothing.
-    static let unprobed = ClaudeCodeStatus(install: .missing, auth: .unknown)
+    static let unprobed = ClaudeCodeStatus(install: .missing, auth: .unknown, authorised: false)
 }
 
 /// Probes the founder's Claude Code installation. A namespace, not an instance: it holds
@@ -167,11 +176,18 @@ enum ClaudeCodeEnvironment {
 
     /// Full preflight. Skips the auth probe when nothing is installed: asking a binary
     /// that is not there costs a spawn and yields a second, confusing not-found.
-    static func probe(shell: ShellRunning = LoginShellRunner()) async -> ClaudeCodeStatus {
+    ///
+    /// `authorised` is passed in rather than read here, because it is not a fact about
+    /// the machine — it is the founder's grant, which lives per company id and is the
+    /// caller's to supply.
+    static func probe(shell: ShellRunning = LoginShellRunner(),
+                      authorised: Bool) async -> ClaudeCodeStatus {
         let install = await probeInstall(shell: shell)
         guard install != .missing else {
-            return ClaudeCodeStatus(install: install, auth: .unknown)
+            return ClaudeCodeStatus(install: install, auth: .unknown, authorised: authorised)
         }
-        return ClaudeCodeStatus(install: install, auth: await probeAuth(shell: shell))
+        return ClaudeCodeStatus(install: install,
+                                auth: await probeAuth(shell: shell),
+                                authorised: authorised)
     }
 }

@@ -3,15 +3,21 @@ import AppKit
 
 /// Connects Codepet to the founder's own Claude plan.
 ///
-/// The one thing this panel must never imply is that Codepet holds a credential. It does
-/// not: `claude auth login` opens the browser itself, runs a local callback server, and
-/// stores the result in the macOS Keychain, which Claude Code owns. Codepet spawns the
-/// process and then asks `claude auth status --json` who is signed in. That is the whole
-/// mechanism, and it is why there is no key field anywhere on this screen.
+/// **Two separate things, deliberately drawn as two rows.** A Mac has one Claude Code
+/// login, in the Keychain, and `claude` neither knows nor cares who spawned it — so the
+/// moment Codepet can find that login it can also spend it. The first row is therefore a
+/// FACT Codepet observed about the machine; the second is a DECISION the founder makes.
+/// An earlier version of this panel drew only the first and labelled it "Connected",
+/// which told a founder who had signed into Claude Code months earlier, in a terminal,
+/// for unrelated reasons, that they had connected something. They had not.
 ///
-/// No Terminal window either — an earlier design opened Terminal.app, which was worse for
-/// no gain, since the CLI launches the browser on its own.
+/// Codepet never holds a credential: `claude auth login` opens the browser itself, runs a
+/// local callback server, and leaves the result in the Keychain that Claude Code owns.
+/// Codepet spawns the process and reads `claude auth status --json`. That is also why
+/// `claude setup-token` is not used despite fitting a GUI more tidily — it prints a
+/// one-year token and saves it nowhere, which would make Codepet the holder.
 struct ClaudeCodePanel: View {
+    @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
     @StateObject private var login = ClaudeCodeLogin()
@@ -20,17 +26,28 @@ struct ClaudeCodePanel: View {
     @State private var pastedCode = ""
     @State private var copied = false
 
-    /// The documented native installer. Shown for copying, never run for the founder:
-    /// they should see what is about to be put on their machine.
+    /// Injected so a test or preview never touches the real defaults domain.
+    var authorisation = ClaudeCodeAuthorisation()
+
+    /// The documented native installer. Shown for copying, never run on the founder's
+    /// behalf: they should see what is about to be put on their machine.
     private static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
+
+    private var companyId: String? { companyStore.companyId }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsGroup {
-                SettingsRow(label: lang == .vi ? "Trạng thái" : "Status",
-                            description: statusDescription) {
-                    statusControl
+                SettingsRow(label: lang == .vi ? "Claude Code trên máy này" : "Claude Code on this Mac",
+                            description: machineDescription) {
+                    machineControl
                 }
+            }
+
+            // Only offered once there is a login to authorise. Asking before that is a
+            // decision about nothing.
+            if status.account != nil, let companyId {
+                grantGroup(companyId: companyId)
             }
 
             if case .needsCode = login.phase {
@@ -46,66 +63,61 @@ struct ClaudeCodePanel: View {
             }
 
             if let warning = status.billingWarning {
-                warningLine(warning)
+                noteLine(warningText(warning), colour: CodepetTheme.accentOrange)
             }
 
             if case .failed(let reason) = login.phase {
-                Text(reason)
-                    .font(CodepetTheme.inter(11))
-                    .foregroundColor(CodepetTheme.accentOrange)
-                    .fixedSize(horizontal: false, vertical: true)
+                noteLine(reason, colour: CodepetTheme.accentOrange)
             }
 
-            Text(lang == .vi
-                 ? "Codepet không bao giờ thấy hay lưu token của bạn. Claude Code giữ nó trong Keychain của máy."
-                 : "Codepet never sees or stores your token. Claude Code keeps it in your Mac's Keychain.")
-                .font(CodepetTheme.inter(11))
-                .foregroundColor(CodepetTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
+            noteLine(lang == .vi
+                     ? "Codepet không bao giờ thấy hay lưu token của bạn. Claude Code giữ nó trong Keychain của máy."
+                     : "Codepet never sees or stores your token. Claude Code keeps it in your Mac's Keychain.",
+                     colour: CodepetTheme.mutedText)
         }
         .task { await refresh() }
-        // A finished sign-in re-probes, so the row stops describing the old state.
         .onChange(of: login.phase) { _, phase in
             if case .signedIn = phase { Task { await refresh() } }
         }
     }
 
-    // MARK: - Status row
+    // MARK: - Row one: what is true about this Mac
 
-    private var statusDescription: String {
+    private var machineDescription: String {
         if probing { return lang == .vi ? "Đang kiểm tra…" : "Checking…" }
         switch status.blocker {
         case .notInstalled:
             return lang == .vi ? "Chưa tìm thấy Claude Code trên máy này."
                                : "Claude Code isn't installed on this Mac."
         case .notSignedIn:
-            return lang == .vi ? "Đã cài, chưa đăng nhập."
-                               : "Installed, but not signed in."
-        // The fix is updating Claude Code, not signing in — so the copy must not send
-        // them to a sign-in screen they are already past.
+            return lang == .vi ? "Đã cài, chưa đăng nhập." : "Installed, but not signed in."
+        // The fix is updating Claude Code, not signing in — so this must not send them to
+        // a sign-in screen they are already past.
         case .versionUnknown:
             return lang == .vi ? "Bản Claude Code này quá cũ để đọc trạng thái đăng nhập. Hãy cập nhật."
                                : "This Claude Code is too old to report its sign-in state. Update it."
-        case nil:
-            return signedInDescription
+        // Signed in, whether or not the grant is given — the account is a fact either way.
+        case .notAuthorised, nil:
+            return accountLine
         }
     }
 
-    private var signedInDescription: String {
+    /// States who is signed in, and says nothing about Codepet. The plan name is the
+    /// useful half: it decides which models are reachable.
+    private var accountLine: String {
         guard let account = status.account else { return "" }
         var parts: [String] = []
         if let email = account.email { parts.append(email) }
-        // The plan name is the useful half: it decides which models are reachable.
         if let plan = account.subscriptionType {
             parts.append(lang == .vi ? "gói \(plan)" : "\(plan) plan")
         }
         if let org = account.orgName { parts.append(org) }
         return parts.isEmpty
-            ? (lang == .vi ? "Đã kết nối." : "Connected.")
+            ? (lang == .vi ? "Đã đăng nhập." : "Signed in.")
             : parts.joined(separator: " · ")
     }
 
-    @ViewBuilder private var statusControl: some View {
+    @ViewBuilder private var machineControl: some View {
         if probing {
             ProgressView().controlSize(.small)
         } else if login.isRunning {
@@ -114,38 +126,48 @@ struct ClaudeCodePanel: View {
                 Text(lang == .vi ? "Đang chờ trình duyệt…" : "Waiting for your browser…")
                     .font(CodepetTheme.inter(12))
                     .foregroundColor(CodepetTheme.mutedText)
-                Button(lang == .vi ? "Huỷ" : "Cancel") { login.cancel() }
-                    .buttonStyle(.plain)
-                    .font(CodepetTheme.inter(12, weight: .medium))
-                    .foregroundColor(CodepetTheme.mutedText)
+                quietButton(lang == .vi ? "Huỷ" : "Cancel") { login.cancel() }
             }
-        } else if status.isReady {
+        } else if status.account != nil {
             HStack(spacing: 10) {
-                Text(lang == .vi ? "Đã kết nối" : "Connected")
+                Text(lang == .vi ? "Đã đăng nhập" : "Signed in")
                     .font(CodepetTheme.inter(12, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentTeal)
-                Button(lang == .vi ? "Kiểm tra lại" : "Re-check") {
-                    Task { await refresh() }
-                }
-                .buttonStyle(.plain)
-                .font(CodepetTheme.inter(12, weight: .medium))
-                .foregroundColor(CodepetTheme.mutedText)
+                quietButton(lang == .vi ? "Kiểm tra lại" : "Re-check") { Task { await refresh() } }
             }
         } else if status.blocker == .notInstalled {
-            // Nothing to sign into yet. Offering a sign-in button here would be an
-            // instruction the founder cannot follow.
-            Button(lang == .vi ? "Kiểm tra lại" : "Re-check") {
-                Task { await refresh() }
-            }
-            .buttonStyle(.plain)
-            .font(CodepetTheme.inter(12, weight: .medium))
-            .foregroundColor(CodepetTheme.mutedText)
+            // Nothing to sign into yet. A sign-in button here is an instruction the
+            // founder cannot follow.
+            quietButton(lang == .vi ? "Kiểm tra lại" : "Re-check") { Task { await refresh() } }
         } else {
-            primaryButton(lang == .vi ? "Kết nối" : "Connect") { login.start() }
+            primaryButton(lang == .vi ? "Đăng nhập" : "Sign in") { login.start() }
         }
     }
 
-    // MARK: - Groups
+    // MARK: - Row two: what the founder allows
+
+    @ViewBuilder private func grantGroup(companyId: String) -> some View {
+        SettingsGroupLabel(lang == .vi ? "Quyền" : "Permission")
+        SettingsGroup {
+            SettingsRow(
+                label: lang == .vi ? "Cho Codepet dùng gói này" : "Let Codepet use this plan",
+                // Names the actual cost, because that is what the founder is agreeing to.
+                // "Uses your quota" is the honest version of "connected".
+                description: lang == .vi
+                    ? "Mỗi lần chạy sẽ tiêu hạn mức Claude của bạn. Tắt là Codepet ngừng dùng — Claude Code trong terminal không bị ảnh hưởng."
+                    : "Runs spend your Claude quota. Turn it off and Codepet stops using it — your terminal's Claude Code is unaffected."
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { authorisation.isAuthorised(companyId) },
+                    set: { authorisation.setAuthorised(companyId, $0); Task { await refresh() } }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+        }
+    }
+
+    // MARK: - Conditional groups
 
     @ViewBuilder private var installGroup: some View {
         SettingsGroupLabel(lang == .vi ? "Cài Claude Code" : "Install Claude Code")
@@ -196,10 +218,8 @@ struct ClaudeCodePanel: View {
 
     @ViewBuilder private func urlGroup(_ url: String) -> some View {
         SettingsGroup {
-            SettingsRow(
-                label: lang == .vi ? "Trình duyệt không mở?" : "Browser didn't open?",
-                description: url
-            ) {
+            SettingsRow(label: lang == .vi ? "Trình duyệt không mở?" : "Browser didn't open?",
+                        description: url) {
                 primaryButton(lang == .vi ? "Mở" : "Open") {
                     if let u = URL(string: url) { NSWorkspace.shared.open(u) }
                 }
@@ -207,27 +227,29 @@ struct ClaudeCodePanel: View {
         }
     }
 
-    @ViewBuilder private func warningLine(_ warning: ClaudeCodeStatus.BillingWarning) -> some View {
-        // A warning, never a block: both cases run fine, and refusing to run would be
-        // Codepet overruling the founder about their own billing.
-        Text({
-            switch warning {
-            case .consoleAccount:
-                return lang == .vi
-                    ? "Đây là tài khoản Console, nên mỗi lần chạy tính tiền theo token thay vì thuộc gói thuê bao."
-                    : "This is a Console account, so runs bill per token instead of being covered by a subscription."
-            case .apiKeyInEnvironment:
-                return lang == .vi
-                    ? "Máy này có API key trong môi trường, và nó được ưu tiên hơn gói thuê bao của bạn."
-                    : "This Mac has an API key in its environment, and it outranks your subscription."
-            }
-        }())
-        .font(CodepetTheme.inter(11))
-        .foregroundColor(CodepetTheme.accentOrange)
-        .fixedSize(horizontal: false, vertical: true)
+    // MARK: - Bits
+
+    /// A warning, never a block: both cases run fine, and refusing to run would be
+    /// Codepet overruling the founder about their own billing.
+    private func warningText(_ warning: ClaudeCodeStatus.BillingWarning) -> String {
+        switch warning {
+        case .consoleAccount:
+            return lang == .vi
+                ? "Đây là tài khoản Console, nên mỗi lần chạy tính tiền theo token thay vì thuộc gói thuê bao."
+                : "This is a Console account, so runs bill per token instead of being covered by a subscription."
+        case .apiKeyInEnvironment:
+            return lang == .vi
+                ? "Máy này có API key trong môi trường, và nó được ưu tiên hơn gói thuê bao của bạn."
+                : "This Mac has an API key in its environment, and it outranks your subscription."
+        }
     }
 
-    // MARK: - Bits
+    @ViewBuilder private func noteLine(_ text: String, colour: Color) -> some View {
+        Text(text)
+            .font(CodepetTheme.inter(11))
+            .foregroundColor(colour)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 
     @ViewBuilder private func primaryButton(_ title: String,
                                             action: @escaping () -> Void) -> some View {
@@ -241,6 +263,14 @@ struct ClaudeCodePanel: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder private func quietButton(_ title: String,
+                                          action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(CodepetTheme.inter(12, weight: .medium))
+            .foregroundColor(CodepetTheme.mutedText)
+    }
+
     private func submitCode() {
         login.submitCode(pastedCode)
         pastedCode = ""
@@ -248,7 +278,10 @@ struct ClaudeCodePanel: View {
 
     private func refresh() async {
         probing = true
-        status = await ClaudeCodeEnvironment.probe()
+        // No company id means no grant can exist yet, so the probe is told `false` rather
+        // than guessing — the panel then shows the machine facts and offers no toggle.
+        let granted = companyId.map { authorisation.isAuthorised($0) } ?? false
+        status = await ClaudeCodeEnvironment.probe(authorised: granted)
         probing = false
         copied = false
     }

@@ -2,9 +2,11 @@
 // can be unit-tested (and verified) without loading the heavy Cloud-Functions module
 // tree. The IO handler lives in generateRoadmap.ts and imports from here.
 //
-// Output shape mirrors native's flat, phase/deps `RoadmapTask` (NOT the dept-grouped
-// shape scaffoldRoadmap.ts produces — that CF is left intact for the 8-department
-// CompanyView; this one feeds the Overview board + onboarding reveal).
+// Output shape mirrors native's flat, phase/deps `RoadmapTask`, and feeds the Overview
+// board + onboarding reveal. A dept-grouped `scaffoldRoadmap` CF used to sit alongside
+// this one, retained for a CompanyView that was expected to need its shape; the
+// CompanyView shipped without ever calling it, so it was deleted. This is now the only
+// roadmap generator.
 
 import { departmentBlock, DEPARTMENT_NAMES } from "./departments";
 

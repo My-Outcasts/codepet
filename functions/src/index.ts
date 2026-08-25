@@ -16,7 +16,6 @@ import { handleVirtualCompanyRun } from "./company/virtualCompany";
 // devpet-8f4b1). Two sources meant a deploy from either one offered to delete
 // the other's functions, so the Virtual Company backend could never ship. This
 // repo is now the only source.
-import { handleScaffoldRoadmap } from "./scaffoldRoadmap";
 import { handleEnrichBrief } from "./enrichBrief";
 import { handleCompanyChat } from "./companyChat";
 import { handleRunTask } from "./runTask";
@@ -66,14 +65,6 @@ export const chatSession = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleChatSession
-);
-
-export const scaffoldRoadmap = onRequest(
-  {
-    cors: false,
-    secrets: ["ANTHROPIC_API_KEY"]
-  },
-  handleScaffoldRoadmap
 );
 
 export const enrichBrief = onRequest(

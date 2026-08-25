@@ -361,10 +361,13 @@ enum CompanyChatStreamError: Error, Equatable {
     case malformedResponse
 }
 
-/// Fail-open client for the (planned) companyChat Cloud Function. Returns the reply
-/// on 200, `nil` on any error / non-200 / unreachable — callers never handle throws.
-/// The CF is authored + deployed separately (node-22 bundle, like scaffoldRoadmap);
-/// until then this returns nil and the chat shows an honest offline message.
+/// Fail-open client for the companyChat Cloud Function. Returns the reply on 200, `nil`
+/// on any error / non-200 / unreachable — callers never handle throws, and the chat shows
+/// an honest offline message instead.
+///
+/// The CF is deployed and live. This comment described it as planned and undeployed long
+/// after it shipped, which is worth naming: fail-open is a permanent design choice here,
+/// not a stopgap for a function that had not landed yet.
 enum CompanyChatClient {
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/companyChat")!
 

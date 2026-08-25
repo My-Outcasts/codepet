@@ -204,10 +204,22 @@ final class FakeShell: ShellRunning {
 
 final class ClaudeCodeEnvironmentTests: XCTestCase {
 
-    func testInstallIsMissingWhenCommandNotFound() async {
-        let shell = FakeShell()   // falls through to exit 127
+    func testInstallIsMissingOnlyWhenEveryKnownPathFails() async {
+        let shell = FakeShell()   // falls through to exit 127 for everything
         let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
         XCTAssertEqual(install, .missing)
+        // PATH first, then each documented install location — concluding
+        // `.missing` without checking them would tell a founder to install
+        // software they already have.
+        XCTAssertEqual(shell.commandsRun.count, 1 + ClaudeCodeEnvironment.knownInstallPaths.count)
+    }
+
+    func testInstallFoundAtAbsolutePathWhenNotOnPath() async {
+        let shell = FakeShell()
+        // Bare `claude` is not found, but the native installer's location works.
+        shell.stub(".local/bin/claude", stdout: "2.1.241 (Claude Code)")
+        let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
+        XCTAssertEqual(install, .present(version: "2.1.241"))
     }
 
     func testInstallReadsVersionFromVersionOutput() async {
@@ -289,15 +301,35 @@ struct ClaudeCodeStatus: Equatable {
 /// it holds no state.
 enum ClaudeCodeEnvironment {
 
-    /// Is `claude` on PATH, and at what version.
+    /// Where the documented installers put `claude`, tried by absolute path
+    /// when PATH resolution fails. A founder whose shell profile the installer
+    /// never touched has the binary installed and invisible, and telling them
+    /// to install software they already have is the specific wrong answer.
+    static let knownInstallPaths = [
+        "~/.local/bin/claude",        // native installer
+        "/opt/homebrew/bin/claude",   // Homebrew, Apple silicon
+        "/usr/local/bin/claude"       // Homebrew Intel, or an npm global
+    ]
+
+    /// Is `claude` reachable, and at what version.
     ///
     /// Reads the leading semver out of `claude --version`, whose current shape
-    /// is "2.1.241 (Claude Code)". A non-zero exit means absent; a zero exit
-    /// whose output does not parse means present at an unknown version.
+    /// is "2.1.241 (Claude Code)". A zero exit whose output does not parse means
+    /// present at an unknown version. Only when PATH resolution AND every known
+    /// install path fail do we conclude `.missing`.
     static func probeInstall(shell: ShellRunning) async -> ClaudeCodeStatus.Install {
-        let result = await shell.run("claude --version")
-        guard result.succeeded else { return .missing }
-        return .present(version: parseVersion(result.trimmedOut))
+        let onPath = await shell.run("claude --version")
+        if onPath.succeeded {
+            return .present(version: parseVersion(onPath.trimmedOut))
+        }
+        for path in knownInstallPaths {
+            let expanded = (path as NSString).expandingTildeInPath
+            let direct = await shell.run("\"\(expanded)\" --version")
+            if direct.succeeded {
+                return .present(version: parseVersion(direct.trimmedOut))
+            }
+        }
+        return .missing
     }
 
     /// Leading dotted-numeric run of a version line, or "" when there is none.
@@ -326,7 +358,7 @@ Run:
 cd /Users/williamdominich/Documents/Murror/codepet
 xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
 ```
-Expected: all three tests PASS.
+Expected: all four tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -492,7 +524,7 @@ Run:
 cd /Users/williamdominich/Documents/Murror/codepet
 xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
 ```
-Expected: all eight tests PASS.
+Expected: all nine tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -638,7 +670,7 @@ Run:
 cd /Users/williamdominich/Documents/Murror/codepet
 xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
 ```
-Expected: all thirteen tests PASS.
+Expected: all fourteen tests PASS.
 
 - [ ] **Step 5: Verify against the real CLI once, by hand**
 
@@ -819,7 +851,7 @@ Run:
 cd /Users/williamdominich/Documents/Murror/codepet
 xcodebuild test -scheme codepet -only-testing:codepetTests/ClaudeCodeEnvironmentTests 2>&1 | tail -30
 ```
-Expected: all eighteen tests PASS.
+Expected: all nineteen tests PASS.
 
 - [ ] **Step 5: Verify the scrub against the real shell, by hand**
 

@@ -192,6 +192,79 @@ notarized, and each release ships a GPG-signed `manifest.json` of SHA256
 checksums (key fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`),
 so Codepet can verify what it found before trusting it.
 
+## Distribution: what a downloaded build needs before it works
+
+Leaving the App Store does not mean leaving Apple's gates. Three of the five
+below are **configuration gaps in the repo today**, and each one fails on a
+stranger's Mac while working fine on ours.
+
+### 1. Hardened Runtime is not enabled — notarization cannot pass without it
+
+`ENABLE_HARDENED_RUNTIME` appears **zero times** in `codepet.xcodeproj`.
+Notarization requires it, and an un-notarized download is effectively unopenable
+on current macOS: the right-click → Open bypass is gone, so the founder must
+find System Settings → Privacy & Security → Open Anyway. That is not an
+onboarding step anyone survives.
+
+Hardened Runtime does not obstruct this design. Library validation restricts
+what gets loaded *into* Codepet's process; `claude` is `exec`d as a separate
+signed process, which is exactly what terminal emulators do.
+
+### 2. No TCC usage descriptions — the spawned `claude` is denied silently
+
+`codepet/Info.plist` contains exactly one key, `CFBundleURLTypes`. There is no
+`NSDocumentsFolderUsageDescription` or any other usage description.
+
+This is the subtlest failure in the whole design. **A child process is attributed
+to its parent for TCC purposes** — so when `claude` reads the founder's repo
+under `~/Documents`, macOS asks whether *Codepet* may do that. Usage descriptions
+do not grant access; they are what makes the dialog possible at all. Without
+them there is no prompt and the access is refused — and the founder sees
+`claude` reporting missing files, which reads as a Claude Code bug rather than a
+Codepet permission gap.
+
+Two ways to fix it, and the choice is real:
+
+- **Usage descriptions** for Documents, Desktop, and Downloads. macOS then
+  prompts in Codepet's name. Simple, and the prompt names the app the founder
+  just launched.
+- **`responsibility_spawnattrs_setdisclaim()`**, which makes the spawned `claude`
+  its own responsible process (Qt Creator does this). Attribution becomes
+  honest — Claude Code asks for what Claude Code reads — at the cost of a prompt
+  naming software the founder may not realise Codepet drives.
+
+Start with usage descriptions; they are required for the fallback path either
+way. Revisit disclaiming once there is a real founder to watch hit the prompt.
+
+### 3. Bundle identifier and keychain group disagree
+
+`PRODUCT_BUNDLE_IDENTIFIER` is `app.murror.codepet`. `codepet.entitlements`
+declares `keychain-access-groups` as `$(AppIdentifierPrefix)com.murror.codepet`
+— `com.`, not `app.`. Whether this matters depends on what the provisioning
+profile allows, and it cannot be settled from source: it needs a signed build
+that actually reaches the keychain. It is called out here because Firebase auth
+uses the keychain and landmine 4 already records that `Auth.auth()` traps rather
+than throwing when things are wrong, which turns a signing mismatch into a crash
+that mimics the Xcode 26.2 test bug.
+
+### 4. `claude` may exist but be off PATH
+
+Codepet resolves `claude` through a login shell, which loads the founder's
+profile, and the native installer puts `~/.local/bin` on PATH there. But a
+founder whose profile the installer never touched — an unusual Homebrew setup, a
+custom shell, a machine where someone hand-moved the binary — has `claude`
+installed and invisible.
+
+The probe therefore falls back to the known install locations before concluding
+`.missing`: `~/.local/bin/claude`, `/opt/homebrew/bin/claude`,
+`/usr/local/bin/claude`. Telling a founder to install software they already have
+is the specific wrong answer this avoids.
+
+### 5. Updates
+
+No self-update mechanism exists today. Not a first-run blocker, but shipping
+without one means every fix requires the founder to notice and re-download.
+
 ## Hard requirement on the founder
 
 Claude Code requires a Pro, Max, Team, Enterprise, or Console account. The free

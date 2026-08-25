@@ -7,42 +7,10 @@ import { verifyAuth } from "./auth";
 import { buildMcpConfig, loadConnectors, MCP_CLIENT_BETA, type McpConfig } from "./oauth/connectors";
 import { checkAndIncrement } from "./rateLimit";
 import {
-  buildSystemPrompt,
-  buildContextBlock,
-  buildMessages,
-  buildRunnableBlock,
-  buildSetupBlock,
-  styleBlock,
-  buildSkillsBlock,
-  parseEnabledSkills,
-  WEB_SEARCH_TOOL,
-  validateRunTaskToolUse,
-  validateNavigateToolUse,
-  validateSetupToolUse,
-  coerceRememberFacts,
-  RUN_TASK_TOOL,
-  COMPLETE_TASK_TOOL,
-  ADD_TASK_TOOL,
-  DRAFT_MESSAGE_TOOL,
-  validateDraftMessageToolUse,
-  validateCompleteTaskToolUse,
-  validateAddTaskToolUse,
-  buildOpenTasksBlock,
-  type CompletableTaskRef,
-  type NewTaskIntent,
-  type MessageDraftIntent,
-  NAVIGATE_TOOL,
-  SETUP_TOOL,
-  REMEMBER_TOOL,
-  ChatTurn,
   ClaudeMessage,
-  type AttachmentDTO,
-  RunnableTaskRef,
-  EnvSetupItem,
-  SetupCategory,
-  NavAction,
-  SetupAction,
-  RememberedFact,
+  buildChatRequest,
+  resolveActions,
+  type ChatRequestBody,
 } from "./companyChatCore";
 
 const CHAT_MODEL = "claude-sonnet-5";
@@ -71,93 +39,6 @@ function client(): Anthropic {
   return _client;
 }
 
-interface ChatRequestBody {
-  language?: string;
-  companion_id?: string;
-  // The department this turn belongs to. Deliberately separate from `companion_id`:
-  // that is who speaks, this is what they know. They come apart when a department's pet
-  // IS the founder's own companion — no handoff to announce, but still a question that
-  // needs that department's expertise. Backward-compatible: omitted → no department block.
-  dept_key?: string;
-  context?: string;
-  history?: ChatTurn[];
-  user_message?: string;
-  // Roadmap tasks byte may offer to run via the run_task tool (see companyChatCore).
-  // Backward-compatible: omitted entirely by older clients → treated as [] → no tool
-  // offered → behavior is byte-for-byte identical to before this field existed.
-  runnable?: RunnableTaskRef[];
-  // The founder's OWN open steps, which `complete_task` may offer to tick off. Separate
-  // from `runnable` because they are the opposite set: runnable is what Codepet can do,
-  // this is what only the founder can. Backward-compatible: omitted → [] → no tool.
-  open_tasks?: CompletableTaskRef[];
-  // Currently-OFF toolkit items (skills/connectors/agents) byte may offer to turn on
-  // via the setup_capability tool (see companyChatCore). Backward-compatible: omitted
-  // entirely by older clients → treated as [] → no tool offered.
-  env_setup?: EnvSetupItem[];
-  // The founder's tone preferences, already composed into one prompt sentence by the
-  // client (`AIStyle.promptFragment()`). Backward-compatible: omitted by older clients,
-  // and omitted by current ones whenever the founder hasn't changed a knob → styleBlock
-  // returns "" → the system prompt is byte-for-byte what it was before this field.
-  style_fragment?: string;
-  // Toolkit skills the founder has turned ON. The mirror of env_setup, and the
-  // reason a toggle now means something. Backward-compatible in the same way:
-  // omitted by older clients → treated as none → no skill block, no extra tool.
-  enabled_skills?: unknown;
-  // Files riding THIS message. Every field is client-supplied and this body is applied
-  // with an `as` cast, so nothing here has been validated: `buildMessages` drops what it
-  // cannot use rather than 400ing the turn (see AttachmentDTO in companyChatCore).
-  // Backward-compatible: omitted by every client that predates attachments -> undefined ->
-  // `renderTurn` returns the plain string it always returned. Note the consequence of the
-  // cast: a MISSPELLED key here is silently ignored, so `attachments` and `media_type`
-  // (snake_case) are a wire contract the native client must match exactly.
-  attachments?: AttachmentDTO[];
-}
-
-const MAX_RUNNABLE_TASKS = 60;
-const MAX_ENV_SETUP_ITEMS = 40;
-const SETUP_CATEGORIES: readonly SetupCategory[] = ["skills", "connectors", "agents"];
-
-function parseRunnable(raw: unknown): RunnableTaskRef[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((r) => {
-      const o = (r ?? {}) as Record<string, unknown>;
-      const id = typeof o.id === "string" ? o.id.trim() : "";
-      const title = typeof o.title === "string" ? o.title.trim() : "";
-      return id ? { id, title } : null;
-    })
-    .filter((r): r is RunnableTaskRef => r !== null)
-    .slice(0, MAX_RUNNABLE_TASKS);
-}
-
-function parseOpenTasks(raw: unknown): CompletableTaskRef[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((r) => {
-      const o = (r ?? {}) as Record<string, unknown>;
-      const id = typeof o.id === "string" ? o.id.trim() : "";
-      const title = typeof o.title === "string" ? o.title.trim() : "";
-      return id ? { id, title } : null;
-    })
-    .filter((r): r is CompletableTaskRef => r !== null)
-    .slice(0, 60);
-}
-
-function parseEnvSetup(raw: unknown): EnvSetupItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((r): EnvSetupItem | null => {
-      const o = (r ?? {}) as Record<string, unknown>;
-      const category = typeof o.category === "string" ? o.category : "";
-      const name = typeof o.name === "string" ? o.name.trim() : "";
-      if (!(SETUP_CATEGORIES as readonly string[]).includes(category) || !name) return null;
-      const item: EnvSetupItem = { category: category as SetupCategory, name };
-      if (typeof o.why === "string") item.why = o.why;
-      return item;
-    })
-    .filter((r): r is EnvSetupItem => r !== null)
-    .slice(0, MAX_ENV_SETUP_ITEMS);
-}
 
 // ─── SSE streaming (opt-in via `Accept: text/event-stream`) ────────────────
 // Mirrors chat.ts's handleChatSession stream contract exactly: same StreamEvent
@@ -261,59 +142,6 @@ function writeFrame(res: Response, event: string, payload: unknown): void {
 // toolkit item) falls through to the next candidate rather than winning by
 // default. remember_fact is orthogonal — it's resolved independently and can
 // co-occur with any of the other three in the same turn.
-interface ResolvedActions {
-  runTaskId: string | null;
-  nav: NavAction | null;
-  setup: SetupAction | null;
-  remember: RememberedFact[];
-  completeTaskId: string | null;
-  addTask: NewTaskIntent | null;
-  drafts: MessageDraftIntent[] | null;
-}
-
-function resolveActions(
-  toolUses: Array<{ name: string; input: unknown }>,
-  runnable: RunnableTaskRef[],
-  envSetup: EnvSetupItem[],
-  openTasks: CompletableTaskRef[]
-): ResolvedActions {
-  const runTaskUse = toolUses.find((t) => t.name === "run_task");
-  const navUse = toolUses.find((t) => t.name === "navigate");
-  const setupUse = toolUses.find((t) => t.name === "setup_capability");
-  const rememberUse = toolUses.find((t) => t.name === "remember_fact");
-  const completeUse = toolUses.find((t) => t.name === "complete_task");
-  const addUse = toolUses.find((t) => t.name === "add_task");
-  const draftUse = toolUses.find((t) => t.name === "draft_message");
-
-  let runTaskId: string | null = null;
-  let nav: NavAction | null = null;
-  let setup: SetupAction | null = null;
-
-  if (runTaskUse) runTaskId = validateRunTaskToolUse(runTaskUse.input, runnable);
-  if (!runTaskId && navUse) nav = validateNavigateToolUse(navUse.input);
-  if (!runTaskId && !nav && setupUse) setup = validateSetupToolUse(setupUse.input, envSetup);
-
-  const remember = rememberUse ? coerceRememberFacts(rememberUse.input) : [];
-
-  // The two roadmap verbs are resolved INDEPENDENTLY of the run/nav/setup trio, like
-  // remember_fact — "I finished that, and now draft the next one" is one honest turn, and
-  // forcing it through the mutual-exclusion chain would silently drop half of it.
-  //
-  // They exclude EACH OTHER, though: completing and creating in one breath is far more
-  // likely a confused turn than a real intent, and the founder cannot review two roadmap
-  // mutations in one confirmation.
-  let completeTaskId: string | null = null;
-  let addTask: NewTaskIntent | null = null;
-  if (completeUse) completeTaskId = validateCompleteTaskToolUse(completeUse.input, openTasks);
-  if (!completeTaskId && addUse) addTask = validateAddTaskToolUse(addUse.input);
-
-  // Independent of everything above: a drafted message is CONTENT, not an action, so it
-  // neither excludes nor is excluded by a verb that mutates something.
-  const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
-
-  return { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts };
-}
-
 export async function handleCompanyChat(req: Request, res: Response): Promise<void> {
   if (req.method !== "POST") { res.status(405).json({ error: "method_not_allowed" }); return; }
   const auth = await verifyAuth(req.headers.authorization);
@@ -329,58 +157,10 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     return;
   }
 
-  const runnable = parseRunnable(body.runnable);
-  const openTasks = parseOpenTasks(body.open_tasks);
-  const envSetup = parseEnvSetup(body.env_setup);
-  const skills = parseEnabledSkills(body.enabled_skills);
-
-  const staticSystem = buildSystemPrompt({
-    companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
-    language: body.language === "vi" ? "vi" : "en",
-    // Which department's expertise to answer from. Absent on an ordinary turn and on every
-    // older client, and `buildSystemPrompt` treats an unknown key as none — so this cannot
-    // break a turn, only enrich one.
-    deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
-  });
-  // The founder's tone preferences, runnable-task grounding and setup-toolkit
-  // grounding all live in the volatile context block (not the cached static one)
-  // since they're per-request, just like the context itself. The style leads: it
-  // sits directly after the persona sentence it may override, and before the
-  // company grounding.
-  const contextBlock =
-    styleBlock(typeof body.style_fragment === "string" ? body.style_fragment : "") +
-    buildContextBlock(typeof body.context === "string" ? body.context : "") +
-    buildRunnableBlock(runnable) +
-    buildOpenTasksBlock(openTasks) +
-    buildSetupBlock(envSetup) +
-    buildSkillsBlock(skills);
-  // History turns carry their own `attachments` and pass through untouched; buildMessages
-  // replays only the most recent ones (ATTACHMENT_REPLAY_WINDOW) so one screenshot is not
-  // re-uploaded on every turn of a long thread.
-  const messages = buildMessages(
-    Array.isArray(body.history) ? body.history : [],
-    userMessage,
-    Array.isArray(body.attachments) ? body.attachments : undefined,
-  );
-
-  // Two system blocks in both paths: the static companion prompt carries the
-  // cache_control breakpoint (the pricing spec's cheap-chat lever); the volatile
-  // per-request company context is a SEPARATE block AFTER it, so it never enters
-  // the cached prefix.
-  const systemBlocks: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [
-    { type: "text", text: staticSystem, cache_control: { type: "ephemeral" } },
-    { type: "text", text: contextBlock },
-  ];
-
-  // Tool assembly: run_task and setup_capability are only offered when there's
-  // something real to run/turn on (older clients that never send `runnable` /
-  // `env_setup` get neither). navigate and remember_fact don't depend on any
-  // per-request list, so they're always offered. NOT forced via tool_choice —
-  // byte stays free to reply in plain text, or ask a clarifying question,
-  // instead of calling any of them.
-  // Connectors the founder has authorised (step 6 of the OAuth work). Fail-open:
-  // if the read or a decrypt throws, chat proceeds with no connectors rather than
-  // taking byte offline for that founder over one bad credential.
+  // Connectors the founder has authorised. Fail-open: if the read or a decrypt throws,
+  // chat proceeds with no connectors rather than taking byte offline for that founder
+  // over one bad credential. This is the one part of assembly the sidecar cannot share —
+  // it needs Firestore and the founder's uid.
   let mcp: McpConfig = { mcpServers: [], mcpToolsets: [] };
   try {
     const encKey = process.env.CONNECTOR_ENC_KEY;
@@ -389,25 +169,11 @@ export async function handleCompanyChat(req: Request, res: Response): Promise<vo
     logger.warn("connector load failed; continuing without", { uid: auth.uid, err: String(err) });
   }
 
-  const tools: unknown[] = [
-    ...(runnable.length ? [RUN_TASK_TOOL] : []),
-    // Offered only when there is something to complete — same rule as run_task. With no
-    // open founder-owned task, a complete_task call could only ever name a hallucination.
-    ...(openTasks.length ? [COMPLETE_TASK_TOOL] : []),
-    ADD_TASK_TOOL,
-    DRAFT_MESSAGE_TOOL,
-    NAVIGATE_TOOL,
-    ...(envSetup.length ? [SETUP_TOOL] : []),
-    REMEMBER_TOOL,
-    // Server-side, so this declaration IS the integration — Anthropic runs the
-    // search and feeds the results back. Offered only to founders who turned the
-    // skill on, both because it costs money per search and because a tool byte
-    // holds is a tool byte will eventually reach for.
-    ...(skills.has("web-research") ? [WEB_SEARCH_TOOL] : []),
-    // Each declared server must be referenced by exactly one toolset, or the
-    // request is rejected — `buildMcpConfig` keeps the two lists in step.
-    ...mcp.mcpToolsets,
-  ];
+  // One builder for both paths — see buildChatRequest in companyChatCore. Each declared
+  // MCP server must be referenced by exactly one toolset or the request is rejected;
+  // buildMcpConfig keeps the two lists in step.
+  const { systemBlocks, messages, tools, runnable, openTasks, envSetup } =
+    buildChatRequest(body, mcp.mcpToolsets);
 
   const wantsStream = typeof req.headers.accept === "string" && req.headers.accept.includes("text/event-stream");
 

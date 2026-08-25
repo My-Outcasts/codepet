@@ -3,7 +3,11 @@ import SwiftUI
 
 /// First-run cinematic onboarding — faithful English-only port of the web
 /// `Onboarding` (8 steps 0–7). Replaces the 6-field CompanyOnboardingView at
-/// first run; the reveal/scaffold is fail-open (scaffoldRoadmap CF undeployed).
+/// first run. The reveal/scaffold stays fail-open by design — `roadmapFetcher` returns
+/// `[]` rather than throwing, so a generation failure falls back to generic value-props
+/// instead of stranding the founder mid-onboarding. It reaches `generateRoadmap`, which
+/// is deployed; this line used to name `scaffoldRoadmap` and call it undeployed, and both
+/// halves were wrong by the time that CF was deleted.
 struct OnboardingView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @EnvironmentObject var appState: AppState

@@ -22,6 +22,12 @@ loading the firebase-functions tree (the iCloud worktree stalls jest/node-requir
 - **New `generateRoadmap` CF**, matching native's phase/deps `RoadmapTask`. The existing
   dept-based `scaffoldRoadmap` CF is **left intact** — its shape is what order 3's 8-department
   CompanyView will need.
+  - **SUPERSEDED 2026-08-25.** `scaffoldRoadmap` was deleted. The retention reason expired
+    without anyone noticing: order 3's 8-department CompanyView shipped (`Views/Company/`)
+    and never called the endpoint once, so the shape it was being kept for was never
+    needed. It was found during an inventory of what still holds `ANTHROPIC_API_KEY` — a
+    dead 123-line handler carrying a live grant to the key. `generateRoadmap` is now the
+    only roadmap generator.
 - Deploy is **scoped** and runs from the **off-iCloud local-disk dir** (`/private/tmp/cc-deploy`),
   the only path that gets past Firebase's source-discovery OOM. Never a bare functions deploy
   (would delete live `distillReference`/`generateDictionary`).

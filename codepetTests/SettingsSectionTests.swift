@@ -13,12 +13,33 @@ final class SettingsSectionTests: XCTestCase {
         XCTAssertEqual(SettingsSection.allCases.first, .preferences)
     }
 
+    /// Sections whose TITLE is a proper noun, so it reads the same in both languages.
+    /// Deliberately narrow: the exemption covers the title only, and the subtitle
+    /// assertions below still apply — so a half-translated section is still caught.
+    /// Adding a section here is a claim that its name is a brand, not a shortcut past
+    /// the translation this test exists to demand.
+    private static let untranslatableTitles: Set<SettingsSection> = [.claudeCode]
+
     func test_everySectionHasBothLanguages() {
         for s in SettingsSection.allCases {
             XCTAssertFalse(s.title(.en).isEmpty)
             XCTAssertFalse(s.title(.vi).isEmpty)
             XCTAssertFalse(s.subtitle(.en).isEmpty)
+            XCTAssertFalse(s.subtitle(.vi).isEmpty)
+            XCTAssertNotEqual(s.subtitle(.en), s.subtitle(.vi),
+                              "\(s.rawValue)'s subtitle is not translated")
+            guard !Self.untranslatableTitles.contains(s) else { continue }
             XCTAssertNotEqual(s.title(.en), s.title(.vi), "\(s.rawValue) is not translated")
+        }
+    }
+
+    /// The exemption above must stay a statement about brand names, not a growing
+    /// allowlist. If a section is exempt, its title really must be identical — an
+    /// exemption that no longer applies is an exemption that should be deleted.
+    func test_exemptTitlesReallyAreIdenticalInBothLanguages() {
+        for s in Self.untranslatableTitles {
+            XCTAssertEqual(s.title(.en), s.title(.vi),
+                           "\(s.rawValue) is exempt but its title differs — drop the exemption")
         }
     }
 

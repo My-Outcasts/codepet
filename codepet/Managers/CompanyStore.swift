@@ -304,7 +304,11 @@ final class CompanyStore: ObservableObject {
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
-         chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { CompanyChatClient.sendStream($0) },
+         // Routed per turn rather than fixed here: `ChatTransportRouter` reads the
+         // founder's grant (`cp_claudeCodeAuthorised`, keyed per company id, which
+         // arrives on the request) and sends the turn to their own Claude Code or to
+         // the Cloud Function. Every test that injects its own streamer is untouched.
+         chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { ChatTransportRouter.sendStream($0) },
          vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
@@ -391,6 +395,16 @@ final class CompanyStore: ObservableObject {
     var isSettingsOpen: Bool { settingsSection != nil }
 
     /// Open settings, optionally on a specific section (chat cards deep-link this way).
+    /// Point `CloudAIBlock`'s mirror at this account's setting.
+    ///
+    /// The mirror exists because `URLProtocol.canInit` is a class function and cannot reach
+    /// the signed-in company, so someone who knows it has to say. Called on load and on
+    /// account switch — miss either and a founder who turned the key off would find it
+    /// quietly back on next launch.
+    func applyCloudAIBlock() {
+        CloudAIBlock.apply(companyId: companyId)
+    }
+
     func openSettings(_ section: SettingsSection = .preferences) {
         settingsSection = section
     }
@@ -427,11 +441,16 @@ final class CompanyStore: ObservableObject {
         // this founder's existing bindings resolve again — including after a sign-out, which
         // must never mint a second id for a folder they already linked.
         //
-        // FIRST, ahead of the diagnostics flush below: both landed here independently and
-        // both belong, but this one decides which account's bindings resolve, and a report
-        // written while the map still points at the previous founder would carry their
-        // project ids. The flush needs only `companyId`, which is already set.
+        // FIRST of the three per-account reads below, and ahead of the diagnostics flush:
+        // each of these three arrived from a different branch and all three belong, but this
+        // one decides which account's bindings resolve, and a report written while the map
+        // still points at the previous founder would carry their project ids.
         identityMap.account = companyId
+        // Before anything can make a request for this account. A founder who turned the key
+        // off must not find it back on because the mirror was still pointing at nobody.
+        applyCloudAIBlock()
+        claudeModel = modelPreference.model(companyId)
+        claudeEffort = modelPreference.effort(companyId)
         // The moment an identity exists, and therefore the first moment a
         // `companies/{uid}/diagnostics` write can be authorised. Everything recorded
         // before now — the previous session's unclean exit, a chat-thread file that
@@ -1157,6 +1176,37 @@ final class CompanyStore: ObservableObject {
     /// itself survive a relaunch would buy nothing and imply otherwise.
     @Published var sessionApprovalTier: ApprovalTier = .standard
 
+    /// The model and effort the NEXT local turn runs with, mirrored so the composer can
+    /// bind to them and written straight through to storage on change.
+    ///
+    /// Published rather than read from `UserDefaults` in the view for the reason the panel's
+    /// switches recorded: a `Binding` whose `get` reads storage never re-renders after its
+    /// own write, so the control snaps back while the value is saved.
+    @Published var claudeModel: ClaudeCodeModel = .inherit {
+        didSet {
+            guard let companyId, oldValue != claudeModel else { return }
+            modelPreference.setModel(companyId, claudeModel)
+        }
+    }
+
+    @Published var claudeEffort: ClaudeCodeEffort = .inherit {
+        didSet {
+            guard let companyId, oldValue != claudeEffort else { return }
+            modelPreference.setEffort(companyId, claudeEffort)
+        }
+    }
+
+    let modelPreference = ClaudeCodeModelPreference()
+
+    /// Whether the NEXT chat turn will run on the founder's own Claude plan.
+    ///
+    /// The composer's model control is shown only when this is true: on the cloud path the
+    /// founder has no say over the model, and offering a picker that changes nothing is
+    /// worse than offering none.
+    var localChatActive: Bool {
+        ChatTransportRouter.transport(companyId: companyId) == .local
+    }
+
     // MARK: - The two doors
 
     /// Which door the working buffer currently belongs to.
@@ -1528,7 +1578,8 @@ final class CompanyStore: ObservableObject {
         // arrive with a second, independent generation — invisible from the transcript, and the
         // difference between "the model stopped" and "we threw its answer away".
         let tail = ChatTailAction.decide(streamThrew: streamThrew, receivedDone: receivedDone,
-                                         streamedText: streamedText, action: doneAction)
+                                         streamedText: streamedText, action: doneAction,
+                                         streamError: streamError)
         Self.chatLog.info("""
             tail=\(String(describing: tail), privacy: .public) threw=\(streamThrew, privacy: .public)             done=\(receivedDone, privacy: .public) chars=\(streamedText.count, privacy: .public)
             """)
@@ -1597,6 +1648,13 @@ final class CompanyStore: ObservableObject {
             // work being started (see `ChatTailAction.LeadIn`).
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 chatMessages[i].text = Self.leadInCopy(kind, language: language)
+            }
+        case .stop(let reason):
+            // No second generation, and no other transport. The founder granted their own
+            // Claude plan; answering from the Cloud Function instead would spend the key
+            // that grant exists to stop — so the turn ends here, saying why.
+            if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
+                chatMessages[i].text = Self.localUnavailableCopy(reason, language: language)
             }
         case .none:
             break
@@ -1942,6 +2000,19 @@ final class CompanyStore: ObservableObject {
     /// says only what the action it belongs to actually delivers: the chip below it opens
     /// a place or offers a switch, and neither is work being produced. "On it — putting
     /// that together now." is reserved for the one case where something IS being made.
+    /// What the founder reads when they granted their own Claude plan and this machine
+    /// cannot honour it.
+    ///
+    /// Names the cause, and says the one thing that stops it reading as a bug in Codepet:
+    /// their grant is why nothing was charged elsewhere. Points at the switch rather than
+    /// at a support page, because the switch is the fix — turning it off restores the
+    /// cloud path immediately.
+    static func localUnavailableCopy(_ reason: String, language: AppLanguage) -> String {
+        language == .vi
+            ? "\(reason)\n\nBạn đã cho Codepet dùng gói Claude của mình, nên mình không tự gọi sang đường trả phí. Mở Cài đặt → Claude Code để kiểm tra, hoặc tắt công tắc đó nếu muốn dùng lại đường cũ."
+            : "\(reason)\n\nYou've set Codepet to use your own Claude plan, so I didn't quietly fall back to the paid path. Open Settings → Claude Code to check it, or turn that switch off to go back to the old route."
+    }
+
     private static func leadInCopy(_ kind: ChatTailAction.LeadIn, language: AppLanguage) -> String {
         let vi = language == .vi
         switch kind {
@@ -2894,6 +2965,9 @@ final class CompanyStore: ObservableObject {
     func reset() {
         hydrationToken &+= 1
         companyId = nil
+        // Signed out: the mirror must stop reflecting the previous account, or their
+        // refusal would silently govern whoever signs in next.
+        applyCloudAIBlock()
         company = .empty
         // Read off the company we just reset to (so it can't drift from what `reset()`
         // assigns), which means the default: memory ON. The NEXT account therefore never

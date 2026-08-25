@@ -9,7 +9,6 @@ import { handleGeneratePlan } from "./generatePlan";
 import { handleDistillReference } from "./distillReference";
 import { handleSynthesizeBrief } from "./synthesizeBrief";
 import { handleRevenueCatWebhook } from "./revenueCatWebhook";
-import { handleExtractKnowledge } from "./extractKnowledge";
 import { handleGenerateDictionary } from "./generateDictionary";
 import { handleVirtualCompanyRun } from "./company/virtualCompany";
 // Consolidated in from the Murror/CodePet-Clean checkout, which until now was a
@@ -17,7 +16,6 @@ import { handleVirtualCompanyRun } from "./company/virtualCompany";
 // devpet-8f4b1). Two sources meant a deploy from either one offered to delete
 // the other's functions, so the Virtual Company backend could never ship. This
 // repo is now the only source.
-import { handleScaffoldRoadmap } from "./scaffoldRoadmap";
 import { handleEnrichBrief } from "./enrichBrief";
 import { handleCompanyChat } from "./companyChat";
 import { handleRunTask } from "./runTask";
@@ -67,14 +65,6 @@ export const chatSession = onRequest(
     secrets: ["ANTHROPIC_API_KEY"]
   },
   handleChatSession
-);
-
-export const scaffoldRoadmap = onRequest(
-  {
-    cors: false,
-    secrets: ["ANTHROPIC_API_KEY"]
-  },
-  handleScaffoldRoadmap
 );
 
 export const enrichBrief = onRequest(
@@ -277,14 +267,6 @@ export const revenueCatWebhook = onRequest(
     cors: false
   },
   handleRevenueCatWebhook
-);
-
-export const extractKnowledge = onRequest(
-  {
-    cors: false,
-    secrets: ["ANTHROPIC_API_KEY"]
-  },
-  handleExtractKnowledge
 );
 
 // Project-aware Dictionary: detected terms from the user's own code → plain,

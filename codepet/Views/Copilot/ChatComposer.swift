@@ -50,6 +50,13 @@ struct ChatComposer: View {
     /// the dock and every existing call site render exactly what they rendered
     /// before — the same additive rule `ChatSurface` follows.
     var tier: Binding<ApprovalTier>? = nil
+    /// Which model and how much thinking the NEXT turn gets, when Codepet is running on the
+    /// founder's own Claude plan. Optional and nil-by-default like `tier`, so every caller
+    /// that does not pass it renders the composer it rendered before — and so the control is
+    /// simply absent when the turn is going to the Cloud Function, where the founder has no
+    /// say over the model anyway.
+    var claudeModel: Binding<ClaudeCodeModel>? = nil
+    var claudeEffort: Binding<ClaudeCodeEffort>? = nil
     /// What the founder pinned or attached for this message, when the surface offers
     /// it. Optional and nil by default — same additive rule as `tier`, so
     /// `DeveloperWorkPane` (whose context is its branch and its folder, not a
@@ -189,6 +196,12 @@ struct ChatComposer: View {
                 // NEXT instruction, and how much rope the next instruction gets is
                 // exactly that.
                 if let tier { tierMenu(tier) }
+                // Beside the tier for the same reason the tier is here: the session bar
+                // carries facts set once, the composer carries controls for the NEXT
+                // instruction — and which model answers it is exactly that.
+                if let claudeModel, let claudeEffort {
+                    modelMenu(claudeModel, claudeEffort)
+                }
                 Spacer(minLength: 8)
                 sendButton
             }
@@ -440,6 +453,73 @@ struct ChatComposer: View {
     /// own conclusion about which one they were given; showing it enabled would be
     /// worse, because selecting "every command prompts" and getting a run that
     /// prompts for nothing is the most dangerous direction this control can be wrong in.
+    /// Model + effort, in one control.
+    ///
+    /// Two levels rather than one flat list: the current generation and Auto sit at the top
+    /// where a founder picks from them daily, and previous generations go behind a submenu
+    /// because pinning one is a deliberate act, not a browse. Effort is its own submenu for
+    /// the same reason — it is a second question, and flattening it into the model list
+    /// would make a nine-item menu into a forty-item one.
+    private func modelMenu(_ model: Binding<ClaudeCodeModel>,
+                           _ effort: Binding<ClaudeCodeEffort>) -> some View {
+        Menu {
+            Button { model.wrappedValue = .inherit } label: {
+                Label(ClaudeCodeModel.inherit.shortName + " — " + ClaudeCodeModel.inherit.note(lang),
+                      systemImage: model.wrappedValue == .inherit ? "checkmark" : "")
+            }
+            Divider()
+            ForEach(ClaudeCodeModel.current) { option in
+                Button { model.wrappedValue = option } label: {
+                    Label(option.shortName,
+                          systemImage: model.wrappedValue == option ? "checkmark" : "")
+                }
+                .help(option.note(lang))
+            }
+            Divider()
+            Menu(lang == .vi ? "Thế hệ trước" : "Older models") {
+                ForEach(ClaudeCodeModel.older) { option in
+                    Button { model.wrappedValue = option } label: {
+                        Label(option.shortName,
+                              systemImage: model.wrappedValue == option ? "checkmark" : "")
+                    }
+                }
+            }
+            Menu(lang == .vi ? "Mức suy nghĩ" : "Effort") {
+                ForEach(ClaudeCodeEffort.choices) { level in
+                    Button { effort.wrappedValue = level } label: {
+                        Label(level.shortName,
+                              systemImage: effort.wrappedValue == level ? "checkmark" : "")
+                    }
+                }
+            }
+        } label: {
+            // ONE flat string, because a `Menu` flattens its label to `(title, image)` —
+            // the trap `plusMenu` and `departmentControl` both document. An HStack here
+            // rendered as the first Text and nothing else: no chevron of mine, no capsule,
+            // and macOS drew its own indicator on the left instead.
+            //
+            // So the label is text, and the capsule and chevron are applied to the MENU
+            // rather than inside it. That keeps one hit target, unlike `departmentControl`,
+            // which needs two because its ✕ does something different.
+            Text(labelText(model.wrappedValue, effort.wrappedValue))
+                .font(CodepetTheme.inter(CodepetType.subheadline))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundColor(CodepetTheme.bodyText)
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(CodepetTokens.well))
+        .overlay(Capsule().stroke(CodepetTokens.cardEdge))
+        .contentShape(Capsule())
+        .help(lang == .vi ? "Model chạy trên gói Claude của bạn" : "The model your Claude plan answers with")
+    }
+
+    /// The composer label. Effort is appended only when it was actually chosen — printing
+    /// "Auto" beside the model would add a word that says nothing on every turn.
+    private func labelText(_ model: ClaudeCodeModel, _ effort: ClaudeCodeEffort) -> String {
+        effort == .inherit ? model.shortName : "\(model.shortName) · \(effort.shortName)"
+    }
+
     private func tierMenu(_ tier: Binding<ApprovalTier>) -> some View {
         Menu {
             ForEach(ApprovalTier.allCases) { option in

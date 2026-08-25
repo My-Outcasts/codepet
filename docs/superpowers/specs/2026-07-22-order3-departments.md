@@ -162,6 +162,8 @@ overlay for legibility (matches web's `dr-img` / `dhero2` + tint gradient).
 - `.roadmap` node-graph map + typed deliverable viewers + richer Overview/chat (order 4).
 - Any per-dept AI commentary / personalize pass (rationale + focus are static catalog copy).
 - The `scaffoldRoadmap` CF (dept-grouped) stays unused — the single dept-tagged list feeds everything.
+  - **Followed through 2026-08-25:** it stayed unused for good, so it was deleted. This line is
+    the evidence the decision was deliberate and not an oversight.
 
 ## Risks / gotchas
 - **`dept` MUST be optional** on `RoadmapTask` (strict Codable) — else existing saved boards blank out.

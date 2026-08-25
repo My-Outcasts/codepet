@@ -446,6 +446,10 @@ struct CopilotChatView: View {
             accent2: CodepetTheme.accentPink,
             isBusy: isChatBusy,
             showsDeptChips: showsDeptChips,
+            // Only when the turn actually runs on the founder's plan. On the cloud path
+            // they have no say over the model, so the control is absent rather than inert.
+            claudeModel: companyStore.localChatActive ? $companyStore.claudeModel : nil,
+            claudeEffort: companyStore.localChatActive ? $companyStore.claudeEffort : nil,
             pins: $pins,
             attachments: $attachments,
             selectedDept: $selectedDept,

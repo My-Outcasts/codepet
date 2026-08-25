@@ -958,3 +958,224 @@ function stripWrappingQuotes(s: string): string {
   }
   return s;
 }
+
+// ─── Request assembly, shared by the HTTP handler and the local sidecar ──────
+//
+// Everything below moved out of companyChat.ts on 2026-08-25. It was always pure —
+// no auth, no Firestore, no Anthropic client — and it had to become reachable from a
+// process with no Firebase at all: the local sidecar that routes a turn through the
+// founder's own Claude Code. Importing companyChat.ts there would drag in verifyAuth
+// and firebase-admin for nothing.
+//
+// The move deleted three constants (MAX_RUNNABLE_TASKS, MAX_ENV_SETUP_ITEMS,
+// SETUP_CATEGORIES) that companyChat.ts had been carrying as byte-identical copies of
+// the ones already here. The parsers now use these.
+
+export interface ChatRequestBody {
+  language?: string;
+  companion_id?: string;
+  // The department this turn belongs to. Deliberately separate from `companion_id`:
+  // that is who speaks, this is what they know. They come apart when a department's pet
+  // IS the founder's own companion — no handoff to announce, but still a question that
+  // needs that department's expertise. Backward-compatible: omitted → no department block.
+  dept_key?: string;
+  context?: string;
+  history?: ChatTurn[];
+  user_message?: string;
+  // Roadmap tasks byte may offer to run via the run_task tool (see companyChatCore).
+  // Backward-compatible: omitted entirely by older clients → treated as [] → no tool
+  // offered → behavior is byte-for-byte identical to before this field existed.
+  runnable?: RunnableTaskRef[];
+  // The founder's OWN open steps, which `complete_task` may offer to tick off. Separate
+  // from `runnable` because they are the opposite set: runnable is what Codepet can do,
+  // this is what only the founder can. Backward-compatible: omitted → [] → no tool.
+  open_tasks?: CompletableTaskRef[];
+  // Currently-OFF toolkit items (skills/connectors/agents) byte may offer to turn on
+  // via the setup_capability tool (see companyChatCore). Backward-compatible: omitted
+  // entirely by older clients → treated as [] → no tool offered.
+  env_setup?: EnvSetupItem[];
+  // The founder's tone preferences, already composed into one prompt sentence by the
+  // client (`AIStyle.promptFragment()`). Backward-compatible: omitted by older clients,
+  // and omitted by current ones whenever the founder hasn't changed a knob → styleBlock
+  // returns "" → the system prompt is byte-for-byte what it was before this field.
+  style_fragment?: string;
+  // Toolkit skills the founder has turned ON. The mirror of env_setup, and the
+  // reason a toggle now means something. Backward-compatible in the same way:
+  // omitted by older clients → treated as none → no skill block, no extra tool.
+  enabled_skills?: unknown;
+  // Files riding THIS message. Every field is client-supplied and this body is applied
+  // with an `as` cast, so nothing here has been validated: `buildMessages` drops what it
+  // cannot use rather than 400ing the turn (see AttachmentDTO in companyChatCore).
+  // Backward-compatible: omitted by every client that predates attachments -> undefined ->
+  // `renderTurn` returns the plain string it always returned. Note the consequence of the
+  // cast: a MISSPELLED key here is silently ignored, so `attachments` and `media_type`
+  // (snake_case) are a wire contract the native client must match exactly.
+  attachments?: AttachmentDTO[];
+}
+
+
+export function parseRunnable(raw: unknown): RunnableTaskRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id.trim() : "";
+      const title = typeof o.title === "string" ? o.title.trim() : "";
+      return id ? { id, title } : null;
+    })
+    .filter((r): r is RunnableTaskRef => r !== null)
+    .slice(0, MAX_RUNNABLE_TASKS);
+}
+
+export function parseOpenTasks(raw: unknown): CompletableTaskRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id.trim() : "";
+      const title = typeof o.title === "string" ? o.title.trim() : "";
+      return id ? { id, title } : null;
+    })
+    .filter((r): r is CompletableTaskRef => r !== null)
+    .slice(0, 60);
+}
+
+export function parseEnvSetup(raw: unknown): EnvSetupItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r): EnvSetupItem | null => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const category = typeof o.category === "string" ? o.category : "";
+      const name = typeof o.name === "string" ? o.name.trim() : "";
+      if (!(SETUP_CATEGORIES as readonly string[]).includes(category) || !name) return null;
+      const item: EnvSetupItem = { category: category as SetupCategory, name };
+      if (typeof o.why === "string") item.why = o.why;
+      return item;
+    })
+    .filter((r): r is EnvSetupItem => r !== null)
+    .slice(0, MAX_SETUP_ITEMS);
+}
+export interface ResolvedActions {
+  runTaskId: string | null;
+  nav: NavAction | null;
+  setup: SetupAction | null;
+  remember: RememberedFact[];
+  completeTaskId: string | null;
+  addTask: NewTaskIntent | null;
+  drafts: MessageDraftIntent[] | null;
+}
+
+export function resolveActions(
+  toolUses: Array<{ name: string; input: unknown }>,
+  runnable: RunnableTaskRef[],
+  envSetup: EnvSetupItem[],
+  openTasks: CompletableTaskRef[]
+): ResolvedActions {
+  const runTaskUse = toolUses.find((t) => t.name === "run_task");
+  const navUse = toolUses.find((t) => t.name === "navigate");
+  const setupUse = toolUses.find((t) => t.name === "setup_capability");
+  const rememberUse = toolUses.find((t) => t.name === "remember_fact");
+  const completeUse = toolUses.find((t) => t.name === "complete_task");
+  const addUse = toolUses.find((t) => t.name === "add_task");
+  const draftUse = toolUses.find((t) => t.name === "draft_message");
+
+  let runTaskId: string | null = null;
+  let nav: NavAction | null = null;
+  let setup: SetupAction | null = null;
+
+  if (runTaskUse) runTaskId = validateRunTaskToolUse(runTaskUse.input, runnable);
+  if (!runTaskId && navUse) nav = validateNavigateToolUse(navUse.input);
+  if (!runTaskId && !nav && setupUse) setup = validateSetupToolUse(setupUse.input, envSetup);
+
+  const remember = rememberUse ? coerceRememberFacts(rememberUse.input) : [];
+
+  // The two roadmap verbs are resolved INDEPENDENTLY of the run/nav/setup trio, like
+  // remember_fact — "I finished that, and now draft the next one" is one honest turn, and
+  // forcing it through the mutual-exclusion chain would silently drop half of it.
+  //
+  // They exclude EACH OTHER, though: completing and creating in one breath is far more
+  // likely a confused turn than a real intent, and the founder cannot review two roadmap
+  // mutations in one confirmation.
+  let completeTaskId: string | null = null;
+  let addTask: NewTaskIntent | null = null;
+  if (completeUse) completeTaskId = validateCompleteTaskToolUse(completeUse.input, openTasks);
+  if (!completeTaskId && addUse) addTask = validateAddTaskToolUse(addUse.input);
+
+  // Independent of everything above: a drafted message is CONTENT, not an action, so it
+  // neither excludes nor is excluded by a verb that mutates something.
+  const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
+
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts };
+}
+
+
+/// Everything the model call needs, assembled. The one place that decides which tools
+/// a turn is offered and in what order the system blocks sit — so the HTTP handler and
+/// the local sidecar cannot drift on the prompt, because there is only one builder.
+///
+/// `extraToolsets` carries connector MCP toolsets, which only the HTTP path can load
+/// (they need Firestore and the founder's uid). The sidecar passes nothing.
+export function buildChatRequest(
+  body: ChatRequestBody,
+  extraToolsets: unknown[] = []
+): {
+  systemBlocks: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
+  messages: ClaudeMessage[];
+  tools: unknown[];
+  runnable: RunnableTaskRef[];
+  openTasks: CompletableTaskRef[];
+  envSetup: EnvSetupItem[];
+  skills: Set<string>;
+} {
+  const userMessage = typeof body.user_message === "string" ? body.user_message.trim() : "";
+  const runnable = parseRunnable(body.runnable);
+  const openTasks = parseOpenTasks(body.open_tasks);
+  const envSetup = parseEnvSetup(body.env_setup);
+  const skills = parseEnabledSkills(body.enabled_skills);
+
+  const staticSystem = buildSystemPrompt({
+    companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
+    language: body.language === "vi" ? "vi" : "en",
+    deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+  });
+
+  const contextBlock =
+    styleBlock(typeof body.style_fragment === "string" ? body.style_fragment : "") +
+    buildContextBlock(typeof body.context === "string" ? body.context : "") +
+    buildRunnableBlock(runnable) +
+    buildOpenTasksBlock(openTasks) +
+    buildSetupBlock(envSetup) +
+    buildSkillsBlock(skills);
+
+  // Two blocks, in this order, in every path: the static companion prompt carries the
+  // cache_control breakpoint; the volatile per-request context is a SEPARATE block
+  // after it so it never enters the cached prefix.
+  const systemBlocks: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [
+    { type: "text", text: staticSystem, cache_control: { type: "ephemeral" } },
+    { type: "text", text: contextBlock },
+  ];
+
+  const messages = buildMessages(
+    Array.isArray(body.history) ? body.history : [],
+    userMessage,
+    Array.isArray(body.attachments) ? body.attachments : undefined,
+  );
+
+  // run_task and setup_capability are only offered when there is something real to
+  // run or turn on. navigate and remember_fact depend on no per-request list, so they
+  // are always offered. NOT forced via tool_choice — byte stays free to reply in plain
+  // text, or ask a clarifying question, instead of calling any of them.
+  const tools: unknown[] = [
+    ...(runnable.length ? [RUN_TASK_TOOL] : []),
+    ...(openTasks.length ? [COMPLETE_TASK_TOOL] : []),
+    ADD_TASK_TOOL,
+    DRAFT_MESSAGE_TOOL,
+    NAVIGATE_TOOL,
+    ...(envSetup.length ? [SETUP_TOOL] : []),
+    REMEMBER_TOOL,
+    ...(skills.has("web-research") ? [WEB_SEARCH_TOOL] : []),
+    ...extraToolsets,
+  ];
+
+  return { systemBlocks, messages, tools, runnable, openTasks, envSetup, skills };
+}

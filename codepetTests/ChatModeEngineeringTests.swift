@@ -125,7 +125,13 @@ final class BuildDestinationTests: XCTestCase {
     private func makeStore() -> CompanyStore {
         let state = CompanyState(brief: CompanyBrief(), departments: [], library: [],
                                  stage: .idea, companionId: "byte", onboardedAt: nil, tasks: [])
-        return CompanyStore(loader: { _ in state }, saver: { _, _ in true })
+        // This class never hydrates, so `account` stays nil and `linkProject`'s bind is a
+        // no-op regardless — but an injected suite (the `CompanyStoreProjectIdentityTests
+        // .makeStore` pattern) keeps that safe rather than lucky if a future test adds a
+        // hydrate call.
+        let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
+        return CompanyStore(loader: { _ in state }, saver: { _, _ in true },
+                            identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"))
     }
 
     func testBuildGoesToTheCloudAgent() {

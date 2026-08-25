@@ -104,15 +104,67 @@ same order.
 
 ### Isolation of every spawned run
 
-Every `claude` invocation Codepet makes passes `--safe-mode` and
-`--strict-mcp-config`. Without them the founder's own `CLAUDE.md`, hooks,
-plugins, skills, and MCP servers load into Codepet's run, and one of their hooks
-can break the structured output Codepet is parsing. `--safe-mode` disables
-customisation while leaving authentication intact.
+**Corrected 2026-08-25 by measurement.** An earlier version of this section said
+to pass `--safe-mode`. That is wrong for any run that needs tools:
+**`--safe-mode` disables MCP servers**, along with every other customisation, so
+a run isolated that way cannot reach the tools Codepet serves it. Measured — with
+`--safe-mode` the init frame reports `mcp_servers: []`.
+
+The recipe that actually isolates without disarming:
+
+| Flag | Keeps out |
+|---|---|
+| `--mcp-config <absolute path>` | — declares Codepet's own tool server |
+| `--strict-mcp-config` | the founder's MCP servers |
+| `--setting-sources ""` | their settings, and therefore their **hooks** |
+| a neutral working directory | `CLAUDE.md` discovery, which walks up from cwd |
+
+Measured on 2.1.241: that combination yields exactly the tools Codepet declares
+(the founder's `mcp-image` and `tripo` servers were excluded) and **zero hook
+events**. Without `--setting-sources ""` their `SessionStart` hook fired and
+injected its own content into Codepet's turn — the leak this section exists to
+prevent, observed rather than theorised.
+
+Two traps found the same way:
+
+- **`--strict-mcp-config` alone excludes everything.** With no `--mcp-config`
+  alongside it, the run gets no MCP servers at all, including Codepet's.
+- **`--allowedTools` is variadic, so it swallows a positional prompt.** The
+  prompt must arrive on stdin — which `ClaudeCodeRunner` already does, and is now
+  a requirement rather than a preference.
 
 **`--bare` must never be used.** It forces `ANTHROPIC_API_KEY` or `apiKeyHelper`
 and never reads OAuth or the keychain — the exact opposite of what this design
 needs.
+
+### Tools: MCP, not `--json-schema`
+
+`--json-schema` forces exactly one structured output, so it cannot express what
+`companyChat` needs: eight optional tools, deliberately **not** forced —
+`companyChat.ts:378` records that "byte stays free to reply in plain text, or ask
+a clarifying question, instead of calling any of them."
+
+Codepet therefore serves those tools over a **hand-rolled MCP stdio server**:
+JSON-RPC over newline-delimited stdio answering `initialize`, `tools/list`, and
+`tools/call`. Hand-rolled rather than `@modelcontextprotocol/sdk` because the
+sidecar lives in `functions/`, which is the deploy source — a dependency added
+there ships to Cloud Functions for no reason. The server is ~80 lines and the
+tool definitions already exist as JSON in `companyChatCore.ts`.
+
+These tools are not actions. They are signals back to the app (navigate here,
+remember this, run that task), so the server records the call and returns an
+acknowledgement; the app reads what was called out of the `stream-json`.
+
+Measured end to end: the model called `mcp__codepet__navigate` with
+`{"destination":"roadmap"}`, the server logged it, and the `tool_use` block
+appeared in `stream-json` where the translator can read it.
+
+One cost to expect: Claude Code defers tool loading, so a `ToolSearch` call fires
+before the real one. That is an extra turn per tool-using reply.
+
+`WEB_SEARCH_TOOL` does **not** port. It is an Anthropic server tool; Claude Code
+has its own `WebSearch` with a different name and shape. It has to be remapped or
+dropped on the local path, and that is an open question rather than a decision.
 
 ### Credentials
 

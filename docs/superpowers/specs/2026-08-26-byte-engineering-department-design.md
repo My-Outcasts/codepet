@@ -2,9 +2,10 @@
 
 **Date:** 2026-08-26
 **Status:** approved, not implemented
-**Amended:** 2026-08-26 — §5 originally listed three blast-radius sites. Reading `DepartmentMenu`
-while writing the plan found a fourth, and it is the only *user-facing string* in the set:
-`anyoneLabel` renders "Anyone — byte routes it". Marked **[A1]** below.
+**Amended:** 2026-08-26 — §5 originally listed three blast-radius sites. Writing the plan
+changed the set in both directions: `DepartmentMenu.anyoneLabel` is a fourth and the only
+*user-facing string* among them (**[A1]**), and `SecondBrainData.companionName` was listed
+wrongly and is withdrawn (**[A2]**).
 **Surface:** `codepet/Models/DepartmentCompanions.swift`, `codepet/Models/Character.swift`,
 `codepet/Managers/CompanyStore.swift`, `codepet/Views/Copilot/DepartmentRoster.swift`,
 `codepet/Views/Copilot/ChatComposer.swift`, `codepet/Views/Copilot/ChatEmptyState.swift`,
@@ -143,7 +144,22 @@ the same change. Each becomes `CodepetBrand.name` unconditionally:
   it just wasn't reading the host.
 - `CopilotChatView.swift:2029` — `whatItDid`, which falls back to `company.companionId` when a
   run carries no specialist. A hostless run is the product's own work, so it reads "Codepet".
-- `SecondBrainData.swift:55` — `companionName`.
+**[A2] `SecondBrainData.swift:55` — withdrawn. It was never a host surface.**
+`SecondBrainPanel.swift:45` renders it under the label **"Companion"** / *"Bạn đồng hành"*. That
+is `company.companionId` doing its own job — the founder's chosen companion, the same axis as the
+menu-bar pet and the tips persona — not the product's voice. It stays as it is.
+
+The rename does change what that row says for a default founder, from "Codepet" to "Byte", and
+that is the correction, not the damage: the row is supposed to name their companion, and their
+companion is the Byte character. It also makes `SecondBrainDataTests.testCompanionNameResolves`
+better than it was — its comment currently excludes byte as a test case *because* its name "literally
+IS 'Codepet'", indistinguishable from the `?? "Codepet"` fallback. After the rename it is
+distinguishable. Only that comment needs updating; both assertions still hold.
+
+The general rule this mistake illustrates, worth stating since the same call shape appears at
+five sites: `PetCharacter.all[company.companionId]?.name` is **correct** wherever the surface
+means "the founder's companion" and **wrong** wherever it means "who is speaking to the founder
+right now". Read the label above the value before deciding which one a site is.
 
 **[A1] `DepartmentMenu.swift:50` — `anyoneLabel`, and this one is worse than the other three.**
 It is not a name resolved from data; it is a hardcoded user-facing string naming the host in

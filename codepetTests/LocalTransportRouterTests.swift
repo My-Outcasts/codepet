@@ -7,7 +7,7 @@ import XCTest
 /// The streaming twin is `ChatTransportRouterTests`; the two routers are deliberately
 /// separate because availability is a different question (a different bundle on disk), and
 /// deliberately identical in what they decide from the grant.
-final class OneShotTransportRouterTests: XCTestCase {
+final class LocalTransportRouterTests: XCTestCase {
 
     private var granted: Set<String> = []
 
@@ -25,19 +25,19 @@ final class OneShotTransportRouterTests: XCTestCase {
     override func setUp() {
         super.setUp()
         granted = []
-        OneShotTransportRouter.apply(companyId: nil)
+        LocalTransportRouter.apply(companyId: nil)
     }
 
     override func tearDown() {
-        OneShotTransportRouter.apply(companyId: nil)
+        LocalTransportRouter.apply(companyId: nil)
         super.tearDown()
     }
 
     private func transport(
         companyId: String?,
         sidecar: Bool = true
-    ) -> OneShotTransportRouter.Transport {
-        OneShotTransportRouter.transport(
+    ) -> LocalTransportRouter.Transport {
+        LocalTransportRouter.transport(
             companyId: companyId, authorisation: authorisation, sidecarAvailable: { sidecar })
     }
 
@@ -95,10 +95,10 @@ final class OneShotTransportRouterTests: XCTestCase {
     /// that already had to do this for `CloudAIBlock`.
     func testTheMirrorIsWhatAnUnparameterisedCallReads() {
         granted.insert("c1")
-        OneShotTransportRouter.apply(companyId: "c1")
-        XCTAssertEqual(OneShotTransportRouter.activeCompanyId, "c1")
+        LocalTransportRouter.apply(companyId: "c1")
+        XCTAssertEqual(LocalTransportRouter.activeCompanyId, "c1")
         XCTAssertEqual(
-            OneShotTransportRouter.transport(
+            LocalTransportRouter.transport(
                 authorisation: authorisation, sidecarAvailable: { true }),
             .local)
     }
@@ -106,15 +106,15 @@ final class OneShotTransportRouterTests: XCTestCase {
     /// Sign-out passes nil. Leaving the previous founder's id in place would route the next
     /// account's calls onto the plan the previous one signed in with.
     func testSigningOutClearsTheMirror() {
-        OneShotTransportRouter.apply(companyId: "c1")
-        OneShotTransportRouter.apply(companyId: nil)
-        XCTAssertNil(OneShotTransportRouter.activeCompanyId)
+        LocalTransportRouter.apply(companyId: "c1")
+        LocalTransportRouter.apply(companyId: nil)
+        XCTAssertNil(LocalTransportRouter.activeCompanyId)
     }
 
     /// An empty string is not a company. Treating it as one would key a grant to "" and let
     /// it apply to whoever came next.
     func testAnEmptyCompanyIdIsNotAnActiveCompany() {
-        OneShotTransportRouter.apply(companyId: "")
-        XCTAssertNil(OneShotTransportRouter.activeCompanyId)
+        LocalTransportRouter.apply(companyId: "")
+        XCTAssertNil(LocalTransportRouter.activeCompanyId)
     }
 }

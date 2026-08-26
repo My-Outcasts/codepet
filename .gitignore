@@ -94,3 +94,4 @@ codepet-mcp-server/test-project/
 # Committing it would put a second, staleable copy of companyChatCore in the repo.
 codepet/Resources/chatSidecar.js
 codepet/Resources/oneShotSidecar.js
+codepet/Resources/vcSidecar.js

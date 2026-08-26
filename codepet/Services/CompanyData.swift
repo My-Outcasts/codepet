@@ -311,7 +311,7 @@ enum CompanyData {
         // than swallowed, because a granted founder staring at an empty board otherwise has
         // nothing to act on. It never falls through to the Cloud Function: that would spend
         // the API key the grant exists to stop spending.
-        switch OneShotTransportRouter.transport() {
+        switch LocalTransportRouter.forOneShot() {
         case .local, .localUnavailable:
             do {
                 let body = try JSONEncoder().encode(
@@ -319,7 +319,7 @@ enum CompanyData {
                 let out = try await LocalOneShotRunner.run(op: "generateRoadmap", body: body)
                 return try JSONDecoder().decode(RoadmapResponse.self, from: out).tasks
             } catch {
-                OneShotTransportRouter.log.error(
+                LocalTransportRouter.log.error(
                     "local roadmap failed: \(error.localizedDescription, privacy: .public)")
                 return []
             }

@@ -712,14 +712,14 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     /// Returns nil for an ungranted founder, which means "carry on to the HTTP path" — so a
     /// call site is two lines and cannot accidentally skip the cloud path it already had.
     /// A granted founder whose Mac cannot run it gets a thrown error, never a quiet cloud
-    /// call: that would spend the API key they said not to spend. `OneShotTransportRouter`
+    /// call: that would spend the API key they said not to spend. `LocalTransportRouter`
     /// records why in full.
     private func localOneShot<Request: Encodable, Response: Decodable>(
         op: String,
         request: Request,
         as: Response.Type
     ) async throws -> Response? {
-        switch OneShotTransportRouter.transport() {
+        switch LocalTransportRouter.forOneShot() {
         case .cloud:
             return nil
         case .localUnavailable:

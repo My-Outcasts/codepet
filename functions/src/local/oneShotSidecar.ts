@@ -19,10 +19,7 @@
  * only, which is why the parsing and planning live next door where tests can reach them.
  */
 
-import { spawn } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { ClaudeCliError, runClaudeJson } from "./claudeCli";
 import {
   ONE_SHOT_OPS,
   OneShotBadRequest,
@@ -32,40 +29,9 @@ import {
   schemaInstruction,
 } from "./oneShotOps";
 
-/**
- * The flags one op runs under. Each is load-bearing, and each is the same decision
- * `chatSidecar.claudeArgs` records — read that first if changing one:
- *
- * - `--system-prompt` REPLACES Claude Code's own. These prompts are complete on their own,
- *   and a coding assistant's persona fights them for voice and format.
- * - `--setting-sources ""` keeps the founder's settings out, and therefore their HOOKS. A
- *   `SessionStart` hook injecting its own content into a JSON-only turn is how you get
- *   prose wrapped around the object.
- * - `--strict-mcp-config` with NO `--mcp-config`: strict alone excludes every server, which
- *   here is exactly what is wanted. Chat has to pass both because it ships a server.
- * - `--tools ""` grants nothing. A SAFETY property, not tidiness: reading a founder's brief
- *   has no business holding Bash, Edit or Write.
- * - `--output-format json` gives one envelope with the final text in `result`, so there is
- *   no stream to reassemble. The streaming form buys nothing when the caller waits for the
- *   whole object anyway.
- * - Prompt on stdin, never as an argument, so no flag above can swallow it.
- */
-export function claudeArgs(opts: {
-  systemPrompt: string;
-  model?: string;
-  effort?: string;
-}): string[] {
-  return [
-    "-p",
-    "--system-prompt", opts.systemPrompt,
-    "--strict-mcp-config",
-    "--setting-sources", "",
-    "--output-format", "json",
-    "--tools", "",
-    ...(opts.model ? ["--model", opts.model] : []),
-    ...(opts.effort ? ["--effort", opts.effort] : []),
-  ];
-}
+// Re-exported: this is the module whose contract the sidecar tests describe, and the flags
+// are part of that contract even though the implementation is now shared with `vcSidecar`.
+export { claudeArgs } from "./claudeCli";
 
 /** The prompt as the model receives it: the shared builder's text, then the shape asked for. */
 export function renderPrompt(prompt: string, schema: unknown): string {
@@ -74,11 +40,6 @@ export function renderPrompt(prompt: string, schema: unknown): string {
 
 function emit(payload: unknown): void {
   process.stdout.write(JSON.stringify(payload));
-}
-
-/** Shell-quote one argument for the login shell the child runs under. */
-function quote(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
 /* istanbul ignore next -- process wiring; the pure parts carry the tests */
@@ -126,79 +87,37 @@ async function main(): Promise<void> {
     return;
   }
 
-  // A run directory the founder's CLAUDE.md cannot be discovered from: discovery walks UP
-  // from cwd, so a temp dir keeps their repo instructions out of Codepet's turn.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codepet-oneshot-"));
-  const cleanup = () => {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-  };
+  let envelope: any;
+  try {
+    envelope = await runClaudeJson({
+      systemPrompt: plan.system ?? "",
+      prompt: renderPrompt(plan.prompt ?? "", plan.schema),
+      model: process.env.CODEPET_CHAT_MODEL,
+      effort: process.env.CODEPET_CHAT_EFFORT,
+    });
+  } catch (err) {
+    emit({
+      error: err instanceof ClaudeCliError ? "upstream_failure" : "sidecar_failure",
+      detail: String((err as Error).message),
+    });
+    process.exitCode = 1;
+    return;
+  }
 
-  const args = claudeArgs({
-    systemPrompt: plan.system ?? "",
-    model: process.env.CODEPET_CHAT_MODEL,
-    effort: process.env.CODEPET_CHAT_EFFORT,
-  });
-
-  // A login shell so the founder's PATH resolves `claude`, and the two credential variables
-  // stripped: precedence puts them ABOVE the subscription, and under -p a present key is
-  // always used — so an exported key would bill their API account for work this whole
-  // design exists to put on the plan they already pay for.
-  const env = { ...process.env };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-
-  const child = spawn("/bin/zsh", ["-lc", `claude ${args.map(quote).join(" ")}`], { cwd: dir, env });
-  child.stdin.write(renderPrompt(plan.prompt ?? "", plan.schema));
-  child.stdin.end();
-
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (c: string) => (stdout += c));
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (c: string) => (stderr += c));
-
-  child.on("close", (code) => {
-    cleanup();
-
-    let envelope: any;
-    try {
-      envelope = JSON.parse(stdout);
-    } catch {
-      // No envelope at all: the CLI never got as far as answering. Its stderr is the real
-      // reason (a missing login, a bad flag), so that is what travels, not a guess.
-      emit({
-        error: "upstream_failure",
-        detail: stderr.trim() || `claude exited ${code} with no output`,
-      });
-      process.exitCode = 1;
-      return;
-    }
-
-    if (envelope?.is_error || typeof envelope?.result !== "string") {
-      emit({
-        error: "upstream_failure",
-        detail: String(envelope?.result ?? envelope?.error ?? stderr.trim() ?? `claude exited ${code}`),
-      });
-      process.exitCode = 1;
-      return;
-    }
-
-    try {
-      const parsed = extractJson(envelope.result);
-      emit(op.respond(body, parsed, {
-        model: pickModel(envelope),
-        nowISO: new Date().toISOString(),
-      }));
-    } catch (err) {
-      const unusable = err instanceof OneShotUnusableAnswer;
-      emit({
-        error: unusable ? "unusable_answer" : "op_failure",
-        detail: String((err as Error).message),
-      });
-      process.exitCode = 1;
-    }
-  });
+  try {
+    const parsed = extractJson(envelope.result);
+    emit(op.respond(body, parsed, {
+      model: pickModel(envelope),
+      nowISO: new Date().toISOString(),
+    }));
+  } catch (err) {
+    const unusable = err instanceof OneShotUnusableAnswer;
+    emit({
+      error: unusable ? "unusable_answer" : "op_failure",
+      detail: String((err as Error).message),
+    });
+    process.exitCode = 1;
+  }
 }
 
 if (require.main === module) {

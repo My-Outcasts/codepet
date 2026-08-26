@@ -1,5 +1,3 @@
-import * as admin from "firebase-admin";
-import * as logger from "firebase-functions/logger";
 import { Blackboard } from "./types";
 
 /**
@@ -8,9 +6,6 @@ import { Blackboard } from "./types";
  */
 export const MAX_RUN_TOKENS = 200_000;
 export const MAX_RUN_COST_USD = 1.5;
-
-/** Config doc read at request time so the feature can be disabled without a deploy. */
-export const KILL_SWITCH_DOC = "config/virtual_company";
 
 /**
  * Billable generation and fresh input. Cache reads are excluded deliberately:
@@ -45,25 +40,4 @@ export function budgetState(bb: Blackboard): {
     };
   }
   return { withinBudget: true, reason: null };
-}
-
-/**
- * Reads the kill switch. Defaults to enabled when the doc or field is missing —
- * a config document that was never created must not take the feature down. A
- * read error also defaults to enabled and is logged, so a Firestore blip does
- * not look like an intentional shutdown.
- */
-export async function isFeatureEnabled(): Promise<boolean> {
-  try {
-    const [collection, doc] = KILL_SWITCH_DOC.split("/");
-    const snap = await admin.firestore().collection(collection).doc(doc).get();
-    if (!snap.exists) return true;
-    const enabled = (snap.data() as Record<string, unknown>).enabled;
-    return enabled !== false;
-  } catch (err) {
-    logger.warn("virtual company kill switch unreadable; defaulting to enabled", {
-      err: String(err)
-    });
-    return true;
-  }
 }

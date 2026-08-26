@@ -374,9 +374,9 @@ final class CompanyStore: ObservableObject {
         #if DEBUG
         self.vcRunner = vcRunner ?? (MockChat.enabled
                                      ? { MockVirtualCompany.run($0) }
-                                     : { VirtualCompanyClient.run($0) })
+                                     : { LocalTransportRouter.runVirtualCompany($0) })
         #else
-        self.vcRunner = vcRunner ?? { VirtualCompanyClient.run($0) }
+        self.vcRunner = vcRunner ?? { LocalTransportRouter.runVirtualCompany($0) }
         #endif
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
@@ -409,11 +409,11 @@ final class CompanyStore: ObservableObject {
     /// quietly back on next launch.
     func applyCloudAIBlock() {
         CloudAIBlock.apply(companyId: companyId)
-        // Same call site, same reason: `OneShotTransportRouter` cannot reach the signed-in
+        // Same call site, same reason: `LocalTransportRouter` cannot reach the signed-in
         // company either — its callers are onboarding models and API clients that take no
         // company id — so whoever knows it has to say. Miss this and a founder's grant
         // silently stops routing the non-streaming ops onto their own plan.
-        OneShotTransportRouter.apply(companyId: companyId)
+        LocalTransportRouter.apply(companyId: companyId)
     }
 
     func openSettings(_ section: SettingsSection = .preferences) {
@@ -1171,7 +1171,7 @@ final class CompanyStore: ObservableObject {
         codingRunBag = nil
         vcRunner = injectedVCRunner ?? (on
                                         ? { MockVirtualCompany.run($0) }
-                                        : { VirtualCompanyClient.run($0) })
+                                        : { LocalTransportRouter.runVirtualCompany($0) })
 
         chatMessages = []
         threads = []
@@ -1235,7 +1235,7 @@ final class CompanyStore: ObservableObject {
     /// refusing `engStartRun` outright. So the default moves, and nothing else does — the run
     /// still says where it is running, and the other machine is still one tap away.
     ///
-    /// **Reads the grant directly, not `OneShotTransportRouter`.** That router also requires
+    /// **Reads the grant directly, not `LocalTransportRouter`.** That router also requires
     /// the bundled one-shot sidecar, which a coding run does not use at all: it drives the
     /// `claude` binary through `ClaudeCodeRunner`. Gating on a resource this path never
     /// touches would send a granted founder to the cloud for the wrong reason.

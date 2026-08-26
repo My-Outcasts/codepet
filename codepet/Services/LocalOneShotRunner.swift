@@ -97,7 +97,7 @@ enum LocalOneShotRunner {
     static func run(
         op: String,
         body: Data,
-        companyId: String? = OneShotTransportRouter.activeCompanyId,
+        companyId: String? = LocalTransportRouter.activeCompanyId,
         modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
     ) async throws -> Data {
         guard let sidecar = resolveSidecarPath() else {

@@ -1,8 +1,9 @@
 import Foundation
 import os
 
-/// Decides whether a NON-STREAMING model call runs on the founder's own Claude Code or on
-/// the Cloud Function.
+/// Decides whether a model call that is NOT chat runs on the founder's own Claude Code or
+/// on the Cloud Function — the one-shot ops (`enrichBrief`, `synthesizeBrief`,
+/// `generateRoadmap`, `runTask`) and the virtual company meeting.
 ///
 /// **The same switch chat follows, deliberately.** `ClaudeCodeAuthorisation` means "Codepet
 /// may spend my Claude plan". A founder who granted that did not grant it for chat; they
@@ -21,9 +22,9 @@ import os
 /// know nothing about companies, and widening every signature would reach mocks and tests
 /// that have no stake in transports. So whoever knows the company says once — the same
 /// shape, and the same call site, as `CloudAIBlock.apply(companyId:)`.
-enum OneShotTransportRouter {
+enum LocalTransportRouter {
 
-    static let log = Logger(subsystem: "app.murror.codepet", category: "OneShotTransport")
+    static let log = Logger(subsystem: "app.murror.codepet", category: "LocalTransport")
 
     enum Transport: Equatable {
         case cloud
@@ -46,7 +47,55 @@ enum OneShotTransportRouter {
         activeCompanyId = (companyId?.isEmpty == false) ? companyId : nil
     }
 
-    /// Which transport an op should use.
+    /// The one-shot ops, which need the `oneShotSidecar` bundle.
+    static func forOneShot(
+        companyId: String? = activeCompanyId,
+        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation()
+    ) -> Transport {
+        transport(companyId: companyId, authorisation: authorisation,
+                  sidecarAvailable: { LocalOneShotRunner.isAvailable() })
+    }
+
+    /// The virtual company meeting, which needs the `vcSidecar` bundle.
+    ///
+    /// A SEPARATE availability question, not a tidier one: the two bundles are built by the
+    /// same script but fail independently, and a founder whose meeting bundle is missing
+    /// should still get their roadmap rather than being told everything local is unavailable.
+    static func forVirtualCompany(
+        companyId: String? = activeCompanyId,
+        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation()
+    ) -> Transport {
+        transport(companyId: companyId, authorisation: authorisation,
+                  sidecarAvailable: { LocalVirtualCompanyStreamer.isAvailable() })
+    }
+
+    /// Drop-in for `VirtualCompanyClient.run`: same signature, routes per run.
+    ///
+    /// Shaped like `ChatTransportRouter.sendStream` so the store's three `vcRunner`
+    /// assignments each change by one word, and none of them has to know which machine won.
+    ///
+    /// `.localUnavailable` FAILS the run rather than reaching for the Cloud Function. A
+    /// meeting is the most expensive thing Codepet buys — the measured ~$0.20 against
+    /// ~$0.005 for an ordinary turn — so a silent fallback here is the most expensive
+    /// possible version of the mistake the grant exists to prevent.
+    static func runVirtualCompany(
+        _ req: VirtualCompanyRequest
+    ) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
+        // `VirtualCompanyRequest` carries no company id — it never needed one, since the CF
+        // reads the uid off the token. So the grant is read from the mirror, the same way the
+        // one-shot ops read it.
+        switch forVirtualCompany() {
+        case .cloud:
+            return VirtualCompanyClient.run(req)
+        case .local:
+            return LocalVirtualCompanyStreamer.run(req)
+        case .localUnavailable(let reason):
+            log.error("meeting refused: \(reason, privacy: .public)")
+            return AsyncThrowingStream { $0.finish(throwing: VirtualCompanyRunError.malformedResponse) }
+        }
+    }
+
+    /// Which transport a call should use, given what its own transport needs on disk.
     ///
     /// Deliberately does NOT probe for `claude` — that costs a subprocess per call and
     /// `ClaudeCodeEnvironment` already answers it in Settings, where the founder is looking
@@ -55,7 +104,7 @@ enum OneShotTransportRouter {
     static func transport(
         companyId: String? = activeCompanyId,
         authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
-        sidecarAvailable: () -> Bool = { LocalOneShotRunner.isAvailable() }
+        sidecarAvailable: () -> Bool
     ) -> Transport {
         // No company id means no grant can exist — an ungranted call is a cloud call, not a
         // failure. Onboarding's first enrich lands here if the mirror was never set.

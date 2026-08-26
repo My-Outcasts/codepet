@@ -1,8 +1,5 @@
-import * as admin from "firebase-admin";
 import { MODEL_PRICING } from "../anthropic";
 import { AgentId, AgentPosition, Blackboard, FounderContext, TokenUsage } from "./types";
-
-export const COMPANY_RUNS_COLLECTION = "company_runs";
 
 export function newBlackboard(args: {
   runId: string;
@@ -85,21 +82,4 @@ export function recordUsage(
       cost_estimate_usd: bb.telemetry.cost_estimate_usd + costOf(model, usage)
     }
   };
-}
-
-export async function saveBlackboard(bb: Blackboard): Promise<void> {
-  await admin
-    .firestore()
-    .collection(COMPANY_RUNS_COLLECTION)
-    .doc(bb.run_id)
-    .set(bb, { merge: true });
-}
-
-export async function loadBlackboard(runId: string): Promise<Blackboard | null> {
-  const snap = await admin
-    .firestore()
-    .collection(COMPANY_RUNS_COLLECTION)
-    .doc(runId)
-    .get();
-  return snap.exists ? (snap.data() as Blackboard) : null;
 }

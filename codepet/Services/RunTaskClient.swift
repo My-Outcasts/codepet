@@ -65,14 +65,14 @@ enum RunTaskClient {
         // is LOGGED — a run that silently produced nothing is the hardest failure here to
         // diagnose. It never falls through to the Cloud Function: that would spend the API
         // key the grant exists to stop spending.
-        switch OneShotTransportRouter.transport() {
+        switch LocalTransportRouter.forOneShot() {
         case .local, .localUnavailable:
             do {
                 let body = try JSONEncoder().encode(req)
                 let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
                 return try JSONDecoder().decode(RunTaskResponse.self, from: out)
             } catch {
-                OneShotTransportRouter.log.error(
+                LocalTransportRouter.log.error(
                     "local runTask failed: \(error.localizedDescription, privacy: .public)")
                 return nil
             }

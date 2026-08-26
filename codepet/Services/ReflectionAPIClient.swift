@@ -704,6 +704,37 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         }
     }
 
+    // MARK: - The founder's own Claude Code, for the non-streaming ops
+
+    /// Run `op` on the founder's Claude Code when they granted it, decoding the SAME
+    /// response DTO the Cloud Function's 200 carries.
+    ///
+    /// Returns nil for an ungranted founder, which means "carry on to the HTTP path" — so a
+    /// call site is two lines and cannot accidentally skip the cloud path it already had.
+    /// A granted founder whose Mac cannot run it gets a thrown error, never a quiet cloud
+    /// call: that would spend the API key they said not to spend. `OneShotTransportRouter`
+    /// records why in full.
+    private func localOneShot<Request: Encodable, Response: Decodable>(
+        op: String,
+        request: Request,
+        as: Response.Type
+    ) async throws -> Response? {
+        switch OneShotTransportRouter.transport() {
+        case .cloud:
+            return nil
+        case .localUnavailable:
+            throw LocalOneShotRunner.Failure.unavailable
+        case .local:
+            let out = try await LocalOneShotRunner.run(
+                op: op, body: try JSONEncoder().encode(request))
+            do {
+                return try JSONDecoder().decode(Response.self, from: out)
+            } catch {
+                throw ReflectionAPIError.malformedResponse
+            }
+        }
+    }
+
     func summarizeTurn(_ request: SummarizeTurnRequest) async throws -> SummarizeTurnResponse {
         let token = try await authTokenProvider()
 
@@ -1131,6 +1162,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Synthesize Brief (non-streaming)
 
     func synthesizeBrief(_ request: SynthesizeBriefRequest) async throws -> SynthesizeBriefResponse {
+        if let local = try await localOneShot(
+            op: "synthesizeBrief", request: request, as: SynthesizeBriefResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.synthesizeBriefEndpoint)
@@ -1187,12 +1222,17 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Enrich Brief (non-streaming)
 
     func enrichBrief(_ brief: CompanyBrief) async throws -> CompanyBrief {
+        let payload = EnrichBriefRequest(brief: brief)
+        if let local = try await localOneShot(
+            op: "enrichBrief", request: payload, as: EnrichBriefResponse.self) {
+            return local.brief
+        }
         let token = try await authTokenProvider()
         var urlRequest = URLRequest(url: Self.enrichBriefEndpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try JSONEncoder().encode(EnrichBriefRequest(brief: brief))
+        urlRequest.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await session.data(for: urlRequest)
         guard let http = response as? HTTPURLResponse else { throw ReflectionAPIError.malformedResponse }

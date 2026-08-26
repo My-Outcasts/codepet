@@ -1,6 +1,11 @@
 #!/bin/bash
 #
-# Bundle the local chat sidecar into the app's resources.
+# Bundle the local sidecars into the app's resources.
+#
+# TWO bundles, not one: `chatSidecar` streams a tool-calling conversation, `oneShotSidecar`
+# runs the non-streaming functions (enrichBrief, synthesizeBrief, ...) that answer with one
+# JSON body. They share the prompt builders they import, not a process — chat's MCP server
+# and its stream reassembly are dead weight in a turn that asks for one object.
 #
 # WHY A BUNDLER AND NOT JUST `tsc`. Xcode's synchronized resource group FLATTENS what it
 # copies — measured: `codepet/Resources/Fonts/*.ttf` land directly in
@@ -29,17 +34,24 @@ ROOT="$PWD"
 # warning. An extension Xcode has no opinion about is copied as a resource instead. `node`
 # does not care what the file is called.
 OUT="$ROOT/codepet/Resources/chatSidecar.js"
+OUT_ONESHOT="$ROOT/codepet/Resources/oneShotSidecar.js"
 
 echo "▸ typechecking functions/"
 (cd functions && npx tsc --noEmit)
 
-echo "▸ bundling the sidecar into one self-contained file"
+echo "▸ bundling the sidecars into self-contained files"
 (cd functions && npx esbuild src/local/chatSidecar.ts \
   --bundle \
   --platform=node \
   --target=node20 \
   --format=cjs \
   --outfile="$OUT")
+(cd functions && npx esbuild src/local/oneShotSidecar.ts \
+  --bundle \
+  --platform=node \
+  --target=node20 \
+  --format=cjs \
+  --outfile="$OUT_ONESHOT")
 
 # Node 20 is what this machine has while functions/package.json declares 22 for the Cloud
 # Functions runtime. The sidecar runs on the FOUNDER's node, not Google's, so it targets
@@ -53,5 +65,15 @@ printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' \
   | grep -q '"navigate"' \
   && echo "  ✓ server mode answers tools/list"
 
+# The one-shot smoke check costs NO tokens on purpose: an unknown op is refused before any
+# `claude` is spawned, so this proves the bundle loads and its registry answers without
+# spending a turn of whoever is building.
+printf '%s\n' '{"op":"nope","body":{}}' \
+  | node "$OUT_ONESHOT" \
+  | grep -q '"unknown_op"' \
+  && echo "  ✓ one-shot mode refuses an op it does not have"
+
 echo "▸ done: $OUT"
 echo "  $(wc -c < "$OUT" | tr -d ' ') bytes"
+echo "▸ done: $OUT_ONESHOT"
+echo "  $(wc -c < "$OUT_ONESHOT" | tr -d ' ') bytes"

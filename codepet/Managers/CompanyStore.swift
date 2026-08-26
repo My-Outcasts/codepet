@@ -403,6 +403,11 @@ final class CompanyStore: ObservableObject {
     /// quietly back on next launch.
     func applyCloudAIBlock() {
         CloudAIBlock.apply(companyId: companyId)
+        // Same call site, same reason: `OneShotTransportRouter` cannot reach the signed-in
+        // company either — its callers are onboarding models and API clients that take no
+        // company id — so whoever knows it has to say. Miss this and a founder's grant
+        // silently stops routing the non-streaming ops onto their own plan.
+        OneShotTransportRouter.apply(companyId: companyId)
     }
 
     func openSettings(_ section: SettingsSection = .preferences) {

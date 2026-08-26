@@ -35,8 +35,11 @@ enum DepartmentTopics {
             "bug", "stacktrace", "deploy", "server", "repo", "codebase",
             "migration", "latency", "caching", "authentication", "test suite", "pull request",
             // Symptom language. A founder reports a fault before they name a subsystem.
-            // NOT bare "crash" — it is also the Engineering pet's NAME, so "crash is my
-            // favourite pet" routed to Engineering. Verb forms keep every fault report.
+            // NOT bare "crash" — it is a pet's NAME (Finance's, since 26 Aug; Engineering's
+            // when this was written), so "crash is my favourite pet" routed to Engineering.
+            // Verb forms keep every fault report. The rule is that no pet's bare name may be
+            // a term, whichever department it speaks for: checked 26 Aug when byte took
+            // Engineering — "byte" is not a term in any lexicon, so no new collision.
             "crashes", "crashed", "crashing",
             "error", "exception", "timeout", "postgres", "sqlite",
             "load time", "throwing a 500", "stack trace",

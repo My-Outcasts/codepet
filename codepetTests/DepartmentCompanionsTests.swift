@@ -18,8 +18,26 @@ final class DepartmentCompanionsTests: XCTestCase {
         XCTAssertNil(DepartmentCompanions.companionId(for: "product"))
     }
 
+    /// Byte takes Engineering — the department whose subject is the product being built,
+    /// and the one whose founder-facing traffic is heaviest. This is the assertion that
+    /// fails if a host rule is ever reintroduced: byte is also every founder's default
+    /// companion, so a host rule would resolve this to nil for essentially everybody.
     func testCompanionIdForEng() {
-        XCTAssertEqual(DepartmentCompanions.companionId(for: "eng"), "crash")
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "eng"), "byte")
+    }
+
+    /// Crash takes Finance, which frees Sage to speak for Support alone.
+    func testCompanionIdForFin() {
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "fin"), "crash")
+    }
+
+    /// Sage no longer doubles up. Nova (Marketing + Sales) and Glitch (Operations + Legal)
+    /// still do, and that is the design.
+    func testSageSpeaksForSupportAlone() {
+        let sages = DepartmentCatalog.roster
+            .filter { DepartmentCompanions.companionId(for: $0.key) == "sage" }
+            .map(\.key)
+        XCTAssertEqual(sages, ["support"])
     }
 
     func testCompanionIdForByte() {

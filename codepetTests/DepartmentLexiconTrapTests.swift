@@ -18,9 +18,10 @@ import XCTest
 /// review before anyone measured it:
 /// - `deal` and `demo` (sales) — ordinary English. The sales sense now lives in the phrases
 ///   `book a demo` / `demo call` / `close the deal` / `deal size`.
-/// - `crash` (eng) — also the Engineering **pet's own name**, so "crash is my favourite pet"
-///   routed to Engineering. Replaced by `crashes` / `crashed` / `crashing`, which keeps every
-///   fault report and drops the collision.
+/// - `crash` (eng) — also a **pet's own name**, so "crash is my favourite pet" routed to
+///   Engineering. Replaced by `crashes` / `crashed` / `crashing`, which keeps every fault
+///   report and drops the collision. (Crash speaks for Finance since 26 Aug; the collision
+///   was with the name, not the department, so the fix is unaffected.)
 ///
 /// Adding a term that makes any case here fire means the term is too broad. Fix the vocabulary,
 /// not this test.
@@ -42,7 +43,7 @@ final class DepartmentLexiconTrapTests: XCTestCase {
 
     /// The pets have names, and one of them is an Engineering word.
     func testAPetsOwnNameDoesNotRouteToItsDepartment() {
-        assertHostedByByte("crash is my favourite pet", "\"crash\" is the Engineering pet's name")
+        assertHostedByByte("crash is my favourite pet", "\"crash\" is a pet's name")
     }
 
     /// Generic founder talk — the most common thing typed into this box.

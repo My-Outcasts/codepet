@@ -282,7 +282,7 @@ enum MockChat {
 
         // Department-flavoured reply — the composer's department chip armed this turn, so
         // the pet that signs the bubble should also SOUND like that department. Without
-        // this, routing lands sage · Finance on the header and byte's generic copy in the
+        // this, routing lands nova · Marketing on the header and the generic copy in the
         // body: the right pet shows up and then says nothing only that pet would say.
         //
         // Placed LAST, immediately before the generic fallthrough, on purpose. Every

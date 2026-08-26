@@ -476,7 +476,7 @@ struct ChatComposer: View {
     }
 
     /// One menu row: checkmark when armed, else the pet's sprite, then
-    /// `crash · Engineering`.
+    /// `Nova · Marketing`.
     ///
     /// **The risk in spec §4 landed, and this is the fix.** `Image("char-crash")` in
     /// a menu icon slot renders the asset at its NATIVE pixel size — on screen the

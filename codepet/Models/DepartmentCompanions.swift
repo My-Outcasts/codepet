@@ -21,12 +21,12 @@ import Foundation
 enum DepartmentCompanions {
     /// deptKey (DepartmentCatalog) → companionId (PetCharacter).
     static let map: [String: String] = [
-        "eng": "crash",      // Backend Dev — builds & ships
+        "eng": "byte",       // data flow, state, algorithms — and the product IS software
         "design": "luna",    // Designer (UX/UI)
         "mkt": "nova",       // Firestarter — launches, energy
         "sales": "nova",     // growth energy (shares the marketing persona)
         "support": "sage",   // calm, patient, methodical
-        "fin": "sage",       // analytical — "real data, not vibes"
+        "fin": "crash",      // runway is a shipping constraint, not an essay
         "ops": "glitch",     // DevOps — automation
         "legal": "glitch",   // rules & edges
     ]

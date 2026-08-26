@@ -49,7 +49,7 @@ final class CompanyStoreWalkThroughTests: XCTestCase {
         await s.hydrate(companyId: "u")
         await s.walkThroughTask(task, language: .en)
         let reply = s.chatMessages.last
-        XCTAssertEqual(reply?.companionId, "crash")
+        XCTAssertEqual(reply?.companionId, "byte")
         XCTAssertEqual(reply?.deptName, "Engineering")
     }
 

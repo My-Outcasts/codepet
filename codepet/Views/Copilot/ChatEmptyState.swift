@@ -34,7 +34,6 @@ struct ChatEmptyState<Composer: View>: View {
     @Environment(\.uiLanguage) private var lang
     @Environment(\.chatSurface) private var surface
     @Environment(\.colorScheme) private var scheme
-    @EnvironmentObject private var companyStore: CompanyStore
 
     /// Which candidate the beacon is showing. `Something else` advances it; it is
     /// view state, not company state — skipping a suggestion is not a decision and

@@ -68,4 +68,20 @@ extension HostIdentityTests {
         XCTAssertFalse(offer.detail.contains("Byte"),
                        "a pet is claiming the product's line")
     }
+
+    /// A run with no department is the product's own work, so every surface on that card
+    /// names the product — not whichever pet happens to be the founder's companion.
+    ///
+    /// This is the test that was missing. `ChatExecLog` resolved its name by falling back to
+    /// `company.companionId`, which rendered "Codepet" only while the byte character was
+    /// displayed as "Codepet". After the rename the same card read "CODEPET" in its kicker and
+    /// "Byte is doing the work…" one line below, and 2045 green tests said nothing.
+    func testAHostlessRunIsNamedForTheProductNotThePet() {
+        XCTAssertEqual(CodepetBrand.speakerName(companionId: nil), CodepetBrand.name)
+        XCTAssertEqual(CodepetBrand.speakerName(companionId: ""), CodepetBrand.name)
+        XCTAssertEqual(CodepetBrand.speakerName(companionId: "nope"), CodepetBrand.name)
+        // And a real specialist still signs with its own name.
+        XCTAssertEqual(CodepetBrand.speakerName(companionId: "byte"), "Byte")
+        XCTAssertEqual(CodepetBrand.speakerName(companionId: "nova"), "Nova")
+    }
 }

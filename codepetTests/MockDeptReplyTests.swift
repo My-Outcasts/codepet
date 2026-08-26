@@ -4,7 +4,7 @@ import XCTest
 #if DEBUG
 /// Prototype mode routes a turn to a department and stamps that department's pet on the
 /// reply bubble (`CompanyStore.actingSpecialist`). Until this branch existed, the header
-/// read "sage · Finance" while the words underneath were byte's generic three-moves copy —
+/// read "nova · Marketing" while the words underneath were byte's generic three-moves copy —
 /// the right pet arriving and then not sounding like one, in the demo whose entire claim is
 /// that the right pet showed up.
 ///

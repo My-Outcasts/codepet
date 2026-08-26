@@ -29,7 +29,6 @@ struct DepartmentRoster: View {
     let onPick: (Department) -> Void
 
     @Environment(\.uiLanguage) private var lang
-    @EnvironmentObject private var companyStore: CompanyStore
 
     /// The prototype's `.roster` caps at 460px so eight chips wrap into a block
     /// rather than a single wide line. Three to a row at this width.

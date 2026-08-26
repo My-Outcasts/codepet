@@ -2173,7 +2173,7 @@ struct CopilotBubble: View {
     /// the specialist who did the work (`headerName` carries "Nova · Marketing", so just the
     /// name here), matching the web's "What Nova did".
     private func whatItDid(_ steps: [ExecStep]) -> some View {
-        let who = PetCharacter.all[message.companionId ?? ""]?.name ?? CodepetBrand.name
+        let who = CodepetBrand.speakerName(companionId: message.companionId)
         return VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { showSteps.toggle() } } label: {
                 HStack(spacing: 5) {

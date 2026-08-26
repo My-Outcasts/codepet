@@ -61,7 +61,7 @@ enum EnrichInterview {
                     why: "để mình ưu tiên những việc thật sự đưa bạn tới đó trước")
                 : InterviewQuestion(
                     ask: "What\u{2019}s your main goal for the next few weeks?",
-                    why: "so byte plans the moves that actually get you there first")
+                    why: "so Codepet plans the moves that actually get you there first")
         case .traction:
             return language == .vi
                 ? InterviewQuestion(

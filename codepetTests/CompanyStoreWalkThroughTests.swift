@@ -7,7 +7,7 @@ import XCTest
 ///
 /// `walkThroughTask` called `sendMessage` with no `department`, so the same Engineering task
 /// answered two different ways depending on which button was pressed: "Have Codepet do it"
-/// produced a run attributed to Crash · Engineering AND grounded in Engineering's focus, while
+/// produced a run attributed to Byte · Engineering AND grounded in Engineering's focus, while
 /// "Walk me through it" — sitting inches away on the same card — got the generic host with no
 /// department grounding at all. The founder is doing the department's work either way.
 @MainActor

@@ -1,7 +1,9 @@
 import Foundation
 
-/// Maps each business department to the pet that speaks for it. Casting is by domain fit
-/// (see PetCharacter.domain) and is freely editable — nothing depends on the exact cast.
+/// Maps each business department to the pet that speaks for it. Casting is by editorial fit —
+/// `PetCharacter.domain` is a leftover from the game layer and does not predict it (`byte.domain`
+/// is "Data / ML" cast to eng, `crash.domain` is "Backend Dev" cast to fin) — and is freely
+/// editable, since nothing depends on the exact cast.
 ///
 /// **There is no host entry, and no host rule.** Codepet is the host: a general turn carries
 /// no `companionId` and `CopilotChatView.headerName` signs it `CodepetBrand.name`. The pets are

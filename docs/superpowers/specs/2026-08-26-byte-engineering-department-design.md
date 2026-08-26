@@ -2,6 +2,12 @@
 
 **Date:** 2026-08-26
 **Status:** approved, not implemented
+**Stacked on:** PR #116 `feat/pet-topic-routing`. That branch adds `DepartmentRouter` and rebuilds
+the composer's department menu ON TOP of `specialistId(for:host:)` — `DepartmentRouter.swift:11`
+names it as the thing that "still decides whether there is a handoff to show, which is why `host`
+is not a parameter here." §3 deletes that function, so the two cannot land independently. This
+work therefore branches from #116 rather than from `main`, and §3's call-site list below is the
+post-#116 one.
 **Amended:** 2026-08-26 — §5 originally listed three blast-radius sites. Writing the plan
 changed the set in both directions: `DepartmentMenu.anyoneLabel` is a fourth and the only
 *user-facing string* among them (**[A1]**), and `SecondBrainData.companionName` was listed
@@ -108,8 +114,28 @@ already split to match (`actingDeptKey` is separate from `actingSpecialist`, aft
 a Nova-hosting founder asked Marketing a question and the model was told nothing about
 marketing). So suppression only ever hid **attribution**, never expertise.
 
-Three call sites: `CompanyStore.actingSpecialist`, `DepartmentRoster.chip`, `ChatComposer`'s
-department chip.
+**Call sites, counted against the stacked base (#116), not against `main`.** An earlier draft of
+this section said "three", which was true of `main` and is not true of the branch this work sits
+on — #116 added five more:
+
+| File | Site |
+|---|---|
+| `CompanyStore.swift:860` | `actingSpecialist` |
+| `DepartmentRoster.swift:68` | `chip` |
+| `DepartmentMenu.swift:22` | `pet(for:host:)`, which the four composer sites reach it through |
+| `ChatComposer.swift:387` | `deptRow(dep, host:current:)` |
+| `ChatComposer.swift:399` | armed-chip sprite |
+| `ChatComposer.swift:403` | armed-chip label |
+| `ChatComposer.swift:473` | **#116's suggestion tooltip** — `DepartmentSuggestionLabel.help(pet:)` |
+| `ChatComposer.swift:501, :504` | `deptRow`'s own body |
+| `ChatComposer.swift:351` | `let host = …`, which loses its last reader and is deleted |
+
+Two more places name the function in prose and go stale with it: `DepartmentRouter.swift:11`
+(quoted above — its "which is why `host` is not a parameter here" survives, but its reason
+changes: nothing takes a host any more) and `DepartmentMenu.swift:9`.
+
+`DepartmentSuggestionLabelTests.swift:109` calls `rowTitle(design, host: "byte")` and moves with
+the signature.
 
 **Consequence, stated plainly.** A founder who picks Nova in Settings will now see
 `"Nova · Marketing"` sign a Marketing reply, where today the turn stays with the host. Under the

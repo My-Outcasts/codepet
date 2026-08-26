@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- **Branch:** work on `feat/byte-engineering-cast`. Do NOT commit to `main` (project rule: branch, PR, say what you verified). The spec's two commits are already on this branch.
+- **Branch:** work on `feat/byte-engineering-cast`, which is **stacked on `feat/pet-topic-routing` (open PR #116)**, NOT on `main`. #116 builds the composer's department menu on top of `specialistId(for:host:)` — the function Task 1 deletes — so the two cannot land independently. Do NOT commit to `main`, and do NOT rebase onto `main`. #116 is actively being worked in the `~/Developer/codepet-two-mode` worktree and gained a commit during this plan's own setup, so its tip moves: if a rebase is ever needed, rebase onto the branch NAME, never a recorded sha.
+- **Never `pkill` anything.** A sibling session runs builds and `xcodebuild test` in `~/Developer/codepet-two-mode` against the same repo. If `codepet.app` is running, ask — do not kill it.
 - **The character id `"byte"` must not change.** Only the display `name` changes. `actor:'byte'`, `company.companionId`, `PetCharacter.starters`, and `imageName` → `char-byte` are all keyed on the id, and changing it is a Firestore migration.
 - **Test module:** `@testable import codepet`. Scheme is lowercase `codepet`. There is no xcodegen step.
 - **New `.swift` files need no project-file edit** — target membership follows the folder on disk (`PBXFileSystemSynchronizedRootGroup`). This plan adds one new test file.
@@ -35,14 +36,17 @@
 
 Its premise never held: `CopilotChatView.headerName` returns `CodepetBrand.name` whenever `message.companionId` is nil, which is every general turn — so the host never signs with a pet's name and there is no self-handoff to suppress. Suppression only ever hid attribution, never expertise: `CompanyStore.actingDeptKey` is already separate from `actingSpecialist`.
 
-**Files:**
+**Files** (line numbers are against the stacked base — #116 moved them all):
 - Modify: `codepet/Models/DepartmentCompanions.swift:22-37` (delete `specialistId`, rewrite the doc comment above it)
-- Modify: `codepet/Models/DepartmentMenu.swift:19-38` (`pet`, `rowTitle`, `armedLabel` lose `host:`)
-- Modify: `codepet/Managers/CompanyStore.swift:852-863` (`actingSpecialist`)
-- Modify: `codepet/Views/Copilot/DepartmentRoster.swift:67-69` (`chip`)
-- Modify: `codepet/Views/Copilot/ChatComposer.swift:333,346,358,362,415-421`
+- Modify: `codepet/Models/DepartmentMenu.swift:9` (prose) and `:19-38` (`pet`, `rowTitle`, `armedLabel` lose `host:`)
+- Modify: `codepet/Managers/CompanyStore.swift:857-863` (`actingSpecialist`)
+- Modify: `codepet/Views/Copilot/DepartmentRoster.swift:66-69` (`chip`)
+- Modify: `codepet/Views/Copilot/ChatComposer.swift:351,387,399,403,473,498-504`
+- Modify: `codepet/Models/DepartmentRouter.swift:11-12` (prose — #116's file, comment only)
 - Create: `codepetTests/DepartmentMenuTests.swift`
-- Test: `codepetTests/DepartmentCompanionsTests.swift:7-15`, `codepetTests/TwoModeHeroTests.swift:429-448`
+- Test: `codepetTests/DepartmentCompanionsTests.swift:7-15`, `codepetTests/TwoModeHeroTests.swift:429-448`, `codepetTests/DepartmentSuggestionLabelTests.swift:109`
+
+**You are editing an open PR's code.** `DepartmentRouter.swift`, `DepartmentSuggestionLabel*` and most of `ChatComposer`'s menu belong to #116. Change only what the `host:` removal forces. Do not restructure #116's routing, tiers, or suggestion UI.
 
 **Interfaces:**
 - Produces: `DepartmentCompanions.companionId(for deptKey: String) -> String?` (already exists, unchanged — it becomes the only resolver). `DepartmentMenu.pet(for department: Department) -> String?`, `DepartmentMenu.rowTitle(_ department: Department) -> String`, `DepartmentMenu.armedLabel(_ department: Department) -> String` — all three lose their `host: String` parameter.
@@ -271,26 +275,47 @@ The `CompanionOrb` fallback below it stays exactly as it is — every roster dep
                     // No mapped pet — Codepet answers. Show the orb rather
 ```
 
-In `codepet/Views/Copilot/ChatComposer.swift`, make four edits:
+In `codepet/Views/Copilot/ChatComposer.swift`, six edits. Every one is the same mechanical removal of `host:` — **do not change any other behaviour in this file**, it is #116's:
 
-Delete line 333 entirely (`let host = companyStore.company.companionId`) — it has no other readers.
+Delete line 351 entirely (`let host = companyStore.company.companionId`). Verify first that it has no readers left after the five edits below; it should not.
 
-Line 346: `Button { selectedDept = dep } label: { deptRow(dep, host: host) }` → `Button { selectedDept = dep } label: { deptRow(dep) }`
+Line 387: `label: { deptRow(dep, host: host, current: shown) }` → `label: { deptRow(dep, current: shown) }`. **Keep `current: shown`** — that is #116's suggestion state, unrelated to this change.
 
-Line 358: `let pet = DepartmentMenu.pet(for: dep, host: host),` → `let pet = DepartmentMenu.pet(for: dep),`
+Line 399: `let pet = DepartmentMenu.pet(for: dep, host: host),` → `let pet = DepartmentMenu.pet(for: dep),`
 
-Line 362: `Text(armed.map { DepartmentMenu.armedLabel($0, host: host) }` → `Text(armed.map { DepartmentMenu.armedLabel($0) }`
+Line 403: `Text(shown.map { DepartmentMenu.armedLabel($0, host: host) }` → `Text(shown.map { DepartmentMenu.armedLabel($0) }`
 
-Lines 415-421, the `deptRow` signature and its two calls:
+Line 473, inside the suggestion tooltip — #116's site:
 
 ```swift
-    @ViewBuilder private func deptRow(_ dep: Department) -> some View {
-        let on = selectedDept?.key == dep.key
+                                               pet: DepartmentMenu.pet(for: dep),
+```
+
+Lines 498-504, `deptRow`'s signature and its two body calls. Note it takes THREE parameters on this base, and only `host` goes:
+
+```swift
+    @ViewBuilder private func deptRow(_ dep: Department,
+                                      current: Department?) -> some View {
+        let on = current?.key == dep.key
         let title = DepartmentMenu.rowTitle(dep)
         if on {
             Label(title, systemImage: "checkmark")
         } else if let pet = DepartmentMenu.pet(for: dep),
                   let sprite = PetMenuIcon.image(pet) {
+```
+
+Finally, in `codepet/Models/DepartmentRouter.swift` lines 11-12 — comment only, no code. It currently names the deleted function as load-bearing:
+
+```swift
+/// never resolves a pet. `DepartmentCompanions.companionId(for:)` resolves the pet, and takes no
+/// host — the host rule was deleted on 26 Aug, so there is no longer a second question for a
+/// `host` parameter to answer.
+```
+
+And in `codepetTests/DepartmentSuggestionLabelTests.swift:109`:
+
+```swift
+        XCTAssertTrue(s.contains(DepartmentMenu.rowTitle(design)), s)
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -300,6 +325,8 @@ cd ~/Developer/codepet && xcodebuild test -scheme codepet -destination 'platform
   CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/DepartmentCompanionsTests \
   -only-testing:codepetTests/DepartmentMenuTests \
   -only-testing:codepetTests/TwoModeHeroTests \
+  -only-testing:codepetTests/DepartmentSuggestionLabelTests \
+  -only-testing:codepetTests/DepartmentRouterTests \
   -only-testing:codepetTests/CompanyStoreChatTests 2>&1 | tail -25
 ```
 
@@ -312,9 +339,10 @@ If `CompanyStoreChatTests` fails, read the failure before changing anything: it 
 ```bash
 cd ~/Developer/codepet
 git add codepet/Models/DepartmentCompanions.swift codepet/Models/DepartmentMenu.swift \
-  codepet/Managers/CompanyStore.swift codepet/Views/Copilot/DepartmentRoster.swift \
-  codepet/Views/Copilot/ChatComposer.swift codepetTests/DepartmentCompanionsTests.swift \
-  codepetTests/DepartmentMenuTests.swift codepetTests/TwoModeHeroTests.swift
+  codepet/Models/DepartmentRouter.swift codepet/Managers/CompanyStore.swift \
+  codepet/Views/Copilot/DepartmentRoster.swift codepet/Views/Copilot/ChatComposer.swift \
+  codepetTests/DepartmentCompanionsTests.swift codepetTests/DepartmentMenuTests.swift \
+  codepetTests/TwoModeHeroTests.swift codepetTests/DepartmentSuggestionLabelTests.swift
 git commit -F - <<'MSG'
 Delete the host-shadow rule: one unconditional resolver for who speaks
 
@@ -671,6 +699,8 @@ generic `View`. Removing it removes the reversion target.
     }
 ```
 
+`codepet/Views/Copilot/ChatComposer.swift`, in `deptRow`'s doc comment (~line 495 on the stacked base), quotes the old copy: `saying "Anyone — byte routes it" while the chip beside it names a pet`. Update the quoted string to `"Anyone — Codepet routes it"`. The sentence's point is unchanged; only the quotation goes stale.
+
 `codepet/Models/PetVoice.swift`, line 55 — comment only, no behavior change. Byte stays on the `default` branch, which is also the unknown-pet fallback, so its speaking voice is unchanged:
 
 ```swift
@@ -823,8 +853,11 @@ Pushing a branch runs NOTHING in CI — the workflow triggers on pull requests, 
 
 ```bash
 cd ~/Developer/codepet && git push -u origin feat/byte-engineering-cast
-gh pr create --draft --title "Byte takes Engineering; Codepet is the host" --body "$(cat <<'BODY'
+gh pr create --draft --base feat/pet-topic-routing \
+  --title "Byte takes Engineering; Codepet is the host" --body "$(cat <<'BODY'
 Byte is on the roster for the first time. It speaks for Engineering, Crash moves to Finance, and Codepet is the host of general conversation.
+
+**Stacked on #116** — it builds the composer menu on `specialistId(for:host:)`, which this deletes, so they cannot land independently. Merge #116 first.
 
 Spec: `docs/superpowers/specs/2026-08-26-byte-engineering-department-design.md`
 Plan: `docs/superpowers/plans/2026-08-26-byte-engineering-cast.md`

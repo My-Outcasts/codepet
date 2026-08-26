@@ -311,3 +311,86 @@ export function coerceDeliverable(raw: unknown, taskTitle: string): Deliverable 
   }
   return { kind, title, body };
 }
+
+// The forced tool's schema and the system prompt, moved here from the handler when the
+// local path started needing them: `local/oneShotSidecar` is esbuild-bundled into the app,
+// so anything it imports from a handler drags the Anthropic SDK in with it. One schema for
+// both transports — the API forces this tool, the local path renders the same
+// `input_schema` into its prompt, which is the only way a payload this large stays in step.
+export const DELIVERABLE_SYSTEM =
+  "You produce real, finished work product for a solo founder's company — never a plan to do the work, the work itself.";
+
+export const DELIVERABLE_TOOL = {
+  name: "record_deliverable",
+  description: "Record the finished deliverable produced for this task.",
+  input_schema: {
+    type: "object",
+    properties: {
+      kind: { type: "string", description: "The deliverable kind that best fits what was produced." },
+      title: { type: "string", description: "A short, clear title for the deliverable." },
+      body: { type: "string", description: "The full deliverable content, written as markdown." },
+      payload: {
+        type: "object",
+        additionalProperties: true,
+        description: "Structured fields for the chosen kind. Fill ONLY the fields for that kind (see the per-kind guide in the prompt); omit for kinds without a structured form.",
+        properties: {
+          items: { type: "array", description: "checklist: 5-7 ordered steps.",
+            items: { type: "object", additionalProperties: false, properties: { t: { type: "string" }, done: { type: "boolean" } }, required: ["t", "done"] } },
+          call: { type: "string", description: "doc: the decision up front (1-2 sentences)." },
+          sections: { type: "array", description: "doc/legal: labeled {h,p} blocks.",
+            items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
+          next: { type: "array", description: "doc: 1-3 next actions.", items: { type: "string" } },
+          goal: { type: "string", description: "plan: one-line goal." },
+          changes: { type: "array", description: "plan: areas touched.",
+            items: { type: "object", additionalProperties: false, properties: { area: { type: "string" }, edit: { type: "string" } }, required: ["area", "edit"] } },
+          verify: { type: "array", description: "plan: future-tense verification checks.", items: { type: "string" } },
+          risks: { type: "string", description: "plan: one-line main risk." },
+          messages: { type: "array", description: "dms: exactly 4 persona DMs.",
+            items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, note: { type: "string" }, msg: { type: "string" } }, required: ["name", "note", "msg"] } },
+          weeks: { type: "array", description: "calendar: exactly 2 weeks, each with a label and 2-3 posts.",
+            items: { type: "object", additionalProperties: false, properties: {
+              label: { type: "string" },
+              items: { type: "array", items: { type: "object", additionalProperties: false, properties: { day: { type: "string" }, kind: { type: "string" }, body: { type: "string" } }, required: ["day", "kind", "body"] } },
+            }, required: ["label", "items"] } },
+          price: { type: "object", description: "sheet: monthly Pro price input {val,min,max,step}.",
+            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
+          waitlist: { type: "object", description: "sheet: waitlist size input {val,min,max,step}.",
+            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
+          conversion: { type: "object", description: "sheet: conversion % input {val,min,max,step}.",
+            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
+          churn: { type: "object", description: "sheet: monthly churn % input {val,min,max,step}.",
+            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
+          summary: { type: "string", description: "sheet: one paragraph on what the model shows at the defaults." },
+          title: { type: "string", description: "site: browser tab / SEO title." },
+          brand: { type: "string", description: "site: company or product name." },
+          kicker: { type: "string", description: "site: tiny label above the headline; empty string if none." },
+          headline: { type: "string", description: "site: the hero H1." },
+          headlineHi: { type: "string", description: "site: accent-colored tail of the headline; empty string if none." },
+          sub: { type: "string", description: "site: one supporting sentence under the headline." },
+          ctaPrimary: { type: "string", description: "site: primary button label." },
+          ctaSecondary: { type: "string", description: "site: secondary button label; empty string if only one CTA." },
+          howEyebrow: { type: "string", description: "site: eyebrow over the how-it-works section." },
+          howTitle: { type: "string", description: "site: how-it-works section heading." },
+          steps: { type: "array", description: "plan: 3-5 ordered approach steps (strings). site: exactly 3 how-it-works steps, each {h,p}.", items: {} },
+          featEyebrow: { type: "string", description: "site: eyebrow over the features section." },
+          featTitle: { type: "string", description: "site: features section heading." },
+          features: { type: "array", description: "site: exactly 3 feature cards, each {h,p}.",
+            items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
+          quote: { type: "string", description: "site: one pull-quote/testimonial line; empty string if none." },
+          quoteBy: { type: "string", description: "site: attribution for the quote; empty string if none." },
+          finalTitle: { type: "string", description: "site: closing call-to-action heading." },
+          finalSub: { type: "string", description: "site: line under the closing CTA; empty string if none." },
+          finalCta: { type: "string", description: "site: closing CTA button label." },
+          accent: { type: "string", description: "site: brand accent colour as a 6-digit hex." },
+          footNote: { type: "string", description: "site: footer line." },
+          screens: { type: "array", description: "screens: exactly 3 onboarding steps, each {name,time,kick,title,sub,art,cta,note}; art is connect/session/recap in order.",
+            items: { type: "object", additionalProperties: false, properties: {
+              name: { type: "string" }, time: { type: "string" }, kick: { type: "string" }, title: { type: "string" }, sub: { type: "string" },
+              art: { type: "string", enum: ["connect", "session", "recap"] }, cta: { type: "string" }, note: { type: "string" },
+            }, required: ["name", "time", "kick", "title", "sub", "art", "cta", "note"] } },
+        },
+      },
+    },
+    required: ["kind", "title", "body"],
+  },
+} as const;

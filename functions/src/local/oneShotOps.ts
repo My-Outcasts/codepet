@@ -37,6 +37,12 @@ import {
   coerceRoadmap,
 } from "../generateRoadmapCore";
 import {
+  DELIVERABLE_SYSTEM,
+  DELIVERABLE_TOOL,
+  buildRunTaskPrompt,
+  coerceDeliverable,
+} from "../runTaskCore";
+import {
   OVERVIEW_TOOL,
   SynthesizeBriefPayload,
   buildSynthesizeUserMessage,
@@ -236,6 +242,45 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
     respond(body, parsed) {
       const language = body?.language === "vi" ? "vi" : "en";
       return coerceRoadmap(parsed, { language });
+    },
+  },
+
+  /**
+   * `runTask` — the deliverable itself, and the most expensive thing Codepet asks for.
+   *
+   * Every field is narrowed exactly as `handleRunTask` narrows it, in the same order,
+   * because `buildRunTaskPrompt` behaves differently for an absent field than for an empty
+   * one: a revise carries `reviseNote` + `current` and edits in place, a first run carries
+   * neither and writes from scratch. Passing `""` where the handler passes `undefined`
+   * would silently turn every first run into a revise of nothing.
+   */
+  runTask: {
+    plan(body) {
+      const taskTitle = typeof body?.task_title === "string" ? body.task_title.trim() : "";
+      if (!taskTitle) throw new OneShotBadRequest("task_title required");
+      return {
+        system: DELIVERABLE_SYSTEM,
+        prompt: buildRunTaskPrompt({
+          companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
+          language: body.language === "vi" ? "vi" : "en",
+          context: typeof body.context === "string" ? body.context : "",
+          taskTitle,
+          taskDetail: typeof body.task_detail === "string" ? body.task_detail : "",
+          reviseNote: typeof body.revise_note === "string" ? body.revise_note : undefined,
+          current: typeof body.current === "string" ? body.current : undefined,
+          deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+        }),
+        schema: DELIVERABLE_TOOL.input_schema,
+      };
+    },
+    respond(body, parsed) {
+      const taskTitle = String(body?.task_title ?? "").trim();
+      // Same coercion, and the same refusal: the handler answers 502 rather than storing a
+      // deliverable it could not read, because a half-parsed one reaches the library and
+      // the founder's approval flow.
+      const deliverable = coerceDeliverable(parsed, taskTitle);
+      if (!deliverable) throw new OneShotUnusableAnswer("no deliverable in the reply");
+      return deliverable;
     },
   },
 

@@ -1,5 +1,6 @@
 // codepet/Services/RunTaskClient.swift
 import Foundation
+import os
 import FirebaseAuth
 
 /// Request body for the runTask Cloud Function.
@@ -59,6 +60,25 @@ enum RunTaskClient {
         #if DEBUG
         if MockChat.enabled { return await MockChat.runResult(req) }
         #endif
+        // The founder's own Claude Code first, when they granted it. Fail-open is preserved
+        // (`nil` is what the caller turns into an honest error on the card), but the reason
+        // is LOGGED — a run that silently produced nothing is the hardest failure here to
+        // diagnose. It never falls through to the Cloud Function: that would spend the API
+        // key the grant exists to stop spending.
+        switch OneShotTransportRouter.transport() {
+        case .local, .localUnavailable:
+            do {
+                let body = try JSONEncoder().encode(req)
+                let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
+                return try JSONDecoder().decode(RunTaskResponse.self, from: out)
+            } catch {
+                OneShotTransportRouter.log.error(
+                    "local runTask failed: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
+        case .cloud:
+            break
+        }
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"

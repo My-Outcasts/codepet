@@ -10,6 +10,7 @@ import { claudeArgs, renderPrompt } from "../local/oneShotSidecar";
 import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBrief";
 import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBrief";
 import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
+import { DELIVERABLE_TOOL, buildRunTaskPrompt } from "../runTaskCore";
 
 /**
  * The local one-shot path: the non-streaming Cloud Functions running on the founder's own
@@ -295,5 +296,72 @@ describe("generateRoadmap op", () => {
   it("answers an empty task list rather than throwing", () => {
     expect(op.respond({ language: "en", brief }, { tasks: "nope" }, { model: "m", nowISO: "t" }))
       .toEqual({ tasks: [] });
+  });
+});
+
+describe("runTask op", () => {
+  const op = ONE_SHOT_OPS.runTask;
+  const body = {
+    language: "en",
+    companion_id: "nova",
+    context: "ACME sells widgets.",
+    task_title: "Write the launch email",
+    task_detail: "Announce the beta",
+    dept_key: "mkt",
+  };
+
+  it("asks with the Cloud Function's own prompt and schema", () => {
+    const plan = op.plan(body);
+    expect(plan.prompt).toBe(buildRunTaskPrompt({
+      companionId: "nova",
+      language: "en",
+      context: "ACME sells widgets.",
+      taskTitle: "Write the launch email",
+      taskDetail: "Announce the beta",
+      reviseNote: undefined,
+      current: undefined,
+      deptKey: "mkt",
+    }));
+    expect(plan.schema).toBe(DELIVERABLE_TOOL.input_schema);
+  });
+
+  /**
+   * THE subtle one. `buildRunTaskPrompt` writes a REVISE prompt when `reviseNote` and
+   * `current` are present and a from-scratch one when they are absent, so passing `""`
+   * where the handler passes `undefined` would turn every first run into a revise of
+   * nothing. This compares against the handler's own narrowing rather than a fixture.
+   */
+  it("keeps an absent revise note absent, not empty", () => {
+    const first = op.plan(body).prompt;
+    const revise = op.plan({ ...body, revise_note: "Make it shorter", current: "old draft" }).prompt;
+    expect(first).not.toBe(revise);
+    expect(first).toBe(buildRunTaskPrompt({
+      companionId: "nova", language: "en", context: "ACME sells widgets.",
+      taskTitle: "Write the launch email", taskDetail: "Announce the beta", deptKey: "mkt",
+    }));
+  });
+
+  it("refuses a payload with no task title", () => {
+    expect(() => op.plan({ ...body, task_title: "   " })).toThrow(OneShotBadRequest);
+    expect(() => op.plan({ language: "en" })).toThrow(OneShotBadRequest);
+  });
+
+  it("coerces the deliverable the way the handler does", () => {
+    const out = op.respond(body, {
+      kind: "doc", title: "Launch email", body: "# Hello",
+      payload: { call: "Ship it.", sections: [{ h: "Why", p: "Because." }] },
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.kind).toBe("doc");
+    expect(out.title).toBe("Launch email");
+    expect(out.body).toContain("Hello");
+  });
+
+  /**
+   * The handler answers 502 rather than storing something it could not read — a
+   * half-parsed deliverable reaches the library and the founder's approval flow.
+   */
+  it("refuses an answer it cannot read as a deliverable", () => {
+    expect(() => op.respond(body, { nothing: true }, { model: "m", nowISO: "t" }))
+      .toThrow(OneShotUnusableAnswer);
   });
 });

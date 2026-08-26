@@ -64,6 +64,18 @@ struct ChatComposer: View {
     var pins: Binding<[ContextPin]>? = nil
     var attachments: Binding<[ChatAttachment]>? = nil
     @Binding var selectedDept: Department?
+    /// The department the router guessed from the draft, rendered tentatively. Distinct from
+    /// `selectedDept` on purpose: an explicit pick must never be silently overwritten, and a
+    /// guess must never look like a choice. Shown only when `selectedDept == nil`.
+    ///
+    /// One value, not three parallel optionals (`suggestedDept`/`suggestionTier`/
+    /// `suggestionMatched`) — `DepartmentRouter.Suggestion` already bundles `deptKey`, `tier`
+    /// and `matched`, so a missing tier on a present guess is impossible rather than papered
+    /// over with `?? .topical`.
+    var suggestion: DepartmentRouter.Suggestion?
+    /// The founder refusing the guess. Clears it for the current draft; the owner decides how
+    /// long the refusal holds.
+    var onDismissSuggestion: () -> Void = {}
     var onSend: () -> Void
     var onQuickAction: (String) -> Void
     /// Convene the Virtual Company on the current draft. Defaulted so main's shell,
@@ -187,7 +199,13 @@ struct ChatComposer: View {
                           floor: ComposerMetrics.paneMinTextHeight, onSend: onSend)
 
             HStack(spacing: 7) {
-                if showsDeptChips || selectedDept != nil { departmentControl }
+                // `suggestion != nil` is the third condition and it carries the rail: a guess
+                // is never made without the chip that shows it. The two-mode hero keeps its
+                // clean rest state — no bare "Departments" button while nothing is picked or
+                // guessed — but the moment the router has an opinion, the dashed chip appears
+                // to state it. Suppressing the guess there instead (the earlier design) meant
+                // the FIRST message of every new conversation silently got no pet.
+                if showsDeptChips || selectedDept != nil || suggestion != nil { departmentControl }
                 plusMenu
                 micButton
                 voiceButton
@@ -332,10 +350,33 @@ struct ChatComposer: View {
     private var departmentControl: some View {
         let host = companyStore.company.companionId
         let armed = selectedDept
+        // A guess only renders when the founder has not chosen. `shown` drives the label, the
+        // sprite and the ✕; `armed` alone drives the SOLID treatment, so a suggestion and a
+        // pick can never look alike.
+        let activeSuggestion = armed == nil ? suggestion : nil
+        let suggestedDept = activeSuggestion.flatMap { DepartmentCatalog.find($0.deptKey) }
+        let shown = armed ?? suggestedDept
         return HStack(spacing: 0) {
             Menu {
-                Button { selectedDept = nil } label: {
-                    if armed == nil {
+                // Two acts, one row — the same rule the `✕` already follows: with nothing
+                // armed, this row is refusing a GUESS (`onDismissSuggestion`), not picking
+                // "Anyone" over a pick that already isn't there. Without this, clicking the
+                // already-checked-looking "Anyone" row while a suggestion is showing did
+                // nothing at all, and the guess survived a founder explicitly rejecting it.
+                //
+                // The `shown` guard is the other half, and it is why this row branches on
+                // `shown` exactly as its own checkmark two lines below does. The `✕` gets the
+                // guard for free — it is only BUILT when `shown != nil` — but this row is
+                // always present, so branching on `armed` alone made an idle poke at the
+                // already-checked "Anyone" refuse a guess that was never there: it set
+                // `suggestionDismissed` and nilled `lastActedDeptKey`, killing carry-over and
+                // suppressing routing for the rest of the draft. With nothing shown, "Anyone"
+                // is already the answer and clicking it is a no-op.
+                Button {
+                    guard shown != nil else { return }
+                    if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
+                } label: {
+                    if shown == nil {
                         Label(DepartmentMenu.anyoneLabel(lang), systemImage: "checkmark")
                     } else {
                         Text(DepartmentMenu.anyoneLabel(lang))
@@ -343,7 +384,7 @@ struct ChatComposer: View {
                 }
                 Divider()
                 ForEach(DepartmentMenu.rosterOrder) { dep in
-                    Button { selectedDept = dep } label: { deptRow(dep, host: host) }
+                    Button { selectedDept = dep } label: { deptRow(dep, host: host, current: shown) }
                 }
             } label: {
                 HStack(spacing: 5) {
@@ -354,24 +395,28 @@ struct ChatComposer: View {
                     // at native size, swallowing the whole composer. The roster
                     // chips above use CharacterImage and are fine: they are plain
                     // Buttons, not Menu labels.
-                    if let dep = armed,
+                    if let dep = shown,
                        let pet = DepartmentMenu.pet(for: dep, host: host),
                        let sprite = PetMenuIcon.image(pet) {
                         sprite
                     }
-                    Text(armed.map { DepartmentMenu.armedLabel($0, host: host) }
+                    Text(shown.map { DepartmentMenu.armedLabel($0, host: host) }
                          ?? DepartmentMenu.restLabel(lang))
                         .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(armed?.accent ?? CodepetTheme.bodyText)
+                        // Same string as a pick, dimmed. Accepting a suggestion must change
+                        // nothing on screen except the chip firming up — a suggestion that
+                        // read differently would look like a second feature.
+                        .foregroundColor(shown.map { $0.accent.opacity(armed == nil ? 0.75 : 1.0) }
+                                         ?? CodepetTheme.bodyText)
                         .lineLimit(1)
-                    if armed == nil {
+                    if shown == nil {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 9))
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
                 .padding(.leading, 10)
-                .padding(.trailing, armed == nil ? 10 : 6)
+                .padding(.trailing, shown == nil ? 10 : 6)
                 .frame(height: 26)
                 .contentShape(Rectangle())
             }
@@ -379,8 +424,10 @@ struct ChatComposer: View {
             .menuIndicator(.hidden)
             .fixedSize()
 
-            if let dep = armed {
-                Button { selectedDept = nil } label: {
+            if let dep = shown {
+                Button {
+                    if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
+                } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(dep.accent)
@@ -388,14 +435,45 @@ struct ChatComposer: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(DepartmentMenu.clearHelp(lang))
+                // The `✕` dismisses a guess or clears a pick — two different acts, and the
+                // tooltip has to say which. The innermost `.help()` wins over the capsule's,
+                // so without this ternary the founder hovering the `✕` on a suggestion (the
+                // control they reach for exactly when the guess looks wrong) read "Clear the
+                // department" — a description of the OTHER act. The ternary makes it say
+                // "Dismiss this suggestion". It does not restore the reason the pet was
+                // suggested: that sentence lives on the capsule's own `.help` below, and
+                // hovering the `✕` still shadows it.
+                .help(armed == nil ? DepartmentMenu.dismissSuggestionHelp(lang)
+                                    : DepartmentMenu.clearHelp(lang))
             }
         }
-        // The armed treatment is the retired chip's treatment, unchanged: two
-        // treatments for one control would read as two features.
-        .background(Capsule().fill(armed.map { $0.accent.opacity(0.15) } ?? CodepetTheme.surface))
-        .overlay(Capsule().stroke(armed?.accent ?? CodepetTheme.hairline))
-        .hoverAffordance(Capsule(), accent: armed?.accent ?? CodepetTheme.accentPurple)
+        // The armed treatment is the retired chip's treatment, unchanged. The suggested
+        // treatment is the same two values weakened, and a DASHED stroke — the one visual
+        // difference, carrying the whole "not yet real" meaning.
+        .background(Capsule().fill(shown.map { $0.accent.opacity(armed == nil ? 0.07 : 0.15) }
+                                   ?? CodepetTheme.surface))
+        .overlay(
+            Capsule().strokeBorder(
+                shown?.accent ?? CodepetTheme.hairline,
+                // `suggestedDept` alone is the whole dashed test: it is derived from
+                // `activeSuggestion`, which is already nil whenever `armed != nil` (see its
+                // definition above). So "a guess is showing" and "nothing is armed" are the
+                // same condition here, and writing the second one out again would only
+                // suggest they could disagree.
+                style: suggestedDept != nil
+                    ? StrokeStyle(lineWidth: 1, dash: [3, 2])
+                    : StrokeStyle(lineWidth: 1)
+            )
+        )
+        .hoverAffordance(Capsule(), accent: shown?.accent ?? CodepetTheme.accentPurple)
+        .help(activeSuggestion.flatMap { s in
+            suggestedDept.map { dep in
+                DepartmentSuggestionLabel.help(tier: s.tier,
+                                               matched: s.matched,
+                                               pet: DepartmentMenu.pet(for: dep, host: host),
+                                               department: dep, lang: lang)
+            }
+        } ?? "")
     }
 
     /// One menu row: checkmark when armed, else the pet's sprite, then
@@ -412,8 +490,14 @@ struct ChatComposer: View {
     /// the part that matters. It does NOT fall back to a custom popover; that shape
     /// was considered and rejected 21 Aug for costing its own keyboard and dismiss
     /// handling.
-    @ViewBuilder private func deptRow(_ dep: Department, host: String) -> some View {
-        let on = selectedDept?.key == dep.key
+    /// `current` is the EFFECTIVE department — a pick, or the guess standing in for one — not
+    /// `selectedDept`. Reading the selection here would open the menu over a suggested chip
+    /// saying "Anyone — byte routes it" while the chip beside it names a pet. Picking the
+    /// already-checked suggested row is a normal pick: it writes `selectedDept`, which promotes
+    /// the guess to a choice.
+    @ViewBuilder private func deptRow(_ dep: Department, host: String,
+                                      current: Department?) -> some View {
+        let on = current?.key == dep.key
         let title = DepartmentMenu.rowTitle(dep, host: host)
         if on {
             Label(title, systemImage: "checkmark")
@@ -875,6 +959,9 @@ struct ChatComposer: View {
 private struct ChatComposerPreviewHost: View {
     /// Preselect a department to see the armed chip (sprite + accent) without running the app.
     var selected: Department? = nil
+    /// Supply a suggestion to see the DASHED chip — the state the founder sees before they
+    /// have chosen anything.
+    var suggested: Department? = nil
     @State private var draft = ""
     @State private var mode: ChatMode = .ask
     @FocusState private var focused: Bool
@@ -892,6 +979,9 @@ private struct ChatComposerPreviewHost: View {
             ],
             accent: CodepetTheme.accentPurple, accent2: CodepetTheme.accentPink,
             isBusy: false, selectedDept: $dept,
+            suggestion: suggested.map {
+                DepartmentRouter.Suggestion(deptKey: $0.key, tier: .topical, matched: "layout")
+            },
             onSend: {}, onQuickAction: { _ in }
         )
         .frame(width: 380)
@@ -909,5 +999,12 @@ private struct ChatComposerPreviewHost: View {
 /// the row must not wrap or crowd the active-project chip once a sprite is in it.
 #Preview("ChatComposer (Marketing armed)") {
     ChatComposerPreviewHost(selected: DepartmentCatalog.find("mkt"))
+}
+
+/// Design SUGGESTED, not picked: dashed stroke, fill at 0.07, label at 0.75. Compare against
+/// the armed preview above — same chip, same string, same sprite. That comparison is the whole
+/// visual design, and it is the one thing green tests cannot check.
+#Preview("ChatComposer (Design suggested)") {
+    ChatComposerPreviewHost(suggested: DepartmentCatalog.find("design"))
 }
 #endif

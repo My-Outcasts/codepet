@@ -15,6 +15,9 @@ import {
   DECISIONS_EXTRACT_SCHEMA,
   buildExtractPrompt,
 } from "../extractDecisionsCore";
+import { NARRATIVE_TOOL, narrativeRequest } from "../anthropicCore";
+import { buildChatMessages, buildChatSystemPrompt } from "../chatCore";
+import { renderPrompt as renderOneShotPrompt } from "../local/oneShotSidecar";
 
 /**
  * The local one-shot path: the non-streaming Cloud Functions running on the founder's own
@@ -417,5 +420,153 @@ describe("extractDecisions op", () => {
     }, { model: "m", nowISO: "t" }) as any;
     expect(out.decisions.length).toBe(1);
     expect(out.decisions[0].statement).toBe("Pro is $49/month.");
+  });
+});
+
+/**
+ * The learning layer — not being developed, but a founder mid-session should not watch it
+ * break the day the key went away. What is worth guarding is what these ops report about
+ * themselves, since the caches the handlers rely on do not exist here.
+ */
+describe("the learning-layer ops", () => {
+  // A payload the ENDPOINT would accept: the op runs the handler's own validator, so a
+  // fixture that skipped a required field would test a refusal instead of an assembly.
+  const turn = {
+    turn_id: "t1",
+    session_id: "s1",
+    language: "en" as const,
+    prompt: "add a login screen",
+    events: [],
+    raw_summary: "created LoginView.swift",
+  };
+
+  it("summarizeTurn asks with the shared narrative assembly", () => {
+    const plan = ONE_SHOT_OPS.summarizeTurn.plan(turn);
+    const shared = narrativeRequest({
+      prompt: "add a login screen", events: [], raw_summary: "created LoginView.swift",
+      language: "en", petPersona: undefined, user_brief: undefined, pet_memory: undefined,
+    });
+    expect(plan.system).toBe(shared.system);
+    expect(plan.prompt).toBe(shared.user);
+    expect(plan.schema).toBe(NARRATIVE_TOOL.input_schema);
+  });
+
+  /**
+   * There is no narrative cache on this path, so a hit cannot happen. Reporting `false` is
+   * the honest answer; omitting the field would break a client that reads it, and claiming
+   * `true` would be an invention.
+   */
+  it("summarizeTurn reports no cache hit rather than guessing", () => {
+    const out = ONE_SHOT_OPS.summarizeTurn.respond(turn, {
+      title: "Login screen", what_you_wanted: "w", what_happened: "h",
+      lesson: "l", next_steps: "n", mood: "proud",
+    }, { model: "claude-haiku-4-5", nowISO: "t" }) as any;
+    expect(out.cache_hit).toBe(false);
+    expect(out.turn_id).toBe("t1");
+    expect(out.narrative.title).toBe("Login screen");
+  });
+
+  it("summarizeTurn refuses a payload the endpoint would refuse", () => {
+    expect(() => ONE_SHOT_OPS.summarizeTurn.plan({ ...turn, raw_summary: undefined }))
+      .toThrow(OneShotBadRequest);
+    expect(() => ONE_SHOT_OPS.summarizeTurn.plan({ ...turn, session_id: "" }))
+      .toThrow(OneShotBadRequest);
+  });
+
+  it("summarizeTurn refuses a reply missing a field the card renders", () => {
+    expect(() => ONE_SHOT_OPS.summarizeTurn.respond(turn, { title: "only a title" },
+      { model: "m", nowISO: "t" })).toThrow(OneShotUnusableAnswer);
+  });
+
+  /**
+   * THE one free-text op. Appending "reply with only a JSON object" to a chat turn would
+   * change the answer, not just its shape — so the schema instruction must not be there.
+   */
+  it("chatSession asks for prose, not an object", () => {
+    const body = {
+      session_id: "s1", language: "en", user_message: "why did that work?",
+      history: [{ role: "user", text: "hello" }],
+      session_context: {
+        turns: [{ prompt: "add a login screen", events: [] }],
+        summary: "built a login screen",
+        lesson: "read the error",
+      },
+    };
+    const plan = ONE_SHOT_OPS.chatSession.plan(body);
+    expect(plan.freeText).toBe(true);
+    expect(plan.schema).toBeUndefined();
+    expect(renderOneShotPrompt(plan.prompt!, plan.schema, true)).toBe(plan.prompt);
+    expect(renderOneShotPrompt(plan.prompt!, plan.schema, true)).not.toContain("JSON Schema");
+    // The system prompt is the handler's own, persona and session context included.
+    expect(plan.system).toBe(buildChatSystemPrompt({
+      language: "en", petPersona: undefined,
+      sessionContext: body.session_context as any,
+    }));
+    // History is flattened, because `claude -p` takes one prompt rather than a messages array.
+    expect(plan.prompt).toContain("why did that work?");
+    expect(buildChatMessages({ history: body.history as any, userMessage: body.user_message })
+      .length).toBe(2);
+  });
+
+  it("chatSession refuses an empty reply", () => {
+    expect(() => ONE_SHOT_OPS.chatSession.respond({}, "   ", { model: "m", nowISO: "t" }))
+      .toThrow(OneShotUnusableAnswer);
+  });
+
+  /**
+   * A product decision, stated in the op and pinned here: the cloud path withholds step
+   * detail from a `preview` founder, and there is no entitlement to read on the founder's own
+   * machine. The tokens are theirs, so gating a plan they paid for would be charging for
+   * someone else's compute.
+   */
+  it("generatePlan hands a local founder the whole plan", () => {
+    const out = ONE_SHOT_OPS.generatePlan.respond({}, {
+      summary: "Validate the problem",
+      steps: [{ title: "Call 5 users", detail: "d", done_when: "w" }],
+      est_effort: "2 hours",
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.tier).toBe("full");
+    expect(out.locked_step_count).toBe(0);
+    expect(out.plan.steps.length).toBe(1);
+  });
+
+  /** The handler's five-principle cap belongs to both transports. */
+  it("distillReference keeps the handler's cap and trim", () => {
+    const out = ONE_SHOT_OPS.distillReference.respond({}, {
+      principles: ["  a  ", "b", "", "c", "d", "e", "f"],
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.principles).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  /**
+   * The requested spelling wins, mapped by term and then by position. A card landing on the
+   * wrong token is worse than a missing card: the founder reads an explanation of something
+   * else entirely.
+   */
+  it("generateDictionary maps cards back onto the terms that were asked for", () => {
+    const body = {
+      language: "en",
+      terms: [{ term: "Firestore" }, { term: "SwiftUI" }],
+      project: { name: "Codepet", brief: "b", tags: [], domains: [] },
+    };
+    const out = ONE_SHOT_OPS.generateDictionary.respond(body, {
+      entries: [
+        { term: "swiftui", plain: "Apple's UI framework" },
+        { term: "firestore", plain: "Google's document database" },
+      ],
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.entries.map((e: any) => e.term)).toEqual(["Firestore", "SwiftUI"]);
+    expect(out.entries[0].plain).toBe("Google's document database");
+    expect(out.cache_hits).toBe(0);
+  });
+
+  it("every op the app can ask for is in the registry", () => {
+    // The Swift side names these strings; a rename on one side has to fail here rather than
+    // at run time on a founder's machine.
+    expect(Object.keys(ONE_SHOT_OPS).sort()).toEqual([
+      "chatSession", "distillReference", "enrichBrief", "extractDecisions",
+      "generateDictionary", "generateGuidance", "generatePlan", "generateRoadmap",
+      "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
+    ]);
   });
 });

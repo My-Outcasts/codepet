@@ -57,8 +57,10 @@ The feature that convenes departments to argue a decision. Backend in `functions
 ## Running on the founder's Claude plan, not the API key
 
 The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function
-declaring `ANTHROPIC_API_KEY` answers 401 at runtime. The company layer now has a local path
-for each of them; the older learning layer does not.
+declaring `ANTHROPIC_API_KEY` answers 401 at runtime. **Every one of them now has a local
+path** — all seventeen entries in `CloudAIBlock.blockedPaths`, company layer and learning
+layer both. The Cloud Functions are still deployed and still the default for a founder who has
+not granted their plan; they simply cannot answer until a key exists again.
 
 - **`CloudAIBlock.blockedPaths` (`codepet/Services/CloudAIBlock.swift`) is the checklist** of
   every endpoint that spends the key. Derive from it, not from memory of which features feel
@@ -68,11 +70,13 @@ for each of them; the older learning layer does not.
   the Cloud Function when the local path is unavailable: that would spend the key the grant
   exists to stop spending
 - Three bundles, built by `scripts/build-sidecar.sh` into `codepet/Resources/` (gitignored) —
-  `chatSidecar.js` (streaming chat with MCP tools), `oneShotSidecar.js` (`enrichBrief`,
-  `synthesizeBrief`, `generateRoadmap`, `runTask`, `extractDecisions`), `vcSidecar.js` (the
-  department room). **Run that script after any change under `functions/src/`, and before
-  archiving** — without it the routers report `localUnavailable` and the founder is told the
-  runner is missing
+  `chatSidecar.js` (streaming chat with MCP tools), `oneShotSidecar.js` (the twelve ops in
+  `ONE_SHOT_OPS`), `vcSidecar.js` (the department room). **Run that script after any change
+  under `functions/src/`, and before archiving** — without it the routers report
+  `localUnavailable` and the founder is told the runner is missing
+- Adding a local op means adding it to `ONE_SHOT_OPS` **and** naming it at its Swift call site.
+  A test pins the registry's key list for exactly that reason: a rename has to fail in `jest`
+  rather than at run time on a founder's machine
 - **Prompts are never re-implemented for the local path.** Every op imports the same builder
   the HTTP handler calls and renders the same forced tool's `input_schema`. Where a builder
   lived in a handler it was split into a `*Core.ts` — esbuild inlines the whole import graph,
@@ -84,9 +88,13 @@ for each of them; the older learning layer does not.
 - Build (`startBuild`) sends a granted founder with a linked folder to `ClaudeCodeRunner`
   instead of the cloud coding agent. A grant is not a folder: without one it still goes cloud,
   because the local run would land in `.noProject`
-- Still on the key, deliberately: the learning layer — `summarizeTurn`, `summarizeSession`,
-  `chatSession`, `generateGuidance`, `generatePlan`, `distillReference`, `generateDictionary`.
-  The Settings panel names them as what breaks when "never use Codepet's API key" is on
+- **What the local path does not reproduce, per feature:** no server-side caches (the
+  narrative cache, the dictionary term cache, prompt caching) — work the cloud would have
+  served free is regenerated on the founder's quota; no blackboard write for a meeting; no
+  rate limit; no kill switch; and `generatePlan` answers `tier: "full"` because there is no
+  entitlement to read on the founder's own machine and the tokens are theirs
+- The only call left that can reach the cloud agent by design is `startSessionBuild` with no
+  folder linked: a two-mode Developer session already declared its machine on the session bar
 
 ## Landmines
 
@@ -185,8 +193,8 @@ This section is the one most likely to go stale. Treat it as a pointer, not a fa
 - The Virtual Company shipped and is deployed; its remaining items are product decisions, listed at the end of `docs/superpowers/specs/2026-08-03-virtual-company-in-chat-design.md`
 - Known and deliberately unfixed: five brief fields (`goal`, `traction`, `problem`, `runway`, `constraints`) are collected by interviews and displayed nowhere; `detectConflicts` reports a false `BLOCKER` when two departments block the same way; `dept-product` has placeholder art so Product is kept off the roster
 - The older game layer (kingdoms, lessons, hearts, coins) is compiled but not being developed
-- The company layer runs on the founder's own Claude Code when they grant it — see the section
-  above. The learning layer's seven endpoints are the only ones left on the API key
+- Every model call runs on the founder's own Claude Code when they grant it — see the section
+  above. Nothing is left that only the API key can answer
 
 # Working agreements
 

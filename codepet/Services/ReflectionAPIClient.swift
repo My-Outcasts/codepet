@@ -735,7 +735,19 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         }
     }
 
+    /// The body a local `chatSession` answers with. No cloud counterpart exists — that path is
+    /// SSE-only — so this is the one place the shape is written down, and it mirrors the
+    /// frames: the text the founder reads, plus the model that wrote it.
+    private struct LocalChatSessionBody: Decodable {
+        let text: String
+        let model: String
+    }
+
     func summarizeTurn(_ request: SummarizeTurnRequest) async throws -> SummarizeTurnResponse {
+        if let local = try await localOneShot(
+            op: "summarizeTurn", request: request, as: SummarizeTurnResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.endpoint)
@@ -761,7 +773,43 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
     }
 
+    /// The local path has NO json deltas, and that is honest rather than a shortcut.
+    ///
+    /// The cloud stream exists so the founder sees the narrative fill in at ~1s instead of
+    /// waiting ~8s; `claude -p` gives one answer at the end, so there is nothing to stream. A
+    /// synthetic drip would be the fake typing the contract forbids, so the stream opens
+    /// (`.started`, which is what shows "generating…") and then lands the whole narrative.
+    private func localNarrativeStream(
+        _ request: SummarizeTurnRequest
+    ) -> AsyncThrowingStream<NarrativeStreamEvent, Error>? {
+        guard localStreamOp() != nil else { return nil }
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let body = try await LocalOneShotRunner.run(
+                        op: "summarizeTurn", body: try JSONEncoder().encode(request))
+                    let decoded = try JSONDecoder().decode(SummarizeTurnResponse.self, from: body)
+                    continuation.yield(.started)
+                    continuation.yield(.done(narrative: decoded.narrative,
+                                             model: decoded.model, cacheHit: decoded.cacheHit))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// `.local` when this turn belongs on the founder's plan, nil when it belongs in the cloud.
+    /// A granted founder whose Mac cannot run it gets `.localUnavailable`, which is still not
+    /// nil: the stream then fails with a reason instead of quietly spending the API key.
+    private func localStreamOp() -> LocalTransportRouter.Transport? {
+        let transport = LocalTransportRouter.forOneShot()
+        return transport == .cloud ? nil : transport
+    }
+
     func summarizeTurnStream(_ request: SummarizeTurnRequest) -> AsyncThrowingStream<NarrativeStreamEvent, Error> {
+        if let local = localNarrativeStream(request) { return local }
         let capturedSession = session
         let capturedAuthTokenProvider = authTokenProvider
         // Append ?stream=true to the endpoint URL
@@ -862,6 +910,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     }
 
     func summarizeSession(_ request: SummarizeSessionRequest) async throws -> SummarizeSessionResponse {
+        if let local = try await localOneShot(
+            op: "summarizeSession", request: request, as: SummarizeSessionResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.sessionEndpoint)
@@ -884,6 +936,24 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     }
 
     func summarizeSessionStream(_ request: SummarizeSessionRequest) -> AsyncThrowingStream<SessionSummaryStreamEvent, Error> {
+        if localStreamOp() != nil {
+            return AsyncThrowingStream { continuation in
+                Task {
+                    do {
+                        let body = try await LocalOneShotRunner.run(
+                            op: "summarizeSession", body: try JSONEncoder().encode(request))
+                        let decoded = try JSONDecoder().decode(SummarizeSessionResponse.self, from: body)
+                        continuation.yield(.started)
+                        continuation.yield(.done(summary: decoded.summary, model: decoded.model,
+                                                 briefUpdate: decoded.summary.briefUpdate,
+                                                 projectOverview: decoded.summary.projectOverview))
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+            }
+        }
         let capturedSession = session
         let capturedAuthTokenProvider = authTokenProvider
         var streamURL = URLComponents(url: Self.sessionEndpoint, resolvingAgainstBaseURL: false)!
@@ -980,6 +1050,25 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     }
 
     func chatSessionStream(_ request: ChatSessionRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        if localStreamOp() != nil {
+            return AsyncThrowingStream { continuation in
+                Task {
+                    do {
+                        let body = try await LocalOneShotRunner.run(
+                            op: "chatSession", body: try JSONEncoder().encode(request))
+                        let decoded = try JSONDecoder().decode(LocalChatSessionBody.self, from: body)
+                        // One delta carrying the whole reply: the view builds its text from
+                        // deltas, and `.done` carries none. Splitting it into fake chunks
+                        // would be the fake typing the contract forbids.
+                        continuation.yield(.delta(decoded.text))
+                        continuation.yield(.done(model: decoded.model, cacheHit: false))
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+            }
+        }
         // Capture actor-isolated values before entering the Task, so the Task
         // can run detached (off MainActor) and freely use URLSession.bytes without
         // risking a deadlock on the main actor while waiting for streaming data.
@@ -1078,6 +1167,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Guidance (non-streaming)
 
     func fetchGuidance(_ request: GenerateGuidanceRequest) async throws -> GenerateGuidanceResponse {
+        if let local = try await localOneShot(
+            op: "generateGuidance", request: request, as: GenerateGuidanceResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.guidanceEndpoint)
@@ -1106,6 +1199,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Plan (non-streaming)
 
     func fetchPlan(_ request: GeneratePlanRequest) async throws -> GeneratePlanResponse {
+        if let local = try await localOneShot(
+            op: "generatePlan", request: request, as: GeneratePlanResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.planEndpoint)
@@ -1134,6 +1231,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Distill Reference (non-streaming)
 
     func fetchReferenceDistillation(_ request: DistillReferenceRequest) async throws -> DistillReferenceResponse {
+        if let local = try await localOneShot(
+            op: "distillReference", request: request, as: DistillReferenceResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.distillEndpoint)
@@ -1194,6 +1295,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     // MARK: - Dictionary (non-streaming)
 
     func fetchDictionary(_ request: GenerateDictionaryRequest) async throws -> GenerateDictionaryResponse {
+        if let local = try await localOneShot(
+            op: "generateDictionary", request: request, as: GenerateDictionaryResponse.self) {
+            return local
+        }
         let token = try await authTokenProvider()
 
         var urlRequest = URLRequest(url: Self.dictionaryEndpoint)

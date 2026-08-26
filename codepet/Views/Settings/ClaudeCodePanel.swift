@@ -190,15 +190,14 @@ struct ClaudeCodePanel: View {
                 SettingsDivider()
                 SettingsRow(
                     label: lang == .vi ? "Không dùng API key của Codepet" : "Never use Codepet's API key",
-                    // Names what BREAKS, not just what it prevents. The whole company layer
-                    // now has a local path; what does NOT is the older learning layer —
-                    // session summaries, the session chat, tips, the dictionary — and a
-                    // switch that turned those off without saying so would read as the app
-                    // falling apart. Every feature moved onto the local path comes off this
-                    // list, and this list is the reason the line above stays honest.
+                    // Nothing is named as breaking any more, because nothing does: every model
+                    // call Codepet makes has a local path. What the switch still costs is
+                    // stated instead — no server-side cache, so work the cloud would have
+                    // served free is regenerated on the founder's own quota. If a future
+                    // feature ships cloud-only, its name belongs in this line before it ships.
                     description: lang == .vi
-                        ? "Toàn bộ phần công ty đã chạy được trên gói của bạn. Bật cái này thì phần học cũ — tóm tắt phiên, chat phiên, tips, từ điển — sẽ ngừng hoạt động, vì chúng chưa có đường local."
-                        : "The whole company layer now runs on your plan. Turn this on and the older learning features — session summaries, session chat, tips and the dictionary — stop working: they have no local path yet."
+                        ? "Mọi tính năng AI đều đã chạy được trên gói của bạn, nên bật cái này sẽ không làm gì ngừng hoạt động. Đổi lại: không còn cache phía server, nên tóm tắt hay thẻ từ điển đã tạo trước đó sẽ được tạo lại và tiêu hạn mức của bạn."
+                        : "Every AI feature now runs on your plan, so turning this on breaks nothing. The trade: no server-side cache, so summaries and dictionary cards that would have been served free get regenerated on your own quota."
                 ) {
                     Toggle("", isOn: Binding(
                         get: { neverUseApiKey },

@@ -33,9 +33,14 @@ import {
 // are part of that contract even though the implementation is now shared with `vcSidecar`.
 export { claudeArgs } from "./claudeCli";
 
-/** The prompt as the model receives it: the shared builder's text, then the shape asked for. */
-export function renderPrompt(prompt: string, schema: unknown): string {
-  return `${prompt}\n\n${schemaInstruction(schema)}`;
+/**
+ * The prompt as the model receives it: the shared builder's text, then the shape asked for.
+ *
+ * A free-text op gets the builder's text ALONE. Appending "reply with only a JSON object" to a
+ * chat turn would change the answer, not just its shape.
+ */
+export function renderPrompt(prompt: string, schema: unknown, freeText = false): string {
+  return freeText ? prompt : `${prompt}\n\n${schemaInstruction(schema)}`;
 }
 
 function emit(payload: unknown): void {
@@ -91,7 +96,7 @@ async function main(): Promise<void> {
   try {
     envelope = await runClaudeJson({
       systemPrompt: plan.system ?? "",
-      prompt: renderPrompt(plan.prompt ?? "", plan.schema),
+      prompt: renderPrompt(plan.prompt ?? "", plan.schema, plan.freeText === true),
       model: process.env.CODEPET_CHAT_MODEL,
       effort: process.env.CODEPET_CHAT_EFFORT,
     });
@@ -105,7 +110,8 @@ async function main(): Promise<void> {
   }
 
   try {
-    const parsed = extractJson(envelope.result);
+    // A free-text op is handed the reply itself; everything else gets the object out of it.
+    const parsed = plan.freeText === true ? envelope.result : extractJson(envelope.result);
     emit(op.respond(body, parsed, {
       model: pickModel(envelope),
       nowISO: new Date().toISOString(),

@@ -37,6 +37,52 @@ import {
   coerceRoadmap,
 } from "../generateRoadmapCore";
 import {
+  NARRATIVE_TOOL,
+  SESSION_SUMMARY_TOOL,
+  coerceNarrative,
+  coerceSessionSummary,
+  narrativeRequest,
+  sessionSummaryRequest,
+} from "../anthropicCore";
+import {
+  ChatSessionPayload,
+  buildChatMessages,
+  buildChatSystemPrompt,
+  validateChatPayload,
+} from "../chatCore";
+import {
+  DICTIONARY_TOOL,
+  GenerateDictionaryPayload,
+  alignEntries,
+  coerceDictionaryEntries,
+  dictionaryRequest,
+  validateDictionaryPayload,
+} from "../generateDictionaryCore";
+import {
+  GUIDANCE_TOOL,
+  GuidancePayload,
+  coerceGuidance,
+  guidanceRequest,
+  validateGuidancePayload,
+} from "../generateGuidanceCore";
+import {
+  PLAN_TOOL,
+  PlanPayload,
+  coercePlan,
+  planRequest,
+  validatePlanPayload,
+} from "../generatePlanCore";
+import {
+  REFERENCE_TOOL,
+  DistillPayload,
+  coercePrinciples,
+  distillRequest,
+  validateDistillPayload,
+} from "../distillReferenceCore";
+import { SummarizePayload, validatePayload as validateTurnPayload } from "../summarizeTurnCore";
+import { SummarizeSessionPayload, validateSessionPayload } from "../summarizeSessionCore";
+import { flattenTranscript } from "./transcript";
+import {
   DECISIONS_EXTRACT_SCHEMA,
   EXTRACT_SYSTEM,
   buildExtractPrompt,
@@ -71,6 +117,13 @@ export interface OneShotPlan {
   prompt?: string;
   /** The forced tool's `input_schema`, verbatim. Rendered into the prompt by the sidecar. */
   schema?: unknown;
+  /**
+   * Set when the answer is PROSE, not a JSON object — `chatSession` is the only one, because
+   * it is a conversation rather than a record. `respond` then receives the reply text itself,
+   * and no schema instruction is appended: asking a chat turn for JSON would change the
+   * answer, not just its shape.
+   */
+  freeText?: boolean;
 }
 
 export interface OneShotMeta {
@@ -314,6 +367,196 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       // `coerceDecisions` fails open to an empty list, which is why nothing here throws: a
       // junk answer must cost an entry, never the approval that already happened.
       return coerceDecisions(parsed);
+    },
+  },
+
+  // ─── The learning layer ─────────────────────────────────────────────────────
+  //
+  // Not being developed any more, but a founder mid-session should not watch it break the day
+  // the key went away. These reproduce the model call only: the Firestore CACHES those
+  // handlers keep (narrative cache, dictionary term cache) do not exist locally, so a local
+  // run always generates. On the cloud path a cache hit costs nothing; here it costs a turn
+  // of the founder's plan, which is the trade this transport is.
+
+  /**
+   * `summarizeTurn` — one working turn, read back as a narrative.
+   *
+   * `cache_hit` is reported false rather than omitted or guessed: there is no cache on this
+   * path, and claiming a hit would be an invention while omitting the field would break a
+   * client that reads it.
+   */
+  summarizeTurn: {
+    plan(body) {
+      // The endpoint's own validator: a payload the cloud would refuse must not quietly
+      // produce a narrative here.
+      const invalid = validateTurnPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const payload = body as SummarizePayload;
+      const { system, user } = narrativeRequest({
+        prompt: payload.prompt,
+        events: payload.events,
+        raw_summary: payload.raw_summary,
+        language: payload.language,
+        petPersona: payload.pet_persona,
+        user_brief: payload.user_brief,
+        pet_memory: payload.pet_memory,
+      });
+      return { system, prompt: user, schema: NARRATIVE_TOOL.input_schema };
+    },
+    respond(body, parsed, meta) {
+      const narrative = coerceNarrative(parsed);
+      if (!narrative) throw new OneShotUnusableAnswer("reply was not a narrative");
+      return {
+        turn_id: body.turn_id,
+        narrative: { ...narrative, model: meta.model },
+        model: meta.model,
+        cache_hit: false,
+      };
+    },
+  },
+
+  /** `summarizeSession` — a whole session's arc and its overarching lesson. */
+  summarizeSession: {
+    plan(body) {
+      const invalid = validateSessionPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const payload = body as SummarizeSessionPayload;
+      const { system, user } = sessionSummaryRequest({
+        turns: payload.turns,
+        language: payload.language,
+        petPersona: payload.pet_persona,
+        userBrief: payload.user_brief,
+        petMemory: payload.pet_memory,
+      });
+      return { system, prompt: user, schema: SESSION_SUMMARY_TOOL.input_schema };
+    },
+    respond(body, parsed, meta) {
+      const summary = coerceSessionSummary(parsed);
+      if (!summary) throw new OneShotUnusableAnswer("reply was not a session summary");
+      return {
+        session_id: body?.session_id,
+        summary,
+        model: meta.model,
+        cache_hit: false,
+      };
+    },
+  },
+
+  /**
+   * `chatSession` — talking about a session that already happened.
+   *
+   * The ONLY free-text op. The history is flattened into one prompt because `claude -p` takes
+   * no messages array; `flattenTranscript` records why that is permanent rather than a first
+   * cut.
+   */
+  chatSession: {
+    plan(body) {
+      const invalid = validateChatPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const payload = body as ChatSessionPayload;
+      return {
+        system: buildChatSystemPrompt({
+          language: payload.language,
+          petPersona: payload.pet_persona,
+          sessionContext: payload.session_context,
+        }),
+        prompt: flattenTranscript(buildChatMessages({
+          history: payload.history,
+          userMessage: payload.user_message,
+        })),
+        freeText: true,
+      };
+    },
+    respond(_body, parsed, meta) {
+      const text = typeof parsed === "string" ? parsed.trim() : "";
+      if (!text) throw new OneShotUnusableAnswer("the reply was empty");
+      return { text, model: meta.model, cache_hit: false };
+    },
+  },
+
+  /** `generateGuidance` — the daily coaching insight on the Tips tab. */
+  generateGuidance: {
+    plan(body) {
+      const invalid = validateGuidancePayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const { system, user } = guidanceRequest(body as GuidancePayload);
+      return { system, prompt: user, schema: GUIDANCE_TOOL.input_schema };
+    },
+    respond(_body, parsed, meta) {
+      const guidance = coerceGuidance(parsed);
+      if (!guidance) throw new OneShotUnusableAnswer("reply was not guidance");
+      return { guidance, model: meta.model, generated_at: meta.nowISO };
+    },
+  },
+
+  /**
+   * `generatePlan` — the ordered plan for one project-health check.
+   *
+   * **`tier: "full"`, and that is a product decision, not an oversight.** The cloud path
+   * resolves the founder's entitlement from Firestore and withholds step detail on `preview`.
+   * There is no entitlement to read from the founder's own machine, and the tokens are theirs:
+   * gating a plan they paid for themselves would be charging for someone else's compute. The
+   * `locked_step_count` is therefore 0 and no step is stripped.
+   */
+  generatePlan: {
+    plan(body) {
+      const invalid = validatePlanPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const { system, user } = planRequest(body as PlanPayload);
+      return { system, prompt: user, schema: PLAN_TOOL.input_schema };
+    },
+    respond(_body, parsed, meta) {
+      const plan = coercePlan(parsed);
+      if (!plan) throw new OneShotUnusableAnswer("reply was not a plan");
+      return {
+        plan,
+        tier: "full",
+        locked_step_count: 0,
+        model: meta.model,
+        generated_at: meta.nowISO,
+      };
+    },
+  },
+
+  /** `distillReference` — a resource turned into principles a coding agent can apply. */
+  distillReference: {
+    plan(body) {
+      const invalid = validateDistillPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const { system, user } = distillRequest(body as DistillPayload);
+      return { system, prompt: user, schema: REFERENCE_TOOL.input_schema };
+    },
+    respond(_body, parsed, meta) {
+      const principles = coercePrinciples(parsed);
+      if (!principles) throw new OneShotUnusableAnswer("reply carried no principles");
+      return { principles, model: meta.model, generated_at: meta.nowISO };
+    },
+  },
+
+  /**
+   * `generateDictionary` — personal cards for the terms in the founder's own code.
+   *
+   * Every requested term is generated: there is no term cache here, so `cache_hits` is 0.
+   * `alignEntries` is the handler's mapping rule — requested spelling wins, by term then by
+   * position — kept in one place so a card cannot land on the wrong token on one transport.
+   */
+  generateDictionary: {
+    plan(body) {
+      const invalid = validateDictionaryPayload(body);
+      if (invalid) throw new OneShotBadRequest(invalid);
+      const payload = body as GenerateDictionaryPayload;
+      const { system, user } = dictionaryRequest(payload);
+      return { system, prompt: user, schema: DICTIONARY_TOOL.input_schema };
+    },
+    respond(body, parsed, meta) {
+      const entries = coerceDictionaryEntries(parsed);
+      if (!entries) throw new OneShotUnusableAnswer("reply carried no entries");
+      return {
+        entries: alignEntries((body as GenerateDictionaryPayload).terms, entries),
+        model: meta.model,
+        generated_at: meta.nowISO,
+        cache_hits: 0,
+      };
     },
   },
 

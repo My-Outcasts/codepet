@@ -342,6 +342,11 @@ final class CompanyStore: ObservableObject {
          // closes over `UserDefaults.standard`, which a nonisolated default-argument context
          // cannot reference without warning.
          identityMap: ProjectIdentityMap? = nil,
+         // Defaulted in the init BODY for the same reason as `identityMap`: the real one
+         // closes over `UserDefaults.standard`. Injected so a test can grant the plan without
+         // writing to the real defaults domain — a leaked grant would route another suite's
+         // Build onto a machine it never asked for.
+         claudeAuthorisation: ClaudeCodeAuthorisation? = nil,
          // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
          // has a second defaulted parameter (an injectable runner, added so its exit-code
          // gate is testable), and Swift does not apply defaults when forming a function
@@ -385,6 +390,7 @@ final class CompanyStore: ObservableObject {
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
+        self.claudeAuthorisation = claudeAuthorisation ?? ClaudeCodeAuthorisation()
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
@@ -905,8 +911,15 @@ final class CompanyStore: ObservableObject {
     /// Falling back to local when no repo is linked would be exactly that
     /// silent routing. Instead the cloud run refuses — cheaply, before the
     /// balance is read — and the connect-or-create sheet opens.
+    /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
+    /// spend their Claude plan, and has a folder linked, gets their own agent — see
+    /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
     func startBuild(ask: String) {
-        startEngineeringRun(ask: ask)
+        if buildRunsOnFoundersAgent {
+            startCodeRun(ask: ask)
+        } else {
+            startEngineeringRun(ask: ask)
+        }
     }
 
     /// The build entry point for a two-mode Developer SESSION.
@@ -1211,6 +1224,31 @@ final class CompanyStore: ObservableObject {
     var localChatActive: Bool {
         ChatTransportRouter.transport(companyId: companyId) == .local
     }
+
+    /// Whether a Build should go to the founder's OWN coding agent rather than the cloud one.
+    ///
+    /// **The grant flips the default; it does not hide the choice.** `startBuild` was
+    /// cloud-first because local needs a linked folder and an installed `claude`, which is
+    /// nobody who just downloaded Codepet. A founder who granted "Codepet may spend my Claude
+    /// plan" is exactly the founder for whom that reasoning inverts: the cloud agent spends
+    /// the Anthropic key the grant exists to stop spending, and `CloudAIBlock` may be
+    /// refusing `engStartRun` outright. So the default moves, and nothing else does — the run
+    /// still says where it is running, and the other machine is still one tap away.
+    ///
+    /// **Reads the grant directly, not `OneShotTransportRouter`.** That router also requires
+    /// the bundled one-shot sidecar, which a coding run does not use at all: it drives the
+    /// `claude` binary through `ClaudeCodeRunner`. Gating on a resource this path never
+    /// touches would send a granted founder to the cloud for the wrong reason.
+    ///
+    /// A linked folder stays necessary: without one the local run lands in `.noProject`, and
+    /// falling into that instead of the connect sheet would be the silent routing
+    /// `startBuild` is documented to avoid.
+    var buildRunsOnFoundersAgent: Bool {
+        guard let companyId else { return false }
+        return localBuildAvailable && claudeAuthorisation.isAuthorised(companyId)
+    }
+
+    let claudeAuthorisation: ClaudeCodeAuthorisation
 
     // MARK: - The two doors
 

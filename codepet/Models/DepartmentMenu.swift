@@ -43,11 +43,17 @@ enum DepartmentMenu {
     }
 
     /// The off state, made nameable. Deselecting used to be reachable only by
-    /// clicking an armed chip a second time; letting byte route it is a real choice
+    /// clicking an armed chip a second time; letting Codepet route it is a real choice
     /// and it should be a row you can pick, with a checkmark saying it is what you
     /// have.
+    ///
+    /// Says "Codepet", not a pet's name: routing is the host's job. This read
+    /// "byte routes it" until 26 Aug, which after byte took Engineering would have told
+    /// the founder that Engineering's character routes everything. `anyoneDetail` below
+    /// has said "Let Codepet pick who answers" the whole time — the two lines about one
+    /// control disagreed, and the recast is what made it visible.
     static func anyoneLabel(_ lang: AppLanguage) -> String {
-        lang == .vi ? "Ai cũng được — byte tự chọn" : "Anyone — byte routes it"
+        lang == .vi ? "Ai cũng được — Codepet tự chọn" : "Anyone — Codepet routes it"
     }
 
     static func anyoneDetail(_ lang: AppLanguage) -> String {

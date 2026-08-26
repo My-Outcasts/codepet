@@ -77,7 +77,7 @@ struct ChatEmptyState<Composer: View>: View {
             brandMark
             greeting
             if let offer = BeaconOffer.offer(for: beaconTask, in: beaconTasks,
-                                             host: hostName, language: lang) {
+                                             host: CodepetBrand.name, language: lang) {
                 beaconCard(offer)
             }
             // The cast, under the one thing to do. Both fit: the chips are two or
@@ -145,10 +145,6 @@ struct ChatEmptyState<Composer: View>: View {
         let candidates = BeaconOffer.candidates(beaconTasks)
         guard !candidates.isEmpty else { return nil }
         return candidates[beaconIndex % candidates.count]
-    }
-
-    private var hostName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
     }
 
     /// Line 1: the question, with only the verb accented. Line 2: the greeting,

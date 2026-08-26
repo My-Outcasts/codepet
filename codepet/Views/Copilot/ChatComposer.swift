@@ -491,7 +491,7 @@ struct ChatComposer: View {
     /// handling.
     /// `current` is the EFFECTIVE department — a pick, or the guess standing in for one — not
     /// `selectedDept`. Reading the selection here would open the menu over a suggested chip
-    /// saying "Anyone — byte routes it" while the chip beside it names a pet. Picking the
+    /// saying "Anyone — Codepet routes it" while the chip beside it names a pet. Picking the
     /// already-checked suggested row is a normal pick: it writes `selectedDept`, which promotes
     /// the guess to a choice.
     @ViewBuilder private func deptRow(_ dep: Department,

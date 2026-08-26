@@ -11,6 +11,10 @@ import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBrief";
 import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBrief";
 import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
 import { DELIVERABLE_TOOL, buildRunTaskPrompt } from "../runTaskCore";
+import {
+  DECISIONS_EXTRACT_SCHEMA,
+  buildExtractPrompt,
+} from "../extractDecisionsCore";
 
 /**
  * The local one-shot path: the non-streaming Cloud Functions running on the founder's own
@@ -363,5 +367,55 @@ describe("runTask op", () => {
   it("refuses an answer it cannot read as a deliverable", () => {
     expect(() => op.respond(body, { nothing: true }, { model: "m", nowISO: "t" }))
       .toThrow(OneShotUnusableAnswer);
+  });
+});
+
+describe("extractDecisions op", () => {
+  const op = ONE_SHOT_OPS.extractDecisions;
+  const body = {
+    deliverable: { title: "Pricing decision", dept: "fin", type: "doc", out: "We will charge $49." },
+    existing_decisions: [{ topic: "Pricing", statement: "We were undecided." }],
+  };
+
+  it("asks with the Cloud Function's own prompt and schema", () => {
+    const plan = op.plan(body);
+    expect(plan.prompt).toBe(buildExtractPrompt(
+      { title: "Pricing decision", dept: "fin", type: "doc", out: "We will charge $49." },
+      [{ topic: "Pricing", statement: "We were undecided." }]));
+    expect(plan.schema).toBe(DECISIONS_EXTRACT_SCHEMA);
+  });
+
+  /**
+   * The handler answers `{decisions: []}` for a deliverable with nothing to read, without
+   * spending a token. The local path must not spend a turn of the founder's plan where the
+   * cloud path would not have spent anything.
+   */
+  it("answers an unreadable deliverable without a model call", () => {
+    expect(op.plan({ deliverable: { title: "No body" } })).toEqual({ answer: { decisions: [] } });
+    expect(op.plan({})).toEqual({ answer: { decisions: [] } });
+  });
+
+  /** Malformed entries in the existing list are dropped, not passed through as blanks. */
+  it("narrows the existing decisions the way the handler does", () => {
+    const plan = op.plan({ ...body, existing_decisions: [{ topic: "" }, "nope", null] });
+    expect(plan.prompt).toBe(buildExtractPrompt(
+      { title: "Pricing decision", dept: "fin", type: "doc", out: "We will charge $49." }, []));
+  });
+
+  /**
+   * Fire-and-forget on both transports: the founder already approved the deliverable, so a
+   * junk answer must cost an entry, never the approval. Nothing here throws.
+   */
+  it("fails open to an empty list rather than throwing", () => {
+    expect(op.respond(body, { nonsense: true }, { model: "m", nowISO: "t" }))
+      .toEqual({ decisions: [] });
+  });
+
+  it("keeps a well-formed extraction", () => {
+    const out = op.respond(body, {
+      decisions: [{ topic: "Pricing", statement: "Pro is $49/month.", confidence: "high" }],
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.decisions.length).toBe(1);
+    expect(out.decisions[0].statement).toBe("Pro is $49/month.");
   });
 });

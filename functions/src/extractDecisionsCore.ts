@@ -103,3 +103,36 @@ export function coerceDecisions(raw: unknown): { decisions: ExtractedDecision[] 
   }
   return { decisions };
 }
+
+// The request narrowing, moved here from the handler when the local path started needing it.
+// Shared rather than copied because these two functions decide what counts as extractable at
+// all: a second copy that read `out` slightly differently would make one transport extract
+// decisions from a deliverable the other one skipped.
+export interface ExtractRequestBody {
+  deliverable?: { title?: unknown; dept?: unknown; type?: unknown; out?: unknown };
+  existing_decisions?: unknown;
+}
+
+const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+export function parseDeliverable(body: ExtractRequestBody): ApprovedDeliverable | null {
+  const d = body.deliverable;
+  if (!d || typeof d !== "object") return null;
+  const title = str(d.title);
+  const out = str(d.out);
+  if (!title || !out) return null; // need a title + content to extract anything
+  return { title, dept: str(d.dept), type: str(d.type), out };
+}
+
+export function parseExisting(body: ExtractRequestBody): DecisionOnRecord[] {
+  const arr = Array.isArray(body.existing_decisions) ? body.existing_decisions : [];
+  const out: DecisionOnRecord[] = [];
+  for (const e of arr) {
+    if (!e || typeof e !== "object") continue;
+    const rec = e as { topic?: unknown; statement?: unknown };
+    const topic = str(rec.topic);
+    const statement = str(rec.statement);
+    if (topic && statement) out.push({ topic, statement });
+  }
+  return out;
+}

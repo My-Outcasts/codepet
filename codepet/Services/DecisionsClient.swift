@@ -1,5 +1,6 @@
 // codepet/Services/DecisionsClient.swift
 import Foundation
+import os
 import FirebaseAuth
 
 /// The approved deliverable's high-signal fields sent to extractDecisions.
@@ -21,6 +22,25 @@ enum DecisionsClient {
     private struct Response: Decodable { let decisions: [ExtractedDecision] }
 
     static func extract(_ deliverable: ApprovedDeliverableDTO, existing: [DecisionEntry]) async -> [ExtractedDecision] {
+        let onRecordLocal = existing.map { DecisionOnRecord(topic: $0.topic, statement: $0.statement) }
+        // The founder's own Claude Code first, when they granted it. Fail-open stays
+        // fail-open — `[]` costs a Second Brain entry, never the approval that already
+        // happened — but the reason is logged. It never falls through to the Cloud Function.
+        switch LocalTransportRouter.forOneShot() {
+        case .local, .localUnavailable:
+            do {
+                let body = try JSONEncoder().encode(
+                    Request(deliverable: deliverable, existing_decisions: onRecordLocal))
+                let out = try await LocalOneShotRunner.run(op: "extractDecisions", body: body)
+                return try JSONDecoder().decode(Response.self, from: out).decisions
+            } catch {
+                LocalTransportRouter.log.error(
+                    "local extractDecisions failed: \(error.localizedDescription, privacy: .public)")
+                return []
+            }
+        case .cloud:
+            break
+        }
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"

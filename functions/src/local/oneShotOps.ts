@@ -37,6 +37,14 @@ import {
   coerceRoadmap,
 } from "../generateRoadmapCore";
 import {
+  DECISIONS_EXTRACT_SCHEMA,
+  EXTRACT_SYSTEM,
+  buildExtractPrompt,
+  coerceDecisions,
+  parseDeliverable,
+  parseExisting,
+} from "../extractDecisionsCore";
+import {
   DELIVERABLE_SYSTEM,
   DELIVERABLE_TOOL,
   buildRunTaskPrompt,
@@ -281,6 +289,31 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       const deliverable = coerceDeliverable(parsed, taskTitle);
       if (!deliverable) throw new OneShotUnusableAnswer("no deliverable in the reply");
       return deliverable;
+    },
+  },
+
+  /**
+   * `extractDecisions` — what an approved deliverable locks in, for the Second Brain.
+   *
+   * Fire-and-forget on both transports: the founder already approved the deliverable, so a
+   * failed extraction costs a Second Brain entry, not their work. `{decisions: []}` is the
+   * answer for a deliverable with nothing to read — the handler returns exactly that, without
+   * spending anything, and so does this.
+   */
+  extractDecisions: {
+    plan(body) {
+      const deliverable = parseDeliverable(body ?? {});
+      if (!deliverable) return { answer: { decisions: [] } };
+      return {
+        system: EXTRACT_SYSTEM,
+        prompt: buildExtractPrompt(deliverable, parseExisting(body ?? {})),
+        schema: DECISIONS_EXTRACT_SCHEMA,
+      };
+    },
+    respond(_body, parsed) {
+      // `coerceDecisions` fails open to an empty list, which is why nothing here throws: a
+      // junk answer must cost an entry, never the approval that already happened.
+      return coerceDecisions(parsed);
     },
   },
 

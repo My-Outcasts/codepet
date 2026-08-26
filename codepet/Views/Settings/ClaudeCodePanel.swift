@@ -170,8 +170,8 @@ struct ClaudeCodePanel: View {
                 // existed, and a permission whose scope is invisible is not informed
                 // consent. Every feature moved onto this path gets added to this line.
                 description: lang == .vi
-                    ? "Chat sẽ chạy trên gói Claude của bạn, và mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
-                    : "Chat runs on your Claude plan, and each turn spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
+                    ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
+                    : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
             ) {
                 Toggle("", isOn: Binding(
                     get: { granted },
@@ -190,13 +190,15 @@ struct ClaudeCodePanel: View {
                 SettingsDivider()
                 SettingsRow(
                     label: lang == .vi ? "Không dùng API key của Codepet" : "Never use Codepet's API key",
-                    // Names what BREAKS, not just what it prevents. Only chat runs on the
-                    // founder's plan today; the other seventeen model calls still go through
-                    // the key, and a switch that turned them off without saying so would read
-                    // as the app falling apart.
+                    // Names what BREAKS, not just what it prevents. The whole company layer
+                    // now has a local path; what does NOT is the older learning layer —
+                    // session summaries, the session chat, tips, the dictionary — and a
+                    // switch that turned those off without saying so would read as the app
+                    // falling apart. Every feature moved onto the local path comes off this
+                    // list, and this list is the reason the line above stays honest.
                     description: lang == .vi
-                        ? "Hiện chỉ chat chạy trên gói của bạn. Bật cái này thì lộ trình, nhiệm vụ, quyết định và brief sẽ ngừng hoạt động — chúng chưa có đường local. Dùng để kiểm tra, chưa dùng hằng ngày."
-                        : "Only chat runs on your plan so far. Turn this on and roadmap, tasks, decisions and briefs stop working — they have no local path yet. For checking, not for daily use."
+                        ? "Toàn bộ phần công ty đã chạy được trên gói của bạn. Bật cái này thì phần học cũ — tóm tắt phiên, chat phiên, tips, từ điển — sẽ ngừng hoạt động, vì chúng chưa có đường local."
+                        : "The whole company layer now runs on your plan. Turn this on and the older learning features — session summaries, session chat, tips and the dictionary — stop working: they have no local path yet."
                 ) {
                     Toggle("", isOn: Binding(
                         get: { neverUseApiKey },

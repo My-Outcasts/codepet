@@ -54,6 +54,40 @@ The feature that convenes departments to argue a decision. Backend in `functions
 - **The ~$0.20 figure predates the effort change.** The position and negotiation phases now run at `POSITION_EFFORT` (`medium`) instead of the API default (`high`), which cuts thinking tokens on the two phases that fan out. Nobody has re-measured since; treat $0.20 as an upper bound until someone does
 - Test procedure and every measured number: `docs/superpowers/virtual-company-test-runbook.md`. Read it before re-measuring anything
 
+## Running on the founder's Claude plan, not the API key
+
+The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function
+declaring `ANTHROPIC_API_KEY` answers 401 at runtime. The company layer now has a local path
+for each of them; the older learning layer does not.
+
+- **`CloudAIBlock.blockedPaths` (`codepet/Services/CloudAIBlock.swift`) is the checklist** of
+  every endpoint that spends the key. Derive from it, not from memory of which features feel
+  AI-ish
+- **`ClaudeCodeAuthorisation` is the one switch.** Keyed per company id. It means "Codepet may
+  spend my Claude plan" — not "for chat". Every transport reads it, and nothing falls back to
+  the Cloud Function when the local path is unavailable: that would spend the key the grant
+  exists to stop spending
+- Three bundles, built by `scripts/build-sidecar.sh` into `codepet/Resources/` (gitignored) —
+  `chatSidecar.js` (streaming chat with MCP tools), `oneShotSidecar.js` (`enrichBrief`,
+  `synthesizeBrief`, `generateRoadmap`, `runTask`, `extractDecisions`), `vcSidecar.js` (the
+  department room). **Run that script after any change under `functions/src/`, and before
+  archiving** — without it the routers report `localUnavailable` and the founder is told the
+  runner is missing
+- **Prompts are never re-implemented for the local path.** Every op imports the same builder
+  the HTTP handler calls and renders the same forced tool's `input_schema`. Where a builder
+  lived in a handler it was split into a `*Core.ts` — esbuild inlines the whole import graph,
+  and reaching a builder through a handler shipped the Anthropic SDK, express and
+  firebase-admin (measured: 7.5 MB of app resource for a prompt and a merge)
+- `claude -p` cannot force a tool call, so the schema is asked for in prose and the reply
+  parsed (`extractJson`). Every op validates or coerces what it got — that coercion IS the
+  safety story on this transport
+- Build (`startBuild`) sends a granted founder with a linked folder to `ClaudeCodeRunner`
+  instead of the cloud coding agent. A grant is not a folder: without one it still goes cloud,
+  because the local run would land in `.noProject`
+- Still on the key, deliberately: the learning layer — `summarizeTurn`, `summarizeSession`,
+  `chatSession`, `generateGuidance`, `generatePlan`, `distillReference`, `generateDictionary`.
+  The Settings panel names them as what breaks when "never use Codepet's API key" is on
+
 ## Landmines
 
 Each of these cost real time to learn.
@@ -151,6 +185,8 @@ This section is the one most likely to go stale. Treat it as a pointer, not a fa
 - The Virtual Company shipped and is deployed; its remaining items are product decisions, listed at the end of `docs/superpowers/specs/2026-08-03-virtual-company-in-chat-design.md`
 - Known and deliberately unfixed: five brief fields (`goal`, `traction`, `problem`, `runway`, `constraints`) are collected by interviews and displayed nowhere; `detectConflicts` reports a false `BLOCKER` when two departments block the same way; `dept-product` has placeholder art so Product is kept off the roster
 - The older game layer (kingdoms, lessons, hearts, coins) is compiled but not being developed
+- The company layer runs on the founder's own Claude Code when they grant it — see the section
+  above. The learning layer's seven endpoints are the only ones left on the API key
 
 # Working agreements
 

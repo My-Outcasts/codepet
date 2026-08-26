@@ -32,42 +32,62 @@ enum DepartmentTopics {
     static let map: [String: Vocabulary] = [
         "eng": Vocabulary(en: [
             "api", "backend", "frontend", "database", "schema", "endpoint", "refactor",
-            "bug", "crash", "stacktrace", "deploy", "server", "repo", "codebase",
+            "bug", "stacktrace", "deploy", "server", "repo", "codebase",
             "migration", "latency", "caching", "authentication", "test suite", "pull request",
+            // Symptom language. A founder reports a fault before they name a subsystem.
+            // NOT bare "crash" — it is also the Engineering pet's NAME, so "crash is my
+            // favourite pet" routed to Engineering. Verb forms keep every fault report.
+            "crashes", "crashed", "crashing",
+            "error", "exception", "timeout", "postgres", "sqlite",
+            "load time", "throwing a 500", "stack trace",
         ], vi: []),
         "design": Vocabulary(en: [
             "layout", "typography", "font", "colour", "color", "palette", "spacing",
             "wireframe", "mockup", "icon", "logo", "branding", "visual", "screen",
             "contrast", "accessibility", "empty state", "first run", "onboarding flow",
+            // How a founder describes a design problem: by how it feels to use.
+            "cluttered", "usability", "navigation", "look and feel", "visual identity",
         ], vi: []),
         "mkt": Vocabulary(en: [
             "launch", "campaign", "seo", "blog", "social", "newsletter", "audience",
             "positioning", "messaging", "brand", "press", "announcement", "growth",
             "landing page", "waitlist", "content calendar", "product hunt",
+            "tagline", "awareness", "distribution", "first users", "one liner",
         ], vi: []),
         "sales": Vocabulary(en: [
-            "lead", "leads", "prospect", "outreach", "demo", "deal", "quota", "discount",
+            "lead", "leads", "prospect", "outreach", "quota", "discount",
             "conversion", "upsell", "cold email", "sales call", "free trial",
+            "pitch", "referral", "follow up", "paying customers", "first customers",
+            // NOT bare "demo"/"deal" — ordinary English ("a good deal", "let me demo it").
+            // Measured as false positives; the sales sense survives as phrases.
+            "book a demo", "demo call", "close the deal", "deal size",
         ], vi: []),
         "support": Vocabulary(en: [
             "ticket", "complaint", "refund", "faq", "escalation", "churn",
             "bug report", "help doc", "response time", "user question",
+            "complaining", "retention", "drop off", "same question", "come back",
         ], vi: []),
         "fin": Vocabulary(en: [
             "pricing", "price", "runway", "burn", "revenue", "mrr", "arr", "margin",
             "invoice", "invoicing", "budget", "forecast", "investor", "investors",
             "funding", "valuation", "subscription", "billing", "stripe",
             "cash flow", "burn rate", "unit economics",
+            // The verbs. A founder asks "what should I charge", never "what is my pricing".
+            "charge", "cost", "spend", "spending", "bootstrap", "raise money", "too much on",
         ], vi: []),
         "ops": Vocabulary(en: [
-            "automation", "workflow", "process", "vendor", "hiring", "integration",
+            "automation", "workflow", "vendor", "hiring", "integration",
             "infrastructure", "monitoring", "backup", "uptime", "incident",
             "standard operating procedure",
+            // Verb forms — "hiring" never matches "hire", and the plural rule only adds s/es.
+            "automate", "hire", "manually", "repetitive", "tooling",
+            "standardise", "standardize",
         ], vi: []),
         "legal": Vocabulary(en: [
             "terms", "privacy", "gdpr", "compliance", "contract", "licence", "license",
             "licensing", "trademark", "copyright", "liability", "incorporation", "nda",
             "terms of service", "privacy policy", "data protection",
+            "commercially", "commercial use", "incorporate", "register a company",
         ], vi: []),
     ]
 

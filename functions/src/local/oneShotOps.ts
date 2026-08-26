@@ -30,6 +30,13 @@ import {
   mergeEnrichment,
 } from "../enrichBriefCore";
 import {
+  ROADMAP_SYSTEM,
+  ROADMAP_TOOL,
+  RoadmapBrief,
+  buildRoadmapPrompt,
+  coerceRoadmap,
+} from "../generateRoadmapCore";
+import {
   OVERVIEW_TOOL,
   SynthesizeBriefPayload,
   buildSynthesizeUserMessage,
@@ -198,6 +205,37 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       // `mergeEnrichment` is what clips, drops blanks, and refuses to overwrite what the
       // founder typed. Calling it is what makes a sloppy local answer as safe as an API one.
       return { brief: mergeEnrichment(body.brief as CompanyBrief, parsed as BriefEnrichment) };
+    },
+  },
+
+  /**
+   * `generateRoadmap` — the board the founder sees the moment onboarding finishes.
+   *
+   * The cloud path pins Sonnet 5 at medium effort for cost; the local path passes whatever
+   * the founder chose in Settings (nothing, by default, which leaves the decision to their
+   * own Claude Code). That divergence is deliberate: pinning a model here would spend their
+   * plan on a tier they did not pick, and cost is not Codepet's problem on this transport.
+   *
+   * `coerceRoadmap` is what makes a loose answer safe — it drops unknown phases, unknown
+   * departments and dependencies that name nothing, exactly as it does for the API's forced
+   * tool. An empty `tasks` array is the fail-open the client already reads as "no change".
+   */
+  generateRoadmap: {
+    plan(body) {
+      const brief = body?.brief as RoadmapBrief | undefined;
+      if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
+        throw new OneShotBadRequest("brief required");
+      }
+      const language = body?.language === "vi" ? "vi" : "en";
+      return {
+        system: ROADMAP_SYSTEM,
+        prompt: buildRoadmapPrompt({ language, brief }),
+        schema: ROADMAP_TOOL.input_schema,
+      };
+    },
+    respond(body, parsed) {
+      const language = body?.language === "vi" ? "vi" : "en";
+      return coerceRoadmap(parsed, { language });
     },
   },
 

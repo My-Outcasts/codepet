@@ -9,6 +9,7 @@ import {
 import { claudeArgs, renderPrompt } from "../local/oneShotSidecar";
 import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBrief";
 import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBrief";
+import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
 
 /**
  * The local one-shot path: the non-streaming Cloud Functions running on the founder's own
@@ -251,5 +252,48 @@ describe("synthesizeBrief op", () => {
     const meta = { model: "m", nowISO: "t" };
     expect(() => op.respond(payload, { overview: "   " }, meta)).toThrow(OneShotUnusableAnswer);
     expect(() => op.respond(payload, {}, meta)).toThrow(OneShotUnusableAnswer);
+  });
+});
+
+describe("generateRoadmap op", () => {
+  const op = ONE_SHOT_OPS.generateRoadmap;
+  const brief = { projectName: "Codepet", oneLiner: "an app for founders" };
+
+  it("asks with the Cloud Function's own prompt and schema", () => {
+    const plan = op.plan({ language: "vi", brief });
+    expect(plan.prompt).toBe(buildRoadmapPrompt({ language: "vi", brief }));
+    expect(plan.schema).toBe(ROADMAP_TOOL.input_schema);
+  });
+
+  /** An unknown language must not reach the prompt builder as itself. */
+  it("narrows the language the way the handler does", () => {
+    expect(op.plan({ language: "fr", brief }).prompt)
+      .toBe(buildRoadmapPrompt({ language: "en", brief }));
+  });
+
+  it("refuses a payload with no brief", () => {
+    expect(() => op.plan({ language: "en" })).toThrow(OneShotBadRequest);
+    expect(() => op.plan({ language: "en", brief: [] })).toThrow(OneShotBadRequest);
+  });
+
+  /**
+   * `coerceRoadmap` is the whole safety story on this transport: the API forces a schema,
+   * `claude -p` cannot, so a loose answer has to be filtered rather than trusted. If this
+   * stops running, a made-up phase reaches the founder's board.
+   */
+  it("coerces the answer instead of trusting it", () => {
+    const out = op.respond({ language: "en", brief }, {
+      tasks: [
+        { phase: "build", title: "Ship the roadmap screen", detail: "d", who: "you", dept: "eng", deps: [] },
+        { phase: "not-a-phase", title: "Nonsense", detail: "d", who: "you", dept: "eng", deps: [] },
+      ],
+    }, { model: "m", nowISO: "t" }) as any;
+    expect(out.tasks.map((t: any) => t.title)).toEqual(["Ship the roadmap screen"]);
+  });
+
+  /** The client reads `[]` as "no change", so a junk answer must degrade to that. */
+  it("answers an empty task list rather than throwing", () => {
+    expect(op.respond({ language: "en", brief }, { tasks: "nope" }, { model: "m", nowISO: "t" }))
+      .toEqual({ tasks: [] });
   });
 });

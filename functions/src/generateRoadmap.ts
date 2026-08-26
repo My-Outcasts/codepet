@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { buildRoadmapPrompt, coerceRoadmap, RoadmapBrief } from "./generateRoadmapCore";
+import { ROADMAP_SYSTEM, ROADMAP_TOOL, buildRoadmapPrompt, coerceRoadmap, RoadmapBrief } from "./generateRoadmapCore";
 
 // Quality surface / credit driver — same tier as runTask (see spec).
 // Sonnet 5 rather than Opus 4.8 for the same reason runTask moved: forced
@@ -16,41 +16,6 @@ const ROADMAP_EFFORT: Effort = "medium";
 // Was 3000, sized before thinking counted against the same budget. Headroom is
 // only billed if generated.
 const ROADMAP_MAX_TOKENS = 8000;
-
-const RECORD_TOOL = {
-  name: "record_roadmap",
-  description: "Record the generated phase/task/dependency roadmap.",
-  input_schema: {
-    type: "object",
-    properties: {
-      tasks: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            phase: { type: "string", description: "One of: find, foundation, build, ship, launch, grow." },
-            title: { type: "string" },
-            detail: { type: "string" },
-            who: { type: "string", description: "'you' | 'does' | 'draft'" },
-            dept: {
-              type: "string",
-              description: "The single owning department: one of eng, design, mkt, sales, support, fin, ops, legal.",
-            },
-            deps: {
-              type: "array",
-              items: { type: "string" },
-              description: "Exact titles of prerequisite tasks from this same list, empty if none.",
-            },
-          },
-          required: ["phase", "title", "who", "detail", "dept"],
-        },
-      },
-    },
-    required: ["tasks"],
-  },
-} as const;
-
-const SYSTEM = "You plan a solo founder's whole-company roadmap. You never invent details the founder did not give you.";
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -94,8 +59,8 @@ export async function handleGenerateRoadmap(req: Request, res: Response): Promis
       model: ROADMAP_MODEL,
       max_tokens: ROADMAP_MAX_TOKENS,
       output_config: { effort: ROADMAP_EFFORT },
-      system: SYSTEM,
-      tools: [RECORD_TOOL as any],
+      system: ROADMAP_SYSTEM,
+      tools: [ROADMAP_TOOL as any],
       tool_choice: { type: "tool", name: "record_roadmap" },
       messages: [{ role: "user", content: buildRoadmapPrompt({ language, brief }) }],
     });

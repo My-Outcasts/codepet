@@ -23,8 +23,14 @@ import XCTest
 @MainActor
 final class PetMenuIconTests: XCTestCase {
 
-    /// Every pet the roster can summon, per `DepartmentCompanions`.
-    private let pets = ["crash", "luna", "nova", "sage", "glitch"]
+    /// Every pet the roster can summon, per `DepartmentCompanions`. DERIVED, not copied:
+    /// this was a hardcoded list making the same claim, which recasting Engineering and
+    /// Finance would have left wrong by one with nothing to catch it.
+    private var pets: [String] {
+        Set(DepartmentCatalog.roster.compactMap {
+            DepartmentCompanions.companionId(for: $0.key)
+        }).sorted()
+    }
 
     func testEverySpriteReportsMenuIconSize() {
         for pet in pets {

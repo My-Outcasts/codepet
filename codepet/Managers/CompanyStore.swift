@@ -850,15 +850,13 @@ final class CompanyStore: ObservableObject {
         company.founderPrefs.memoryEnabled ? company.decisions : []
     }
 
-    /// The specialist companion to bring in for this turn, if a department is in
-    /// focus — from the explicit chip, else a department named in the text. Returns
-    /// nil when no department applies, it has no mapped companion, or it maps to the
-    /// current host companion (no visible handoff needed).
+    /// The pet to bring in for this turn, if a department is in focus — from the explicit
+    /// chip, else a department named in the text. Returns nil when no department applies or
+    /// it has no mapped pet.
     private func actingSpecialist(text: String, department: Department?) -> (companionId: String, deptName: String)? {
         guard let deptKey = actingDeptKey(text: text, department: department),
               let dept = DepartmentCatalog.find(deptKey),
-              let companionId = DepartmentCompanions.specialistId(for: deptKey,
-                                                                  host: company.companionId)
+              let companionId = DepartmentCompanions.companionId(for: deptKey)
         else { return nil }
         return (companionId, dept.name)
     }
@@ -867,12 +865,13 @@ final class CompanyStore: ObservableObject {
     /// founder addressed in the text. Split out of `actingSpecialist` because the two
     /// questions had been fused, and the fusion cost the answer.
     ///
-    /// `actingSpecialist` returns nil in two very different situations: no department applies
-    /// at all, and a department applies but its pet happens to BE the founder's own companion
-    /// (nothing to announce). Reading the department off that nil meant a founder whose
-    /// companion is Nova asked Marketing a question and the model was told nothing about
-    /// marketing — the one founder for whom the handoff is invisible was also the one whose
-    /// answer got no expertise. Who speaks and what they know are now resolved separately.
+    /// `actingSpecialist` and this used to be one function, and the fusion cost the answer: a
+    /// founder whose companion was Nova asked Marketing a question and the model was told
+    /// nothing about marketing, because the department was read off a nil that meant "no
+    /// handoff to announce" rather than "no department". The host rule that produced that nil
+    /// is gone as of 26 Aug, but who speaks and what they know stay separately resolved — the
+    /// wire fields are separate too (`companion_id` vs `dept_key`), and re-fusing them would
+    /// reintroduce the same class of bug the next time a department has no pet. Product is one.
     private func actingDeptKey(text: String, department: Department?) -> String? {
         department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
     }
@@ -1891,15 +1890,16 @@ final class CompanyStore: ObservableObject {
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
-    /// The specialist for a task's owning department, if it maps to a companion
-    /// other than the host — used to attribute the run's producing row + draft.
-    /// The pet that runs this task, and the department it runs for.
+    /// The pet that runs this task, and the department it runs for — used to attribute
+    /// the run's producing row + draft.
     ///
-    /// No "not if it is also the host" guard any more. That guard belongs to CHAT handoff, where
-    /// announcing a handoff to yourself is meaningless — but it was also stripping the department
-    /// character off RUNS: with Glitch as the founder's companion, every ops and legal task ran
-    /// with no pet at all, because Glitch is this map's ops/legal specialist. A run is always
-    /// performed BY a department, so it always shows that department's character.
+    /// No "not if it is also the host" guard here — there never was one. A run is always
+    /// performed BY a department, so it always shows that department's character: with Glitch
+    /// as the founder's companion, every ops and legal task still ran with Glitch's face, never
+    /// with no pet at all. Chat used to be the odd one out, suppressing exactly that case with
+    /// a guard of its own — the host-shadow rule, deleted 26 Aug. Now nothing suppresses it
+    /// anywhere, and there is no longer an asymmetry between chat and runs for this comment to
+    /// explain.
     private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
         guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
               let companionId = DepartmentCompanions.companionId(for: deptKey) else { return nil }

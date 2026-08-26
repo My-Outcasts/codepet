@@ -29,7 +29,6 @@ struct DepartmentRoster: View {
     let onPick: (Department) -> Void
 
     @Environment(\.uiLanguage) private var lang
-    @EnvironmentObject private var companyStore: CompanyStore
 
     /// The prototype's `.roster` caps at 460px so eight chips wrap into a block
     /// rather than a single wide line. Three to a row at this width.
@@ -59,14 +58,12 @@ struct DepartmentRoster: View {
     ///
     /// The pet's name leads because that is what the reply will be signed with —
     /// `CopilotChatView.headerName` renders "Nova · Marketing" — so the chip and the
-    /// answer read in the same order. Four pets cover eight departments (nova takes
-    /// Marketing and Sales, sage Finance and Support, glitch Operations and Legal),
-    /// which is a fact about the cast worth showing rather than hiding: the repeat
-    /// is the point, not a bug.
+    /// answer read in the same order. Six pets cover eight departments (nova takes
+    /// Marketing and Sales, glitch Operations and Legal), which is a fact about the
+    /// cast worth showing rather than hiding: the repeat is the point, not a bug.
     private func chip(_ dep: Department) -> some View {
         let on = selected?.key == dep.key
-        let pet = DepartmentCompanions.specialistId(for: dep.key,
-                                                    host: companyStore.company.companionId)
+        let pet = DepartmentCompanions.companionId(for: dep.key)
         return Button {
             onPick(dep)
         } label: {
@@ -74,7 +71,7 @@ struct DepartmentRoster: View {
                 if let pet {
                     CharacterImage(pet, size: 16)
                 } else {
-                    // No mapped companion — the host answers. Show the orb rather
+                    // No mapped pet — Codepet answers. Show the orb rather
                     // than a gap, so the chip never promises a pet that won't appear.
                     CompanionOrb(size: 14, glow: false)
                 }

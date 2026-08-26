@@ -120,9 +120,9 @@ Steps are **grounded** in the real request (brief fields, the department playboo
 ```
 ┌─ Nova · Marketing ·······  Working  0:04   2/4 ┐
 │  ✓ reading brief   ⟳ drafting   • …            │
-├─ Crash · Engineering ····  Working  0:04   1/4 ┤
+├─ Byte · Engineering ·····  Working  0:04   1/4 ┤
 │  ⟳ reading brief   • …                         │
-├─ Sage · Finance ·········  Done     0:06   4/4 ┤
+├─ Crash · Finance ········  Done     0:06   4/4 ┤
 └────────────────────────────────────────────────┘
 ```
 
@@ -172,7 +172,7 @@ pkill -x codepet
 open -n "<DerivedData>/Build/Products/Debug/codepet.app" --args -CODEPET_MOCK_CHAT YES
 ```
 
-In mock mode the app boots a populated cross-department roadmap. Try: `run landing` (Nova/Marketing), `run waitlist` (Crash/Engineering), `run pricing` (Sage/Finance); `+ → Run my next moves` for the parallel card; a Design/Engineering chip for the handoff; **New chat** for the empty hero.
+In mock mode the app boots a populated cross-department roadmap. Try: `run landing` (Nova/Marketing), `run waitlist` (Byte/Engineering), `run pricing` (Crash/Finance); `+ → Run my next moves` for the parallel card; a Design/Engineering chip for the handoff; **New chat** for the empty hero.
 
 ---
 

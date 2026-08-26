@@ -8,8 +8,9 @@ import Foundation
 /// exactly that reason — `actingSpecialist` → `actingDeptKey`, whose comment says the fusion
 /// "cost the answer". *Who speaks*, *what they know*, and *how sure we are* are three
 /// questions. This file owns the third and only the third: it returns a department key and
-/// never resolves a pet. `DepartmentCompanions.specialistId(for:host:)` still decides whether
-/// there is a handoff to show, which is why `host` is not a parameter here.
+/// never resolves a pet. `DepartmentCompanions.companionId(for:)` resolves the pet, and takes no
+/// host — the host rule was deleted on 26 Aug, so there is no longer a second question for a
+/// `host` parameter to answer.
 ///
 /// **Tier order is the safety model.** Tier 1 is `mentionedDeptKey`, unchanged and first, so
 /// every message that routes today routes identically. The new tiers can only produce an

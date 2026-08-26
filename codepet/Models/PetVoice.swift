@@ -52,8 +52,9 @@ enum PetVoice {
             // reads as playful. Not Bahh/Boing/Jester, which are sound effects.
             return VoiceProfile(preferredVoices: ["Junior", "Kathy", "Samantha"], rate: 0.58, pitch: 1.15)
         default:
-            // byte, the host — heard most often, so the most listenable. Also the
-            // fallback for an unknown pet: the overlay must never be voiceless.
+            // Byte, and the fallback for an unknown pet: the overlay must never be
+            // voiceless. Byte speaks for Engineering, the most-heard department, so the
+            // most listenable voice belongs here either way.
             return VoiceProfile(preferredVoices: ["Samantha"], rate: 0.50, pitch: 1.00)
         }
     }

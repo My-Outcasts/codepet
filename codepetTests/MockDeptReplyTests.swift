@@ -4,7 +4,7 @@ import XCTest
 #if DEBUG
 /// Prototype mode routes a turn to a department and stamps that department's pet on the
 /// reply bubble (`CompanyStore.actingSpecialist`). Until this branch existed, the header
-/// read "sage · Finance" while the words underneath were byte's generic three-moves copy —
+/// read "nova · Marketing" while the words underneath were byte's generic three-moves copy —
 /// the right pet arriving and then not sounding like one, in the demo whose entire claim is
 /// that the right pet showed up.
 ///
@@ -95,9 +95,16 @@ final class MockDeptReplyTests: XCTestCase {
         XCTAssertEqual(seen.count, 8, "expected 8 distinct department replies, got \(seen.count)")
     }
 
-    /// Sales and Marketing are both cast to nova, and Finance and Support both to sage. The
-    /// reply is keyed off the DEPARTMENT, not off the pet, so the pair must still differ —
+    /// Marketing and Sales are both cast to nova, and Operations and Legal both to glitch. The
+    /// reply is keyed off the DEPARTMENT, not off the pet, so each pair must still differ —
     /// this is the assertion that would catch a `switch` written over `companionId`.
+    ///
+    /// Finance and Support used to be the second pair, both cast to sage. The 26 Aug recast
+    /// gave Finance to crash, so that pair stopped sharing a pet and the case quietly stopped
+    /// testing anything — it still passed, on two departments that no longer collide. Operations
+    /// and Legal replace it because they genuinely share glitch. Finance/Support stays as a
+    /// third case: it costs one comparison and it is the regression that would fire first if
+    /// the cast moved back.
     ///
     /// DELETE THE BRANCH AND THIS GOES RED (both sides become the generic reply and compare equal).
     func testDepartmentsSharingOnePetStillAnswerDifferently() async throws {
@@ -105,9 +112,13 @@ final class MockDeptReplyTests: XCTestCase {
         let sales = try await text(neutral, dept: "sales")
         XCTAssertNotEqual(mkt, sales, "nova answers Marketing and Sales identically")
 
+        let ops = try await text(neutral, dept: "ops")
+        let legal = try await text(neutral, dept: "legal")
+        XCTAssertNotEqual(ops, legal, "glitch answers Operations and Legal identically")
+
         let fin = try await text(neutral, dept: "fin")
         let support = try await text(neutral, dept: "support")
-        XCTAssertNotEqual(fin, support, "sage answers Finance and Support identically")
+        XCTAssertNotEqual(fin, support, "Finance and Support answer identically")
     }
 
     // MARK: - What must NOT change

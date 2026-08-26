@@ -3,19 +3,41 @@ import XCTest
 
 final class DepartmentCompanionsTests: XCTestCase {
     /// The composer's chip and the send that follows it read the same rule, so what the chip
-    /// shows and what signs the reply cannot disagree.
-    func testSpecialistIdDeclinesTheHostAndTheUnmapped() {
-        // Cast to someone other than the founder's companion — the visible handoff.
-        XCTAssertEqual(DepartmentCompanions.specialistId(for: "mkt", host: "byte"), "nova")
-        // The founder whose OWN companion is Nova gets no handoff on Marketing: announcing a
-        // handoff to yourself says nothing, and a chip showing Nova would promise one.
-        XCTAssertNil(DepartmentCompanions.specialistId(for: "mkt", host: "nova"))
+    /// shows and what signs the reply cannot disagree. One unconditional resolver is what
+    /// guarantees it: with no `host` parameter there is no input on which they could differ.
+    ///
+    /// The deleted `specialistId(for:host:)` returned nil here whenever `host == "nova"`, so the
+    /// founder whose own companion was Nova got no attribution on Marketing. That is the
+    /// behaviour change, and it gets no assertion of its own because it can no longer be
+    /// expressed: there is no second input to vary. Nothing in Swift can assert that a deleted
+    /// symbol stays deleted, so the guard against the rule returning is the doc comment on
+    /// `DepartmentCompanions` and this test's name, not an assertion.
+    func testCompanionIdIsUnconditional() {
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "mkt"), "nova")
         // Product is in the catalog to resolve a Virtual Company wire key; it has no pet.
-        XCTAssertNil(DepartmentCompanions.specialistId(for: "product", host: "byte"))
+        XCTAssertNil(DepartmentCompanions.companionId(for: "product"))
     }
 
+    /// Byte takes Engineering — the department whose subject is the product being built,
+    /// and the one whose founder-facing traffic is heaviest. This is the assertion that
+    /// fails if a host rule is ever reintroduced: byte is also every founder's default
+    /// companion, so a host rule would resolve this to nil for essentially everybody.
     func testCompanionIdForEng() {
-        XCTAssertEqual(DepartmentCompanions.companionId(for: "eng"), "crash")
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "eng"), "byte")
+    }
+
+    /// Crash takes Finance, which frees Sage to speak for Support alone.
+    func testCompanionIdForFin() {
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "fin"), "crash")
+    }
+
+    /// Sage no longer doubles up. Nova (Marketing + Sales) and Glitch (Operations + Legal)
+    /// still do, and that is the design.
+    func testSageSpeaksForSupportAlone() {
+        let sages = DepartmentCatalog.roster
+            .filter { DepartmentCompanions.companionId(for: $0.key) == "sage" }
+            .map(\.key)
+        XCTAssertEqual(sages, ["support"])
     }
 
     func testCompanionIdForByte() {

@@ -348,7 +348,6 @@ struct ChatComposer: View {
     /// `Menu` its whole label as one target — hence an `HStack` of two controls
     /// sharing one background rather than a `Menu` with an overlay.
     private var departmentControl: some View {
-        let host = companyStore.company.companionId
         let armed = selectedDept
         // A guess only renders when the founder has not chosen. `shown` drives the label, the
         // sprite and the ✕; `armed` alone drives the SOLID treatment, so a suggestion and a
@@ -384,7 +383,7 @@ struct ChatComposer: View {
                 }
                 Divider()
                 ForEach(DepartmentMenu.rosterOrder) { dep in
-                    Button { selectedDept = dep } label: { deptRow(dep, host: host, current: shown) }
+                    Button { selectedDept = dep } label: { deptRow(dep, current: shown) }
                 }
             } label: {
                 HStack(spacing: 5) {
@@ -396,11 +395,11 @@ struct ChatComposer: View {
                     // chips above use CharacterImage and are fine: they are plain
                     // Buttons, not Menu labels.
                     if let dep = shown,
-                       let pet = DepartmentMenu.pet(for: dep, host: host),
+                       let pet = DepartmentMenu.pet(for: dep),
                        let sprite = PetMenuIcon.image(pet) {
                         sprite
                     }
-                    Text(shown.map { DepartmentMenu.armedLabel($0, host: host) }
+                    Text(shown.map { DepartmentMenu.armedLabel($0) }
                          ?? DepartmentMenu.restLabel(lang))
                         .font(CodepetTheme.inter(12, weight: .semibold))
                         // Same string as a pick, dimmed. Accepting a suggestion must change
@@ -470,14 +469,14 @@ struct ChatComposer: View {
             suggestedDept.map { dep in
                 DepartmentSuggestionLabel.help(tier: s.tier,
                                                matched: s.matched,
-                                               pet: DepartmentMenu.pet(for: dep, host: host),
+                                               pet: DepartmentMenu.pet(for: dep),
                                                department: dep, lang: lang)
             }
         } ?? "")
     }
 
     /// One menu row: checkmark when armed, else the pet's sprite, then
-    /// `crash · Engineering`.
+    /// `Nova · Marketing`.
     ///
     /// **The risk in spec §4 landed, and this is the fix.** `Image("char-crash")` in
     /// a menu icon slot renders the asset at its NATIVE pixel size — on screen the
@@ -492,16 +491,16 @@ struct ChatComposer: View {
     /// handling.
     /// `current` is the EFFECTIVE department — a pick, or the guess standing in for one — not
     /// `selectedDept`. Reading the selection here would open the menu over a suggested chip
-    /// saying "Anyone — byte routes it" while the chip beside it names a pet. Picking the
+    /// saying "Anyone — Codepet routes it" while the chip beside it names a pet. Picking the
     /// already-checked suggested row is a normal pick: it writes `selectedDept`, which promotes
     /// the guess to a choice.
-    @ViewBuilder private func deptRow(_ dep: Department, host: String,
+    @ViewBuilder private func deptRow(_ dep: Department,
                                       current: Department?) -> some View {
         let on = current?.key == dep.key
-        let title = DepartmentMenu.rowTitle(dep, host: host)
+        let title = DepartmentMenu.rowTitle(dep)
         if on {
             Label(title, systemImage: "checkmark")
-        } else if let pet = DepartmentMenu.pet(for: dep, host: host),
+        } else if let pet = DepartmentMenu.pet(for: dep),
                   let sprite = PetMenuIcon.image(pet) {
             Label { Text(title) } icon: { sprite }
         } else {

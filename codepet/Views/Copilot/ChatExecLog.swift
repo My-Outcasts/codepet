@@ -17,14 +17,10 @@ struct ExecLogRow: View {
     let taskTitle: String
     let deptName: String?
     let steps: [ExecStep]
-    /// The specialist working (department handoff); nil → the global/host companion.
+    /// The specialist working (department handoff); nil → the product itself.
     var companionId: String? = nil
 
-    @EnvironmentObject private var companyStore: CompanyStore
-
-    private var resolvedId: String { companionId ?? companyStore.company.companionId }
-    private var persona: PetCharacter? { PetCharacter.all[resolvedId] }
-    private var name: String { persona?.name ?? "Codepet" }
+    private var name: String { CodepetBrand.speakerName(companionId: companionId) }
     // Same rule as AgentRun.currentStepIndex: the first not-yet-done step.
     private var currentStepIndex: Int? { steps.firstIndex { !$0.done } }
     // The web's producing card uses the brand violet throughout (kicker, checks,

@@ -1351,10 +1351,6 @@ struct CopilotBubble: View {
     @State private var interviewDraft = ""
     private var isMe: Bool { message.role == .me }
 
-    private var companionName: String {
-        PetCharacter.all[companyStore.company.companionId]?.name ?? "Codepet"
-    }
-
     private var companionAccent: Color {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
@@ -2177,7 +2173,7 @@ struct CopilotBubble: View {
     /// the specialist who did the work (`headerName` carries "Nova · Marketing", so just the
     /// name here), matching the web's "What Nova did".
     private func whatItDid(_ steps: [ExecStep]) -> some View {
-        let who = PetCharacter.all[message.companionId ?? companyStore.company.companionId]?.name ?? "Codepet"
+        let who = CodepetBrand.speakerName(companionId: message.companionId)
         return VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { showSteps.toggle() } } label: {
                 HStack(spacing: 5) {

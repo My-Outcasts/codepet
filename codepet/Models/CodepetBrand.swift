@@ -1,6 +1,6 @@
 import Foundation
 
-/// The product's name, in one place.
+/// The product's name and who is speaking when no pet does.
 ///
 /// The founder talks to **Codepet**. The pets — byte, nova, crash, luna, sage, glitch, null —
 /// are department characters that appear when one of them does a department's work. Every

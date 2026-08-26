@@ -28,8 +28,8 @@ import XCTest
 final class DepartmentLexiconTrapTests: XCTestCase {
 
     private func assertStaysWithTheHost(_ message: String,
-                                    _ why: String,
-                                    file: StaticString = #filePath, line: UInt = #line) {
+                                         _ why: String,
+                                         file: StaticString = #filePath, line: UInt = #line) {
         let s = DepartmentRouter.suggest(text: message, tasks: [], lastActed: nil, language: .en)
         XCTAssertNil(s, "\(why) — \"\(message)\" routed to \(s?.deptKey ?? "-") on \"\(s?.matched ?? "-")\"",
                      file: file, line: line)

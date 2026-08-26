@@ -133,7 +133,7 @@ struct AgentsWorkingRow: View {
                  steps: [ExecStep(label: "Read webhook handler", done: true),
                          ExecStep(label: "Add retry + backoff", done: true)],
                  status: .reviewing, startedAt: now.addingTimeInterval(-210)),
-        AgentRun(companionId: "sage", deptName: "Product",
+        AgentRun(companionId: "nova", deptName: "Marketing",
                  taskTitle: "Draft the W1 roadmap update",
                  steps: [ExecStep(label: "Summarize shipped items", done: true)],
                  status: .done, startedAt: now.addingTimeInterval(-300)),

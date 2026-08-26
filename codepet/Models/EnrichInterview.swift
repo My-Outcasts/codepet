@@ -10,7 +10,7 @@ enum InterviewGap: String, CaseIterable, Equatable {
     case runway, constraints
 }
 
-/// byte's question for a gap plus the one-line reason it's asking (so it reads
+/// Codepet's question for a gap plus the one-line reason it's asking (so it reads
 /// like a companion, not a form).
 struct InterviewQuestion: Equatable {
     let ask: String
@@ -25,7 +25,7 @@ enum EnrichInterview {
     /// numbers), then problem (sharpens positioning). `detectGaps` preserves it.
     static let gapOrder: [InterviewGap] = [.goal, .traction, .problem]
 
-    /// The most gaps byte asks about in one interview — keep it short.
+    /// The most gaps Codepet asks about in one interview — keep it short.
     static let maxQuestions = 3
 
     private static func filled(_ v: String?) -> Bool {

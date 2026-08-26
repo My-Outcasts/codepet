@@ -2,6 +2,9 @@
 
 **Date:** 2026-08-26
 **Status:** approved, not implemented
+**Amended:** 2026-08-26 — §5 originally listed three blast-radius sites. Reading `DepartmentMenu`
+while writing the plan found a fourth, and it is the only *user-facing string* in the set:
+`anyoneLabel` renders "Anyone — byte routes it". Marked **[A1]** below.
 **Surface:** `codepet/Models/DepartmentCompanions.swift`, `codepet/Models/Character.swift`,
 `codepet/Managers/CompanyStore.swift`, `codepet/Views/Copilot/DepartmentRoster.swift`,
 `codepet/Views/Copilot/ChatComposer.swift`, `codepet/Views/Copilot/ChatEmptyState.swift`,
@@ -142,9 +145,31 @@ the same change. Each becomes `CodepetBrand.name` unconditionally:
   run carries no specialist. A hostless run is the product's own work, so it reads "Codepet".
 - `SecondBrainData.swift:55` — `companionName`.
 
+**[A1] `DepartmentMenu.swift:50` — `anyoneLabel`, and this one is worse than the other three.**
+It is not a name resolved from data; it is a hardcoded user-facing string naming the host in
+prose: `"Anyone — byte routes it"` (vi: `"Ai cũng được — byte tự chọn"`). It is the composer
+menu's "no department" row. After this change "byte" names Engineering's pet, so the row would
+tell the founder that the Engineering character routes everything — the opposite of what it
+means. It becomes `"Anyone — Codepet routes it"` / `"Ai cũng được — Codepet tự chọn"`.
+
+The adjacent `anyoneDetail` already reads *"Let Codepet pick who answers"* — so these two lines
+about the same control already disagree today, and this change is what makes the disagreement
+visible. (`anyoneDetail` has no callers; it is left alone rather than deleted, since removing it
+is unrelated to this work.)
+
 Not affected: `ChatExecLog.swift:27` and `AgentsWorkingRow.swift:44` read `persona?.name`, where
 `persona` is the specialist. Their `?? "Codepet"` fallback is already the host case and is
 already right.
+
+Also not affected, verified rather than assumed: the voice recognizer's `contextualStrings`
+(`CopilotChatView.swift:570`, `:652`) is
+`DepartmentCatalog.roster.map(\.name) + PetCharacter.all.values.map(\.name) + ["Codepet"]`.
+The rename swaps `"Codepet"` for `"Byte"` inside the pet names, but `"Codepet"` is appended
+explicitly, so the recognizer still receives both words. No change needed.
+
+`PetVoice.profile` keeps byte on the `default` branch, which is also the unknown-pet fallback, so
+Byte's speaking voice is unchanged. Only its comment ("byte, the host") goes stale and is
+corrected.
 
 **Dead code removed in passing:** `CopilotChatView.swift:1203` `companionName` has no readers —
 only the adjacent `companionAccent` is used. It is one of the sites that would silently flip to

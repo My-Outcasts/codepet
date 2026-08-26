@@ -52,9 +52,12 @@ final class DepartmentSpecialistReachesModelTests: XCTestCase {
     }
 
     /// The case that forced `deptKey` to be its own field rather than being read off the
-    /// handoff. Nova IS this founder's companion, so there is no handoff to announce — and
-    /// under the old shape that silently meant no marketing expertise either. The founder who
-    /// chose Nova was the one founder whose marketing questions got answered by a generalist.
+    /// handoff. Nova IS this founder's companion, and the reply signs as Nova anyway — there
+    /// is no host-shadow rule any more to suppress it. "Nova · Marketing" says something a
+    /// bare "Nova" does not, and the department is the new information in that header: the
+    /// old shape hid it from exactly the founder who had chosen Nova. `deptKey` and
+    /// `companionId` are still read off two separate fields regardless of who the founder's
+    /// own companion is — that half of the original point survives unchanged.
     func testTheDepartmentIsSentEvenWhenItsPetIsAlreadyTheHost() async {
         var sent: CompanyChatRequest?
         let s = store(host: "nova", capture: { sent = $0 })
@@ -62,8 +65,8 @@ final class DepartmentSpecialistReachesModelTests: XCTestCase {
         await s.sendChat("draft a launch tweet", language: .en, department: marketing)
         XCTAssertEqual(sent?.deptKey, "mkt", "a marketing question is a marketing question")
         XCTAssertEqual(sent?.companionId, "nova")
-        XCTAssertNil(s.chatMessages.last?.companionId,
-                     "and still no visible handoff — announcing a handoff to yourself says nothing")
+        XCTAssertEqual(s.chatMessages.last?.companionId, "nova",
+                       "the reply signs as Nova even though Nova is also this founder's own companion")
     }
 
     /// An ordinary turn is unchanged: the host speaks and no department rides along, so the

@@ -1,9 +1,23 @@
 import Foundation
 
-/// Maps each business department to a specialist companion persona. `byte` is the
-/// host/generalist and is intentionally NOT assigned to any department, so it can
-/// hand off to a specialist. Casting is by domain fit (see PetCharacter.domain)
-/// and is freely editable — the handoff mechanic doesn't depend on the exact cast.
+/// Maps each business department to the pet that speaks for it. Casting is by domain fit
+/// (see PetCharacter.domain) and is freely editable — nothing depends on the exact cast.
+///
+/// **There is no host entry, and no host rule.** Codepet is the host: a general turn carries
+/// no `companionId` and `CopilotChatView.headerName` signs it `CodepetBrand.name`. The pets are
+/// department characters and nothing else.
+///
+/// This map used to be read through `specialistId(for:host:)`, which returned nil whenever a
+/// department's pet WAS the founder's own companion — "announcing a handoff to yourself says
+/// nothing". That premise assumed the host signs replies with a pet's name. It does not, and
+/// never did. What the rule actually did was hide attribution from exactly one founder per
+/// department, and once `byte` took Engineering — with every founder's companion defaulting to
+/// `byte` since the onboarding picker was removed on 14 Aug — it would have hidden Engineering's
+/// pet from everybody.
+///
+/// The invariant it was written to protect survives without it, more strongly: a chip promising
+/// a pet that the send then declines to hand off to is a lie the founder can see in one tap, and
+/// with one unconditional resolver the chip and the send have no input on which they can differ.
 enum DepartmentCompanions {
     /// deptKey (DepartmentCatalog) → companionId (PetCharacter).
     static let map: [String: String] = [
@@ -18,23 +32,6 @@ enum DepartmentCompanions {
     ]
 
     static func companionId(for deptKey: String) -> String? { map[deptKey] }
-
-    /// The pet that visibly takes over a chat turn for `deptKey`, or nil when the turn stays
-    /// with the host — an unmapped department, or one cast to the founder's OWN companion, where
-    /// announcing a handoff to yourself says nothing.
-    ///
-    /// One home for that rule because two surfaces now state it: `CompanyStore.actingSpecialist`
-    /// decides who signs the reply, and the composer's department chip shows who is about to be
-    /// summoned. A chip promising a pet that the send then declines to hand off to is a lie the
-    /// founder can see in one tap, and the second condition is exactly the one a second copy
-    /// would forget — a founder whose companion is Nova gets no handoff on Marketing or Sales.
-    ///
-    /// NOT used by runs: `taskSpecialist` deliberately keeps the host case, because a run is
-    /// performed BY a department and always shows that department's character (see its comment).
-    static func specialistId(for deptKey: String, host: String) -> String? {
-        guard let id = companionId(for: deptKey), id != host else { return nil }
-        return id
-    }
 
     /// The first department whose NAME appears in `text` (case-insensitive) AND has a
     /// companion to bring in, so a free-text mention ("help me with marketing") gets the

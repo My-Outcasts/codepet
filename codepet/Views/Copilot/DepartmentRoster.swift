@@ -65,8 +65,7 @@ struct DepartmentRoster: View {
     /// is the point, not a bug.
     private func chip(_ dep: Department) -> some View {
         let on = selected?.key == dep.key
-        let pet = DepartmentCompanions.specialistId(for: dep.key,
-                                                    host: companyStore.company.companionId)
+        let pet = DepartmentCompanions.companionId(for: dep.key)
         return Button {
             onPick(dep)
         } label: {
@@ -74,7 +73,7 @@ struct DepartmentRoster: View {
                 if let pet {
                     CharacterImage(pet, size: 16)
                 } else {
-                    // No mapped companion — the host answers. Show the orb rather
+                    // No mapped pet — Codepet answers. Show the orb rather
                     // than a gap, so the chip never promises a pet that won't appear.
                     CompanionOrb(size: 14, glow: false)
                 }

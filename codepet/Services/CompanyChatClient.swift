@@ -156,14 +156,13 @@ struct CompanyChatRequest: Codable {
     /// The department this turn belongs to (a `DepartmentCatalog` key), so the CF can put
     /// that department's real expertise in front of the model.
     ///
-    /// Deliberately SEPARATE from `companionId`, because the two answer different questions
-    /// and one of them used to answer neither. `companionId` is who speaks; this is what they
-    /// know. They come apart in the case that proves they are not the same field: when the
-    /// department's pet IS the founder's own companion, there is no visible handoff to
-    /// announce — `actingSpecialist` returns nil, and it should — but the marketing question
-    /// is still a marketing question and must still be answered with marketing expertise.
-    /// Keying the expertise off the handoff would have silently dropped it for exactly those
-    /// founders.
+    /// Deliberately SEPARATE from `companionId`, because the two answer different questions.
+    /// `companionId` is who speaks; this is what they know. They come apart in the case that
+    /// proves they are not the same field: Product is in the catalog to resolve the Virtual
+    /// Company's `department_key`, but has no pet, so `companionId` resolves to nothing for
+    /// it — while the department is still real and still needs its own expertise in front of
+    /// the model. Keying the expertise off the companion would have silently dropped it for
+    /// exactly that department.
     ///
     /// nil when no department is in focus, which omits `dept_key` from the JSON entirely
     /// (Optional + synthesised `encodeIfPresent`) — an ordinary chat turn costs nothing.

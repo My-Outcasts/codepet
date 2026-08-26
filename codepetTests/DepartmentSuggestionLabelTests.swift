@@ -106,7 +106,7 @@ final class DepartmentSuggestionLabelTests: XCTestCase {
     func testWhoMatchesTheChipLabel() {
         let s = DepartmentSuggestionLabel.help(tier: .carryOver, matched: nil,
                                                pet: "luna", department: design, lang: .en)
-        XCTAssertTrue(s.contains(DepartmentMenu.rowTitle(design, host: "byte")), s)
+        XCTAssertTrue(s.contains(DepartmentMenu.rowTitle(design)), s)
     }
 
     /// The `✕`'s tooltip has to say something different when it is dismissing a GUESS than

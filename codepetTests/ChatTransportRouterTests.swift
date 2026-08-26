@@ -77,6 +77,55 @@ final class ChatTransportRouterTests: XCTestCase {
         XCTAssertEqual(transport(companyId: "c1", sidecar: false), .cloud)
     }
 
+    // MARK: - The non-streaming retry
+
+    /// The store retries a turn without streaming when no `.done` frame arrived. That retry
+    /// used to be wired straight to the Cloud Function, so a granted founder whose local
+    /// stream died was answered by the API key they had just said not to spend — the failure
+    /// this router exists to prevent, one layer below where it was looking. These cover the
+    /// fold the local retry uses; the routing itself is the same `transport` call above.
+    func testAStreamWithNoDoneFrameIsNotAnAnsweredTurn() async {
+        let reply = await ChatTransportRouter.collect(stream([.delta("half a th")]))
+        XCTAssertNil(reply, "partial text presented as a whole reply hides the failure")
+    }
+
+    func testADoneFrameCarriesTheTurnsTextAndItsAction() async {
+        let reply = await ChatTransportRouter.collect(stream([
+            .delta("Sure — "), .delta("running it now."),
+            .done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: "t1")),
+        ]))
+        XCTAssertEqual(reply?.text, "Sure — running it now.")
+        XCTAssertEqual(reply?.runTaskId, "t1")
+    }
+
+    /// byte can legitimately answer with an action and no prose. That is a completed turn, not
+    /// an empty one — the same distinction `ChatTailAction` makes on the streaming path.
+    func testAnActionOnlyTurnCountsAsAnswered() async {
+        let reply = await ChatTransportRouter.collect(stream([
+            .done(model: "m", cacheHit: false, action: ChatDoneAction(runTaskId: "t1")),
+        ]))
+        XCTAssertEqual(reply?.text, "")
+        XCTAssertEqual(reply?.runTaskId, "t1")
+    }
+
+    func testAThrowingStreamIsNotAnAnsweredTurn() async {
+        let failing = AsyncThrowingStream<CompanyChatStreamEvent, Error> { continuation in
+            continuation.yield(.delta("partial"))
+            continuation.finish(throwing: CompanyChatStreamError.malformedResponse)
+        }
+        let reply = await ChatTransportRouter.collect(failing)
+        XCTAssertNil(reply)
+    }
+
+    private func stream(
+        _ events: [CompanyChatStreamEvent]
+    ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            for event in events { continuation.yield(event) }
+            continuation.finish()
+        }
+    }
+
     // MARK: - Cost of deciding
 
     /// The decision runs on EVERY message, so it must stay cheap. Probing for `claude`

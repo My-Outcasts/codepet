@@ -303,7 +303,10 @@ final class CompanyStore: ObservableObject {
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
-         chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
+         // Routed per turn, for the same reason `chatStreamer` is: this is the NON-streaming
+         // retry, and wiring it straight to the Cloud Function meant a granted founder whose
+         // local stream died was answered by the API key they had said not to spend.
+         chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = { await ChatTransportRouter.send($0) },
          // Routed per turn rather than fixed here: `ChatTransportRouter` reads the
          // founder's grant (`cp_claudeCodeAuthorised`, keyed per company id, which
          // arrives on the request) and sends the turn to their own Claude Code or to
@@ -1066,7 +1069,11 @@ final class CompanyStore: ObservableObject {
         if let id = engineeringRunAnchorId {
             chatMessages.removeAll { $0.id == id }
         }
-        startEngineeringRun(ask: ask)
+        // `startBuild`, not `startEngineeringRun`: linking the folder is exactly what made
+        // `buildRunsOnFoundersAgent` true, so a granted founder who just linked one would
+        // otherwise be sent to the cloud agent by the very action that unblocked the local
+        // one — and be billed for the key their grant exists to stop spending.
+        startBuild(ask: ask)
     }
 
     /// Open the Review pane on the run currently in flight.

@@ -35,14 +35,51 @@ enum PrototypeMode {
     static let launchKeys = ["CODEPET_MOCK_CHAT", "CODEPET_MOCK_FLOW", "CODEPET_MOCK_AUTOPLAY"]
 
     #if DEBUG
+    /// **Where the mode is read from — and the one reason this is a variable.**
+    ///
+    /// Every read below used `UserDefaults.standard`. The XCTest host IS the app, so it shares
+    /// that domain, and a founder clicking the prototype-mode toggle changed what the test
+    /// target exercised: six `CompanyChatClientTests` began receiving `MockChat` fixture text
+    /// because `CompanyChatClient.sendStream` short-circuits on `MockChat.enabled` (issue #117).
+    ///
+    /// **The loud failure was the lucky one.** The same coupling means any test that would pass
+    /// against fixtures and fail against the real client passes for the WRONG REASON whenever
+    /// prototype mode is on, and a green run tells nobody.
+    ///
+    /// It also could not be diagnosed by inspection: the plist read `false` while the suite still
+    /// saw mock data, because a running app holds the live value in `cfprefsd` and the test host
+    /// reads through the same daemon. `defaults read` answers from an empty sandbox container
+    /// while the unsandboxed app uses `~/Library/Preferences/app.murror.codepet.plist`, so it
+    /// confirms the wrong answer twice over.
+    ///
+    /// **Under XCTest this defaults to a scratch suite, wiped on creation.** Isolation is
+    /// automatic rather than opt-in on purpose: a per-suite `setUp` only protects the suites
+    /// somebody remembered, and the dangerous case is the test nobody is looking at. Tests that
+    /// want to exercise prototype-mode behaviour still write through this property and are still
+    /// honoured — the seam is redirected, not disabled.
+    ///
+    /// Detecting the test host in app code is normally an anti-pattern. It is confined here to
+    /// one `#if DEBUG` property behind a developer-only toggle, which is a smaller cost than a
+    /// suite that can silently verify fixtures.
+    static var store: UserDefaults = {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else {
+            return .standard
+        }
+        let name = "app.murror.codepet.tests.prototype"
+        guard let scratch = UserDefaults(suiteName: name) else { return .standard }
+        // Wiped on creation so a run never inherits the previous run's writes.
+        scratch.removePersistentDomain(forName: name)
+        return scratch
+    }()
+
     /// Forced on from the command line, and therefore not switchable this session.
     static var isLocked: Bool {
-        launchKeys.contains { UserDefaults.standard.bool(forKey: $0) && wasPassedAsArgument($0) }
+        launchKeys.contains { store.bool(forKey: $0) && wasPassedAsArgument($0) }
     }
 
     static var isOn: Bool {
-        if launchKeys.contains(where: { UserDefaults.standard.bool(forKey: $0) }) { return true }
-        return UserDefaults.standard.bool(forKey: key)
+        if launchKeys.contains(where: { store.bool(forKey: $0) }) { return true }
+        return store.bool(forKey: key)
     }
 
     /// **Whether the demo starts at the COLD OPEN**, which is not the same question
@@ -62,8 +99,8 @@ enum PrototypeMode {
     /// their account. Flipping the toggle gives fixtures and the walkthrough controls;
     /// launching with the flag is what starts the story at the beginning.
     static var startsAtColdOpen: Bool {
-        UserDefaults.standard.bool(forKey: "CODEPET_MOCK_FLOW")
-            || UserDefaults.standard.bool(forKey: "CODEPET_MOCK_AUTOPLAY")
+        store.bool(forKey: "CODEPET_MOCK_FLOW")
+            || store.bool(forKey: "CODEPET_MOCK_AUTOPLAY")
     }
 
     /// Ignored while locked — a launch argument wins, and pretending otherwise would
@@ -71,7 +108,7 @@ enum PrototypeMode {
     @discardableResult
     static func set(_ on: Bool) -> Bool {
         guard !isLocked else { return false }
-        UserDefaults.standard.set(on, forKey: key)
+        store.set(on, forKey: key)
         return true
     }
 

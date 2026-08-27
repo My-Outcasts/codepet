@@ -70,7 +70,8 @@ final class PrototypeModeStoreTests: XCTestCase {
                        "the coding runner survived the switch — it is still the one "
                        + "built for the other mode")
 
-        // Leave the preference as it was found; this writes `UserDefaults.standard`.
+        // Leave the preference as it was found; this writes `PrototypeMode.store` (a scratch
+        // suite under XCTest — see PrototypeMode.store and issue #117).
         await store.setPrototypeMode(!PrototypeMode.isOn)
     }
 

@@ -109,15 +109,15 @@ final class BuildDestinationTests: XCTestCase {
         // `startBuild` reaches the real `EngineeringClient` without this, and
         // `Auth.auth()` TRAPS on unconfigured Firebase (landmine #4) from a
         // detached Task, after the test has already passed.
-        previousMockFlag = UserDefaults.standard.object(forKey: "CODEPET_MOCK_CHAT")
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_CHAT")
+        previousMockFlag = PrototypeMode.store.object(forKey: "CODEPET_MOCK_CHAT")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_CHAT")
     }
 
     override func tearDown() {
         if let previousMockFlag {
-            UserDefaults.standard.set(previousMockFlag, forKey: "CODEPET_MOCK_CHAT")
+            PrototypeMode.store.set(previousMockFlag, forKey: "CODEPET_MOCK_CHAT")
         } else {
-            UserDefaults.standard.removeObject(forKey: "CODEPET_MOCK_CHAT")
+            PrototypeMode.store.removeObject(forKey: "CODEPET_MOCK_CHAT")
         }
         super.tearDown()
     }

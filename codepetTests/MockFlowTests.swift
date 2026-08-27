@@ -17,8 +17,8 @@ final class MockFlowTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        previousChat = UserDefaults.standard.object(forKey: "CODEPET_MOCK_CHAT")
-        previousFlow = UserDefaults.standard.object(forKey: "CODEPET_MOCK_FLOW")
+        previousChat = PrototypeMode.store.object(forKey: "CODEPET_MOCK_CHAT")
+        previousFlow = PrototypeMode.store.object(forKey: "CODEPET_MOCK_FLOW")
         MockChat.flowOnboarded = false
         MockChat.flowBrief = nil
     }
@@ -34,8 +34,8 @@ final class MockFlowTests: XCTestCase {
     }
 
     private func restore(_ key: String, _ value: Any?) {
-        if let value { UserDefaults.standard.set(value, forKey: key) }
-        else { UserDefaults.standard.removeObject(forKey: key) }
+        if let value { PrototypeMode.store.set(value, forKey: key) }
+        else { PrototypeMode.store.removeObject(forKey: key) }
     }
 
     // MARK: - the flag
@@ -44,8 +44,8 @@ final class MockFlowTests: XCTestCase {
         // Two flags where one is meaningless without the other is a state you
         // can get half-right: mock off + flow on would run onboarding against
         // the real, dead backend.
-        UserDefaults.standard.set(false, forKey: "CODEPET_MOCK_CHAT")
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(false, forKey: "CODEPET_MOCK_CHAT")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         XCTAssertTrue(MockChat.enabled, "flow mode did not imply mock mode")
         XCTAssertTrue(MockChat.flowEnabled)
     }
@@ -54,8 +54,8 @@ final class MockFlowTests: XCTestCase {
         // The existing behaviour, unchanged: `-CODEPET_MOCK_CHAT` alone boots
         // an already-onboarded company, which is what makes chat and
         // engineering reachable in one launch.
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_CHAT")
-        UserDefaults.standard.set(false, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_CHAT")
+        PrototypeMode.store.set(false, forKey: "CODEPET_MOCK_FLOW")
         XCTAssertTrue(MockChat.enabled)
         XCTAssertFalse(MockChat.flowEnabled)
     }
@@ -81,7 +81,7 @@ final class MockFlowTests: XCTestCase {
         // suite green. That is the same hole `EngineeringReachabilityTests`
         // exists for: correct pieces, unconnected wire. The mock path returns
         // before Firestore is touched, so this is safe to call in a test.
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
 
         MockChat.flowOnboarded = false
         let before = await CompanyData.load(companyId: "demo")
@@ -98,7 +98,7 @@ final class MockFlowTests: XCTestCase {
         // Same reasoning: `generateRoadmap` treats an empty result as "no
         // change", so a fetcher that fell through to the network would leave
         // the board empty and say nothing about why.
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         var brief = CompanyBrief()
         brief.projectName = "Codepet"
         let tasks = await CompanyData.fetchRoadmap(brief: brief, language: .en)
@@ -106,7 +106,7 @@ final class MockFlowTests: XCTestCase {
     }
 
     func testFinishingOnboardingLeavesTheDemoOnboarded() async {
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         let store = CompanyStore(loader: { _ in MockChat.preOnboardingCompany() },
                                  saver: { _, _ in true })
         await store.hydrate(companyId: "demo")
@@ -126,7 +126,7 @@ final class MockFlowTests: XCTestCase {
     func testSkippingCountsAsFinishing() async {
         // Otherwise Skip appears not to have worked: it leaves onboarding, and
         // the next hydrate puts them straight back into it.
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         let store = CompanyStore(loader: { _ in MockChat.preOnboardingCompany() },
                                  saver: { _, _ in true })
         await store.hydrate(companyId: "demo")
@@ -157,7 +157,7 @@ final class MockFlowTests: XCTestCase {
         // onboarding with `company()`, whose brief was hardcoded — so a
         // founder who onboarded something else watched their project silently
         // become Codepet on the next account switch.
-        UserDefaults.standard.set(true, forKey: "CODEPET_MOCK_FLOW")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         let store = CompanyStore(loader: { _ in MockChat.preOnboardingCompany() },
                                  saver: { _, _ in true })
         await store.hydrate(companyId: "demo")

@@ -1,0 +1,187 @@
+// codepet/Views/Copilot/DepartmentPicker.swift
+import SwiftUI
+
+/// The composer's department control, as a popover.
+///
+/// **Why not a `Menu`.** A `Menu`'s rows flatten to `(title, image)`, so a selected row's
+/// checkmark takes the image slot and the pet's sprite is dropped — on the one row whose
+/// pet is about to speak, while the composer chip below still showed that face. Neither
+/// that nor grouping two departments under one portrait can be expressed in a native
+/// `Menu` at any price. That constraint, not taste, is why this is a popover.
+///
+/// Every decision here is made by a pure function elsewhere — `DepartmentPickerRows` for
+/// the grouping, `DepartmentPickerFocus` for the keyboard, `DepartmentChipState` for the
+/// three chip treatments. This file only draws them.
+struct DepartmentPicker: View {
+
+    let armed: Department?
+    let suggested: Department?
+    let lang: AppLanguage
+    let onPick: (Department) -> Void
+    let onAnyone: () -> Void
+
+    @State private var focus: PickerFocus = .anyone
+
+    private var rows: [PetRow] { DepartmentPickerRows.rows }
+
+    /// Open with the keyboard already on whatever is current, so the first arrow press
+    /// moves from the founder's actual selection rather than from the top of the list.
+    private var initialFocus: PickerFocus {
+        guard let dep = shown else { return .anyone }
+        for (petIndex, row) in rows.enumerated() {
+            if let slot = row.departments.firstIndex(where: { $0.key == dep.key }) {
+                return .chip(pet: petIndex, dept: slot)
+            }
+        }
+        return .anyone
+    }
+
+    /// A suggestion is only ever live when nothing is armed — the same rule
+    /// `DepartmentChipState.of` applies, kept here so the Anyone row's checkmark agrees
+    /// with the chips below it.
+    private var shown: Department? { armed ?? suggested }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            anyoneRow
+            Divider()
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                petRow(row, at: index)
+            }
+        }
+        .padding(.vertical, 10)
+        .frame(width: 326)
+        .onMoveCommand { direction in
+            switch direction {
+            case .up:    focus = DepartmentPickerFocus.up(from: focus, rows: rows)
+            case .down:  focus = DepartmentPickerFocus.down(from: focus, rows: rows)
+            case .left:  focus = DepartmentPickerFocus.left(from: focus, rows: rows)
+            case .right: focus = DepartmentPickerFocus.right(from: focus, rows: rows)
+            @unknown default: break
+            }
+        }
+        // Return acts on whatever the arrows landed on. No `.onExitCommand` here on
+        // purpose: `.popover` already dismisses on Esc, and overriding it would turn
+        // "close without deciding" into "clear the department", which is a different act.
+        .onKeyPress(.return) {
+            if let dep = DepartmentPickerFocus.department(at: focus, rows: rows) {
+                onPick(dep)
+            } else {
+                onAnyone()
+            }
+            return .handled
+        }
+        .onAppear { focus = initialFocus }
+    }
+
+    private var anyoneRow: some View {
+        Button {
+            onAnyone()
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(DepartmentMenu.anyoneLabel(lang))
+                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                    Text(DepartmentMenu.anyoneDetail(lang))
+                        .font(CodepetTheme.inter(11.5))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                Spacer(minLength: 0)
+                if shown == nil {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                }
+            }
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(focusRing(focus == .anyone))
+    }
+
+    private func petRow(_ row: PetRow, at index: Int) -> some View {
+        HStack(spacing: 10) {
+            CharacterImage(row.petId, size: 20)
+            Text(row.petName)
+                .font(CodepetTheme.inter(13.5, weight: .medium))
+                .foregroundColor(CodepetTheme.bodyText)
+            Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                ForEach(Array(row.departments.enumerated()), id: \.element.key) { slot, dep in
+                    chip(dep, petId: row.petId, focused: focus == .chip(pet: index, dept: slot))
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 32)
+    }
+
+    private func chip(_ dep: Department, petId: String, focused: Bool) -> some View {
+        let state = DepartmentChipState.of(dep, armed: armed, suggested: suggested)
+        let petColor = PetCharacter.all[petId]?.color ?? dep.accent
+        return Button {
+            onPick(dep)
+        } label: {
+            Text(dep.name)
+                .font(CodepetTheme.inter(12, weight: state == .picked ? .semibold : .regular))
+                .foregroundColor(chipForeground(state, petColor: petColor))
+                .padding(.horizontal, 9)
+                .frame(height: 24)
+                .background(chipBackground(state, petColor: petColor))
+                .overlay(chipBorder(state, petColor: petColor))
+                .overlay(focusRing(focused, shape: RoundedRectangle(cornerRadius: 6)))
+        }
+        .buttonStyle(.plain)
+        // The row splits the pet's name from the department visually, but a screen
+        // reader must still hear the string the reply is signed with — `rowTitle` stays
+        // the single source of truth for "Nova · Marketing".
+        .accessibilityLabel(DepartmentMenu.rowTitle(dep))
+        .accessibilityAddTraits(state == .picked ? [.isButton, .isSelected] : [.isButton])
+    }
+
+    private func chipForeground(_ state: DepartmentChipState, petColor: Color) -> Color {
+        switch state {
+        case .idle:      return CodepetTheme.mutedText
+        case .suggested: return petColor
+        case .picked:    return .white
+        }
+    }
+
+    @ViewBuilder
+    private func chipBackground(_ state: DepartmentChipState, petColor: Color) -> some View {
+        switch state {
+        case .idle:      Color.clear
+        case .suggested: RoundedRectangle(cornerRadius: 6).fill(petColor.opacity(0.09))
+        case .picked:    RoundedRectangle(cornerRadius: 6).fill(petColor)
+        }
+    }
+
+    @ViewBuilder
+    private func chipBorder(_ state: DepartmentChipState, petColor: Color) -> some View {
+        switch state {
+        case .idle:
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(CodepetTheme.hairline, lineWidth: 1)
+        case .suggested:
+            // The same dashed language the composer chip already uses for a guess, so
+            // one grammar covers both controls instead of the two contradicting.
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(petColor, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+        case .picked:
+            EmptyView()
+        }
+    }
+
+    private func focusRing(_ on: Bool) -> some View {
+        focusRing(on, shape: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func focusRing<S: InsettableShape>(_ on: Bool, shape: S) -> some View {
+        shape.stroke(on ? Color.accentColor : .clear, lineWidth: 2)
+    }
+}

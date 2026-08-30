@@ -202,8 +202,21 @@ struct DepartmentPicker: View {
         focusRing(on, shape: RoundedRectangle(cornerRadius: 6))
     }
 
+    /// **Inset, and not `Color.accentColor`.** Drawn flush at 2pt in the system accent, this
+    /// ring sat exactly on the chip's own border and painted over it — which erased the
+    /// DASHED stroke that distinguishes a guess from a pick. Rendered and compared, a
+    /// focused suggested chip and a focused picked chip differed only in fill and text
+    /// colour, so the spec's shape-not-colour rule was defeated on precisely the chip the
+    /// keyboard was on. `.strokeBorder` insets the ring inside the shape instead of
+    /// straddling it, leaving the dashed border visible underneath.
+    ///
+    /// The colour is the app's accent rather than the system's: every other mark in this
+    /// popover is either a pet's colour or a theme token, and system blue read as the
+    /// loudest thing on screen.
     private func focusRing<S: InsettableShape>(_ on: Bool, shape: S) -> some View {
-        shape.stroke(on ? Color.accentColor : .clear, lineWidth: 2)
+        shape
+            .inset(by: 2)
+            .strokeBorder(on ? CodepetTheme.accentPurple : .clear, lineWidth: 2)
     }
 }
 

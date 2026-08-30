@@ -346,10 +346,11 @@ struct ChatComposer: View {
     /// The promoted chip existed because a choice made inside a menu was invisible;
     /// an armed BUTTON is visible, so the patch stops being needed.
     ///
-    /// **One capsule, two hit targets.** The label opens the menu, the `✕` clears.
-    /// A `✕` that only decorated would be worse than none, and SwiftUI gives a
-    /// `Menu` its whole label as one target — hence an `HStack` of two controls
-    /// sharing one background rather than a `Menu` with an overlay.
+    /// **One capsule, two hit targets.** The label opens the `.popover`, the `✕`
+    /// clears. They stay separate controls in an `HStack` because they are two
+    /// distinct acts, not one: opening the picker is a PICK, and clearing is
+    /// refusing a GUESS — collapsing them into one target would make the ✕ trigger
+    /// whichever act the label was doing, which is wrong for either one.
     private var departmentControl: some View {
         let armed = selectedDept
         // A guess only renders when the founder has not chosen. `shown` drives the label, the

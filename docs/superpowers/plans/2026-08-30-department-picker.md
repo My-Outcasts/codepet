@@ -18,7 +18,7 @@
 - **A `-only-testing:` branch is an untested branch.** Open a draft PR when the work is done — pushing a branch alone runs no CI.
 - **Build team-signed:** `DEVELOPMENT_TEAM=YL72VTKBR7 CODE_SIGN_IDENTITY="Apple Development" -allowProvisioningUpdates`. `CODE_SIGNING_ALLOWED=NO` builds run but Firebase auth does not.
 - **New `.swift` files need no project-file edit.** `PBXFileSystemSynchronizedRootGroup`: target membership follows the folder on disk.
-- **Do not add `.interpolation(.none)` to the picker's sprites.** `CLAUDE.md`'s always-nearest rule is about *upscaling*. These sprites are reduced from 421pt to 20pt, where nearest samples one pixel in twenty and can drop a 4px eye outright. `CharacterImage` uses smooth scaling and that is correct here — `PetMenuIcon`'s doc comment records the measurement.
+- **Do not add `.interpolation(.none)` to the picker's sprites.** `CLAUDE.md`'s always-nearest rule is about *upscaling*. These sprites are reduced from 421pt to 20pt, where nearest samples one pixel in twenty and can drop a 4px eye outright. `CharacterImage` uses smooth scaling and that is correct here — `CharacterImage`'s doc comment records the measurement.
 - **Do not touch `DepartmentCompanions.map`.** The cast is not part of this change.
 - Branch: `feat/department-picker`, cut from `origin/main`.
 

@@ -6,7 +6,7 @@ import XCTest
 /// sufficient — if a fake cannot express the behaviour the surface needs, the
 /// boundary is in the wrong place.
 ///
-/// The rule is not style. On 21 Aug, `PetMenuIcon` drew a sprite through
+/// The rule is not style. On 21 Aug, a since-deleted menu-icon helper drew a sprite through
 /// `NSImage.lockFocus()`, which needs a window-server graphics context a headless
 /// XCTest host lacks, and six unrelated SSE streaming tests began failing — a
 /// stream test read `delta("You're ")` instead of `delta("Hello")`. AVFoundation

@@ -68,4 +68,37 @@ final class DepartmentPickerFocusTests: XCTestCase {
         XCTAssertEqual(dep.key, "sales")
         XCTAssertNil(DepartmentPickerFocus.department(at: .anyone, rows: rows))
     }
+
+    /// Opening the picker on a single-department pet lands on its one chip.
+    func testLocateFindsASingleDepartmentPetsChip() {
+        let byte = rows.firstIndex { $0.petId == "byte" }!
+        let engineering = try! XCTUnwrap(rows[byte].departments.first)
+        XCTAssertEqual(DepartmentPickerFocus.locate(engineering, in: rows),
+                       .chip(pet: byte, dept: 0))
+    }
+
+    /// Opening on the SECOND chip of a two-department pet lands on that slot, not the first.
+    func testLocateFindsTheSecondChipOfATwoDepartmentPet() {
+        let nova = rows.firstIndex { $0.petId == "nova" }!
+        let sales = try! XCTUnwrap(rows[nova].departments.first { $0.key == "sales" })
+        XCTAssertEqual(DepartmentPickerFocus.locate(sales, in: rows),
+                       .chip(pet: nova, dept: 1))
+    }
+
+    /// Product is in the catalog but filtered out of `rosterOrder`, so no row carries it.
+    /// This is the silent fallback the view used to hide — pin it explicitly.
+    func testLocateFallsBackToAnyoneForADepartmentNoRowCarries() {
+        let product = try! XCTUnwrap(DepartmentCatalog.find("product"))
+        XCTAssertEqual(DepartmentPickerFocus.locate(product, in: rows), .anyone)
+    }
+
+    /// `locate` and `department(at:)` are inverses for every chip actually on screen.
+    func testLocateAndDepartmentAtRoundTripForEveryChip() {
+        for row in rows {
+            for dep in row.departments {
+                let focus = DepartmentPickerFocus.locate(dep, in: rows)
+                XCTAssertEqual(DepartmentPickerFocus.department(at: focus, rows: rows)?.key, dep.key)
+            }
+        }
+    }
 }

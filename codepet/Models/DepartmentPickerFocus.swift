@@ -49,7 +49,7 @@ enum DepartmentPickerFocus {
     /// The department under the cursor, or nil on the Anyone row.
     static func department(at focus: PickerFocus, rows: [PetRow]) -> Department? {
         guard case .chip(let pet, let dept) = focus,
-              pet < rows.count, dept < rows[pet].departments.count else { return nil }
+              pet < rows.count, dept >= 0, dept < rows[pet].departments.count else { return nil }
         return rows[pet].departments[dept]
     }
 

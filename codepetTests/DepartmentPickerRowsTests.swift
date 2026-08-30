@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import codepet
 
@@ -38,5 +39,17 @@ final class DepartmentPickerRowsTests: XCTestCase {
     func testSixRowsForEightDepartments() {
         XCTAssertEqual(DepartmentPickerRows.rows.count, 6)
         XCTAssertEqual(DepartmentMenu.rosterOrder.count, 8)
+    }
+
+    /// Every pet the picker can summon needs art, or a row shows a blank face. This is the
+    /// asset-existence guard `PetMenuIconTests.testEverySpriteReportsMenuIconSize` used to
+    /// carry before `PetMenuIcon` was deleted; `CharacterImage` has no nil-image fallback to
+    /// text the way `PetMenuIcon.image` did, so a missing sprite now renders a blank 20×20
+    /// box instead of failing loudly.
+    func testEveryRowsPetHasArt() {
+        for row in DepartmentPickerRows.rows {
+            XCTAssertNotNil(NSImage(named: "char-\(row.petId)"),
+                             "no sprite for \(row.petId) — the picker would show a blank face")
+        }
     }
 }

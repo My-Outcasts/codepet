@@ -105,14 +105,23 @@ struct DepartmentPicker: View {
             }
             .padding(.horizontal, 16)
             .contentShape(Rectangle())
+            .hoverAffordance(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .background(focusRing(focus == .anyone))
+        // Chips already say which department is current via `.isSelected` — the
+        // Anyone row is the fourth possible answer and needs the same trait when
+        // it is the one in effect (`shown == nil`).
+        .accessibilityAddTraits(shown == nil ? [.isSelected] : [])
     }
 
     private func petRow(_ row: PetRow, at index: Int) -> some View {
         HStack(spacing: 10) {
+            // The chips below already announce the full "Nova · Marketing" —
+            // the row's own decorative sprite would otherwise be read again as
+            // an unlabelled image ahead of it.
             CharacterImage(row.petId, size: 20)
+                .accessibilityHidden(true)
             Text(row.petName)
                 .font(CodepetTheme.inter(13.5, weight: .medium))
                 .foregroundColor(CodepetTheme.bodyText)
@@ -141,6 +150,9 @@ struct DepartmentPicker: View {
                 .background(chipBackground(state, petColor: petColor))
                 .overlay(chipBorder(state, petColor: petColor))
                 .overlay(focusRing(focused, shape: RoundedRectangle(cornerRadius: 6)))
+                // A native `Menu` highlighted the hovered row for free; the popover's
+                // rows are plain buttons and gave a mouse user no signal at all.
+                .hoverAffordance(RoundedRectangle(cornerRadius: 6), accent: petColor)
         }
         .buttonStyle(.plain)
         // The row splits the pet's name from the department visually, but a screen
@@ -163,7 +175,10 @@ struct DepartmentPicker: View {
         switch state {
         case .idle:      Color.clear
         case .suggested: RoundedRectangle(cornerRadius: 6).fill(petColor.opacity(0.09))
-        case .picked:    RoundedRectangle(cornerRadius: 6).fill(petColor)
+        // `.picked` is the only state that puts white text directly on the raw pet
+        // color, so it is the only one that needs darkening — idle and suggested
+        // keep the pet hue at full strength, untouched.
+        case .picked:    RoundedRectangle(cornerRadius: 6).fill(petColor.darkenedForPickedChipText())
         }
     }
 
@@ -189,5 +204,51 @@ struct DepartmentPicker: View {
 
     private func focusRing<S: InsettableShape>(_ on: Bool, shape: S) -> some View {
         shape.stroke(on ? Color.accentColor : .clear, lineWidth: 2)
+    }
+}
+
+private extension Color {
+    /// WCAG AA text-contrast floor for normal-weight text.
+    static let wcagAATextContrast: Double = 4.5
+
+    /// Darken `self` — by uniformly scaling its sRGB channels toward black, which
+    /// lowers brightness while leaving hue and saturation alone — until white text
+    /// drawn on top clears the WCAG AA floor (4.5:1).
+    ///
+    /// Measured before this fix: white on the raw pet color was ≈2.33:1 for nova
+    /// (`#FF8C00`), and every one of the six pet colors failed the same 4.5:1 floor
+    /// the same way — none of them is dark enough on its own to carry white text.
+    /// Only the `.picked` chip fill needs this; idle and suggested chips never put
+    /// white on the raw hue. Deriving the darkened fill here, from the same
+    /// relative-luminance math the WCAG spec defines, means a future pet's color is
+    /// automatically corrected instead of needing a seventh hardcoded value.
+    func darkenedForPickedChipText() -> Color {
+        guard let base = NSColor(self).usingColorSpace(.sRGB) else { return self }
+        let r = Double(base.redComponent)
+        let g = Double(base.greenComponent)
+        let b = Double(base.blueComponent)
+        var scale = 1.0
+        while scale > 0.05 {
+            if Color.contrastWithWhite(r: r * scale, g: g * scale, b: b * scale) >= Color.wcagAATextContrast {
+                break
+            }
+            scale -= 0.01
+        }
+        return Color(red: r * scale, green: g * scale, blue: b * scale)
+    }
+
+    private static func contrastWithWhite(r: Double, g: Double, b: Double) -> Double {
+        // WCAG contrast ratio: (L_lighter + 0.05) / (L_darker + 0.05). White's own
+        // relative luminance is 1.0, so it is always the lighter of the two here.
+        (1.0 + 0.05) / (relativeLuminance(r: r, g: g, b: b) + 0.05)
+    }
+
+    /// WCAG relative luminance, sRGB coefficients (0.2126 / 0.7152 / 0.0722) over
+    /// gamma-decoded channels.
+    private static func relativeLuminance(r: Double, g: Double, b: Double) -> Double {
+        func linear(_ c: Double) -> Double {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 }

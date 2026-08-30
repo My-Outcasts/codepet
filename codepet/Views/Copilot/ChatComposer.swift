@@ -129,6 +129,9 @@ struct ChatComposer: View {
     /// follows is not an answer to it.
     @State private var attachNotice: String?
 
+    /// Drives the department popover that replaced the `Menu`.
+    @State private var pickerOpen = false
+
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -356,55 +359,18 @@ struct ChatComposer: View {
         let suggestedDept = activeSuggestion.flatMap { DepartmentCatalog.find($0.deptKey) }
         let shown = armed ?? suggestedDept
         return HStack(spacing: 0) {
-            Menu {
-                // Two acts, one row — the same rule the `✕` already follows: with nothing
-                // armed, this row is refusing a GUESS (`onDismissSuggestion`), not picking
-                // "Anyone" over a pick that already isn't there. Without this, clicking the
-                // already-checked-looking "Anyone" row while a suggestion is showing did
-                // nothing at all, and the guess survived a founder explicitly rejecting it.
-                //
-                // The `shown` guard is the other half, and it is why this row branches on
-                // `shown` exactly as its own checkmark two lines below does. The `✕` gets the
-                // guard for free — it is only BUILT when `shown != nil` — but this row is
-                // always present, so branching on `armed` alone made an idle poke at the
-                // already-checked "Anyone" refuse a guess that was never there: it set
-                // `suggestionDismissed` and nilled `lastActedDeptKey`, killing carry-over and
-                // suppressing routing for the rest of the draft. With nothing shown, "Anyone"
-                // is already the answer and clicking it is a no-op.
-                Button {
-                    guard shown != nil else { return }
-                    if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
-                } label: {
-                    if shown == nil {
-                        Label(DepartmentMenu.anyoneLabel(lang), systemImage: "checkmark")
-                    } else {
-                        Text(DepartmentMenu.anyoneLabel(lang))
-                    }
-                }
-                Divider()
-                ForEach(DepartmentMenu.rosterOrder) { dep in
-                    Button { selectedDept = dep } label: { deptRow(dep, current: shown) }
-                }
+            Button {
+                pickerOpen = true
             } label: {
                 HStack(spacing: 5) {
-                    // `PetMenuIcon`, not `CharacterImage`. A `Menu`'s LABEL is
-                    // flattened to `(title, image)` exactly like its rows are, and
-                    // the image is sized from `NSImage.size` — so CharacterImage's
-                    // explicit .frame(16) was discarded and the raw asset rendered
-                    // at native size, swallowing the whole composer. The roster
-                    // chips above use CharacterImage and are fine: they are plain
-                    // Buttons, not Menu labels.
-                    if let dep = shown,
-                       let pet = DepartmentMenu.pet(for: dep),
-                       let sprite = PetMenuIcon.image(pet) {
-                        sprite
+                    if let dep = shown, let pet = DepartmentMenu.pet(for: dep) {
+                        CharacterImage(pet, size: 16)
                     }
                     Text(shown.map { DepartmentMenu.armedLabel($0) }
                          ?? DepartmentMenu.restLabel(lang))
                         .font(CodepetTheme.inter(12, weight: .semibold))
                         // Same string as a pick, dimmed. Accepting a suggestion must change
-                        // nothing on screen except the chip firming up — a suggestion that
-                        // read differently would look like a second feature.
+                        // nothing on screen except the chip firming up.
                         .foregroundColor(shown.map { $0.accent.opacity(armed == nil ? 0.75 : 1.0) }
                                          ?? CodepetTheme.bodyText)
                         .lineLimit(1)
@@ -419,9 +385,30 @@ struct ChatComposer: View {
                 .frame(height: 26)
                 .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
             .fixedSize()
+            .popover(isPresented: $pickerOpen, arrowEdge: .top) {
+                DepartmentPicker(
+                    armed: armed,
+                    suggested: suggestedDept,
+                    lang: lang,
+                    onPick: { dep in
+                        selectedDept = dep
+                        pickerOpen = false
+                    },
+                    // Two acts, one row — with nothing armed this refuses a GUESS rather
+                    // than picking "Anyone" over a pick that is not there. The `shown`
+                    // guard is the other half: with nothing shown, Anyone is already the
+                    // answer and clicking it is a no-op. Without it, an idle poke killed
+                    // carry-over and suppressed routing for the rest of the draft.
+                    onAnyone: {
+                        if shown != nil {
+                            if armed == nil { onDismissSuggestion() } else { selectedDept = nil }
+                        }
+                        pickerOpen = false
+                    }
+                )
+            }
 
             if let dep = shown {
                 Button {
@@ -473,39 +460,6 @@ struct ChatComposer: View {
                                                department: dep, lang: lang)
             }
         } ?? "")
-    }
-
-    /// One menu row: checkmark when armed, else the pet's sprite, then
-    /// `Nova · Marketing`.
-    ///
-    /// **The risk in spec §4 landed, and this is the fix.** `Image("char-crash")` in
-    /// a menu icon slot renders the asset at its NATIVE pixel size — on screen the
-    /// menu became a vertical slideshow of full-screen pixel faces, one per row.
-    /// `PetMenuIcon` hands AppKit an `NSImage` whose `size` is already 16pt, which is
-    /// the only sizing input a menu item reads; a SwiftUI `.frame()` here is dropped
-    /// because the label is flattened to `(title, image)` rather than laid out.
-    ///
-    /// A missing sprite falls back to the text alone — still cast-signed, which is
-    /// the part that matters. It does NOT fall back to a custom popover; that shape
-    /// was considered and rejected 21 Aug for costing its own keyboard and dismiss
-    /// handling.
-    /// `current` is the EFFECTIVE department — a pick, or the guess standing in for one — not
-    /// `selectedDept`. Reading the selection here would open the menu over a suggested chip
-    /// saying "Anyone — Codepet routes it" while the chip beside it names a pet. Picking the
-    /// already-checked suggested row is a normal pick: it writes `selectedDept`, which promotes
-    /// the guess to a choice.
-    @ViewBuilder private func deptRow(_ dep: Department,
-                                      current: Department?) -> some View {
-        let on = current?.key == dep.key
-        let title = DepartmentMenu.rowTitle(dep)
-        if on {
-            Label(title, systemImage: "checkmark")
-        } else if let pet = DepartmentMenu.pet(for: dep),
-                  let sprite = PetMenuIcon.image(pet) {
-            Label { Text(title) } icon: { sprite }
-        } else {
-            Text(title)
-        }
     }
 
     /// The active coding-agent project — a quiet, always-visible reminder of which

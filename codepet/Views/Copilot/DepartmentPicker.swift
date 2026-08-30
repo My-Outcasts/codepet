@@ -22,6 +22,14 @@ struct DepartmentPicker: View {
 
     @State private var focus: PickerFocus = .anyone
 
+    // `DepartmentPickerFocus` and its .onMoveCommand/.onKeyPress wiring below were
+    // always correct — nothing was ever making the VStack focusable, so AppKit never
+    // routed arrow keys or Return to it. `.focusable(true)` alone would still leave
+    // the popover waiting for a click before the keyboard worked; binding this
+    // FocusState and setting it in `.onAppear` (alongside the existing seeded
+    // `focus`) makes the popover open already holding keyboard focus.
+    @FocusState private var keyboardFocused: Bool
+
     private var rows: [PetRow] { DepartmentPickerRows.rows }
 
     /// A suggestion is only ever live when nothing is armed — the same rule
@@ -42,6 +50,11 @@ struct DepartmentPicker: View {
         }
         .padding(.vertical, 10)
         .frame(width: 326)
+        // Precedent: OnboardingStageSlider.swift puts `.focusable(true)` immediately
+        // above its own `.onMoveCommand` — same fix, same reason: without it AppKit
+        // has nothing to deliver arrow/Return events to.
+        .focusable(true)
+        .focused($keyboardFocused)
         .onMoveCommand { direction in
             switch direction {
             case .up:    focus = DepartmentPickerFocus.up(from: focus, rows: rows)
@@ -66,6 +79,7 @@ struct DepartmentPicker: View {
         // moves from the founder's actual selection rather than from the top of the list.
         .onAppear {
             focus = shown.map { DepartmentPickerFocus.locate($0, in: rows) } ?? .anyone
+            keyboardFocused = true
         }
     }
 

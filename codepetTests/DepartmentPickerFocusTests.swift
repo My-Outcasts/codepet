@@ -70,26 +70,34 @@ final class DepartmentPickerFocusTests: XCTestCase {
     }
 
     /// Opening the picker on a single-department pet lands on its one chip.
-    func testLocateFindsASingleDepartmentPetsChip() {
+    func testLocateFindsASingleDepartmentPetsChip() throws {
         let byte = rows.firstIndex { $0.petId == "byte" }!
-        let engineering = try! XCTUnwrap(rows[byte].departments.first)
+        let engineering = try XCTUnwrap(rows[byte].departments.first)
         XCTAssertEqual(DepartmentPickerFocus.locate(engineering, in: rows),
                        .chip(pet: byte, dept: 0))
     }
 
     /// Opening on the SECOND chip of a two-department pet lands on that slot, not the first.
-    func testLocateFindsTheSecondChipOfATwoDepartmentPet() {
+    func testLocateFindsTheSecondChipOfATwoDepartmentPet() throws {
         let nova = rows.firstIndex { $0.petId == "nova" }!
-        let sales = try! XCTUnwrap(rows[nova].departments.first { $0.key == "sales" })
+        let sales = try XCTUnwrap(rows[nova].departments.first { $0.key == "sales" })
         XCTAssertEqual(DepartmentPickerFocus.locate(sales, in: rows),
                        .chip(pet: nova, dept: 1))
     }
 
     /// Product is in the catalog but filtered out of `rosterOrder`, so no row carries it.
     /// This is the silent fallback the view used to hide — pin it explicitly.
-    func testLocateFallsBackToAnyoneForADepartmentNoRowCarries() {
-        let product = try! XCTUnwrap(DepartmentCatalog.find("product"))
+    func testLocateFallsBackToAnyoneForADepartmentNoRowCarries() throws {
+        let product = try XCTUnwrap(DepartmentCatalog.find("product"))
         XCTAssertEqual(DepartmentPickerFocus.locate(product, in: rows), .anyone)
+    }
+
+    /// A row's `departments` array can be empty by construction (`PetRow` is publicly
+    /// constructible), which used to make `right(from:rows:)` yield `dept: -1` and then
+    /// `department(at:rows:)` would trap on `rows[pet].departments[-1]` instead of
+    /// reporting "nothing here." The guard needs a lower bound, not just an upper one.
+    func testDepartmentAtReturnsNilRatherThanTrappingOnANegativeIndex() {
+        XCTAssertNil(DepartmentPickerFocus.department(at: .chip(pet: 0, dept: -1), rows: rows))
     }
 
     /// `locate` and `department(at:)` are inverses for every chip actually on screen.

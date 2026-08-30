@@ -24,18 +24,6 @@ struct DepartmentPicker: View {
 
     private var rows: [PetRow] { DepartmentPickerRows.rows }
 
-    /// Open with the keyboard already on whatever is current, so the first arrow press
-    /// moves from the founder's actual selection rather than from the top of the list.
-    private var initialFocus: PickerFocus {
-        guard let dep = shown else { return .anyone }
-        for (petIndex, row) in rows.enumerated() {
-            if let slot = row.departments.firstIndex(where: { $0.key == dep.key }) {
-                return .chip(pet: petIndex, dept: slot)
-            }
-        }
-        return .anyone
-    }
-
     /// A suggestion is only ever live when nothing is armed — the same rule
     /// `DepartmentChipState.of` applies, kept here so the Anyone row's checkmark agrees
     /// with the chips below it.
@@ -74,7 +62,11 @@ struct DepartmentPicker: View {
             }
             return .handled
         }
-        .onAppear { focus = initialFocus }
+        // Open with the keyboard already on whatever is current, so the first arrow press
+        // moves from the founder's actual selection rather than from the top of the list.
+        .onAppear {
+            focus = shown.map { DepartmentPickerFocus.locate($0, in: rows) } ?? .anyone
+        }
     }
 
     private var anyoneRow: some View {

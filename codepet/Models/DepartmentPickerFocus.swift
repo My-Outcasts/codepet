@@ -52,4 +52,18 @@ enum DepartmentPickerFocus {
               pet < rows.count, dept < rows[pet].departments.count else { return nil }
         return rows[pet].departments[dept]
     }
+
+    /// Where `department` sits in `rows`, or `.anyone` when no row carries it.
+    ///
+    /// The inverse of `department(at:rows:)`. It lives here rather than in the view so the
+    /// not-found case is pinned by a test: a department absent from every row falls back to
+    /// `.anyone` rather than to an index that would point at the wrong pet.
+    static func locate(_ department: Department, in rows: [PetRow]) -> PickerFocus {
+        for (petIndex, row) in rows.enumerated() {
+            if let slot = row.departments.firstIndex(where: { $0.key == department.key }) {
+                return .chip(pet: petIndex, dept: slot)
+            }
+        }
+        return .anyone
+    }
 }

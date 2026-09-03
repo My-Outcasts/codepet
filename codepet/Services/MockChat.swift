@@ -96,6 +96,28 @@ enum MockChat {
     /// with Codepet's, mid-walkthrough, with nothing saying why.
     nonisolated(unsafe) static var flowBrief: CompanyBrief?
 
+    /// **Which demo project `flowBrief` was captured under.**
+    ///
+    /// `flowBrief` exists so a re-hydrate does not replace the project the founder typed in
+    /// the cold open. That was the whole story until demo projects existed, and then it
+    /// silently outranked them: with `CODEPET_MOCK_FLOW` persisted from an earlier session, a
+    /// founder launching `-CODEPET_DEMO_PROJECT murror` got **Murror's board and Codepet's
+    /// name** — "Build the Murror landing page" sitting under "What should we build for
+    /// Codepet today?". Reported from the app as "why don't I see any changes at all?", because
+    /// the project name is the most visible thing on the screen and it had not changed.
+    ///
+    /// Recording the project makes the two rules compose instead of fight: a captured brief
+    /// still wins for the project it belongs to, and a different project's selection wins over
+    /// a stale capture.
+    nonisolated(unsafe) static var flowBriefProject: String?
+
+    /// The captured brief, but only when it belongs to the demo project now selected.
+    static var activeFlowBrief: CompanyBrief? {
+        guard let brief = flowBrief else { return nil }
+        guard let captured = flowBriefProject else { return brief }  // pre-demo-project capture
+        return captured == DemoProject.current.id ? brief : nil
+    }
+
     /// What the canned copy calls the product.
     ///
     /// Every deliverable and reply below is written with a `{{product}}` token
@@ -108,7 +130,7 @@ enum MockChat {
     /// being copied into new canned text, an interpolation has to be remembered
     /// each time.
     static var productName: String {
-        let typed = (flowBrief?.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = (activeFlowBrief?.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty { return typed }
         return DemoProject.current.brief.projectName ?? "Codepet"
     }
@@ -501,7 +523,7 @@ enum MockChat {
         // the next hydrate — makes the fixture look like it ignored them.
         // The brief now comes from the SELECTED demo project rather than a literal, so the
         // fixture can be a company other than Codepet.
-        var brief = flowBrief ?? DemoProject.current.brief
+        var brief = activeFlowBrief ?? DemoProject.current.brief
         if (brief.stage ?? "").isEmpty { brief.stage = "building" }
         return CompanyState(brief: brief, departments: [], library: [], stage: .building,
                             companionId: "byte", onboardedAt: Date(), tasks: roadmap())

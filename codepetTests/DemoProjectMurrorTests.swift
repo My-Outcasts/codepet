@@ -337,6 +337,57 @@ final class DemoProjectMurrorTests: XCTestCase {
         XCTAssertEqual(MockChat.productName, "Murror")
     }
 
+    /// **The board said Murror and the greeting said Codepet.**
+    ///
+    /// `flowBrief` exists so a re-hydrate does not replace the project the founder typed in
+    /// the cold open, and it silently outranked the demo-project selection. With
+    /// `CODEPET_MOCK_FLOW` persisted from an earlier session, launching
+    /// `-CODEPET_DEMO_PROJECT murror` produced Murror's tasks under "What should we build for
+    /// Codepet today?" — reported from the app as "why don't I see any changes at all?",
+    /// because the project name is the most visible thing on screen and it had not changed.
+    ///
+    /// The board was never wrong, which is what made it confusing: `roadmap()` read the demo
+    /// project and `company().brief` did not.
+    func testAStaleFlowBriefDoesNotOverrideTheSelectedProject() {
+        DemoProject.select("murror")
+        var stale = CompanyBrief()
+        stale.projectName = "Codepet"
+        MockChat.flowBrief = stale
+        MockChat.flowBriefProject = "codepet"
+        defer { MockChat.flowBrief = nil; MockChat.flowBriefProject = nil }
+
+        XCTAssertEqual(MockChat.company().brief.projectName, "Murror",
+                       "a brief captured under Codepet outranked an explicit Murror selection")
+        XCTAssertEqual(MockChat.productName, "Murror")
+    }
+
+    /// The other direction must keep working: a brief captured under THIS project still wins,
+    /// or the flow demo would forget what the founder typed on the next hydrate.
+    func testAFlowBriefForTheSelectedProjectStillWins() {
+        DemoProject.select("murror")
+        var typed = CompanyBrief()
+        typed.projectName = "Murror Labs"
+        MockChat.flowBrief = typed
+        MockChat.flowBriefProject = "murror"
+        defer { MockChat.flowBrief = nil; MockChat.flowBriefProject = nil }
+
+        XCTAssertEqual(MockChat.company().brief.projectName, "Murror Labs")
+        XCTAssertEqual(MockChat.productName, "Murror Labs")
+    }
+
+    /// A capture from before the project was stamped has no project to compare against, so it
+    /// keeps its old precedence rather than being silently discarded.
+    func testAnUnstampedFlowBriefKeepsItsOldPrecedence() {
+        DemoProject.select("murror")
+        var legacy = CompanyBrief()
+        legacy.projectName = "Something Typed"
+        MockChat.flowBrief = legacy
+        MockChat.flowBriefProject = nil
+        defer { MockChat.flowBrief = nil }
+
+        XCTAssertEqual(MockChat.company().brief.projectName, "Something Typed")
+    }
+
     /// `{{product}}` must resolve to Murror, not to Codepet, in Murror's own copy.
     func testProductTokenFillsWithMurror() {
         DemoProject.select("murror")

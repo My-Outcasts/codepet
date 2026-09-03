@@ -520,6 +520,9 @@ final class CompanyStore: ObservableObject {
         if MockChat.flowEnabled {
             MockChat.flowOnboarded = true
             MockChat.flowBrief = brief
+            // Stamped with the project it belongs to, so a later `-CODEPET_DEMO_PROJECT`
+            // selection is not overridden by a brief captured under a different one.
+            MockChat.flowBriefProject = DemoProject.current.id
         }
         #endif
     }

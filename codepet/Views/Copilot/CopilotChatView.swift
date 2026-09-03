@@ -2252,6 +2252,19 @@ struct CopilotBubble: View {
                     // the buttons below it while its hover fill still reads as a target.
                     .padding(-6).padding(.horizontal, -2)
 
+                    // The deliverable ITSELF, not a description of where it is. `d.payload` was
+                    // decoded, stored on the model, and never read by this card — so Finance's
+                    // four-input pricing model rendered as a truncated paragraph, and the
+                    // landing page rendered as a sentence telling the founder to go and look.
+                    //
+                    // Gated on `hasStructuredPreview` rather than on the kind: the prose `Text`
+                    // above stays the fallback whenever a payload did not arrive, because an
+                    // empty structured view reads as a broken card and the founder cannot tell
+                    // that from an absent payload.
+                    if DraftPayloadPreview.hasStructuredPreview(d) {
+                        DraftPayloadPreview(deliverable: d)
+                    }
+
                     // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity
                     // (inline-run transparency): the live execute-log collapses onto the
                     // finished deliverable instead of vanishing with it, so "how did it get

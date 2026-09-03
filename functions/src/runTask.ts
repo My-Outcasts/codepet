@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { DELIVERABLE_SYSTEM, DELIVERABLE_TOOL, buildRunTaskPrompt, coerceDeliverable } from "./runTaskCore";
+import { DELIVERABLE_SYSTEM, DELIVERABLE_TOOL, buildRunTaskPrompt, coerceDeliverable, parseUpstream } from "./runTaskCore";
 
 // Sonnet 5 rather than Opus 4.8: this is schema-forced generation, the shape
 // Sonnet 5 is closest to Opus on, at 40% less per token ($3/$15 vs $5/$25).
@@ -46,6 +46,9 @@ interface RunTaskRequestBody {
   // expertise. Backward-compatible: omitted by older clients and by legacy dept-less
   // tasks → no department block → byte-for-byte identical to before this field existed.
   dept_key?: string;
+  // Finished work from the tasks this one dependsOn. `unknown` because it is an array off
+  // the wire whose shape is not ours to trust — `parseUpstream` is what makes it a type.
+  upstream?: unknown;
 }
 
 export async function handleRunTask(req: Request, res: Response): Promise<void> {
@@ -74,6 +77,10 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
     // The owning department of the task, so the deliverable is written with that function's
     // expertise. Absent for a legacy dept-less task; unknown keys resolve to no brief.
     deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+    // What the departments this task depends on already produced. Narrowed by the shared
+    // `parseUpstream` rather than inline, so this handler and the ONE_SHOT_OPS entry cannot
+    // read the same wire field two different ways.
+    upstream: parseUpstream(body.upstream),
   });
 
   try {

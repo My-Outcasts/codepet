@@ -95,6 +95,7 @@ import {
   DELIVERABLE_TOOL,
   buildRunTaskPrompt,
   coerceDeliverable,
+  parseUpstream,
 } from "../runTaskCore";
 import {
   OVERVIEW_TOOL,
@@ -330,6 +331,9 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
           reviseNote: typeof body.revise_note === "string" ? body.revise_note : undefined,
           current: typeof body.current === "string" ? body.current : undefined,
           deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+          // The third place. Miss it and the local path — the DEFAULT for a founder running
+          // on their own Claude plan — silently drops the field on the transport nobody curls.
+          upstream: parseUpstream(body.upstream),
         }),
         schema: DELIVERABLE_TOOL.input_schema,
       };

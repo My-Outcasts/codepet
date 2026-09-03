@@ -25,6 +25,83 @@ struct ContentView: View {
 
     private let cloudSync = CloudSyncService()
 
+    // MARK: - Prototype mode does not require an account
+
+    /// The company id the fixture shell hydrates under when nobody is signed in.
+    ///
+    /// A literal, not a uid: there is no account, and the fixtures ignore the id entirely
+    /// (`CompanyData.load` answers from `MockChat` before it looks at it). It exists so the
+    /// bootstrapping gate below has something to compare against — a nil id would leave the
+    /// shell waiting on a hydrate that had already finished.
+    static let prototypeCompanyId = "prototype"
+
+    /// **Whether the sign-in screen is the honest answer to "nobody is signed in".**
+    ///
+    /// It was, unconditionally, until 2026-09-03. The auth gate sits ABOVE everything the
+    /// demo touches — `CompanyData.load` is the only place the selected demo project is read,
+    /// and it is unreachable while signed out — so prototype mode silently required a live
+    /// Firebase login and a network. Reported from the app as *"I cannot press the button"*
+    /// and *"why don't I see any changes at all?"*: the flags were correct, the fixtures were
+    /// correct, and the founder was looking at a sign-in card the whole time.
+    ///
+    /// A demo that needs an account is a demo you cannot show on a plane, and the failure
+    /// reads as "the build did nothing" rather than as "you are signed out".
+    ///
+    /// Safe because prototype mode already gates the dangerous direction:
+    /// `PrototypeMode.allowsCloudWrites` is false whenever it is on, checked inside
+    /// `CompanyData` rather than at each call site, so nothing fixture-shaped can reach a
+    /// real account — and there is no account here to reach.
+    /// Pure, so the routing decision is testable without a Firebase session or a rendered
+    /// view. The bug this replaces could not be caught by any fixture test — every one of
+    /// those asserted the fixtures were RIGHT, none that they were REACHABLE — and it could
+    /// only ever have been caught here.
+    static func needsSignIn(signedIn: Bool, prototypeOn: Bool) -> Bool {
+        guard !signedIn else { return false }
+        #if DEBUG
+        return !prototypeOn
+        #else
+        return true
+        #endif
+    }
+
+    private var needsSignIn: Bool {
+        Self.needsSignIn(signedIn: authManager.currentUser != nil,
+                         prototypeOn: PrototypeMode.isOn)
+    }
+
+    /// The id the hydrated company must carry before the shell may render — the signed-in
+    /// founder's uid, or the fixture id when prototype mode is standing in for an account.
+    ///
+    /// Without the second case the bootstrapping gate compares `"prototype"` against a nil
+    /// uid, never matches, and holds the demo on the splash screen forever.
+    static func expectedCompanyId(uid: String?, prototypeOn: Bool) -> String? {
+        #if DEBUG
+        if uid == nil, prototypeOn { return prototypeCompanyId }
+        #endif
+        return uid
+    }
+
+    private var expectedCompanyId: String? {
+        Self.expectedCompanyId(uid: authManager.currentUser?.uid,
+                               prototypeOn: PrototypeMode.isOn)
+    }
+
+    /// True while the fixture shell is standing in for a signed-out account — and therefore
+    /// the one state in which the hydrate below must be driven by something other than the
+    /// `currentUser` publisher.
+    static func prototypeStandIn(signedIn: Bool, prototypeOn: Bool) -> Bool {
+        #if DEBUG
+        return !signedIn && prototypeOn
+        #else
+        return false
+        #endif
+    }
+
+    private var prototypeStandIn: Bool {
+        Self.prototypeStandIn(signedIn: authManager.currentUser != nil,
+                              prototypeOn: PrototypeMode.isOn)
+    }
+
     var body: some View {
         Group {
             if showSplash {
@@ -37,13 +114,16 @@ struct ContentView: View {
             } else if authManager.isLoading || isLoadingCloudData {
                 // Still checking auth state or loading cloud data
                 SplashView()
-            } else if authManager.currentUser == nil {
+            } else if needsSignIn {
                 // Not signed in — always show sign-in. Guest mode is blocked, so a
                 // stale persisted cp_isGuestMode can never strand a signed-out user
                 // in the company-less, non-persisting shell (companyId is nil until
                 // an account hydrates).
+                //
+                // `needsSignIn` rather than `currentUser == nil`: in DEBUG, prototype
+                // mode falls through to the fixture shell instead. See below.
                 ReturningSignInView()
-            } else if companyStore.companyId != authManager.currentUser?.uid || companyStore.isHydrating {
+            } else if companyStore.companyId != expectedCompanyId || companyStore.isHydrating {
                 // Bootstrapping — signed in, but this account's company hasn't finished
                 // hydrating yet (companyId not yet swapped to this uid, or a hydrate is
                 // in flight). Mirrors the web's "Setting up your company…" gate so we
@@ -80,6 +160,16 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: showSplash)
         .animation(.easeInOut(duration: 0.3), value: appState.onboardingComplete)
         .animation(.easeInOut(duration: 0.3), value: authManager.currentUser == nil)
+        // The fixture company has to be hydrated by SOMETHING. Every other path into
+        // `hydrate` hangs off the `currentUser` publisher below, which by definition never
+        // fires when nobody signs in — so without this the bypass renders a shell whose
+        // company was never loaded, and `isOnboarding` sends the founder into onboarding
+        // instead of the demo.
+        .task(id: prototypeStandIn) {
+            guard prototypeStandIn,
+                  companyStore.companyId != Self.prototypeCompanyId else { return }
+            await companyStore.hydrate(companyId: Self.prototypeCompanyId)
+        }
         .onReceive(authManager.$currentUser) { user in
             guard let user = user else {
                 // Signed out — intentionally keep the stored UID and in-memory

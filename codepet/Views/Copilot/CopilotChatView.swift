@@ -1473,6 +1473,8 @@ struct CopilotBubble: View {
                 actionButton(action)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let offer = message.chainOffer {
+            chainOfferCard(offer)
         } else if let proposal = message.runProposal {
             runProposalCard(proposal)
         } else if let proposal = message.roadmapProposal {
@@ -1524,6 +1526,70 @@ struct CopilotBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A run whose dependency has produced nothing, offered as a choice.
+    ///
+    /// Same shape as `runProposalCard` — the sentence stays a plain reply and the choice
+    /// retires to a record of which way the founder went — with the one difference that BOTH
+    /// buttons do something, so both have to name the work they do rather than say Yes and No.
+    ///
+    /// "Run both" is filled and "Just mine" outlined. That is a real recommendation, not
+    /// decoration: the downstream deliverable is better for having read the upstream one, and
+    /// that is the entire premise of the feature. It is worth stating plainly that the
+    /// recommended option is also the one that spends more, which is why the cheaper path
+    /// stays a first-class button next to it and not a text link under it.
+    @ViewBuilder private func chainOfferCard(_ offer: ChainOffer) -> some View {
+        VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
+            textBubble
+            if message.actionConsumed {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(offer.doneLabel(lang, chained: message.chainOfferChained ?? false))
+                }
+                .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            } else {
+                HStack(spacing: 8) {
+                    chainOfferButton(offer.bothLabel(lang), filled: true) {
+                        await companyStore.confirmChain(messageId: message.id, language: lang)
+                    }
+                    chainOfferButton(offer.aloneLabel(lang), filled: false) {
+                        await companyStore.declineChain(messageId: message.id, language: lang)
+                    }
+                }
+                // Both options spend credits, so neither is pressable while another run or a
+                // chat turn is already in flight — same rule as `runProposalCard`.
+                .disabled(companyStore.isStreaming || companyStore.isCompanionTyping
+                          || companyStore.runningTaskIds.contains(offer.taskId))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func chainOfferButton(_ label: String, filled: Bool,
+                                               _ act: @escaping () async -> Void) -> some View {
+        Button {
+            Task { await act() }
+        } label: {
+            Text(label)
+                .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                .foregroundColor(filled ? .white : CodepetTheme.accentPurple)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.vertical, 7)
+                .background {
+                    if filled {
+                        Capsule().fill(CodepetTheme.accentPurple)
+                    } else {
+                        Capsule().strokeBorder(CodepetTheme.accentPurple.opacity(0.45), lineWidth: 1)
+                    }
+                }
+                .hoverAffordance(Capsule())
+        }
+        .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
     }
 
     /// A roadmap change Codepet is offering to make.
@@ -2261,6 +2327,16 @@ struct CopilotBubble: View {
                     // above stays the fallback whenever a payload did not arrive, because an
                     // empty structured view reads as a broken card and the founder cannot tell
                     // that from an absent payload.
+                    // What this deliverable was built on, above the deliverable itself. The
+                    // roadmap has drawn these dependency arrows all along; until the run
+                    // actually carried the upstream work there was nothing true to say here.
+                    //
+                    // Absent — not an empty row — for a task with no dependencies, which is
+                    // most of them: see `UpstreamCredit.line`.
+                    if let up = message.upstream, !up.isEmpty {
+                        UpstreamCredit(work: up) { _ in showDetail = true }
+                    }
+
                     if DraftPayloadPreview.hasStructuredPreview(d) {
                         DraftPayloadPreview(deliverable: d)
                     }

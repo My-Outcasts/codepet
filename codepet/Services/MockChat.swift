@@ -508,9 +508,27 @@ enum MockChat {
         let payload = entry.payloadJSON.flatMap {
             try? JSONDecoder().decode(DeliverablePayload.self, from: Data($0.utf8))
         }
+        // The upstream work, named in the body the way a real run is asked to name it
+        // (`buildRunTaskPrompt`: "Where you rely on it, say so in one short phrase"). Without
+        // this the fixture would receive `upstream` and produce a deliverable that shows no
+        // sign of it — a demo of the mechanism that demonstrates nothing, which is the exact
+        // failure this feature exists to fix one layer up.
+        let credit = Self.upstreamCredit(req.upstream ?? [])
         return RunTaskResponse(kind: entry.kind, title: req.taskTitle,
-                               body: fill(entry.body + note, title: req.taskTitle),
+                               body: fill(entry.body + credit + note, title: req.taskTitle),
                                payload: payload)
+    }
+
+    /// The one-line "building on X" a fixture run appends when it was given upstream work.
+    private static func upstreamCredit(_ work: [UpstreamWork]) -> String {
+        guard !work.isEmpty else { return "" }
+        let names = work.map { item -> String in
+            let who = item.petName.isEmpty ? item.deptName : item.petName
+            let draft = item.unapproved ? " (unapproved draft)" : ""
+            return who.isEmpty ? "\"\(item.taskTitle)\"\(draft)"
+                               : "\(who)'s \"\(item.taskTitle)\"\(draft)"
+        }
+        return "\n\n_Building on \(names.joined(separator: " and ")) — carried into this run._"
     }
     /// A fully canned, onboarded company for `CompanyData.load` — so mock mode is
     /// self-contained (no Firestore, no real account needed) and the fan-out has a

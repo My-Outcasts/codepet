@@ -43,15 +43,48 @@ struct UpstreamWork: Codable, Hashable {
         return task.dependsOn.prefix(cap * 3).compactMap { depId -> UpstreamWork? in
             guard let dep = byId[depId],
                   let filed = RoadmapEngine.deliverable(for: dep, in: library) else { return nil }
-            let dept = DepartmentCatalog.find(dep.dept)
-            let pet = DepartmentCompanions.companionId(for: dep.dept ?? "")
-                .flatMap { PetCharacter.all[$0] }
-            return UpstreamWork(taskTitle: filed.title,
-                                deptName: dept?.name ?? "",
-                                petName: pet?.name ?? "",
-                                kind: filed.kind.rawValue,
-                                body: String(filed.body.prefix(bodyLimit)))
+            return item(filed, from: dep, unapproved: false)
         }.prefix(cap).map { $0 }
+    }
+
+    /// The first dependency that has produced nothing yet — what a chained run offers to run
+    /// before the task the founder asked for.
+    ///
+    /// Keyed on the LIBRARY and not on `done`. A task the founder marked complete themselves
+    /// is `done` with no deliverable behind it, and that is precisely the case worth chaining:
+    /// the downstream run has a dependency arrow pointing at nothing it can read.
+    static func firstUnfiled(dependencyOf task: RoadmapTask,
+                             in tasks: [RoadmapTask],
+                             library: [Deliverable]) -> RoadmapTask? {
+        let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return task.dependsOn.lazy.compactMap { byId[$0] }
+            .first { RoadmapEngine.deliverable(for: $0, in: library) == nil }
+    }
+
+    /// Build an item from a DRAFT rather than from the library.
+    ///
+    /// A chained run's upstream deliverable is deliberately not filed — chaining does not
+    /// stop for approval, and filing it early would put unapproved work in the founder's
+    /// library — so `assemble` cannot see it and `runChained` prepends this instead.
+    /// `unapproved` defaults true because that is the only way this function is reached.
+    static func fromDraft(_ draft: Deliverable, task: RoadmapTask,
+                          unapproved: Bool = true) -> UpstreamWork {
+        item(draft, from: task, unapproved: unapproved)
+    }
+
+    /// The one place a department and its pet are resolved for this type, so the library path
+    /// and the draft path cannot credit the same department two different ways.
+    private static func item(_ deliverable: Deliverable, from task: RoadmapTask,
+                             unapproved: Bool) -> UpstreamWork {
+        let dept = DepartmentCatalog.find(task.dept)
+        let pet = DepartmentCompanions.companionId(for: task.dept ?? "")
+            .flatMap { PetCharacter.all[$0] }
+        return UpstreamWork(taskTitle: deliverable.title,
+                            deptName: dept?.name ?? "",
+                            petName: pet?.name ?? "",
+                            kind: deliverable.kind.rawValue,
+                            body: String(deliverable.body.prefix(bodyLimit)),
+                            unapproved: unapproved)
     }
 }
 

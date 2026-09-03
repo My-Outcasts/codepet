@@ -53,6 +53,20 @@ struct CopilotMessage: Identifiable, Equatable {
     /// message — revealed progressively as the run proceeds. Nil/empty for an
     /// ordinary producing placeholder (renders the plain orb instead).
     var execSteps: [ExecStep]?
+    /// What this deliverable was built on — the upstream departments' work that travelled with
+    /// the run, exactly as the request carried it. Nil for a run with no dependencies, which
+    /// is most of them, and for every message that is not a finished draft.
+    ///
+    /// Read off the `RunTaskRequest` that was actually sent rather than re-derived for the
+    /// view. Deriving it twice is how a card ends up crediting work the model never received —
+    /// the library can change between the run and the render, and the chained case is not in
+    /// the library at all.
+    var upstream: [UpstreamWork]?
+    /// A run offered as a choice because its dependency has produced nothing — see `ChainOffer`.
+    /// `actionConsumed` retires the buttons once the founder picks, like `runProposal`.
+    var chainOffer: ChainOffer?
+    /// Which way the founder went on `chainOffer`, so the retired row says so. Nil until they pick.
+    var chainOfferChained: Bool?
     /// A Virtual Company run rendered inside this message. Follows the existing
     /// fat-struct/if-chain pattern rather than an enum refactor, per
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
@@ -131,7 +145,9 @@ struct CopilotMessage: Identifiable, Equatable {
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
-         execSteps: [ExecStep]? = nil, vcRun: VirtualCompanyRunState? = nil,
+         execSteps: [ExecStep]? = nil, upstream: [UpstreamWork]? = nil,
+         chainOffer: ChainOffer? = nil, chainOfferChained: Bool? = nil,
+         vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
          drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil,
          founderAsk: String? = nil, attachments: [ChatAttachment] = []) {
@@ -152,6 +168,9 @@ struct CopilotMessage: Identifiable, Equatable {
         self.companionId = companionId
         self.deptName = deptName
         self.execSteps = execSteps
+        self.upstream = upstream
+        self.chainOffer = chainOffer
+        self.chainOfferChained = chainOfferChained
         self.vcRun = vcRun
         self.runProposal = runProposal
         self.roadmapProposal = roadmapProposal

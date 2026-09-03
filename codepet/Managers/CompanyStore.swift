@@ -1989,7 +1989,56 @@ final class CompanyStore: ObservableObject {
             appendRunRefusal(Self.runRefusalCopy(status, task: task, language: language))
             return
         }
-        _ = await produceDraftInline(for: task, cid: cid, language: language)
+        // A dependency arrow pointing at nothing. The task is runnable — `status` above
+        // already refused a genuinely blocked one — but a prerequisite the founder marked
+        // done themselves produced no deliverable, so this department would write in the
+        // dark. Offer the choice rather than deciding for them: running the upstream task
+        // spends credits on work they did not ask for, and running alone is still a good
+        // answer. See `ChainOffer`.
+        if let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
+                                               library: company.library) {
+            appendChainOffer(for: task, dependency: dep, language: language)
+            return
+        }
+        await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// The needs-upstream card: the sentence and the two buttons, as one message.
+    private func appendChainOffer(for task: RoadmapTask, dependency: RoadmapTask,
+                                  language: AppLanguage) {
+        let specialist = taskSpecialist(for: dependency)
+        let offer = ChainOffer(
+            taskId: task.id, taskTitle: task.title,
+            upstreamTaskId: dependency.id, upstreamTaskTitle: dependency.title,
+            upstreamDeptName: specialist?.deptName,
+            upstreamPetName: specialist.flatMap { PetCharacter.all[$0.companionId]?.name })
+        chatMessages.append(CopilotMessage(role: .companion, text: offer.line(language),
+                                           chainOffer: offer))
+    }
+
+    /// "Run both" — the dependency, then the task, with the dependency's work fed forward.
+    func confirmChain(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let offer = chatMessages[i].chainOffer,
+              !chatMessages[i].actionConsumed else { return }
+        chatMessages[i].actionConsumed = true
+        chatMessages[i].chainOfferChained = true
+        await runChained(taskId: offer.taskId, language: language)
+    }
+
+    /// "Just mine" — only the task the founder asked for, carrying whatever the library
+    /// already holds (which for this offer to have appeared is not the missing dependency).
+    func declineChain(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let offer = chatMessages[i].chainOffer,
+              !chatMessages[i].actionConsumed,
+              let task = company.tasks.first(where: { $0.id == offer.taskId }) else { return }
+        chatMessages[i].actionConsumed = true
+        chatMessages[i].chainOfferChained = false
+        let cid = companyId
+        dockCollapsed = false
+        await produceDraftInline(for: task, cid: cid, language: language)
+        flushActiveThread()
     }
 
     /// Record the founder's thumb on a reply.
@@ -2137,11 +2186,20 @@ final class CompanyStore: ObservableObject {
     /// step checklist revealed progressively (transparency, not a snap-to-done) —
     /// attributed to the task's department specialist (pet sprite + "Name · Dept").
     /// The last step stays "working" until BOTH the reveal and the real result
-    /// finish, then it collapses into the draft card. Returns true if a draft was
-    /// appended (false → an honest "couldn't generate" bubble). Account-guarded
-    /// via `cid` so a mid-run account switch can't land in another account's chat.
+    /// finish, then it collapses into the draft card. Account-guarded via `cid` so a
+    /// mid-run account switch can't land in another account's chat.
+    ///
+    /// Returns the deliverable it produced, or nil (→ an honest "couldn't generate"
+    /// bubble). It returned `Bool` until the chain landed: `runChained` needs the draft
+    /// ITSELF to feed forward — the upstream deliverable is deliberately never filed, so
+    /// there is nowhere else to read it from — and a caller that only wants "did it work"
+    /// reads `!= nil`.
+    ///
+    /// `extraUpstream` is work that is not in the library and cannot be: a chained run's
+    /// unapproved upstream draft.
     @discardableResult
-    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage) async -> Bool {
+    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage,
+                                    extraUpstream: [UpstreamWork] = []) async -> Deliverable? {
         let specialist = taskSpecialist(for: task)
         let steps = Self.execSteps(task: task, specialist: specialist,
                                    decisionCount: company.decisions.count, language: language)
@@ -2157,15 +2215,19 @@ final class CompanyStore: ObservableObject {
                 chatMessages[mi].execSteps?[idx].done = true
             }
         }
-        let result = await taskRunner(runRequest(for: task, language: language))
+        // Built once and HELD: the card's credit is read back off this request rather than
+        // re-derived for the view, so what the founder is told the run built on is exactly
+        // what the prompt was given.
+        let request = runRequest(for: task, language: language, extraUpstream: extraUpstream)
+        let result = await taskRunner(request)
         _ = await reveal.value   // let every revealed step land before finishing
-        guard companyId == cid else { return false }
+        guard companyId == cid else { return nil }
         if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
            let count = chatMessages[mi].execSteps?.count {
             for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
         }
         try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
-        guard companyId == cid else { return false }
+        guard companyId == cid else { return nil }
         // The finished log, carried onto the draft rather than thrown away with the producing
         // row. The web keeps it as a "▸ What Nova did · N steps" disclosure on the deliverable
         // card (inline-run transparency, web #71), and the native port dropped it: the steps
@@ -2177,7 +2239,7 @@ final class CompanyStore: ObservableObject {
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName,
-                                               execSteps: finishedSteps))
+                                               execSteps: finishedSteps, upstream: request.upstream))
             // Reflect the run on the roadmap so the task leaves the "next moves" set
             // and can't be re-run into a duplicate draft (mirrors the board runTask).
             if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
@@ -2194,13 +2256,52 @@ final class CompanyStore: ObservableObject {
                     if let cid { _ = await tasksSaver(cid, company.tasks) }
                 }
             }
-            return true
+            return draft
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
-            return false
+            return nil
         }
+    }
+
+    /// Run a task's missing dependency first, then the task itself, with the dependency's work
+    /// fed forward.
+    ///
+    /// **No approval gate between the two, by founder decision (2026-09-03).** Halting to ask
+    /// stalls exactly the founder who least knows what they are being asked to approve, so the
+    /// upstream draft passes forward unapproved and the downstream card SAYS `(unapproved
+    /// draft)`. Hiding that is the failure mode this codebase keeps paying for.
+    ///
+    /// `RoadmapGating.awaitsApproval` is untouched: this moves work forward inside the phase
+    /// window that is already open and never opens a phase.
+    ///
+    /// The upstream deliverable is NOT filed to the library. It was never approved, and the
+    /// library is the founder's approved work — which is also why the item has to be built
+    /// from the draft (`UpstreamWork.fromDraft`) rather than found by `assemble`.
+    func runChained(taskId: String, language: AppLanguage) async {
+        let cid = companyId
+        guard let task = company.tasks.first(where: { $0.id == taskId }) else { return }
+        dockCollapsed = false
+
+        var carried: [UpstreamWork] = []
+        if let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
+                                               library: company.library) {
+            let upstreamDraft = await produceDraftInline(for: dep, cid: cid, language: language)
+            guard companyId == cid else { return }
+            // A failed upstream run does not cancel the downstream one. It already appended its
+            // own honest failure bubble, and refusing to run what the founder asked for would
+            // answer a request with silence — the shape `handleRunTaskId` documents at length.
+            if let upstreamDraft {
+                carried = [UpstreamWork.fromDraft(upstreamDraft, task: dep)]
+            }
+        }
+
+        // Re-resolve: the upstream run awaited, and mark-complete or a roadmap edit may have
+        // changed or removed this task while it did.
+        guard let fresh = company.tasks.first(where: { $0.id == taskId }) else { return }
+        await produceDraftInline(for: fresh, cid: cid, language: language, extraUpstream: carried)
+        flushActiveThread()
     }
 
     /// Dispatch a `.done` frame's actions — shared by the streaming `.done` case and
@@ -2752,7 +2853,7 @@ final class CompanyStore: ObservableObject {
         // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
         // answer to one question.
         dockCollapsed = false
-        let produced = await produceDraftInline(for: task, cid: cid, language: language)
+        let produced = await produceDraftInline(for: task, cid: cid, language: language) != nil
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
         // `produceDraftInline` owns the draft, the task write and its own honest failure bubble,

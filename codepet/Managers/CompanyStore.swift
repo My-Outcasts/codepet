@@ -2530,20 +2530,32 @@ final class CompanyStore: ObservableObject {
     /// Build a RunTaskRequest for a task (grounded on brief + roadmap). `reviseNote`/
     /// `current` default nil — a first run or blind redo sends neither (unchanged
     /// wire shape); only a revise chip tap sets both.
+    /// `extraUpstream` is prepended to what the library yields, for a chained run whose
+    /// upstream draft is deliberately not filed yet (`runChained`).
     private func runRequest(for task: RoadmapTask, language: AppLanguage,
-                             reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
+                             reviseNote: String? = nil, current: String? = nil,
+                             extraUpstream: [UpstreamWork] = []) -> RunTaskRequest {
         // The pet the execute log and the draft card have always credited for this run — now
         // it is also the one generating it. `taskSpecialist` deliberately keeps the host case
         // (a run is performed BY a department, so it always shows that department's
         // character), which is exactly the behaviour wanted here too.
         let specialist = taskSpecialist(for: task)
+        // What the departments this task depends on have already produced. Assembled here
+        // rather than at each caller because this is the only place a `RunTaskRequest` is
+        // built, so a run cannot acquire a dependency graph and forget to carry it.
+        //
+        // Empty collapses to nil: see `RunTaskRequest.upstream` — an empty array would put a
+        // new key on every dependency-free run, which is nearly all of them.
+        let upstream = extraUpstream + UpstreamWork.assemble(for: task, in: company.tasks,
+                                                             library: company.library)
         return RunTaskRequest(
             companyId: companyId, language: language.rawValue,
             companionId: specialist?.companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
-            reviseNote: reviseNote, current: current, deptKey: task.dept)
+            reviseNote: reviseNote, current: current, deptKey: task.dept,
+            upstream: upstream.isEmpty ? nil : Array(upstream.prefix(UpstreamWork.cap)))
     }
 
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,

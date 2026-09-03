@@ -3,6 +3,58 @@ import Foundation
 import os
 import FirebaseAuth
 
+/// One upstream department's finished work, travelling with a downstream run.
+///
+/// **Why this exists.** `mur-site` (Marketing) depends on `mur-brand` (Design), and the run
+/// passed Nova nothing of Luna's output: no field on the request, no assembly in the store,
+/// nowhere in the prompt to put it. The dependency graph gated ORDER and never INFORMATION —
+/// exactly the shape of the already-fixed `deptKey` bug documented on `RunTaskRequest.deptKey`
+/// below, where a run was performed BY a department the prompt was never told about.
+///
+/// Field names stay camelCase, unlike `RunTaskRequest`'s snake_case wire keys, because they
+/// are read on the other side by the `UpstreamWork` interface in `runTaskCore.ts` — the two
+/// declarations have to agree, and they are diffed against each other by name.
+struct UpstreamWork: Codable, Hashable {
+    let taskTitle: String
+    let deptName: String
+    let petName: String
+    let kind: String
+    let body: String
+    /// True when the work was produced by a chained run and not yet approved. Surfaced on the
+    /// card rather than hidden — a chain that conceals this is the fixture-lie failure mode.
+    var unapproved: Bool = false
+
+    static let cap = 3
+    static let bodyLimit = 1500
+
+    /// In `dependsOn` order: the fixture authors that array deliberately, so its order is the
+    /// intended precedence rather than an arbitrary notion of "nearest".
+    ///
+    /// Reads the LIBRARY, so only approved work feeds forward here. A chained run's unapproved
+    /// draft is not in the library yet and cannot be — see `CompanyStore.runChained`, which
+    /// prepends its own item with `unapproved: true` rather than filing a draft early to make
+    /// this function see it.
+    static func assemble(for task: RoadmapTask,
+                         in tasks: [RoadmapTask],
+                         library: [Deliverable]) -> [UpstreamWork] {
+        let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // `cap * 3` bounds the scan, not the result: a task with nine dependencies should not
+        // walk the whole library nine times to return three items.
+        return task.dependsOn.prefix(cap * 3).compactMap { depId -> UpstreamWork? in
+            guard let dep = byId[depId],
+                  let filed = RoadmapEngine.deliverable(for: dep, in: library) else { return nil }
+            let dept = DepartmentCatalog.find(dep.dept)
+            let pet = DepartmentCompanions.companionId(for: dep.dept ?? "")
+                .flatMap { PetCharacter.all[$0] }
+            return UpstreamWork(taskTitle: filed.title,
+                                deptName: dept?.name ?? "",
+                                petName: pet?.name ?? "",
+                                kind: filed.kind.rawValue,
+                                body: String(filed.body.prefix(bodyLimit)))
+        }.prefix(cap).map { $0 }
+    }
+}
+
 /// Request body for the runTask Cloud Function.
 struct RunTaskRequest: Codable {
     let companyId: String?
@@ -26,6 +78,15 @@ struct RunTaskRequest: Codable {
     /// the execute log and on the draft — and until now that was the only thing the
     /// department affected. The prompt never learned which department it was writing for.
     var deptKey: String? = nil
+    /// The finished work of the tasks this one `dependsOn` — see `UpstreamWork`.
+    ///
+    /// **Optional, not an empty array, and that is load-bearing.** The synthesized encoder
+    /// omits a nil Optional and always writes an empty Array, so `[UpstreamWork] = []` would
+    /// put `"upstream": []` on every request Codepet has ever sent — a wire change for the
+    /// overwhelmingly common dependency-free run, which this field is supposed to leave
+    /// byte-for-byte alone (the same promise `deptKey` above makes). `CompanyStore.runRequest`
+    /// is the one place that collapses empty to nil.
+    var upstream: [UpstreamWork]? = nil
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -38,6 +99,10 @@ struct RunTaskRequest: Codable {
         case reviseNote = "revise_note"
         case current
         case deptKey = "dept_key"
+        // A stored property missing from this enum is not a compile error and not a runtime
+        // error — it is simply never encoded. `UpstreamWorkTests` encodes the whole request
+        // for exactly that reason: every other test here would pass with this line deleted.
+        case upstream
     }
 }
 

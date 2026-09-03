@@ -154,6 +154,32 @@ open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murr
   `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
   identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
 
+### Departments that build on each other
+
+A run now carries the finished work of its `dependsOn` tasks — capped at 3 items × 1500
+characters, in `dependsOn` order — and the draft card credits them ("Built on Luna's brand
+direction"). Added 2026-09-03.
+
+- **`UpstreamWork` (`Services/RunTaskClient.swift`) is the one type**, and its field names are
+  camelCase on purpose: the TypeScript `UpstreamWork` in `runTaskCore.ts` reads them by name.
+  Adding a field means editing both, plus `RunTaskRequest.CodingKeys` — that enum renames every
+  field for the wire, and a stored property missing from it is silently never encoded
+- **`parseUpstream` is the only narrowing**, shared by `handleRunTask` and the `runTask` entry
+  in `ONE_SHOT_OPS`. It re-enforces the caps rather than trusting the client's
+- **The card's credit is read off the request that was sent**, not re-derived. `message.upstream`
+  is set from `RunTaskRequest.upstream` in `produceDraftInline`, so the credit and the prompt
+  cannot disagree
+- **Chained runs do not stop for approval** (founder decision). `runChained` runs the missing
+  dependency, feeds its DRAFT forward with `unapproved: true`, and the card says
+  `(unapproved draft)`. The upstream draft is never filed to the library — it was not approved —
+  which is why `UpstreamWork.fromDraft` exists alongside `assemble`
+- **A runnable task whose dependency produced nothing offers `[Run both]` / `[Just mine]`**
+  rather than guessing (`ChainOffer`). On a fresh Murror company that is 8 of 8 runnable tasks,
+  because `mur-brand` and `mur-landscape` are `done` with no deliverables behind them — so the
+  offer is currently the demo's first screen for every department. To make the demo lead with
+  the credit instead, give those two prerequisite tasks real deliverables in the fixture
+- `RoadmapGating.awaitsApproval` is untouched: chaining never opens a phase
+
 ---
 
 # Workspaces

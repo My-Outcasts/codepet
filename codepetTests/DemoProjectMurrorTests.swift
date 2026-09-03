@@ -210,9 +210,14 @@ final class DemoProjectMurrorTests: XCTestCase {
         let site = try XCTUnwrap(p.site)
         let html = SiteViewer.buildHTML(site)
 
-        if let out = ProcessInfo.processInfo.environment["CODEPET_DUMP_SITE"] {
-            try? html.write(toFile: out, atomically: true, encoding: .utf8)
-        }
+        // Written every run, and the path LOGGED rather than assumed. `xcodebuild` does not
+        // forward the parent environment to a unit-test host — a `CODEPET_DUMP_SITE` env gate
+        // and a `TEST_RUNNER_`-prefixed build setting both silently wrote nothing — so the
+        // trigger is removed rather than made conditional on something that does not arrive.
+        let out = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("murror-site.html")
+        try? html.write(to: out, atomically: true, encoding: .utf8)
+        NSLog("[murror-site] %d bytes → %@", html.utf8.count, out.path)
 
         XCTAssertTrue(html.hasPrefix("<!"), "not a document")
         // The accent reaches the stylesheet, so the CTA really is navy rather than the fallback.

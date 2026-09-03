@@ -303,7 +303,10 @@ final class CompanyStore: ObservableObject {
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
-         chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = CompanyChatClient.send,
+         // Routed per turn, for the same reason `chatStreamer` is: this is the NON-streaming
+         // retry, and wiring it straight to the Cloud Function meant a granted founder whose
+         // local stream died was answered by the API key they had said not to spend.
+         chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = { await ChatTransportRouter.send($0) },
          // Routed per turn rather than fixed here: `ChatTransportRouter` reads the
          // founder's grant (`cp_claudeCodeAuthorised`, keyed per company id, which
          // arrives on the request) and sends the turn to their own Claude Code or to
@@ -342,6 +345,11 @@ final class CompanyStore: ObservableObject {
          // closes over `UserDefaults.standard`, which a nonisolated default-argument context
          // cannot reference without warning.
          identityMap: ProjectIdentityMap? = nil,
+         // Defaulted in the init BODY for the same reason as `identityMap`: the real one
+         // closes over `UserDefaults.standard`. Injected so a test can grant the plan without
+         // writing to the real defaults domain — a leaked grant would route another suite's
+         // Build onto a machine it never asked for.
+         claudeAuthorisation: ClaudeCodeAuthorisation? = nil,
          // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
          // has a second defaulted parameter (an injectable runner, added so its exit-code
          // gate is testable), and Swift does not apply defaults when forming a function
@@ -369,9 +377,9 @@ final class CompanyStore: ObservableObject {
         #if DEBUG
         self.vcRunner = vcRunner ?? (MockChat.enabled
                                      ? { MockVirtualCompany.run($0) }
-                                     : { VirtualCompanyClient.run($0) })
+                                     : { LocalTransportRouter.runVirtualCompany($0) })
         #else
-        self.vcRunner = vcRunner ?? { VirtualCompanyClient.run($0) }
+        self.vcRunner = vcRunner ?? { LocalTransportRouter.runVirtualCompany($0) }
         #endif
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
@@ -385,6 +393,7 @@ final class CompanyStore: ObservableObject {
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
+        self.claudeAuthorisation = claudeAuthorisation ?? ClaudeCodeAuthorisation()
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
@@ -403,6 +412,11 @@ final class CompanyStore: ObservableObject {
     /// quietly back on next launch.
     func applyCloudAIBlock() {
         CloudAIBlock.apply(companyId: companyId)
+        // Same call site, same reason: `LocalTransportRouter` cannot reach the signed-in
+        // company either — its callers are onboarding models and API clients that take no
+        // company id — so whoever knows it has to say. Miss this and a founder's grant
+        // silently stops routing the non-streaming ops onto their own plan.
+        LocalTransportRouter.apply(companyId: companyId)
     }
 
     func openSettings(_ section: SettingsSection = .preferences) {
@@ -899,8 +913,15 @@ final class CompanyStore: ObservableObject {
     /// Falling back to local when no repo is linked would be exactly that
     /// silent routing. Instead the cloud run refuses — cheaply, before the
     /// balance is read — and the connect-or-create sheet opens.
+    /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
+    /// spend their Claude plan, and has a folder linked, gets their own agent — see
+    /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
     func startBuild(ask: String) {
-        startEngineeringRun(ask: ask)
+        if buildRunsOnFoundersAgent {
+            startCodeRun(ask: ask)
+        } else {
+            startEngineeringRun(ask: ask)
+        }
     }
 
     /// The build entry point for a two-mode Developer SESSION.
@@ -1047,7 +1068,11 @@ final class CompanyStore: ObservableObject {
         if let id = engineeringRunAnchorId {
             chatMessages.removeAll { $0.id == id }
         }
-        startEngineeringRun(ask: ask)
+        // `startBuild`, not `startEngineeringRun`: linking the folder is exactly what made
+        // `buildRunsOnFoundersAgent` true, so a granted founder who just linked one would
+        // otherwise be sent to the cloud agent by the very action that unblocked the local
+        // one — and be billed for the key their grant exists to stop spending.
+        startBuild(ask: ask)
     }
 
     /// Open the Review pane on the run currently in flight.
@@ -1152,7 +1177,7 @@ final class CompanyStore: ObservableObject {
         codingRunBag = nil
         vcRunner = injectedVCRunner ?? (on
                                         ? { MockVirtualCompany.run($0) }
-                                        : { VirtualCompanyClient.run($0) })
+                                        : { LocalTransportRouter.runVirtualCompany($0) })
 
         chatMessages = []
         threads = []
@@ -1205,6 +1230,31 @@ final class CompanyStore: ObservableObject {
     var localChatActive: Bool {
         ChatTransportRouter.transport(companyId: companyId) == .local
     }
+
+    /// Whether a Build should go to the founder's OWN coding agent rather than the cloud one.
+    ///
+    /// **The grant flips the default; it does not hide the choice.** `startBuild` was
+    /// cloud-first because local needs a linked folder and an installed `claude`, which is
+    /// nobody who just downloaded Codepet. A founder who granted "Codepet may spend my Claude
+    /// plan" is exactly the founder for whom that reasoning inverts: the cloud agent spends
+    /// the Anthropic key the grant exists to stop spending, and `CloudAIBlock` may be
+    /// refusing `engStartRun` outright. So the default moves, and nothing else does — the run
+    /// still says where it is running, and the other machine is still one tap away.
+    ///
+    /// **Reads the grant directly, not `LocalTransportRouter`.** That router also requires
+    /// the bundled one-shot sidecar, which a coding run does not use at all: it drives the
+    /// `claude` binary through `ClaudeCodeRunner`. Gating on a resource this path never
+    /// touches would send a granted founder to the cloud for the wrong reason.
+    ///
+    /// A linked folder stays necessary: without one the local run lands in `.noProject`, and
+    /// falling into that instead of the connect sheet would be the silent routing
+    /// `startBuild` is documented to avoid.
+    var buildRunsOnFoundersAgent: Bool {
+        guard let companyId else { return false }
+        return localBuildAvailable && claudeAuthorisation.isAuthorised(companyId)
+    }
+
+    let claudeAuthorisation: ClaudeCodeAuthorisation
 
     // MARK: - The two doors
 

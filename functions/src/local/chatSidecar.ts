@@ -25,8 +25,11 @@ import {
   buildChatRequest,
   resolveActions,
   type ChatRequestBody,
-  type ClaudeMessage,
 } from "../companyChatCore";
+import { flattenTranscript } from "./transcript";
+
+// Re-exported under the name this module's tests and its own history use.
+export { flattenTranscript as renderForPrompt } from "./transcript";
 import { toMcpTools, allowedToolNames, serveMcp } from "./mcpToolServer";
 
 /**
@@ -161,68 +164,6 @@ export function ingestLine(
 }
 
 
-/**
- * Render the built messages as ONE prompt string.
- *
- * **This is the one place the local path cannot match the HTTP path, and it is a
- * deliberate compromise rather than an oversight.** `claude -p` takes a single prompt on
- * stdin; it has no messages array. So a multi-turn conversation that reaches the API as
- * structured user/assistant turns reaches Claude Code as a labelled transcript followed by
- * the current turn. The words are identical — `buildChatRequest` produced them — but the
- * ROLE STRUCTURE is flattened, and a model reads a transcript slightly differently from a
- * real turn history.
- *
- * **There is no better shape available, and that was measured rather than assumed.**
- * `--input-format stream-json` looked like the faithful alternative and is not:
- *
- *   - A seeded `assistant` message costs no turn but is DROPPED. Sent one followed by a
- *     question about it, the model answered "I don't have any prior context in this
- *     conversation establishing a company name."
- *   - Every `user` message triggers its own generation. Three input messages produced two
- *     `result` frames, so replaying an N-turn history would cost N generations of the
- *     founder's quota and N× the latency.
- *
- *   An earlier reading of the first experiment concluded it DID work — the model repeated a
- *   name from the injected history. It knew the name because the first user turn had
- *   actually run and answered it; the injected assistant message played no part. The
- *   minimal two-message case is what separated those.
- *
- * So flattening is not a first cut to be improved later. It is the only shape `claude -p`
- * supports, and the divergence from the HTTP path is permanent for this transport.
- *
- * Attachments cannot ride a text prompt. They are named rather than dropped silently, so a
- * founder who attached a screenshot sees that it was not read instead of wondering why the
- * answer ignores it.
- */
-export function renderForPrompt(messages: ClaudeMessage[]): string {
-  const text = (content: ClaudeMessage["content"]): string => {
-    if (typeof content === "string") return content;
-    return content
-      .map((b) => {
-        const blk = b as { type?: string; text?: string };
-        if (blk.type === "text") return blk.text ?? "";
-        return `[attachment omitted: ${blk.type ?? "unknown"} — this path cannot read files]`;
-      })
-      .filter(Boolean)
-      .join("\n");
-  };
-
-  if (!messages.length) return "";
-  const history = messages.slice(0, -1);
-  const current = messages[messages.length - 1];
-
-  const parts: string[] = [];
-  if (history.length) {
-    parts.push("Earlier in this conversation:");
-    for (const m of history) {
-      parts.push(`${m.role === "user" ? "Founder" : "You"}: ${text(m.content)}`);
-    }
-    parts.push("");
-  }
-  parts.push(text(current.content));
-  return parts.join("\n");
-}
-
 /* istanbul ignore next -- process wiring; the pure parts above carry the tests */
 async function main(): Promise<void> {
   const raw = await new Promise<string>((resolve) => {
@@ -291,7 +232,7 @@ async function main(): Promise<void> {
   // The turn's prompt goes on stdin, never as an argument: `--allowedTools` above is
   // variadic and would swallow it. `renderForPrompt` is what carries the history, since
   // `claude -p` takes one prompt rather than a messages array.
-  child.stdin.write(renderForPrompt(built.messages));
+  child.stdin.write(flattenTranscript(built.messages));
   child.stdin.end();
 
   let buf = "";

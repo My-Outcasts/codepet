@@ -1,6 +1,13 @@
 #!/bin/bash
 #
-# Bundle the local chat sidecar into the app's resources.
+# Bundle the local sidecars into the app's resources.
+#
+# THREE bundles, not one, because the three shapes are genuinely different: `chatSidecar`
+# streams a tool-calling conversation, `oneShotSidecar` runs the non-streaming functions
+# (enrichBrief, synthesizeBrief, generateRoadmap, runTask) that answer with one JSON body,
+# and `vcSidecar` runs a multi-agent meeting that streams the virtual-company frame order.
+# They share the prompt builders and the `claude -p` flags they import, not a process — and
+# they fail independently, so a broken meeting cannot take onboarding down with it.
 #
 # WHY A BUNDLER AND NOT JUST `tsc`. Xcode's synchronized resource group FLATTENS what it
 # copies — measured: `codepet/Resources/Fonts/*.ttf` land directly in
@@ -29,17 +36,31 @@ ROOT="$PWD"
 # warning. An extension Xcode has no opinion about is copied as a resource instead. `node`
 # does not care what the file is called.
 OUT="$ROOT/codepet/Resources/chatSidecar.js"
+OUT_ONESHOT="$ROOT/codepet/Resources/oneShotSidecar.js"
+OUT_VC="$ROOT/codepet/Resources/vcSidecar.js"
 
 echo "▸ typechecking functions/"
 (cd functions && npx tsc --noEmit)
 
-echo "▸ bundling the sidecar into one self-contained file"
+echo "▸ bundling the sidecars into self-contained files"
 (cd functions && npx esbuild src/local/chatSidecar.ts \
   --bundle \
   --platform=node \
   --target=node20 \
   --format=cjs \
   --outfile="$OUT")
+(cd functions && npx esbuild src/local/oneShotSidecar.ts \
+  --bundle \
+  --platform=node \
+  --target=node20 \
+  --format=cjs \
+  --outfile="$OUT_ONESHOT")
+(cd functions && npx esbuild src/local/vcSidecar.ts \
+  --bundle \
+  --platform=node \
+  --target=node20 \
+  --format=cjs \
+  --outfile="$OUT_VC")
 
 # Node 20 is what this machine has while functions/package.json declares 22 for the Cloud
 # Functions runtime. The sidecar runs on the FOUNDER's node, not Google's, so it targets
@@ -53,5 +74,24 @@ printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' \
   | grep -q '"navigate"' \
   && echo "  ✓ server mode answers tools/list"
 
+# The one-shot smoke check costs NO tokens on purpose: an unknown op is refused before any
+# `claude` is spawned, so this proves the bundle loads and its registry answers without
+# spending a turn of whoever is building.
+printf '%s\n' '{"op":"nope","body":{}}' \
+  | { node "$OUT_ONESHOT" || true; } \
+  | grep -q '"unknown_op"' \
+  && echo "  ✓ one-shot mode refuses an op it does not have"
+
 echo "▸ done: $OUT"
 echo "  $(wc -c < "$OUT" | tr -d ' ') bytes"
+# Same zero-token check for the meeting: an invalid payload is refused by the shared
+# validator before any agent is called.
+printf '%s\n' '{"request":""}' \
+  | { node "$OUT_VC" || true; } \
+  | grep -q '"invalid_payload"' \
+  && echo "  ✓ meeting mode refuses an invalid payload"
+
+echo "▸ done: $OUT_ONESHOT"
+echo "  $(wc -c < "$OUT_ONESHOT" | tr -d ' ') bytes"
+echo "▸ done: $OUT_VC"
+echo "  $(wc -c < "$OUT_VC" | tr -d ' ') bytes"

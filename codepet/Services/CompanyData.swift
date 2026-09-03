@@ -1,5 +1,6 @@
 // codepet/Services/CompanyData.swift
 import Foundation
+import os
 import FirebaseFirestore
 import FirebaseAuth
 
@@ -305,6 +306,26 @@ enum CompanyData {
             return MockChat.roadmap()
         }
         #endif
+        // The founder's own Claude Code first, when they granted it. Fail-open still applies
+        // — `[]` is what the caller reads as "no change" — but the reason is LOGGED rather
+        // than swallowed, because a granted founder staring at an empty board otherwise has
+        // nothing to act on. It never falls through to the Cloud Function: that would spend
+        // the API key the grant exists to stop spending.
+        switch LocalTransportRouter.forOneShot() {
+        case .local, .localUnavailable:
+            do {
+                let body = try JSONEncoder().encode(
+                    RoadmapRequest(language: language.rawValue, brief: brief))
+                let out = try await LocalOneShotRunner.run(op: "generateRoadmap", body: body)
+                return try JSONDecoder().decode(RoadmapResponse.self, from: out).tasks
+            } catch {
+                LocalTransportRouter.log.error(
+                    "local roadmap failed: \(error.localizedDescription, privacy: .public)")
+                return []
+            }
+        case .cloud:
+            break
+        }
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
         var req = URLRequest(url: roadmapEndpoint)
         req.httpMethod = "POST"

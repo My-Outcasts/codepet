@@ -170,8 +170,8 @@ struct ClaudeCodePanel: View {
                 // existed, and a permission whose scope is invisible is not informed
                 // consent. Every feature moved onto this path gets added to this line.
                 description: lang == .vi
-                    ? "Chat sẽ chạy trên gói Claude của bạn, và mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
-                    : "Chat runs on your Claude plan, and each turn spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
+                    ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
+                    : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
             ) {
                 Toggle("", isOn: Binding(
                     get: { granted },
@@ -190,13 +190,14 @@ struct ClaudeCodePanel: View {
                 SettingsDivider()
                 SettingsRow(
                     label: lang == .vi ? "Không dùng API key của Codepet" : "Never use Codepet's API key",
-                    // Names what BREAKS, not just what it prevents. Only chat runs on the
-                    // founder's plan today; the other seventeen model calls still go through
-                    // the key, and a switch that turned them off without saying so would read
-                    // as the app falling apart.
+                    // Nothing is named as breaking any more, because nothing does: every model
+                    // call Codepet makes has a local path. What the switch still costs is
+                    // stated instead — no server-side cache, so work the cloud would have
+                    // served free is regenerated on the founder's own quota. If a future
+                    // feature ships cloud-only, its name belongs in this line before it ships.
                     description: lang == .vi
-                        ? "Hiện chỉ chat chạy trên gói của bạn. Bật cái này thì lộ trình, nhiệm vụ, quyết định và brief sẽ ngừng hoạt động — chúng chưa có đường local. Dùng để kiểm tra, chưa dùng hằng ngày."
-                        : "Only chat runs on your plan so far. Turn this on and roadmap, tasks, decisions and briefs stop working — they have no local path yet. For checking, not for daily use."
+                        ? "Mọi tính năng AI đều đã chạy được trên gói của bạn, nên bật cái này sẽ không làm gì ngừng hoạt động. Đổi lại: không còn cache phía server, nên tóm tắt hay thẻ từ điển đã tạo trước đó sẽ được tạo lại và tiêu hạn mức của bạn."
+                        : "Every AI feature now runs on your plan, so turning this on breaks nothing. The trade: no server-side cache, so summaries and dictionary cards that would have been served free get regenerated on your own quota."
                 ) {
                     Toggle("", isOn: Binding(
                         get: { neverUseApiKey },

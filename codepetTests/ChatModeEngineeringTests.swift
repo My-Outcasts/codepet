@@ -164,6 +164,62 @@ final class BuildDestinationTests: XCTestCase {
         XCTAssertNil(store.codingRun.run, "Build silently started the LOCAL agent")
     }
 
+    /// The grant flips the default. A founder who said "Codepet may spend my Claude plan"
+    /// and linked a folder gets their OWN agent, because the cloud one spends the Anthropic
+    /// key that grant exists to stop spending — and `CloudAIBlock` may be refusing
+    /// `engStartRun` outright, which would fail as an unexplained network error.
+    func testAGrantedFounderWithAFolderGetsTheirOwnAgent() async {
+        let store = grantedStore()
+        await store.hydrate(companyId: "c1")
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+        XCTAssertTrue(store.buildRunsOnFoundersAgent, "the fixture failed to grant + link")
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertNotNil(store.codingRun.run, "a granted Build did not run on the founder's agent")
+        XCTAssertNil(store.engineeringRunStore, "a granted Build still spent the API key")
+    }
+
+    /// A grant is not a folder. Without one the local run lands in `.noProject`, so falling
+    /// into it instead of the connect sheet would be the silent routing `startBuild` exists
+    /// to avoid — the cloud refusal is what opens that sheet.
+    func testAGrantWithNoFolderIsStillNotALocalBuild() async {
+        let store = grantedStore()
+        await store.hydrate(companyId: "c1")
+        XCTAssertFalse(store.buildRunsOnFoundersAgent)
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertNotNil(store.engineeringRunStore)
+        XCTAssertNil(store.codingRun.run)
+    }
+
+    /// The grant is per company id — one Mac has one Claude Code login, so founder A's
+    /// consent must not route founder B's Build onto the plan A signed in with.
+    func testAnotherFoundersGrantDoesNotMoveThisBuild() async {
+        let store = grantedStore(granted: "someone-else")
+        await store.hydrate(companyId: "c1")
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertNotNil(store.engineeringRunStore)
+        XCTAssertNil(store.codingRun.run)
+    }
+
+    /// A grant table in memory, so no case here touches the real defaults domain: a leaked
+    /// grant would move another suite's Build to a machine it never asked for.
+    private func grantedStore(granted: String = "c1") -> CompanyStore {
+        let state = CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                                 stage: .idea, companionId: "byte", onboardedAt: nil, tasks: [])
+        let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
+        return CompanyStore(
+            loader: { _ in state }, saver: { _, _ in true },
+            identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"),
+            claudeAuthorisation: ClaudeCodeAuthorisation(
+                isAuthorised: { $0 == granted }, setAuthorised: { _, _ in }))
+    }
+
     func testTheSwitchActuallyMovesTheRunToTheOtherMachine() {
         // And drops the cloud one: two coding agents on one ask, writing to two
         // different places, is a state no card could explain.

@@ -181,3 +181,43 @@ export function coerceRoadmap(raw: unknown, _opts?: { language?: string }): { ta
 
   return { tasks };
 }
+
+// The forced tool's schema and the system prompt, moved here from the handler when the
+// local path started needing them: `local/oneShotSidecar` is esbuild-bundled into the app,
+// so anything it imports from a handler drags the Anthropic SDK in with it (measured: 7.5 MB).
+// Living here keeps ONE schema for both transports — the API forces this tool, and the local
+// path renders this same `input_schema` into its prompt.
+export const ROADMAP_TOOL = {
+  name: "record_roadmap",
+  description: "Record the generated phase/task/dependency roadmap.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            phase: { type: "string", description: "One of: find, foundation, build, ship, launch, grow." },
+            title: { type: "string" },
+            detail: { type: "string" },
+            who: { type: "string", description: "'you' | 'does' | 'draft'" },
+            dept: {
+              type: "string",
+              description: "The single owning department: one of eng, design, mkt, sales, support, fin, ops, legal.",
+            },
+            deps: {
+              type: "array",
+              items: { type: "string" },
+              description: "Exact titles of prerequisite tasks from this same list, empty if none.",
+            },
+          },
+          required: ["phase", "title", "who", "detail", "dept"],
+        },
+      },
+    },
+    required: ["tasks"],
+  },
+} as const;
+
+export const ROADMAP_SYSTEM = "You plan a solo founder's whole-company roadmap. You never invent details the founder did not give you.";

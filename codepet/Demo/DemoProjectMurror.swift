@@ -1,0 +1,123 @@
+// codepet/Demo/DemoProjectMurror.swift
+#if DEBUG
+import Foundation
+
+/// Murror — the second demo company, and the one that proves the fixtures carry a PROJECT rather
+/// than a coat of paint.
+///
+/// Codepet's fixture demos a founder tool to a founder. Murror is a consumer app about loneliness,
+/// so nothing about Codepet's copy survives the move: the audience, the problem, the departments
+/// that matter and the argument the room has are all different. That is the point of having two.
+///
+/// Content is Murror's own, taken from murror.app rather than invented — "The connection
+/// practice", "AI that brings people closer", emotion recognition, relationship insights, small
+/// acts of care, private by design.
+extension DemoProject {
+
+    static let murror = DemoProject(
+        id: "murror",
+        brief: {
+            var b = CompanyBrief()
+            b.founderName = "Mona"
+            b.projectName = "Murror"
+            b.oneLiner = "AI that brings people closer."
+            b.audience = "Adults who feel lonely and want to be closer to the people they love"
+            b.problem = "Most of us were never taught how to understand what we feel, "
+                + "or how to show up for someone else."
+            b.goal = "Get 20 people through a first week of the practice and see who comes back."
+            b.stage = "building"
+            return b
+        }(),
+        tasks: murrorTasks,
+        deliverables: murrorDeliverables,
+        roomFrames: murrorRoomFrames(ask:)
+    )
+
+    /// **Eleven tasks: a three-task completed spine, and eight runnable — one per roster
+    /// department.**
+    ///
+    /// The shape is a company already in motion rather than a blank slate, and the reason is
+    /// mechanical. `RoadmapEngine.status` returns `.codepetCanDo` only when every id in
+    /// `dependsOn` resolves to a task that is `done` (`depsSatisfied`), so **for all eight pets
+    /// to be runnable at once, the eight may depend only on completed tasks.** The edges
+    /// therefore hang off the spine instead of chaining the runnables together.
+    ///
+    /// It would have been simpler to give the eight no dependencies at all. That was rejected for
+    /// the same reason `MockChat.roadmap()`'s graph exists: with `dependsOn` empty every task
+    /// qualifies as an entry task, `RoadmapLayoutEngine` draws zero dependency edges and fans the
+    /// root out to all of them — the board cannot exercise its own flow rendering, and it does
+    /// not look like a plan. This graph covers each routing case exactly once:
+    ///
+    ///   - `{brand, landscape} → site` is a **fan-IN**, two sources into one target. Its
+    ///     `landscape` leg is also a shared-lane straight run: both sit on the `mkt` lane.
+    ///   - `brand → screens` is an **IN-COLUMN** edge — both are `.foundation`, both `design` —
+    ///     so it exercises `sideElbow`'s left-gutter hook.
+    ///   - `brand → launch` **SKIPS** `.build`, and `interviews → privacy` skips two phases.
+    ///     Skip-level edges are the reproduction for the routing flaw where they read as a
+    ///     chain; they are here on purpose and should not be "tidied" away.
+    ///   - `{interviews, landscape} → outreach` is a second fan-IN, both legs from `.find`.
+    ///
+    /// **No task sets `drafted`.** An unapproved draft is the one thing that still closes the
+    /// phase window (`RoadmapGating.awaitsApproval`, changed 2026-08-05 so a founder-owned task
+    /// no longer gates), and one here would block everything behind it regardless of the graph.
+    private static var murrorTasks: [RoadmapTask] {
+        [
+            // ── FIND: complete. The research that the rest of the board depends on. ──────────
+            RoadmapTask(id: "mur-interviews", title: "Talk to 12 people about being lonely",
+                        detail: "Not about the app — about the last evening they wanted to reach out and didn't.",
+                        phase: .find, who: .you, done: true, dept: "mkt"),
+            RoadmapTask(id: "mur-landscape", title: "Scan the journaling and companion apps",
+                        detail: "What they promise, what they actually do on day three, and where the gap is.",
+                        phase: .find, who: .draft, done: true, dept: "mkt"),
+
+            // ── FOUNDATION ──────────────────────────────────────────────────────────────────
+            // Done, and the ancestor three runnables hang off.
+            RoadmapTask(id: "mur-brand", title: "Shape the Murror visual direction",
+                        detail: "Night sky, warm light. It has to feel safe enough to be honest in.",
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-landscape"], done: true, dept: "design"),
+            // THE WEBSITE. Fan-IN: the page needs both the visual direction and the positioning.
+            RoadmapTask(id: "mur-site", title: "Build the Murror landing page",
+                        detail: "One page that says what the practice is, for someone who has never heard of it.",
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-brand", "mur-landscape"], dept: "mkt"),
+            // In-column with `mur-brand` → sideElbow.
+            RoadmapTask(id: "mur-screens", title: "Design the first-run flow",
+                        detail: "Four screens from install to the first message actually sent.",
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-brand"], dept: "design"),
+            RoadmapTask(id: "mur-pricing", title: "Decide what free and paid mean",
+                        detail: "Where the line sits when the thing being sold is somebody's own history.",
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-landscape"], dept: "fin"),
+
+            // ── BUILD ───────────────────────────────────────────────────────────────────────
+            RoadmapTask(id: "mur-signup", title: "Ship an email capture",
+                        detail: "One field, no backend, so the interest from the interviews isn't lost.",
+                        phase: .build, who: .does,
+                        dependsOn: ["mur-brand"], dept: "eng"),
+            // Second fan-IN, both legs from `.find`.
+            RoadmapTask(id: "mur-outreach", title: "Find the first 20 users",
+                        detail: "Three places where people already talk about this, and what to say in each.",
+                        phase: .build, who: .draft,
+                        dependsOn: ["mur-interviews", "mur-landscape"], dept: "sales"),
+            RoadmapTask(id: "mur-faq", title: "Answer the first questions",
+                        detail: "Starting with the one everybody asks first, and answering it honestly.",
+                        phase: .build, who: .draft,
+                        dependsOn: ["mur-interviews"], dept: "support"),
+
+            // ── SHIP ────────────────────────────────────────────────────────────────────────
+            // SKIPS .build on purpose — the skip-level routing case.
+            RoadmapTask(id: "mur-launch", title: "Write the launch checklist",
+                        detail: "Including the one item that can block a launch outright.",
+                        phase: .ship, who: .does,
+                        dependsOn: ["mur-brand"], dept: "ops"),
+            // Skips two phases — the second skip-level case.
+            RoadmapTask(id: "mur-privacy", title: "Draft the privacy policy",
+                        detail: "Plain language, because the data here is the most personal kind there is.",
+                        phase: .ship, who: .draft,
+                        dependsOn: ["mur-interviews"], dept: "legal"),
+        ]
+    }
+}
+#endif

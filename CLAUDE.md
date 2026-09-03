@@ -130,6 +130,30 @@ byte, nova, crash, luna, sage, glitch, null
 - UserDefaults keys are prefixed with `cp_` (e.g., `cp_onboardingComplete`)
 - Cloud sync has two destinations: company state under `companies/{uid}`, the older game progress under `users/{uid}`
 
+## Prototype mode: two demo companies
+
+Prototype mode runs the whole product on fixtures. **Which company those fixtures describe is a
+second switch,** `DemoProject` (`codepet/Demo/`), and there are two:
+
+```
+open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murror
+```
+
+- Default is `codepet` — Codepet demoing Codepet, the content the fixtures always had. Every
+  suite written against those literals depends on this default, so do not change it.
+- `murror` is the second company: 11 tasks, **8 runnable at once — one per roster department**,
+  and the only fixture whose run produces a `.site`, i.e. an actual rendered landing page in the
+  Library's `WKWebView`. Ask for "the landing page" to see it.
+- **Selection is read through `PrototypeMode.store`**, which is redirected to a scratch suite
+  under XCTest. That is deliberate and load-bearing: reading `UserDefaults.standard` here would
+  re-open issue #117, where the test host sharing the app's defaults domain meant a founder's
+  toggle silently changed what the suite exercised.
+- A launch argument outranks the stored preference (`NSArgumentDomain`), so the demo cannot be
+  left half-selected between the two.
+- **All eight Murror tasks are runnable only because each depends solely on `done` tasks.**
+  `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
+  identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
+
 ---
 
 # Workspaces

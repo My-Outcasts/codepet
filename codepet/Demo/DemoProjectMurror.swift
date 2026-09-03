@@ -30,6 +30,12 @@ extension DemoProject {
         }(),
         tasks: murrorTasks,
         deliverables: murrorDeliverables,
+        // The two prerequisites every other Murror task depends on. They are `done` in the
+        // board above, and a `done` task with nothing filed behind it is a state the real
+        // product cannot reach — approving is what marks a task done AND files its
+        // deliverable. Filing them is what lets the demo show departments building on each
+        // other at all: `UpstreamWork.assemble` reads the library.
+        filed: ["mur-interviews", "mur-landscape", "mur-brand"],
         roomFrames: murrorRoomFrames(ask:)
     )
 

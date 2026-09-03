@@ -46,11 +46,59 @@ struct DemoProject {
     let tasks: [RoadmapTask]
     let deliverables: [DemoDeliverable]
 
+    /// Task ids whose deliverable is ALREADY in the library when the demo opens.
+    ///
+    /// **Why a demo needs this.** `MockChat.company()` handed back `library: []`, so prototype
+    /// mode opened with a board where prerequisite tasks were `done` and nothing was filed
+    /// behind them. That is not a state the real product can reach — approving is what marks a
+    /// task done, and approving is what files the deliverable — and it made the collaboration
+    /// invisible: `UpstreamWork.assemble` reads the library, so with an empty one no run could
+    /// ever inherit anything and no credit line could ever render. Measured on the walkthrough:
+    /// zero credits in 24 chapters, and the chain offer firing on 8 of 8 Murror tasks because
+    /// every dependency looked unproduced.
+    ///
+    /// Empty for `.codepet`, which keeps the default demo byte-for-byte what it was.
+    let filed: [String]
+
+    /// The starting library: the canned deliverable each `filed` task produced.
+    ///
+    /// Built from `deliverables` rather than authored a second time — the demo's story is that
+    /// this task already ran, so the artifact has to be the one that task actually produces.
+    /// Two sources would let the pre-filed copy and the run's output disagree, which is the
+    /// same shape of bug as a card crediting work the model never received.
+    ///
+    /// Ids are derived, not random, so a relaunch does not reshuffle the Library.
+    func library() -> [Deliverable] {
+        filed.compactMap { id -> Deliverable? in
+            guard let task = tasks.first(where: { $0.id == id }) else { return nil }
+            let entry = deliverable(for: task.title)
+            let payload = entry.payloadJSON.flatMap {
+                try? JSONDecoder().decode(DeliverablePayload.self, from: Data($0.utf8))
+            }
+            return Deliverable(
+                id: "demo-\(id)", kind: DeliverableKind(raw: entry.kind), title: task.title,
+                body: MockChat.fill(entry.body, title: task.title),
+                createdAt: nil, sourceTaskId: id, payload: payload)
+        }
+    }
+
     /// **A function of the ask, not a stored array.** `MockVirtualCompany.frames(ask:)` encodes
     /// the founder's own question into `real_question`, and that has to survive quoting — an ask
     /// containing a quote mark would otherwise produce invalid JSON and silently drop the routing
     /// frame, which is the whole room. Flattening this to `[SSEFrame]` would lose that.
     let roomFrames: (String) -> [SSEFrame]
+
+    /// `filed` defaults to empty so `.codepet` needs no edit and opens exactly as it did.
+    init(id: String, brief: CompanyBrief, tasks: [RoadmapTask],
+         deliverables: [DemoDeliverable], filed: [String] = [],
+         roomFrames: @escaping (String) -> [SSEFrame]) {
+        self.id = id
+        self.brief = brief
+        self.tasks = tasks
+        self.deliverables = deliverables
+        self.filed = filed
+        self.roomFrames = roomFrames
+    }
 
     /// First entry whose keyword appears in the title.
     ///

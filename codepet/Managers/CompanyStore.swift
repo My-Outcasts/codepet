@@ -1989,18 +1989,39 @@ final class CompanyStore: ObservableObject {
             appendRunRefusal(Self.runRefusalCopy(status, task: task, language: language))
             return
         }
-        // A dependency arrow pointing at nothing. The task is runnable — `status` above
-        // already refused a genuinely blocked one — but a prerequisite the founder marked
-        // done themselves produced no deliverable, so this department would write in the
-        // dark. Offer the choice rather than deciding for them: running the upstream task
-        // spends credits on work they did not ask for, and running alone is still a good
-        // answer. See `ChainOffer`.
-        if let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
-                                               library: company.library) {
-            appendChainOffer(for: task, dependency: dep, language: language)
-            return
-        }
+        guard !offerChainIfNeeded(for: task, language: language) else { return }
         await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// A dependency arrow pointing at nothing: offer the choice instead of guessing, and
+    /// return true when the run should stop here and wait for the founder.
+    ///
+    /// **Every run entry point calls this, and that is the point.** It lived inside
+    /// `handleRunTaskId` for one afternoon, which meant the SAME task asked in chat and ran
+    /// straight through from the beacon, the Roadmap and the autoplay walkthrough — all three
+    /// go through `runTask`. Caught by watching the walkthrough: 24 chapters, a Design run
+    /// with an unproduced dependency, no offer and no credit. One task must not have two
+    /// behaviours depending on which button started it.
+    ///
+    /// The task is already known runnable by every caller — `RoadmapEngine.status` refuses a
+    /// genuinely blocked one — so what this catches is narrower: a prerequisite that is `done`
+    /// with no deliverable behind it, usually because the founder marked it done themselves.
+    ///
+    /// `runChained` and `declineChain` deliberately do NOT call it: they are the answers to it,
+    /// and re-asking would loop.
+    private func offerChainIfNeeded(for task: RoadmapTask, language: AppLanguage) -> Bool {
+        guard let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
+                                                  library: company.library) else { return false }
+        // An offer already on screen for this task is not repeated — the beacon and the
+        // Roadmap can both be pressed for the same task before either is answered.
+        guard !chatMessages.contains(where: { $0.chainOffer?.taskId == task.id
+                                              && !$0.actionConsumed }) else {
+            dockCollapsed = false
+            return true
+        }
+        appendChainOffer(for: task, dependency: dep, language: language)
+        dockCollapsed = false
+        return true
     }
 
     /// The needs-upstream card: the sentence and the two buttons, as one message.
@@ -2853,6 +2874,13 @@ final class CompanyStore: ObservableObject {
         // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
         // answer to one question.
         dockCollapsed = false
+        // Same question the chat path asks, for the same reason — see `offerChainIfNeeded`.
+        // The task leaves `runningTaskIds` first: the offer's buttons are disabled while its
+        // own task is running, so holding the id here would render the card un-pressable.
+        if offerChainIfNeeded(for: task, language: language) {
+            runningTaskIds.remove(task.id)
+            return
+        }
         let produced = await produceDraftInline(for: task, cid: cid, language: language) != nil
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }

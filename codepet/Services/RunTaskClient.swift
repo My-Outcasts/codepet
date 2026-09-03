@@ -50,15 +50,25 @@ struct UpstreamWork: Codable, Hashable {
     /// The first dependency that has produced nothing yet — what a chained run offers to run
     /// before the task the founder asked for.
     ///
-    /// Keyed on the LIBRARY and not on `done`. A task the founder marked complete themselves
-    /// is `done` with no deliverable behind it, and that is precisely the case worth chaining:
-    /// the downstream run has a dependency arrow pointing at nothing it can read.
+    /// Keyed on the LIBRARY and not on `done`: a task can be `done` with no deliverable behind
+    /// it, and that is exactly the case worth chaining — the downstream run has a dependency
+    /// arrow pointing at nothing it can read.
+    ///
+    /// But only where Codepet could produce that deliverable. See the `.you` clause below.
     static func firstUnfiled(dependencyOf task: RoadmapTask,
                              in tasks: [RoadmapTask],
                              library: [Deliverable]) -> RoadmapTask? {
         let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return task.dependsOn.lazy.compactMap { byId[$0] }
-            .first { RoadmapEngine.deliverable(for: $0, in: library) == nil }
+            .first {
+                // `who == .you` is the founder's own work — an interview round, a conversation,
+                // something that happened off the screen. Codepet must not offer to run it:
+                // `handleRunTaskId` refuses a `.you` task outright ("that one's yours to do"),
+                // so an offer whose "Run both" button reached one would be promising work the
+                // product declines to do everywhere else. Such a dependency simply feeds
+                // nothing forward, and the downstream run proceeds without it.
+                $0.who != .you && RoadmapEngine.deliverable(for: $0, in: library) == nil
+            }
     }
 
     /// Build an item from a DRAFT rather than from the library.

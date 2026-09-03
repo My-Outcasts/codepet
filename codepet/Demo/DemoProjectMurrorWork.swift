@@ -29,7 +29,120 @@ extension DemoProject {
             // `.step .n`, and the whole `.final` block), so a pale colour renders
             // white-on-pale — and `safeHex` validates hex SYNTAX, not contrast, so nothing
             // else in the codebase would catch it.
+            // ── THE RESEARCH THE REST OF THE BOARD HANGS OFF ────────────────────────────────
+            //
+            // These three are `done` in the board and FILED in `DemoProject.filed`, which is
+            // what lets the demo show departments building on each other: `UpstreamWork`
+            // reads the library, so an unfiled prerequisite feeds nothing forward. They are
+            // real artifacts rather than the catch-all on purpose — a downstream run that
+            // inherits filler produces filler, and the credit line would then be true about
+            // a lie. Keywords sit FIRST so their titles cannot fall through to a later,
+            // more general entry.
             DemoDeliverable(
+                keywords: ["12 people", "lonely", "interviews"],
+                kind: "doc",
+                body: """
+                Twelve conversations, none of them about the app. What they have in common is \
+                not loneliness — it is a specific evening that already happened.
+
+                **The pattern, stated once**
+                Eleven of the twelve could name the last time they wanted to reach out and did \
+                not. Nobody was short of contacts. What stopped them was not knowing what they \
+                would say once the person picked up.
+
+                **What they actually said**
+                - "I didn't want to dump it on her." — the fear is being a burden, not being alone.
+                - "By the time I worked out what was wrong it was 1am and too late to text."
+                - "I journal when it's already bad. Never before." — journaling is triage, not practice.
+                - "I know I'm off. I couldn't tell you which off." — naming the feeling is the missing step.
+
+                **The one who disagreed**
+                One person found the whole framing insulting: she does not want help understanding \
+                herself, she wants fewer obligations. Keep her in mind — she is the person who \
+                will find any version of this patronising, and she is not wrong about herself.
+
+                **What this rules out**
+                A mood tracker. Every one of them had tried one and stopped; none could say what \
+                it had ever told them. Numbers on a chart are not the thing that was missing.
+
+                **What it points at**
+                The gap is between feeling something and being able to say it to a person. \
+                Anything that only closes the first half is a diary, and they already have one.
+                """),
+
+            DemoDeliverable(
+                keywords: ["journaling and companion", "scan the", "landscape"],
+                kind: "doc",
+                body: """
+                What the journaling and companion apps promise, what they do on day three, and \
+                where the gap actually is.
+
+                **What everyone promises**
+                Understand yourself. Every app in the category, near-verbatim.
+
+                **What day three looks like**
+                - **Journals** — a blank page and a streak counter. The page does not get easier \
+                to face on day three; the counter gets harder to lose.
+                - **Mood trackers** — five emoji and a chart nobody reads back. Fast to fill in, \
+                which is exactly why it costs nothing and returns nothing.
+                - **AI companions** — endlessly available and endlessly agreeable. They keep the \
+                conversation inside the app, which is where it stays.
+
+                **The gap, in one line**
+                Every one of them ends with the user understanding themselves slightly better, \
+                alone. Not one of them ends with a person on the other end.
+
+                **Where that leaves {{product}}**
+                The category has solved the private half and left the second half untouched. \
+                "AI that brings people closer" is not a softer version of what these do — it is \
+                the half they all stop before.
+
+                **Two things to steal**
+                A first session that asks for nothing (the best onboarding here asks for no \
+                account), and crisis routing that is built in rather than bolted on.
+
+                **One thing to refuse**
+                Streaks. Every app in this set has them, and every person we interviewed had \
+                broken one and stopped.
+                """),
+
+            DemoDeliverable(
+                keywords: ["visual direction", "brand"],
+                kind: "doc",
+                body: """
+                The visual direction, decided against one worry: that naming a feeling in an app \
+                feels like being graded.
+
+                **The call**
+                Warm dark. Not clinical white, not therapy-app pastel. The screen should feel \
+                like a lit room at night rather than a form to fill in.
+
+                **Palette**
+                - Ground: deep navy, near-black — `#12141C`. The room, not the paper.
+                - Warmth: a single amber `#E8A24C`, used for one thing per screen and nothing else.
+                - Text: warm off-white `#F2EFE9`. Pure white on navy reads as a dialog box.
+                - No red anywhere in the ordinary flow. Red is reserved for the crisis path, so \
+                it has to mean only that.
+
+                **Type**
+                One serif for the user's own words, one clean sans for everything {{product}} \
+                says. The distinction is load-bearing: what you wrote should not look like what \
+                the app wrote.
+
+                **What the amber is for**
+                The single next action. Never a decoration, never two per screen. If two things \
+                are amber, neither is.
+
+                **What this rules out**
+                Progress rings, badges, confetti, streak flames. Anything that scores the user \
+                contradicts the one worry above.
+
+                **The test**
+                Screenshot any screen and ask: does this look like a room, or a report card? \
+                If it is a report card, the amber is doing too much or the serif is missing.
+                """),
+
+                        DemoDeliverable(
                 keywords: ["landing page", "landing", "website"],
                 kind: "site",
                 body: """

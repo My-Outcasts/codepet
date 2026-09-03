@@ -543,7 +543,11 @@ enum MockChat {
         // fixture can be a company other than Codepet.
         var brief = activeFlowBrief ?? DemoProject.current.brief
         if (brief.stage ?? "").isEmpty { brief.stage = "building" }
-        return CompanyState(brief: brief, departments: [], library: [], stage: .building,
+        // The demo's already-approved work. Empty until 2026-09-03, which meant a prototype
+        // board showed `done` prerequisites with nothing behind them and no run could inherit
+        // anything — see `DemoProject.filed`.
+        return CompanyState(brief: brief, departments: [], library: DemoProject.current.library(),
+                            stage: .building,
                             companionId: "byte", onboardedAt: Date(), tasks: roadmap())
     }
 

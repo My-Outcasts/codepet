@@ -254,6 +254,38 @@ final class UpstreamCreditTests: XCTestCase {
         XCTAssertEqual(requests.map(\.taskId), ["mur-site"])
     }
 
+    /// The defect the screen recording found: `runTask` is what the beacon, the Roadmap and
+    /// the autoplay walkthrough all call, and it ran straight through while chat asked. One
+    /// task must not have two behaviours depending on which button started it.
+    func testTheBoardPathOffersTheChainToo() async {
+        let seen = Recorder()
+        let s = murrorStore(runner: { req in
+            await seen.record(req)
+            return RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# x")
+        })
+        await s.hydrate(companyId: "u")
+        let site = try! XCTUnwrap(s.company.tasks.first { $0.id == "mur-site" })
+        await s.runTask(site, language: .en)
+
+        XCTAssertEqual(s.chatMessages.compactMap(\.chainOffer).first?.taskId, "mur-site")
+        let requests = await seen.requests
+        XCTAssertTrue(requests.isEmpty, "the beacon must wait for the founder, like chat does")
+        // And the task must not be left marked as running, or the offer's own buttons are dead.
+        XCTAssertFalse(s.runningTaskIds.contains("mur-site"))
+    }
+
+    /// Two surfaces can be pressed for the same task before either is answered.
+    func testTheOfferIsNotDuplicatedForOneTask() async {
+        let s = murrorStore(runner: { req in
+            RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# x")
+        })
+        await s.hydrate(companyId: "u")
+        let site = try! XCTUnwrap(s.company.tasks.first { $0.id == "mur-site" })
+        await s.runTask(site, language: .en)
+        await s.runTask(site, language: .en)
+        XCTAssertEqual(s.chatMessages.filter { $0.chainOffer != nil }.count, 1)
+    }
+
     /// An actor, not a captured array: `taskRunner` is called from the store's own tasks and
     /// a plain `var` would be a data race the compiler is right to reject.
     private actor Recorder {

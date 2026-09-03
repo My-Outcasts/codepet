@@ -112,11 +112,56 @@ final class DraftPayloadPreviewTests: XCTestCase {
             let kind = try XCTUnwrap(DeliverableKind(rawValue: entry.kind))
             let d = try deliverable(kind, payloadJSON: entry.payloadJSON)
             let renderer = ImageRenderer(content:
-                DraftPayloadPreview(deliverable: d).frame(width: 320))
+                DraftPayloadPreview(deliverable: d) { }.frame(width: 320))
             let image = try XCTUnwrap(renderer.nsImage, "\(entry.kind) rendered nothing")
             XCTAssertLessThanOrEqual(image.size.height, DraftPayloadPreview.maxHeight + 1,
                                      "\(entry.kind) is \(image.size.height)pt tall")
             XCTAssertGreaterThan(image.size.height, 8, "\(entry.kind) rendered empty")
         }
     }
+
+    // MARK: - Opening the full render
+
+    /// **The defect this closes.** The preview rendered the landing page's identity and had no
+    /// tap target of its own: the card's only gesture sat on the title block ABOVE it, so a
+    /// founder who clicked the thing that looks like a website got nothing. The plan for §1
+    /// said "let Open reach the true render" and that affordance was never built.
+    ///
+    /// Every kind is now tappable, so this is asserted as a property of the type rather than
+    /// per-case — a new payload kind must not arrive un-openable.
+    func testEveryStructuredPreviewIsOpenable() {
+        for kind in DeliverableKind.allCases {
+            XCTAssertTrue(DraftPayloadPreview.opensFullViewer,
+                          "\(kind) preview must route to the full viewer")
+        }
+    }
+
+    /// `.site` gets a WORDED cue and the others do not, and that asymmetry is the point: a
+    /// rendered page reads as "this IS the page", so the founder has no way to know a fuller
+    /// render sits behind it. A pricing model or a screens grid visibly is a summary already.
+    func testOnlyTheSiteCarriesAWordedOpenCue() {
+        XCTAssertEqual(DraftPayloadPreview.openCue(for: .site, lang: .en), "Open the live page")
+        XCTAssertEqual(DraftPayloadPreview.openCue(for: .site, lang: .vi), "Mở trang thật")
+        for kind in DeliverableKind.allCases where kind != .site {
+            XCTAssertNil(DraftPayloadPreview.openCue(for: kind, lang: .en), "\(kind)")
+        }
+    }
+
+    /// The cue must not promise something the sheet cannot deliver. `DeliverableDetailView`
+    /// mounts `SiteViewer` only when `payload.site` is non-nil, and `hasStructuredPreview`
+    /// already gates the whole preview on exactly that — so the two conditions have to agree,
+    /// or the cue says "Open the live page" over a sheet that shows prose.
+    func testTheCueOnlyAppearsWhereTheViewerCanActuallyRenderIt() throws {
+        // The real Murror site fixture, not a stub — the same payload the demo renders.
+        let entry = try XCTUnwrap(DemoProject.murror.deliverables.first { $0.kind == "site" })
+        let withSite = try deliverable(.site, payloadJSON: entry.payloadJSON)
+        XCTAssertTrue(DraftPayloadPreview.hasStructuredPreview(withSite))
+        XCTAssertNotNil(DraftPayloadPreview.openCue(for: withSite.kind, lang: .en))
+
+        // A `.site` with no payload falls back to prose and must show no preview at all,
+        // which means no cue either.
+        let noPayload = try deliverable(.site, payloadJSON: nil)
+        XCTAssertFalse(DraftPayloadPreview.hasStructuredPreview(noPayload))
+    }
+
 }

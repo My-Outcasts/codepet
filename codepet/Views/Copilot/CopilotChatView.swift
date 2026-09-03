@@ -2338,7 +2338,7 @@ struct CopilotBubble: View {
                     }
 
                     if DraftPayloadPreview.hasStructuredPreview(d) {
-                        DraftPayloadPreview(deliverable: d)
+                        DraftPayloadPreview(deliverable: d) { showDetail = true }
                     }
 
                     // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity

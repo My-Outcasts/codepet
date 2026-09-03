@@ -18,6 +18,39 @@ import SwiftUI
 /// and what the suite pins.
 struct DraftPayloadPreview: View {
     let deliverable: Deliverable
+    /// Open the full viewer. Non-optional on purpose: a preview with no way through is the
+    /// defect this parameter exists to make impossible to reintroduce.
+    let onOpen: () -> Void
+
+    @Environment(\.uiLanguage) private var lang
+
+    /// Every structured preview routes to the full viewer.
+    ///
+    /// **The defect this records.** The preview rendered the landing page's brand, headline,
+    /// accent and CTA — and had no tap target of its own. The card's only gesture sat on the
+    /// title block ABOVE it, so a founder who clicked the thing that looks like a website got
+    /// nothing at all. §1's own plan said "let Open reach the true render"; the render landed
+    /// and the affordance did not.
+    ///
+    /// A constant rather than a per-kind switch, so a new payload kind cannot arrive
+    /// un-openable — which is exactly how this one got missed.
+    static let opensFullViewer = true
+
+    /// A worded cue, for the one kind that needs one.
+    ///
+    /// **Only `.site`, and the asymmetry is deliberate.** A rendered page reads as *"this IS
+    /// the page"*, so nothing on screen tells the founder that a fuller render sits behind it.
+    /// A pricing model or a screens grid is visibly a summary of something bigger already, and
+    /// labelling all seven would put more chrome about the deliverable on the card than the
+    /// deliverable gets.
+    ///
+    /// It promises what `DeliverableDetailView` actually mounts — `SiteViewer`, a real web view
+    /// of the page — and `hasStructuredPreview` gates this whole view on the same non-nil
+    /// `payload.site` that viewer requires, so the cue cannot appear over a sheet showing prose.
+    static func openCue(for kind: DeliverableKind, lang: AppLanguage) -> String? {
+        guard kind == .site else { return nil }
+        return lang == .vi ? "M\u{1EDF} trang th\u{1EAD}t" : "Open the live page"
+    }
 
     /// **Capped, and deliberately not scrollable.** A card that scrolls inside a scrolling
     /// transcript is worse than one that truncates — two nested scroll views fight the
@@ -61,9 +94,28 @@ struct DraftPayloadPreview: View {
     }
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: Self.maxHeight, alignment: .top)
+        VStack(alignment: .leading, spacing: 5) {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: Self.maxHeight, alignment: .top)
+            if let cue = Self.openCue(for: deliverable.kind, lang: lang) {
+                Text(cue)
+                    .font(.pixelSystem(size: 11, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+            }
+        }
+        // `contentShape` before the gesture: the preview is a stack of shapes with gaps
+        // between them, and without it the gaps are not part of the target — a click landing
+        // between the headline and the swatch would do nothing, which is the same bug in
+        // miniature. Matches the title block above: hover fill, pointing hand, tap opens.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .hoverAffordance(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .cursorOnHover(.pointingHand)
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(Self.openCue(for: deliverable.kind, lang: lang)
+                            ?? (lang == .vi ? "M\u{1EDF} b\u{1EA3}n \u{111}\u{1EA7}y \u{111}\u{1EE7}" : "Open the full deliverable"))
             .clipped()
     }
 

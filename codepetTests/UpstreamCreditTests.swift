@@ -19,7 +19,22 @@ final class UpstreamCreditTests: XCTestCase {
 
     func testNamesThePetAndTheWork() {
         let line = UpstreamCredit.line([work("brand direction")])
-        XCTAssertEqual(line, "Built on Luna's brand direction")
+        XCTAssertEqual(line, "Built on Luna\'s \u{201C}brand direction\u{201D}")
+    }
+
+    /// The fixture in every other test here is a tidy noun phrase ("brand direction") and a
+    /// REAL `taskTitle` is not: it is a deliverable's title, and `buildDeliverable` falls back
+    /// to the task's own name, so what actually arrives is "Shape the Murror visual
+    /// direction". Unquoted, the possessive read "Built on Luna\'s Shape the Murror visual
+    /// direction". Found by rendering the row to a PNG and reading it — no fixture written for
+    /// this feature could have failed, which is why this one uses the fixture\'s own string.
+    func testASentenceTitleStillReadsAsASentence() throws {
+        let real = DemoProject.murror.tasks.first { $0.id == "mur-brand" }!.title
+        XCTAssertEqual(real, "Shape the Murror visual direction", "fixture moved; update this")
+        let line = try XCTUnwrap(UpstreamCredit.line([work(real)]))
+        XCTAssertFalse(line.contains("Luna\'s Shape"),
+                       "an imperative title needs quoting, not a possessive: \(line)")
+        XCTAssertTrue(line.contains("\u{201C}\(real)\u{201D}"), line)
     }
 
     /// The founder decision: a chained run passes the draft forward unapproved and the card
@@ -37,7 +52,10 @@ final class UpstreamCreditTests: XCTestCase {
     /// other reason, which is not a guard.
     func testCountsTheContributionsItDidNotName() throws {
         let two = try XCTUnwrap(UpstreamCredit.line([work("brand direction"), work("the scan")]))
-        XCTAssertTrue(two.contains("Luna's brand direction"), two)
+        // The quotes are CURLY (U+201C/D). `contains("Luna's brand direction")` was the
+        // assertion here and it went red the moment the title got quoted — the same
+        // straight-vs-curly trap this repo has paid for before.
+        XCTAssertTrue(two.contains("Luna's \u{201C}brand direction\u{201D}"), two)
         XCTAssertTrue(two.contains("1 more"), two)
 
         let three = try XCTUnwrap(

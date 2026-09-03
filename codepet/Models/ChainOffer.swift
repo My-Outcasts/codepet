@@ -34,7 +34,8 @@ struct ChainOffer: Equatable {
             return "\"\(taskTitle)\" dựa trên \"\(upstreamTaskTitle)\", mà \(owner)chưa làm xong. "
                 + "Mình có thể làm cái đó trước rồi dùng nó, hoặc làm thẳng cái bạn hỏi."
         }
-        let owner = who.map { "\($0) hasn't" } ?? "Nobody has"
+        // Lower-case: it lands mid-sentence, after "and".
+        let owner = who.map { "\($0) hasn't" } ?? "nobody has"
         return "\"\(taskTitle)\" builds on \"\(upstreamTaskTitle)\", and \(owner) produced it yet. "
             + "I can do that first and build on it, or go straight at what you asked for."
     }

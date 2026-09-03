@@ -26,12 +26,19 @@ struct UpstreamCredit: View {
     /// The unapproved note is appended whenever ANY item is unapproved, not only the first:
     /// what the founder is being told is that something under this card skipped approval, and
     /// the position it arrived in is not something they can see.
+    /// **The title is QUOTED, and that is not decoration.** `taskTitle` is a deliverable's
+    /// title, and a deliverable's title is frequently an imperative sentence — the fallback in
+    /// `buildDeliverable` is the task's own name, so the real value here is "Shape the Murror
+    /// visual direction", not "brand direction". Unquoted, the possessive produced
+    /// *"Built on Luna's Shape the Murror visual direction"*, which is not a sentence. Caught
+    /// by rendering the row and reading it; every test fixture written for this used a tidy
+    /// noun phrase and none of them could have found it.
     static func line(_ work: [UpstreamWork]) -> String? {
         guard let first = work.first else { return nil }
         let who = first.petName.isEmpty ? first.deptName : first.petName
         var line = who.isEmpty
-            ? "Built on \(first.taskTitle)"
-            : "Built on \(who)'s \(first.taskTitle)"
+            ? "Built on \u{201C}\(first.taskTitle)\u{201D}"
+            : "Built on \(who)'s \u{201C}\(first.taskTitle)\u{201D}"
         if work.count > 1 { line += " + \(work.count - 1) more" }
         if work.contains(where: \.unapproved) { line += " (unapproved draft)" }
         return line

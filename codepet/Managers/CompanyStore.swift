@@ -209,6 +209,7 @@ final class CompanyStore: ObservableObject {
     private let companionSaver: (String, String) async -> Bool
     private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
+    private let firstApprovalSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
@@ -319,6 +320,7 @@ final class CompanyStore: ObservableObject {
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
+         firstApprovalSaver: @escaping (String, Date) async -> Bool = CompanyData.saveFirstApproval,
          // The mock branch lives in the DEFAULT rather than inside
          // `scaffoldFromOnboarding`, so the store keeps exactly one enrichment
          // path and every test that injects its own closure is untouched by it.
@@ -387,6 +389,7 @@ final class CompanyStore: ObservableObject {
         self.companionSaver = companionSaver
         self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
+        self.firstApprovalSaver = firstApprovalSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
@@ -2575,6 +2578,21 @@ final class CompanyStore: ObservableObject {
     /// can be produced by a chat ask that no roadmap task owns, and it should still be keepable.
     private func fileApproval(_ draft: Deliverable, taskId: String?) async {
         company.library.append(draft)
+        // The founder has now approved something, so the "not saved yet" note on the draft card
+        // has done its job and retires (see `DraftCardCopy.shouldShowNotFiledNote`).
+        //
+        // HERE and not in `approveDraft`/`approveTask`: this is the one path both of them call,
+        // which is why `ApprovalParityTests` exists. Writing it in the two callers instead would
+        // be two places to drift, and the board is as real a way to learn the rule as the chat.
+        //
+        // Set once. This records WHEN THEY LEARNED IT, not when they last approved.
+        if company.firstApprovalAt == nil {
+            let now = Date()
+            company.firstApprovalAt = now
+            // Fire-and-forget and fail-soft, matching `markIntroSeen`: a lost write costs one
+            // extra showing of a teaching line, never a broken card or a blocked approval.
+            if let cid = companyId { _ = await firstApprovalSaver(cid, now) }
+        }
         var wroteTasks = false
         if let taskId, let ti = company.tasks.firstIndex(where: { $0.id == taskId }),
            !company.tasks[ti].done {

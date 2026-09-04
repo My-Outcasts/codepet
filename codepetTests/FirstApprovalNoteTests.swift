@@ -38,4 +38,83 @@ final class FirstApprovalNoteTests: XCTestCase {
             CompanyState.self, from: try JSONEncoder().encode(state))
         XCTAssertEqual(back.firstApprovalAt?.timeIntervalSince1970, 1_700_000_000)
     }
+
+    // MARK: - Task 2: the store sets it
+
+    /// Same stubs as `CompanyStoreChatRunTests`: the live defaults reach Firestore and Firebase
+    /// Auth, both of which trap under an unconfigured `FirebaseApp`.
+    private func store(tasks: [RoadmapTask] = [],
+                       saver: @escaping (String, Date) async -> Bool = { _, _ in true })
+        -> CompanyStore {
+        CompanyStore(loader: { _ in
+            CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .building,
+                         companionId: "byte", onboardedAt: Date(), tasks: tasks)
+        }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
+           chatSender: { _ in nil },
+           chatStreamer: { _ in
+               AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+           },
+           taskRunner: { _ in nil }, librarySaver: { _, _ in true },
+           // BEFORE `decisionExtractor`, matching the declaration order in
+           // `CompanyStore.init` — Swift requires labelled arguments to appear in the order
+           // they are declared, and `firstApprovalSaver` sits next to `introSeenSaver`, which
+           // is well above `decisionExtractor`.
+           firstApprovalSaver: saver,
+           decisionExtractor: { _, _ in [] })
+    }
+
+    private func draft(_ taskId: String? = nil) -> Deliverable {
+        // `kind` before `title` — see `Deliverable.init`.
+        Deliverable(id: "d1", kind: .doc, title: "T", body: "B", sourceTaskId: taskId)
+    }
+
+    func testApprovingFromChatRecordsTheFirstApproval() async {
+        let s = store()
+        await s.hydrate(companyId: "u")
+        XCTAssertNil(s.company.firstApprovalAt, "a fresh account has approved nothing")
+        s.seedChatMessagesForTesting([
+            CopilotMessage(id: "m1", role: .companion, text: "", draft: draft())
+        ])
+        await s.approveDraft(messageId: "m1")
+        XCTAssertNotNil(s.company.firstApprovalAt)
+    }
+
+    /// The board is a real path to the same lesson. Both approve paths funnel through
+    /// `fileApproval`, so this passes for free — and goes red the moment someone writes the
+    /// flag in `approveDraft` instead of at the chokepoint.
+    func testApprovingFromTheBoardRecordsItToo() async {
+        let task = RoadmapTask(id: "t1", title: "T", detail: "", phase: .build, who: .draft,
+                               drafted: true, draft: draft("t1"))
+        let s = store(tasks: [task])
+        await s.hydrate(companyId: "u")
+        await s.approveTask(id: "t1")
+        XCTAssertNotNil(s.company.firstApprovalAt)
+    }
+
+    /// Written once. A second approval must not move the timestamp — it is "when did they
+    /// learn this", not "when did they last approve".
+    func testTheTimestampIsNotOverwrittenByLaterApprovals() async {
+        let s = store()
+        await s.hydrate(companyId: "u")
+        s.seedChatMessagesForTesting([
+            CopilotMessage(id: "m1", role: .companion, text: "", draft: draft()),
+            CopilotMessage(id: "m2", role: .companion, text: "", draft: draft())
+        ])
+        await s.approveDraft(messageId: "m1")
+        let first = s.company.firstApprovalAt
+        await s.approveDraft(messageId: "m2")
+        XCTAssertEqual(s.company.firstApprovalAt, first)
+    }
+
+    /// Fail-soft, matching `markIntroSeen`: a rejected write leaves the in-memory flag set, so
+    /// the founder is not re-taught inside the session they just learned it in.
+    func testAFailedWriteStillRetiresTheNoteInSession() async {
+        let s = store(saver: { _, _ in false })
+        await s.hydrate(companyId: "u")
+        s.seedChatMessagesForTesting([
+            CopilotMessage(id: "m1", role: .companion, text: "", draft: draft())
+        ])
+        await s.approveDraft(messageId: "m1")
+        XCTAssertNotNil(s.company.firstApprovalAt)
+    }
 }

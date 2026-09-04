@@ -22,6 +22,16 @@
 - Commit with `git commit -F <file>`, never `-m`: bodies contain backticks and zsh would execute them.
 - `xcodebuild test` exits 65 on a clean checkout — the XCTest host crashes on Xcode 26.2 when a `@MainActor ObservableObject` deallocates (~27 tests never finish, none actually fail). Run per-suite with `-only-testing:` and read counts from `xcresulttool get test-results summary`, **never from the exit code**. A zero count means the suite did not run — treat that as a failure, not a pass.
 - Quit the running `codepet.app` before any `xcodebuild test`: a live app kills the test host. Check with `ps -eo pid,comm | awk '$2 ~ /codepet$/'` — **not** `pgrep -f`, which matches the wrapper shell's own command line and lies.
+- **`osascript -e 'quit app "codepet"'` does not reliably terminate it** — measured by the Task 1 implementer on 4 Sep: the app was still present after the quit plus a sleep. Verify, and fall back to the pid:
+
+```bash
+osascript -e 'quit app "codepet"' 2>/dev/null; sleep 2
+PID=$(ps -eo pid,comm | awk '$2 ~ /codepet$/ {print $1}')
+[ -n "$PID" ] && kill "$PID" && sleep 2
+ps -eo pid,comm | awk '$2 ~ /codepet$/ {print "STILL RUNNING",$1}'
+```
+
+  The last line must print nothing before you run tests. This is the founder's own app — killing it is fine here because this worktree owns the running instance, but never `pkill -f codepet`, which would also match sibling sessions' processes.
 
 ---
 

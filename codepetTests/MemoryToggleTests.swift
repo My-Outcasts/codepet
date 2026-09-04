@@ -78,6 +78,7 @@ final class MemoryToggleTests: XCTestCase {
             let s = CompanyStore(loader: { _ in seed },
                                  tasksSaver: { _, _ in true },
                                  librarySaver: { _, _ in true },
+                                 firstApprovalSaver: { _, _ in true },
                                  decisionsSaver: { _, d in saved = d; return true },
                                  decisionExtractor: { _, existing in
                                      handed = existing

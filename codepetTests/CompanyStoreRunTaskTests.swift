@@ -143,6 +143,7 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
                              librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
                              decisionExtractor: { _, _ in [] })
         await s.hydrate(companyId: "u")
         await s.approveTask(id: "t1")
@@ -187,6 +188,7 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
                              librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
                              decisionsSaver: { _, d in savedDecisions = d; return true },
                              decisionExtractor: { _, _ in [ExtractedDecision(topic: "pricing", statement: "Plus $4/mo", source: "Pricing")] })
         await s.hydrate(companyId: "u")
@@ -264,6 +266,7 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
                              librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
                              decisionExtractor: { _, _ in [] })
         await s.hydrate(companyId: "u")
         await s.approveTask(id: "t1")

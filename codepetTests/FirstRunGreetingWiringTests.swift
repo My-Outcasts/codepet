@@ -40,4 +40,34 @@ final class FirstRunGreetingWiringTests: XCTestCase {
             CompanyState.self, from: try JSONEncoder().encode(state))
         XCTAssertEqual(back.greetedAt?.timeIntervalSince1970, 1_700_000_000)
     }
+
+    // MARK: - Task 2: the gate
+
+    /// A pure static, not a condition inside `hydrate`. Three inputs' worth of truth table is
+    /// where a bug here would live, and a condition inside an async store method is only
+    /// testable by driving the whole store.
+    func testGreetsOnlyAFreshAccountWithWorkToName() {
+        XCTAssertTrue(FirstRunGreetingGate.shouldGreet(
+            hasBeenGreeted: false, transcriptIsEmpty: true, hasTasks: true))
+    }
+
+    func testDoesNotGreetTwice() {
+        XCTAssertFalse(FirstRunGreetingGate.shouldGreet(
+            hasBeenGreeted: true, transcriptIsEmpty: true, hasTasks: true))
+    }
+
+    /// The trap the persisted flag exists for: `newChat()` empties the transcript.
+    func testDoesNotGreetIntoAConversationInProgress() {
+        XCTAssertFalse(FirstRunGreetingGate.shouldGreet(
+            hasBeenGreeted: false, transcriptIsEmpty: false, hasTasks: true))
+    }
+
+    /// With no roadmap there is no first move to name, and the builder falls back to "Take a
+    /// look around…" — a weaker message not worth spending the one-time greeting on. Wait for
+    /// the next hydrate, when the roadmap has resolved.
+    func testDoesNotGreetBeforeTheRoadmapExists() {
+        XCTAssertFalse(FirstRunGreetingGate.shouldGreet(
+            hasBeenGreeted: false, transcriptIsEmpty: true, hasTasks: false))
+    }
+
 }

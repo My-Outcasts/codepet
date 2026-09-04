@@ -130,7 +130,7 @@ In `init(from decoder:)`, after the `introSeenAt = try c.decodeIfPresent(...)` l
         firstApprovalAt = try c.decodeIfPresent(Date.self, forKey: .firstApprovalAt)
 ```
 
-`CodingKeys` is synthesised for this type (only `init(from:)` is hand-written, encoding stays synthesised), so adding the stored property is enough — **do not** hand-write a `CodingKeys` enum here. If the build reports `.firstApprovalAt` is not a member of `CodingKeys`, a hand-written enum exists after all: add `case firstApprovalAt` to it.
+`CodingKeys` is synthesised for this type — verified: `CompanyState.swift` contains no hand-written enum, only `keyedBy: CodingKeys.self` at line 64 referencing the synthesised one. Adding the stored property is therefore enough, and encoding stays synthesised too. **Do not** hand-write a `CodingKeys` enum here.
 
 - [ ] **Step 4: Add the DTO field, the mapping, the payload and the saver**
 

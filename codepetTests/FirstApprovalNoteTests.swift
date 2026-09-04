@@ -117,4 +117,40 @@ final class FirstApprovalNoteTests: XCTestCase {
         await s.approveDraft(messageId: "m1")
         XCTAssertNotNil(s.company.firstApprovalAt)
     }
+
+    // MARK: - Task 3: the decision
+
+    /// A pure static, not a condition inside `draftCard`'s body. Same reasoning as
+    /// `DraftPayloadPreview.hasStructuredPreview`: the bug worth guarding lives in the
+    /// decision, and a decision inside a `View` body is only testable by rendering it.
+    func testTheNoteShowsOnlyBeforeTheFirstApproval() {
+        XCTAssertTrue(DraftCardCopy.shouldShowNotFiledNote(hasApproved: false,
+                                                           draftApproved: false))
+        XCTAssertFalse(DraftCardCopy.shouldShowNotFiledNote(hasApproved: true,
+                                                            draftApproved: false),
+                       "retired once the founder has approved anything")
+    }
+
+    /// An approved card already says "Added to Library". Two answers to one question on one
+    /// card is worse than none.
+    func testTheNoteNeverShowsOnAnApprovedCard() {
+        XCTAssertFalse(DraftCardCopy.shouldShowNotFiledNote(hasApproved: false,
+                                                            draftApproved: true))
+        XCTAssertFalse(DraftCardCopy.shouldShowNotFiledNote(hasApproved: true,
+                                                            draftApproved: true))
+    }
+
+    func testTheCopyIsExactlyWhatTheSpecSays() {
+        XCTAssertEqual(DraftCardCopy.notFiledNote(.en),
+                       "Not saved yet — approving files it in your Library.")
+        XCTAssertEqual(DraftCardCopy.notFiledNote(.vi),
+                       "Chưa lưu — duyệt để đưa vào Thư viện.")
+    }
+
+    /// An em dash, not a hyphen — every other string on this card uses one, and a lone hyphen
+    /// reads as a typo beside them.
+    func testTheCopyUsesAnEmDash() {
+        XCTAssertTrue(DraftCardCopy.notFiledNote(.en).contains("\u{2014}"))
+        XCTAssertTrue(DraftCardCopy.notFiledNote(.vi).contains("\u{2014}"))
+    }
 }

@@ -106,9 +106,17 @@ final class FirstApprovalNoteTests: XCTestCase {
         XCTAssertEqual(s.company.firstApprovalAt, first)
     }
 
-    /// Fail-soft, matching `markIntroSeen`: a rejected write leaves the in-memory flag set, so
-    /// the founder is not re-taught inside the session they just learned it in.
-    func testAFailedWriteStillRetiresTheNoteInSession() async {
+    /// The in-memory flag is NOT gated on the write succeeding: a rejected save still retires
+    /// the note, so the founder is not re-taught inside the session they just learned in.
+    ///
+    /// **Named for what it actually discriminates.** It was called
+    /// `testAFailedWriteStillRetiresTheNoteInSession`, which read as the guard for fail-soft
+    /// behaviour generally — and it is not. A correct implementation and one that ignores the
+    /// saver's return value entirely both pass, because both set the flag before awaiting.
+    /// What it does catch is the one wrong shape here: `if await saver(...) { set flag }`.
+    /// The "never throws into the caller" half needs no test at all — `firstApprovalSaver` is
+    /// declared `async -> Bool`, non-throwing, so the compiler forecloses it.
+    func testTheFlagIsNotGatedOnTheWriteSucceeding() async {
         let s = store(saver: { _, _ in false })
         await s.hydrate(companyId: "u")
         s.seedChatMessagesForTesting([
@@ -145,13 +153,6 @@ final class FirstApprovalNoteTests: XCTestCase {
                        "Not saved yet — approving files it in your Library.")
         XCTAssertEqual(DraftCardCopy.notFiledNote(.vi),
                        "Chưa lưu — duyệt để đưa vào Thư viện.")
-    }
-
-    /// An em dash, not a hyphen — every other string on this card uses one, and a lone hyphen
-    /// reads as a typo beside them.
-    func testTheCopyUsesAnEmDash() {
-        XCTAssertTrue(DraftCardCopy.notFiledNote(.en).contains("\u{2014}"))
-        XCTAssertTrue(DraftCardCopy.notFiledNote(.vi).contains("\u{2014}"))
     }
 
     // MARK: - Task 4: the demo, and the trap

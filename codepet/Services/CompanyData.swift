@@ -13,6 +13,7 @@ struct CompanyDoc: Codable {
     var companionId: String?
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
     var introSeenAt: Double?   // epoch MILLIS (matches the web schema's `Millis`)
+    var firstApprovalAt: Double?  // epoch MILLIS, same shape as introSeenAt above
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
@@ -34,6 +35,7 @@ enum CompanyData {
             companionId: doc.companionId ?? "byte",
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
             introSeenAt: doc.introSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
+            firstApprovalAt: doc.firstApprovalAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
             decisions: Decisions.normalizeDecisions(doc.decisions ?? []),
@@ -88,6 +90,29 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(introSeenPayload(at), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for the first-approval write — testable without Firestore.
+    /// Millis, not ISO, matching `introSeenPayload` above.
+    static func firstApprovalPayload(_ at: Date) -> [String: Any] {
+        ["firstApprovalAt": at.timeIntervalSince1970 * 1000]
+    }
+
+    /// Write companies/{uid}.firstApprovalAt, merge. Fail-soft: false on error — a lost write
+    /// only means the "not saved yet" note shows once more, never a broken card.
+    static func saveFirstApproval(_ companyId: String, _ at: Date) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from fixtures on
+        // every load, so a write here would put demo data in a real founder's document.
+        // Reported as done rather than failed: nothing was attempted, so there is no error to
+        // show. Same guard as `saveIntroSeen`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(firstApprovalPayload(at), merge: true)
             return true
         } catch {
             return false

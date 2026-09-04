@@ -25,6 +25,15 @@ struct CompanyState: Codable, Hashable {
     /// the one-time intro doesn't reappear on another machine. Mirrors the web's
     /// `companies/{uid}.introSeenAt`.
     var introSeenAt: Date?
+    /// When this account first approved anything. Account-scoped like `introSeenAt` above, and
+    /// for the same reason: the note it retires is a one-time lesson, not a per-device one.
+    ///
+    /// Deliberately NOT derived from `library.isEmpty`, which looks like a free proxy since
+    /// approving is the only thing that files there. The Murror demo pre-files three research
+    /// artifacts (`DemoProject.filed`), so a derived signal would silence the note in prototype
+    /// mode — the one surface used to demo the product, and the place the rule is most worth
+    /// teaching.
+    var firstApprovalAt: Date?
     var tasks: [RoadmapTask]
     var enabledTools: Set<String>
     var decisions: [DecisionEntry]
@@ -38,6 +47,7 @@ struct CompanyState: Codable, Hashable {
     init(brief: CompanyBrief, departments: [DeptRef], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
          introSeenAt: Date? = nil,
+         firstApprovalAt: Date? = nil,
          tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds,
          decisions: [DecisionEntry] = [],
          founderPrefs: FounderPrefs = .init()) {
@@ -48,6 +58,7 @@ struct CompanyState: Codable, Hashable {
         self.companionId = companionId
         self.onboardedAt = onboardedAt
         self.introSeenAt = introSeenAt
+        self.firstApprovalAt = firstApprovalAt
         self.tasks = tasks
         self.enabledTools = enabledTools
         self.decisions = decisions
@@ -69,6 +80,7 @@ struct CompanyState: Codable, Hashable {
         companionId = try c.decodeIfPresent(String.self, forKey: .companionId) ?? "byte"
         onboardedAt = try c.decodeIfPresent(Date.self, forKey: .onboardedAt)
         introSeenAt = try c.decodeIfPresent(Date.self, forKey: .introSeenAt)
+        firstApprovalAt = try c.decodeIfPresent(Date.self, forKey: .firstApprovalAt)
         tasks = try c.decodeIfPresent([RoadmapTask].self, forKey: .tasks) ?? []
         enabledTools = try c.decodeIfPresent(Set<String>.self, forKey: .enabledTools)
             ?? Toolkit.defaultEnabledIds

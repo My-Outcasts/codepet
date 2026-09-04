@@ -154,6 +154,26 @@ open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murr
   `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
   identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
 
+### A new account is greeted, once
+
+`CompanyStore.greetIfNeeded(language:)` seeds the first-run greeting — the founder's name, the
+project, the best first move, and "nothing ships without your say-so". Wired 2026-09-04; before
+that it had **no caller at all** and no new founder had ever seen it.
+
+- **It is NOT part of `hydrate`, and that is deliberate.** It was, for one commit: 34 suites call
+  `hydrate` and 14 assert on `chatMessages`, so seeding a message there shifted the whole store
+  suite's baseline. `hydrate` loads company DATA; starting a conversation is a separate concern.
+  `ContentView` calls both in order. **Do not move it back** — two tests pin the boundary
+- Gated on `CompanyState.greetedAt`, the third field of that shape after `introSeenAt` and
+  `firstApprovalAt`. **Never gate it on an empty transcript** — `newChat()` empties it, so that
+  condition is true again every time the founder starts a conversation
+- Called after hydrate rather than at the onboarding→app edge because prototype mode boots an
+  already-onboarded company and never crosses that edge — which is exactly why this message went
+  unseen. `saveGreeted` is silent under prototype mode, so the demo greets every launch, and a
+  test asserts the fixture stays ungreeted
+- `startEnrichInterviewIfNeeded` is still uncalled. Separate decision; its comment is the record
+  of why the greeting was dead
+
 ### A first draft says it is not saved yet
 
 Until the founder's first approval, the chat draft card carries **"Not saved yet — approving

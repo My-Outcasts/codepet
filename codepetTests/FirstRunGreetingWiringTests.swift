@@ -175,4 +175,31 @@ final class FirstRunGreetingWiringTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.count, 1)
     }
 
+    // MARK: - Task 4: the demo greets on every launch
+
+    /// **The reason this hook was chosen over the onboarding edge**, asserted rather than
+    /// eyeballed. Prototype mode boots an already-onboarded company and never crosses the
+    /// onboarding→app edge, so anything seeded there is invisible in the demo — which is how a
+    /// working, tested greeting went unseen long enough to be assumed absent.
+    ///
+    /// The fixture company carries no `greetedAt`, and `saveGreeted` is silent under prototype
+    /// mode (`PrototypeMode.allowsCloudWrites`), so the flag never persists there and every
+    /// launch greets afresh. That is what a demo wants.
+    func testThePrototypeCompanyIsAlwaysUngreeted() {
+        XCTAssertNil(MockChat.company().greetedAt,
+                     "the demo must greet on every launch — if this is ever set, the fixture "
+                     + "persists the flag and the demo silently stops showing the greeting")
+        XCTAssertFalse(MockChat.company().tasks.isEmpty,
+                       "and it must have a roadmap, or the gate correctly declines to greet")
+    }
+
+    /// The gate's verdict on the real fixture, not a hand-made state.
+    func testTheGateGreetsTheDemoCompany() {
+        let demo = MockChat.company()
+        XCTAssertTrue(FirstRunGreetingGate.shouldGreet(
+            hasBeenGreeted: demo.greetedAt != nil,
+            transcriptIsEmpty: true,
+            hasTasks: !demo.tasks.isEmpty))
+    }
+
 }

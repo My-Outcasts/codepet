@@ -32,6 +32,7 @@ ps -eo pid,comm | awk '$2 ~ /codepet$/ {print "STILL RUNNING",$1}'
 ```
 
   The last line must print nothing before you run tests. This is the founder's own app — killing it is fine here because this worktree owns the running instance, but never `pkill -f codepet`, which would also match sibling sessions' processes.
+- **Never `git stash` / `git stash pop` bare.** This is a worktree and the stash stack is SHARED with the main checkout and every sibling worktree — `git stash list` currently holds an entry belonging to another branch entirely. A bare `pop` takes whatever is on top, which may be a sibling session's uncommitted work: it destroys their entry and applies foreign changes to this tree. To set work aside, make a temporary WIP commit and reset it afterwards. If you genuinely must stash, use `git stash push -u -m "<unique-tag>"`, capture the SHA from `git stash list --format='%H %gs'`, restore with `git stash apply <sha>` (never `pop`), then drop that entry by re-finding it by tag.
 
 ---
 

@@ -2351,6 +2351,23 @@ struct CopilotBubble: View {
                         whatItDid(steps)
                     }
 
+                    // The one moment the approval promise is silent. `BeaconOffer` says "you
+                    // approve before it is filed" before the run, and the branch below confirms
+                    // "Added to Library" after — but here the founder is looking at a
+                    // finished-LOOKING deliverable beside a button marked Approve, with nothing
+                    // saying it is unsaved.
+                    //
+                    // Retires on the founder's FIRST approval, account-wide: it is a one-time
+                    // lesson, and a founder who learned it on the board does not need it here.
+                    if DraftCardCopy.shouldShowNotFiledNote(
+                        hasApproved: companyStore.company.firstApprovalAt != nil,
+                        draftApproved: message.draftApproved) {
+                        Text(DraftCardCopy.notFiledNote(lang))
+                            .font(.pixelSystem(size: 11.5))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     if message.draftApproved {
                         HStack(spacing: 5) {
                             Image(systemName: "checkmark.circle.fill")

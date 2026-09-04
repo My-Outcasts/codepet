@@ -153,4 +153,27 @@ final class FirstApprovalNoteTests: XCTestCase {
         XCTAssertTrue(DraftCardCopy.notFiledNote(.en).contains("\u{2014}"))
         XCTAssertTrue(DraftCardCopy.notFiledNote(.vi).contains("\u{2014}"))
     }
+
+    // MARK: - Task 4: the demo, and the trap
+
+    /// **The derived-from-Library trap, pinned.** `library.isEmpty` looks like a free proxy for
+    /// "has never approved", since approving is the only thing that files there. The Murror demo
+    /// pre-files three research artifacts (`DemoProject.filed`) so departments can build on each
+    /// other — so a derived signal would silence this note in prototype mode, which is the one
+    /// surface used to demo the product and the place the rule is most worth teaching.
+    ///
+    /// This test fails if anyone "simplifies" the flag away.
+    func testTheMurrorDemoShowsTheNoteDespiteAPrefilledLibrary() {
+        let library = DemoProject.murror.library()
+        XCTAssertFalse(library.isEmpty, "fixture changed — the trap this pins is gone")
+
+        let state = CompanyState(brief: CompanyBrief(), departments: [], library: library,
+                                 stage: .building, companionId: "byte", onboardedAt: Date(),
+                                 tasks: DemoProject.murror.tasks)
+        XCTAssertNil(state.firstApprovalAt, "a pre-filled library is not an approval")
+        XCTAssertTrue(
+            DraftCardCopy.shouldShowNotFiledNote(hasApproved: state.firstApprovalAt != nil,
+                                                 draftApproved: false),
+            "the demo must still teach the rule")
+    }
 }

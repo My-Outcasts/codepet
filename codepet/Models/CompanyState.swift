@@ -34,6 +34,14 @@ struct CompanyState: Codable, Hashable {
     /// mode — the one surface used to demo the product, and the place the rule is most worth
     /// teaching.
     var firstApprovalAt: Date?
+    /// When this account was greeted for the first time. Account-scoped like `introSeenAt` and
+    /// `firstApprovalAt` above.
+    ///
+    /// **Persisted rather than derived from an empty transcript.** `newChat()` sets
+    /// `chatMessages = []`, so "no messages" is true again every time the founder starts a
+    /// conversation — gating on that alone would welcome someone who has used the product for a
+    /// month. The transcript is session-only; this is what makes "first run" mean first run.
+    var greetedAt: Date?
     var tasks: [RoadmapTask]
     var enabledTools: Set<String>
     var decisions: [DecisionEntry]
@@ -48,6 +56,7 @@ struct CompanyState: Codable, Hashable {
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
          introSeenAt: Date? = nil,
          firstApprovalAt: Date? = nil,
+         greetedAt: Date? = nil,
          tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds,
          decisions: [DecisionEntry] = [],
          founderPrefs: FounderPrefs = .init()) {
@@ -59,6 +68,7 @@ struct CompanyState: Codable, Hashable {
         self.onboardedAt = onboardedAt
         self.introSeenAt = introSeenAt
         self.firstApprovalAt = firstApprovalAt
+        self.greetedAt = greetedAt
         self.tasks = tasks
         self.enabledTools = enabledTools
         self.decisions = decisions
@@ -81,6 +91,7 @@ struct CompanyState: Codable, Hashable {
         onboardedAt = try c.decodeIfPresent(Date.self, forKey: .onboardedAt)
         introSeenAt = try c.decodeIfPresent(Date.self, forKey: .introSeenAt)
         firstApprovalAt = try c.decodeIfPresent(Date.self, forKey: .firstApprovalAt)
+        greetedAt = try c.decodeIfPresent(Date.self, forKey: .greetedAt)
         tasks = try c.decodeIfPresent([RoadmapTask].self, forKey: .tasks) ?? []
         enabledTools = try c.decodeIfPresent(Set<String>.self, forKey: .enabledTools)
             ?? Toolkit.defaultEnabledIds

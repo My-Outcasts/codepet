@@ -14,6 +14,7 @@ struct CompanyDoc: Codable {
     var onboardedAt: String?   // ISO-8601 string (JSON-safe; not a Firestore Timestamp)
     var introSeenAt: Double?   // epoch MILLIS (matches the web schema's `Millis`)
     var firstApprovalAt: Double?  // epoch MILLIS, same shape as introSeenAt above
+    var greetedAt: Double?        // epoch MILLIS, same shape as the two above
     var tasks: [RoadmapTask]?  // JSON-safe (strings/enums-as-string/bools/arrays)
     var library: [Deliverable]?  // JSON-safe (strings/enum-as-string/optional strings)
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
@@ -36,6 +37,7 @@ enum CompanyData {
             onboardedAt: doc.onboardedAt.flatMap { ISO8601DateFormatter().date(from: $0) },
             introSeenAt: doc.introSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             firstApprovalAt: doc.firstApprovalAt.map { Date(timeIntervalSince1970: $0 / 1000) },
+            greetedAt: doc.greetedAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
             decisions: Decisions.normalizeDecisions(doc.decisions ?? []),
@@ -113,6 +115,30 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(firstApprovalPayload(at), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for the greeted write — testable without Firestore.
+    static func greetedPayload(_ at: Date) -> [String: Any] {
+        ["greetedAt": at.timeIntervalSince1970 * 1000]
+    }
+
+    /// Write companies/{uid}.greetedAt, merge. Fail-soft: false on error — a lost write means
+    /// the founder is greeted once more, never a broken screen.
+    static func saveGreeted(_ companyId: String, _ at: Date) async -> Bool {
+        // Prototype mode rebuilds the company from fixtures on every load, so a write here
+        // would put demo data in a real founder's document. Reported as done rather than
+        // failed: nothing was attempted. Same guard as `saveIntroSeen`/`saveFirstApproval`.
+        //
+        // This is also WHY the demo shows the greeting on every launch: the flag never
+        // persists there, which is what a demo wants.
+        guard PrototypeMode.allowsCloudWrites else { return true }
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(greetedPayload(at), merge: true)
             return true
         } catch {
             return false

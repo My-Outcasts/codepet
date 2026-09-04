@@ -8,6 +8,11 @@ import SwiftUI
 /// truncated paragraph ending in `....`, and the landing page arrived as a sentence reading
 /// *"The page is live in your Library — open it to see it rendered."*
 ///
+/// That sentence is quoted here as history and no longer exists: it was the Murror fixture's
+/// own prose body, and it survived this view landing — so the card told the founder to go and
+/// look at a page it was already rendering ten pixels below, above a draft the card also said
+/// was "Not saved yet". Seen in a founder recording on 4 Sep and cut from the fixture then.
+///
 /// That sentence was the whole problem in miniature: the card explained where the work was
 /// instead of being it. Reported by the founder as *"each department's output should appear on
 /// the card as soon as it's completed."*

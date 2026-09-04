@@ -146,7 +146,7 @@ extension DemoProject {
                 keywords: ["landing page", "landing", "website"],
                 kind: "site",
                 body: """
-                The page is live in your Library — open it to see it rendered.
+                A one-page site: the promise up top, the loop under it, and one thing to click.
 
                 **What it says.** The practice, not the technology. The headline is the promise, \
                 the three steps are the loop somebody actually repeats, and the four features are \

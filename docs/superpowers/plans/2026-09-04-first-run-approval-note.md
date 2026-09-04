@@ -260,8 +260,12 @@ Append inside `FirstApprovalNoteTests` (before its closing brace):
                AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
            },
            taskRunner: { _ in nil }, librarySaver: { _, _ in true },
-           decisionExtractor: { _, _ in [] },
-           firstApprovalSaver: saver)
+           // BEFORE `decisionExtractor`, matching the declaration order in
+           // `CompanyStore.init` — Swift requires labelled arguments to appear in the order
+           // they are declared, and `firstApprovalSaver` sits next to `introSeenSaver`, which
+           // is well above `decisionExtractor`.
+           firstApprovalSaver: saver,
+           decisionExtractor: { _, _ in [] })
     }
 
     private func draft(_ taskId: String? = nil) -> Deliverable {

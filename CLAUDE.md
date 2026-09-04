@@ -154,6 +154,29 @@ open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murr
   `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
   identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
 
+### A first draft says it is not saved yet
+
+Until the founder's first approval, the chat draft card carries **"Not saved yet — approving
+files it in your Library."** Added 2026-09-04. The rule it teaches is already stated before a
+run (`BeaconOffer`: "you approve before it is filed") and confirmed after ("Added to Library");
+this fills the moment in between, where the founder is looking at a finished-LOOKING deliverable
+beside a button marked Approve.
+
+- Gated on `CompanyState.firstApprovalAt`, set in `CompanyStore.fileApproval` — **the one path
+  both `approveDraft` and `approveTask` call**. `ApprovalParityTests` exists because those two
+  once drifted; write anything approval-related there, not in the callers
+- **Never derive "has never approved" from an empty library.** It reads as a free proxy since
+  approving is the only thing that files there, and it is wrong exactly where it matters: the
+  demo pre-files three artifacts (`DemoProject.filed`), so a derived signal goes quiet in
+  prototype mode. `FirstApprovalNoteTests` pins this
+- The decision is `DraftCardCopy.shouldShowNotFiledNote(hasApproved:draftApproved:)`, a pure
+  static — same reasoning as `DraftPayloadPreview.hasStructuredPreview`
+- **Adding any new saver to `fileApproval` breaks every test suite that approves without
+  injecting it.** The real savers call `Firestore.firestore()`, which TRAPS rather than throwing
+  under an unconfigured `FirebaseApp`, so the test host dies and the log reads "Restarting after
+  unexpected exit" — which looks like an assertion failure and is not. Four suites had to be
+  updated when this landed. If you add one, sweep the neighbours in the same change
+
 ### Departments that build on each other
 
 A run now carries the finished work of its `dependsOn` tasks — capped at 3 items × 1500

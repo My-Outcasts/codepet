@@ -210,6 +210,7 @@ final class CompanyStore: ObservableObject {
     private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
     private let firstApprovalSaver: (String, Date) async -> Bool
+    private let greetedSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
@@ -321,6 +322,7 @@ final class CompanyStore: ObservableObject {
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
          firstApprovalSaver: @escaping (String, Date) async -> Bool = CompanyData.saveFirstApproval,
+         greetedSaver: @escaping (String, Date) async -> Bool = CompanyData.saveGreeted,
          // The mock branch lives in the DEFAULT rather than inside
          // `scaffoldFromOnboarding`, so the store keeps exactly one enrichment
          // path and every test that injects its own closure is untouched by it.
@@ -390,6 +392,7 @@ final class CompanyStore: ObservableObject {
         self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
         self.firstApprovalSaver = firstApprovalSaver
+        self.greetedSaver = greetedSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
@@ -499,6 +502,39 @@ final class CompanyStore: ObservableObject {
         // read statically by the summarize enrichers, so without this push the previous
         // account's answer would keep governing this account's payloads.
         codingMemoryGate(loaded.founderPrefs.memoryEnabled)
+    }
+
+    /// Greet the founder, once per account, if they have never been greeted.
+    ///
+    /// **Why this is not inside `hydrate`.** It was, for one commit, and the cost showed
+    /// immediately: 34 test suites call `hydrate`, 14 of them assert on `chatMessages`, and
+    /// seeding a message there shifted the baseline of the entire store suite by one. That is
+    /// not 14 broken tests — it is the wrong boundary. `hydrate` loads company DATA; starting a
+    /// conversation is a different concern, and coupling them means every future store test has
+    /// to know about a greeting.
+    ///
+    /// So the app edge calls both, in order, and a test that only wants a loaded company calls
+    /// only `hydrate`.
+    ///
+    /// **The greeting itself had no caller at all before this.** It was reachable only from the
+    /// first-run enrich interview's completion, and nothing in the app starts that interview
+    /// (see `startEnrichInterviewIfNeeded`'s own comment). A new founder got the hero and a
+    /// beacon card, and the message naming their first move never ran.
+    ///
+    /// Called after `hydrate` rather than at the onboarding→app edge, deliberately: prototype
+    /// mode boots an already-onboarded company and never crosses that edge, which is why this
+    /// greeting has never been seen in the demo. `saveGreeted` is silent under prototype mode,
+    /// so the demo re-greets on every launch — which is what a demo wants.
+    func greetIfNeeded(language: AppLanguage) async {
+        guard FirstRunGreetingGate.shouldGreet(hasBeenGreeted: company.greetedAt != nil,
+                                               transcriptIsEmpty: chatMessages.isEmpty,
+                                               hasTasks: !company.tasks.isEmpty) else { return }
+        seedFirstRunGreeting(language: language)
+        let now = Date()
+        company.greetedAt = now
+        // Fire-and-forget and fail-soft, matching `markIntroSeen`: a lost write costs one extra
+        // greeting, never a broken screen.
+        if let cid = companyId { _ = await greetedSaver(cid, now) }
     }
 
     /// Persist + stamp + leave onboarding. (Enrichment happens earlier, in

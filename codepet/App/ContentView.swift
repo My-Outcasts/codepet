@@ -169,6 +169,7 @@ struct ContentView: View {
             guard prototypeStandIn,
                   companyStore.companyId != Self.prototypeCompanyId else { return }
             await companyStore.hydrate(companyId: Self.prototypeCompanyId)
+            await companyStore.greetIfNeeded(language: appState.uiLanguage)
         }
         .onReceive(authManager.$currentUser) { user in
             guard let user = user else {
@@ -211,6 +212,7 @@ struct ContentView: View {
             // (company.companionId) so the header, Copilot, and AI persona all agree.
             Task {
                 await companyStore.hydrate(companyId: user.uid)
+                await companyStore.greetIfNeeded(language: appState.uiLanguage)
                 appState.activeChar = companyStore.company.companionId
             }
 

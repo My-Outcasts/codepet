@@ -41,8 +41,9 @@ final class MockFlowPlayer: ObservableObject {
 
     /// Which sequence is playing. The 24-beat tour by default; the day-one simulation when the
     /// day-one fixture is selected. A stored property rather than a computed one so a running
-    /// player cannot have the script changed under it mid-beat.
-    var script: [MockFlowScript.Beat] = DemoProject.current.id == "murror-day-one"
+    /// player cannot have the script changed under it mid-beat — `private(set)` so that
+    /// invariant is enforced by the compiler, not by convention.
+    private(set) var script: [MockFlowScript.Beat] = DemoProject.current.id == "murror-day-one"
         ? DayOneScript.beats : MockFlowScript.beats
     var beats: [MockFlowScript.Beat] { script }
     var currentChapter: String? {

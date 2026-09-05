@@ -59,17 +59,31 @@ final class DayOneScriptTests: XCTestCase {
         XCTAssertFalse(awaitingApproval, "the last run is never approved")
     }
 
-    /// A beat whose intent has no handler is a silent no-op — it plays as a caption over a
-    /// screen where nothing happens, and nothing fails.
-    func testEveryIntentUsedHasAHandler() {
-        let handled: Set<String> = ["hold", "mode", "go", "newChat", "say", "runBeacon",
-                                    "approveNewestDraft", "convene", "linkDemoFolder",
-                                    "codeRun", "confirmCodeRun", "approveCodeRun",
-                                    "walkthroughFounderTask", "recordFounderTask", "runTask"]
+    /// Replaces a vacuous `testEveryIntentUsedHasAHandler`, which stringified each beat's intent
+    /// name and checked it against a hardcoded set of handler names it never derived from
+    /// `MockFlowPlayer` — a check against itself. `Intent` is an enum and the player's `switch`
+    /// has no `default:`, so a genuinely unhandled case is a COMPILE error; that test could never
+    /// fail.
+    ///
+    /// The real, silent version of that hazard is a typo'd task id. `.runTask` and
+    /// `.recordFounderTask` both carry a raw `String` id looked up with `first(where:)` — a
+    /// mistyped id (`"mur-stakc"` for `"mur-stack"`) fails that lookup and returns without doing
+    /// anything or reporting anything. The beat's caption plays over a screen where nothing
+    /// happened. This test is what would go red for that typo.
+    func testEveryActedOnTaskIdResolvesToARealTask() {
+        let boardIds = Set(DemoProject.murrorDayOne.tasks.map(\.id))
         for b in beats {
-            let name = String(describing: b.intent).prefix(while: { $0 != "(" })
-            XCTAssertTrue(handled.contains(String(name)),
-                          "`\(name)` has no case in MockFlowPlayer")
+            switch b.intent {
+            case .runTask(let id):
+                XCTAssertTrue(boardIds.contains(id),
+                              "`.runTask(\"\(id)\")` in chapter '\(b.chapter)' does not match any "
+                              + "task on the day-one board — the beat would silently do nothing")
+            case .recordFounderTask(let id, _):
+                XCTAssertTrue(boardIds.contains(id),
+                              "`.recordFounderTask(\"\(id)\", _)` in chapter '\(b.chapter)' does "
+                              + "not match any task on the day-one board")
+            default: break
+            }
         }
     }
 

@@ -25,6 +25,57 @@ export const DELIVERABLE_KINDS = new Set([
 
 const clip = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 
+/** One upstream department's finished work — the Swift `UpstreamWork` in `RunTaskClient.swift`.
+ *  Field names are camelCase on both sides deliberately: the two declarations have to agree,
+ *  and they are diffed against each other by name. */
+export interface UpstreamWork {
+  taskTitle: string;
+  deptName: string;
+  petName: string;
+  kind: string;
+  body: string;
+  unapproved?: boolean;
+}
+
+/** Items past this many are dropped, and each body clipped to `UPSTREAM_BODY_LIMIT`. */
+const UPSTREAM_CAP = 3;
+const UPSTREAM_BODY_LIMIT = 1500;
+
+/**
+ * Narrow `upstream` off the wire — ONE function, called by `handleRunTask` and by the
+ * `runTask` entry in `ONE_SHOT_OPS`, so the two transports cannot narrow it differently.
+ * Two copies of these checks would drift, and the local path is the one nobody curls.
+ *
+ * Returns `undefined` rather than `[]` for anything unusable: `buildRunTaskPrompt` branches
+ * on the array having length, and a dependency-free run must produce the prompt it always did.
+ *
+ * The caps are re-enforced here and not merely trusted from the client. A body arrives as a
+ * string of unknown length; an unbounded one would land in a prompt already carrying 4000
+ * characters of company context.
+ */
+export function parseUpstream(raw: unknown): UpstreamWork[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: UpstreamWork[] = [];
+  for (const entry of raw) {
+    if (out.length >= UPSTREAM_CAP) break;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    const body = clip(e.body, UPSTREAM_BODY_LIMIT);
+    // No body, nothing to build on — an item that names a department and carries none of its
+    // work would spend prompt on an instruction to credit something the model cannot read.
+    if (!body) continue;
+    out.push({
+      taskTitle: clip(e.taskTitle, 200),
+      deptName: clip(e.deptName, 80),
+      petName: clip(e.petName, 80),
+      kind: clip(e.kind, 40),
+      body,
+      unapproved: e.unapproved === true,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 export interface RunTaskArgs {
   companionId: string;
   language: string;
@@ -38,6 +89,9 @@ export interface RunTaskArgs {
   /** Owning department key of the task, so the deliverable comes from that function's
    *  expertise rather than generic company context. Unknown/absent → no department block. */
   deptKey?: string | null;
+  /** Finished work from the departments this task depends on. The graph used to gate order
+   *  and never information — see the deptKey comment below for the same bug, already fixed. */
+  upstream?: UpstreamWork[];
 }
 
 /** Build the companion-voiced generation prompt for a single roadmap task. */
@@ -68,10 +122,30 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
       `Produce what that function would actually produce, at the level of specificity it would use.\n\n`
     : "";
 
+  // What the departments this task depends on have already produced. Same shape as the
+  // deptBlock bug above: the dependency arrows were drawn on the roadmap and the model was
+  // never told about them, so Marketing wrote a landing page having never read Design's
+  // brand direction. Asking the model to NAME what it relied on is what makes the credit on
+  // the card honest rather than decorative.
+  const upstream = args.upstream ?? [];
+  const upstreamBlock = upstream.length
+    ? `Other departments have already produced work this task must build on:\n\n` +
+      upstream
+        .map(
+          (u) =>
+            `— ${u.petName} (${u.deptName}) produced "${clip(u.taskTitle, 200)}"` +
+            `${u.unapproved ? " (a draft, not yet approved)" : ""}:\n${clip(u.body, UPSTREAM_BODY_LIMIT)}`
+        )
+        .join("\n\n") +
+      `\n\nBuild on this. Do not contradict it, and do not re-derive what it already decided. ` +
+      `Where you rely on it, say so in one short phrase.\n\n`
+    : "";
+
   return (
     `You are ${c.name}, the AI building companion inside Codepet — a senior operator who does real work for a solo founder, department by department.\n\n` +
     `Voice: ${c.voice}\n\n` +
     deptBlock +
+    upstreamBlock +
     `The founder's company:\n${context || "The founder hasn't filled in much of a brief yet — keep the deliverable general but still genuinely useful."}\n\n` +
     `Task to complete: ${taskTitle || "(untitled task)"}\n` +
     (taskDetail ? `Task detail: ${taskDetail}\n` : "") +

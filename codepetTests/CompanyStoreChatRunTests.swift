@@ -30,6 +30,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
                      tasksSaver: { _, _ in true },
                      chatSender: { _ in reply }, chatStreamer: Self.failingStreamer,
                      taskRunner: runner, librarySaver: saver,
+                     firstApprovalSaver: { _, _ in true },
                      decisionExtractor: { _, _ in [] })
     }
 
@@ -131,6 +132,7 @@ final class CompanyStoreChatRunTests: XCTestCase {
                                  return RunTaskResponse(kind: "doc", title: "WTP", body: n == 1 ? "# first" : "# second")
                              },
                              librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
                              decisionExtractor: { _, _ in [] })
         ref = s
         await s.hydrate(companyId: "u")

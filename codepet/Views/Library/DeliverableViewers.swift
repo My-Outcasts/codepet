@@ -753,8 +753,21 @@ struct EmailViewer: View {
 /// HTML, and a Copy-HTML button puts it on the pasteboard.
 struct SiteViewer: View {
     let payload: SitePayload
+    /// Names the temp file the browser opens, so the same page replaces itself rather than
+    /// accumulating copies. Optional with a default so no other call site has to change.
+    var deliverableId: String? = nil
     @State private var tab: Tab = .preview
+    /// Set when the write fails, so the button says why instead of doing nothing.
+    @State private var openFailed = false
     @Environment(\.uiLanguage) private var lang
+
+    /// **"Open in browser", not "Open".** The chat draft card already carries an "Open the live
+    /// page" cue routing to THIS viewer; a second, differently-destined "Open" on one path is
+    /// the confusion this avoids. The file is `file://` — a real browser page, and NOT
+    /// shareable with anyone. No Share affordance, no Copy link.
+    static func openLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Mở trong trình duyệt" : "Open in browser"
+    }
 
     private enum Tab { case preview, code }
 
@@ -776,6 +789,36 @@ struct SiteViewer: View {
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
+                    // In THIS viewer's own content rather than on `DeliverableFrame`'s single
+                    // `action:` slot: that frame is shared by 9 viewers and 13 deliverable
+                    // kinds, and widening a shared API to serve one kind is the wrong trade.
+                    // Copy HTML keeps the frame's slot untouched.
+                    Button {
+                        do {
+                            let url = SiteExport.fileURL(
+                                forDeliverableId: deliverableId ?? "site")
+                            try SiteExport.write(html: html, to: url)
+                            NSWorkspace.shared.open(url)
+                            openFailed = false
+                        } catch {
+                            // A button that sometimes does nothing is worse than one that says
+                            // why. Fail-soft: no trap, nothing thrown into the view.
+                            openFailed = true
+                        }
+                    } label: {
+                        Text(SiteViewer.openLabel(lang))
+                            .font(.pixelSystem(size: 11, weight: .semibold))
+                            .foregroundColor(CodepetTheme.accentPurple)
+                    }
+                    .buttonStyle(.plain)
+                    .cursorOnHover(.pointingHand)
+
+                    if openFailed {
+                        Text(lang == .vi ? "Không mở được" : "Couldn't open")
+                            .font(.pixelSystem(size: 11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+
                     Spacer()
                     Picker("", selection: $tab) {
                         Text(lang == .vi ? "Xem trước" : "Preview").tag(Tab.preview)

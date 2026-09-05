@@ -43,6 +43,26 @@ enum MockFlowScript {
         /// Codepet cannot do for the founder. The prototype's "Work only you can do".
         /// No-ops when the board has no founder-only task, rather than narrating one.
         case walkthroughFounderTask
+        /// Run ONE named task.
+        ///
+        /// **Not `.runBeacon`.** `RoadmapEngine.nextStep` sorts every dependency-satisfied open
+        /// task by (phase order, array position), so it does not follow a dependency chain.
+        /// Measured against the Murror fixture, a beacon-driven day-one script drifts to
+        /// `mur-pricing` at step 3 and never comes back. A scripted sequence has to say what it
+        /// is running.
+        case runTask(String)
+        /// Record what came back from the founder's own work, which files it.
+        ///
+        /// `walkthroughFounderTask` ASKS about a `.you` task; this one completes it. Both are
+        /// needed: the demo has to show Codepet declining to do the interviews AND has to end
+        /// up with the interviews filed, because everything downstream reads them.
+        ///
+        /// **Carries only the task id, not a body.** An earlier version carried its own prose
+        /// summary, which drifted from the fixture's own filed body for the same task — the
+        /// beat and mid-flight told two different stories about what got recorded. The body is
+        /// resolved from the demo fixture instead, the same way every other deliverable body in
+        /// the demo is resolved, so the two cannot diverge again.
+        case recordFounderTask(taskId: String)
         /// Convene the Virtual Company on a decision. Safe under the demo flags only
         /// because `MockVirtualCompany` now backs `vcRunner` — before that fixture
         /// existed this beat would have spent ~$0.20 on the live endpoint, unattended,
@@ -167,9 +187,18 @@ enum MockFlowScript {
          "The five surfaces are state you browse — the work itself only ever happens "
          + "in chat. The roadmap is where the beacon came from."),
 
-        ("Where the state lives", 2.6, .go(.library),
-         "And the deliverable that was just approved is here. Library is the record of "
-         + "what the company has actually produced."),
+        // 4.4s, not 2.6: this screen now carries nine artifacts across all eight departments,
+        // and the old duration was sized for reading about one deliverable. Measured against
+        // both budgets `MockFlowScriptTests` enforces — 236 characters needs 3.50s to be
+        // readable even on Slow, and the tour goes 82.3s -> 84.1s against a 100s ceiling that
+        // its own comment says was twice refused a raise.
+        //
+        // RE-CAPTIONED, not added. The walkthrough already visited the Library; a second beat
+        // would be the duplication this change exists to avoid, and a test pins the count at one.
+        ("Where the state lives", 4.4, .go(.library),
+         "The deliverable just approved is here — and so is finished work from all eight "
+         + "departments, grouped by whose it is. Every one of them traces back to a task on "
+         + "the roadmap. Library is the record of what the company has actually produced."),
 
         ("Your company touches your code", 3.4, .mode(.developer),
          "Developer is the second door. The five surfaces do not move — they collapse "

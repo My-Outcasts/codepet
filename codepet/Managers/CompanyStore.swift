@@ -209,6 +209,8 @@ final class CompanyStore: ObservableObject {
     private let companionSaver: (String, String) async -> Bool
     private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
+    private let firstApprovalSaver: (String, Date) async -> Bool
+    private let greetedSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
@@ -319,6 +321,8 @@ final class CompanyStore: ObservableObject {
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
+         firstApprovalSaver: @escaping (String, Date) async -> Bool = CompanyData.saveFirstApproval,
+         greetedSaver: @escaping (String, Date) async -> Bool = CompanyData.saveGreeted,
          // The mock branch lives in the DEFAULT rather than inside
          // `scaffoldFromOnboarding`, so the store keeps exactly one enrichment
          // path and every test that injects its own closure is untouched by it.
@@ -387,6 +391,8 @@ final class CompanyStore: ObservableObject {
         self.companionSaver = companionSaver
         self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
+        self.firstApprovalSaver = firstApprovalSaver
+        self.greetedSaver = greetedSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
         self.decisionExtractor = decisionExtractor
@@ -498,6 +504,39 @@ final class CompanyStore: ObservableObject {
         codingMemoryGate(loaded.founderPrefs.memoryEnabled)
     }
 
+    /// Greet the founder, once per account, if they have never been greeted.
+    ///
+    /// **Why this is not inside `hydrate`.** It was, for one commit, and the cost showed
+    /// immediately: 34 test suites call `hydrate`, 14 of them assert on `chatMessages`, and
+    /// seeding a message there shifted the baseline of the entire store suite by one. That is
+    /// not 14 broken tests — it is the wrong boundary. `hydrate` loads company DATA; starting a
+    /// conversation is a different concern, and coupling them means every future store test has
+    /// to know about a greeting.
+    ///
+    /// So the app edge calls both, in order, and a test that only wants a loaded company calls
+    /// only `hydrate`.
+    ///
+    /// **The greeting itself had no caller at all before this.** It was reachable only from the
+    /// first-run enrich interview's completion, and nothing in the app starts that interview
+    /// (see `startEnrichInterviewIfNeeded`'s own comment). A new founder got the hero and a
+    /// beacon card, and the message naming their first move never ran.
+    ///
+    /// Called after `hydrate` rather than at the onboarding→app edge, deliberately: prototype
+    /// mode boots an already-onboarded company and never crosses that edge, which is why this
+    /// greeting has never been seen in the demo. `saveGreeted` is silent under prototype mode,
+    /// so the demo re-greets on every launch — which is what a demo wants.
+    func greetIfNeeded(language: AppLanguage) async {
+        guard FirstRunGreetingGate.shouldGreet(hasBeenGreeted: company.greetedAt != nil,
+                                               transcriptIsEmpty: chatMessages.isEmpty,
+                                               hasTasks: !company.tasks.isEmpty) else { return }
+        seedFirstRunGreeting(language: language)
+        let now = Date()
+        company.greetedAt = now
+        // Fire-and-forget and fail-soft, matching `markIntroSeen`: a lost write costs one extra
+        // greeting, never a broken screen.
+        if let cid = companyId { _ = await greetedSaver(cid, now) }
+    }
+
     /// Persist + stamp + leave onboarding. (Enrichment happens earlier, in
     /// scaffoldFromOnboarding for the first-run path, or in the Settings model.)
     /// Fail-soft: a failed cloud write still lets the founder into the app.
@@ -520,6 +559,9 @@ final class CompanyStore: ObservableObject {
         if MockChat.flowEnabled {
             MockChat.flowOnboarded = true
             MockChat.flowBrief = brief
+            // Stamped with the project it belongs to, so a later `-CODEPET_DEMO_PROJECT`
+            // selection is not overridden by a brief captured under a different one.
+            MockChat.flowBriefProject = DemoProject.current.id
         }
         #endif
     }
@@ -1986,7 +2028,83 @@ final class CompanyStore: ObservableObject {
             appendRunRefusal(Self.runRefusalCopy(status, task: task, language: language))
             return
         }
-        _ = await produceDraftInline(for: task, cid: cid, language: language)
+        guard !offerChainIfNeeded(for: task, language: language) else { return }
+        await produceDraftInline(for: task, cid: cid, language: language)
+    }
+
+    /// A dependency arrow pointing at nothing: offer the choice instead of guessing, and
+    /// return true when the run should stop here and wait for the founder.
+    ///
+    /// **Every run entry point calls this, and that is the point.** It lived inside
+    /// `handleRunTaskId` for one afternoon, which meant the SAME task asked in chat and ran
+    /// straight through from the beacon, the Roadmap and the autoplay walkthrough — all three
+    /// go through `runTask`. Caught by watching the walkthrough: 24 chapters, a Design run
+    /// with an unproduced dependency, no offer and no credit. One task must not have two
+    /// behaviours depending on which button started it.
+    ///
+    /// The task is already known runnable by every caller — `RoadmapEngine.status` refuses a
+    /// genuinely blocked one — so what this catches is narrower: a prerequisite that is `done`
+    /// with no deliverable behind it, usually because the founder marked it done themselves.
+    ///
+    /// `runChained` and `declineChain` deliberately do NOT call it: they are the answers to it,
+    /// and re-asking would loop.
+    private func offerChainIfNeeded(for task: RoadmapTask, language: AppLanguage) -> Bool {
+        guard let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
+                                                  library: company.library) else { return false }
+        // An offer already on screen for this task is not repeated — the beacon and the
+        // Roadmap can both be pressed for the same task before either is answered.
+        guard !chatMessages.contains(where: { $0.chainOffer?.taskId == task.id
+                                              && !$0.actionConsumed }) else {
+            dockCollapsed = false
+            return true
+        }
+        appendChainOffer(for: task, dependency: dep, language: language)
+        dockCollapsed = false
+        return true
+    }
+
+    /// The needs-upstream card: the sentence and the two buttons, as one message.
+    private func appendChainOffer(for task: RoadmapTask, dependency: RoadmapTask,
+                                  language: AppLanguage) {
+        let specialist = taskSpecialist(for: dependency)
+        let offer = ChainOffer(
+            taskId: task.id, taskTitle: task.title,
+            upstreamTaskId: dependency.id, upstreamTaskTitle: dependency.title,
+            upstreamDeptName: specialist?.deptName,
+            upstreamPetName: specialist.flatMap { PetCharacter.all[$0.companionId]?.name })
+        chatMessages.append(CopilotMessage(role: .companion, text: offer.line(language),
+                                           chainOffer: offer))
+    }
+
+    /// "Run both" — the dependency, then the task, with the dependency's work fed forward.
+    func confirmChain(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let offer = chatMessages[i].chainOffer,
+              !chatMessages[i].actionConsumed else { return }
+        chatMessages[i].actionConsumed = true
+        chatMessages[i].chainOfferChained = true
+        await runChained(taskId: offer.taskId, language: language)
+    }
+
+    /// "Just mine" — only the task the founder asked for, carrying whatever the library
+    /// already holds (which for this offer to have appeared is not the missing dependency).
+    func declineChain(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let offer = chatMessages[i].chainOffer,
+              !chatMessages[i].actionConsumed,
+              !runningTaskIds.contains(offer.taskId),
+              let task = company.tasks.first(where: { $0.id == offer.taskId }),
+              !task.done, !task.drafted else { return }
+        chatMessages[i].actionConsumed = true
+        chatMessages[i].chainOfferChained = false
+        let cid = companyId
+        // Held for the same reason `runChained` holds it: while this runs, the Roadmap's Run
+        // button for the same task must not start a second one.
+        runningTaskIds.insert(offer.taskId)
+        defer { runningTaskIds.remove(offer.taskId) }
+        dockCollapsed = false
+        await produceDraftInline(for: task, cid: cid, language: language)
+        flushActiveThread()
     }
 
     /// Record the founder's thumb on a reply.
@@ -2134,11 +2252,20 @@ final class CompanyStore: ObservableObject {
     /// step checklist revealed progressively (transparency, not a snap-to-done) —
     /// attributed to the task's department specialist (pet sprite + "Name · Dept").
     /// The last step stays "working" until BOTH the reveal and the real result
-    /// finish, then it collapses into the draft card. Returns true if a draft was
-    /// appended (false → an honest "couldn't generate" bubble). Account-guarded
-    /// via `cid` so a mid-run account switch can't land in another account's chat.
+    /// finish, then it collapses into the draft card. Account-guarded via `cid` so a
+    /// mid-run account switch can't land in another account's chat.
+    ///
+    /// Returns the deliverable it produced, or nil (→ an honest "couldn't generate"
+    /// bubble). It returned `Bool` until the chain landed: `runChained` needs the draft
+    /// ITSELF to feed forward — the upstream deliverable is deliberately never filed, so
+    /// there is nowhere else to read it from — and a caller that only wants "did it work"
+    /// reads `!= nil`.
+    ///
+    /// `extraUpstream` is work that is not in the library and cannot be: a chained run's
+    /// unapproved upstream draft.
     @discardableResult
-    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage) async -> Bool {
+    private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage,
+                                    extraUpstream: [UpstreamWork] = []) async -> Deliverable? {
         let specialist = taskSpecialist(for: task)
         let steps = Self.execSteps(task: task, specialist: specialist,
                                    decisionCount: company.decisions.count, language: language)
@@ -2154,15 +2281,19 @@ final class CompanyStore: ObservableObject {
                 chatMessages[mi].execSteps?[idx].done = true
             }
         }
-        let result = await taskRunner(runRequest(for: task, language: language))
+        // Built once and HELD: the card's credit is read back off this request rather than
+        // re-derived for the view, so what the founder is told the run built on is exactly
+        // what the prompt was given.
+        let request = runRequest(for: task, language: language, extraUpstream: extraUpstream)
+        let result = await taskRunner(request)
         _ = await reveal.value   // let every revealed step land before finishing
-        guard companyId == cid else { return false }
+        guard companyId == cid else { return nil }
         if let mi = chatMessages.firstIndex(where: { $0.id == producingId }),
            let count = chatMessages[mi].execSteps?.count {
             for i in 0..<count { chatMessages[mi].execSteps?[i].done = true }
         }
         try? await Task.sleep(nanoseconds: Self.execDoneBeatNanos)
-        guard companyId == cid else { return false }
+        guard companyId == cid else { return nil }
         // The finished log, carried onto the draft rather than thrown away with the producing
         // row. The web keeps it as a "▸ What Nova did · N steps" disclosure on the deliverable
         // card (inline-run transparency, web #71), and the native port dropped it: the steps
@@ -2174,7 +2305,7 @@ final class CompanyStore: ObservableObject {
         if let draft = buildDeliverable(from: result, task: task) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName,
-                                               execSteps: finishedSteps))
+                                               execSteps: finishedSteps, upstream: request.upstream))
             // Reflect the run on the roadmap so the task leaves the "next moves" set
             // and can't be re-run into a duplicate draft (mirrors the board runTask).
             if let ti = company.tasks.firstIndex(where: { $0.id == task.id }) {
@@ -2191,13 +2322,65 @@ final class CompanyStore: ObservableObject {
                     if let cid { _ = await tasksSaver(cid, company.tasks) }
                 }
             }
-            return true
+            return draft
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
                 : "Couldn't generate that just now — try again."))
-            return false
+            return nil
         }
+    }
+
+    /// Run a task's missing dependency first, then the task itself, with the dependency's work
+    /// fed forward.
+    ///
+    /// **No approval gate between the two, by founder decision (2026-09-03).** Halting to ask
+    /// stalls exactly the founder who least knows what they are being asked to approve, so the
+    /// upstream draft passes forward unapproved and the downstream card SAYS `(unapproved
+    /// draft)`. Hiding that is the failure mode this codebase keeps paying for.
+    ///
+    /// `RoadmapGating.awaitsApproval` is untouched: this moves work forward inside the phase
+    /// window that is already open and never opens a phase.
+    ///
+    /// The upstream deliverable is NOT filed to the library. It was never approved, and the
+    /// library is the founder's approved work — which is also why the item has to be built
+    /// from the draft (`UpstreamWork.fromDraft`) rather than found by `assemble`.
+    func runChained(taskId: String, language: AppLanguage) async {
+        let cid = companyId
+        // The same three guards `runTask` enforces, which the chain dropped entirely.
+        //
+        // `offerChainIfNeeded` removes the task from `runningTaskIds` so the offer's own buttons
+        // are pressable, and nothing put it back — so during a 20-40s chained run the Roadmap's
+        // Run button for that task stayed live, and pressing it produced a SECOND offer card,
+        // then a second run of both tasks: double credits, and last-write-wins on the draft.
+        guard !runningTaskIds.contains(taskId) else { return }
+        guard let task = company.tasks.first(where: { $0.id == taskId }),
+              !task.done, !task.drafted else { return }
+        runningTaskIds.insert(taskId)
+        defer { runningTaskIds.remove(taskId) }
+        dockCollapsed = false
+
+        var carried: [UpstreamWork] = []
+        if let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
+                                               library: company.library) {
+            let upstreamDraft = await produceDraftInline(for: dep, cid: cid, language: language)
+            guard companyId == cid else { return }
+            // A failed upstream run does not cancel the downstream one. It already appended its
+            // own honest failure bubble, and refusing to run what the founder asked for would
+            // answer a request with silence — the shape `handleRunTaskId` documents at length.
+            if let upstreamDraft {
+                carried = [UpstreamWork.fromDraft(upstreamDraft, task: dep)]
+            }
+        }
+
+        // Re-resolve, and re-check: the upstream run awaited, so mark-complete, a roadmap edit
+        // or another surface's approve may have changed this task while it did. `runTask` makes
+        // the same check for the same reason — a done or already-drafted task must not be run
+        // into a duplicate draft.
+        guard let fresh = company.tasks.first(where: { $0.id == taskId }),
+              !fresh.done, !fresh.drafted else { return }
+        await produceDraftInline(for: fresh, cid: cid, language: language, extraUpstream: carried)
+        flushActiveThread()
     }
 
     /// Dispatch a `.done` frame's actions — shared by the streaming `.done` case and
@@ -2458,6 +2641,32 @@ final class CompanyStore: ObservableObject {
             company.tasks[ti].draft = nil
             wroteTasks = true
         }
+        // The founder has now approved something, so the "not saved yet" note on the draft card
+        // has done its job and retires (see `DraftCardCopy.shouldShowNotFiledNote`).
+        //
+        // HERE and not in `approveDraft`/`approveTask`: this is the one path both of them call,
+        // which is why `ApprovalParityTests` exists. Writing it in the two callers instead would
+        // be two places to drift, and the board is as real a way to learn the rule as the chat.
+        //
+        // **AFTER the task mutation above, and that ordering is load-bearing.** This block used
+        // to sit between `library.append` and the `done` write, which put an `await` — a
+        // SUSPENSION — inside the pair that makes `approveTask` idempotent. Those two mutations
+        // were atomic on the MainActor precisely because nothing suspended between them; with a
+        // network round-trip in the middle, a second approval (a double tap, or chat racing the
+        // board) passed the `!done` guard while the first was still awaiting and appended the
+        // SAME deliverable id twice, both of which then persisted.
+        //
+        // A reviewer cleared this region earlier by checking that no call between the two could
+        // THROW. That was true and insufficient: the hazard is suspension, not failure.
+        //
+        // Set once. This records WHEN THEY LEARNED IT, not when they last approved.
+        if company.firstApprovalAt == nil {
+            let now = Date()
+            company.firstApprovalAt = now
+            // Fail-soft, matching `markIntroSeen`: a lost write costs one extra showing of a
+            // teaching line, never a broken card or a blocked approval.
+            if let cid = companyId { _ = await firstApprovalSaver(cid, now) }
+        }
         if let cid = companyId {
             await persistLibrary(cid)
             if wroteTasks { _ = await tasksSaver(cid, company.tasks) }
@@ -2527,20 +2736,32 @@ final class CompanyStore: ObservableObject {
     /// Build a RunTaskRequest for a task (grounded on brief + roadmap). `reviseNote`/
     /// `current` default nil — a first run or blind redo sends neither (unchanged
     /// wire shape); only a revise chip tap sets both.
+    /// `extraUpstream` is prepended to what the library yields, for a chained run whose
+    /// upstream draft is deliberately not filed yet (`runChained`).
     private func runRequest(for task: RoadmapTask, language: AppLanguage,
-                             reviseNote: String? = nil, current: String? = nil) -> RunTaskRequest {
+                             reviseNote: String? = nil, current: String? = nil,
+                             extraUpstream: [UpstreamWork] = []) -> RunTaskRequest {
         // The pet the execute log and the draft card have always credited for this run — now
         // it is also the one generating it. `taskSpecialist` deliberately keeps the host case
         // (a run is performed BY a department, so it always shows that department's
         // character), which is exactly the behaviour wanted here too.
         let specialist = taskSpecialist(for: task)
+        // What the departments this task depends on have already produced. Assembled here
+        // rather than at each caller because this is the only place a `RunTaskRequest` is
+        // built, so a run cannot acquire a dependency graph and forget to carry it.
+        //
+        // Empty collapses to nil: see `RunTaskRequest.upstream` — an empty array would put a
+        // new key on every dependency-free run, which is nearly all of them.
+        let upstream = extraUpstream + UpstreamWork.assemble(for: task, in: company.tasks,
+                                                             library: company.library)
         return RunTaskRequest(
             companyId: companyId, language: language.rawValue,
             companionId: specialist?.companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
-            reviseNote: reviseNote, current: current, deptKey: task.dept)
+            reviseNote: reviseNote, current: current, deptKey: task.dept,
+            upstream: upstream.isEmpty ? nil : Array(upstream.prefix(UpstreamWork.cap)))
     }
 
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,
@@ -2737,7 +2958,14 @@ final class CompanyStore: ObservableObject {
         // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
         // answer to one question.
         dockCollapsed = false
-        let produced = await produceDraftInline(for: task, cid: cid, language: language)
+        // Same question the chat path asks, for the same reason — see `offerChainIfNeeded`.
+        // The task leaves `runningTaskIds` first: the offer's buttons are disabled while its
+        // own task is running, so holding the id here would render the card un-pressable.
+        if offerChainIfNeeded(for: task, language: language) {
+            runningTaskIds.remove(task.id)
+            return
+        }
+        let produced = await produceDraftInline(for: task, cid: cid, language: language) != nil
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
         // `produceDraftInline` owns the draft, the task write and its own honest failure bubble,
@@ -2750,6 +2978,32 @@ final class CompanyStore: ObservableObject {
             return
         }
         flushActiveThread()
+    }
+
+    /// File the outcome of a task Codepet cannot run.
+    ///
+    /// **The gap this closes.** `who == .you` work — an interview round, a conversation, a
+    /// clinician reading a crisis path — has no run path, so `approveTask` finds no draft and
+    /// `toggleTaskDone` marks it done leaving nothing behind. That is precisely the state
+    /// `UpstreamWork.firstUnfiled` calls out: a dependency arrow pointing at nothing readable.
+    /// Every downstream run then loses the credit line it should have had.
+    ///
+    /// Goes through `approveTask` rather than filing directly, so a recorded outcome takes the
+    /// same path an approved draft does — one place marks a task done, appends to the library
+    /// and stamps the first approval.
+    ///
+    /// **Refuses a `drafted` task too.** `BeaconOffer` already documents that a founder-only
+    /// task can be carrying a prepared draft awaiting the founder's own approval (`.review`,
+    /// checked ahead of `.walkthrough` for exactly this reason) — recording over it here would
+    /// silently overwrite that draft with a different body instead of asking the founder to
+    /// approve or discard what is already waiting.
+    func recordFounderOutcome(taskId: String, body: String, kind: DeliverableKind) async {
+        guard let i = company.tasks.firstIndex(where: { $0.id == taskId }),
+              company.tasks[i].who == .you,
+              !company.tasks[i].done, !company.tasks[i].drafted else { return }
+        company.tasks[i].draft = Deliverable(kind: kind, title: company.tasks[i].title,
+                                             body: body, sourceTaskId: taskId)
+        await approveTask(id: taskId)
     }
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,

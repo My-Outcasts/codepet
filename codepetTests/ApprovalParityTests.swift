@@ -36,6 +36,7 @@ final class ApprovalParityTests: XCTestCase {
             chatStreamer: Self.failingStreamer,
             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "Landing copy", body: "# hi") },
             librarySaver: { _, _ in true },
+            firstApprovalSaver: { _, _ in true },
             decisionExtractor: { _, _ in [] })
     }
 

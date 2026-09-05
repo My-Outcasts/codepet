@@ -82,7 +82,7 @@ struct MockFlowCaptionBar: View {
         let current = player.currentChapter
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 5) {
-                ForEach(MockFlowScript.chapters, id: \.self) { chapter in
+                ForEach(player.chapters, id: \.self) { chapter in
                     Button { player.jump(toChapter: chapter) } label: {
                         Text(chapter)
                             .font(CodepetTheme.inter(CodepetType.footnote,

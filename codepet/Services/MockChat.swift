@@ -96,6 +96,28 @@ enum MockChat {
     /// with Codepet's, mid-walkthrough, with nothing saying why.
     nonisolated(unsafe) static var flowBrief: CompanyBrief?
 
+    /// **Which demo project `flowBrief` was captured under.**
+    ///
+    /// `flowBrief` exists so a re-hydrate does not replace the project the founder typed in
+    /// the cold open. That was the whole story until demo projects existed, and then it
+    /// silently outranked them: with `CODEPET_MOCK_FLOW` persisted from an earlier session, a
+    /// founder launching `-CODEPET_DEMO_PROJECT murror` got **Murror's board and Codepet's
+    /// name** — "Build the Murror landing page" sitting under "What should we build for
+    /// Codepet today?". Reported from the app as "why don't I see any changes at all?", because
+    /// the project name is the most visible thing on the screen and it had not changed.
+    ///
+    /// Recording the project makes the two rules compose instead of fight: a captured brief
+    /// still wins for the project it belongs to, and a different project's selection wins over
+    /// a stale capture.
+    nonisolated(unsafe) static var flowBriefProject: String?
+
+    /// The captured brief, but only when it belongs to the demo project now selected.
+    static var activeFlowBrief: CompanyBrief? {
+        guard let brief = flowBrief else { return nil }
+        guard let captured = flowBriefProject else { return brief }  // pre-demo-project capture
+        return captured == DemoProject.current.id ? brief : nil
+    }
+
     /// What the canned copy calls the product.
     ///
     /// Every deliverable and reply below is written with a `{{product}}` token
@@ -108,13 +130,20 @@ enum MockChat {
     /// being copied into new canned text, an interpolation has to be remembered
     /// each time.
     static var productName: String {
-        let typed = (flowBrief?.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return typed.isEmpty ? "Codepet" : typed
+        let typed = (activeFlowBrief?.projectName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        return DemoProject.current.brief.projectName ?? "Codepet"
     }
 
     /// Fill `{{product}}` in any canned string.
     static func fill(_ text: String) -> String {
         text.replacingOccurrences(of: "{{product}}", with: productName)
+    }
+
+    /// `{{title}}` as well as `{{product}}`. The catch-all deliverable used to interpolate the
+    /// task title directly, which is what kept the table from being plain values.
+    static func fill(_ text: String, title: String) -> String {
+        fill(text).replacingOccurrences(of: "{{title}}", with: title)
     }
 
     /// Decide the reply text + which `.done` action fires, from the message text
@@ -322,82 +351,11 @@ enum MockChat {
     /// one sentence. Returns nil for a department with no copy, which falls the turn back
     /// to the generic reply rather than answering with a blank bubble.
     private static func departmentReply(for deptKey: String) -> String? {
-        switch deptKey {
-        case "eng":
-            return """
-            The only engineering on your board is **Set up a waitlist signup**, and it is \
-            waiting on the landing page — there is nowhere to put the form yet. When it \
-            unblocks, keep it a hosted form writing into one collection; collecting an email \
-            does not need a backend, and building one now is a week you spend not shipping.
-
-            Want me to sketch the smallest version that would actually capture a signup today?
-            """
-        case "design":
-            return """
-            Decide who is looking before you decide what they see. **Sketch two early user \
-            personas** is open right now and it is the cheaper half of this — **Design your \
-            brand look** is downstream of it, because a visual direction is an argument aimed \
-            at someone specific.
-
-            Give me the two people and I will make the colors and type argue for them.
-            """
-        case "mkt":
-            return """
-            Your bottleneck is the sentence, not the channel. **Scan five competitors' \
-            positioning** is open now, and the gap it finds is exactly what **Write your \
-            landing page copy** needs: one line a stranger understands in five seconds.
-
-            Say "run competitors" and I will do the scan and hand you the sentence it points at.
-            """
-        case "sales":
-            return """
-            At your stage you land users one conversation at a time — a campaign has nothing \
-            to convert yet. **Write a cold outreach email** is on the board but waits on both \
-            the landing page and a price, and that order is right: a stranger needs somewhere \
-            to look and something to say yes to.
-
-            Until then your five discovery calls are the pipeline. Ask for one intro at the \
-            end of every single one.
-            """
-        case "support":
-            return """
-            You have no users yet, which makes support cheap to get right and expensive to \
-            retrofit. **Draft a support FAQ** sits behind pricing on your board for a reason — \
-            the first questions are always what is this, what does it cost, and can I cancel.
-
-            Write those answers once and they double as your objection-handling script on the \
-            discovery calls.
-            """
-        case "fin":
-            return """
-            Numbers before vibes. **Size the market you're entering** is open right now, and it \
-            is a top-down sanity check you can finish in an hour — not a fundraising slide, so \
-            do not spend a week on it.
-
-            Then **Draft a simple pricing plan**, because a price is the first thing that makes \
-            interest cost something. Ship a number you are allowed to change.
-            """
-        case "ops":
-            return """
-            Operations is the plumbing that stops you from being the plumbing. **Set up a \
-            deploy checklist** is on your board behind the waitlist, and the whole point of it \
-            is that shipping stops needing your full attention — same steps, same order, every \
-            release.
-
-            Write it the first time you deploy by hand, while you still remember what you forgot.
-            """
-        case "legal":
-            return """
-            Legal here is cheap insurance bought before you need it. **Draft a privacy policy** \
-            is on your board, and at your size it is four honest paragraphs: what you collect, \
-            why, who else sees it, and how someone deletes it.
-
-            Draft it in plain language now and have a lawyer read it before you take money. Do \
-            not copy a competitor's — you will inherit claims about a company that is not yours.
-            """
-        default:
-            return nil
-        }
+        // Behind the `DemoProject` seam, not hardcoded here. This copy is written against a
+        // SPECIFIC board on purpose, so hardcoding it meant a founder looking at Murror got a
+        // specialist naming Codepet's tasks and telling them to say a phrase matching nothing
+        // on their board — exactly the find-replace failure the seam exists to prevent.
+        DemoProject.current.departmentReplies[deptKey]
     }
 
     /// Department display name for a runnable task id (mock roadmap lookup) — used
@@ -470,192 +428,37 @@ enum MockChat {
     /// the task so demo screenshots read like genuine Codepet output.
     static func runResult(_ req: RunTaskRequest) async -> RunTaskResponse? {
         try? await Task.sleep(nanoseconds: 700_000_000)  // "producing…" beat
-        let (kind, body) = deliverable(for: req.taskTitle)
+        let entry = DemoProject.current.deliverable(for: req.taskTitle)
         let note = req.reviseNote.map { "\n\n_Revised per your note: \($0)_" } ?? ""
-        return RunTaskResponse(kind: kind, title: req.taskTitle, body: fill(body + note), payload: nil)
+        // DECODED, not built memberwise: `SitePayload.init(from:)` hard-decodes six anchor fields
+        // and throws when any is absent, so a fixture that would render a broken page fails here
+        // rather than on screen. `payload` stayed nil until 2026-09-03, which is why no run could
+        // produce a website at all.
+        let payload = entry.payloadJSON.flatMap {
+            try? JSONDecoder().decode(DeliverablePayload.self, from: Data($0.utf8))
+        }
+        // The upstream work, named in the body the way a real run is asked to name it
+        // (`buildRunTaskPrompt`: "Where you rely on it, say so in one short phrase"). Without
+        // this the fixture would receive `upstream` and produce a deliverable that shows no
+        // sign of it — a demo of the mechanism that demonstrates nothing, which is the exact
+        // failure this feature exists to fix one layer up.
+        let credit = Self.upstreamCredit(req.upstream ?? [])
+        return RunTaskResponse(kind: entry.kind, title: req.taskTitle,
+                               body: fill(entry.body + credit + note, title: req.taskTitle),
+                               payload: payload)
     }
 
-    /// A realistic deliverable (kind + markdown body) tailored to the task title.
-    private static func deliverable(for title: String) -> (kind: String, body: String) {
-        let t = title.lowercased()
-        if t.contains("positioning") || t.contains("value prop") {
-            return ("doc", """
-            For solo founders drowning in scattered docs and stalled momentum, **{{product}}** is the \
-            AI cofounder that turns your company into one living workspace — it plans your next \
-            move, does the work with you, and remembers every decision. Unlike a generic AI chat \
-            or a stack of disconnected tools, {{product}} is grounded in *your* company and acts, not \
-            just answers.
-
-            **One-liner** — {{product}} is the AI cofounder that runs your company's busywork so you \
-            can build.
-
-            **Why it works**
-            - Names a sharp, real pain (scattered context, no momentum).
-            - Says exactly who it's for (early solo founders), not 'everyone'.
-            - Draws the contrast (grounded + acts vs. generic chat).
-
-            **Use it in**: your landing hero, the first line of your pitch, the App Store subtitle.
-            """)
+    /// The one-line "building on X" a fixture run appends when it was given upstream work.
+    private static func upstreamCredit(_ work: [UpstreamWork]) -> String {
+        guard !work.isEmpty else { return "" }
+        let names = work.map { item -> String in
+            let who = item.petName.isEmpty ? item.deptName : item.petName
+            let draft = item.unapproved ? " (unapproved draft)" : ""
+            return who.isEmpty ? "\"\(item.taskTitle)\"\(draft)"
+                               : "\(who)'s \"\(item.taskTitle)\"\(draft)"
         }
-        if t.contains("landing") || t.contains("copy") || t.contains("website") {
-            return ("post", """
-            **Headline** — Your AI cofounder, not another chatbot.
-
-            **Subhead** — {{product}} plans your next move, does the work with you, and remembers \
-            every decision — grounded in your actual company.
-
-            **Benefit bullets**
-            - **Always knows your context.** No re-explaining — it reads your brief, roadmap, and decisions.
-            - **Does the work, not just talk.** Drafts, plans, and deliverables you approve in one tap.
-            - **A team of specialists.** Marketing, Engineering, and Design pets step in for their domain.
-
-            **Primary CTA** — Start free   ·   **Secondary** — See how it works
-            """)
-        }
-        if t.contains("waitlist") || t.contains("signup") || t.contains("sign up") {
-            return ("checklist", """
-            A no-backend email capture you can ship today.
-
-            1. **Pick the tool** — a hosted form (Tally / Typeform) or a one-field section on your landing page.
-            2. **Ask for one thing** — email only. Every extra field drops conversion.
-            3. **Set the confirmation** — a short 'you're on the list' message + what to expect next.
-            4. **Wire the storage** — form → a sheet or your Firestore `waitlist` collection.
-            5. **Add a share nudge** — 'Want in sooner? Share your link.'
-
-            **Done when**: a stranger can land, drop an email, and you can see it come through.
-            """)
-        }
-        if t.contains("brand") || t.contains("logo") || t.contains("look") || t.contains("visual") {
-            return ("doc", """
-            A calm, confident visual direction you can apply everywhere.
-
-            **Palette** — one ink (`#1f1b15`), one paper (`#f4f1ea`), one accent (a violet, `#7c3aed`). \
-            Restraint reads as premium; add a second accent only when you truly need it.
-
-            **Type** — a friendly grotesk for headers, a readable sans for body. One family, two weights beats five fonts.
-
-            **Logo mark** — a simple, single-color glyph that survives at 16px (favicon) and in one color \
-            (stamps, watermarks). Wordmark = the name set in your header weight, tightened.
-
-            **Rule of thumb** — pick the boring, consistent option; recognizability comes from repetition, not novelty.
-            """)
-        }
-        if t.contains("outreach") || t.contains("cold") || t.contains("sales") || t.contains("email") {
-            return ("email", """
-            **Subject** — a quick idea for {{company}}
-
-            Hi {{name}} — I'll keep this short. I'm building {{product}}, an AI cofounder that runs a \
-            solo founder's whole company — it plans the next move, does the work with you, and \
-            remembers every decision.
-
-            I noticed {{company}} is {{specific observation}} — that's exactly the kind of momentum \
-            problem it's built for. Worth a 15-minute look?
-
-            No pitch deck, just a live demo. Reply "yes" and I'll send a time.
-
-            — Mona
-
-            _Tip: keep the ask tiny (a 15-min look), personalize line 2, and cut everything else._
-            """)
-        }
-        if t.contains("faq") || t.contains("support") || t.contains("help center") {
-            return ("doc", """
-            The first questions new users ask — answer them before they have to write in.
-
-            **What is {{product}}?** An AI cofounder that runs your company's busywork — it plans, does \
-            the work with you, and remembers your decisions.
-
-            **Do I need to know how to code?** No. {{product}} drafts and produces; you approve.
-
-            **Is my data private?** Your company context is yours; we don't train on it.
-
-            **How is it priced?** A credit model — chat feels free, deliverables spend. Trial, then Pro.
-
-            **Can I cancel anytime?** Yes, one tap in Settings — no email required.
-
-            _Add each real question you get to this list; it doubles as your objection-handling script._
-            """)
-        }
-        if t.contains("deploy") || t.contains("release") || t.contains("ops") {
-            return ("checklist", """
-            Ship a release the same safe way every time.
-
-            1. **Green build** — tests pass locally and in CI.
-            2. **Version bump** — tag the release; write a one-line changelog.
-            3. **Backup / migration** — run pending DB migrations; confirm a rollback path.
-            4. **Deploy to staging** — smoke-test the critical flow end to end.
-            5. **Promote to prod** — deploy, then re-run the smoke test live.
-            6. **Watch** — check errors/latency for 15 minutes; keep the rollback command ready.
-
-            **Done when**: the critical flow works in prod and dashboards are clean.
-            """)
-        }
-        if t.contains("privacy") || t.contains("policy") || t.contains("legal") || t.contains("terms") {
-            return ("legal", """
-            _Plain-language draft — have a lawyer review before you publish._
-
-            **Privacy Policy — {{product}}**
-
-            **What we collect** — your account email, the company context you enter, and basic usage \
-            analytics. We do **not** sell your data or train public models on your company content.
-
-            **Why** — to run the product for you (generate work, remember decisions) and to keep it reliable.
-
-            **Your choices** — export or delete your data anytime from Settings; deleting your account \
-            removes your company content.
-
-            **Sharing** — only with the infrastructure providers needed to run the service (hosting, \
-            auth, payments), under their own terms.
-
-            **Contact** — privacy@codepet.app for any request.
-            """)
-        }
-        if t.contains("pricing") || t.contains("price") {
-            return ("doc", """
-            **Model** — credits, not a seat/day cap: chat feels unlimited, deliverables spend.
-
-            - **Trial** — 7 days, ~150 credits, then it stops (no permanent free tier).
-            - **Pro — $20/mo** — 800 credits included; overage auto-billed at $0.05/credit.
-
-            **Why this shape**
-            - Chat is cheap (~0.25 credit/msg) so exploring feels free; the real cost is generation.
-            - One price, no BYOK — simpler to reason about and simpler to sell.
-
-            You can change any number later — ship a price, then let real usage tell you.
-            """)
-        }
-        if t.contains("user") || t.contains("interview") || t.contains("talk to") || t.contains("discovery") {
-            return ("doc", """
-            **Goal** — understand the problem, not pitch. 20 minutes each.
-
-            **Opening** — 'I'm trying to learn, not sell. Walk me through the last time you ran into this.'
-
-            **Core questions**
-            1. When did you last hit this? What did you actually do?
-            2. What's the most frustrating part — and why that part?
-            3. What have you tried? What did it cost you (time or money)?
-            4. If you had a magic fix, what would it do for you?
-
-            **Close** — 'Who else should I talk to?' and ask to follow up.
-
-            **Watch for**: stories about real behavior over opinions ('I would probably…').
-            """)
-        }
-        // default: a crisp weekly plan.
-        return ("plan", """
-        A first cut to get you moving — treat it as a starting point, not the final word.
-
-        **The move** — take '\(title)' from idea to a concrete first step this week.
-
-        **This week**
-        1. Define what 'done' looks like in a single sentence.
-        2. Ship the smallest version today — rough is fine.
-        3. Get one piece of real feedback before you polish anything.
-
-        **Watch out for** — scope creep and polishing before you've validated the core.
-        """)
+        return "\n\n_Building on \(names.joined(separator: " and ")) — carried into this run._"
     }
-
     /// A fully canned, onboarded company for `CompanyData.load` — so mock mode is
     /// self-contained (no Firestore, no real account needed) and the fan-out has a
     /// deterministic roadmap with THREE distinct runnable departments (mkt / eng /
@@ -665,15 +468,15 @@ enum MockChat {
         // Falling back to Codepet's here — as this did until a founder
         // onboarded something else and watched their project get replaced on
         // the next hydrate — makes the fixture look like it ignored them.
-        var brief = flowBrief ?? {
-            var b = CompanyBrief()
-            b.founderName = "Mona"
-            b.projectName = "Codepet"
-            b.oneLiner = "Your AI cofounder that runs the whole company with you."
-            return b
-        }()
+        // The brief now comes from the SELECTED demo project rather than a literal, so the
+        // fixture can be a company other than Codepet.
+        var brief = activeFlowBrief ?? DemoProject.current.brief
         if (brief.stage ?? "").isEmpty { brief.stage = "building" }
-        return CompanyState(brief: brief, departments: [], library: [], stage: .building,
+        // The demo's already-approved work. Empty until 2026-09-03, which meant a prototype
+        // board showed `done` prerequisites with nothing behind them and no run could inherit
+        // anything — see `DemoProject.filed`.
+        return CompanyState(brief: brief, departments: [], library: DemoProject.current.library(),
+                            stage: .building,
                             companionId: "byte", onboardedAt: Date(), tasks: roadmap())
     }
 
@@ -718,110 +521,9 @@ enum MockChat {
         return b
     }
 
-    /// Canned roadmap for `CompanyData.fetchRoadmap` — a realistic mix so the
-    /// board, the chat's `runnable` list (Codepet-can-do tasks), and the
-    /// "needs you" landing card all have something to show offline.
-    ///
-    /// The `dependsOn` graph is deliberate, not decorative: with it empty, EVERY task
-    /// qualified as an entry task, so `RoadmapLayoutEngine` drew zero dependency edges and
-    /// fanned the root out to all nine — the board could not exercise its own flow rendering
-    /// at all. This graph is shaped to cover each routing case exactly once:
-    ///
-    ///   - The depless tasks are the FIND four (`interviews` + the three runnable ones), so
-    ///     the root draws FOUR edges, not nine. It drew one until Aug 5, when `.find` gained
-    ///     runnable work; four is still a fan-out the board must route rather than the
-    ///     degenerate nine-way spray this graph exists to avoid, and it is what a real
-    ///     scaffolded roadmap looks like — an opening phase of parallel research. If you are
-    ///     testing single-entry routing specifically, drop the three and expect the fan-out
-    ///     and in-chat runs to stop working (`MockFixtureRunnableTests` will say so).
-    ///   - `interviews → {brand, landing, pricing}` touches the beacon, so these are the
-    ///     `critical` edges (halo + solid) — previously unreachable in the mock.
-    ///   - `brand → landing` is an IN-COLUMN edge → `sideElbow`'s left-gutter hook.
-    ///   - `landing → outreach`, `pricing → faq`, `waitlist → deploy` share a dept lane →
-    ///     2-point straight runs.
-    ///   - `{landing, pricing} → outreach` is a fan-IN: two sources, one target.
-    ///   - `landing → privacy` SKIPS the BUILD column, and both sit on the mkt/legal lane
-    ///     (row 1) — so its horizontal leg passes behind `outreach`. Kept on purpose: it is
-    ///     the reproduction for the routing flaw where a skip-level edge reads as a chain.
-    ///
-    /// NOTE the phase window, not these deps, is what locks the downstream cards:
-    /// `interviews` is `who: .you`, so `RoadmapGating.openPhases` stops at `.find` and
-    /// `RoadmapEngine.status` blocks all eight later tasks regardless of `dependsOn`.
-    ///
-    /// That silently broke the fixture's whole purpose, and the note this replaces recorded it
-    /// as a known dead end rather than a bug: with every task either founder-owned or behind
-    /// the window, NOTHING was `codepetCanDo`, so the client sent an empty `runnable` list and
-    /// the mock router answered "you don't have a task I can run right now" to every "run the
-    /// landing page". No execute log, no draft, and no 3-agent fan-out — the three surfaces
-    /// this fixture exists to demonstrate. Reported from the app on Aug 5 as "the UI for
-    /// showing which agents are running still isn't working": it was the roadmap, not the UI.
-    ///
-    /// The fix is what that note called a separate call — three Codepet-owned tasks INSIDE
-    /// `.find`, in three distinct departments. Inside the open window they are `codepetCanDo`
-    /// while `interviews` keeps holding the later phases shut, so the fixture demonstrates
-    /// both halves at once: runnable work in the open phase, and the gating that the founder's
-    /// own step imposes on everything after it. Three distinct departments because
-    /// `RoadmapEngine.nextMoves` takes the first runnable task per DEPARTMENT, so a fan-out
-    /// of three needs three of them.
-    static func roadmap() -> [RoadmapTask] {
-        [
-            // ── FIND: runnable now (the open phase) ────────────────────────────────
-            // Each title carries the keyword the mock router matches on ("run competitors").
-            RoadmapTask(id: "mock-competitors", title: "Scan five competitors' positioning",
-                        detail: "What they claim, who they target, and where the gap is.",
-                        phase: .find, who: .draft, dept: "mkt"),             // run competitors
-            RoadmapTask(id: "mock-personas", title: "Sketch two early user personas",
-                        detail: "Who feels this pain most, and what they do today instead.",
-                        phase: .find, who: .draft, dept: "design"),          // run personas
-            RoadmapTask(id: "mock-market", title: "Size the market you're entering",
-                        detail: "A rough top-down number you can sanity-check later.",
-                        phase: .find, who: .draft, dept: "fin"),             // run market
-            // ── Later phases: one task per department (all 8) so every department's card
-            // is testable, and all of them BLOCKED behind `interviews` — which is the
-            // gating the founder should be able to see and feel, not a fixture defect.
-            // Each title carries a keyword ("run <keyword>") the mock router matches.
-            RoadmapTask(id: "mock-brand", title: "Design your brand look",
-                        detail: "A simple visual direction — colors, type, and a logo mark.",
-                        phase: .foundation, who: .draft,
-                        dependsOn: ["mock-interviews"], dept: "design"),     // run brand
-            RoadmapTask(id: "mock-landing", title: "Write your landing page copy",
-                        detail: "Headline, subhead, and three benefit bullets.",
-                        phase: .foundation, who: .draft,
-                        // + brand: the copy follows the visual direction. Same column → sideElbow.
-                        dependsOn: ["mock-interviews", "mock-brand"], dept: "mkt"),  // run landing
-            RoadmapTask(id: "mock-pricing", title: "Draft a simple pricing plan",
-                        detail: "A starting price + model you can change later.",
-                        phase: .foundation, who: .draft,
-                        dependsOn: ["mock-interviews"], dept: "fin"),        // run pricing
-            RoadmapTask(id: "mock-waitlist", title: "Set up a waitlist signup",
-                        detail: "A simple email capture so early interest isn't lost.",
-                        phase: .build, who: .does,
-                        // There has to be a page before there's a signup on it.
-                        dependsOn: ["mock-landing"], dept: "eng"),           // run waitlist
-            RoadmapTask(id: "mock-outreach", title: "Write a cold outreach email",
-                        detail: "A short first-touch email to a potential customer.",
-                        phase: .build, who: .draft,
-                        // Fan-IN: you can't pitch without both a page and a price.
-                        dependsOn: ["mock-landing", "mock-pricing"], dept: "sales"),  // run outreach
-            RoadmapTask(id: "mock-faq", title: "Draft a support FAQ",
-                        detail: "Answers to the first questions new users will ask.",
-                        phase: .build, who: .draft,
-                        dependsOn: ["mock-pricing"], dept: "support"),       // run faq
-            RoadmapTask(id: "mock-deploy", title: "Set up a deploy checklist",
-                        detail: "The steps to ship a release safely, every time.",
-                        phase: .ship, who: .does,
-                        dependsOn: ["mock-waitlist"], dept: "ops"),          // run deploy
-            RoadmapTask(id: "mock-privacy", title: "Draft a privacy policy",
-                        detail: "A plain-language policy covering what you collect and why.",
-                        phase: .ship, who: .draft,
-                        // SKIPS BUILD on purpose — the reproduction for the skip-level
-                        // routing flaw (see the graph note above). Do not "tidy" this away.
-                        dependsOn: ["mock-landing"], dept: "legal"),         // run privacy
-            // A "needs you" task so the landing card + roadmap show that state too.
-            RoadmapTask(id: "mock-interviews", title: "Talk to 5 potential users",
-                        detail: "Book and run five short discovery calls this week.",
-                        phase: .find, who: .you, dept: "mkt"),
-        ]
-    }
+
+
+    /// The selected demo project's board. The graph and its routing-case notes moved with it.
+    static func roadmap() -> [RoadmapTask] { DemoProject.current.tasks }
 }
 #endif

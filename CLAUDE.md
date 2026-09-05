@@ -130,6 +130,134 @@ byte, nova, crash, luna, sage, glitch, null
 - UserDefaults keys are prefixed with `cp_` (e.g., `cp_onboardingComplete`)
 - Cloud sync has two destinations: company state under `companies/{uid}`, the older game progress under `users/{uid}`
 
+## Prototype mode: two demo companies
+
+Prototype mode runs the whole product on fixtures. **Which company those fixtures describe is a
+second switch,** `DemoProject` (`codepet/Demo/`), and there are two:
+
+```
+open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murror
+```
+
+- Default is `codepet` — Codepet demoing Codepet, the content the fixtures always had. Every
+  suite written against those literals depends on this default, so do not change it.
+- `murror` is the second company: 11 tasks, **8 runnable at once — one per roster department**,
+  and the only fixture whose run produces a `.site`, i.e. an actual rendered landing page in the
+  Library's `WKWebView`. Ask for "the landing page" to see it.
+- **Selection is read through `PrototypeMode.store`**, which is redirected to a scratch suite
+  under XCTest. That is deliberate and load-bearing: reading `UserDefaults.standard` here would
+  re-open issue #117, where the test host sharing the app's defaults domain meant a founder's
+  toggle silently changed what the suite exercised.
+- A launch argument outranks the stored preference (`NSArgumentDomain`), so the demo cannot be
+  left half-selected between the two.
+- **All eight Murror tasks are runnable only because each depends solely on `done` tasks.**
+  `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
+  identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
+
+### The Murror Library shows all eight departments
+
+Nine filed artifacts (`DemoProject.filed`) across all eight roster departments. Added 5 Sep,
+because `LibraryView` already groups deliverables BY DEPARTMENT and had only `mkt` and `design`
+work to show — two groups, not eight — so the demo narrated "eight departments, each speaking
+with its own pet" and demonstrated one.
+
+- **The board carries BOTH halves**: nine `done` tasks with filed deliverables AND eight
+  runnable ones. Those pull against each other — a task cannot be both done with work behind it
+  and open to be run — so `DemoProjectEightDepartmentsTests` asserts both in one suite. **Do not
+  trade one for the other.**
+- New `done` fixture tasks go in **`.foundation`, never `.find`** — `.find` must stay complete or
+  the board stops being the mid-flight state the fixture exists to show
+- **New deliverable entries go after every specific entry and before the catch-all.**
+  `deliverable(for:)` returns the FIRST keyword match, so a broad keyword early in the table
+  silently steals another department's work — no error, just Sales showing Engineering's
+- **There is exactly ONE `.go(.library)` walkthrough beat.** It was re-captioned, not duplicated;
+  a test pins the count. The script enforces two time budgets — caption readability
+  (chars/45 ÷ 1.5) and a 100s total whose comment records that a raise was twice refused. Measure
+  before spending either
+
+### A new account is greeted, once
+
+`CompanyStore.greetIfNeeded(language:)` seeds the first-run greeting — the founder's name, the
+project, the best first move, and "nothing ships without your say-so". Wired 2026-09-04; before
+that it had **no caller at all** and no new founder had ever seen it.
+
+- **It is NOT part of `hydrate`, and that is deliberate.** It was, for one commit: 34 suites call
+  `hydrate` and 14 assert on `chatMessages`, so seeding a message there shifted the whole store
+  suite's baseline. `hydrate` loads company DATA; starting a conversation is a separate concern.
+  `ContentView` calls both in order. **Do not move it back** — two tests pin the boundary
+- Gated on `CompanyState.greetedAt`, the third field of that shape after `introSeenAt` and
+  `firstApprovalAt`. **Never gate it on an empty transcript** — `newChat()` empties it, so that
+  condition is true again every time the founder starts a conversation
+- Called after hydrate rather than at the onboarding→app edge because prototype mode boots an
+  already-onboarded company and never crosses that edge — which is exactly why this message went
+  unseen. `saveGreeted` is silent under prototype mode, so the demo greets every launch, and a
+  test asserts the fixture stays ungreeted
+- `startEnrichInterviewIfNeeded` is still uncalled. Separate decision; its comment is the record
+  of why the greeting was dead
+
+### A first draft says it is not saved yet
+
+Until the founder's first approval, the chat draft card carries **"Not saved yet — approving
+files it in your Library."** Added 2026-09-04. The rule it teaches is already stated before a
+run (`BeaconOffer`: "you approve before it is filed") and confirmed after ("Added to Library");
+this fills the moment in between, where the founder is looking at a finished-LOOKING deliverable
+beside a button marked Approve.
+
+- Gated on `CompanyState.firstApprovalAt`, set in `CompanyStore.fileApproval` — **the one path
+  both `approveDraft` and `approveTask` call**. `ApprovalParityTests` exists because those two
+  once drifted; write anything approval-related there, not in the callers
+- **Never derive "has never approved" from an empty library.** It reads as a free proxy since
+  approving is the only thing that files there, and it is wrong exactly where it matters: the
+  demo pre-files three artifacts (`DemoProject.filed`), so a derived signal goes quiet in
+  prototype mode. `FirstApprovalNoteTests` pins this
+- The decision is `DraftCardCopy.shouldShowNotFiledNote(hasApproved:draftApproved:)`, a pure
+  static — same reasoning as `DraftPayloadPreview.hasStructuredPreview`
+- **Adding any new saver to `fileApproval` breaks every test suite that approves without
+  injecting it.** The real savers call `Firestore.firestore()`, which TRAPS rather than throwing
+  under an unconfigured `FirebaseApp`, so the test host dies and the log reads "Restarting after
+  unexpected exit" — which looks like an assertion failure and is not. Four suites had to be
+  updated when this landed. If you add one, sweep the neighbours in the same change
+
+### Departments that build on each other
+
+A run now carries the finished work of its `dependsOn` tasks — capped at 3 items × 1500
+characters, in `dependsOn` order — and the draft card credits them ("Built on Luna's brand
+direction"). Added 2026-09-03.
+
+- **`UpstreamWork` (`Services/RunTaskClient.swift`) is the one type**, and its field names are
+  camelCase on purpose: the TypeScript `UpstreamWork` in `runTaskCore.ts` reads them by name.
+  Adding a field means editing both, plus `RunTaskRequest.CodingKeys` — that enum renames every
+  field for the wire, and a stored property missing from it is silently never encoded
+- **`parseUpstream` is the only narrowing**, shared by `handleRunTask` and the `runTask` entry
+  in `ONE_SHOT_OPS`. It re-enforces the caps rather than trusting the client's
+- **The card's credit is read off the request that was sent**, not re-derived. `message.upstream`
+  is set from `RunTaskRequest.upstream` in `produceDraftInline`, so the credit and the prompt
+  cannot disagree
+- **Chained runs do not stop for approval** (founder decision). `runChained` runs the missing
+  dependency, feeds its DRAFT forward with `unapproved: true`, and the card says
+  `(unapproved draft)`. The upstream draft is never filed to the library — it was not approved —
+  which is why `UpstreamWork.fromDraft` exists alongside `assemble`
+- **A runnable task whose dependency produced nothing offers `[Run both]` / `[Just mine]`**
+  rather than guessing (`ChainOffer`). On a fresh Murror company that is 8 of 8 runnable tasks,
+  because `mur-brand` and `mur-landscape` are `done` with no deliverables behind them — so the
+  offer is currently the demo's first screen for every department. To make the demo lead with
+  the credit instead, give those two prerequisite tasks real deliverables in the fixture
+- `RoadmapGating.awaitsApproval` is untouched: chaining never opens a phase
+
+### The day-one simulation (`DemoProject.murrorDayOne`)
+
+Day one and mid-flight are ONE task list. Four things break the bridge between them:
+
+1. **Do not give day one its own task array.** It is `murrorTasks` with nine `done` flags
+   cleared. Two arrays drift, and `DayOneBridgeTests` is what notices.
+2. **Do not remove an existing `dependsOn` id when adding a chain edge.** `mur-brand` keeps its
+   `mur-landscape` edge AND gains `mur-notfor`. Replacing rewrites mid-flight's roadmap.
+3. **Keep `DemoProject.dayOneChain` equal to `DemoProject.murror.filed`.** The bridge claim is
+   that running the nine lands on mid-flight; different sets make it false.
+4. **A new `who: .you` task needs a `.recordFounderTask` beat if anything depends on it.**
+   `toggleTaskDone` files nothing, so a founder-only task completed any other way leaves the
+   dependency arrow pointing at nothing and every downstream credit line empty.
+
 ---
 
 # Workspaces

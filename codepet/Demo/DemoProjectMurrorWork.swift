@@ -385,6 +385,158 @@ extension DemoProject {
 
             // ── The catch-all. Reached by the `?? last` fallback, so it must stay last and
             // must have no keywords of its own.
+            // ── WORK ALREADY BEHIND THE FOUNDER ─────────────────────────────────────────────
+            //
+            // Six finished artifacts, one per department the board's `done` tasks did not cover
+            // (eng, sales, support, fin, ops, legal). They exist so the Library — which already
+            // groups by department — shows EIGHT groups rather than two, which is what makes
+            // "eight departments, each speaking with its own pet" a claim the demo can support
+            // rather than only narrate.
+            //
+            // Placed HERE, after every specific entry and before the catch-all, because
+            // `deliverable(for:)` returns the FIRST keyword match: a broad keyword earlier in
+            // the table silently steals another department's deliverable.
+            DemoDeliverable(
+                keywords: ["built on", "the app is built"],
+                kind: "doc",
+                body: """
+                What {{product}} runs on, and the one constraint that decided it.
+
+                **The call.** On-device inference for anything touching an entry. A server round \
+                trip is faster to build and cheaper to run, and it means the most private thing \
+                a person owns leaves their phone. The promise is that entries never leave with a \
+                name attached; the only version of that promise worth making is the one the \
+                architecture keeps.
+
+                **What that costs.** A smaller model, a slower first-run download, and no server \
+                logs to debug from. All three are real and all three are worth it.
+
+                **What still reaches a server.** Crisis-resource lookup by region, and nothing \
+                else. It carries no entry text and no identifier.
+
+                **What this rules out.** Any feature needing to read across users' entries — \
+                trends, comparisons, "people like you". Those are the obvious second-year roadmap \
+                items and this decision closes them. Say so now rather than discovering it when \
+                someone asks for a dashboard.
+                """),
+
+            DemoDeliverable(
+                keywords: ["month of inference", "inference costs"],
+                kind: "sheet",
+                body: """
+                What a month of {{product}} costs to run, per active user, at today's model.
+
+                **The number.** About **$0.11 per active user per month**, assuming the median of \
+                four sessions a week the interviews suggest, and on-device inference for \
+                everything except crisis-resource lookup.
+
+                **What moves it.** Session length moves it most — someone who writes for ten \
+                minutes costs roughly triple someone who writes for three. Frequency barely \
+                matters by comparison, which is the opposite of the intuition and the reason \
+                pricing should not be built around a session cap.
+
+                **What it means for pricing.** At $6/month margin is not the constraint; \
+                conversion is. That is the number worth arguing about, and this exists so the \
+                argument starts from a measured floor rather than a guess.
+
+                **Confidence.** Low on session length, high on per-token cost. Re-run it once \
+                twenty people have used it for a fortnight.
+                """),
+
+            DemoDeliverable(
+                keywords: ["not for", "who this is not"],
+                kind: "doc",
+                body: """
+                Who {{product}} is **not for** — written down so outreach stops spending its best \
+                hours in the wrong places.
+
+                **The person who found it insulting.** One of the twelve said plainly that she \
+                does not want help understanding herself, she wants fewer obligations. She is not \
+                a persuasion problem. Every product like this has her, and pitching her is how you \
+                learn the wrong lesson from a rejection.
+
+                **People in crisis right now.** This is a practice, not treatment, and it says so. \
+                Reaching for someone mid-crisis is both ineffective and wrong, which is why the \
+                crisis path exists to decline gracefully.
+
+                **Anyone looking for a mood tracker.** All twelve had tried one and stopped, and \
+                none could say what it had ever told them. Selling against that category means \
+                inheriting its expectations.
+
+                **Teams and workplaces.** The moment an employer can see it, the honesty the whole \
+                thing depends on is gone. Refuse this one even when it is the only cheque on the \
+                table.
+                """),
+
+            DemoDeliverable(
+                keywords: ["bad night", "happens on a bad"],
+                kind: "doc",
+                body: """
+                What {{product}} does when someone writes something frightening. This is policy, \
+                not copy — the wording can change, the behaviour cannot.
+
+                **First, before anything else.** A crisis resource for their region, shown \
+                immediately and without an interstitial. Not after the entry saves, not behind a \
+                tap. This path is built in and cannot be turned off.
+
+                **What the app does not do.** It does not try to handle it. No breathing exercise, \
+                no reframing, no follow-up question. Every one of those reads as the product \
+                deciding it is qualified, and it is not.
+
+                **What it does not do to the entry.** Nothing. Not deleted, not flagged, not \
+                escalated, not attached to a name. Someone who learns the app reports them is \
+                someone who never writes honestly again.
+
+                **The one thing it says.** That this is more than a practice can hold, that there \
+                is a number, and that nobody will be told.
+
+                _A clinician reads this before launch. Until they have, it is a draft._
+                """),
+
+            DemoDeliverable(
+                keywords: ["release rhythm", "weekly release"],
+                kind: "checklist",
+                body: """
+                A weekly rhythm, so shipping stops needing anybody's full attention.
+
+                **Thursday, not Friday.** A Friday release means a weekend of nobody watching. \
+                Thursday leaves a working day to notice and undo.
+
+                **Every week, in order**
+                1. Cut from `main` on Thursday morning — whatever is merged is what ships.
+                2. Run the crisis path by hand on a real device. Every release, no exceptions: it \
+                is the one path where a regression is not recoverable by a hotfix.
+                3. Check the on-device model still loads on the oldest supported phone.
+                4. Ship to 10% for a day, then the rest.
+                5. Write two lines in the changelog a person would understand.
+
+                **What stops a release.** A failing crisis path, and nothing else. Everything else \
+                waits a week — a rhythm that bends for urgency is not a rhythm.
+                """),
+
+            DemoDeliverable(
+                keywords: ["data-deletion", "deletion promise"],
+                kind: "legal",
+                body: """
+                **The deletion promise.** Plain language first; the privacy policy formalises it \
+                afterwards.
+
+                **One tap, and it is gone.** Settings → Delete everything. No confirmation email, \
+                no support ticket, no waiting period, no "are you sure" chain designed to make you \
+                give up.
+
+                **Permanent means permanent.** Entries are removed from the device and from any \
+                backup held, within 30 days. No anonymised copy is kept, because there is no such \
+                thing for text this personal.
+
+                **What survives, and why.** Aggregate counts with no content and no identifier — \
+                how many people opened the app on a given day. Nothing traceable to a person or \
+                reconstructable into an entry.
+
+                **What we will not do.** We will not ask why. A deletion flow that interviews you \
+                on the way out is a dark pattern wearing a research hat.
+                """),
+
             DemoDeliverable(keywords: [], kind: "doc", body: """
             A first cut on '{{title}}' — a starting point, not the final word.
 

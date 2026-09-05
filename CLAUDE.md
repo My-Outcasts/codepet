@@ -154,6 +154,27 @@ open <path>/codepet.app --args -CODEPET_MOCK_CHAT YES -CODEPET_DEMO_PROJECT murr
   `RoadmapEngine.depsSatisfied` blocks a task whose prerequisite is open, and the roster looks
   identical either way — `DemoProjectMurrorTests` asserts it through the engine for that reason.
 
+### The Murror Library shows all eight departments
+
+Nine filed artifacts (`DemoProject.filed`) across all eight roster departments. Added 5 Sep,
+because `LibraryView` already groups deliverables BY DEPARTMENT and had only `mkt` and `design`
+work to show — two groups, not eight — so the demo narrated "eight departments, each speaking
+with its own pet" and demonstrated one.
+
+- **The board carries BOTH halves**: nine `done` tasks with filed deliverables AND eight
+  runnable ones. Those pull against each other — a task cannot be both done with work behind it
+  and open to be run — so `DemoProjectEightDepartmentsTests` asserts both in one suite. **Do not
+  trade one for the other.**
+- New `done` fixture tasks go in **`.foundation`, never `.find`** — `.find` must stay complete or
+  the board stops being the mid-flight state the fixture exists to show
+- **New deliverable entries go after every specific entry and before the catch-all.**
+  `deliverable(for:)` returns the FIRST keyword match, so a broad keyword early in the table
+  silently steals another department's work — no error, just Sales showing Engineering's
+- **There is exactly ONE `.go(.library)` walkthrough beat.** It was re-captioned, not duplicated;
+  a test pins the count. The script enforces two time budgets — caption readability
+  (chars/45 ÷ 1.5) and a 100s total whose comment records that a raise was twice refused. Measure
+  before spending either
+
 ### A new account is greeted, once
 
 `CompanyStore.greetIfNeeded(language:)` seeds the first-run greeting — the founder's name, the

@@ -7,10 +7,17 @@ questions in order, one per link, landing exactly on today's mid-flight board.
 
 **Architecture:** One shared task list with a linear `dependsOn` chain through the nine tasks the
 simulation runs. `DemoProject.murrorDayOne` is that list with those nine `done: false` and
-`filed: []`; `DemoProject.murror` is unchanged. A new beat table drives nine run-and-approve
-pairs through the EXISTING `.runBeacon` intent, which resolves `RoadmapEngine.nextStep` — so the
-dependency chain is what makes the beacon walk the script in order. Approving each link files it,
-and `UpstreamWork.assemble` then credits it to the next link with no new carry-forward code.
+`filed: []`; `DemoProject.murror` is unchanged. A new beat table names its nine task ids
+explicitly and runs each one, then approves it. Approving files it, and `UpstreamWork.assemble`
+then credits it to the next link with no new carry-forward code.
+
+**The chain edges carry the hand-off, NOT the ordering.** An earlier draft of this plan claimed
+`.runBeacon` would walk the chain because `RoadmapEngine.nextStep` follows dependencies. That is
+false and was measured false: `nextStep` sorts every dependency-satisfied open task by (phase
+order, array position), and Murror has other open tasks — `mur-pricing`, `mur-clinician`,
+`mur-site`, `mur-screens` — that unblock mid-chain and sit EARLIER in the array. Simulated against
+the real fixture, the beacon drifts at step 3 and never recovers. The script therefore names its
+ids. The edges remain load-bearing for `assemble`, which is what renders each card's credit line.
 
 **Tech Stack:** Swift 5, SwiftUI, XCTest. Xcode 26.2, macOS. `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
 
@@ -527,9 +534,15 @@ MSG
 estimate was made before the captions were written and counted run time only, not reading time.
 65.8s is the number to hold; `testTheWholeSequenceStaysUnderNinetySeconds` is the budget.
 
-**Why no new run machinery:** `.runBeacon` calls `RoadmapEngine.nextStep`, and Task 2's chain
-means that IS the next link. Nine `.runBeacon` + `.approveNewestDraft` pairs walk the whole
-script through intents that already exist and are already tested.
+**Why the script names its task ids.** `.runBeacon` resolves `RoadmapEngine.nextStep`, which
+sorts ALL dependency-satisfied open tasks by (phase order, array position) — it does not follow
+the chain. Simulated against the real fixture, a `.runBeacon`-driven script drifts to
+`mur-pricing` at step 3, `mur-clinician` at step 4, and never returns to the chain. Two new
+intents, `.runTask(String)` and `.recordFounderTask(taskId:body:)`, name what they act on.
+
+This also removes a hidden coupling: a script whose order emerged from array positions in a
+different file would break silently whenever a task was inserted. `testTheScriptRunsExactlyTheDayOneChain`
+pins the order to `DemoProject.dayOneChain`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -552,7 +565,7 @@ final class DayOneScriptTests: XCTestCase {
         for b in beats {
             switch b.intent {
             case .recordFounderTask: record += 1
-            case .runBeacon: runs += 1
+            case .runTask: runs += 1
             case .approveNewestDraft: approvals += 1
             default: break
             }
@@ -562,13 +575,48 @@ final class DayOneScriptTests: XCTestCase {
         XCTAssertEqual(approvals, 8, "each run is approved; the record files itself")
     }
 
+    /// **The guard that replaces an assumption.** An earlier draft used `.runBeacon` and trusted
+    /// `RoadmapEngine.nextStep` to follow the dependency chain. It does not — it sorts every
+    /// dependency-satisfied open task by (phase order, array position), and simulated against
+    /// the real fixture it drifted to `mur-pricing` at step 3. The script now names its ids, and
+    /// this pins them to the chain so the two cannot diverge.
+    func testTheScriptRunsExactlyTheDayOneChain() {
+        var acted: [String] = []
+        for b in beats {
+            switch b.intent {
+            case .recordFounderTask(let id, _): acted.append(id)
+            case .runTask(let id): acted.append(id)
+            default: break
+            }
+        }
+        XCTAssertEqual(acted, DemoProject.dayOneChain,
+                       "the script's order must BE the chain, not resemble it")
+    }
+
+    /// Every run beat must be followed by its approval before the next link runs — otherwise the
+    /// next department reads an unfiled predecessor and its credit line comes back empty.
+    func testEveryRunIsApprovedBeforeTheNextRun() {
+        var awaitingApproval = false
+        for b in beats {
+            switch b.intent {
+            case .runTask(let id):
+                XCTAssertFalse(awaitingApproval, "a run started before \(id)'s predecessor was approved")
+                awaitingApproval = true
+            case .approveNewestDraft:
+                awaitingApproval = false
+            default: break
+            }
+        }
+        XCTAssertFalse(awaitingApproval, "the last run is never approved")
+    }
+
     /// A beat whose intent has no handler is a silent no-op — it plays as a caption over a
     /// screen where nothing happens, and nothing fails.
     func testEveryIntentUsedHasAHandler() {
         let handled: Set<String> = ["hold", "mode", "go", "newChat", "say", "runBeacon",
                                     "approveNewestDraft", "convene", "linkDemoFolder",
                                     "codeRun", "confirmCodeRun", "approveCodeRun",
-                                    "walkthroughFounderTask", "recordFounderTask"]
+                                    "walkthroughFounderTask", "recordFounderTask", "runTask"]
         for b in beats {
             let name = String(describing: b.intent).prefix(while: { $0 != "(" })
             XCTAssertTrue(handled.contains(String(name)),
@@ -607,7 +655,7 @@ final class DayOneScriptTests: XCTestCase {
     }
 
     private func isRun(_ i: MockFlowScript.Intent) -> Bool {
-        if case .runBeacon = i { return true }
+        if case .runTask = i { return true }
         return false
     }
 }
@@ -624,12 +672,20 @@ Expected: compile failure — no `DayOneScript`, no `.recordFounderTask`.
 In `codepet/Demo/MockFlowScript.swift`, immediately after `case walkthroughFounderTask`:
 
 ```swift
+        /// Run ONE named task.
+        ///
+        /// **Not `.runBeacon`.** `RoadmapEngine.nextStep` sorts every dependency-satisfied open
+        /// task by (phase order, array position), so it does not follow a dependency chain.
+        /// Measured against the Murror fixture, a beacon-driven day-one script drifts to
+        /// `mur-pricing` at step 3 and never comes back. A scripted sequence has to say what it
+        /// is running.
+        case runTask(String)
         /// Record what came back from the founder's own work, which files it.
         ///
         /// `walkthroughFounderTask` ASKS about a `.you` task; this one completes it. Both are
         /// needed: the demo has to show Codepet declining to do the interviews AND has to end
         /// up with the interviews filed, because everything downstream reads them.
-        case recordFounderTask(String)
+        case recordFounderTask(taskId: String, body: String)
 ```
 
 - [ ] **Step 4: Handle it, and let the player take a script**
@@ -656,11 +712,16 @@ body and before the switch's closing brace. Swift requires the switch stay exhau
 omitting this is a compile error rather than a silent no-op beat:
 
 ```swift
-        case .recordFounderTask(let body):
+        case .runTask(let id):
             store.view = .chat
-            guard let task = RoadmapEngine.nextStep(store.company.tasks),
-                  task.who == .you else { return }
-            Task { await store.recordFounderOutcome(taskId: task.id, body: body, kind: .doc) }
+            // The same three guards `runTask` enforces. A beat that fires on a task already
+            // running or drafted would produce a second draft and double the credits.
+            guard let task = store.company.tasks.first(where: { $0.id == id }),
+                  !task.done, !task.drafted else { return }
+            Task { await store.runTask(task, language: language) }
+        case .recordFounderTask(let taskId, let body):
+            store.view = .chat
+            Task { await store.recordFounderOutcome(taskId: taskId, body: body, kind: .doc) }
 ```
 
 - [ ] **Step 5: Write the script**
@@ -679,10 +740,14 @@ import Foundation
 /// and that is who this product is for. Measured on the tour: one `.runBeacon` and one
 /// `.approveNewestDraft`, so one department of eight produced anything on camera.
 ///
-/// **Why the beats are so plain.** Each link is a question, a run and an approval, using
-/// `.runBeacon` — which resolves `RoadmapEngine.nextStep`. `DemoProject.dayOneChain` gives the
-/// nine a linear `dependsOn`, so the beacon walks them in order with no new playback machinery
-/// and no hardcoded task ids in this file.
+/// **Why the beats name their task ids.** Each link is a question, a run and an approval. The
+/// run is `.runTask(id)`, NOT `.runBeacon`: `RoadmapEngine.nextStep` sorts every
+/// dependency-satisfied open task by (phase order, array position) rather than following a
+/// chain, and simulated against this fixture a beacon-driven version drifts to `mur-pricing` at
+/// step 3 and never returns. `DayOneScriptTests` pins this order to `DemoProject.dayOneChain`.
+///
+/// The chain's `dependsOn` edges are still load-bearing — they are what `UpstreamWork.assemble`
+/// reads to credit each card. They carry the HAND-OFF, not the ordering.
 ///
 /// **The ending is a hand-back, not a finale.** After link 9 the board is mid-flight and the
 /// beacon lands on the landing page — where the tour's own `.runBeacon` starts. Her tenth
@@ -702,14 +767,15 @@ enum DayOneScript {
          + "the guide and says so plainly."),
 
         ("Is this real?", 3.4, .recordFounderTask(
-            "Nine of twelve described the same evening: they thought of someone, drafted "
+            taskId: "mur-interviews",
+            body: "Nine of twelve described the same evening: they thought of someone, drafted "
             + "something, and never sent it. Two wanted tracking, not company. One found the "
             + "whole idea insulting."),
          "She has the conversations and records what she heard. That is what files it — and "
          + "everything after this reads it."),
 
         // Link 2 — Marketing · Nova.
-        ("Has someone built it?", 3.0, .runBeacon,
+        ("Has someone built it?", 3.0, .runTask("mur-landscape"),
          "Second question, and the first one Codepet can take: has someone already built this? "
          + "Nova reads the interviews before answering — the credit line on the card names them."),
         ("Has someone built it?", 2.8, .approveNewestDraft,
@@ -717,7 +783,7 @@ enum DayOneScript {
          + "department will read what she just approved."),
 
         // Link 3 — Sales · Nova.
-        ("Who is it not for?", 3.0, .runBeacon,
+        ("Who is it not for?", 3.0, .runTask("mur-notfor"),
          "The scan turns up crowded ground, which sharpens the real question: who is this NOT "
          + "for? The one person who found it insulting is worth more here than the nine who "
          + "liked it."),
@@ -726,7 +792,7 @@ enum DayOneScript {
          + "artifact that makes the next four decisions easy."),
 
         // Link 4 — Design · Luna.
-        ("What should it feel like?", 3.0, .runBeacon,
+        ("What should it feel like?", 3.0, .runTask("mur-brand"),
          "Now that she knows who it is for and who it is not, Luna can shape how it feels. "
          + "A different department, a different pet, reading the two artifacts before it."),
         ("What should it feel like?", 2.8, .approveNewestDraft,
@@ -734,14 +800,14 @@ enum DayOneScript {
          + "from the brief again."),
 
         // Link 5 — Engineering · Byte.
-        ("What do I build it on?", 3.0, .runBeacon,
+        ("What do I build it on?", 3.0, .runTask("mur-stack"),
          "The first question with a bill attached. Byte reads the direction and decides what "
          + "the app runs on — and whether anything a person writes ever leaves their device."),
         ("What do I build it on?", 2.8, .approveNewestDraft,
          "That decision sets the running cost, which is why Finance is next and not first."),
 
         // Link 6 — Finance · Crash.
-        ("What does it cost me?", 3.0, .runBeacon,
+        ("What does it cost me?", 3.0, .runTask("mur-unitcost"),
          "Crash cannot price anything without knowing what it runs on, so this question could "
          + "not have been asked earlier. Cost per active user, from the stack just chosen."),
         ("What does it cost me?", 2.8, .approveNewestDraft,
@@ -749,7 +815,7 @@ enum DayOneScript {
          + "than describes."),
 
         // Link 7 — Support · Sage.
-        ("A bad night", 3.2, .runBeacon,
+        ("A bad night", 3.2, .runTask("mur-crisis"),
          "The question a consumer app about loneliness cannot avoid: what happens when someone "
          + "is genuinely struggling at 2am. Sage writes what the app says, when, and what it "
          + "refuses to handle."),
@@ -758,7 +824,7 @@ enum DayOneScript {
          + "founder-only task later asks a clinician to read."),
 
         // Link 8 — Legal · Glitch.
-        ("Am I in trouble?", 3.0, .runBeacon,
+        ("Am I in trouble?", 3.0, .runTask("mur-deletion"),
          "She is now holding people's private words. Glitch reads the crisis policy and the "
          + "stack decision, and turns them into a promise: one tap, permanent, no email."),
         ("Am I in trouble?", 2.8, .approveNewestDraft,
@@ -766,7 +832,7 @@ enum DayOneScript {
          + "sitting on her board, unwritten."),
 
         // Link 9 — Operations · Glitch.
-        ("How do I ship it?", 3.0, .runBeacon,
+        ("How do I ship it?", 3.0, .runTask("mur-rhythm"),
          "The last question of the first week: how does any of this reach anyone without "
          + "breaking. A weekly rhythm the launch checklist will later assume."),
         ("How do I ship it?", 2.8, .approveNewestDraft,
@@ -798,7 +864,7 @@ enum DayOneScript {
 
 Run: `xcodebuild test -scheme codepet -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:codepetTests/DayOneScriptTests 2>&1 | tail -25`
 
-Expected: `Executed 6 tests, with 0 failures`.
+Expected: `Executed 8 tests, with 0 failures`.
 
 - [ ] **Step 7: Confirm the tour did not move**
 
@@ -822,16 +888,23 @@ git add codepet/Demo/DayOneScript.swift codepet/Demo/MockFlowScript.swift \
 git commit -F - <<'MSG'
 feat(demo): the day-one sequence — nine questions, eight departments
 
-Each link is a question, a run and an approval. The runs go through the
-existing `.runBeacon`, which resolves `RoadmapEngine.nextStep` — the chain
-edges added with the fixture are what make the beacon walk the nine in the
-order the questions are asked, so this script hardcodes no task ids and
-needs no new playback machinery.
+Each link is a question, a run and an approval, and the script names the
+task each beat acts on.
 
-One new intent: `.recordFounderTask`. `walkthroughFounderTask` ASKS about a
-`.you` task; this one completes it. The demo has to show Codepet declining
-to run the interviews AND end with them filed, because all eight links
-downstream read them.
+It nearly did not. The plan said `.runBeacon` would walk the chain because
+`RoadmapEngine.nextStep` follows dependencies. It does not — it sorts every
+dependency-satisfied open task by (phase order, array position), and Murror
+has open tasks that unblock mid-chain and sit earlier in the array.
+Simulated against the real fixture before this was built, a beacon-driven
+script drifted to `mur-pricing` at step 3 and never recovered.
+
+Two new intents: `.runTask(id)` and `.recordFounderTask(taskId:body:)`.
+`walkthroughFounderTask` ASKS about a `.you` task; the latter completes it,
+because the demo has to show Codepet declining to run the interviews AND
+end with them filed — all eight links downstream read them.
+
+The chain edges remain load-bearing for `UpstreamWork.assemble`, which
+renders each card's credit line. They carry the hand-off, not the order.
 
 Ends by handing back the tenth question rather than answering it.
 MSG

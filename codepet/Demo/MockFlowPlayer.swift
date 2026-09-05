@@ -4,6 +4,7 @@ import AppKit
 import Combine
 import Foundation
 import SwiftUI
+import os
 
 /// Plays `MockFlowScript` against the real store — the prototype's `stepStory()`.
 ///
@@ -38,6 +39,30 @@ final class MockFlowPlayer: ObservableObject {
     private var timer: Timer?
     private weak var store: CompanyStore?
     private var language: AppLanguage = .en
+
+    private static let log = Logger(subsystem: "app.murror.codepet", category: "MockFlowPlayer")
+
+    /// How long `.approveNewestDraft` will wait for a draft to exist before giving up and
+    /// logging rather than silently no-op'ing.
+    ///
+    /// Bounded, not immediate: the beat used to check once and return if the run that
+    /// precedes it hadn't produced its draft yet, which raced three real cases — Reduce
+    /// Motion capping every beat at 0.8s, a Brisk pace below 1.0 shrinking the authored
+    /// margin further, and `CODEPET_SLOW_RUNS`, which multiplies the run's OWN step timing
+    /// (unaffected by the player's pace) by up to 20×. That last one sets the ceiling: a run
+    /// is six exec steps at 420ms plus a 260ms settle (`CompanyStore.execStepNanos` /
+    /// `execDoneBeatNanos`), so the slowest realistic run is 6*420ms*20 + 260ms*20 ≈ 55.6s.
+    /// 90s leaves real headroom above that without ever hanging the player — past it the
+    /// beat gives up loudly instead of waiting forever.
+    private static let approvalWaitCeiling: TimeInterval = 90
+    private static let approvalPollInterval: UInt64 = 100_000_000  // 0.1s
+
+    /// The in-flight `.approveNewestDraft` wait, if one is pending. Cancelled in `pause()`
+    /// (and so by `restart()` and `jump()`, which both call it first) so a wait started
+    /// before a pause/restart/jump can never land its approval into a player that has since
+    /// stopped or moved on to a different beat — a wait that outlives a pause would be a new
+    /// race, not a fix for this one.
+    private var pendingApproval: Task<Void, Never>?
 
     /// Which sequence is playing. The 24-beat tour by default; the day-one simulation when the
     /// day-one fixture is selected. A stored property rather than a computed one so a running
@@ -83,6 +108,10 @@ final class MockFlowPlayer: ObservableObject {
         isPlaying = false
         timer?.invalidate()
         timer = nil
+        // See `pendingApproval`'s doc comment: this is what makes a bounded wait safe
+        // across pause/restart/jump instead of just bounded.
+        pendingApproval?.cancel()
+        pendingApproval = nil
     }
 
     func toggle() { isPlaying ? pause() : play() }
@@ -168,8 +197,39 @@ final class MockFlowPlayer: ObservableObject {
             guard let task = RoadmapEngine.nextStep(store.company.tasks) else { return }
             Task { await store.runTask(task, language: language) }
         case .approveNewestDraft:
-            guard let id = newestDraftMessageId(in: store) else { return }
-            Task { await store.approveDraft(messageId: id) }
+            // Waits for the draft rather than racing it — see `pendingApproval` and
+            // `approvalWaitCeiling`. `beatIndex` is captured now (not read from `self.index`
+            // inside the task later, by which point later beats may have advanced it) purely
+            // so a timeout's log line names the beat that actually stalled.
+            let beatIndex = index
+            pendingApproval?.cancel()
+            pendingApproval = Task { [weak self] in
+                guard let self, let cid = self.store?.companyId else { return }
+                let deadline = Date().addingTimeInterval(Self.approvalWaitCeiling)
+                while !Task.isCancelled {
+                    // Re-read `self.store` (rather than close over the `store` this `perform`
+                    // call already unwrapped) each pass, matching how every sibling `Task {}`
+                    // in this file and `CompanyStore` re-checks `companyId == cid`: an account
+                    // switch mid-wait must bail rather than approve into the new account.
+                    guard let store = self.store, store.companyId == cid else { return }
+                    if let id = self.newestDraftMessageId(in: store) {
+                        await store.approveDraft(messageId: id)
+                        return
+                    }
+                    guard Date() < deadline else {
+                        // `runningTaskIds` is exactly the task(s) this beat was waiting ON — a
+                        // beat that gave up with something still running names the run that
+                        // never finished; an empty set means the run already ended (or never
+                        // started) without ever producing a draft. Either way, "the demo
+                        // stalled" now has a task id and a beat index behind it instead of
+                        // nothing.
+                        let stillRunning = store.runningTaskIds.sorted().joined(separator: ", ")
+                        Self.log.error("approveNewestDraft: no draft after \(Self.approvalWaitCeiling, privacy: .public)s at beat \(beatIndex, privacy: .public) — still running: \(stillRunning.isEmpty ? "none" : stillRunning, privacy: .public) — nothing filed")
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: Self.approvalPollInterval)
+                }
+            }
         case .convene(let ask):
             store.view = .chat
             // Safe under the demo flags only because `vcRunner` resolves to

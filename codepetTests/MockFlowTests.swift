@@ -233,4 +233,117 @@ final class MockFlowTests: XCTestCase {
         XCTAssertTrue((enriched.oneLiner ?? "").contains("Murror"),
                       "the reveal would show a project the founder never named")
     }
+
+    // MARK: - the approve beat waits for its draft
+
+    /// **The bug this guards.** `.approveNewestDraft` used to check for a draft exactly
+    /// once, at the moment its OWN timer fired, and silently return if the run beat
+    /// before it hadn't produced one yet — a race against Reduce Motion (every beat
+    /// capped at 0.8s), a Brisk pace below 1.0 (both of which shrink the SCRIPT's
+    /// margin), and `CODEPET_SLOW_RUNS` (2-20x the run's OWN step timing, which the
+    /// player's pace does not touch at all). Losing it meant the beat filed nothing:
+    /// the predecessor task stayed `drafted` forever and the library never grew.
+    ///
+    /// **Why the injected delay has to outlast the WHOLE remaining script, not just
+    /// one beat's gap.** The first miss is not the end of the story: every later
+    /// `.runTask` in the day-one chain depends (directly or transitively) on
+    /// `mur-landscape`, and `offerChainIfNeeded` blocks a run whose dependency has no
+    /// FILED deliverable yet — regardless of `done` — so as long as `mur-landscape`
+    /// stays unfiled, every later run becomes a harmless chain-offer card instead of a
+    /// competing draft. That leaves `mur-landscape`'s draft the ONLY one in play, which
+    /// means a LATER `.approveNewestDraft` beat can still stumble onto it once it's
+    /// ready — an early version of this test used a 1.5s delay against a ~0.3-0.5s
+    /// per-beat gap and passed even against the unfixed handler, because the SECOND
+    /// approve beat happened to land after the draft turned up. That was not the fix
+    /// working; it was luck at a several-hundred-millisecond margin. Making the delay
+    /// (20s) outlast the entire script's real playback (≈10s at this pace; ≤16.8s even
+    /// under Reduce Motion, where every beat caps at 0.8s) means NO approve beat —
+    /// first, second, or last — can find the draft under the unfixed handler, so a
+    /// failure here is the real bug and not a coin flip.
+    ///
+    /// Reproduced without touching either script's authored `seconds` (the founder's
+    /// rule): a very low `pace` shrinks the script's OWN real playback time, and the
+    /// injected `taskRunner`'s 20s sleep outlasts it — the same shape `CODEPET_SLOW_RUNS`
+    /// produces at full scale (up to ≈55.6s beyond a normal run), just scaled down so
+    /// this test runs in well under a minute instead of several. `CompanyStore.
+    /// execStepNanos`/`execDoneBeatNanos` are zeroed (the documented "tests set it to 0"
+    /// seam) so the injected sleep is the ONLY source of delay in the run itself.
+    func testApproveBeatFilesTheDraftEvenWhenTheRunIsStillSlowerThanTheBeat() async throws {
+        // The day-one script is what uses `.runTask(id)` rather than `.runBeacon`, so
+        // the run's target task is named in the script instead of resolved through
+        // `RoadmapEngine.nextStep` — this test needs to know exactly which task the
+        // slow `taskRunner` below has to stall.
+        let previousProject = PrototypeMode.store.string(forKey: DemoProject.key)
+        defer {
+            if let previousProject { PrototypeMode.store.set(previousProject, forKey: DemoProject.key) }
+            else { PrototypeMode.store.removeObject(forKey: DemoProject.key) }
+        }
+        DemoProject.select("murror-day-one")
+
+        let previousStepNanos = CompanyStore.execStepNanos
+        let previousDoneBeatNanos = CompanyStore.execDoneBeatNanos
+        defer {
+            CompanyStore.execStepNanos = previousStepNanos
+            CompanyStore.execDoneBeatNanos = previousDoneBeatNanos
+        }
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+
+        let project = DemoProject.murrorDayOne
+        let seed = CompanyState(brief: project.brief, departments: [], library: project.library(),
+                                stage: .building, companionId: "byte", onboardedAt: Date(),
+                                tasks: project.tasks)
+        let store = CompanyStore(
+            loader: { _ in seed },
+            tasksSaver: { _, _ in true },
+            // The script's `.walkthroughFounderTask` beat (ahead of the run/approve pair
+            // this test cares about) calls `sendChat`, which without these would reach
+            // the REAL transport — `MockChat.stream`/`reply` keep it offline, same as
+            // every other mock-mode surface.
+            chatSender: { await MockChat.reply($0) },
+            chatStreamer: { MockChat.stream($0) },
+            // 20s: comfortably longer than the day-one script's own real playback at
+            // ANY pace/Reduce-Motion combination (see the doc comment above) — every
+            // `.approveNewestDraft` beat in the script, not just the first, must find
+            // nothing until this fires, or the test proves nothing.
+            taskRunner: { req in
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                let entry = project.deliverable(for: req.taskTitle)
+                return RunTaskResponse(kind: entry.kind, title: req.taskTitle,
+                                       body: MockChat.fill(entry.body, title: req.taskTitle))
+            },
+            librarySaver: { _, _ in true },
+            firstApprovalSaver: { _, _ in true },
+            decisionsSaver: { _, _ in true },
+            decisionExtractor: { _, _ in [] })
+        await store.hydrate(companyId: "u")
+
+        let player = MockFlowPlayer()
+        player.attach(store: store, language: .en)
+        // Brisk-below-1.0, several times over — one of the three real races named
+        // above. Shrinks the script's own ~65s authored total to a real playback of
+        // well under the 20s the injected `taskRunner` sleeps.
+        player.pace = 0.15
+
+        // Playing from the top walks the whole day-one script — every run/approve
+        // pair after "mur-landscape" degrades to a harmless chain-offer (see the doc
+        // comment above), so this reaches the same end state a `jump` to any single
+        // pair would, without needing to set `index`, which the player exposes no
+        // setter for.
+        player.play()
+
+        // 40s: past the ~20s the draft needs plus the script's own real playback, with
+        // margin. Under the unfixed handler this loop runs out the full 40s and the
+        // assertions below fail — that is the point of this test.
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline {
+            if store.company.tasks.first(where: { $0.id == "mur-landscape" })?.done == true { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        XCTAssertEqual(store.company.tasks.first(where: { $0.id == "mur-landscape" })?.done, true,
+                       "the approve beat(s) fired before the run's draft existed, and filed nothing")
+        XCTAssertTrue(store.company.library.contains { $0.sourceTaskId == "mur-landscape" },
+                      "approved but never actually filed to the library")
+    }
 }

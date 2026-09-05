@@ -479,7 +479,8 @@ struct DeliverableBodyView: View {
             case .sheet where deliverable.payload?.sheet != nil:
                 SheetViewer(payload: deliverable.payload!.sheet!)
             case .site where deliverable.payload?.site != nil:
-                SiteViewer(payload: deliverable.payload!.site!)
+                SiteViewer(payload: deliverable.payload!.site!,
+                           deliverableId: deliverable.id)
             case .screens where deliverable.payload?.screens != nil:
                 ScreensViewer(payload: deliverable.payload!.screens!)
             case .legal:

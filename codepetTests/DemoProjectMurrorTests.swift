@@ -37,8 +37,8 @@ final class DemoProjectMurrorTests: XCTestCase {
         XCTAssertEqual(murror.brief.oneLiner, "AI that brings people closer.")
     }
 
-    func testBoardIsTwelveTasks() {
-        XCTAssertEqual(murror.tasks.count, 12)
+    func testBoardIsEighteenTasks() {
+        XCTAssertEqual(murror.tasks.count, 18)
         XCTAssertEqual(open.count, 9, "eight Codepet can do, plus one that is the founder's")
         XCTAssertEqual(codepetRunnable.count, 8)
     }
@@ -352,7 +352,7 @@ final class DemoProjectMurrorTests: XCTestCase {
     func testSelectingMurrorChangesTheCompany() {
         DemoProject.select("murror")
         XCTAssertEqual(MockChat.company().brief.projectName, "Murror")
-        XCTAssertEqual(MockChat.roadmap().count, 12)
+        XCTAssertEqual(MockChat.roadmap().count, 18)
         XCTAssertEqual(MockChat.productName, "Murror")
     }
 

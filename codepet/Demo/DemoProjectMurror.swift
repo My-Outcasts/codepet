@@ -36,7 +36,12 @@ extension DemoProject {
         // product cannot reach — approving is what marks a task done AND files its
         // deliverable. Filing them is what lets the demo show departments building on each
         // other at all: `UpstreamWork.assemble` reads the library.
-        filed: ["mur-interviews", "mur-landscape", "mur-brand"],
+        // Nine filed artifacts across all eight roster departments. The first three are the
+        // research the open tasks build on; the six below are what the other departments have
+        // already finished.
+        filed: ["mur-interviews", "mur-landscape", "mur-brand",
+                "mur-stack", "mur-unitcost", "mur-notfor",
+                "mur-crisis", "mur-rhythm", "mur-deletion"],
         roomFrames: murrorRoomFrames(ask:)
     )
 
@@ -121,6 +126,38 @@ extension DemoProject {
                         detail: "Codepet cannot do this one. It needs a name, an email, and "
                             + "someone qualified saying the wording is safe.",
                         phase: .foundation, who: .you, dept: "support"),
+
+            // ── WORK ALREADY BEHIND THE FOUNDER ─────────────────────────────────────────────
+            //
+            // One `done` task per department the board did not already cover, each with a real
+            // deliverable filed in `filed` below. This is what makes the Library show EIGHT
+            // groups: it already groups by department, and had only two departments' work.
+            //
+            // In FOUNDATION rather than `.find`: `.find` must stay complete (a test asserts it)
+            // or the board stops being the mid-flight state the fixture exists to show, and
+            // foundation already has open work so the phase window does not move.
+            //
+            // These are `done`, so they do not join the eight `codepetCanDo` tasks — the demo's
+            // headline claim survives, and the board reads like a real mid-flight company: work
+            // behind you and work in front of you.
+            RoadmapTask(id: "mur-stack", title: "Choose what the app is built on",
+                        detail: "On-device or server, and what that decision closes off.",
+                        phase: .foundation, who: .draft, done: true, dept: "eng"),
+            RoadmapTask(id: "mur-unitcost", title: "Work out what a month of inference costs",
+                        detail: "Per active user, at today's model. The floor pricing argues from.",
+                        phase: .foundation, who: .draft, done: true, dept: "fin"),
+            RoadmapTask(id: "mur-notfor", title: "Write down who this is not for",
+                        detail: "The disqualifiers, so outreach stops spending its best hours wrong.",
+                        phase: .foundation, who: .draft, done: true, dept: "sales"),
+            RoadmapTask(id: "mur-crisis", title: "Decide what happens on a bad night",
+                        detail: "The crisis path as policy. Wording can change; behaviour cannot.",
+                        phase: .foundation, who: .draft, done: true, dept: "support"),
+            RoadmapTask(id: "mur-rhythm", title: "Set up the weekly release rhythm",
+                        detail: "Thursday, not Friday, and the one thing that stops a release.",
+                        phase: .foundation, who: .draft, done: true, dept: "ops"),
+            RoadmapTask(id: "mur-deletion", title: "Write the data-deletion promise",
+                        detail: "One tap, permanent, no email. The policy formalises it later.",
+                        phase: .foundation, who: .draft, done: true, dept: "legal"),
             // Second fan-IN, both legs from `.find`.
             RoadmapTask(id: "mur-outreach", title: "Find the first 20 users",
                         detail: "Three places where people already talk about this, and what to say in each.",

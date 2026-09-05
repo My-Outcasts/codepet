@@ -11,10 +11,18 @@ import XCTest
 /// renders. Measured on the autoplay walkthrough: zero credit lines across 24 chapters.
 final class DemoProjectFiledTests: XCTestCase {
 
-    func testMurrorFilesItsThreePrerequisites() {
+    /// The three prerequisites the open tasks depend on must STILL be filed — that is what this
+    /// suite was written to guard, and `UpstreamWork.assemble` reads the library, so unfiling
+    /// any of them silently removes the credit line from every downstream run.
+    ///
+    /// Asserted as the leading three rather than as the whole list: the Library gained six more
+    /// artifacts on 5 Sep so every department has finished work to show, and an exact-equality
+    /// assertion here would go red for that reason alone while guarding nothing extra.
+    func testMurrorStillFilesItsThreePrerequisites() {
         let library = DemoProject.murror.library()
-        XCTAssertEqual(library.map(\.sourceTaskId),
+        XCTAssertEqual(Array(library.prefix(3)).map(\.sourceTaskId),
                        ["mur-interviews", "mur-landscape", "mur-brand"])
+        XCTAssertEqual(library.count, 9, "three prerequisites plus one per remaining department")
         for item in library {
             XCTAssertFalse(item.body.isEmpty, "a filed deliverable with no body renders blank")
             XCTAssertFalse(item.title.isEmpty)

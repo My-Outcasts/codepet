@@ -71,4 +71,77 @@ final class DemoProjectEightDepartmentsTests: XCTestCase {
                            "unsubstituted token survives filling in \(entry.keywords)")
         }
     }
+
+    // MARK: - Task 2: the board carries both halves
+
+    /// **The claim this whole change exists to make.** Every roster department has finished work
+    /// a founder can open, not just a task it could run.
+    func testEveryRosterDepartmentHasFiledWork() {
+        let library = murror.library()
+        let byDept = Dictionary(grouping: library) { d -> String in
+            murror.tasks.first { $0.id == d.sourceTaskId }?.dept ?? "?"
+        }
+        for dept in DepartmentCatalog.roster.map(\.key) {
+            XCTAssertNotNil(byDept[dept], "\(dept) has no filed deliverable — the Library will "
+                            + "show seven groups, not eight")
+        }
+    }
+
+    /// And the existing headline claim survives. These two pull against each other — a task
+    /// cannot be both `done` with work behind it and open for Codepet to run — so they are
+    /// asserted together, because a future edit will be tempted to trade one for the other.
+    func testTheEightAreStillRunnable() {
+        let tasks = murror.tasks
+        let runnable = tasks.filter { RoadmapEngine.status(for: $0, in: tasks) == .codepetCanDo }
+        XCTAssertEqual(runnable.count, 8)
+        XCTAssertEqual(Set(runnable.compactMap(\.dept)),
+                       Set(DepartmentCatalog.roster.map(\.key)))
+    }
+
+    func testTheNewTasksAreDoneAndNotRunnable() {
+        for id in ["mur-stack", "mur-unitcost", "mur-notfor",
+                   "mur-crisis", "mur-rhythm", "mur-deletion"] {
+            guard let t = murror.tasks.first(where: { $0.id == id }) else {
+                XCTFail("\(id) missing from the board"); continue
+            }
+            XCTAssertTrue(t.done, "\(id) must be done")
+            XCTAssertEqual(RoadmapEngine.status(for: t, in: murror.tasks), .done)
+        }
+    }
+
+    /// Every filed deliverable traces to a done task on the roadmap. That provenance IS the
+    /// "your company did this" claim; filed work with no source task quietly weakens it.
+    func testEveryFiledDeliverableTracesToADoneTask() {
+        for d in murror.library() {
+            guard let id = d.sourceTaskId else {
+                XCTFail("\(d.title) has no source task"); continue
+            }
+            guard let t = murror.tasks.first(where: { $0.id == id }) else {
+                XCTFail("\(d.title) points at \(id), not on the board"); continue
+            }
+            XCTAssertTrue(t.done, "\(d.title) is filed but its task is not done")
+        }
+    }
+
+
+    // MARK: - Task 3: the walkthrough points at it
+
+    /// Exactly one Library beat. The walkthrough already had one, so this change re-captions it
+    /// rather than adding a second — which would be the duplication the spec warns about.
+    func testThereIsExactlyOneLibraryBeat() {
+        let n = MockFlowScript.beats.filter { $0.intent == .go(.library) }.count
+        XCTAssertEqual(n, 1, "one Library beat, not two")
+    }
+
+    /// It must claim the breadth that is now actually on screen. The old caption spoke only of
+    /// the single deliverable just approved, which with nine artifacts across eight departments
+    /// understates it badly.
+    func testTheLibraryBeatNamesTheBreadth() throws {
+        let beat = try XCTUnwrap(MockFlowScript.beats.first { $0.intent == .go(.library) })
+        XCTAssertTrue(beat.caption.lowercased().contains("eight"),
+                      "the caption should name the eight departments: \(beat.caption)")
+        XCTAssertGreaterThanOrEqual(beat.seconds, 4.0,
+                                    "2.6s is not long enough to read eight groups")
+    }
+
 }

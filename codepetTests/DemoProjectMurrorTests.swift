@@ -12,7 +12,16 @@ import XCTest
 final class DemoProjectMurrorTests: XCTestCase {
 
     private var murror: DemoProject { DemoProject.murror }
-    private var runnable: [RoadmapTask] { murror.tasks.filter { !$0.done } }
+    /// Every task still open — INCLUDING the founder-only one. Named `open` because that is
+    /// what it is; it was called `runnable`, which conflated "not done" with "Codepet can do
+    /// it" and made the suite assert a proxy for its own headline claim.
+    private var open: [RoadmapTask] { murror.tasks.filter { !$0.done } }
+
+    /// The eight the DEMO is about: open, and the engine says Codepet can do them now. This is
+    /// the set "all eight pets runnable at once" actually refers to.
+    private var codepetRunnable: [RoadmapTask] {
+        open.filter { RoadmapEngine.status(for: $0, in: murror.tasks) == .codepetCanDo }
+    }
 
     override func tearDown() {
         PrototypeMode.store.removeObject(forKey: DemoProject.key)
@@ -28,9 +37,10 @@ final class DemoProjectMurrorTests: XCTestCase {
         XCTAssertEqual(murror.brief.oneLiner, "AI that brings people closer.")
     }
 
-    func testBoardIsElevenTasks() {
-        XCTAssertEqual(murror.tasks.count, 11)
-        XCTAssertEqual(runnable.count, 8)
+    func testBoardIsTwelveTasks() {
+        XCTAssertEqual(murror.tasks.count, 12)
+        XCTAssertEqual(open.count, 9, "eight Codepet can do, plus one that is the founder's")
+        XCTAssertEqual(codepetRunnable.count, 8)
     }
 
     /// The invariant behind "all eight runnable": `RoadmapEngine.depsSatisfied` blocks a task
@@ -38,7 +48,7 @@ final class DemoProjectMurrorTests: XCTestCase {
     /// pet, and the roster would look identical either way.
     func testEveryRunnableDependsOnlyOnDoneTasks() {
         let byId = Dictionary(uniqueKeysWithValues: murror.tasks.map { ($0.id, $0) })
-        for task in runnable {
+        for task in codepetRunnable {
             for dep in task.dependsOn {
                 guard let prereq = byId[dep] else {
                     return XCTFail("\(task.id) depends on '\(dep)', which is not in the fixture")
@@ -50,16 +60,25 @@ final class DemoProjectMurrorTests: XCTestCase {
     }
 
     func testAllEightRosterDepartmentsHaveExactlyOneRunnable() {
-        let byDept = Dictionary(grouping: runnable) { $0.dept ?? "" }
+        let byDept = Dictionary(grouping: codepetRunnable) { $0.dept ?? "" }
         XCTAssertEqual(Set(byDept.keys), Set(DepartmentCatalog.roster.map(\.key)))
         for (dept, tasks) in byDept {
             XCTAssertEqual(tasks.count, 1, "\(dept) has \(tasks.count) runnable tasks, expected 1")
         }
     }
 
+    /// The founder-only task is deliberately NOT one of the eight — it is the one thing on this
+    /// board Codepet must refuse to do, and the surfaces that show that need it to exist.
+    func testTheFounderOnlyTaskIsOpenAndNotRunnableByCodepet() throws {
+        let mine = try XCTUnwrap(murror.tasks.first { $0.who == .you && !$0.done })
+        XCTAssertEqual(mine.id, "mur-clinician")
+        XCTAssertEqual(RoadmapEngine.status(for: mine, in: murror.tasks), .needsYou)
+        XCTAssertFalse(codepetRunnable.contains { $0.id == mine.id })
+    }
+
     /// The end-to-end claim: the engine itself says every one of the eight is runnable.
     func testEveryRunnableIsCodepetCanDo() {
-        for task in runnable {
+        for task in codepetRunnable {
             XCTAssertEqual(RoadmapEngine.status(for: task, in: murror.tasks), .codepetCanDo,
                            "\(task.id) (\(task.dept ?? "no dept")) is not runnable")
         }
@@ -102,7 +121,7 @@ final class DemoProjectMurrorTests: XCTestCase {
     /// Eight tasks, eight different viewers — so the demo walks eight of the twelve without any
     /// task having been chosen to fill a slot.
     func testEveryRunnableResolvesToADistinctKind() {
-        let kinds = runnable.map { murror.deliverable(for: $0.title).kind }
+        let kinds = codepetRunnable.map { murror.deliverable(for: $0.title).kind }
         XCTAssertEqual(kinds.count, 8)
         XCTAssertEqual(Set(kinds).count, 8, "kinds collide: \(kinds.sorted())")
     }
@@ -333,7 +352,7 @@ final class DemoProjectMurrorTests: XCTestCase {
     func testSelectingMurrorChangesTheCompany() {
         DemoProject.select("murror")
         XCTAssertEqual(MockChat.company().brief.projectName, "Murror")
-        XCTAssertEqual(MockChat.roadmap().count, 11)
+        XCTAssertEqual(MockChat.roadmap().count, 12)
         XCTAssertEqual(MockChat.productName, "Murror")
     }
 

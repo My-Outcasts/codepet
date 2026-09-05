@@ -46,6 +46,19 @@ struct DemoProject {
     let tasks: [RoadmapTask]
     let deliverables: [DemoDeliverable]
 
+    /// A short, in-character answer per department key, for a turn the founder armed with the
+    /// composer's department chip.
+    ///
+    /// **Behind the seam, like `deliverables` and `roomFrames`, and for the same reason.** This
+    /// copy is written against a SPECIFIC board on purpose — the demo's claim is that the
+    /// specialist knows the company, and a reply that would read identically for any company
+    /// disproves it in one sentence. That is exactly why it could not stay in `MockChat`:
+    /// hardcoded there, it named Codepet's tasks at a founder looking at Murror's board, and
+    /// told them to say a phrase matching no task on it.
+    ///
+    /// Missing key → the turn falls back to the generic reply rather than a blank bubble.
+    let departmentReplies: [String: String]
+
     /// Task ids whose deliverable is ALREADY in the library when the demo opens.
     ///
     /// **Why a demo needs this.** `MockChat.company()` handed back `library: []`, so prototype
@@ -90,12 +103,14 @@ struct DemoProject {
 
     /// `filed` defaults to empty so `.codepet` needs no edit and opens exactly as it did.
     init(id: String, brief: CompanyBrief, tasks: [RoadmapTask],
-         deliverables: [DemoDeliverable], filed: [String] = [],
+         deliverables: [DemoDeliverable], departmentReplies: [String: String] = [:],
+         filed: [String] = [],
          roomFrames: @escaping (String) -> [SSEFrame]) {
         self.id = id
         self.brief = brief
         self.tasks = tasks
         self.deliverables = deliverables
+        self.departmentReplies = departmentReplies
         self.filed = filed
         self.roomFrames = roomFrames
     }
@@ -108,7 +123,12 @@ struct DemoProject {
     func deliverable(for title: String) -> DemoDeliverable {
         let t = title.lowercased()
         return deliverables.first { d in d.keywords.contains { t.contains($0) } }
-            ?? deliverables[deliverables.count - 1]
+            // `.last`, not `[count - 1]`: an empty table would trap on index -1 and crash the
+            // app on the first run instead of degrading. The catch-all convention below makes
+            // that unlikely, not impossible — a third project could land with an empty table.
+            ?? deliverables.last
+            ?? DemoDeliverable(keywords: [], kind: "doc",
+                               body: "A first cut on '{{title}}' — a starting point.")
     }
 
     // MARK: - Selection

@@ -27,6 +27,7 @@ extension DemoProject {
         }(),
         tasks: codepetTasks,
         deliverables: codepetDeliverables,
+        departmentReplies: DemoProject.codepetDepartmentReplies,
         roomFrames: codepetRoomFrames(ask:)
     )
 

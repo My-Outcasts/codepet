@@ -351,82 +351,11 @@ enum MockChat {
     /// one sentence. Returns nil for a department with no copy, which falls the turn back
     /// to the generic reply rather than answering with a blank bubble.
     private static func departmentReply(for deptKey: String) -> String? {
-        switch deptKey {
-        case "eng":
-            return """
-            The only engineering on your board is **Set up a waitlist signup**, and it is \
-            waiting on the landing page — there is nowhere to put the form yet. When it \
-            unblocks, keep it a hosted form writing into one collection; collecting an email \
-            does not need a backend, and building one now is a week you spend not shipping.
-
-            Want me to sketch the smallest version that would actually capture a signup today?
-            """
-        case "design":
-            return """
-            Decide who is looking before you decide what they see. **Sketch two early user \
-            personas** is open right now and it is the cheaper half of this — **Design your \
-            brand look** is downstream of it, because a visual direction is an argument aimed \
-            at someone specific.
-
-            Give me the two people and I will make the colors and type argue for them.
-            """
-        case "mkt":
-            return """
-            Your bottleneck is the sentence, not the channel. **Scan five competitors' \
-            positioning** is open now, and the gap it finds is exactly what **Write your \
-            landing page copy** needs: one line a stranger understands in five seconds.
-
-            Say "run competitors" and I will do the scan and hand you the sentence it points at.
-            """
-        case "sales":
-            return """
-            At your stage you land users one conversation at a time — a campaign has nothing \
-            to convert yet. **Write a cold outreach email** is on the board but waits on both \
-            the landing page and a price, and that order is right: a stranger needs somewhere \
-            to look and something to say yes to.
-
-            Until then your five discovery calls are the pipeline. Ask for one intro at the \
-            end of every single one.
-            """
-        case "support":
-            return """
-            You have no users yet, which makes support cheap to get right and expensive to \
-            retrofit. **Draft a support FAQ** sits behind pricing on your board for a reason — \
-            the first questions are always what is this, what does it cost, and can I cancel.
-
-            Write those answers once and they double as your objection-handling script on the \
-            discovery calls.
-            """
-        case "fin":
-            return """
-            Numbers before vibes. **Size the market you're entering** is open right now, and it \
-            is a top-down sanity check you can finish in an hour — not a fundraising slide, so \
-            do not spend a week on it.
-
-            Then **Draft a simple pricing plan**, because a price is the first thing that makes \
-            interest cost something. Ship a number you are allowed to change.
-            """
-        case "ops":
-            return """
-            Operations is the plumbing that stops you from being the plumbing. **Set up a \
-            deploy checklist** is on your board behind the waitlist, and the whole point of it \
-            is that shipping stops needing your full attention — same steps, same order, every \
-            release.
-
-            Write it the first time you deploy by hand, while you still remember what you forgot.
-            """
-        case "legal":
-            return """
-            Legal here is cheap insurance bought before you need it. **Draft a privacy policy** \
-            is on your board, and at your size it is four honest paragraphs: what you collect, \
-            why, who else sees it, and how someone deletes it.
-
-            Draft it in plain language now and have a lawyer read it before you take money. Do \
-            not copy a competitor's — you will inherit claims about a company that is not yours.
-            """
-        default:
-            return nil
-        }
+        // Behind the `DemoProject` seam, not hardcoded here. This copy is written against a
+        // SPECIFIC board on purpose, so hardcoding it meant a founder looking at Murror got a
+        // specialist naming Codepet's tasks and telling them to say a phrase matching nothing
+        // on their board — exactly the find-replace failure the seam exists to prevent.
+        DemoProject.current.departmentReplies[deptKey]
     }
 
     /// Department display name for a runnable task id (mock roadmap lookup) — used
@@ -593,14 +522,6 @@ enum MockChat {
     }
 
 
-    /// A realistic deliverable (kind + markdown body) tailored to the task title.
-    /// The selected demo project decides what a run produces. This was a 130-line
-    /// `if t.contains(...)` chain of Codepet copy; it is now a table per project, and the
-    /// chain's order is preserved in `DemoProject.codepet` because that order is load-bearing.
-    private static func deliverable(for title: String) -> (kind: String, body: String) {
-        let d = DemoProject.current.deliverable(for: title)
-        return (d.kind, d.body)
-    }
 
     /// The selected demo project's board. The graph and its routing-case notes moved with it.
     static func roadmap() -> [RoadmapTask] { DemoProject.current.tasks }

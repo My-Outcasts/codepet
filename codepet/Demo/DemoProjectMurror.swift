@@ -30,6 +30,7 @@ extension DemoProject {
         }(),
         tasks: murrorTasks,
         deliverables: murrorDeliverables,
+        departmentReplies: DemoProject.murrorDepartmentReplies,
         // The two prerequisites every other Murror task depends on. They are `done` in the
         // board above, and a `done` task with nothing filed behind it is a state the real
         // product cannot reach — approving is what marks a task done AND files its
@@ -76,6 +77,11 @@ extension DemoProject {
                         detail: "What they promise, what they actually do on day three, and where the gap is.",
                         phase: .find, who: .draft, done: true, dept: "mkt"),
 
+            // A founder-only task that is still OPEN. Murror had exactly one `who: .you`
+            // (`mur-interviews`) and it is `done`, so the "needs you" landing card, the
+            // `needsYou` roadmap state and the walkthrough's "Work only you can do" chapter all
+            // had nothing to render — that beat silently no-opped on this project. Codepet's
+            // fixture carries `mock-interviews` for exactly this reason.
             // ── FOUNDATION ──────────────────────────────────────────────────────────────────
             // Done, and the ancestor three runnables hang off.
             RoadmapTask(id: "mur-brand", title: "Shape the Murror visual direction",
@@ -102,6 +108,19 @@ extension DemoProject {
                         detail: "One field, no backend, so the interest from the interviews isn't lost.",
                         phase: .build, who: .does,
                         dependsOn: ["mur-brand"], dept: "eng"),
+
+            // A founder-only task that is still OPEN, and the ONLY one on this board.
+            // `mur-interviews` is `who: .you` but `done`, so before this the "needs you"
+            // landing card, the `needsYou` roadmap state and the walkthrough's "Work only you
+            // can do" chapter all had nothing to render — that beat silently no-opped on
+            // Murror. Codepet's fixture carries `mock-interviews` for exactly this reason.
+            //
+            // In FOUNDATION, not `.find`: `.find` must stay complete or the board stops being
+            // the mid-flight state the whole fixture is built to show.
+            RoadmapTask(id: "mur-clinician", title: "Get a clinician to read the crisis path",
+                        detail: "Codepet cannot do this one. It needs a name, an email, and "
+                            + "someone qualified saying the wording is safe.",
+                        phase: .foundation, who: .you, dept: "support"),
             // Second fan-IN, both legs from `.find`.
             RoadmapTask(id: "mur-outreach", title: "Find the first 20 users",
                         detail: "Three places where people already talk about this, and what to say in each.",

@@ -140,7 +140,7 @@ struct DemoProject {
 
     /// `current` falls back to `.codepet` for any id not present, so an unknown selection is
     /// inert rather than empty.
-    static var all: [DemoProject] { [.codepet, .murror] }
+    static var all: [DemoProject] { [.codepet, .murror, .murrorDayOne] }
 
     /// **Read through `PrototypeMode.store`, never `UserDefaults.standard`.**
     ///

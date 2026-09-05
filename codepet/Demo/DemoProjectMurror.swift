@@ -74,13 +74,22 @@ extension DemoProject {
     /// no longer gates), and one here would block everything behind it regardless of the graph.
     private static var murrorTasks: [RoadmapTask] {
         [
+            // ── THE DAY-ONE CHAIN ───────────────────────────────────────────────────────────
+            // These nine carry a linear `dependsOn` so `RoadmapEngine.nextStep` walks them in
+            // the order the day-one script asks its nine questions. The edges are SAFE for
+            // mid-flight because all nine are `done` there, and `status` returns `.done` before
+            // it consults `depsSatisfied` — no status, no beacon and no runnable count moves.
+            //
+            // `mur-brand` KEEPS its existing `mur-landscape` edge. Replacing rather than adding
+            // would quietly rewrite mid-flight's roadmap.
             // ── FIND: complete. The research that the rest of the board depends on. ──────────
             RoadmapTask(id: "mur-interviews", title: "Talk to 12 people about being lonely",
                         detail: "Not about the app — about the last evening they wanted to reach out and didn't.",
                         phase: .find, who: .you, done: true, dept: "mkt"),
             RoadmapTask(id: "mur-landscape", title: "Scan the journaling and companion apps",
                         detail: "What they promise, what they actually do on day three, and where the gap is.",
-                        phase: .find, who: .draft, done: true, dept: "mkt"),
+                        phase: .find, who: .draft,
+                        dependsOn: ["mur-interviews"], done: true, dept: "mkt"),
 
             // A founder-only task that is still OPEN. Murror had exactly one `who: .you`
             // (`mur-interviews`) and it is `done`, so the "needs you" landing card, the
@@ -92,7 +101,7 @@ extension DemoProject {
             RoadmapTask(id: "mur-brand", title: "Shape the Murror visual direction",
                         detail: "Night sky, warm light. It has to feel safe enough to be honest in.",
                         phase: .foundation, who: .draft,
-                        dependsOn: ["mur-landscape"], done: true, dept: "design"),
+                        dependsOn: ["mur-landscape", "mur-notfor"], done: true, dept: "design"),
             // THE WEBSITE. Fan-IN: the page needs both the visual direction and the positioning.
             RoadmapTask(id: "mur-site", title: "Build the Murror landing page",
                         detail: "One page that says what the practice is, for someone who has never heard of it.",
@@ -142,22 +151,28 @@ extension DemoProject {
             // behind you and work in front of you.
             RoadmapTask(id: "mur-stack", title: "Choose what the app is built on",
                         detail: "On-device or server, and what that decision closes off.",
-                        phase: .foundation, who: .draft, done: true, dept: "eng"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-brand"], done: true, dept: "eng"),
             RoadmapTask(id: "mur-unitcost", title: "Work out what a month of inference costs",
                         detail: "Per active user, at today's model. The floor pricing argues from.",
-                        phase: .foundation, who: .draft, done: true, dept: "fin"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-stack"], done: true, dept: "fin"),
             RoadmapTask(id: "mur-notfor", title: "Write down who this is not for",
                         detail: "The disqualifiers, so outreach stops spending its best hours wrong.",
-                        phase: .foundation, who: .draft, done: true, dept: "sales"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-landscape"], done: true, dept: "sales"),
             RoadmapTask(id: "mur-crisis", title: "Decide what happens on a bad night",
                         detail: "The crisis path as policy. Wording can change; behaviour cannot.",
-                        phase: .foundation, who: .draft, done: true, dept: "support"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-unitcost"], done: true, dept: "support"),
             RoadmapTask(id: "mur-rhythm", title: "Set up the weekly release rhythm",
                         detail: "Thursday, not Friday, and the one thing that stops a release.",
-                        phase: .foundation, who: .draft, done: true, dept: "ops"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-deletion"], done: true, dept: "ops"),
             RoadmapTask(id: "mur-deletion", title: "Write the data-deletion promise",
                         detail: "One tap, permanent, no email. The policy formalises it later.",
-                        phase: .foundation, who: .draft, done: true, dept: "legal"),
+                        phase: .foundation, who: .draft,
+                        dependsOn: ["mur-crisis"], done: true, dept: "legal"),
             // Second fan-IN, both legs from `.find`.
             RoadmapTask(id: "mur-outreach", title: "Find the first 20 users",
                         detail: "Three places where people already talk about this, and what to say in each.",

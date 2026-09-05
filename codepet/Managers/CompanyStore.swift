@@ -2092,10 +2092,16 @@ final class CompanyStore: ObservableObject {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let offer = chatMessages[i].chainOffer,
               !chatMessages[i].actionConsumed,
-              let task = company.tasks.first(where: { $0.id == offer.taskId }) else { return }
+              !runningTaskIds.contains(offer.taskId),
+              let task = company.tasks.first(where: { $0.id == offer.taskId }),
+              !task.done, !task.drafted else { return }
         chatMessages[i].actionConsumed = true
         chatMessages[i].chainOfferChained = false
         let cid = companyId
+        // Held for the same reason `runChained` holds it: while this runs, the Roadmap's Run
+        // button for the same task must not start a second one.
+        runningTaskIds.insert(offer.taskId)
+        defer { runningTaskIds.remove(offer.taskId) }
         dockCollapsed = false
         await produceDraftInline(for: task, cid: cid, language: language)
         flushActiveThread()
@@ -2341,7 +2347,17 @@ final class CompanyStore: ObservableObject {
     /// from the draft (`UpstreamWork.fromDraft`) rather than found by `assemble`.
     func runChained(taskId: String, language: AppLanguage) async {
         let cid = companyId
-        guard let task = company.tasks.first(where: { $0.id == taskId }) else { return }
+        // The same three guards `runTask` enforces, which the chain dropped entirely.
+        //
+        // `offerChainIfNeeded` removes the task from `runningTaskIds` so the offer's own buttons
+        // are pressable, and nothing put it back — so during a 20-40s chained run the Roadmap's
+        // Run button for that task stayed live, and pressing it produced a SECOND offer card,
+        // then a second run of both tasks: double credits, and last-write-wins on the draft.
+        guard !runningTaskIds.contains(taskId) else { return }
+        guard let task = company.tasks.first(where: { $0.id == taskId }),
+              !task.done, !task.drafted else { return }
+        runningTaskIds.insert(taskId)
+        defer { runningTaskIds.remove(taskId) }
         dockCollapsed = false
 
         var carried: [UpstreamWork] = []
@@ -2357,9 +2373,12 @@ final class CompanyStore: ObservableObject {
             }
         }
 
-        // Re-resolve: the upstream run awaited, and mark-complete or a roadmap edit may have
-        // changed or removed this task while it did.
-        guard let fresh = company.tasks.first(where: { $0.id == taskId }) else { return }
+        // Re-resolve, and re-check: the upstream run awaited, so mark-complete, a roadmap edit
+        // or another surface's approve may have changed this task while it did. `runTask` makes
+        // the same check for the same reason — a done or already-drafted task must not be run
+        // into a duplicate draft.
+        guard let fresh = company.tasks.first(where: { $0.id == taskId }),
+              !fresh.done, !fresh.drafted else { return }
         await produceDraftInline(for: fresh, cid: cid, language: language, extraUpstream: carried)
         flushActiveThread()
     }
@@ -2614,21 +2633,6 @@ final class CompanyStore: ObservableObject {
     /// can be produced by a chat ask that no roadmap task owns, and it should still be keepable.
     private func fileApproval(_ draft: Deliverable, taskId: String?) async {
         company.library.append(draft)
-        // The founder has now approved something, so the "not saved yet" note on the draft card
-        // has done its job and retires (see `DraftCardCopy.shouldShowNotFiledNote`).
-        //
-        // HERE and not in `approveDraft`/`approveTask`: this is the one path both of them call,
-        // which is why `ApprovalParityTests` exists. Writing it in the two callers instead would
-        // be two places to drift, and the board is as real a way to learn the rule as the chat.
-        //
-        // Set once. This records WHEN THEY LEARNED IT, not when they last approved.
-        if company.firstApprovalAt == nil {
-            let now = Date()
-            company.firstApprovalAt = now
-            // Fire-and-forget and fail-soft, matching `markIntroSeen`: a lost write costs one
-            // extra showing of a teaching line, never a broken card or a blocked approval.
-            if let cid = companyId { _ = await firstApprovalSaver(cid, now) }
-        }
         var wroteTasks = false
         if let taskId, let ti = company.tasks.firstIndex(where: { $0.id == taskId }),
            !company.tasks[ti].done {
@@ -2636,6 +2640,32 @@ final class CompanyStore: ObservableObject {
             company.tasks[ti].drafted = false
             company.tasks[ti].draft = nil
             wroteTasks = true
+        }
+        // The founder has now approved something, so the "not saved yet" note on the draft card
+        // has done its job and retires (see `DraftCardCopy.shouldShowNotFiledNote`).
+        //
+        // HERE and not in `approveDraft`/`approveTask`: this is the one path both of them call,
+        // which is why `ApprovalParityTests` exists. Writing it in the two callers instead would
+        // be two places to drift, and the board is as real a way to learn the rule as the chat.
+        //
+        // **AFTER the task mutation above, and that ordering is load-bearing.** This block used
+        // to sit between `library.append` and the `done` write, which put an `await` — a
+        // SUSPENSION — inside the pair that makes `approveTask` idempotent. Those two mutations
+        // were atomic on the MainActor precisely because nothing suspended between them; with a
+        // network round-trip in the middle, a second approval (a double tap, or chat racing the
+        // board) passed the `!done` guard while the first was still awaiting and appended the
+        // SAME deliverable id twice, both of which then persisted.
+        //
+        // A reviewer cleared this region earlier by checking that no call between the two could
+        // THROW. That was true and insufficient: the hazard is suspension, not failure.
+        //
+        // Set once. This records WHEN THEY LEARNED IT, not when they last approved.
+        if company.firstApprovalAt == nil {
+            let now = Date()
+            company.firstApprovalAt = now
+            // Fail-soft, matching `markIntroSeen`: a lost write costs one extra showing of a
+            // teaching line, never a broken card or a blocked approval.
+            if let cid = companyId { _ = await firstApprovalSaver(cid, now) }
         }
         if let cid = companyId {
             await persistLibrary(cid)

@@ -104,15 +104,19 @@ final class UpstreamCreditTests: XCTestCase {
 
     // MARK: - The chain, through the store
 
+    /// `library` defaults to EMPTY on purpose: most tests here exercise the chain, which only
+    /// fires when a dependency has produced nothing. Pass `DemoProject.murror.library()` to get
+    /// the state the real app loads, where the three research artifacts are already filed.
     private func murrorStore(
         reply: CompanyChatReply? = nil,
+        library: [Deliverable] = [],
         runner: @escaping (RunTaskRequest) async -> RunTaskResponse?
     ) -> CompanyStore {
         // Same stubs as `CompanyStoreChatRunTests`: the live defaults reach Firestore and
         // Firebase Auth, both of which trap under an unconfigured `FirebaseApp`.
         CompanyStore(loader: { _ in
-            CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .building,
-                         companionId: "byte", onboardedAt: Date(),
+            CompanyState(brief: CompanyBrief(), departments: [], library: library,
+                         stage: .building, companionId: "byte", onboardedAt: Date(),
                          tasks: DemoProject.murror.tasks)
         }, saver: { _, _ in true }, tasksSaver: { _, _ in true },
            chatSender: { _ in reply },
@@ -175,17 +179,63 @@ final class UpstreamCreditTests: XCTestCase {
         XCTAssertTrue(line?.contains("unapproved draft") ?? false, line ?? "nil")
     }
 
-    /// The common case has to stay untouched: a task with no dependencies gets no credit row.
-    func testAnOrdinaryRunCreditsNothing() async {
-        let s = murrorStore(runner: { req in
+    /// No chain fires when every dependency is already filed — one card, not two.
+    ///
+    /// This used to run `mur-landscape` "because dependsOn is empty", and passed only because
+    /// `runChained` had no done-guard: that task is `done: true` in the fixture and was never a
+    /// legitimate thing to run. `runTask` has always refused a done task; the chain does now too.
+    func testNoChainFiresWhenEveryDependencyIsFiled() async {
+        let s = murrorStore(library: DemoProject.murror.library(), runner: { req in
             RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# done")
         })
         await s.hydrate(companyId: "u")
-        await s.runChained(taskId: "mur-landscape", language: .en)   // dependsOn is empty
+        await s.runChained(taskId: "mur-site", language: .en)   // brand + landscape, both filed
         let cards = s.chatMessages.filter { $0.draft != nil }
-        XCTAssertEqual(cards.count, 1, "no dependency, no chained run")
+        XCTAssertEqual(cards.count, 1, "nothing missing, so nothing to chain")
+        XCTAssertEqual(cards[0].upstream?.count, 2, "and it credits the filed work it read")
+    }
+
+    /// The other half, which the old test conflated with the above: a task with NO dependencies
+    /// gets no credit row at all. No Murror task is both open and dependency-free, so this uses
+    /// its own board rather than bending the fixture to fit.
+    func testATaskWithNoDependenciesGetsNoCredit() async {
+        let solo = RoadmapTask(id: "solo", title: "Write the launch note", detail: "",
+                               phase: .build, who: .draft, dept: "mkt")
+        let s = CompanyStore(loader: { _ in
+            CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .building,
+                         companionId: "byte", onboardedAt: Date(), tasks: [solo])
+        }, saver: { _, _ in true }, tasksSaver: { _, _ in true }, chatSender: { _ in nil },
+           chatStreamer: { _ in
+               AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
+           },
+           taskRunner: { req in RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# x") },
+           librarySaver: { _, _ in true }, firstApprovalSaver: { _, _ in true },
+           greetedSaver: { _, _ in true }, decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.runChained(taskId: "solo", language: .en)
+        let cards = s.chatMessages.filter { $0.draft != nil }
+        XCTAssertEqual(cards.count, 1)
         XCTAssertNil(cards[0].upstream)
         XCTAssertNil(UpstreamCredit.line(cards[0].upstream ?? []))
+    }
+
+    /// **The re-entrancy guard the chain was missing.** `offerChainIfNeeded` removes the task
+    /// from `runningTaskIds` so the offer's buttons are pressable, and nothing put it back — so
+    /// the Roadmap's Run button stayed live for the 20-40s a chained run takes, and a second
+    /// press produced a second offer and a second run. Double credits.
+    func testAChainedRunIsNotReentrant() async {
+        let seen = Recorder()
+        let s = murrorStore(runner: { req in
+            await seen.record(req)
+            return RunTaskResponse(kind: "doc", title: req.taskTitle, body: "# x")
+        })
+        await s.hydrate(companyId: "u")
+        async let a: Void = s.runChained(taskId: "mur-site", language: .en)
+        async let b: Void = s.runChained(taskId: "mur-site", language: .en)
+        _ = await (a, b)
+        let ids = await seen.requests.map(\.taskId)
+        XCTAssertEqual(ids.filter { $0 == "mur-site" }.count, 1,
+                       "the second call must be refused, not run again: \(ids)")
     }
 
     // MARK: - The offer

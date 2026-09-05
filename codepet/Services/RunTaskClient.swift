@@ -38,9 +38,14 @@ struct UpstreamWork: Codable, Hashable {
                          in tasks: [RoadmapTask],
                          library: [Deliverable]) -> [UpstreamWork] {
         let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // `cap * 3` bounds the scan, not the result: a task with nine dependencies should not
-        // walk the whole library nine times to return three items.
-        return task.dependsOn.prefix(cap * 3).compactMap { depId -> UpstreamWork? in
+        // **`lazy` then `prefix(cap)` bounds the RESULT, not the scan.** It was
+        // `prefix(cap * 3)` BEFORE the filter, which silently dropped real work: a task with ten
+        // dependencies whose approved prerequisites sat past index 8 assembled nothing, and the
+        // founder got no credit line with no indication anything had been skipped. `lazy` keeps
+        // the original intent — stop early rather than walk every dependency — while counting
+        // what was found instead of what was looked at. `parseUpstream` on the server already
+        // breaks on results; this now matches it.
+        return task.dependsOn.lazy.compactMap { depId -> UpstreamWork? in
             guard let dep = byId[depId],
                   let filed = RoadmapEngine.deliverable(for: dep, in: library) else { return nil }
             return item(filed, from: dep, unapproved: false)

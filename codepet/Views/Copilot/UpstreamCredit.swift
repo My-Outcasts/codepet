@@ -12,7 +12,6 @@ import SwiftUI
 /// appears — is in `line(_:)`, so the suite pins it without rendering anything.
 struct UpstreamCredit: View {
     let work: [UpstreamWork]
-    let onOpen: (UpstreamWork) -> Void
 
     /// The credit sentence, or nil when there is nothing to credit.
     ///
@@ -33,19 +32,29 @@ struct UpstreamCredit: View {
     /// *"Built on Luna's Shape the Murror visual direction"*, which is not a sentence. Caught
     /// by rendering the row and reading it; every test fixture written for this used a tidy
     /// noun phrase and none of them could have found it.
-    static func line(_ work: [UpstreamWork]) -> String? {
+    static func line(_ work: [UpstreamWork], _ lang: AppLanguage = .en) -> String? {
         guard let first = work.first else { return nil }
         let who = first.petName.isEmpty ? first.deptName : first.petName
-        var line = who.isEmpty
-            ? "Built on \u{201C}\(first.taskTitle)\u{201D}"
-            : "Built on \(who)'s \u{201C}\(first.taskTitle)\u{201D}"
-        if work.count > 1 { line += " + \(work.count - 1) more" }
-        if work.contains(where: \.unapproved) { line += " (unapproved draft)" }
+        let title = "\u{201C}\(first.taskTitle)\u{201D}"
+        var line: String
+        if lang == .vi {
+            // Vietnamese puts the owner AFTER the thing owned ("X của Luna"), so this is a
+            // different sentence rather than a word-for-word swap.
+            line = who.isEmpty ? "Dựa trên \(title)" : "Dựa trên \(title) của \(who)"
+            if work.count > 1 { line += " + \(work.count - 1) nữa" }
+            if work.contains(where: \.unapproved) { line += " (bản nháp chưa duyệt)" }
+        } else {
+            line = who.isEmpty ? "Built on \(title)" : "Built on \(who)'s \(title)"
+            if work.count > 1 { line += " + \(work.count - 1) more" }
+            if work.contains(where: \.unapproved) { line += " (unapproved draft)" }
+        }
         return line
     }
 
+    @Environment(\.uiLanguage) private var lang
+
     var body: some View {
-        if let line = Self.line(work) {
+        if let line = Self.line(work, lang) {
             HStack(spacing: 8) {
                 // A 2pt rule rather than an icon: this is a provenance note attached to the
                 // deliverable above it, and Codepet keeps only functional icons.
@@ -59,9 +68,13 @@ struct UpstreamCredit: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .cursorOnHover(.pointingHand)
-            .onTapGesture { if let first = work.first { onOpen(first) } }
+            // **Deliberately NOT tappable.** It was — pointing-hand cursor and all — and the tap
+            // opened `showDetail`, i.e. the DOWNSTREAM draft the founder was already looking at,
+            // not the upstream work the line names. A pointer cursor promising to open "Luna's
+            // brand direction" and showing you Nova's landing page instead is worse than no
+            // affordance. Opening the right thing is not reliably possible here: the library
+            // case is resolvable through `sourceTaskId`, but a CHAINED item is an unapproved
+            // draft that is deliberately not in the library and has nothing to open.
             .accessibilityLabel(line)
         }
     }

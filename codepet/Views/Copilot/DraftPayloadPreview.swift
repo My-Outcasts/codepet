@@ -245,8 +245,17 @@ struct DraftPayloadPreview: View {
     }
 
     /// `6.0` reads as a bug on a price row; `6` does not.
+    ///
+    /// **Never `Int(value)`.** `SheetInput.val` is a `Double` decoded straight from the model's
+    /// tool output, and `Int()` on a Double outside `Int`'s range is a runtime TRAP, not a
+    /// clamp — `1e19` is valid JSON, satisfies `value == value.rounded()`, and crashed the app
+    /// as the card rendered. `%.0f` formats the same result and cannot trap. The `fraction`
+    /// helper above was already hardened against untrusted wire values; this was not.
     static func trimmed(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+        guard value.isFinite else { return "—" }
+        return value == value.rounded()
+            ? String(format: "%.0f", value)
+            : String(format: "%.1f", value)
     }
 
     // MARK: - screens
@@ -292,7 +301,8 @@ struct DraftPayloadPreview: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if messages.count > 1 {
-                Text("\(messages.count) recipients")
+                Text(lang == .vi ? "\(messages.count) người nhận"
+                                 : "\(messages.count) recipients")
                     .font(.pixelSystem(size: 10.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentPurple)
             }
@@ -315,7 +325,8 @@ struct DraftPayloadPreview: View {
                 }
             }
             if items.count > 3 {
-                Text("+\(items.count - 3) more")
+                Text(lang == .vi ? "+\(items.count - 3) mục nữa"
+                                 : "+\(items.count - 3) more")
                     .font(.pixelSystem(size: 10.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentPurple)
             }
@@ -352,7 +363,8 @@ struct DraftPayloadPreview: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("\(steps.count) steps · \(changes.count) changes")
+            Text(lang == .vi ? "\(steps.count) bước · \(changes.count) thay đổi"
+                             : "\(steps.count) steps · \(changes.count) changes")
                 .font(.pixelSystem(size: 10.5, weight: .semibold))
                 .foregroundColor(CodepetTheme.accentPurple)
         }

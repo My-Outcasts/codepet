@@ -11,7 +11,7 @@ import XCTest
 /// renders. Measured on the autoplay walkthrough: zero credit lines across 24 chapters.
 final class DemoProjectFiledTests: XCTestCase {
 
-    func testMurrorFilesItsTwoPrerequisites() {
+    func testMurrorFilesItsThreePrerequisites() {
         let library = DemoProject.murror.library()
         XCTAssertEqual(library.map(\.sourceTaskId),
                        ["mur-interviews", "mur-landscape", "mur-brand"])

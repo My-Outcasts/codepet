@@ -2334,7 +2334,7 @@ struct CopilotBubble: View {
                     // Absent — not an empty row — for a task with no dependencies, which is
                     // most of them: see `UpstreamCredit.line`.
                     if let up = message.upstream, !up.isEmpty {
-                        UpstreamCredit(work: up) { _ in showDetail = true }
+                        UpstreamCredit(work: up)
                     }
 
                     if DraftPayloadPreview.hasStructuredPreview(d) {

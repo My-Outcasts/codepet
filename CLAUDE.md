@@ -244,6 +244,20 @@ direction"). Added 2026-09-03.
   the credit instead, give those two prerequisite tasks real deliverables in the fixture
 - `RoadmapGating.awaitsApproval` is untouched: chaining never opens a phase
 
+### The day-one simulation (`DemoProject.murrorDayOne`)
+
+Day one and mid-flight are ONE task list. Four things break the bridge between them:
+
+1. **Do not give day one its own task array.** It is `murrorTasks` with nine `done` flags
+   cleared. Two arrays drift, and `DayOneBridgeTests` is what notices.
+2. **Do not remove an existing `dependsOn` id when adding a chain edge.** `mur-brand` keeps its
+   `mur-landscape` edge AND gains `mur-notfor`. Replacing rewrites mid-flight's roadmap.
+3. **Keep `DemoProject.dayOneChain` equal to `DemoProject.murror.filed`.** The bridge claim is
+   that running the nine lands on mid-flight; different sets make it false.
+4. **A new `who: .you` task needs a `.recordFounderTask` beat if anything depends on it.**
+   `toggleTaskDone` files nothing, so a founder-only task completed any other way leaves the
+   dependency arrow pointing at nothing and every downstream credit line empty.
+
 ---
 
 # Workspaces

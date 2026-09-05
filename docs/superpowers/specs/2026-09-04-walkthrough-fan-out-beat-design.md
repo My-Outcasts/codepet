@@ -1,6 +1,11 @@
 # The walkthrough shows one department of eight
 
-**Status:** design, awaiting founder review.
+**Status:** SUPERSEDED 2026-09-05 by
+`2026-09-05-library-shows-all-eight-design.md`. Do not execute this plan.
+Showing eight finished artifacts in the Library is strictly more than showing three being made,
+and the founder chose it after seeing that this spec had been written and left unbuilt. The
+reasoning here about `maxFanOut` being a production cost guard rather than a demo dial is
+carried forward into the new spec.
 **Date:** 2026-09-04
 **Founder decision:** add a fan-out beat showing three departments at once, using the machinery
 that already exists.

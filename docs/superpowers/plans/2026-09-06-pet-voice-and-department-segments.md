@@ -168,6 +168,29 @@ final class CopilotChatHeaderTests: XCTestCase {
 }
 ```
 
+**Founder decision, 6 Sep — this task also carries a test that can actually fail.** The four above
+pass the moment Task 1 lands, and `CLAUDE.md` is explicit: *"If a test passes with and without the
+code it protects, it is not protecting anything."* Add the following to the same file **after Task 4
+lands** (it depends on `.petAsks`), and note it in the ledger so it is not forgotten:
+
+```swift
+    /// Goes red if a department stops attributing its message — the guard the four rule-tests
+    /// above cannot provide, because they assert a pure function that is already correct.
+    /// The SwiftUI row itself stays verified on screen; a unit test cannot reach it.
+    func testEveryPetAskedQuestionResolvesToAPetHeader() {
+        for b in DayOneScript.beats {
+            guard case let .petAsks(deptKey) = b.intent else { continue }
+            guard let companionId = DepartmentCompanions.companionId(for: deptKey),
+                  let dept = DepartmentCatalog.find(deptKey) else {
+                return XCTFail("\(deptKey) cannot be attributed at all")
+            }
+            let h = CodepetBrand.header(companionId: companionId, deptName: dept.name)
+            XCTAssertNotNil(h, "\(deptKey)'s question would render with no header")
+            XCTAssertNotEqual(h, "Codepet", "\(deptKey)'s question would be signed by the product")
+        }
+    }
+```
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
@@ -412,32 +435,40 @@ git commit -m "feat(chat): a task's department decides who answers about it"
 ### Task 4: The pet asks its own question
 
 **Files:**
-- Modify: `codepet/Demo/MockFlowScript.swift:24-100` (add `Intent` case), `codepet/Demo/MockFlowPlayer.swift` (handle it)
+- Modify: `codepet/Demo/MockFlowScript.swift` (add `Intent` case), `codepet/Demo/MockFlowPlayer.swift` (handle it), `codepet/Demo/DayOneScript.swift` (the table + the beats)
 - Test: `codepetTests/DayOneScriptTests.swift` (extend)
 
 **Interfaces:**
-- Consumes: `speakerFor(task:text:department:)` from Task 3, `CodepetBrand.header` from Task 1.
-- Produces: `MockFlowScript.Intent.petAsks(deptKey: String, question: String)` — appends one `CopilotMessage` authored by that department's pet.
+- Consumes: `CodepetBrand.header` (Task 1), `DepartmentCompanions.companionId(for:)`, `DepartmentCatalog.find(_:)`.
+- Produces:
+  - `MockFlowScript.Intent.petAsks(deptKey: String)` — carries the department key ONLY, no prose.
+  - `DayOneScript.questions: [String: (en: String, vi: String)]` — keyed by department key.
+  - `DayOneScript.question(for deptKey: String, language: AppLanguage) -> String?`
+
+**Founder decision, 6 Sep:** the beat carries no prose and the question is resolved at play time
+from one bilingual table. Neither `DayOneScript.swift` nor `MockFlowScript.swift` contains a single
+`.vi` conditional — the beat tuple has no language dimension and captions are English-only by
+existing design. But `.petAsks` produces a real `CopilotMessage`, and chat text IS localised
+elsewhere (`.walkthroughFounderTask` picks its language at play time). Resolving from a table keeps
+the script naming departments rather than prose, and puts all sixteen strings in one place.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `codepetTests/DayOneScriptTests.swift`:
 
 ```swift
-    /// Every department opens its own segment with its own pet asking the question.
-    /// Eight departments, and Marketing opens once even though it holds two links.
+    /// Every department opens its own segment. Eight departments, and Marketing opens once
+    /// even though it holds two links.
     func testEachDepartmentIsOpenedByItsOwnPet() {
         var asked: [String] = []
         for b in beats {
-            if case let .petAsks(deptKey, question) = b.intent {
+            if case let .petAsks(deptKey) = b.intent {
                 asked.append(deptKey)
-                XCTAssertFalse(question.isEmpty, "\(deptKey) opens with an empty question")
                 XCTAssertNotNil(DepartmentCompanions.companionId(for: deptKey),
                                 "\(deptKey) has no pet, so nobody can ask its question")
             }
         }
-        XCTAssertEqual(Set(asked).count, 8, "all eight departments open a segment")
-        XCTAssertEqual(asked.count, asked.count, "no department opens twice")
+        XCTAssertEqual(asked.count, 8, "no department opens twice")
         XCTAssertEqual(Set(asked), Set(["mkt", "sales", "design", "eng", "fin", "support", "legal", "ops"]))
     }
 
@@ -446,13 +477,34 @@ Append to `codepetTests/DayOneScriptTests.swift`:
         var seenAsk = Set<String>()
         for b in beats {
             switch b.intent {
-            case let .petAsks(deptKey, _): seenAsk.insert(deptKey)
+            case let .petAsks(deptKey): seenAsk.insert(deptKey)
             case let .runTask(id):
                 let dept = DemoProject.murrorDayOne.tasks.first { $0.id == id }?.dept
                 XCTAssertTrue(dept.map(seenAsk.contains) ?? false,
                               "\(id) runs before its department was introduced")
             default: break
             }
+        }
+    }
+
+    /// Both languages, for every department that asks. An English question inside a chat
+    /// bubble in a bilingual app is the finding that was raised about the credit line on 5 Sep.
+    func testEveryQuestionExistsInBothLanguages() {
+        for b in beats {
+            guard case let .petAsks(deptKey) = b.intent else { continue }
+            for lang in [AppLanguage.en, AppLanguage.vi] {
+                let q = DayOneScript.question(for: deptKey, language: lang)
+                XCTAssertNotNil(q, "\(deptKey) has no question in \(lang)")
+                XCTAssertFalse(q?.isEmpty ?? true, "\(deptKey)'s \(lang) question is empty")
+            }
+        }
+    }
+
+    /// The two languages must not be the same string — a copy-paste that leaves English
+    /// in the vi slot passes a non-empty check and ships English to a Vietnamese founder.
+    func testTheTwoLanguagesActuallyDiffer() {
+        for (deptKey, pair) in DayOneScript.questions {
+            XCTAssertNotEqual(pair.en, pair.vi, "\(deptKey) has the same text in both languages")
         }
     }
 ```
@@ -474,12 +526,13 @@ In `codepet/Demo/MockFlowScript.swift`, inside `enum Intent`, after `case say(St
 ```swift
         /// A department's pet opens its own segment by asking the question that link answers.
         ///
-        /// Carries the DEPARTMENT KEY, not a companion id: the cast is remapped from time to
-        /// time (`eng` moved to byte and `fin` to crash on 26 Aug) and a script naming pets
-        /// directly would silently keep asking in a retired pet's name. Resolving through
-        /// `DepartmentCompanions` means the script names the department and the cast decides
-        /// who speaks for it.
-        case petAsks(deptKey: String, question: String)
+        /// Carries the DEPARTMENT KEY and nothing else. Two reasons, and both were paid for.
+        /// The cast is remapped from time to time (`eng` moved to byte and `fin` to crash on
+        /// 26 Aug), so a script naming pets directly would keep asking in a retired pet's name.
+        /// And the prose is resolved at play time because it is a CHAT MESSAGE, not a caption:
+        /// captions in this file are English-only by design, but a message in the transcript
+        /// has to be bilingual, and the beat tuple has no language dimension to carry it.
+        case petAsks(deptKey: String)
 ```
 
 - [ ] **Step 4: Handle it in the player**
@@ -487,50 +540,93 @@ In `codepet/Demo/MockFlowScript.swift`, inside `enum Intent`, after `case say(St
 In `codepet/Demo/MockFlowPlayer.swift`, alongside `case .walkthroughFounderTask:`:
 
 ```swift
-        case let .petAsks(deptKey, question):
+        case let .petAsks(deptKey):
             store.view = .chat
             guard let companionId = DepartmentCompanions.companionId(for: deptKey),
-                  let dept = DepartmentCatalog.find(deptKey) else { return }
+                  let dept = DepartmentCatalog.find(deptKey),
+                  let question = DayOneScript.question(for: deptKey, language: language)
+            else { return }
             store.chatMessages.append(
                 CopilotMessage(role: .companion, text: question,
                                companionId: companionId, deptName: dept.name))
 ```
 
-An unmapped department returns without appending rather than posting an unattributed question — the same headerless-not-"Codepet" fallthrough the spec requires.
+An unmapped department returns without appending rather than posting an unattributed question —
+the same headerless-not-"Codepet" fallthrough the spec requires.
 
-- [ ] **Step 5: Add the eight questions to the script**
+- [ ] **Step 5: Add the bilingual question table**
 
-In `codepet/Demo/DayOneScript.swift`, insert a `.petAsks` beat before each link's `.runTask` / `.recordFounderTask`. Both languages, matching the fixture's existing bilingual pattern. English shown; the `vi` variants go in the same place the script's other localised strings live:
+In `codepet/Demo/DayOneScript.swift`, above `beats`:
 
 ```swift
-        ("Marketing · Nova", 2.4, .petAsks(deptKey: "mkt", question: "Is this a real problem, or just yours? Talk to twelve people before you build anything."),
+    /// The question each department opens its segment with, in both languages.
+    ///
+    /// One table rather than sixteen literals in the beat list: the beats name departments, the
+    /// copy lives here, and a translator edits one place. Keyed by department key so a cast
+    /// remap cannot strand a question on a retired pet.
+    static let questions: [String: (en: String, vi: String)] = [
+        "mkt": (en: "Is this a real problem, or just yours? Talk to twelve people before you build anything.",
+                vi: "Đây là vấn đề có thật, hay chỉ của riêng bạn? Hãy nói chuyện với mười hai người trước khi xây bất cứ thứ gì."),
+        "sales": (en: "So who is this NOT for? The one person who found it insulting is worth more than the nine who liked it.",
+                  vi: "Vậy sản phẩm này KHÔNG dành cho ai? Một người thấy bị xúc phạm đáng giá hơn chín người khen hay."),
+        "design": (en: "Now that you know who it is for, what should it feel like?",
+                   vi: "Giờ bạn đã biết nó dành cho ai — vậy nó nên mang lại cảm giác gì?"),
+        "eng": (en: "What do you build it on — and does anything a person writes ever leave their device?",
+                vi: "Bạn sẽ xây trên nền gì — và những gì người ta viết có bao giờ rời khỏi máy của họ không?"),
+        "fin": (en: "What does that cost you a month? I cannot price anything until Byte has chosen.",
+                vi: "Mỗi tháng tốn bao nhiêu? Tôi không thể tính giá cho đến khi Byte chọn xong."),
+        "support": (en: "What happens when someone is genuinely struggling at 2am?",
+                    vi: "Chuyện gì xảy ra khi ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
+        "legal": (en: "Are you in trouble for holding their words? Say what you delete, and when.",
+                  vi: "Bạn có gặp rắc rối khi giữ lời của họ không? Hãy nói rõ bạn xoá gì, và khi nào."),
+        "ops": (en: "How do you ship without breaking it? Thursday, not Friday.",
+                vi: "Làm sao để phát hành mà không làm hỏng? Thứ Năm, đừng thứ Sáu."),
+    ]
+
+    /// The question for a department, or nil when it has none.
+    static func question(for deptKey: String, language: AppLanguage) -> String? {
+        guard let pair = questions[deptKey] else { return nil }
+        return language == .vi ? pair.vi : pair.en
+    }
+```
+
+- [ ] **Step 6: Insert the eight beats**
+
+Insert a `.petAsks` beat before each link's `.runTask` / `.recordFounderTask`. Chapter strings are
+set in Task 5 — use the existing chapter string of the link each one introduces for now.
+
+```swift
+        ("Is this real?", 2.4, .petAsks(deptKey: "mkt"),
          "Nova opens. The first question is hers to answer, not Codepet's."),
-        ("Sales · Nova", 2.2, .petAsks(deptKey: "sales", question: "So who is this NOT for? The one person who found it insulting is worth more than the nine who liked it."),
+        ("Who is it not for?", 2.2, .petAsks(deptKey: "sales"),
          "The same pet, a different department — Nova speaks for both."),
-        ("Design · Luna", 2.2, .petAsks(deptKey: "design", question: "Now that you know who it is for, what should it feel like?"),
+        ("What should it feel like?", 2.2, .petAsks(deptKey: "design"),
          "Luna reads the two artifacts before it."),
-        ("Engineering · Byte", 2.2, .petAsks(deptKey: "eng", question: "What do you build it on — and does anything a person writes ever leave their device?"),
+        ("What do I build it on?", 2.2, .petAsks(deptKey: "eng"),
          "The first question with a bill attached."),
-        ("Finance · Crash", 2.2, .petAsks(deptKey: "fin", question: "What does that cost you a month? I cannot price anything until Byte has chosen."),
+        ("What does it cost me?", 2.2, .petAsks(deptKey: "fin"),
          "Crash says why this could not have been asked earlier."),
-        ("Support · Sage", 2.4, .petAsks(deptKey: "support", question: "What happens when someone is genuinely struggling at 2am?"),
+        ("A bad night", 2.4, .petAsks(deptKey: "support"),
          "The question a consumer app about loneliness cannot avoid."),
-        ("Legal · Glitch", 2.2, .petAsks(deptKey: "legal", question: "Are you in trouble for holding their words? Say what you delete, and when."),
+        ("Data deletion", 2.2, .petAsks(deptKey: "legal"),
          "Glitch reads Sage's policy before answering."),
-        ("Operations · Glitch", 2.2, .petAsks(deptKey: "ops", question: "How do you ship without breaking it? Thursday, not Friday."),
+        ("Release rhythm", 2.2, .petAsks(deptKey: "ops"),
          "The same pet again, and the last question before the day hands one back."),
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+Use the ACTUAL chapter strings already present on the two final links rather than the invented
+`"Data deletion"` / `"Release rhythm"` above if they differ — read the file.
+
+- [ ] **Step 7: Run test to verify it passes**
 
 Run the Step 2 command.
-Expected: PASS. `DayOneScriptTests` should now report its original tests plus the two new ones.
+Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add codepet/Demo/MockFlowScript.swift codepet/Demo/MockFlowPlayer.swift codepet/Demo/DayOneScript.swift codepetTests/DayOneScriptTests.swift
-git commit -m "feat(demo): each department is opened by its own pet, asking its own question"
+git commit -m "feat(demo): each department is opened by its own pet, in both languages"
 ```
 
 ---

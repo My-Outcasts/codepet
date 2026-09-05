@@ -51,6 +51,21 @@ final class MockFlowPlayer: ObservableObject {
         return beats[index].chapter
     }
 
+    /// The chapters of WHICHEVER script is playing, deduplicated in order — the chapter bar's
+    /// jump buttons. `MockFlowScript.chapters` is computed from `MockFlowScript.beats` alone, so
+    /// it always listed the tour's chapters even while the day-one simulation was playing.
+    /// Mirrors that computation against `script` instead of duplicating it against `beats` a
+    /// second time.
+    var chapters: [String] {
+        var seen = Set<String>()
+        return script.compactMap { seen.insert($0.chapter).inserted ? $0.chapter : nil }
+    }
+
+    /// The index of the first beat of a chapter, within WHICHEVER script is playing.
+    func firstBeat(of chapter: String) -> Int? {
+        script.firstIndex { $0.chapter == chapter }
+    }
+
     func attach(store: CompanyStore, language: AppLanguage) {
         self.store = store
         self.language = language
@@ -84,7 +99,7 @@ final class MockFlowPlayer: ObservableObject {
     }
 
     func jump(toChapter chapter: String) {
-        guard let i = MockFlowScript.firstBeat(of: chapter) else { return }
+        guard let i = firstBeat(of: chapter) else { return }
         let wasPlaying = isPlaying
         pause()
         index = i
@@ -220,9 +235,13 @@ final class MockFlowPlayer: ObservableObject {
             guard let task = store.company.tasks.first(where: { $0.id == id }),
                   !task.done, !task.drafted else { return }
             Task { await store.runTask(task, language: language) }
-        case .recordFounderTask(let taskId, let body):
+        case .recordFounderTask(let taskId):
             store.view = .chat
-            Task { await store.recordFounderOutcome(taskId: taskId, body: body, kind: .doc) }
+            guard let task = store.company.tasks.first(where: { $0.id == taskId }) else { return }
+            let entry = DemoProject.current.deliverable(for: task.title)
+            let body = MockChat.fill(entry.body, title: task.title)
+            Task { await store.recordFounderOutcome(taskId: taskId, body: body,
+                                                    kind: DeliverableKind(raw: entry.kind)) }
         }
     }
 

@@ -75,8 +75,10 @@ extension DemoProject {
     private static var murrorTasks: [RoadmapTask] {
         [
             // ── THE DAY-ONE CHAIN ───────────────────────────────────────────────────────────
-            // These nine carry a linear `dependsOn` so `RoadmapEngine.nextStep` walks them in
-            // the order the day-one script asks its nine questions. The edges are SAFE for
+            // These nine carry a linear `dependsOn`, but not for ordering — `RoadmapEngine.nextStep`
+            // sorts every dependency-satisfied open task by (phase order, array position) rather
+            // than walking a chain. The edges exist so `UpstreamWork.assemble` can credit each
+            // link's predecessor; the script names its ids explicitly. The edges are SAFE for
             // mid-flight because all nine are `done` there, and `status` returns `.done` before
             // it consults `depsSatisfied` — no status, no beacon and no runnable count moves.
             //

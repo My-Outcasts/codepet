@@ -2991,10 +2991,16 @@ final class CompanyStore: ObservableObject {
     /// Goes through `approveTask` rather than filing directly, so a recorded outcome takes the
     /// same path an approved draft does — one place marks a task done, appends to the library
     /// and stamps the first approval.
+    ///
+    /// **Refuses a `drafted` task too.** `BeaconOffer` already documents that a founder-only
+    /// task can be carrying a prepared draft awaiting the founder's own approval (`.review`,
+    /// checked ahead of `.walkthrough` for exactly this reason) — recording over it here would
+    /// silently overwrite that draft with a different body instead of asking the founder to
+    /// approve or discard what is already waiting.
     func recordFounderOutcome(taskId: String, body: String, kind: DeliverableKind) async {
         guard let i = company.tasks.firstIndex(where: { $0.id == taskId }),
               company.tasks[i].who == .you,
-              !company.tasks[i].done else { return }
+              !company.tasks[i].done, !company.tasks[i].drafted else { return }
         company.tasks[i].draft = Deliverable(kind: kind, title: company.tasks[i].title,
                                              body: body, sourceTaskId: taskId)
         await approveTask(id: taskId)

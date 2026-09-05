@@ -53,13 +53,21 @@ final class FounderOutcomeTests: XCTestCase {
         XCTAssertTrue(store.company.tasks[0].done, "recording is what completes it")
     }
 
-    /// The artifact must be reachable the way every other filed artifact is, or the Library
-    /// and `UpstreamWork.assemble` will both miss it.
-    func testTheFiledWorkResolvesThroughRoadmapEngine() async {
-        let store = await makeStore(tasks: [founderTask()])
-        await store.recordFounderOutcome(taskId: "t-you", body: "b", kind: .doc)
-        let d = RoadmapEngine.deliverable(for: store.company.tasks[0], in: store.company.library)
-        XCTAssertNotNil(d, "assemble reads exactly this lookup")
+    /// A `.you` task carrying a prepared draft awaiting approval must not be silently
+    /// overwritten. `BeaconOffer` documents that a founder-only task can hold such a draft —
+    /// recording over it here would clobber it with a different body instead of asking the
+    /// founder to approve or discard what is already waiting.
+    func testItRefusesADraftedTask() async {
+        var task = founderTask(id: "t-drafted")
+        task.drafted = true
+        task.draft = Deliverable(kind: .doc, title: task.title, body: "already waiting",
+                                 sourceTaskId: "t-drafted")
+        let store = await makeStore(tasks: [task])
+        await store.recordFounderOutcome(taskId: "t-drafted", body: "clobbering body", kind: .doc)
+        XCTAssertTrue(store.company.library.isEmpty, "a drafted task must not be filed this way")
+        XCTAssertFalse(store.company.tasks[0].done)
+        XCTAssertEqual(store.company.tasks[0].draft?.body, "already waiting",
+                       "the prepared draft must survive untouched")
     }
 
     /// Codepet's own tasks have a run path that already files. Routing them through here too

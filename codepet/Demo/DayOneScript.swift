@@ -35,11 +35,7 @@ enum DayOneScript {
          + "pretend to run this one — twelve conversations are hers to have — so it prepares "
          + "the guide and says so plainly."),
 
-        ("Is this real?", 3.4, .recordFounderTask(
-            taskId: "mur-interviews",
-            body: "Nine of twelve described the same evening: they thought of someone, drafted "
-            + "something, and never sent it. Two wanted tracking, not company. One found the "
-            + "whole idea insulting."),
+        ("Is this real?", 3.4, .recordFounderTask(taskId: "mur-interviews"),
          "She has the conversations and records what she heard. That is what files it — and "
          + "everything after this reads it."),
 

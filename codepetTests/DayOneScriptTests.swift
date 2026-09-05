@@ -33,7 +33,7 @@ final class DayOneScriptTests: XCTestCase {
         var acted: [String] = []
         for b in beats {
             switch b.intent {
-            case .recordFounderTask(let id, _): acted.append(id)
+            case .recordFounderTask(let id): acted.append(id)
             case .runTask(let id): acted.append(id)
             default: break
             }
@@ -78,9 +78,9 @@ final class DayOneScriptTests: XCTestCase {
                 XCTAssertTrue(boardIds.contains(id),
                               "`.runTask(\"\(id)\")` in chapter '\(b.chapter)' does not match any "
                               + "task on the day-one board — the beat would silently do nothing")
-            case .recordFounderTask(let id, _):
+            case .recordFounderTask(let id):
                 XCTAssertTrue(boardIds.contains(id),
-                              "`.recordFounderTask(\"\(id)\", _)` in chapter '\(b.chapter)' does "
+                              "`.recordFounderTask(\"\(id)\")` in chapter '\(b.chapter)' does "
                               + "not match any task on the day-one board")
             default: break
             }

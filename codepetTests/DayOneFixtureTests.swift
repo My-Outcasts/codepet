@@ -45,13 +45,14 @@ final class DayOneFixtureTests: XCTestCase {
         XCTAssertEqual(dayOne.brief.projectName, midFlight.brief.projectName)
     }
 
-    /// The chain must actually be a line, or `nextStep` will not walk it in order.
+    /// The chain must actually be a line, or `UpstreamWork.assemble` will not credit the
+    /// predecessor's filed work when the next link runs.
     func testEachLinkDependsOnItsPredecessor() {
         let byId = Dictionary(uniqueKeysWithValues: dayOne.tasks.map { ($0.id, $0) })
         for (i, id) in DemoProject.dayOneChain.enumerated() where i > 0 {
             let prev = DemoProject.dayOneChain[i - 1]
             XCTAssertTrue(byId[id]?.dependsOn.contains(prev) == true,
-                          "\(id) must depend on \(prev) or the beacon will skip it")
+                          "\(id) must depend on \(prev) or its card will credit nobody")
         }
     }
 

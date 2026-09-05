@@ -56,9 +56,13 @@ final class DayOneBridgeTests: XCTestCase {
                 XCTFail("\(id) missing from the day-one board"); return
             }
             if task.who == .you {
+                // The same resolution `MockFlowPlayer` now performs for `.recordFounderTask` —
+                // the intent carries only the task id, so the body has nowhere left to diverge
+                // from mid-flight's filed artifact for the same task.
                 let entry = project.deliverable(for: task.title)
                 await store.recordFounderOutcome(
-                    taskId: id, body: MockChat.fill(entry.body, title: task.title), kind: .doc)
+                    taskId: id, body: MockChat.fill(entry.body, title: task.title),
+                    kind: DeliverableKind(raw: entry.kind))
             } else {
                 await store.runTask(task, language: .en)
                 await store.approveTask(id: id)
@@ -78,6 +82,14 @@ final class DayOneBridgeTests: XCTestCase {
         XCTAssertEqual(filedIds, Set(DemoProject.murror.filed),
                        "and every one of them left an artifact behind")
         XCTAssertEqual(store.company.library.count, 9)
+
+        // **The point of this test.** `mur-interviews` is recorded, not run — its body has
+        // nowhere to come from but the demo fixture, so this is what would catch a beat that
+        // carried its own prose again and drifted from what mid-flight actually has filed.
+        let landed = store.company.library.first { $0.sourceTaskId == "mur-interviews" }
+        let midFlight = DemoProject.murror.library().first { $0.sourceTaskId == "mur-interviews" }
+        XCTAssertEqual(landed?.body, midFlight?.body,
+                       "the simulation's filed body for mur-interviews must equal mid-flight's")
     }
 
     /// The hand-off to the tour. After the nine, the beacon is where the tour's `.runBeacon`

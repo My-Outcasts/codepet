@@ -56,7 +56,13 @@ enum MockFlowScript {
         /// `walkthroughFounderTask` ASKS about a `.you` task; this one completes it. Both are
         /// needed: the demo has to show Codepet declining to do the interviews AND has to end
         /// up with the interviews filed, because everything downstream reads them.
-        case recordFounderTask(taskId: String, body: String)
+        ///
+        /// **Carries only the task id, not a body.** An earlier version carried its own prose
+        /// summary, which drifted from the fixture's own filed body for the same task — the
+        /// beat and mid-flight told two different stories about what got recorded. The body is
+        /// resolved from the demo fixture instead, the same way every other deliverable body in
+        /// the demo is resolved, so the two cannot diverge again.
+        case recordFounderTask(taskId: String)
         /// Convene the Virtual Company on a decision. Safe under the demo flags only
         /// because `MockVirtualCompany` now backs `vcRunner` — before that fixture
         /// existed this beat would have spent ~$0.20 on the live endpoint, unattended,

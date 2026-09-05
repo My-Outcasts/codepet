@@ -82,13 +82,23 @@ intentional: it is the property that keeps them from drifting.
 
 ### 2. A task's department resolves the reply's voice
 
-Resolve the specialist through the existing `taskSpecialist(for:)` and carry the result on
-`companionId` / `deptName` for every message that names a task: the `producing` placeholder, the
-exec-log row, and the finished draft reply. These are the three that already resolve a task and
-today attribute only the card, not the message.
+**Corrected after reading the code.** The *run* path was never broken:
+`produceDraftInline(for:cid:language:)` already calls `taskSpecialist(for: task)` and already sets
+`companionId` / `deptName` on both the `producing` placeholder and the finished draft. That is why
+the cards correctly read *What Nova did · 6 steps*.
 
-A reply that names no task is unaffected and stays headerless — which is the general-conversation
-case, reached by the same branch rather than by a second rule.
+The gap is narrower and sits in **conversation about a task**. `sendChat` resolves its speaker only
+through `actingSpecialist(text:department:)`, which has no notion of a task. So when
+`.walkthroughFounderTask` sends `"Walk me through: Talk to 12 people about being lonely"` with no
+department chip, and the text names no department, the specialist is nil and the reply signs itself
+"Codepet". That single message is what the founder photographed.
+
+The fix: give `sendChat` an optional task context, and when present resolve the speaker through the
+existing `taskSpecialist(for:)` before falling back to `actingSpecialist`. Task first, because a
+task's department is a fact while a keyword match is an inference.
+
+A turn about no task is unaffected and stays headerless — the general-conversation case, reached by
+the same branch rather than by a second rule.
 
 **Explicitly not a demo-only attribution path.** The demo gets pets because it goes through the same
 resolution the real chat does. A parallel copy is exactly how `MockChat.departmentReply` came to

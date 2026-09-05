@@ -43,6 +43,20 @@ enum MockFlowScript {
         /// Codepet cannot do for the founder. The prototype's "Work only you can do".
         /// No-ops when the board has no founder-only task, rather than narrating one.
         case walkthroughFounderTask
+        /// Run ONE named task.
+        ///
+        /// **Not `.runBeacon`.** `RoadmapEngine.nextStep` sorts every dependency-satisfied open
+        /// task by (phase order, array position), so it does not follow a dependency chain.
+        /// Measured against the Murror fixture, a beacon-driven day-one script drifts to
+        /// `mur-pricing` at step 3 and never comes back. A scripted sequence has to say what it
+        /// is running.
+        case runTask(String)
+        /// Record what came back from the founder's own work, which files it.
+        ///
+        /// `walkthroughFounderTask` ASKS about a `.you` task; this one completes it. Both are
+        /// needed: the demo has to show Codepet declining to do the interviews AND has to end
+        /// up with the interviews filed, because everything downstream reads them.
+        case recordFounderTask(taskId: String, body: String)
         /// Convene the Virtual Company on a decision. Safe under the demo flags only
         /// because `MockVirtualCompany` now backs `vcRunner` — before that fixture
         /// existed this beat would have spent ~$0.20 on the live endpoint, unattended,

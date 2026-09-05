@@ -39,7 +39,12 @@ final class MockFlowPlayer: ObservableObject {
     private weak var store: CompanyStore?
     private var language: AppLanguage = .en
 
-    var beats: [MockFlowScript.Beat] { MockFlowScript.beats }
+    /// Which sequence is playing. The 24-beat tour by default; the day-one simulation when the
+    /// day-one fixture is selected. A stored property rather than a computed one so a running
+    /// player cannot have the script changed under it mid-beat.
+    var script: [MockFlowScript.Beat] = DemoProject.current.id == "murror-day-one"
+        ? DayOneScript.beats : MockFlowScript.beats
+    var beats: [MockFlowScript.Beat] { script }
     var currentChapter: String? {
         guard index < beats.count else { return nil }
         return beats[index].chapter
@@ -207,6 +212,16 @@ final class MockFlowPlayer: ObservableObject {
                                     : "Walk me through: \(task.title)",
                     language: language)
             }
+        case .runTask(let id):
+            store.view = .chat
+            // The same three guards `runTask` enforces. A beat that fires on a task already
+            // running or drafted would produce a second draft and double the credits.
+            guard let task = store.company.tasks.first(where: { $0.id == id }),
+                  !task.done, !task.drafted else { return }
+            Task { await store.runTask(task, language: language) }
+        case .recordFounderTask(let taskId, let body):
+            store.view = .chat
+            Task { await store.recordFounderOutcome(taskId: taskId, body: body, kind: .doc) }
         }
     }
 

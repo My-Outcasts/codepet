@@ -2980,6 +2980,26 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    /// File the outcome of a task Codepet cannot run.
+    ///
+    /// **The gap this closes.** `who == .you` work — an interview round, a conversation, a
+    /// clinician reading a crisis path — has no run path, so `approveTask` finds no draft and
+    /// `toggleTaskDone` marks it done leaving nothing behind. That is precisely the state
+    /// `UpstreamWork.firstUnfiled` calls out: a dependency arrow pointing at nothing readable.
+    /// Every downstream run then loses the credit line it should have had.
+    ///
+    /// Goes through `approveTask` rather than filing directly, so a recorded outcome takes the
+    /// same path an approved draft does — one place marks a task done, appends to the library
+    /// and stamps the first approval.
+    func recordFounderOutcome(taskId: String, body: String, kind: DeliverableKind) async {
+        guard let i = company.tasks.firstIndex(where: { $0.id == taskId }),
+              company.tasks[i].who == .you,
+              !company.tasks[i].done else { return }
+        company.tasks[i].draft = Deliverable(kind: kind, title: company.tasks[i].title,
+                                             body: body, sourceTaskId: taskId)
+        await approveTask(id: taskId)
+    }
+
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,
     /// and clear the draft/drafted state. Persists both tasks + library. Idempotent — a
     /// task with no pending draft, or already done, is a no-op (no duplicate library entry).

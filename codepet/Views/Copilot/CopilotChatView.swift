@@ -1363,12 +1363,9 @@ struct CopilotBubble: View {
     /// named the wrong thing. (This reverses the reading I shipped earlier the same day, where
     /// the header carried the CHOSEN companion's name. "The name appears when it responds" meant
     /// when a PET responds, i.e. on a department's task, not on every reply.)
-    private var headerName: String {
-        guard let id = message.companionId, let pet = PetCharacter.all[id] else {
-            return CodepetBrand.name
-        }
-        if let dept = message.deptName, !dept.isEmpty { return "\(pet.name) · \(dept)" }
-        return pet.name
+    /// nil means the product is speaking and no row renders.
+    private var headerName: String? {
+        CodepetBrand.header(companionId: message.companionId, deptName: message.deptName)
     }
     private var headerAccent: Color {
         guard let id = message.companionId else { return companionAccent }
@@ -1661,7 +1658,7 @@ struct CopilotBubble: View {
             actionIcon(copiedMarkdown ? "checkmark" : "square.and.arrow.up",
                        help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown",
                        tint: copiedMarkdown ? CodepetTheme.accentTeal : nil) {
-                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang), setting: $copiedMarkdown)
+                copy(MessageTranscript.markdown(message, speaker: headerName ?? CodepetBrand.name, lang: lang), setting: $copiedMarkdown)
             }
             actionIcon("arrow.clockwise",
                        help: retryEnabled
@@ -2188,11 +2185,13 @@ struct CopilotBubble: View {
             // otherwise, and `headerName` carries the "Name · Dept" attribution — so the
             // one place the pet's own name appears is the moment it answers.
             VStack(alignment: .leading, spacing: ChatRhythm.nameToProse) {
-                HStack(spacing: 8) {
-                    CompanionAvatar(companionId: message.companionId, size: 22)
-                    Text(headerName)
-                        .font(CodepetTheme.inter(12.5, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
+                if let headerName {
+                    HStack(spacing: 8) {
+                        CompanionAvatar(companionId: message.companionId, size: 22)
+                        Text(headerName)
+                            .font(CodepetTheme.inter(12.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                    }
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
                     prose(message.text)

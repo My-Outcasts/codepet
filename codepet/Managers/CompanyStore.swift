@@ -951,6 +951,29 @@ final class CompanyStore: ObservableObject {
         return actingSpecialist(text: text, department: department)
     }
 
+    /// What the model should be grounded in for this turn: the task's own department when the
+    /// turn is about a task, else the chip-or-keyword rule. `speakerFor`'s task-first order,
+    /// mirrored — a task's `dept` is a recorded fact, a keyword match is an inference over prose.
+    ///
+    /// **Deliberately its own resolver, not a second use of `speakerFor`.** The comment above
+    /// `actingDeptKey` records the bug fusing "who speaks" with "what they know" caused; this
+    /// answers "what does the model know," `speakerFor` answers "whose name is on the bubble,"
+    /// and unlike `taskSpecialist` this does not require a mapped pet — `product` resolves in
+    /// `DepartmentCatalog` with no companion, and a task in that department should still ground
+    /// the reply even though nothing relabels the header. `MockChat.route` enforces the
+    /// companion requirement separately before it will use a department's in-character reply.
+    ///
+    /// Before this, `dept_key` was resolved from the chip or a department named in the text only
+    /// — never from the task — so a reply headed "Nova · Marketing" (from `speakerFor`) could
+    /// carry the generic default reply, because the request that produced it told the model
+    /// nothing about marketing.
+    func deptKeyFor(task: RoadmapTask?, text: String, department: Department?) -> String? {
+        if let task, let key = task.dept, DepartmentCatalog.find(key) != nil {
+            return key
+        }
+        return actingDeptKey(text: text, department: department)
+    }
+
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
     /// run card to it, and stage the run. With no linked project the coordinator lands
     /// in `.noProject` and the card offers "Link a project".
@@ -1581,7 +1604,7 @@ final class CompanyStore: ObservableObject {
         // too, and the department rides along so the CF can ground the answer in that
         // department's expertise.
         let specialist = speakerFor(task: aboutTask, text: text, department: department)
-        let deptKey = actingDeptKey(text: text, department: department)
+        let deptKey = deptKeyFor(task: aboutTask, text: text, department: department)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue,
             // The specialist when one leads, else the founder's own companion. Falling back

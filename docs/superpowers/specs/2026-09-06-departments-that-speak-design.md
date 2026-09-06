@@ -406,3 +406,109 @@ asked for it shorter. Recorded so the next person sees the trend rather than jus
   `role: .me`. Must go red if any of them regresses to a pet message.
 - The opening plays before any department speaks.
 - Runtime re-measured, read out of a failing assertion, not estimated.
+
+---
+
+# Amendment 3, 6 Sep — the environment, the code, and a slimmer bar
+
+## Audit answer
+
+Confirmed: the day-one flow ends at the roadmap reveal. 48 beats — chat for nine segments, one
+Library beat, then Roadmap. **`AppView.environment` and the Developer (CODE) mode are never
+visited.**
+
+## Why these two belong together
+
+`Views/Environment/` holds `ProjectLinker.swift`. **Linking a project folder is the real
+prerequisite for a code run** — without one, `startBuild` lands in `.noProject` and refuses.
+So Environment is not a decorative extra stop before Code; it is the thing that makes Code
+possible.
+
+That satisfies the founder's constraint that *whatever runs in the prototype should also work in
+actual use*: the demo shows the real precondition rather than a build that works by magic and
+then fails for a real founder who never linked anything.
+
+Both sections use existing, real mechanisms — nothing mimed:
+- `.go(.environment)` — a real destination
+- `.mode(.developer)` — already used by the 24-beat tour ("Your company touches your code")
+- `MockEngineeringRunner` — drives the same `EngineeringRunStore` the live runner does, with no
+  credits and no network. Endings: `finishes`, `pausesAgain`, `failsAtBudget`.
+
+## Placement
+
+The existing roadmap beat already hands off into this: *"the beacon has moved to her tenth
+question — how people hear about it. Codepet points at the landing page and waits."*
+
+```
+Operations reports → Library (nine artifacts) → Roadmap (beacon → landing page)
+                                                        ↓
+                     Environment · Byte    link the folder, choose the tools
+                                                        ↓
+                     Code · Byte           the landing page actually gets built
+                                                        ↓
+                     Roadmap               ten questions in, the board has moved
+```
+
+**Byte carries both.** It chose the stack four questions earlier, so it is the voice that knows
+what the environment needs and what the first code should be. Continuity, not a new cast member.
+
+## The copy — English only, per the founder's standing decision
+
+### Environment · Byte
+
+**asks** (founder)
+> What do I need set up before any of this can run?
+
+**frames** (Byte)
+> I picked the stack four questions ago. Before I can touch code, this company needs a folder to
+> work in — and you decide which tools it is allowed to use.
+
+**reports** (Byte)
+> Linked. Three tools on, the rest off until they earn it. Nothing here needs a card yet.
+
+### Code · Byte
+
+**asks** (founder)
+> Can you build the landing page?
+
+**frames** (Byte)
+> That is the beacon's tenth question — how people hear about it. I work on your machine, I show
+> you every change, and nothing is saved until you say so.
+
+**reports** (Byte)
+> One page, Luna's direction, Nova's positioning line. A draft until you approve it — same as
+> everything else today.
+
+### Closing beat
+
+> Ten questions in, and the board has moved.
+
+## Runtime
+
+Roughly +30s, taking the day to about **157s**. The ceiling would move 140 → 170.
+
+**This is the fourth raise (75 → 120 → 140 → 170) against a prior author's 90s ceiling whose note
+read "a Ns simulation is one nobody watches twice."** The lever that has been offered three times
+and not taken: cutting the eight department `frames` lines returns ~25s and lands at ~132s. The
+founder keeps the questions, the artifacts, the reports and the handoffs; she loses each
+department's reasoning about why it goes when it does. **Not doing this unless she says so** —
+it is her copy.
+
+## The bottom bar
+
+`codepet/Demo/MockFlowCaptionBar.swift` — three stacked rows (caption, nine chapter chips,
+controls), ~145px, and the chip row wraps.
+
+**Founder decision: fold the chapters into the controls.** The chips row is deleted. The current
+chapter and position become one compact label inside the control bar, and clicking it opens a
+menu to jump to any chapter. Saves a row, keeps every capability, and stops the row wrapping as
+sections are added — which matters immediately, since this amendment adds two.
+
+## Tests
+
+- The environment beat navigates to `AppView.environment`; the code beat enters `.developer`
+  mode. Both must go red if the destination changes.
+- The code run uses `MockEngineeringRunner` — no network, no credits.
+- Chapter jumping still works with the chips row gone: `firstBeat(of:)` still resolves every
+  chapter, and a test pins the chapter list.
+- Runtime re-measured, read out of a failing assertion.

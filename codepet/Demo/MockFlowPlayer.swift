@@ -252,9 +252,23 @@ final class MockFlowPlayer: ObservableObject {
         // beat) does this actually hold the player — which is the fix, not a tax on the common
         // case.
         let runWait = pendingRunWait
+        // **The approval wait has to be joined too, and leaving it out was half a fix.**
+        // `.runTask` waiting made the RUN land in its own chapter, but `.approveNewestDraft`
+        // arms `pendingWait` and was still orphaned — the player advanced on the beat's
+        // authored seconds while the approval was in flight. So a department's draft sat
+        // UNAPPROVED (and therefore unfiled) while the next department's beats played, and
+        // `offerChainIfNeeded` — which fires on an unfiled dependency, not an unfinished one —
+        // truthfully reported "Byte hasn't produced it yet" under a card of Byte's work that
+        // was visible on screen at that moment. The founder photographed exactly that.
+        //
+        // Worse, `pendingApproval?.cancel()` means the NEXT approve beat cancels this one, so
+        // a slow approval was not merely late — it never happened at all, and its task stayed
+        // drafted for the rest of the run.
+        let approvalWait = pendingWait
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 await runWait?.value
+                await approvalWait?.value
                 self?.step()
             }
         }

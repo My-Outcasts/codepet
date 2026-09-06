@@ -512,3 +512,88 @@ sections are added — which matters immediately, since this amendment adds two.
 - Chapter jumping still works with the chips row gone: `firstBeat(of:)` still resolves every
   chapter, and a test pins the chapter list.
 - Runtime re-measured, read out of a failing assertion.
+
+---
+
+# Amendment 4, 6 Sep — the prototype runs live
+
+The founder finds Codepet's scripted answers short and superficial, and has chosen to run the
+whole prototype against the real model rather than fixtures. She was shown the trade-offs and
+picked this deliberately.
+
+## Correcting an overstatement
+
+I warned that `DayOneBridgeTests` could not hold under live mode. **It holds.** It asserts three
+things about IDs — the nine done tasks, the nine filed `sourceTaskId`s, the count of nine — all
+unaffected by model-generated bodies. The single body it compares is `mur-interviews`, which is
+RECORDED rather than run, so it comes from the fixture either way. The test was written to catch
+a beat carrying its own prose and it keeps doing that job.
+
+What actually changes:
+
+| | |
+|---|---|
+| `DayOneBridgeTests` | holds |
+| Script-shape tests | hold — they test the script, not the output |
+| Caption readability | holds — captions stay authored |
+| Wall-clock runtime | breaks: 157s of authored beats **plus nine live runs**, realistically 4–8 minutes |
+| Content | differs every playthrough. That is the point. |
+| Cost | spends the founder's Claude plan on every run |
+| Failure | a live run can fail or time out mid-demo |
+
+## The guard being deliberately opened
+
+`PrototypeMode.launchKeys` records that its three flags imply one another because *"autoplay
+without the fixtures behind it would drive the real Cloud Functions unattended, and two flags
+where one is meaningless alone is a state you can get half-right."*
+
+Live autoplay is precisely that configuration. **It is being enabled on purpose, behind its own
+explicit flag, not by loosening that rule.** `CODEPET_LIVE_AI` is NOT added to `launchKeys`; the
+implication between the existing three is untouched, so the accident the author guarded against
+still cannot happen by default. The comment there must be amended to record that a deliberate,
+separately-flagged exception now exists — a guard that is silently bypassed is worse than one
+that is openly qualified.
+
+## What live mode swaps, and what it does not
+
+`MockChat.enabled` currently fuses two separate things: the fixture DATA (Murror's board, tasks,
+library) and the mock TRANSPORT (chat, task and VC runners). Live mode keeps the first and
+replaces the second.
+
+- **Keeps fixtures:** the board, the nine-question chain, the departments, the roadmap. The demo
+  still opens on Murror.
+- **Goes live:** `taskRunner`, the chat transport, and `vcRunner` route through
+  `LocalTransportRouter` — the founder's own Claude plan via the sidecars, the same path the
+  real product uses. Verified available on this machine: all three bundles present in
+  `codepet/Resources/`, `claude` on PATH.
+- **Stays authored:** the founder's nine questions, and every caption. Those are the script. Only
+  the DEPARTMENT'S ANSWER and its artifact become model-generated — which is exactly where the
+  founder said the depth was missing.
+
+## The player must wait
+
+Beats advance on authored seconds. A live run takes an unpredictable 20–60s, so a run beat that
+advances on a timer would move on before its own draft exists — the bug `c51c246` already fixed
+once for the approve beat.
+
+Extend that mechanism rather than inventing a second one: a run beat awaits its draft with a
+bounded, cancellable wait, cancelled by `pause()`, re-checking `companyId` each poll so an
+account switch bails, and **logging on timeout via `os.Logger` with `.public`** rather than
+returning silently. The existing ceiling is 90s sized off `CODEPET_SLOW_RUNS`' worst case; a live
+run needs its own, larger ceiling.
+
+**On timeout the demo must say so on screen.** A scripted demo that silently skips a beat looks
+like a product that lost the work.
+
+## Tests
+
+- Live mode does NOT engage without `CODEPET_LIVE_AI` — the existing three flags alone must still
+  give fixtures. This is the guard; it must go red if the flag implication is ever widened.
+- With the flag set, the injected transports are the live ones, not the mocks.
+- Script-shape, ordering, count and bridge assertions are unchanged and must stay green.
+- No test may make a real model call. The transport choice is asserted, never exercised.
+
+## Not in this amendment
+
+The landing-page redesign and opening the page in Chrome are separate, smaller pieces that build
+on this. English only, per the founder's standing decision.

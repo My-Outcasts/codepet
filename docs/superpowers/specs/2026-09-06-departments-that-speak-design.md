@@ -248,3 +248,78 @@ is NOT being implemented — see the founder decision above. Do not transcribe i
   count assertion that silently keeps passing on the new case would hide a regression.
 - ~115s is a long demo. If it drags on screen, the lever is cutting `frames` — the reports carry
   the chain, the frames carry the reasoning.
+
+---
+
+# Amendment, 6 Sep — the founder asks, the department answers
+
+The founder watched the built version and caught two things. Both are mine.
+
+## 1. The pet was asking the founder's own question
+
+The brief was *"imagine what questions **they** would have when starting a project"* — the
+questions belong to the founder. They shipped as pet-authored messages, so Nova asks a question
+and then answers it herself. The whole chapter contains exactly one founder message, and it is
+the auto-generated `"Walk me through:"` line. That is not a conversation.
+
+**Fix:** the `asks` line posts as the FOUNDER — `role: .me`, no `companionId`, no speaker row,
+right-aligned like any other thing the founder types. The pet's `frames` line becomes its
+answer. Each segment then reads:
+
+```
+                     Is this a real problem, or just mine?   ← founder
+● Nova · Marketing   The first one is yours — twelve
+                     conversations I can't have for you…     ← Nova answers
+  □ artifact                                        ✓ filed
+● Nova · Marketing   Twelve conversations and a scan…        ← Nova reports
+```
+
+## 2. Day one was serving mid-flight copy
+
+Grounding `dept_key` in the task (`156d185`) made `MockChat`'s department replies reachable —
+and `murrorDayOne` borrows `murrorDepartmentReplies`, which is written against the **mid-flight**
+board. So the demo showed Marketing saying *"…I will write it against the brand direction Luna
+set"* on day one, four segments before Luna speaks. This spec predicted that failure and then
+caused it.
+
+**Fix, two parts:**
+- `.walkthroughFounderTask` is removed from the day-one script. It was the only beat triggering
+  a `MockChat` conversational turn, and it is now redundant: the founder's question and the
+  department's answer are both scripted beats. `.recordFounderTask` still files the artifact.
+- `murrorDayOne` gets `departmentReplies: [:]`. Belt and braces — if any future beat does trigger
+  a chat turn, it must not be able to serve another board's copy.
+- A test asserts the day-one script contains **no** beat that triggers a `MockChat` reply, so
+  this cannot silently return.
+
+`deptKeyFor` remains correct and valuable — it is what the LIVE hero-card walkthrough button
+needs. Day one simply no longer exercises it.
+
+## The eight questions, in the founder's voice
+
+First person, and stripped of the coaching instruction — that content already lives in each
+department's `frames` and `reports` lines, so nothing is lost.
+
+⚠ **The Vietnamese below is a rewrite and needs a native read.** These are short first-person
+questions rather than the idiom-heavy paragraphs that went wrong before, but two of three
+Vietnamese phrases written for this branch were still wrong.
+
+| dept | en | vi |
+|---|---|---|
+| `mkt` | Is this a real problem, or just mine? | Đây có phải vấn đề thật không, hay chỉ mình tôi thấy vậy? |
+| `sales` | So who is this not for? | Vậy sản phẩm này không dành cho ai? |
+| `design` | What should it feel like? | Nó nên mang lại cảm giác gì? |
+| `eng` | What do I build it on? And does anything people write leave their device? | Tôi nên xây trên nền tảng gì? Và những gì người ta viết có rời khỏi máy của họ không? |
+| `fin` | What is this going to cost me a month? | Mỗi tháng cái này sẽ tốn của tôi bao nhiêu? |
+| `support` | What happens if someone's really struggling at 2am? | Chuyện gì xảy ra nếu ai đó thật sự khủng hoảng lúc 2 giờ sáng? |
+| `legal` | Am I in trouble for holding what people write? | Tôi có gặp rắc rối khi lưu giữ những gì người ta viết không? |
+| `ops` | How do I ship this without breaking it? | Làm sao để phát hành mà không làm hỏng nó? |
+
+The `frames` and `reports` copy is UNCHANGED — it already reads as an answer.
+
+## Tests
+
+- The `asks` beat posts with `role: .me` and **no** `companionId`; `frames` and `reports` post as
+  the pet. A test that would go red if `asks` regressed to a pet message.
+- Day one contains no beat that triggers a `MockChat` conversational reply.
+- `murrorDayOne.departmentReplies` is empty, so mid-flight copy cannot reach it.
+- Runtime is re-measured, not estimated. Removing `.walkthroughFounderTask` shortens the day.

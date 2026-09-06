@@ -282,12 +282,9 @@ final class MockFlowPlayer: ObservableObject {
             // the founder would actually have been offered — not an arbitrary one.
             guard let task = BeaconOffer.candidates(store.company.tasks)
                 .first(where: { $0.who == .you }) else { return }
+            let ask = WalkthroughAsk.compose(for: task, language: language)
             Task {
-                await store.sendChat(
-                    language == .vi ? "Hướng dẫn tôi làm: \(task.title)"
-                                    : "Walk me through: \(task.title)",
-                    language: language,
-                    aboutTask: task)
+                await store.sendChat(ask.text, language: language, aboutTask: ask.task)
             }
         case .runTask(let id):
             store.view = .chat

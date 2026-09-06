@@ -919,11 +919,7 @@ struct CopilotChatView: View {
         case .run:
             Task { await companyStore.runTask(task, language: lang) }
         case .walkthrough:
-            companyStore.chatDraft = lang == .vi
-                ? "Hướng dẫn tôi làm: \(task.title)"
-                : "Walk me through: \(task.title)"
-            mode = .ask
-            send(aboutTask: task)
+            sendWalkthrough(.compose(for: task, language: lang))
         case .review:
             companyStore.select(.roadmap)
         }
@@ -1105,13 +1101,22 @@ struct CopilotChatView: View {
     /// `speakerFor` to resolve the reply's speaker from the task's own department (a
     /// recorded fact) rather than falling back to keyword inference over `text`. Every
     /// existing caller — `onStarter`, quick actions, the typed composer — has no task in
-    /// mind and keeps the default `nil` unchanged. Only `runBeacon`'s `.walkthrough` case
-    /// passes one: it builds the same "Walk me through: <title>" string `MockFlowPlayer`'s
-    /// scripted beat does, but through THIS generic composer, which reads only the bare
-    /// `chatDraft` string — no task reference survived that hop, so a task whose title
-    /// carries no department vocabulary fell back to a keyword guess and signed the reply
-    /// with the product name, or worse, misattributed it (finding logged 6 Sep, live-path
-    /// half of the bug Task 3 fixed only on the demo path).
+    /// mind and keeps the default `nil` unchanged. Only `sendWalkthrough` below passes one,
+    /// and it can't drop it: `WalkthroughAsk` binds the text and the task together, so there
+    /// is no path from "walk me through" to this function that carries text without a task
+    /// (finding logged 6 Sep, live-path half of the bug Task 3 fixed only on the demo path).
+    /// **The one entry point for "walk me through this task."** Takes a `WalkthroughAsk` —
+    /// the composed text and the task it is about, bound together by `WalkthroughAsk.compose` —
+    /// and always forwards both halves into `send(aboutTask:)`. This is what makes the mistake
+    /// that shipped twice (composing the string, forgetting to also pass the task) a compile
+    /// error for a third caller rather than a silently wrong attribution: there is no way to
+    /// call this with text alone, because a `WalkthroughAsk` cannot exist without its task.
+    private func sendWalkthrough(_ ask: WalkthroughAsk) {
+        companyStore.chatDraft = ask.text
+        mode = .ask
+        send(aboutTask: ask.task)
+    }
+
     private func send(aboutTask: RoadmapTask? = nil) {
         let text = companyStore.chatDraft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

@@ -323,3 +323,86 @@ The `frames` and `reports` copy is UNCHANGED — it already reads as an answer.
 - Day one contains no beat that triggers a `MockChat` conversational reply.
 - `murrorDayOne.departmentReplies` is empty, so mid-flight copy cannot reach it.
 - Runtime is re-measured, not estimated. Removing `.walkthroughFounderTask` shortens the day.
+
+---
+
+# Amendment 2, 6 Sep — the day needs an opening
+
+The founder watched the built version and objected to the cold start: after onboarding, the
+transcript's first line is *"Is this a real problem, or just mine?"* with no context at all.
+
+She also asked whether the flow of the remaining features had been cut back. **A section-by-section
+audit says no for departments and yes for surfaces:**
+
+| section | time | beats |
+|---|---|---|
+| Day one | 3.2s | 1 |
+| Marketing · Nova | 15.6s | 6 |
+| Sales · Nova | 13.0s | 5 |
+| Design · Luna | 12.2s | 5 |
+| Engineering · Byte | 12.4s | 5 |
+| Finance · Crash | 12.8s | 5 |
+| Support · Sage | 13.0s | 5 |
+| Legal · Glitch | 13.0s | 5 |
+| Operations · Glitch | 17.6s | 7 |
+
+Every department gets the same five beats; Marketing has six because it holds two links and
+Operations seven because it carries the ending. No department was trimmed.
+
+**But roughly 104s of 112.8s is chat.** There are two `.go` beats in the whole run, both bolted
+onto Operations' chapter at the end: the Library gets ONE beat, then the Roadmap. Tasks, Company
+and Environment are never visited. Nine artifacts are produced and the place they live is a
+single passing beat inside another department's section.
+
+**Founder decision: the Library moment is NOT being added now.** Recorded as a known gap, not an
+oversight.
+
+## The opening
+
+Four new beats in the `Day one` chapter, after the existing `.hold`. English only, consistent
+with `frames`/`reports`.
+
+The three Codepet lines are the PRODUCT speaking, so they render as bare prose with **no speaker
+row** — that is the rule already shipped, not an exception. Only the founder's reply is
+right-aligned.
+
+**summary** (host)
+> Here's what I have so far: Murror — an app for people who feel lonely and don't know how to
+> reach each other. That came from onboarding, and it's all I know. No plan, no brand, no users.
+
+**prompt** (host)
+> Before I bring in the departments — tell me anything else that matters. Who is it for, what
+> have you tried, what worries you?
+
+**founderReply** (founder, `role: .me`)
+> It started because I couldn't tell anyone I was lonely without it sounding like a crisis. I
+> want something that helps people say the small version out loud.
+
+**setup** (host)
+> That's the thing to protect. Eight departments, nine questions — I'll bring each one in as it
+> becomes answerable, and you approve everything before it's filed.
+
+## The intent
+
+`.opening(OpeningLine)` where `enum OpeningLine { case summary, prompt, founderReply, setup }`.
+The player posts `summary`, `prompt` and `setup` with no `companionId` (product voice, no row)
+and `founderReply` with `role: .me`.
+
+Kept separate from `.petSays` because these lines belong to no department, and giving them a
+`deptKey` would be a lie the header rule would then have to special-case.
+
+## The budget
+
+Roughly +14s, taking the day to about **127s**. The ceiling moves from 120s to **140s** —
+deliberate headroom, not fitted to the result.
+
+This is the third raise: 75 → 120 → 140, against a ceiling a previous author set at 90s with the
+note *"a Ns simulation is one nobody watches twice."* The founder has been told twice and has not
+asked for it shorter. Recorded so the next person sees the trend rather than just the number.
+
+## Tests
+
+- The three host lines post with NO `companionId` and NO `deptName`; `founderReply` posts with
+  `role: .me`. Must go red if any of them regresses to a pet message.
+- The opening plays before any department speaks.
+- Runtime re-measured, read out of a failing assertion, not estimated.

@@ -32,6 +32,17 @@ enum PrototypeMode {
     /// autoplay without the fixtures behind it would drive the real Cloud Functions
     /// unattended, and two flags where one is meaningless alone is a state you can
     /// get half-right.
+    ///
+    /// **Amendment 4, 6 Sep — a deliberate, separately-flagged exception now exists.**
+    /// `CODEPET_LIVE_AI` (see `liveAI` below) puts autoplay through the real model instead
+    /// of `MockChat`'s canned replies — the founder asked for exactly that, having been
+    /// shown the trade-offs (unpredictable 20-60s runs, real spend, a run that can fail
+    /// mid-demo). That is precisely the shape this comment used to call unattended and
+    /// unsafe, and it still would be BY ACCIDENT. So `CODEPET_LIVE_AI` is deliberately NOT
+    /// added here: the implication between these three stays exactly what it was, and the
+    /// accident above still cannot happen by default. Live mode is reached only by setting
+    /// `CODEPET_LIVE_AI` on top of one of these three, never by any of these three alone —
+    /// a guard that is silently bypassed is worse than one that is openly qualified.
     static let launchKeys = ["CODEPET_MOCK_CHAT", "CODEPET_MOCK_FLOW", "CODEPET_MOCK_AUTOPLAY"]
 
     #if DEBUG
@@ -82,6 +93,19 @@ enum PrototypeMode {
         return store.bool(forKey: key)
     }
 
+    /// `-CODEPET_LIVE_AI YES` (or the persisted key, read through `store` like everything
+    /// else here): keeps every prototype fixture — the board, the nine-question chain, the
+    /// departments — but swaps the chat/task/VC TRANSPORT off `MockChat`'s canned replies
+    /// onto `LocalTransportRouter`, the founder's own Claude plan via the sidecars, the same
+    /// path the real product uses.
+    ///
+    /// **Deliberately its own flag, not a fourth entry in `launchKeys`.** See that property's
+    /// amended comment: live autoplay is the exact configuration the three-flag implication
+    /// was built to prevent by accident, so it is entered only on purpose, by setting this
+    /// flag ON TOP of one of the three — never implied by them, and never implying them back.
+    /// Meaningless with all three off: nothing schedules a chat/task/VC call for it to swap.
+    static var liveAI: Bool { store.bool(forKey: "CODEPET_LIVE_AI") }
+
     /// **Whether the demo starts at the COLD OPEN**, which is not the same question
     /// as whether fixtures are on — and collapsing the two was a regression CI caught
     /// on the first full run of the suite.
@@ -128,6 +152,7 @@ enum PrototypeMode {
     #else
     static var isLocked: Bool { true }
     static var isOn: Bool { false }
+    static var liveAI: Bool { false }
     static var startsAtColdOpen: Bool { false }
     @discardableResult
     static func set(_ on: Bool) -> Bool { false }

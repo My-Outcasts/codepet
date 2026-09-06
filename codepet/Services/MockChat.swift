@@ -59,7 +59,28 @@ enum MockChat {
     /// The master switch. `CODEPET_MOCK_FLOW` implies it, so the full-flow demo
     /// is ONE launch argument rather than two that must agree — two flags where
     /// one is meaningless without the other is a state you can get half-right.
+    ///
+    /// **Fuses two separate things — DATA and TRANSPORT — and only gates the first as of
+    /// Amendment 4 (6 Sep).** `enabled` stays `true` throughout live mode: the board, the
+    /// nine-question chain, the departments are still fixtures, and the demo still opens on
+    /// Murror. Whether a chat/task/VC CALL should also be mocked is a separate question,
+    /// answered by `usesMockTransport` below — every dispatch site must check THAT, not this.
     static var enabled: Bool { PrototypeMode.isOn }
+
+    /// Whether a chat/task/VC call should use the MOCK transport — `MockChat.reply`/`.stream`/
+    /// `.runResult`, `MockVirtualCompany.run` — rather than dispatch through
+    /// `ChatTransportRouter`/`LocalTransportRouter` the way the real product does.
+    ///
+    /// `false` under `CODEPET_LIVE_AI` even while `enabled` is `true` — that is the whole
+    /// swap the founder asked for: keep the fixtures on screen, spend the model on producing
+    /// a real answer instead of a canned one. See `PrototypeMode.liveAI`'s comment for why
+    /// that flag stays separate from `launchKeys` rather than folded into `enabled` itself.
+    ///
+    /// **The one gate every chat/task/VC dispatch site reads.** Not reimplemented at the call
+    /// site — `CompanyChatClient.send`/`.sendStream`, `RunTaskClient.run`, and both of
+    /// `CompanyStore`'s `vcRunner` assignments all check this exact property, so there is
+    /// exactly one place the swap can get wrong.
+    static var usesMockTransport: Bool { enabled && !PrototypeMode.liveAI }
 
     /// `-CODEPET_MOCK_FLOW YES` — start at the cold open and walk the whole
     /// product, with a fake company built from whatever gets typed in.

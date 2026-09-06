@@ -171,7 +171,10 @@ enum RunTaskClient {
 
     static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
         #if DEBUG
-        if MockChat.enabled { return await MockChat.runResult(req) }
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture board and
+        // tasks stay exactly as they are, but the run itself falls through to the founder's
+        // own Claude Code below instead of a canned deliverable — see `MockChat.usesMockTransport`.
+        if MockChat.usesMockTransport { return await MockChat.runResult(req) }
         #endif
         // The founder's own Claude Code first, when they granted it. Fail-open is preserved
         // (`nil` is what the caller turns into an honest error on the card), but the reason

@@ -379,7 +379,10 @@ final class CompanyStore: ObservableObject {
         // on the wire. Same reason `codeRunner` picks `MockCodeRunner` above.
         self.injectedVCRunner = vcRunner
         #if DEBUG
-        self.vcRunner = vcRunner ?? (MockChat.enabled
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture board stays
+        // fixture, but a convened room dispatches through `LocalTransportRouter` — the same
+        // path the real product uses — instead of `MockVirtualCompany`'s canned frames.
+        self.vcRunner = vcRunner ?? (MockChat.usesMockTransport
                                      ? { MockVirtualCompany.run($0) }
                                      : { LocalTransportRouter.runVirtualCompany($0) })
         #else
@@ -1259,7 +1262,10 @@ final class CompanyStore: ObservableObject {
         clearEngineeringRun()
         _codingRun = nil
         codingRunBag = nil
-        vcRunner = injectedVCRunner ?? (on
+        // Re-resolved off `usesMockTransport`, not the raw `on` this switch just set — see the
+        // init assignment above for why: `CODEPET_LIVE_AI` keeps prototype mode's fixtures
+        // ("on" stays true) while routing the room through `LocalTransportRouter`.
+        vcRunner = injectedVCRunner ?? (MockChat.usesMockTransport
                                         ? { MockVirtualCompany.run($0) }
                                         : { LocalTransportRouter.runVirtualCompany($0) })
 

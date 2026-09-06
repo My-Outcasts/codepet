@@ -55,6 +55,16 @@ final class MockFlowPlayer: ObservableObject {
     /// 90s leaves real headroom above that without ever hanging the player — past it the
     /// beat gives up loudly instead of waiting forever.
     private static let approvalWaitCeiling: TimeInterval = 90
+    /// **`CODEPET_LIVE_AI`'s own ceiling — not a reuse of `approvalWaitCeiling`.** That one is
+    /// sized off `CODEPET_SLOW_RUNS`'s worst case (a MOCKED run's own step timing, multiplied up
+    /// to 20×). A live run answers a different question: it is the founder's own Claude plan
+    /// replying for real, measured (Amendment 4, 6 Sep) at an unpredictable 20-60s with no
+    /// multiplier to bound it. Reusing 90s here would be exactly the "one flag standing in for
+    /// two meanings" mistake `PrototypeMode.launchKeys` was written to avoid — a mocked run's
+    /// ceiling and a live run's answer different questions and must be free to diverge. 180s
+    /// leaves 3× headroom above the measured worst case (60s) without ever hanging the player —
+    /// past it the beat gives up loudly (see the timeout branch below) instead of waiting forever.
+    private static let liveApprovalWaitCeiling: TimeInterval = 180
     private static let approvalPollInterval: UInt64 = 100_000_000  // 0.1s
 
     /// The in-flight `.approveNewestDraft` wait, if one is pending. Cancelled in `pause()`
@@ -212,10 +222,17 @@ final class MockFlowPlayer: ObservableObject {
             // inside the task later, by which point later beats may have advanced it) purely
             // so a timeout's log line names the beat that actually stalled.
             let beatIndex = index
+            // The run this beat is waiting on went out over `CODEPET_LIVE_AI` — see
+            // `liveApprovalWaitCeiling`'s comment for why that gets its own, larger bound
+            // rather than sharing `approvalWaitCeiling`. Read once, at the wait's start: the
+            // flag does not change mid-wait, and every other seam here reads it at the point
+            // the decision is made rather than mid-flight.
+            let isLiveRun = MockChat.enabled && PrototypeMode.liveAI
+            let ceiling = isLiveRun ? Self.liveApprovalWaitCeiling : Self.approvalWaitCeiling
             pendingApproval?.cancel()
             pendingApproval = Task { [weak self] in
                 guard let self, let cid = self.store?.companyId else { return }
-                let deadline = Date().addingTimeInterval(Self.approvalWaitCeiling)
+                let deadline = Date().addingTimeInterval(ceiling)
                 while !Task.isCancelled {
                     // Re-read `self.store` (rather than close over the `store` this `perform`
                     // call already unwrapped) each pass, matching how every sibling `Task {}`
@@ -234,7 +251,15 @@ final class MockFlowPlayer: ObservableObject {
                         // stalled" now has a task id and a beat index behind it instead of
                         // nothing.
                         let stillRunning = store.runningTaskIds.sorted().joined(separator: ", ")
-                        Self.log.error("approveNewestDraft: no draft after \(Self.approvalWaitCeiling, privacy: .public)s at beat \(beatIndex, privacy: .public) — still running: \(stillRunning.isEmpty ? "none" : stillRunning, privacy: .public) — nothing filed")
+                        Self.log.error("approveNewestDraft: no draft after \(ceiling, privacy: .public)s at beat \(beatIndex, privacy: .public) — still running: \(stillRunning.isEmpty ? "none" : stillRunning, privacy: .public) — nothing filed")
+                        // **On screen, not just in the log.** A demo that silently skips a beat
+                        // reads as a product that lost the work — this reuses the same caption
+                        // surface every other beat narrates through, rather than inventing a
+                        // second one. Left up until the next beat's own `performCurrentAndCaption`
+                        // overwrites it, same as any other caption.
+                        if self.captionsOn {
+                            self.caption = "This run took too long and timed out — nothing was filed for this step."
+                        }
                         return
                     }
                     try? await Task.sleep(nanoseconds: Self.approvalPollInterval)
@@ -242,8 +267,10 @@ final class MockFlowPlayer: ObservableObject {
             }
         case .convene(let ask):
             store.view = .chat
-            // Safe under the demo flags only because `vcRunner` resolves to
-            // `MockVirtualCompany` when `MockChat.enabled` — nothing on the wire.
+            // Nothing on the wire under plain prototype mode, because `vcRunner` resolves to
+            // `MockVirtualCompany` whenever `MockChat.usesMockTransport`. Under `CODEPET_LIVE_AI`
+            // that is deliberately no longer true — this beat convenes a real room on the
+            // founder's own Claude plan, same as `.runTask`/`.runBeacon` now run a real task.
             Task { await store.sendChat(ask, language: language, convenesRoom: true) }
         case .linkDemoFolder:
             // A real directory with a real file: `ProjectProbe` reads the disk, so an

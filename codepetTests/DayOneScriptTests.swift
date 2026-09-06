@@ -121,4 +121,55 @@ final class DayOneScriptTests: XCTestCase {
         if case .runTask = i { return true }
         return false
     }
+
+    /// Every department opens its own segment. Eight departments, and Marketing opens once
+    /// even though it holds two links.
+    func testEachDepartmentIsOpenedByItsOwnPet() {
+        var asked: [String] = []
+        for b in beats {
+            if case let .petAsks(deptKey) = b.intent {
+                asked.append(deptKey)
+                XCTAssertNotNil(DepartmentCompanions.companionId(for: deptKey),
+                                "\(deptKey) has no pet, so nobody can ask its question")
+            }
+        }
+        XCTAssertEqual(asked.count, 8, "no department opens twice")
+        XCTAssertEqual(Set(asked), Set(["mkt", "sales", "design", "eng", "fin", "support", "legal", "ops"]))
+    }
+
+    /// A pet asks BEFORE its link runs, never after.
+    func testThePetAsksBeforeTheWorkItIntroduces() {
+        var seenAsk = Set<String>()
+        for b in beats {
+            switch b.intent {
+            case let .petAsks(deptKey): seenAsk.insert(deptKey)
+            case let .runTask(id):
+                let dept = DemoProject.murrorDayOne.tasks.first { $0.id == id }?.dept
+                XCTAssertTrue(dept.map(seenAsk.contains) ?? false,
+                              "\(id) runs before its department was introduced")
+            default: break
+            }
+        }
+    }
+
+    /// Both languages, for every department that asks. An English question inside a chat
+    /// bubble in a bilingual app is the finding that was raised about the credit line on 5 Sep.
+    func testEveryQuestionExistsInBothLanguages() {
+        for b in beats {
+            guard case let .petAsks(deptKey) = b.intent else { continue }
+            for lang in [AppLanguage.en, AppLanguage.vi] {
+                let q = DayOneScript.question(for: deptKey, language: lang)
+                XCTAssertNotNil(q, "\(deptKey) has no question in \(lang)")
+                XCTAssertFalse(q?.isEmpty ?? true, "\(deptKey)'s \(lang) question is empty")
+            }
+        }
+    }
+
+    /// The two languages must not be the same string — a copy-paste that leaves English
+    /// in the vi slot passes a non-empty check and ships English to a Vietnamese founder.
+    func testTheTwoLanguagesActuallyDiffer() {
+        for (deptKey, pair) in DayOneScript.questions {
+            XCTAssertNotEqual(pair.en, pair.vi, "\(deptKey) has the same text in both languages")
+        }
+    }
 }

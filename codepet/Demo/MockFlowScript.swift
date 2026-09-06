@@ -33,6 +33,15 @@ enum MockFlowScript {
         /// so "run …", "roadmap …" and "long …" each exercise a different reply
         /// shape with no network.
         case say(String)
+        /// A department's pet opens its own segment by asking the question that link answers.
+        ///
+        /// Carries the DEPARTMENT KEY and nothing else. Two reasons, and both were paid for.
+        /// The cast is remapped from time to time (`eng` moved to byte and `fin` to crash on
+        /// 26 Aug), so a script naming pets directly would keep asking in a retired pet's name.
+        /// And the prose is resolved at play time because it is a CHAT MESSAGE, not a caption:
+        /// captions in this file are English-only by design, but a message in the transcript
+        /// has to be bilingual, and the beat tuple has no language dimension to carry it.
+        case petAsks(deptKey: String)
         /// Run the beacon — `RoadmapEngine.nextStep`, the same task the hero card
         /// offers. Produces a real draft through the fixture.
         case runBeacon

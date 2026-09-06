@@ -23,11 +23,44 @@ import Foundation
 /// question is the one this simulation refuses to answer for her.
 enum DayOneScript {
 
+    /// The question each department opens its segment with, in both languages.
+    ///
+    /// One table rather than sixteen literals in the beat list: the beats name departments, the
+    /// copy lives here, and a translator edits one place. Keyed by department key so a cast
+    /// remap cannot strand a question on a retired pet.
+    static let questions: [String: (en: String, vi: String)] = [
+        "mkt": (en: "Is this a real problem, or just yours? Talk to twelve people before you build anything.",
+                vi: "Đây là vấn đề có thật, hay chỉ của riêng bạn? Hãy nói chuyện với mười hai người trước khi xây bất cứ thứ gì."),
+        "sales": (en: "So who is this NOT for? The one person who found it insulting is worth more than the nine who liked it.",
+                  vi: "Vậy sản phẩm này KHÔNG dành cho ai? Một người thấy bị xúc phạm đáng giá hơn chín người khen hay."),
+        "design": (en: "Now that you know who it is for, what should it feel like?",
+                   vi: "Giờ bạn đã biết nó dành cho ai — vậy nó nên mang lại cảm giác gì?"),
+        "eng": (en: "What do you build it on — and does anything a person writes ever leave their device?",
+                vi: "Bạn sẽ xây trên nền gì — và những gì người ta viết có bao giờ rời khỏi máy của họ không?"),
+        "fin": (en: "What does that cost you a month? I cannot price anything until Byte has chosen.",
+                vi: "Mỗi tháng tốn bao nhiêu? Tôi không thể tính giá cho đến khi Byte chọn xong."),
+        "support": (en: "What happens when someone is genuinely struggling at 2am?",
+                    vi: "Chuyện gì xảy ra khi ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
+        "legal": (en: "Are you in trouble for holding their words? Say what you delete, and when.",
+                  vi: "Bạn có gặp rắc rối khi giữ lời của họ không? Hãy nói rõ bạn xoá gì, và khi nào."),
+        "ops": (en: "How do you ship without breaking it? Thursday, not Friday.",
+                vi: "Làm sao để phát hành mà không làm hỏng? Thứ Năm, đừng thứ Sáu."),
+    ]
+
+    /// The question for a department, or nil when it has none.
+    static func question(for deptKey: String, language: AppLanguage) -> String? {
+        guard let pair = questions[deptKey] else { return nil }
+        return language == .vi ? pair.vi : pair.en
+    }
+
     static let beats: [MockFlowScript.Beat] = build([
         ("Day one", 4.0, .hold,
          "Mona has a feeling and nothing else — people are lonely and don't know how to reach "
          + "each other. No plan, no brand, no idea where to start. This is the board a founder "
          + "actually begins with: empty."),
+
+        ("Is this real?", 2.4, .petAsks(deptKey: "mkt"),
+         "Nova opens. The first question is hers to answer, not Codepet's."),
 
         // Link 1 — Marketing · Nova. The founder's own work, and it stays that way.
         ("Is this real?", 4.2, .walkthroughFounderTask,
@@ -47,6 +80,9 @@ enum DayOneScript {
          "Approving files it. Nothing was written anywhere until that tap, and the next "
          + "department will read what she just approved."),
 
+        ("Who is it not for?", 2.2, .petAsks(deptKey: "sales"),
+         "The same pet, a different department — Nova speaks for both."),
+
         // Link 3 — Sales · Nova.
         ("Who is it not for?", 3.0, .runTask("mur-notfor"),
          "The scan turns up crowded ground, which sharpens the real question: who is this NOT "
@@ -56,6 +92,9 @@ enum DayOneScript {
          "A disqualifier list is a strange thing to be pleased about, and it is the first "
          + "artifact that makes the next four decisions easy."),
 
+        ("What should it feel like?", 2.2, .petAsks(deptKey: "design"),
+         "Luna reads the two artifacts before it."),
+
         // Link 4 — Design · Luna.
         ("What should it feel like?", 3.0, .runTask("mur-brand"),
          "Now that she knows who it is for and who it is not, Luna can shape how it feels. "
@@ -64,12 +103,18 @@ enum DayOneScript {
          "Four questions in, and each answer has been built on the last rather than started "
          + "from the brief again."),
 
+        ("What do I build it on?", 2.2, .petAsks(deptKey: "eng"),
+         "The first question with a bill attached."),
+
         // Link 5 — Engineering · Byte.
         ("What do I build it on?", 3.0, .runTask("mur-stack"),
          "The first question with a bill attached. Byte reads the direction and decides what "
          + "the app runs on — and whether anything a person writes ever leaves their device."),
         ("What do I build it on?", 2.8, .approveNewestDraft,
          "That decision sets the running cost, which is why Finance is next and not first."),
+
+        ("What does it cost me?", 2.2, .petAsks(deptKey: "fin"),
+         "Crash says why this could not have been asked earlier."),
 
         // Link 6 — Finance · Crash.
         ("What does it cost me?", 3.0, .runTask("mur-unitcost"),
@@ -78,6 +123,9 @@ enum DayOneScript {
         ("What does it cost me?", 2.8, .approveNewestDraft,
          "A number she can hold against a price — the first artifact that constrains rather "
          + "than describes."),
+
+        ("A bad night", 2.4, .petAsks(deptKey: "support"),
+         "The question a consumer app about loneliness cannot avoid."),
 
         // Link 7 — Support · Sage.
         ("A bad night", 3.2, .runTask("mur-crisis"),
@@ -88,6 +136,9 @@ enum DayOneScript {
          "Written down as policy, not left to a prompt. This is the artifact the board's one "
          + "founder-only task later asks a clinician to read."),
 
+        ("Am I in trouble?", 2.2, .petAsks(deptKey: "legal"),
+         "Glitch reads Sage's policy before answering."),
+
         // Link 8 — Legal · Glitch.
         ("Am I in trouble?", 3.0, .runTask("mur-deletion"),
          "She is now holding people's private words. Glitch reads the crisis policy and the "
@@ -95,6 +146,9 @@ enum DayOneScript {
         ("Am I in trouble?", 2.8, .approveNewestDraft,
          "The promise comes before the privacy policy that formalises it — which is still "
          + "sitting on her board, unwritten."),
+
+        ("How do I ship it?", 2.2, .petAsks(deptKey: "ops"),
+         "The same pet again, and the last question before the day hands one back."),
 
         // Link 9 — Operations · Glitch.
         ("How do I ship it?", 3.0, .runTask("mur-rhythm"),

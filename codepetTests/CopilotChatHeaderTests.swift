@@ -31,6 +31,19 @@ final class CopilotChatHeaderTests: XCTestCase {
         }
     }
 
-    // Task 4 adds `testEveryPetAskedQuestionResolvesToAPetHeader` here, once `.petAsks` exists
-    // on `DayOneScript`'s intent enum. Tracked in the progress ledger — do not add it early.
+    /// Goes red if a department stops attributing its message — the guard the rule-tests
+    /// cannot provide, because they assert a pure function that is already correct.
+    /// The SwiftUI row itself stays verified on screen; a unit test cannot reach it.
+    func testEveryPetAskedQuestionResolvesToAPetHeader() {
+        for b in DayOneScript.beats {
+            guard case let .petAsks(deptKey) = b.intent else { continue }
+            guard let companionId = DepartmentCompanions.companionId(for: deptKey),
+                  let dept = DepartmentCatalog.find(deptKey) else {
+                return XCTFail("\(deptKey) cannot be attributed at all")
+            }
+            let h = CodepetBrand.header(companionId: companionId, deptName: dept.name)
+            XCTAssertNotNil(h, "\(deptKey)'s question would render with no header")
+            XCTAssertNotEqual(h, "Codepet", "\(deptKey)'s question would be signed by the product")
+        }
+    }
 }

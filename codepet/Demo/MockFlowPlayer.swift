@@ -83,7 +83,17 @@ final class MockFlowPlayer: ObservableObject {
     /// before a pause/restart/jump can never land its approval into a player that has since
     /// stopped or moved on to a different beat — a wait that outlives a pause would be a new
     /// race, not a fix for this one.
-    private var pendingApproval: Task<Void, Never>?
+    private var pendingWait: Task<Void, Never>?
+
+    /// **Added for the artifact-lands-under-the-wrong-department race.** The in-flight wait for
+    /// a `.runTask` beat's OWN run to resolve, if one is pending. Same shape as `pendingWait`
+    /// above — bounded, cancellable, account-guarded, cancelled by `pause()` — but a SEPARATE
+    /// slot rather than reusing `pendingWait`: `schedule(after:)` needs to know, at the moment
+    /// it arms the beat's timer, whether THIS beat has a run to join before it may advance, and
+    /// sharing one property with `.approveNewestDraft`'s wait would make that ambiguous (is the
+    /// current occupant an approve-wait that should NOT gate advancing, or a run-wait that
+    /// should?). Two properties, one scheme, applied twice — not two schemes.
+    private var pendingRunWait: Task<Void, Never>?
 
     /// Which sequence is playing. The 24-beat tour by default; the day-one simulation when the
     /// day-one fixture is selected. A stored property rather than a computed one so a running
@@ -129,10 +139,12 @@ final class MockFlowPlayer: ObservableObject {
         isPlaying = false
         timer?.invalidate()
         timer = nil
-        // See `pendingApproval`'s doc comment: this is what makes a bounded wait safe
+        // See `pendingWait`'s doc comment: this is what makes a bounded wait safe
         // across pause/restart/jump instead of just bounded.
-        pendingApproval?.cancel()
-        pendingApproval = nil
+        pendingWait?.cancel()
+        pendingWait = nil
+        pendingRunWait?.cancel()
+        pendingRunWait = nil
     }
 
     func toggle() { isPlaying ? pause() : play() }
@@ -167,10 +179,59 @@ final class MockFlowPlayer: ObservableObject {
             isPlaying = false
             return
         }
+        let beat = beats[index]
         performCurrentAndCaption()
-        let seconds = beats[index].seconds
+        let seconds = beat.seconds
         index += 1
+        // **The race this guards.** `.runTask` used to fire `Task { await store.runTask(...) }`
+        // and let the TIMER below advance the player on the beat's authored `seconds` regardless
+        // — fine in mock mode, where a run finishes in ~2.5s against a 2.6s beat, but under
+        // `CODEPET_LIVE_AI` a real run takes 20-60s and the player was already several beats and
+        // departments further along by the time the draft actually landed in chat: the founder's
+        // own screenshot, a Sales artifact appearing under Support's message.
+        //
+        // `armRunTaskWait` arms `pendingRunWait` for THIS beat; `schedule(after:)` below is what
+        // actually joins it — see that function's comment for why waiting is a JOIN against the
+        // timer rather than something stacked after it.
+        if case .runTask(let id) = beat.intent {
+            armRunTaskWait(taskId: id, beatIndex: index - 1)
+        } else {
+            // A non-`.runTask` beat has nothing to join — clearing this stops a stale, already-
+            // resolved wait from a PRIOR run beat from being re-captured by `schedule` below.
+            pendingRunWait = nil
+        }
         schedule(after: seconds)
+    }
+
+    /// Arms `pendingRunWait`: a bounded, cancellable, account-guarded wait for `taskId` to leave
+    /// `runningTaskIds` — i.e. for its run to be DONE, success or failure either way. Extends the
+    /// same shape `.approveNewestDraft`'s wait (`pendingWait`) already uses — the two ceilings,
+    /// the poll interval, the account re-check, `.public` logging on timeout, `reportRunFailure`
+    /// — rather than inventing a second waiting scheme; only the READY condition differs, and
+    /// only because a run beat isn't waiting for a draft to appear, it's waiting for itself to
+    /// finish.
+    private func armRunTaskWait(taskId: String, beatIndex: Int) {
+        let isLiveRun = MockChat.enabled && PrototypeMode.liveAI
+        let ceiling = isLiveRun ? Self.liveApprovalWaitCeiling : Self.approvalWaitCeiling
+        pendingRunWait?.cancel()
+        pendingRunWait = Task { [weak self] in
+            guard let self, let cid = self.store?.companyId else { return }
+            let deadline = Date().addingTimeInterval(ceiling)
+            while !Task.isCancelled {
+                // Re-checked every pass, matching every sibling wait in this file: an account
+                // switch mid-run must bail rather than advance the player against the new
+                // account's state.
+                guard let store = self.store, store.companyId == cid else { return }
+                guard store.runningTaskIds.contains(taskId) else { return }  // done — success or failure
+                guard Date() < deadline else {
+                    Self.log.error("runTask: still running after \(ceiling, privacy: .public)s at beat \(beatIndex, privacy: .public), task \(taskId, privacy: .public) — advancing without it")
+                    self.reportRunFailure(
+                        "This run took too long and timed out — nothing was filed for this step.")
+                    return
+                }
+                try? await Task.sleep(nanoseconds: Self.approvalPollInterval)
+            }
+        }
     }
 
     private func schedule(after seconds: Double) {
@@ -179,8 +240,23 @@ final class MockFlowPlayer: ObservableObject {
         // Reduce Motion shortens the beats rather than disabling the walkthrough —
         // the captions are the content, and the motion is only the pacing.
         let delay = reduce ? min(seconds, 0.8) : seconds * pace
+        // Captured NOW, not read from `self.pendingRunWait` inside the timer's closure later:
+        // by the time the timer fires, a LATER beat could have armed (or cleared) a different
+        // wait, and this beat must join only the one that was actually pending for IT.
+        //
+        // **A join, not a second delay stacked after the first.** The timer already fires on the
+        // beat's own authored `seconds` — that has not changed, and in mock mode the run beneath
+        // it (~2.5s) is normally already done well before this fires, so `await runWait?.value`
+        // resolves instantly and the player advances exactly when it always did. Only when the
+        // run outlasts the beat's authored `seconds` (`CODEPET_LIVE_AI`'s 20-60s against a 2.6s
+        // beat) does this actually hold the player — which is the fix, not a tax on the common
+        // case.
+        let runWait = pendingRunWait
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.step() }
+            Task { @MainActor in
+                await runWait?.value
+                self?.step()
+            }
         }
     }
 
@@ -240,7 +316,7 @@ final class MockFlowPlayer: ObservableObject {
             guard let task = RoadmapEngine.nextStep(store.company.tasks) else { return }
             Task { await store.runTask(task, language: language) }
         case .approveNewestDraft:
-            // Waits for the draft rather than racing it — see `pendingApproval` and
+            // Waits for the draft rather than racing it — see `pendingWait` and
             // `approvalWaitCeiling`. `beatIndex` is captured now (not read from `self.index`
             // inside the task later, by which point later beats may have advanced it) purely
             // so a timeout's log line names the beat that actually stalled.
@@ -252,8 +328,8 @@ final class MockFlowPlayer: ObservableObject {
             // the decision is made rather than mid-flight.
             let isLiveRun = MockChat.enabled && PrototypeMode.liveAI
             let ceiling = isLiveRun ? Self.liveApprovalWaitCeiling : Self.approvalWaitCeiling
-            pendingApproval?.cancel()
-            pendingApproval = Task { [weak self] in
+            pendingWait?.cancel()
+            pendingWait = Task { [weak self] in
                 guard let self, let cid = self.store?.companyId else { return }
                 let deadline = Date().addingTimeInterval(ceiling)
                 while !Task.isCancelled {

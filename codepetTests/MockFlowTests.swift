@@ -346,4 +346,112 @@ final class MockFlowTests: XCTestCase {
         XCTAssertTrue(store.company.library.contains { $0.sourceTaskId == "mur-landscape" },
                       "approved but never actually filed to the library")
     }
+
+    // MARK: - a `.runTask` beat waits for its own run to resolve
+
+    /// **The bug this guards.** `MockFlowPlayer` fired `Task { await store.runTask(...) }` for a
+    /// `.runTask` beat and let its OWN timer advance the player on the beat's authored `seconds`
+    /// regardless of whether that run had actually finished. In mock mode a run resolves in
+    /// ~2.5s against a ~2.6s beat, so this never showed; under `CODEPET_LIVE_AI` a real run takes
+    /// 20-60s, and the player kept walking through several more departments' beats — posting
+    /// their `asks`/`frames` lines into the SAME transcript — while the earlier run was still in
+    /// flight. When that run finally resolved, its draft (and the approval that follows it)
+    /// landed underneath whatever department's message was on screen by then: the founder's own
+    /// screenshot, a Sales artifact ("Who Murror Is Not For — Sales Disqualifiers") appearing
+    /// under Support · Sage's message.
+    ///
+    /// **Why this is a DIFFERENT bug than the one `testApproveBeatFilesTheDraftEvenWhenTheRunIs
+    /// StillSlowerThanTheBeat` above guards.** That test's `.approveNewestDraft` wait already
+    /// makes the draft get approved and filed correctly no matter how late it arrives — the
+    /// deliverable is never lost. This bug is about WHERE it lands: the player must not walk
+    /// through later departments' chat lines while an earlier department's run is still pending,
+    /// even though that earlier run's draft will eventually be approved just fine. So the signal
+    /// this test checks is not "did it get filed" (already covered) but "did the NEXT department
+    /// speak before this run resolved" — Sales · Nova's `asks` line must not appear in the
+    /// transcript while `mur-landscape`'s run (Marketing · Nova, the day-one chain's first
+    /// `.runTask`) is still in `runningTaskIds`.
+    ///
+    /// **Reproduced the same way the sibling test above does**: a very low `pace` shrinks the
+    /// script's own real playback far below the injected `taskRunner`'s artificial delay (1.8s
+    /// here — long enough to leave a wide, reliable window; short enough to keep this test fast),
+    /// which is the same shape `CODEPET_LIVE_AI`'s real 20-60s produces against a live beat, just
+    /// scaled down. `execStepNanos`/`execDoneBeatNanos` are zeroed so the injected sleep is the
+    /// only source of delay in the run itself.
+    ///
+    /// Verified red by hand: reverting `MockFlowPlayer.step()`/`schedule(after:)` to the
+    /// fire-and-forget shape (`Task { await store.runTask(...) }` inside `perform()`, with
+    /// `step()` scheduling the next beat unconditionally) makes this fail — the low pace races
+    /// the player straight through Marketing's report and Sales' opening while `mur-landscape` is
+    /// still running.
+    func testARunTaskBeatDoesNotAdvanceUntilItsOwnRunResolves() async throws {
+        let previousProject = PrototypeMode.store.string(forKey: DemoProject.key)
+        defer {
+            if let previousProject { PrototypeMode.store.set(previousProject, forKey: DemoProject.key) }
+            else { PrototypeMode.store.removeObject(forKey: DemoProject.key) }
+        }
+        DemoProject.select("murror-day-one")
+
+        let previousStepNanos = CompanyStore.execStepNanos
+        let previousDoneBeatNanos = CompanyStore.execDoneBeatNanos
+        defer {
+            CompanyStore.execStepNanos = previousStepNanos
+            CompanyStore.execDoneBeatNanos = previousDoneBeatNanos
+        }
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+
+        let project = DemoProject.murrorDayOne
+        let seed = CompanyState(brief: project.brief, departments: [], library: project.library(),
+                                stage: .building, companionId: "byte", onboardedAt: Date(),
+                                tasks: project.tasks)
+        let store = CompanyStore(
+            loader: { _ in seed },
+            tasksSaver: { _, _ in true },
+            chatSender: { await MockChat.reply($0) },
+            chatStreamer: { MockChat.stream($0) },
+            // 1.8s: comfortably longer than the ~1.2s the six beats ahead of `mur-landscape`'s
+            // OWN run take to play at the pace below, short enough to keep the test itself fast.
+            taskRunner: { req in
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                let entry = project.deliverable(for: req.taskTitle)
+                return RunTaskResponse(kind: entry.kind, title: req.taskTitle,
+                                       body: MockChat.fill(entry.body, title: req.taskTitle))
+            },
+            librarySaver: { _, _ in true },
+            firstApprovalSaver: { _, _ in true },
+            decisionsSaver: { _, _ in true },
+            decisionExtractor: { _, _ in [] })
+        await store.hydrate(companyId: "u")
+
+        let player = MockFlowPlayer()
+        player.attach(store: store, language: .en)
+        // Brisk-below-1.0, same tool the sibling test uses: shrinks every authored beat to a
+        // handful of milliseconds, so the script's own pacing cannot be what holds it back —
+        // only the fix (or its absence) can. At this pace the six beats ahead of `mur-landscape`'s
+        // OWN run (24.4 authored seconds: the opening, Marketing's `asks`/`frames`, and
+        // `mur-interviews`'s record) play in ~1.22s real time, so the run itself starts at
+        // roughly that mark and — with the injected 1.8s sleep above — resolves at roughly 3.0s.
+        player.pace = 0.05
+
+        player.play()
+
+        // 2.2s: past the ~1.22s it takes to REACH `mur-landscape`'s run, comfortably short of
+        // the ~3.0s it takes to RESOLVE — the window both assertions below depend on. Under the
+        // unfixed handler, Sales · Nova's own `asks` (35.0 authored seconds — 1.75s real at this
+        // pace) has ALREADY played by 2.2s regardless of whether the run has resolved, which is
+        // exactly the bug: the player raced two chapters ahead of a run still in flight.
+        try? await Task.sleep(nanoseconds: 2_200_000_000)
+
+        XCTAssertTrue(store.runningTaskIds.contains("mur-landscape"),
+                     "the run should still be in flight at this point in the window this test "
+                     + "depends on, or the assertion below proves nothing")
+
+        let salesAsk = DayOneScript.line(for: "sales", .asks, language: .en)
+        XCTAssertFalse(store.chatMessages.contains { $0.text == salesAsk },
+                      "the player advanced into Sales · Nova's chapter while mur-landscape's run "
+                      + "was still in flight — a `.runTask` beat must not advance until its own "
+                      + "run resolves")
+
+        player.pause()
+    }
 }

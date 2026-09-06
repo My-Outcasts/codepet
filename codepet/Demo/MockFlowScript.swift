@@ -50,6 +50,16 @@ enum MockFlowScript {
         /// carry it. `frames` and `reports` are English-only by founder decision (6 Sep) — the
         /// same lookup just returns English regardless of `language` for those two lines.
         case petSays(deptKey: String, line: DayOneScript.Line)
+        /// One of the four lines that open the day, before any department speaks.
+        ///
+        /// **Amendment 2, 6 Sep.** Kept separate from `.petSays` because these lines belong to
+        /// no department — `summary`, `prompt` and `setup` are the PRODUCT talking, and
+        /// `founderReply` is the founder's own words. Giving any of them a `deptKey` would be a
+        /// lie the header rule would then have to special-case: `CodepetBrand.header` already
+        /// returns nil for a message with neither `companionId` nor `deptName`, which is what
+        /// makes the three product lines render as bare prose with no speaker row, and that is
+        /// the rule as shipped, not an exception added for this beat.
+        case opening(DayOneScript.OpeningLine)
         /// Run the beacon — `RoadmapEngine.nextStep`, the same task the hero card
         /// offers. Produces a real draft through the fixture.
         case runBeacon

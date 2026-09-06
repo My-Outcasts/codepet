@@ -194,10 +194,45 @@ final class DayOneScriptTests: XCTestCase {
     /// reason, but keeping two differently-numbered budget assertions on one value is the kind
     /// of duplication that invites the next raise to update one and miss the other. Its floor
     /// check is folded in below.
+    ///
+    /// **Amendment 2, 6 Sep — the third raise.** The four opening beats added ~14s, so the
+    /// ceiling moves again, 120s to 140s — deliberate headroom, not fitted to the result. This
+    /// is the third raise on this value (75 → 120 → 140); the founder has been told twice and
+    /// has not asked for it shorter.
     func testTheDayFitsItsTimeBudget() {
         let total = beats.reduce(0) { $0 + $1.seconds }
-        XCTAssertLessThanOrEqual(total, 120.0, "day one runs \(total)s; budget is 120s")
+        XCTAssertLessThanOrEqual(total, 140.0, "day one runs \(total)s; budget is 140s")
         XCTAssertGreaterThan(total, 30, "seventeen speaking beats and nine links cannot honestly play in under 30s")
+    }
+
+    /// **Amendment 2, 6 Sep — the opening must come first.** No `.petSays` beat may precede any
+    /// `.opening` beat: the whole point of the amendment is that the founder reads context
+    /// before any department speaks, not after.
+    func testTheOpeningPlaysBeforeAnyDepartmentSpeaks() {
+        var sawPetSays = false
+        var sawOpening = false
+        for b in beats {
+            switch b.intent {
+            case .opening:
+                XCTAssertFalse(sawPetSays, "an opening beat plays after a department already spoke")
+                sawOpening = true
+            case .petSays:
+                sawPetSays = true
+            default: break
+            }
+        }
+        XCTAssertTrue(sawOpening, "the day-one script has no opening beats at all")
+    }
+
+    /// The four opening beats are exactly those four lines, in the order the design doc gives
+    /// them — a scrambled or duplicated line would pass the "before any department" test above
+    /// but still tell the wrong story.
+    func testTheOpeningIsExactlyTheFourLinesInOrder() {
+        let opening: [DayOneScript.OpeningLine] = beats.compactMap {
+            if case let .opening(line) = $0.intent { return line }
+            return nil
+        }
+        XCTAssertEqual(opening, [.summary, .prompt, .founderReply, .setup])
     }
 
     /// Caption readability is a budget independent of the total-runtime one above: a beat

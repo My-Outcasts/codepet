@@ -38,6 +38,43 @@ enum DayOneScript {
         case asks, frames, reports
     }
 
+    /// Which of the four opening lines this is. Shared with `MockFlowScript.Intent`
+    /// (`.opening(_:)`) the same way `Line` is shared with `.petSays(deptKey:line:)`.
+    ///
+    /// **Amendment 2, 6 Sep — the day needs an opening.** The founder objected to the cold
+    /// start: after onboarding, the transcript's first line used to be Marketing's `asks`
+    /// ("Is this a real problem, or just mine?") with no context at all. These four beats give
+    /// it one, before any department speaks.
+    enum OpeningLine: Equatable {
+        case summary, prompt, founderReply, setup
+    }
+
+    /// The opening's four lines, verbatim from the design doc. `summary`, `prompt` and `setup`
+    /// are the PRODUCT talking — `MockFlowPlayer` posts them with no `companionId` and no
+    /// `deptName`, which renders as bare prose with no speaker row (`CodepetBrand.header`
+    /// returns nil for exactly that combination — the rule as shipped, not a new exception).
+    /// `founderReply` is the founder's own words and posts `role: .me`, the same way
+    /// `.petSays(line: .asks)` already does. English only, consistent with `frames`/`reports`.
+    static func openingText(_ line: OpeningLine) -> String {
+        switch line {
+        case .summary:
+            return "Here's what I have so far: Murror — an app for people who feel lonely and "
+                + "don't know how to reach each other. That came from onboarding, and it's all I "
+                + "know. No plan, no brand, no users."
+        case .prompt:
+            return "Before I bring in the departments — tell me anything else that matters. Who "
+                + "is it for, what have you tried, what worries you?"
+        case .founderReply:
+            return "It started because I couldn't tell anyone I was lonely without it sounding "
+                + "like a crisis. I want something that helps people say the small version out "
+                + "loud."
+        case .setup:
+            return "That's the thing to protect. Eight departments, nine questions — I'll bring "
+                + "each one in as it becomes answerable, and you approve everything before it's "
+                + "filed."
+        }
+    }
+
     /// One department's three lines. `asks` is bilingual because it ships in the transcript as
     /// a chat message a Vietnamese founder has to read; `frames` and `reports` are English only
     /// — founder decision, 6 Sep, recorded in the design doc: writing sixteen more reviewed
@@ -140,6 +177,20 @@ enum DayOneScript {
          "Mona has a feeling and nothing else — people are lonely and don't know how to reach "
          + "each other. No plan, no brand, no idea where to start. This is the board a founder "
          + "actually begins with: empty."),
+
+        // Amendment 2, 6 Sep — the opening. Four beats, before any department speaks: the
+        // founder objected to the cold start onto Marketing's `asks` with no context at all.
+        // `summary`, `prompt` and `setup` are the PRODUCT talking (no speaker row); only
+        // `founderReply` is right-aligned. Durations are the readability floor (chars/45 ÷ 1.5
+        // at Slow) with real margin, not the bare minimum — these are long lines and the
+        // budget test below is what actually enforces the floor.
+        ("Day one", 4.4, .opening(.summary), DayOneScript.openingText(.summary)),
+
+        ("Day one", 3.0, .opening(.prompt), DayOneScript.openingText(.prompt)),
+
+        ("Day one", 3.2, .opening(.founderReply), DayOneScript.openingText(.founderReply)),
+
+        ("Day one", 3.4, .opening(.setup), DayOneScript.openingText(.setup)),
 
         ("Marketing · Nova", 2.4, .petSays(deptKey: "mkt", line: .asks),
          "Mona asks her own first question — right-aligned, no speaker row, same as "

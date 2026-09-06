@@ -296,6 +296,17 @@ final class MockFlowPlayer: ObservableObject {
             } else {
                 store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
             }
+        case .opening(let line):
+            store.view = .chat
+            let text = DayOneScript.openingText(line)
+            // `founderReply` is the founder's own words — `role: .me`, right-aligned, exactly
+            // like `.petSays(line: .asks)`. `summary`/`prompt`/`setup` are the PRODUCT talking:
+            // no companion, no department — see `postScriptedHostMessage`.
+            if line == .founderReply {
+                store.postScriptedFounderMessage(text)
+            } else {
+                store.postScriptedHostMessage(text)
+            }
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the

@@ -3070,6 +3070,18 @@ final class CompanyStore: ObservableObject {
     func postScriptedFounderMessage(_ text: String) {
         chatMessages.append(CopilotMessage(role: .me, text: text))
     }
+
+    /// Post a pre-written PRODUCT-voiced message with no model call — the day-one opening's
+    /// `summary`/`prompt`/`setup` beats (Amendment 2, 6 Sep). These lines belong to no
+    /// department, so unlike `postScriptedCompanionMessage` there is no `companionId`/
+    /// `deptName` to carry: `role: .companion` with both nil, which is what makes
+    /// `CodepetBrand.header` return nil and the line render as bare prose with no speaker
+    /// row — the rule already shipped, not a case added here. Matches the existing
+    /// `role: .companion, text: text` convention used elsewhere in this file for an
+    /// unattributed reply (e.g. `sendChat`'s own generic-reply path).
+    func postScriptedHostMessage(_ text: String) {
+        chatMessages.append(CopilotMessage(role: .companion, text: text))
+    }
     #endif
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,

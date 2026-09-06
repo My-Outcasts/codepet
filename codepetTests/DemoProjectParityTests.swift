@@ -32,6 +32,25 @@ final class DemoProjectParityTests: XCTestCase {
         }
     }
 
+    /// Extends the guard above to the day-one script: a bolded title in any of a department's
+    /// three lines (`asks`, `frames`, `reports`) must exist on the DAY-ONE board specifically —
+    /// not the mid-flight one, since day one is the temporally-wrong board this whole change
+    /// exists to stop naming (see the design doc's account of Marketing's mid-flight-only
+    /// "brand direction Luna set" reply).
+    func testDayOneScriptOnlyNamesTasksOnTheDayOneBoard() {
+        let titles = Set(DemoProject.murrorDayOne.tasks.map(\.title))
+        for (dept, entry) in DayOneScript.script {
+            for text in [entry.asks.en, entry.frames, entry.reports] {
+                let bolded = text.components(separatedBy: "**")
+                    .enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
+                for name in bolded where name.count > 12 {
+                    XCTAssertTrue(titles.contains(name),
+                                  "day-one \(dept) names \"\(name)\", which is not on its board")
+                }
+            }
+        }
+    }
+
     /// Every department with a runnable task should have something to say when its chip is armed.
     func testEveryDepartmentOnTheBoardHasAReply() {
         for p in projects {

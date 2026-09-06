@@ -3051,7 +3051,7 @@ final class CompanyStore: ObservableObject {
 
     #if DEBUG
     /// Post a pre-written, pet-attributed message with no model call — the day-one
-    /// walkthrough's `.petAsks` beat, where the "reply" is scripted copy rather than a live
+    /// walkthrough's `.petSays` beat, where the "reply" is scripted copy rather than a live
     /// turn. `chatMessages` stays `private(set)` outside this file (session-only transcript
     /// state, mutated only through the store's own methods), so this is the seam a caller in
     /// another file uses instead of appending directly.

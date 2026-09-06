@@ -275,13 +275,15 @@ final class MockFlowPlayer: ObservableObject {
             // relative to the commit root and the apply step re-joins them to it.
             // Absolute paths made every file miss and the beat ended in a failure card.
             Task { await store.codingRun.approve(acceptedPaths: run.acceptedPaths) }
-        case let .petAsks(deptKey):
+        case let .petSays(deptKey, line):
             store.view = .chat
+            // An unmapped department returns without posting rather than posting
+            // unattributed — same fallthrough `.petAsks` had.
             guard let companionId = DepartmentCompanions.companionId(for: deptKey),
                   let dept = DepartmentCatalog.find(deptKey),
-                  let question = DayOneScript.question(for: deptKey, language: language)
+                  let text = DayOneScript.line(for: deptKey, line, language: language)
             else { return }
-            store.postScriptedCompanionMessage(question, companionId: companionId, deptName: dept.name)
+            store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the

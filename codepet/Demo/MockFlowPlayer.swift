@@ -286,7 +286,8 @@ final class MockFlowPlayer: ObservableObject {
                 await store.sendChat(
                     language == .vi ? "Hướng dẫn tôi làm: \(task.title)"
                                     : "Walk me through: \(task.title)",
-                    language: language)
+                    language: language,
+                    aboutTask: task)
             }
         case .runTask(let id):
             store.view = .chat

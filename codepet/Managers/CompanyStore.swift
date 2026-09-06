@@ -781,7 +781,8 @@ final class CompanyStore: ObservableObject {
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
                   founderAsk: String? = nil, convenesRoom: Bool = false,
                   pinned: [ContextPin] = [],
-                  attachments: [ChatAttachment] = []) async {
+                  attachments: [ChatAttachment] = [],
+                  aboutTask: RoadmapTask? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -797,7 +798,8 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
                           display: words,
-                          founderAsk: words, pinned: pinned, attachments: attachments)
+                          founderAsk: words, pinned: pinned, attachments: attachments,
+                          aboutTask: aboutTask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -930,6 +932,23 @@ final class CompanyStore: ObservableObject {
     /// reintroduce the same class of bug the next time a department has no pet. Product is one.
     private func actingDeptKey(text: String, department: Department?) -> String? {
         department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
+    }
+
+    /// Who speaks for this turn: the task's own department when the turn is about a task,
+    /// else the chip-or-keyword rule.
+    ///
+    /// **Task first, and the order is the point.** A task's `dept` is a recorded fact; a
+    /// keyword match is an inference over prose. Asking "walk me through <task>" names no
+    /// department, so inference returned nil and the reply signed itself with the product's
+    /// name on a Marketing task — the bug the founder photographed on 6 Sep.
+    ///
+    /// `internal` rather than `private` so the resolution is testable without a view. The two
+    /// inputs stay separate for the same reason `actingSpecialist` and `actingDeptKey` are
+    /// separate: who speaks and what they know are different questions.
+    func speakerFor(task: RoadmapTask?, text: String,
+                    department: Department?) -> (companionId: String, deptName: String)? {
+        if let task, let spec = taskSpecialist(for: task) { return spec }
+        return actingSpecialist(text: text, department: department)
     }
 
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
@@ -1505,7 +1524,8 @@ final class CompanyStore: ObservableObject {
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
                              founderAsk: String? = nil, pinned: [ContextPin] = [],
-                             attachments: [ChatAttachment] = []) async {
+                             attachments: [ChatAttachment] = [],
+                             aboutTask: RoadmapTask? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         // The same total-base64 rule the composer refuses with, applied again at the
         // wire. Not belt-and-braces for its own sake: the composer is only ONE caller,
@@ -1560,7 +1580,7 @@ final class CompanyStore: ObservableObject {
         // was Byte writing in Nova's name. Whoever leads the turn now leads it on the wire
         // too, and the department rides along so the CF can ground the answer in that
         // department's expertise.
-        let specialist = actingSpecialist(text: text, department: department)
+        let specialist = speakerFor(task: aboutTask, text: text, department: department)
         let deptKey = actingDeptKey(text: text, department: department)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue,
@@ -1992,7 +2012,7 @@ final class CompanyStore: ObservableObject {
     /// a guard of its own — the host-shadow rule, deleted 26 Aug. Now nothing suppresses it
     /// anywhere, and there is no longer an asymmetry between chat and runs for this comment to
     /// explain.
-    private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
+    func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
         guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
               let companionId = DepartmentCompanions.companionId(for: deptKey) else { return nil }
         return (companionId, dept.name)

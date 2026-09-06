@@ -201,8 +201,14 @@ enum DayOneScript {
             frames: "Byte built exactly what I asked for, and seeing it told me something the "
                 + "direction alone couldn't: it isn't soft yet. Same page, same words — less "
                 + "contrast, more room around everything, nothing that reads as urgent.",
-            reports: "Lighter, slower, more space around every line. Still a draft, same as the "
-                + "first pass — you approve before it's the page anyone else sees."
+            // Amendment 5, 6 Sep — the redesign is what files the page, not the first build.
+            // Byte's build stays a draft on purpose (see `extraAppearances["Code · Byte"]`'s
+            // comment above it) so THIS revision has something to revise through the product's
+            // own path (`redoDraft(reviseNote:)`) rather than a mechanism that doesn't exist for
+            // an already-filed deliverable. This line used to say "still a draft" — now it's the
+            // moment that actually approves it, so the copy has to say so.
+            reports: "Lighter, slower, more space around every line — and now it's filed. One "
+                + "page, revised once, approved once: the page anyone else will see."
         ),
     ]
 
@@ -484,6 +490,25 @@ enum DayOneScript {
         ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
          "One page, Luna's direction, Nova's positioning line. A draft until you approve "
          + "it — same as everything else today."),
+
+        // **The page is actually BUILT here, not merely described.** `.codeRun` above drives
+        // the coding agent in Developer mode; it produces a code change, never a `.site`
+        // deliverable. Without this pair the demo talked about a landing page for two
+        // chapters and never produced one — no card, nothing for "open in Chrome" to open,
+        // and a flow that still effectively ended at the roadmap. The founder found that.
+        //
+        // `mur-site` is `who: .draft` and depends on `mur-brand` + `mur-landscape`, both
+        // filed during the nine — so it is genuinely runnable at exactly this point, rather
+        // than being force-fed. Its `dept` is `mkt`, so the artifact lands as NOVA's: the
+        // landing page is Marketing's task. Byte linked the folder and wrote the code; the
+        // page itself belongs to the department whose board carries it.
+        ("Code · Byte", 2.8, .runTask("mur-site"),
+         "And the page itself gets made — the board's own tenth task, the one the beacon "
+         + "has been pointing at since the roadmap."),
+
+        ("Code · Byte", 2.8, .approveNewestDraft,
+         "Approving files it. Now there is a real page in the Library, and a button that "
+         + "opens it in Chrome like anything else on the web."),
 
         // Amendment 4, 6 Sep — the redesign. Byte built it; Luna is who set the visual
         // direction earlier in the day and who looks at the result against that standard.

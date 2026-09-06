@@ -32,8 +32,25 @@ final class DayOneScriptTests: XCTestCase {
             }
         }
         XCTAssertEqual(record, 1, "only `mur-interviews` is the founder's own work")
-        XCTAssertEqual(runs, 8, "the other eight links are Codepet runs")
-        XCTAssertEqual(approvals, 8, "each run is approved; the record files itself")
+        // **Nine, not eight, and the ninth is deliberate.** Eight are the chain's own links.
+        // The ninth is `mur-site` — the landing page, the TENTH question the roadmap beacon
+        // points at — run in the Code chapter after the hand-off. Re-scoped rather than
+        // relaxed when that was added: the counts below still pin both halves separately, so
+        // losing a chain link or gaining a stray run each still goes red.
+        XCTAssertEqual(runs, 9, "eight chain links plus the landing page")
+        XCTAssertEqual(approvals, 9, "each run is approved; the record files itself")
+    }
+
+    /// The eight chain runs and the one page build, counted apart — so neither can absorb a
+    /// mistake in the other. `testItHasOneRecordEightRunsAndEightApprovals` sees only a total.
+    func testTheChainRunsEightAndThePageIsTheNinth() {
+        var chainRuns = 0, pageRuns = 0
+        for b in beats {
+            guard case let .runTask(id) = b.intent else { continue }
+            if DemoProject.dayOneChain.contains(id) { chainRuns += 1 } else { pageRuns += 1 }
+        }
+        XCTAssertEqual(chainRuns, 8, "the chain's own eight Codepet links")
+        XCTAssertEqual(pageRuns, 1, "exactly one build outside the chain: the landing page")
     }
 
     /// **The guard that replaces an assumption.** An earlier draft used `.runBeacon` and trusted
@@ -50,8 +67,15 @@ final class DayOneScriptTests: XCTestCase {
             default: break
             }
         }
-        XCTAssertEqual(acted, DemoProject.dayOneChain,
+        // **The chain still comes first, in order, entire** — that is the claim this test was
+        // written for and it is unchanged. What follows it is the tenth question: `mur-site`,
+        // the landing page the roadmap beat has been pointing at. Asserted as a suffix rather
+        // than folded into the equality, so a chain link that goes missing or reorders still
+        // fails here exactly as before.
+        XCTAssertEqual(Array(acted.prefix(DemoProject.dayOneChain.count)), DemoProject.dayOneChain,
                        "the script's order must BE the chain, not resemble it")
+        XCTAssertEqual(Array(acted.dropFirst(DemoProject.dayOneChain.count)), ["mur-site"],
+                       "after the chain, the script builds the landing page and nothing else")
     }
 
     /// Every run beat must be followed by its approval before the next link runs — otherwise the

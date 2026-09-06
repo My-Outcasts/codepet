@@ -161,9 +161,54 @@ enum DayOneScript {
         ),
     ]
 
+    /// **Amendment 3, 6 Sep — Byte's second and third appearances.** Environment and Code are
+    /// new chapters that come AFTER Operations hands the day back, and Byte carries both —
+    /// continuity, not a new cast member: it chose the stack four questions earlier, so it is
+    /// the voice that knows what the environment needs and what the first code should be.
+    ///
+    /// `deptKey` alone ("eng") cannot disambiguate a third appearance from the first — `script`
+    /// holds exactly one triple per department. Keyed by CHAPTER instead, because that is the
+    /// one piece of context `MockFlowPlayer` already has at the call site and the one thing that
+    /// actually distinguishes "Engineering · Byte" asking about the stack from "Environment ·
+    /// Byte" asking what needs to be linked. English only, per the founder's standing decision
+    /// recorded in the design doc for this amendment — unlike `script`, there is no `vi` slot to
+    /// leave empty because none was ever asked for.
+    static let extraAppearances: [String: (asks: String, frames: String, reports: String)] = [
+        "Environment · Byte": (
+            asks: "What do I need set up before any of this can run?",
+            frames: "I picked the stack four questions ago. Before I can touch code, this "
+                + "company needs a folder to work in — and you decide which tools it is "
+                + "allowed to use.",
+            reports: "Linked. Three tools on, the rest off until they earn it. Nothing here "
+                + "needs a card yet."
+        ),
+        "Code · Byte": (
+            asks: "Can you build the landing page?",
+            frames: "That is the beacon's tenth question — how people hear about it. I work "
+                + "on your machine, I show you every change, and nothing is saved until you "
+                + "say so.",
+            reports: "One page, Luna's direction, Nova's positioning line. A draft until you "
+                + "approve it — same as everything else today."
+        ),
+    ]
+
     /// The text for one department's line, or nil when the department has none. Only `asks`
     /// varies by language; `frames` and `reports` return their English string regardless.
-    static func line(for deptKey: String, _ line: Line, language: AppLanguage) -> String? {
+    ///
+    /// `chapter` is nil by default so every existing caller (including `DayOneScriptTests`
+    /// calling this directly) keeps resolving against `script` exactly as before. When a chapter
+    /// IS given and it names one of Byte's extra appearances, that takes priority over the
+    /// department's original ("Engineering · Byte") triple — it is a different chapter asking a
+    /// different question, not the same one replayed.
+    static func line(for deptKey: String, _ line: Line, language: AppLanguage,
+                      chapter: String? = nil) -> String? {
+        if let chapter, let extra = extraAppearances[chapter] {
+            switch line {
+            case .asks: return extra.asks
+            case .frames: return extra.frames
+            case .reports: return extra.reports
+            }
+        }
         guard let entry = script[deptKey] else { return nil }
         switch line {
         case .asks: return language == .vi ? entry.asks.vi : entry.asks.en
@@ -371,6 +416,66 @@ enum DayOneScript {
         ("Operations · Glitch", 2.8, .go(.roadmap),
          "The beacon has moved to her tenth question — how people hear about it. Codepet "
          + "points at the landing page and waits."),
+
+        // Amendment 3, 6 Sep — the environment, the code, and a slimmer bar. The roadmap beat
+        // above already hands off into this: Environment and Code are two new chapters that
+        // pick up her tenth question rather than just naming it. Byte carries both — it chose
+        // the stack four questions ago, so it is the voice that knows what the environment
+        // needs and what the first code should be.
+        //
+        // `.go(.environment)` and `.linkDemoFolder` are not decoration before `.codeRun` — per
+        // the design doc, `Views/Environment/ProjectLinker.swift` is the real prerequisite for
+        // a code run: without a linked folder, `startBuild` lands in `.noProject` and refuses.
+        // Showing that precondition is what keeps the demo honest with the founder's own
+        // constraint that whatever runs in the prototype also works in actual use.
+        ("Environment · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
+         "Mona's tenth question finally gets a place to land — Byte answers again, the same "
+         + "pet who chose the stack."),
+
+        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
+         "I picked the stack four questions ago. Before I can touch code, this company needs "
+         + "a folder to work in — and you decide which tools it is allowed to use."),
+
+        ("Environment · Byte", 2.6, .go(.environment),
+         "Byte opens Environment — the surface where a folder gets linked and its tools get "
+         + "chosen. Nothing here has been possible until now."),
+
+        ("Environment · Byte", 2.8, .linkDemoFolder,
+         "Linking a folder is not a formality — without one, a code run refuses outright. "
+         + "The same folder this chapter links is the one the next chapter builds on."),
+
+        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .reports),
+         "Linked. Three tools on, the rest off until they earn it. Nothing here needs a "
+         + "card yet."),
+
+        ("Code · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
+         "Her tenth question, asked plainly. Byte already knows what this needs to run on."),
+
+        ("Code · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
+         "That is the beacon's tenth question — how people hear about it. I work on your "
+         + "machine, I show you every change, and nothing is saved until you say so."),
+
+        ("Code · Byte", 2.6, .mode(.developer),
+         "Developer wakes already linked — the folder from the last chapter, not a fresh "
+         + "ask. The board's tenth question finally has somewhere to run."),
+
+        ("Code · Byte", 2.8, .codeRun("Build the Murror landing page — Luna's direction, Nova's positioning line"),
+         "Byte describes the change and it does not start. The plan shows first — which "
+         + "files, what it may run — and waits for a tap that hasn't happened yet."),
+
+        ("Code · Byte", 2.8, .confirmCodeRun,
+         "That tap is hers. Only now does the run actually start, naming its steps as it "
+         + "goes — a process to watch, not a trick performed off screen."),
+
+        ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
+         "One page, Luna's direction, Nova's positioning line. A draft until you approve "
+         + "it — same as everything else today."),
+
+        // The closing beat. Stays inside Code's chapter rather than opening an eleventh —
+        // same rule the Operations hand-back above already follows: no new department
+        // content plays here, so no new chapter should appear.
+        ("Code · Byte", 2.6, .go(.roadmap),
+         "Ten questions in, and the board has moved."),
     ])
 
     /// Numbers the beats so `id` cannot drift from position — the same shape `MockFlowScript`

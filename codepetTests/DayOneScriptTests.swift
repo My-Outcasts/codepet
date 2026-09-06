@@ -8,6 +8,18 @@ final class DayOneScriptTests: XCTestCase {
 
     private var beats: [MockFlowScript.Beat] { DayOneScript.beats }
 
+    /// The original nine-question chain's eight department chapters — the chapters
+    /// `testExactlyEightDepartmentsSpeakThreeTimesEach` and its neighbours were written to
+    /// guard, before Amendment 3 added "Environment · Byte" and "Code · Byte" after them.
+    /// Byte speaks a second and third time in those two new chapters (see
+    /// `DayOneScript.extraAppearances`), which is exactly why any test asserting "each
+    /// department speaks exactly three times, in order" has to be scoped to THESE chapters —
+    /// otherwise Byte's legitimate encore reads as the same bug the test exists to catch.
+    private let chainChapters: Set<String> = [
+        "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
+        "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
+    ]
+
     /// Link 1 is founder-only, so it is RECORDED, not run. The other eight are run and approved.
     func testItHasOneRecordEightRunsAndEightApprovals() {
         var record = 0, runs = 0, approvals = 0
@@ -87,12 +99,21 @@ final class DayOneScriptTests: XCTestCase {
         }
     }
 
-    /// Exactly 8 departments speak, and each exactly three times: `asks`, `frames`, `reports`.
-    /// The load-bearing count this branch adds — a department missing one of its three lines,
-    /// or gaining a fourth, goes red here.
+    /// Exactly 8 departments speak, and each exactly three times: `asks`, `frames`, `reports` —
+    /// over the nine-question chain's own eight chapters.
+    ///
+    /// **Re-scoped, Amendment 3 (6 Sep).** This used to count every `.petSays` beat in the
+    /// whole script, global. Amendment 3 gives Byte two more chapters after the chain ends
+    /// ("Environment · Byte", "Code · Byte"), each with its own `asks`/`frames`/`reports` — real
+    /// continuity (Byte chose the stack four questions ago), not a bug, but it made Byte speak
+    /// nine times script-wide and this test go red for the wrong reason: the claim it guards —
+    /// every department IN THE CHAIN speaks exactly three times — was still true. Scoping to
+    /// `chainChapters` restores that claim without weakening it: delete a line from any of the
+    /// eight chain chapters, or add a fourth, and this still goes red. The two new chapters get
+    /// their own count assertions below instead of being folded into this one silently.
     func testExactlyEightDepartmentsSpeakThreeTimesEach() {
         var counts: [String: Int] = [:]
-        for b in beats {
+        for b in beats where chainChapters.contains(b.chapter) {
             if case let .petSays(deptKey, _) = b.intent { counts[deptKey, default: 0] += 1 }
         }
         XCTAssertEqual(counts.count, 8, "expected exactly 8 speaking departments, found \(counts.count)")
@@ -101,13 +122,41 @@ final class DayOneScriptTests: XCTestCase {
         }
     }
 
+    /// **Amendment 3, 6 Sep.** "Environment · Byte" is Byte's second appearance — its own
+    /// `asks`/`frames`/`reports`, same shape as a chain department, just not one of the nine
+    /// questions. Goes red if a line is lost, duplicated, or another department's key leaks in.
+    func testEnvironmentChapterHasExactlyBytesThreeLines() {
+        var counts: [String: Int] = [:]
+        for b in beats where b.chapter == "Environment · Byte" {
+            if case let .petSays(deptKey, _) = b.intent { counts[deptKey, default: 0] += 1 }
+        }
+        XCTAssertEqual(counts, ["eng": 3], "Environment · Byte must be exactly Byte, three lines")
+    }
+
+    /// **Amendment 3, 6 Sep.** "Code · Byte" is Byte's third appearance, same guard as above.
+    func testCodeChapterHasExactlyBytesThreeLines() {
+        var counts: [String: Int] = [:]
+        for b in beats where b.chapter == "Code · Byte" {
+            if case let .petSays(deptKey, _) = b.intent { counts[deptKey, default: 0] += 1 }
+        }
+        XCTAssertEqual(counts, ["eng": 3], "Code · Byte must be exactly Byte, three lines")
+    }
+
     /// **The load-bearing ordering guard.** Per department: `asks` → `frames` → its link(s) →
     /// `reports`. A report placed before its department's work is filed must fail here —
     /// verified red before this change existed, since nothing enforced the order at all.
     /// Marketing holds two links (`mur-interviews`, `mur-landscape`) and reports once, only
     /// after BOTH are filed — this is what actually checks that, rather than trusting the
     /// beat list's visual order.
+    ///
+    /// **Scoped to `chainChapters`, Amendment 3 (6 Sep).** Byte's Environment/Code encores
+    /// (re)use `deptKey: "eng"` for `.petSays`, so a state machine walking every beat would see
+    /// "eng" already `.reported` from the Engineering chapter and flag the Environment chapter's
+    /// `asks` as "asks twice" — a false positive, not a real ordering violation. Restricting the
+    /// walk to the chain's own eight chapters keeps the guard aimed at what it was built for.
     func testEachDepartmentSpeaksAsksFramesWorkReportInOrder() {
+        let chainBeats = beats.filter { chainChapters.contains($0.chapter) }
+
         // Every task id day one acts on, grouped by the department that owns it — the set of
         // work a department's `reports` beat must have seen filed before it plays.
         var workByDept: [String: Set<String>] = [:]
@@ -122,7 +171,7 @@ final class DayOneScriptTests: XCTestCase {
         var filedByDept: [String: Set<String>] = [:]
         var lastRunId: String?
 
-        for b in beats {
+        for b in chainBeats {
             switch b.intent {
             case let .petSays(deptKey, line):
                 let current = stage[deptKey] ?? .notStarted
@@ -172,15 +221,21 @@ final class DayOneScriptTests: XCTestCase {
         }
     }
 
-    /// The chapter bar reads as the opener plus eight departments, not twenty-one questions.
+    /// The chapter bar reads as the opener plus eight departments plus Amendment 3's two new
+    /// chapters, not twenty-one questions.
+    ///
+    /// **Amendment 3, 6 Sep.** Was "one opener + eight departments" (9 total) before Environment
+    /// and Code were appended after the roadmap hand-back; this pins the full 11-chapter list so
+    /// a chapter silently going missing, duplicated, or reordered still fails here.
     func testTheChapterBarIsTheOpenerPlusEightDepartments() {
         var seen = Set<String>()
         let chapters = beats.compactMap { seen.insert($0.chapter).inserted ? $0.chapter : nil }
-        XCTAssertEqual(chapters.count, 9, "one opener + eight departments")
+        XCTAssertEqual(chapters.count, 11, "one opener + eight departments + Environment + Code")
         XCTAssertEqual(chapters.first, "Day one")
         XCTAssertEqual(Array(chapters.dropFirst()), [
             "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
             "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
+            "Environment · Byte", "Code · Byte",
         ])
     }
 
@@ -199,9 +254,15 @@ final class DayOneScriptTests: XCTestCase {
     /// ceiling moves again, 120s to 140s — deliberate headroom, not fitted to the result. This
     /// is the third raise on this value (75 → 120 → 140); the founder has been told twice and
     /// has not asked for it shorter.
+    ///
+    /// **Amendment 3, 6 Sep — the fourth raise.** Environment and Code add ~30s (measured:
+    /// 126.8s → 157.2s), so the ceiling moves again, 140s to 170s. This is the fourth raise
+    /// (75 → 120 → 140 → 170) against a prior author's 90s ceiling. The lever offered three
+    /// times and not taken: cutting the eight department `frames` lines would return ~25s —
+    /// the founder's own copy, not cut unless she says so.
     func testTheDayFitsItsTimeBudget() {
         let total = beats.reduce(0) { $0 + $1.seconds }
-        XCTAssertLessThanOrEqual(total, 140.0, "day one runs \(total)s; budget is 140s")
+        XCTAssertLessThanOrEqual(total, 170.0, "day one runs \(total)s; budget is 170s")
         XCTAssertGreaterThan(total, 30, "seventeen speaking beats and nine links cannot honestly play in under 30s")
     }
 
@@ -256,11 +317,15 @@ final class DayOneScriptTests: XCTestCase {
                       "the opening states the problem this simulation exists for: \(first.caption)")
     }
 
-    /// The ending hands the next move back rather than taking it.
-    func testItEndsPointingAtTheLandingPage() throws {
+    /// **Amendment 3, 6 Sep.** The day used to hand the next move back by NAMING the landing
+    /// page and stopping; now it actually builds it (Environment · Byte, Code · Byte) and closes
+    /// on the board having moved, verbatim from the design doc's closing beat.
+    func testItEndsWithTheBoardHavingMoved() throws {
         let last = try XCTUnwrap(beats.last)
-        XCTAssertTrue(last.caption.lowercased().contains("landing page"),
-                      "the bridge to the tour must be named: \(last.caption)")
+        XCTAssertEqual(last.caption, "Ten questions in, and the board has moved.")
+        guard case .go(.roadmap) = last.intent else {
+            return XCTFail("the closing beat must be `.go(.roadmap)`, found \(last.intent)")
+        }
     }
 
     private func isRun(_ i: MockFlowScript.Intent) -> Bool {
@@ -270,9 +335,16 @@ final class DayOneScriptTests: XCTestCase {
 
     /// Every department opens its own segment. Eight departments, and Marketing opens once
     /// even though it holds two links.
+    ///
+    /// **Scoped to `chainChapters`, Amendment 3 (6 Sep).** Byte's Environment and Code chapters
+    /// each open with their own `.petSays(deptKey: "eng", line: .asks)` — a real, deliberate
+    /// second and third "opening" for Byte specifically, not the "no department opens twice"
+    /// bug this test exists to catch within the nine-question chain. Restricted to the chain's
+    /// eight chapters, the count stays exactly 8 and a genuine duplicate WITHIN the chain still
+    /// fails it.
     func testEachDepartmentIsOpenedByItsOwnPet() {
         var asked: [String] = []
-        for b in beats {
+        for b in beats where chainChapters.contains(b.chapter) {
             if case let .petSays(deptKey, .asks) = b.intent {
                 asked.append(deptKey)
                 XCTAssertNotNil(DepartmentCompanions.companionId(for: deptKey),
@@ -383,5 +455,66 @@ final class DayOneScriptTests: XCTestCase {
                             "\(chapter) is offered in the day-one menu but unreachable — "
                             + "jumping to it would silently no-op")
         }
+    }
+
+    // MARK: - Amendment 3, 6 Sep — Environment and Code
+
+    /// The environment beat navigates to `AppView.environment` — the real destination
+    /// `Views/Environment/ProjectLinker.swift` lives behind. Goes red if it ever points
+    /// somewhere else.
+    func testTheEnvironmentChapterNavigatesToTheEnvironmentDestination() {
+        let destinations: [AppView] = beats
+            .filter { $0.chapter == "Environment · Byte" }
+            .compactMap { if case let .go(v) = $0.intent { return v }; return nil }
+        XCTAssertEqual(destinations, [.environment],
+                       "Environment · Byte must navigate to exactly `.go(.environment)`")
+    }
+
+    /// The code beat enters Developer mode. Goes red if it ever enters `.ask` instead, or
+    /// stops entering a mode at all.
+    func testTheCodeChapterEntersDeveloperMode() {
+        let modes: [WorkspaceMode] = beats
+            .filter { $0.chapter == "Code · Byte" }
+            .compactMap { if case let .mode(m) = $0.intent { return m }; return nil }
+        XCTAssertEqual(modes, [.developer],
+                       "Code · Byte must enter exactly `.mode(.developer)`")
+    }
+
+    /// **The precondition ordering.** `Views/Environment/ProjectLinker.swift` is the real
+    /// prerequisite for a code run — without a linked folder, `startBuild` lands in
+    /// `.noProject` and refuses. `.linkDemoFolder` must therefore occur strictly before
+    /// `.codeRun` in the beat sequence. Verified red by hand: swapping the two beats in
+    /// `DayOneScript.beats` during development made this fail exactly as expected, then the
+    /// swap was reverted.
+    func testTheFolderIsLinkedBeforeTheCodeRun() {
+        var linkIndex: Int?
+        var runIndex: Int?
+        for (i, b) in beats.enumerated() {
+            if case .linkDemoFolder = b.intent, linkIndex == nil { linkIndex = i }
+            if case .codeRun = b.intent, runIndex == nil { runIndex = i }
+        }
+        guard let link = linkIndex, let run = runIndex else {
+            return XCTFail("expected both `.linkDemoFolder` and `.codeRun` in the script")
+        }
+        XCTAssertLessThan(link, run,
+                          "`.linkDemoFolder` (beat \(link)) must precede `.codeRun` (beat \(run)) "
+                          + "— it is the real precondition for a code run, not decoration")
+    }
+
+    /// Nothing starts the run except the founder's own tap: `.confirmCodeRun` must follow
+    /// `.codeRun`, in the same chapter, with nothing else acting on the run in between.
+    func testConfirmCodeRunFollowsCodeRun() {
+        var runIndex: Int?
+        var confirmIndex: Int?
+        for (i, b) in beats.enumerated() {
+            if case .codeRun = b.intent, runIndex == nil { runIndex = i }
+            if case .confirmCodeRun = b.intent, confirmIndex == nil { confirmIndex = i }
+        }
+        guard let run = runIndex, let confirm = confirmIndex else {
+            return XCTFail("expected both `.codeRun` and `.confirmCodeRun` in the script")
+        }
+        XCTAssertLessThan(run, confirm,
+                          "`.confirmCodeRun` (beat \(confirm)) must follow `.codeRun` (beat \(run)) "
+                          + "— nothing starts without the founder's tap")
     }
 }

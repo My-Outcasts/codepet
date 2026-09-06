@@ -166,7 +166,7 @@ final class MockFlowPlayer: ObservableObject {
         guard index < beats.count else { return }
         let beat = beats[index]
         caption = captionsOn ? beat.caption : nil
-        perform(beat.intent)
+        perform(beat.intent, chapter: beat.chapter)
     }
 
     // MARK: - Intents
@@ -182,7 +182,12 @@ final class MockFlowPlayer: ObservableObject {
     /// directly (`.petSays(deptKey:line:)` in particular) without going through the
     /// Timer-scheduled `play()`, which is real `Foundation`/`AppKit` run-loop machinery
     /// a test has no business depending on just to prove which method a beat calls.
-    func perform(_ intent: MockFlowScript.Intent) {
+    ///
+    /// `chapter` defaults to nil so every existing direct call (`DayOneBridgeTests` drives
+    /// `.petSays(deptKey: "mkt", ...)` this way) keeps resolving exactly as before — only
+    /// `.petSays` reads it, and only to pick between Byte's original chapter and one of its
+    /// Amendment 3 encores (see `DayOneScript.extraAppearances`).
+    func perform(_ intent: MockFlowScript.Intent, chapter: String? = nil) {
         guard let store else { return }
         switch intent {
         case .hold:
@@ -286,7 +291,7 @@ final class MockFlowPlayer: ObservableObject {
             // unattributed — same fallthrough `.petAsks` had.
             guard let companionId = DepartmentCompanions.companionId(for: deptKey),
                   let dept = DepartmentCatalog.find(deptKey),
-                  let text = DayOneScript.line(for: deptKey, line, language: language)
+                  let text = DayOneScript.line(for: deptKey, line, language: language, chapter: chapter)
             else { return }
             // Amendment, 6 Sep: `asks` is the FOUNDER's own question — no speaker row, no
             // companion attribution. `frames`/`reports` are still the department answering,

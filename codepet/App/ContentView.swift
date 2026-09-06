@@ -74,8 +74,14 @@ struct ContentView: View {
     ///
     /// Without the second case the bootstrapping gate compares `"prototype"` against a nil
     /// uid, never matches, and holds the demo on the splash screen forever.
-    static func expectedCompanyId(uid: String?, prototypeOn: Bool) -> String? {
+    /// **`locked` outranks a signed-in uid**, and forgetting that deadlocked the splash.
+    /// A launch-forced demo refuses the real session in the `currentUser` handler below, so
+    /// nothing ever hydrates that uid — and a gate still waiting for it holds "Loading…"
+    /// forever. The two must agree on which company the demo is: when a launch argument
+    /// forced prototype mode, it is always the fixture, whoever happens to be signed in.
+    static func expectedCompanyId(uid: String?, prototypeOn: Bool, locked: Bool = false) -> String? {
         #if DEBUG
+        if locked, prototypeOn { return prototypeCompanyId }
         if uid == nil, prototypeOn { return prototypeCompanyId }
         #endif
         return uid
@@ -83,14 +89,20 @@ struct ContentView: View {
 
     private var expectedCompanyId: String? {
         Self.expectedCompanyId(uid: authManager.currentUser?.uid,
-                               prototypeOn: PrototypeMode.isOn)
+                               prototypeOn: PrototypeMode.isOn,
+                               locked: PrototypeMode.isLocked)
     }
 
     /// True while the fixture shell is standing in for a signed-out account — and therefore
     /// the one state in which the hydrate below must be driven by something other than the
     /// `currentUser` publisher.
-    static func prototypeStandIn(signedIn: Bool, prototypeOn: Bool) -> Bool {
+    /// **Also true while LOCKED and signed in**, which the original `!signedIn` form got
+    /// wrong. A launch-forced demo now refuses the real session in the `currentUser`
+    /// handler below; if this still returned false for a signed-in founder, BOTH hydrate
+    /// paths would be shut and the app would sit on the splash forever. It did, and it did.
+    static func prototypeStandIn(signedIn: Bool, prototypeOn: Bool, locked: Bool = false) -> Bool {
         #if DEBUG
+        if locked, prototypeOn { return true }
         return !signedIn && prototypeOn
         #else
         return false
@@ -99,7 +111,8 @@ struct ContentView: View {
 
     private var prototypeStandIn: Bool {
         Self.prototypeStandIn(signedIn: authManager.currentUser != nil,
-                              prototypeOn: PrototypeMode.isOn)
+                              prototypeOn: PrototypeMode.isOn,
+                              locked: PrototypeMode.isLocked)
     }
 
     var body: some View {

@@ -35,6 +35,17 @@ final class MockFlowPlayer: ObservableObject {
     @Published var captionsOn = true
     /// Slow / Steady / Brisk — the prototype's `PACE`.
     @Published var pace: Double = 1.0
+    /// **Set once a scripted run fails or times out, and sticky for the rest of THIS
+    /// playthrough.** Both scripts close on a caption that narrates unqualified success —
+    /// day-one's "Ten questions in, and the board has moved.", the tour's "Every success
+    /// needed the founder's approval" — text authored assuming every run before it landed.
+    /// Under `CODEPET_LIVE_AI` a run can fail (see `reportRunFailure`), and a demo that
+    /// plays that line anyway over a board that did NOT move is worse than one that stops:
+    /// it tells the founder the product worked when it didn't. Read by
+    /// `performCurrentAndCaption` to override exactly that closing line; every other
+    /// beat's authored caption is untouched. Reset by `restart()` so a replay isn't
+    /// haunted by the previous run's failure.
+    @Published private(set) var hadRunFailure = false
 
     private var timer: Timer?
     private weak var store: CompanyStore?
@@ -135,6 +146,7 @@ final class MockFlowPlayer: ObservableObject {
         pause()
         index = 0
         caption = nil
+        hadRunFailure = false
     }
 
     func jump(toChapter chapter: String) {
@@ -175,7 +187,18 @@ final class MockFlowPlayer: ObservableObject {
     private func performCurrentAndCaption() {
         guard index < beats.count else { return }
         let beat = beats[index]
-        caption = captionsOn ? beat.caption : nil
+        // The closing beat of either script is the one line that narrates the WHOLE
+        // walkthrough as landed — it is authored for the case where nothing above it
+        // failed. `hadRunFailure` means that assumption is false, so this is not the
+        // moment to play it: same principle as the timeout branch, applied to the one
+        // beat that would otherwise claim a completion the founder didn't get.
+        if hadRunFailure, index == beats.count - 1 {
+            caption = captionsOn
+                ? "This walkthrough didn't finish as scripted — a run above failed, so the board hasn't moved as far as this story expects."
+                : nil
+        } else {
+            caption = captionsOn ? beat.caption : nil
+        }
         perform(beat.intent, chapter: beat.chapter)
     }
 
@@ -243,23 +266,31 @@ final class MockFlowPlayer: ObservableObject {
                         await store.approveDraft(messageId: id)
                         return
                     }
+                    // **A run that already ENDED without a draft failed — it did not merely
+                    // take a while.** `runningTaskIds` is inserted at the top of
+                    // `CompanyStore.runTask` and only removed after `produceDraftInline`
+                    // returns — success or failure — and that path always spends several
+                    // hundred ms on its own exec-step reveal first. So an empty set here can
+                    // never be this beat's run not having started yet; it is that run having
+                    // already finished (an instant 401, an offline sidecar, whatever) and
+                    // posted its own honest "Couldn't generate…" bubble to chat with no draft
+                    // behind it. Reported immediately, on the shape Task 2's diagnosis
+                    // actually produced, instead of silently waiting out the full ceiling for
+                    // a run that already told the founder it failed.
+                    if store.runningTaskIds.isEmpty {
+                        Self.log.error("approveNewestDraft: run ended with no draft at beat \(beatIndex, privacy: .public) — treating as a failed run, not a stall")
+                        self.reportRunFailure(
+                            "This run didn't produce anything — nothing was filed for this step.")
+                        return
+                    }
                     guard Date() < deadline else {
-                        // `runningTaskIds` is exactly the task(s) this beat was waiting ON — a
-                        // beat that gave up with something still running names the run that
-                        // never finished; an empty set means the run already ended (or never
-                        // started) without ever producing a draft. Either way, "the demo
-                        // stalled" now has a task id and a beat index behind it instead of
-                        // nothing.
+                        // A genuine stall: something is still running and never finished
+                        // inside the ceiling. `runningTaskIds` names it, for the same reason
+                        // the fast-fail branch above names the beat.
                         let stillRunning = store.runningTaskIds.sorted().joined(separator: ", ")
                         Self.log.error("approveNewestDraft: no draft after \(ceiling, privacy: .public)s at beat \(beatIndex, privacy: .public) — still running: \(stillRunning.isEmpty ? "none" : stillRunning, privacy: .public) — nothing filed")
-                        // **On screen, not just in the log.** A demo that silently skips a beat
-                        // reads as a product that lost the work — this reuses the same caption
-                        // surface every other beat narrates through, rather than inventing a
-                        // second one. Left up until the next beat's own `performCurrentAndCaption`
-                        // overwrites it, same as any other caption.
-                        if self.captionsOn {
-                            self.caption = "This run took too long and timed out — nothing was filed for this step."
-                        }
+                        self.reportRunFailure(
+                            "This run took too long and timed out — nothing was filed for this step.")
                         return
                     }
                     try? await Task.sleep(nanoseconds: Self.approvalPollInterval)
@@ -410,6 +441,18 @@ final class MockFlowPlayer: ObservableObject {
                            "-c", "user.email=walkthrough@codepet.local",
                            "commit", "-m", "the folder as it was before Codepet touched it"],
                           in: path)
+    }
+
+    /// Surface a failed/timed-out run **on screen, not just in the log.** A demo that
+    /// silently skips a beat reads as a product that lost the work — this reuses the same
+    /// caption surface every other beat narrates through, rather than inventing a second
+    /// one. Left up until the next beat's own `performCurrentAndCaption` overwrites it,
+    /// same as any other caption. Also flips `hadRunFailure`, which is the sticky half of
+    /// this fix — see its doc comment.
+    private func reportRunFailure(_ message: String) {
+        hadRunFailure = true
+        guard captionsOn else { return }
+        caption = message
     }
 
     /// The newest reply carrying a draft that is still awaiting approval. Searched

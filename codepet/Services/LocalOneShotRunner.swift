@@ -192,6 +192,7 @@ enum LocalOneShotRunner {
             log.error("one-shot \(op, privacy: .public) refused: \(failure.localizedDescription, privacy: .public)")
             throw failure
         }
+        log.error("one-shot \(op, privacy: .public) succeeded: \(out.count, privacy: .public) bytes")
         return out
     }
 }

@@ -32,13 +32,39 @@ import Foundation
 /// fixtures. That still spends the plan, so it still needs a "yes" — but the founder
 /// gave that yes on the command line, deliberately, the moment they typed the flag.
 /// `-CODEPET_LIVE_AI` IS the grant, in exactly the sense this file's opening paragraph
-/// requires: it does not exist until they set it, it is per-launch (never persisted, so
-/// it cannot outlive the session the way a stored `cp_claude_authorised_*` key would),
-/// and it is scoped to `ContentView.prototypeCompanyId` — the literal `"prototype"` —
-/// and nothing else. Every real company id still resolves only from the stored
-/// per-company grant below; this default closure is the ONLY place that reads
-/// `PrototypeMode.liveAI`, so a real company can never pick up an implicit grant this
-/// way, and the injected-closure seam a test supplies still overrides it completely.
+/// requires: it does not exist until they set it, and it is per-launch (never persisted,
+/// so it cannot outlive the session the way a stored `cp_claude_authorised_*` key would).
+///
+/// **Amendment 2, 6 Sep — the exception is keyed on PROTOTYPE MODE, not on a literal id.**
+/// This was first written as `$0 == ContentView.prototypeCompanyId, PrototypeMode.liveAI`,
+/// on the assumption that prototype mode always hydrates under that literal string. It
+/// does — but ONLY while nobody is signed in (`ContentView.prototypeStandIn` requires
+/// `!signedIn`). A founder who is actually signed in and flips prototype mode on from
+/// inside the running app (`PrototypeModeToggle`, no sign-out involved) keeps her REAL
+/// uid as `companyId` the entire time. Under the literal-id check, her `-CODEPET_LIVE_AI`
+/// consent — or the in-app toggle's runtime equivalent — silently granted nothing: the
+/// grant checked an id prototype mode wasn't using, `transport()` fell through to
+/// `.cloud`, and the founder's own signed-in token made the Cloud Function call actually
+/// go out and 401 (the API key was deleted 26 Aug), instead of failing at the offline
+/// guard the literal-id version was supposed to hit. Same dead-end this file's opening
+/// paragraph describes for a missing grant, reached from the opposite direction: a grant
+/// that exists but is keyed to an id nobody is using.
+///
+/// The fix asks the actual question — "is this prototype mode's live-AI switch on?" —
+/// rather than "does this specific id match a literal string prototype mode sometimes
+/// uses." `PrototypeMode.isOn` is still required alongside `liveAI` (see that property's
+/// own doc comment: `liveAI` is meaningless with every `launchKeys` flag off, since
+/// nothing schedules a call for it to swap), so this still cannot fire for a founder who
+/// never turned prototype mode on at all — it only widens WHICH id it fires for once she
+/// has.
+///
+/// This is still not a device-global bypass. It is gated on a mode + flag that, once on,
+/// answers true for every id a `CompanyStore` in this process could possibly carry — but
+/// `PrototypeMode.allowsCloudWrites` is false for that entire duration, so there is no
+/// path from this to a real company document; the only thing "authorised" changes here
+/// is which TRANSPORT a call takes, never what gets persisted. A real company's stored
+/// grant is untouched either way: with prototype mode off, this branch never runs, full
+/// stop, and the stored check below is the only answer, exactly as before this amendment.
 struct ClaudeCodeAuthorisation {
     static func key(_ companyId: String) -> String { "cp_claude_authorised_\(companyId)" }
 
@@ -46,12 +72,12 @@ struct ClaudeCodeAuthorisation {
     /// the behaviour we want, not an accident to work around: a founder who has never
     /// seen the toggle has never agreed.
     ///
-    /// The `liveAI` check runs first and only ever ADDS an authorisation for the
-    /// prototype id — it can never take one away, and it never runs for any other id,
-    /// so a real company's stored grant (or lack of one) is untouched either way.
-    var isAuthorised: (String) -> Bool = {
-        if $0 == ContentView.prototypeCompanyId, PrototypeMode.liveAI { return true }
-        return UserDefaults.standard.bool(forKey: key($0))
+    /// The `liveAI` check runs first and only ever ADDS an authorisation while prototype
+    /// mode is on — it can never take one away, and it never runs at all with prototype
+    /// mode off, so a real company's stored grant (or lack of one) is untouched either way.
+    var isAuthorised: (String) -> Bool = { companyId in
+        if PrototypeMode.isOn, PrototypeMode.liveAI { return true }
+        return UserDefaults.standard.bool(forKey: key(companyId))
     }
     var setAuthorised: (String, Bool) -> Void = { UserDefaults.standard.set($1, forKey: key($0)) }
 }

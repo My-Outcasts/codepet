@@ -188,6 +188,28 @@ struct ContentView: View {
             // currentUserId, so a PIN session can't inherit or overwrite a real
             // account's working data. (They're still excluded from cloud backup.)
 
+            // **A launch-forced demo must not be hijacked by a stale real session.**
+            // Firebase Auth restores whatever was last signed in on this Mac and fires
+            // this publisher on ANY launch — prototype or not, there is no "signed out
+            // for the demo" state to request. Without this guard, a dev machine that had
+            // ever signed in for real re-fires this handler moments after the prototype
+            // hydrate below (`.task(id: prototypeStandIn)`), and `hydrate(companyId:
+            // user.uid)` silently repoints `companyStore.companyId` — and therefore
+            // `LocalTransportRouter.activeCompanyId`, the exact mirror `applyCloudAIBlock`
+            // sets — from `"prototype"` to that real uid. Every one-shot run then resolves
+            // the REAL company's (almost always ungranted) authorisation instead of the
+            // prototype exception, falls through to the Cloud Function, and gets an
+            // instant 401 (its API key was deleted — see CLAUDE.md) that reads onscreen as
+            // "Couldn't generate that just now — try again." with zero spend and zero
+            // delay. Found by adding `os.Logger` lines to `LocalTransportRouter.apply` and
+            // watching `activeCompanyId` flip within 100ms of launch.
+            //
+            // Only guards the LOCKED case (a launch argument forced prototype mode on).
+            // Toggling prototype mode at runtime while genuinely signed in is a different,
+            // legitimate path — the founder is real, and their own grant should keep
+            // routing their own transport — so that case must keep hydrating normally.
+            guard !PrototypeMode.isLocked else { return }
+
             let storedUID = PersistenceManager.shared.currentUserId
             let isDifferentUser = storedUID != nil && storedUID != user.uid
 

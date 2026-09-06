@@ -177,7 +177,12 @@ final class MockFlowPlayer: ObservableObject {
     /// crash or a lie: a beat is never load-bearing (the prototype wraps each
     /// action in a bare `try/catch` for the same reason). A tour that stops dead
     /// because one fixture moved is worse than one that narrates past it.
-    private func perform(_ intent: MockFlowScript.Intent) {
+    ///
+    /// Internal, not `private`: `@testable import` lets a test drive a SINGLE intent
+    /// directly (`.petSays(deptKey:line:)` in particular) without going through the
+    /// Timer-scheduled `play()`, which is real `Foundation`/`AppKit` run-loop machinery
+    /// a test has no business depending on just to prove which method a beat calls.
+    func perform(_ intent: MockFlowScript.Intent) {
         guard let store else { return }
         switch intent {
         case .hold:
@@ -283,7 +288,14 @@ final class MockFlowPlayer: ObservableObject {
                   let dept = DepartmentCatalog.find(deptKey),
                   let text = DayOneScript.line(for: deptKey, line, language: language)
             else { return }
-            store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
+            // Amendment, 6 Sep: `asks` is the FOUNDER's own question — no speaker row, no
+            // companion attribution. `frames`/`reports` are still the department answering,
+            // unchanged.
+            if line == .asks {
+                store.postScriptedFounderMessage(text)
+            } else {
+                store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
+            }
         case .walkthroughFounderTask:
             store.view = .chat
             // The first founder-only task still open. `BeaconOffer.candidates` is the

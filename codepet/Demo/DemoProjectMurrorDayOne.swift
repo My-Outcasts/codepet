@@ -39,7 +39,13 @@ extension DemoProject {
             return open
         },
         deliverables: murrorDeliverables,
-        departmentReplies: DemoProject.murrorDepartmentReplies,
+        // Empty, not `murrorDepartmentReplies` — belt and braces. Amendment, 6 Sep:
+        // `murrorDepartmentReplies` is written against the MID-FLIGHT board (it names tasks
+        // day one hasn't reached yet, e.g. "the brand direction Luna set"), and grounding
+        // `dept_key` in a task (`156d185`) is what made it reachable through `MockChat` at
+        // all. Day one's own conversational beat (`.walkthroughFounderTask`) is gone now, but
+        // this stays empty so no FUTURE beat can silently serve another board's copy either.
+        departmentReplies: [:],
         // Nothing filed. The Library fills as she approves, which is the point.
         filed: [],
         roomFrames: murrorRoomFrames(ask:)

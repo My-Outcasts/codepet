@@ -43,10 +43,19 @@ enum DayOneScript {
     /// — founder decision, 6 Sep, recorded in the design doc: writing sixteen more reviewed
     /// Vietnamese strings was rejected in favour of shipping the English lines that exist, on
     /// the record as a mixed-language demo in Vietnamese rather than a silent gap.
+    ///
+    /// **`asks` is the FOUNDER's own words, not the pet's.** Amendment, 6 Sep: the brief was
+    /// "imagine what questions THEY would have when starting a project" — the questions belong
+    /// to the founder. They shipped as pet-authored messages, so Nova asked a question and then
+    /// answered it herself; `MockFlowPlayer` now posts this line as `role: .me` instead. First
+    /// person, and stripped of the coaching instruction that used to ride along — that content
+    /// already lives in `frames`/`reports`, so nothing is lost. The Vietnamese here is a rewrite
+    /// that still needs a native read (two of three Vietnamese phrases written for this branch
+    /// were wrong before a human caught them).
     static let script: [String: (asks: (en: String, vi: String), frames: String, reports: String)] = [
         "mkt": (
-            asks: (en: "Is this a real problem, or just yours? Talk to twelve people before you build anything.",
-                   vi: "Đây là vấn đề có thật, hay chỉ của riêng bạn? Hãy nói chuyện với mười hai người trước khi xây bất cứ thứ gì."),
+            asks: (en: "Is this a real problem, or just mine?",
+                   vi: "Đây có phải vấn đề thật không, hay chỉ mình tôi thấy vậy?"),
             frames: "The first one is yours — twelve conversations I can't have for you. Once you've had "
                 + "them, I'll scan what's already out there and tell you where those apps stop.",
             reports: "Twelve conversations and a scan, and they agree: every app in this category ends "
@@ -54,8 +63,8 @@ enum DayOneScript {
                 + "— and it's still me asking it."
         ),
         "sales": (
-            asks: (en: "So who is this NOT for? The one person who found it insulting is worth more than the nine who liked it.",
-                    vi: "Vậy sản phẩm này KHÔNG dành cho ai? Một người thấy bị xúc phạm đáng giá hơn chín người khen hay."),
+            asks: (en: "So who is this not for?",
+                    vi: "Vậy sản phẩm này không dành cho ai?"),
             frames: "Same voice, different job. Marketing found who this is for; Sales has to find who "
                 + "it isn't, and be specific enough that it stings.",
             reports: "One of your twelve found it insulting. That's the most useful sentence in the file "
@@ -63,24 +72,24 @@ enum DayOneScript {
                 + "now we know who, she can decide how it feels."
         ),
         "design": (
-            asks: (en: "Now that you know who it is for, what should it feel like?",
-                    vi: "Giờ bạn đã biết nó dành cho ai — vậy nó nên mang lại cảm giác gì?"),
+            asks: (en: "What should it feel like?",
+                    vi: "Nó nên mang lại cảm giác gì?"),
             frames: "I've read the interviews and the disqualifier list. Feeling comes last, not first "
                 + "— I can only shape it once I know who it's for and who it isn't.",
             reports: "Soft, quiet, unhurried — and never graded. Naming a feeling must not feel like "
                 + "being marked. Byte next: someone has to decide what this actually runs on."
         ),
         "eng": (
-            asks: (en: "What do you build it on — and does anything a person writes ever leave their device?",
-                    vi: "Bạn sẽ xây trên nền tảng gì — và những gì người ta viết có bao giờ rời khỏi máy của họ không?"),
+            asks: (en: "What do I build it on? And does anything people write leave their device?",
+                    vi: "Tôi nên xây trên nền tảng gì? Và những gì người ta viết có rời khỏi máy của họ không?"),
             frames: "Direction's set, so I can pick a stack. The question that matters isn't the "
                 + "framework — it's whether anything a person writes ever leaves their device.",
             reports: "On-device where it can be, and nothing leaves with a name attached. That decision "
                 + "sets your running cost, which is why Crash goes next and not first."
         ),
         "fin": (
-            asks: (en: "What does that cost you a month? I cannot price anything until Byte has chosen.",
-                    vi: "Mỗi tháng tốn bao nhiêu? Tôi không thể tính giá cho đến khi Byte chọn xong."),
+            asks: (en: "What is this going to cost me a month?",
+                    vi: "Mỗi tháng cái này sẽ tốn của tôi bao nhiêu?"),
             frames: "I couldn't have answered this an hour ago. Pricing needs a stack — now Byte's "
                 + "chosen, I can put a number on it.",
             reports: "Sixty cents a month per active user, at your numbers, on Byte's stack. Charge "
@@ -88,8 +97,8 @@ enum DayOneScript {
                 + "about loneliness cannot dodge."
         ),
         "support": (
-            asks: (en: "What happens when someone is genuinely struggling at 2am?",
-                    vi: "Chuyện gì xảy ra khi ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
+            asks: (en: "What happens if someone's really struggling at 2am?",
+                    vi: "Chuyện gì xảy ra nếu ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
             frames: "I want to be careful here. Someone struggling at 2am doesn't need a chatbot being "
                 + "clever, and what the app says then has to be written down, not improvised.",
             reports: "What it says, when it says it, and what it refuses to handle — written as policy "
@@ -97,8 +106,8 @@ enum DayOneScript {
                 + "question too."
         ),
         "legal": (
-            asks: (en: "Are you in trouble for holding their words? Say what you delete, and when.",
-                    vi: "Bạn có gặp rắc rối khi lưu giữ những gì họ viết không? Hãy nói rõ bạn xoá gì, và khi nào."),
+            asks: (en: "Am I in trouble for holding what people write?",
+                    vi: "Tôi có gặp rắc rối khi lưu giữ những gì người ta viết không?"),
             frames: "I've read Sage's policy. People are typing the most private thing they have into "
                 + "this, so the deletion promise has to be plain language first and paperwork second.",
             reports: "One tap and it's gone. No confirmation email, no support ticket, no \"are you "
@@ -106,8 +115,8 @@ enum DayOneScript {
                 + "this without breaking it."
         ),
         "ops": (
-            asks: (en: "How do you ship without breaking it? Thursday, not Friday.",
-                    vi: "Làm sao để phát hành mà không làm hỏng? Thứ Năm, chứ không phải thứ Sáu."),
+            asks: (en: "How do I ship this without breaking it?",
+                    vi: "Làm sao để phát hành mà không làm hỏng nó?"),
             frames: "Still me. Legal was about what you owe them; Operations is about not breaking it "
                 + "while you keep your word.",
             reports: "Thursday, not Friday — a Friday release means a weekend of nobody watching. "
@@ -133,7 +142,8 @@ enum DayOneScript {
          + "actually begins with: empty."),
 
         ("Marketing · Nova", 2.4, .petSays(deptKey: "mkt", line: .asks),
-         "Nova opens. The first question is hers to answer, not Codepet's."),
+         "Mona asks her own first question — right-aligned, no speaker row, same as "
+         + "anything else she types."),
 
         // Framing beat: caption is the department's own `frames` copy, verbatim — not a short
         // narration like the `asks` beat above. Its duration is sized off that same text via
@@ -144,12 +154,13 @@ enum DayOneScript {
 
         // Link 1 — Marketing · Nova. The founder's own work, and it stays that way.
         //
-        // Caption trimmed: Nova's own petAsks beat above now carries the question, so
-        // restating it here was the redundancy this whole change exists to remove.
-        ("Marketing · Nova", 2.4, .walkthroughFounderTask,
-         "Codepet won't pretend to run this one — twelve conversations are hers to have. It "
-         + "prepares the guide and says so plainly."),
-
+        // `.walkthroughFounderTask` used to sit here, asking about this task through a real
+        // `MockChat` turn. Removed — amendment, 6 Sep: it was the only beat in day one that
+        // triggered a conversational reply, and `murrorDayOne` borrows `murrorDepartmentReplies`,
+        // which is written against the MID-FLIGHT board — so it showed Marketing offering to
+        // write the landing page "against the brand direction Luna set" four segments before
+        // Luna speaks. It is also redundant now: the founder's question above and Nova's
+        // `frames` answer are both already scripted beats.
         ("Marketing · Nova", 2.4, .recordFounderTask(taskId: "mur-interviews"),
          "She has the conversations and records what she heard — that's what files it, and "
          + "everything after reads it."),
@@ -169,7 +180,7 @@ enum DayOneScript {
          + "— and it's still me asking it."),
 
         ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .asks),
-         "The same pet, a different department — Nova speaks for both."),
+         "Mona asks again — same founder, a different department waiting to answer."),
 
         ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .frames),
          "Same voice, different job. Marketing found who this is for; Sales has to find who "
@@ -189,7 +200,7 @@ enum DayOneScript {
          + "now we know who, she can decide how it feels."),
 
         ("Design · Luna", 2.2, .petSays(deptKey: "design", line: .asks),
-         "Luna reads the two artifacts before it."),
+         "Her third question. Luna has read the two artifacts and answers it next."),
 
         ("Design · Luna", 2.2, .petSays(deptKey: "design", line: .frames),
          "I've read the interviews and the disqualifier list. Feeling comes last, not first "
@@ -225,7 +236,7 @@ enum DayOneScript {
          + "sets your running cost, which is why Crash goes next and not first."),
 
         ("Finance · Crash", 2.2, .petSays(deptKey: "fin", line: .asks),
-         "Crash says why this could not have been asked earlier."),
+         "Her question now — Crash explains next why it couldn't have come any sooner."),
 
         ("Finance · Crash", 2.2, .petSays(deptKey: "fin", line: .frames),
          "I couldn't have answered this an hour ago. Pricing needs a stack — now Byte's "
@@ -283,7 +294,7 @@ enum DayOneScript {
          + "this without breaking it."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .asks),
-         "The same pet again, and the last question before the day hands one back."),
+         "Mona's last question before the day hands one back — Glitch answers again."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .frames),
          "Still me. Legal was about what you owe them; Operations is about not breaking it "

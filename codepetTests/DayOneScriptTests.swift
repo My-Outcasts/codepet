@@ -288,6 +288,23 @@ final class DayOneScriptTests: XCTestCase {
     /// Every department has all three lines, non-empty. `frames` and `reports` are `String`,
     /// not a bilingual pair — there is no `vi` slot for them to leave empty; the type itself is
     /// the guard for "must not gain an empty vi slot". This checks the content is real.
+    /// **Amendment, 6 Sep.** `.walkthroughFounderTask` was the only beat in day one that
+    /// triggered a live `MockChat` conversational turn (through `sendChat`), and it served
+    /// `murrorDepartmentReplies` — copy written against the MID-FLIGHT board, four segments
+    /// before the beat it grounds even speaks. Removed. This is what would go red if it, or
+    /// `.say` (the composer's own free-text intent, also routed through `MockChat`), came back.
+    func testDayOneTriggersNoMockChatConversationalTurn() {
+        for b in beats {
+            switch b.intent {
+            case .walkthroughFounderTask:
+                XCTFail("day one must not trigger a MockChat reply via `.walkthroughFounderTask`")
+            case .say:
+                XCTFail("day one must not trigger a MockChat reply via `.say`")
+            default: break
+            }
+        }
+    }
+
     func testEveryDepartmentHasAllThreeNonEmptyLines() {
         let expected = ["mkt", "sales", "design", "eng", "fin", "support", "legal", "ops"]
         for dept in expected {

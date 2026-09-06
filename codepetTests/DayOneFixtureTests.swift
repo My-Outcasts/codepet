@@ -90,4 +90,13 @@ final class DayOneFixtureTests: XCTestCase {
     func testDayOneIsSelectable() {
         XCTAssertTrue(DemoProject.all.contains { $0.id == "murror-day-one" })
     }
+
+    /// Amendment, 6 Sep — belt and braces: `murrorDepartmentReplies` is written against the
+    /// MID-FLIGHT board, and grounding `dept_key` in a task (`156d185`) is what made it
+    /// reachable through `MockChat` at all. Day one's own conversational beat is gone, but this
+    /// stays empty so no FUTURE beat can silently serve another board's copy either.
+    func testDayOneHasNoDepartmentRepliesTable() {
+        XCTAssertTrue(dayOne.departmentReplies.isEmpty,
+                      "murrorDayOne must not carry mid-flight's chip replies")
+    }
 }

@@ -52,8 +52,13 @@ final class DemoProjectParityTests: XCTestCase {
     }
 
     /// Every department with a runnable task should have something to say when its chip is armed.
+    ///
+    /// `murror-day-one` is excluded: amendment, 6 Sep, deliberately empties its
+    /// `departmentReplies` (belt and braces — `murrorDepartmentReplies` is written against the
+    /// mid-flight board, so day one must not be able to reach it through a future chat-armed
+    /// chip any more than through the `.walkthroughFounderTask` beat that used to reach it).
     func testEveryDepartmentOnTheBoardHasAReply() {
-        for p in projects {
+        for p in projects where p.id != DemoProject.murrorDayOne.id {
             let depts = Set(p.tasks.compactMap(\.dept))
             for d in depts {
                 XCTAssertNotNil(p.departmentReplies[d],

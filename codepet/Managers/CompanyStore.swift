@@ -3059,6 +3059,17 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(role: .companion, text: text,
                                            companionId: companionId, deptName: deptName))
     }
+
+    /// Post a pre-written FOUNDER-attributed message with no model call — the day-one
+    /// walkthrough's `.petSays(line: .asks)` beat.
+    ///
+    /// Amendment, 6 Sep: the question belongs to the founder, not the department that will
+    /// answer it (the brief was "imagine what questions THEY would have"), so it can't post
+    /// the same way `postScriptedCompanionMessage` does. `role: .me`, no `companionId`, no
+    /// `deptName` — right-aligned with no speaker row, exactly like anything else she types.
+    func postScriptedFounderMessage(_ text: String) {
+        chatMessages.append(CopilotMessage(role: .me, text: text))
+    }
     #endif
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,

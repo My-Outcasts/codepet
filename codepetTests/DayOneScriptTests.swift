@@ -142,6 +142,17 @@ final class DayOneScriptTests: XCTestCase {
         XCTAssertEqual(counts, ["eng": 3], "Code · Byte must be exactly Byte, three lines")
     }
 
+    /// **Amendment 4, 6 Sep.** "Redesign · Luna" is a NEW chapter, not an encore of her earlier
+    /// one — she already spoke her three chain lines in "Design · Luna". Same guard shape as
+    /// Byte's encores: exactly Luna's three lines, and nobody else's key leaks in.
+    func testRedesignChapterHasExactlyLunasThreeLines() {
+        var counts: [String: Int] = [:]
+        for b in beats where b.chapter == "Redesign · Luna" {
+            if case let .petSays(deptKey, _) = b.intent { counts[deptKey, default: 0] += 1 }
+        }
+        XCTAssertEqual(counts, ["design": 3], "Redesign · Luna must be exactly Luna, three lines")
+    }
+
     /// **The load-bearing ordering guard.** Per department: `asks` → `frames` → its link(s) →
     /// `reports`. A report placed before its department's work is filed must fail here —
     /// verified red before this change existed, since nothing enforced the order at all.
@@ -222,20 +233,24 @@ final class DayOneScriptTests: XCTestCase {
     }
 
     /// The chapter bar reads as the opener plus eight departments plus Amendment 3's two new
-    /// chapters, not twenty-one questions.
+    /// chapters plus Amendment 4's redesign, not twenty-one questions.
     ///
     /// **Amendment 3, 6 Sep.** Was "one opener + eight departments" (9 total) before Environment
     /// and Code were appended after the roadmap hand-back; this pins the full 11-chapter list so
     /// a chapter silently going missing, duplicated, or reordered still fails here.
+    ///
+    /// **Amendment 4, 6 Sep.** "Redesign · Luna" is appended after "Code · Byte" — the redesign
+    /// pass Luna runs once the page exists to look at — so the pinned list grows to 12.
     func testTheChapterBarIsTheOpenerPlusEightDepartments() {
         var seen = Set<String>()
         let chapters = beats.compactMap { seen.insert($0.chapter).inserted ? $0.chapter : nil }
-        XCTAssertEqual(chapters.count, 11, "one opener + eight departments + Environment + Code")
+        XCTAssertEqual(chapters.count, 12,
+                       "one opener + eight departments + Environment + Code + Redesign")
         XCTAssertEqual(chapters.first, "Day one")
         XCTAssertEqual(Array(chapters.dropFirst()), [
             "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
             "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
-            "Environment · Byte", "Code · Byte",
+            "Environment · Byte", "Code · Byte", "Redesign · Luna",
         ])
     }
 
@@ -260,9 +275,16 @@ final class DayOneScriptTests: XCTestCase {
     /// (75 → 120 → 140 → 170) against a prior author's 90s ceiling. The lever offered three
     /// times and not taken: cutting the eight department `frames` lines would return ~25s —
     /// the founder's own copy, not cut unless she says so.
+    ///
+    /// **Amendment 4, 6 Sep — the fifth raise.** The redesign pass (Luna's second appearance:
+    /// `asks`/`frames`/a `.codeRun`+`.confirmCodeRun` pair/`reports`) pushed the real total to
+    /// 170.2s — read off a temporarily-forced-failing assertion here (`XCTAssertLessThanOrEqual
+    /// (total, 0.0)`), not estimated, then reverted to this real ceiling. 170s had essentially no
+    /// headroom left for it, so the ceiling moves to 200s — real margin, not fitted to the exact
+    /// result. This is the fifth raise (75 → 120 → 140 → 170 → 200).
     func testTheDayFitsItsTimeBudget() {
         let total = beats.reduce(0) { $0 + $1.seconds }
-        XCTAssertLessThanOrEqual(total, 170.0, "day one runs \(total)s; budget is 170s")
+        XCTAssertLessThanOrEqual(total, 200.0, "day one runs \(total)s; budget is 200s")
         XCTAssertGreaterThan(total, 30, "seventeen speaking beats and nine links cannot honestly play in under 30s")
     }
 
@@ -516,5 +538,42 @@ final class DayOneScriptTests: XCTestCase {
         XCTAssertLessThan(run, confirm,
                           "`.confirmCodeRun` (beat \(confirm)) must follow `.codeRun` (beat \(run)) "
                           + "— nothing starts without the founder's tap")
+    }
+
+    // MARK: - Amendment 4, 6 Sep — the redesign
+
+    /// **The ordering claim this whole amendment exists to make.** The redesign is a revision
+    /// of the built page, not an alternate take that happens to play first — Luna has to see
+    /// what Byte built before she can ask for anything. Verified red by hand: swapping
+    /// "Code · Byte" and "Redesign · Luna" in `DayOneScript.beats` during development failed
+    /// this exactly as expected, then the swap was reverted.
+    func testTheRedesignRunsAfterTheOriginalBuild() {
+        guard let firstRedesign = beats.firstIndex(where: { $0.chapter == "Redesign · Luna" }) else {
+            return XCTFail("expected a \"Redesign · Luna\" chapter in the day-one script")
+        }
+        guard let lastCode = beats.lastIndex(where: { $0.chapter == "Code · Byte" }) else {
+            return XCTFail("expected a \"Code · Byte\" chapter in the day-one script")
+        }
+        XCTAssertLessThan(lastCode, firstRedesign,
+                          "the redesign (beat \(firstRedesign)) must follow the original build "
+                          + "(beat \(lastCode)), never precede it")
+    }
+
+    /// The redesign reuses `.codeRun`/`.confirmCodeRun` — a second pair, not new machinery — so
+    /// this pins that the SECOND occurrence of each (the first belongs to the original build,
+    /// already covered by `testTheFolderIsLinkedBeforeTheCodeRun`/`testConfirmCodeRunFollowsCodeRun`
+    /// above) still keeps the founder's tap gating the run, inside "Redesign · Luna" specifically.
+    func testTheRedesignsCodeRunIsAlsoGatedOnAConfirm() {
+        var runIndex: Int?
+        var confirmIndex: Int?
+        for (i, b) in beats.enumerated() where b.chapter == "Redesign · Luna" {
+            if case .codeRun = b.intent, runIndex == nil { runIndex = i }
+            if case .confirmCodeRun = b.intent, confirmIndex == nil { confirmIndex = i }
+        }
+        guard let run = runIndex, let confirm = confirmIndex else {
+            return XCTFail("expected both `.codeRun` and `.confirmCodeRun` inside \"Redesign · Luna\"")
+        }
+        XCTAssertLessThan(run, confirm,
+                          "the redesign's `.confirmCodeRun` must follow its own `.codeRun`")
     }
 }

@@ -190,6 +190,20 @@ enum DayOneScript {
             reports: "One page, Luna's direction, Nova's positioning line. A draft until you "
                 + "approve it — same as everything else today."
         ),
+
+        // Amendment 4, 6 Sep — the redesign. Byte built the page; Luna is who set the visual
+        // direction back in her own chapter and who would look at the result and want it
+        // changed. Founder decision: a revision, not a new build — this is the one moment day
+        // one demonstrates that a department's work can be checked against its own standard
+        // and sent back, rather than only ever produced once and approved.
+        "Redesign · Luna": (
+            asks: "It works, but it doesn't feel like what you described — can it feel softer?",
+            frames: "Byte built exactly what I asked for, and seeing it told me something the "
+                + "direction alone couldn't: it isn't soft yet. Same page, same words — less "
+                + "contrast, more room around everything, nothing that reads as urgent.",
+            reports: "Lighter, slower, more space around every line. Still a draft, same as the "
+                + "first pass — you approve before it's the page anyone else sees."
+        ),
     ]
 
     /// The text for one department's line, or nil when the department has none. Only `asks`
@@ -471,10 +485,35 @@ enum DayOneScript {
          "One page, Luna's direction, Nova's positioning line. A draft until you approve "
          + "it — same as everything else today."),
 
-        // The closing beat. Stays inside Code's chapter rather than opening an eleventh —
-        // same rule the Operations hand-back above already follows: no new department
-        // content plays here, so no new chapter should appear.
-        ("Code · Byte", 2.6, .go(.roadmap),
+        // Amendment 4, 6 Sep — the redesign. Byte built it; Luna is who set the visual
+        // direction earlier in the day and who looks at the result against that standard.
+        // Same machinery as the build itself (`.codeRun` / `.confirmCodeRun`), never a new
+        // kind of beat — this demonstrates revision, not a second one-shot generation.
+        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .asks),
+         "She's seen the page now — not a description of a feeling but the feeling itself. "
+         + "Her question is really a correction."),
+
+        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .frames),
+         "Luna checks what Byte built against the standard she set at the start of the day."),
+
+        ("Redesign · Luna", 2.6,
+         .codeRun("Redesign the Murror landing page — softer contrast, more white space, "
+                  + "nothing that reads as urgent"),
+         "Same mechanism as the first build: the ask goes in, and the plan shows before "
+         + "anything runs."),
+
+        ("Redesign · Luna", 2.8, .confirmCodeRun,
+         "Her tap starts it — a revision, not a rebuild. The page changes; the plan and the "
+         + "approval do not."),
+
+        ("Redesign · Luna", 2.8, .petSays(deptKey: "design", line: .reports),
+         "Same page, calmer. The day's last check is whether the feeling she promised "
+         + "survived being built."),
+
+        // The closing beat. Stays inside the last chapter to speak rather than opening a
+        // thirteenth — same rule the Operations hand-back and the original Code chapter both
+        // already followed: no new department content plays here, so no new chapter appears.
+        ("Redesign · Luna", 2.6, .go(.roadmap),
          "Ten questions in, and the board has moved."),
     ])
 

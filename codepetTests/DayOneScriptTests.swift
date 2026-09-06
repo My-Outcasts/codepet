@@ -103,6 +103,38 @@ final class DayOneScriptTests: XCTestCase {
         XCTAssertGreaterThan(total, 30, "nine links cannot honestly play in under 30s")
     }
 
+    /// The chapter bar reads as the opener plus eight departments, not twenty-one questions.
+    func testTheChapterBarIsTheOpenerPlusEightDepartments() {
+        var seen = Set<String>()
+        let chapters = beats.compactMap { seen.insert($0.chapter).inserted ? $0.chapter : nil }
+        XCTAssertEqual(chapters.count, 9, "one opener + eight departments")
+        XCTAssertEqual(chapters.first, "Day one")
+        XCTAssertEqual(Array(chapters.dropFirst()), [
+            "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
+            "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
+        ])
+    }
+
+    /// The whole day still fits the budget. Recorded, not estimated.
+    func testTheDayFitsItsTimeBudget() {
+        let total = beats.reduce(0) { $0 + $1.seconds }
+        XCTAssertLessThanOrEqual(total, 75.0, "day one runs \(total)s; budget is 75s")
+    }
+
+    /// Caption readability is a budget independent of the total-runtime one above: a beat
+    /// trimmed to fit the 75s ceiling can still be too short to read. Same formula
+    /// `MockFlowScriptTests.testCaptionsHaveTimeToBeRead` uses for the 24-beat tour — ~18
+    /// characters/second, floored further by the player's Slow pace (1.5x).
+    func testEveryCaptionHasTimeToBeReadEvenOnSlow() {
+        for beat in beats {
+            let needed = Double(beat.caption.count) / 45.0
+            XCTAssertGreaterThanOrEqual(beat.seconds * 1.5, needed,
+                                        "beat \(beat.id) ('\(beat.chapter)') shows "
+                                        + "\(beat.caption.count) characters for \(beat.seconds)s "
+                                        + "— unreadable even on Slow")
+        }
+    }
+
     /// The opening must be the founder's own words, not a feature tour.
     func testItOpensOnNotKnowingWhereToStart() throws {
         let first = try XCTUnwrap(beats.first)

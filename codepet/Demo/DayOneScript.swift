@@ -54,117 +54,114 @@ enum DayOneScript {
     }
 
     static let beats: [MockFlowScript.Beat] = build([
-        ("Day one", 4.0, .hold,
+        ("Day one", 3.2, .hold,
          "Mona has a feeling and nothing else — people are lonely and don't know how to reach "
          + "each other. No plan, no brand, no idea where to start. This is the board a founder "
          + "actually begins with: empty."),
 
-        ("Is this real?", 2.4, .petAsks(deptKey: "mkt"),
+        ("Marketing · Nova", 2.4, .petAsks(deptKey: "mkt"),
          "Nova opens. The first question is hers to answer, not Codepet's."),
 
         // Link 1 — Marketing · Nova. The founder's own work, and it stays that way.
-        ("Is this real?", 4.2, .walkthroughFounderTask,
-         "Her first question is whether the problem is real or just hers. Codepet will not "
-         + "pretend to run this one — twelve conversations are hers to have — so it prepares "
-         + "the guide and says so plainly."),
+        //
+        // Caption trimmed: Nova's own petAsks beat above now carries the question, so
+        // restating it here was the redundancy this whole change exists to remove.
+        ("Marketing · Nova", 2.4, .walkthroughFounderTask,
+         "Codepet won't pretend to run this one — twelve conversations are hers to have. It "
+         + "prepares the guide and says so plainly."),
 
-        ("Is this real?", 3.4, .recordFounderTask(taskId: "mur-interviews"),
-         "She has the conversations and records what she heard. That is what files it — and "
-         + "everything after this reads it."),
+        ("Marketing · Nova", 2.4, .recordFounderTask(taskId: "mur-interviews"),
+         "She has the conversations and records what she heard — that's what files it, and "
+         + "everything after reads it."),
 
-        // Link 2 — Marketing · Nova.
-        ("Has someone built it?", 3.0, .runTask("mur-landscape"),
-         "Second question, and the first one Codepet can take: has someone already built this? "
-         + "Nova reads the interviews before answering — the credit line on the card names them."),
-        ("Has someone built it?", 2.8, .approveNewestDraft,
+        // Link 2 — Marketing · Nova. Same department, same pet — it does not open twice.
+        ("Marketing · Nova", 2.6, .runTask("mur-landscape"),
+         "Nova reads the interviews before answering — the credit line on the card names them."),
+        ("Marketing · Nova", 2.8, .approveNewestDraft,
          "Approving files it. Nothing was written anywhere until that tap, and the next "
          + "department will read what she just approved."),
 
-        ("Who is it not for?", 2.2, .petAsks(deptKey: "sales"),
+        ("Sales · Nova", 2.2, .petAsks(deptKey: "sales"),
          "The same pet, a different department — Nova speaks for both."),
 
         // Link 3 — Sales · Nova.
-        ("Who is it not for?", 3.0, .runTask("mur-notfor"),
-         "The scan turns up crowded ground, which sharpens the real question: who is this NOT "
-         + "for? The one person who found it insulting is worth more here than the nine who "
-         + "liked it."),
-        ("Who is it not for?", 2.8, .approveNewestDraft,
+        ("Sales · Nova", 2.6, .runTask("mur-notfor"),
+         "The scan turns up crowded ground. The one person who found it insulting is worth "
+         + "more than the nine who liked it."),
+        ("Sales · Nova", 2.8, .approveNewestDraft,
          "A disqualifier list is a strange thing to be pleased about, and it is the first "
          + "artifact that makes the next four decisions easy."),
 
-        ("What should it feel like?", 2.2, .petAsks(deptKey: "design"),
+        ("Design · Luna", 2.2, .petAsks(deptKey: "design"),
          "Luna reads the two artifacts before it."),
 
         // Link 4 — Design · Luna.
-        ("What should it feel like?", 3.0, .runTask("mur-brand"),
-         "Now that she knows who it is for and who it is not, Luna can shape how it feels. "
-         + "A different department, a different pet, reading the two artifacts before it."),
-        ("What should it feel like?", 2.8, .approveNewestDraft,
+        ("Design · Luna", 2.6, .runTask("mur-brand"),
+         "Luna reads both artifacts and shapes how it should feel."),
+        ("Design · Luna", 2.8, .approveNewestDraft,
          "Four questions in, and each answer has been built on the last rather than started "
          + "from the brief again."),
 
-        ("What do I build it on?", 2.2, .petAsks(deptKey: "eng"),
+        ("Engineering · Byte", 2.2, .petAsks(deptKey: "eng"),
          "The first question with a bill attached."),
 
         // Link 5 — Engineering · Byte.
-        ("What do I build it on?", 3.0, .runTask("mur-stack"),
-         "The first question with a bill attached. Byte reads the direction and decides what "
-         + "the app runs on — and whether anything a person writes ever leaves their device."),
-        ("What do I build it on?", 2.8, .approveNewestDraft,
+        ("Engineering · Byte", 2.6, .runTask("mur-stack"),
+         "Byte reads the direction and decides what it runs on — and whether anything a "
+         + "person writes ever leaves their device."),
+        ("Engineering · Byte", 2.8, .approveNewestDraft,
          "That decision sets the running cost, which is why Finance is next and not first."),
 
-        ("What does it cost me?", 2.2, .petAsks(deptKey: "fin"),
+        ("Finance · Crash", 2.2, .petAsks(deptKey: "fin"),
          "Crash says why this could not have been asked earlier."),
 
         // Link 6 — Finance · Crash.
-        ("What does it cost me?", 3.0, .runTask("mur-unitcost"),
-         "Crash cannot price anything without knowing what it runs on, so this question could "
-         + "not have been asked earlier. Cost per active user, from the stack just chosen."),
-        ("What does it cost me?", 2.8, .approveNewestDraft,
+        ("Finance · Crash", 2.6, .runTask("mur-unitcost"),
+         "Cost per active user, straight from the stack Byte just chose."),
+        ("Finance · Crash", 2.8, .approveNewestDraft,
          "A number she can hold against a price — the first artifact that constrains rather "
          + "than describes."),
 
-        ("A bad night", 2.4, .petAsks(deptKey: "support"),
+        ("Support · Sage", 2.4, .petAsks(deptKey: "support"),
          "The question a consumer app about loneliness cannot avoid."),
 
         // Link 7 — Support · Sage.
-        ("A bad night", 3.2, .runTask("mur-crisis"),
-         "The question a consumer app about loneliness cannot avoid: what happens when someone "
-         + "is genuinely struggling at 2am. Sage writes what the app says, when, and what it "
-         + "refuses to handle."),
-        ("A bad night", 2.8, .approveNewestDraft,
+        ("Support · Sage", 2.6, .runTask("mur-crisis"),
+         "Sage writes what the app says at 2am, when, and what it refuses to handle."),
+        ("Support · Sage", 2.8, .approveNewestDraft,
          "Written down as policy, not left to a prompt. This is the artifact the board's one "
          + "founder-only task later asks a clinician to read."),
 
-        ("Am I in trouble?", 2.2, .petAsks(deptKey: "legal"),
+        ("Legal · Glitch", 2.2, .petAsks(deptKey: "legal"),
          "Glitch reads Sage's policy before answering."),
 
         // Link 8 — Legal · Glitch.
-        ("Am I in trouble?", 3.0, .runTask("mur-deletion"),
-         "She is now holding people's private words. Glitch reads the crisis policy and the "
-         + "stack decision, and turns them into a promise: one tap, permanent, no email."),
-        ("Am I in trouble?", 2.8, .approveNewestDraft,
+        ("Legal · Glitch", 2.6, .runTask("mur-deletion"),
+         "Glitch turns the crisis policy and the stack decision into a promise: one tap, "
+         + "permanent, no email."),
+        ("Legal · Glitch", 2.8, .approveNewestDraft,
          "The promise comes before the privacy policy that formalises it — which is still "
          + "sitting on her board, unwritten."),
 
-        ("How do I ship it?", 2.2, .petAsks(deptKey: "ops"),
+        ("Operations · Glitch", 2.2, .petAsks(deptKey: "ops"),
          "The same pet again, and the last question before the day hands one back."),
 
         // Link 9 — Operations · Glitch.
-        ("How do I ship it?", 3.0, .runTask("mur-rhythm"),
-         "The last question of the first week: how does any of this reach anyone without "
-         + "breaking. A weekly rhythm the launch checklist will later assume."),
-        ("How do I ship it?", 2.8, .approveNewestDraft,
+        ("Operations · Glitch", 2.6, .runTask("mur-rhythm"),
+         "A weekly rhythm the launch checklist will later assume."),
+        ("Operations · Glitch", 2.8, .approveNewestDraft,
          "Nine questions, eight departments, nine artifacts — and every one of them traces "
          + "back to a task on her roadmap."),
 
-        ("What's next is yours", 3.6, .go(.library),
-         "This is what a week looks like when every answer builds on the last. She started "
-         + "with a feeling and no plan."),
+        // The hand-back stays inside Operations' chapter rather than opening a tenth —
+        // no beat here introduces new department content, so no new chapter should appear.
+        ("Operations · Glitch", 2.6, .go(.library),
+         "A week where every answer builds on the last. She started with a feeling and no "
+         + "plan."),
 
-        ("What's next is yours", 4.0, .go(.roadmap),
-         "And the beacon has already moved on to her tenth question — how do people hear about "
-         + "it? Codepet does not answer that one here. It points at the landing page and waits."),
+        ("Operations · Glitch", 2.8, .go(.roadmap),
+         "The beacon has moved to her tenth question — how people hear about it. Codepet "
+         + "points at the landing page and waits."),
     ])
 
     /// Numbers the beats so `id` cannot drift from position — the same shape `MockFlowScript`

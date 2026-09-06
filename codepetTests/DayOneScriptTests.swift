@@ -353,4 +353,35 @@ final class DayOneScriptTests: XCTestCase {
             XCTAssertFalse(entry.reports.isEmpty, "\(dept) reports is empty")
         }
     }
+
+    /// **The chapter menu, on day one.** `MockFlowScript.chapters`/`firstBeat(of:)` only ever
+    /// read `MockFlowScript.beats` — the 24-beat tour — so they say nothing about whether day
+    /// one's OWN chapters ("Marketing · Nova" and the rest) are complete and reachable. The
+    /// caption bar's compact menu reads `player.chapters`/`player.firstBeat(of:)` instead, which
+    /// mirror that same computation against whichever script is actually playing (see
+    /// `MockFlowPlayer.chapters`'s doc comment) — this drives the player with day one selected,
+    /// the same `DemoProject.select` seam `MockFlowTests` already uses, and checks both halves:
+    /// the list matches a fresh dedup of `DayOneScript.beats` in order, and every entry in it
+    /// actually resolves. A department chapter that becomes unreachable would otherwise fail
+    /// silently — `jump(toChapter:)` no-ops on a nil index — over a menu row a founder can still
+    /// click.
+    func testTheMenusChapterListIsExactlyDayOnesChaptersAndAllResolve() {
+        let previousProject = PrototypeMode.store.string(forKey: DemoProject.key)
+        defer {
+            if let previousProject { PrototypeMode.store.set(previousProject, forKey: DemoProject.key) }
+            else { PrototypeMode.store.removeObject(forKey: DemoProject.key) }
+        }
+        DemoProject.select("murror-day-one")
+
+        let player = MockFlowPlayer()
+        var seen = Set<String>()
+        let expected = DayOneScript.beats.compactMap { seen.insert($0.chapter).inserted ? $0.chapter : nil }
+        XCTAssertEqual(player.chapters, expected,
+                       "the menu's day-one chapter list has drifted from the script")
+        for chapter in player.chapters {
+            XCTAssertNotNil(player.firstBeat(of: chapter),
+                            "\(chapter) is offered in the day-one menu but unreachable — "
+                            + "jumping to it would silently no-op")
+        }
+    }
 }

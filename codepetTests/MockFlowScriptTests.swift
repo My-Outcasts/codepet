@@ -209,6 +209,23 @@ final class MockFlowScriptTests: XCTestCase {
         }
     }
 
+    /// **The control that replaced the chip row.** The chip row read `player.chapters` and
+    /// called `player.jump(toChapter:)` directly; the compact menu that replaced it reads the
+    /// same two. `player.chapters` is documented to mirror `MockFlowScript.chapters` exactly for
+    /// the default script — this pins that "mirrors" to an actual assertion instead of trusting
+    /// the comment, so a menu that quietly started re-deriving its own list (or dropped one)
+    /// goes red here rather than only in a screenshot nobody takes.
+    func testTheMenusChapterListIsExactlyTheScriptsChapters() {
+        let player = MockFlowPlayer()
+        XCTAssertEqual(player.chapters, MockFlowScript.chapters,
+                       "the menu's chapter list has drifted from the canonical one")
+        for chapter in player.chapters {
+            XCTAssertNotNil(MockFlowScript.firstBeat(of: chapter),
+                            "\(chapter) is offered in the menu but unreachable — jumping to it "
+                            + "would silently no-op")
+        }
+    }
+
     /// Autoplay without the fixtures behind it would either spend real credits or
     /// narrate an empty company. Both flags are off by default.
     func testBothDemoFlagsDefaultOff() {

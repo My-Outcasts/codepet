@@ -25,12 +25,33 @@ import Foundation
 /// Closures rather than direct `UserDefaults` reads, like every other I/O seam
 /// injected into `CompanyStore`, so tests never touch the real defaults domain and
 /// cannot leak a grant between cases.
+///
+/// **Amendment 6 Sep — `CODEPET_LIVE_AI` is a second, narrower grant, not a bypass of
+/// this one.** Prototype mode's live-transport switch (`PrototypeMode.liveAI`, see its
+/// doc comment) runs the demo on the founder's own Claude plan instead of `MockChat`'s
+/// fixtures. That still spends the plan, so it still needs a "yes" — but the founder
+/// gave that yes on the command line, deliberately, the moment they typed the flag.
+/// `-CODEPET_LIVE_AI` IS the grant, in exactly the sense this file's opening paragraph
+/// requires: it does not exist until they set it, it is per-launch (never persisted, so
+/// it cannot outlive the session the way a stored `cp_claude_authorised_*` key would),
+/// and it is scoped to `ContentView.prototypeCompanyId` — the literal `"prototype"` —
+/// and nothing else. Every real company id still resolves only from the stored
+/// per-company grant below; this default closure is the ONLY place that reads
+/// `PrototypeMode.liveAI`, so a real company can never pick up an implicit grant this
+/// way, and the injected-closure seam a test supplies still overrides it completely.
 struct ClaudeCodeAuthorisation {
     static func key(_ companyId: String) -> String { "cp_claude_authorised_\(companyId)" }
 
     /// Absent means NOT granted. `bool(forKey:)` returning false for a missing key is
     /// the behaviour we want, not an accident to work around: a founder who has never
     /// seen the toggle has never agreed.
-    var isAuthorised: (String) -> Bool = { UserDefaults.standard.bool(forKey: key($0)) }
+    ///
+    /// The `liveAI` check runs first and only ever ADDS an authorisation for the
+    /// prototype id — it can never take one away, and it never runs for any other id,
+    /// so a real company's stored grant (or lack of one) is untouched either way.
+    var isAuthorised: (String) -> Bool = {
+        if $0 == ContentView.prototypeCompanyId, PrototypeMode.liveAI { return true }
+        return UserDefaults.standard.bool(forKey: key($0))
+    }
     var setAuthorised: (String, Bool) -> Void = { UserDefaults.standard.set($1, forKey: key($0)) }
 }

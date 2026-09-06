@@ -125,8 +125,18 @@ final class CompanyStore: ObservableObject {
     }
 
     private func makeCodingRun() -> CodingRunCoordinator {
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the coding run goes to
+        // the founder's own Claude Code, like every other model call in live mode. This was
+        // MISSED when live mode was built — chat, task and VC transports moved and this one
+        // did not, so the Code and Redesign chapters stayed a scripted animation while
+        // everything around them was real. The founder asked whether the prototype behaves
+        // like actual use; this was the honest answer's sharpest exception.
+        //
+        // It writes to disk for real, which is safe here only because `.linkDemoFolder` binds
+        // a throwaway directory under `NSTemporaryDirectory()`. Never point this at a folder
+        // that matters without the founder linking it themselves.
         #if DEBUG
-        let mock = MockChat.enabled
+        let mock = MockChat.usesMockTransport
         #else
         let mock = false
         #endif
@@ -1095,8 +1105,10 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(msg)
         engineeringRunAnchorId = msg.id
 
+        // `usesMockTransport`, not `enabled` — same reason as `makeCodingRun`: under
+        // `CODEPET_LIVE_AI` an engineering run is a real one on the founder's own plan.
         #if DEBUG
-        let mock = MockChat.enabled
+        let mock = MockChat.usesMockTransport
         #else
         let mock = false
         #endif

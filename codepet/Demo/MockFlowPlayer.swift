@@ -405,6 +405,22 @@ final class MockFlowPlayer: ObservableObject {
                 try? "// demo target for the walkthrough\nstruct SignupView {}\n"
                     .write(to: file, atomically: true, encoding: .utf8)
             }
+            // **A second seed, because two scripts ask this folder for different things.**
+            // The 24-beat tour runs "fix the signup validation" against the Swift stub above.
+            // Day one runs "build the Murror landing page" — and under `CODEPET_LIVE_AI` that
+            // is now a REAL coding agent, which would otherwise be asked for a landing page in
+            // a directory containing one Swift struct and would produce something real and
+            // incoherent. Seeding a page it can actually edit is what keeps the live run's
+            // output belonging to the story the caption is telling.
+            let page = dir.appendingPathComponent("index.html")
+            if !FileManager.default.fileExists(atPath: page.path) {
+                try? """
+                <!doctype html>
+                <title>Murror</title>
+                <h1>Murror</h1>
+                <p>AI that brings people closer.</p>
+                """.write(to: page, atomically: true, encoding: .utf8)
+            }
             Self.prepareWalkthroughRepo(at: dir.path)
             // **Always this folder, even when something is already linked.** The guard
             // used to be `activeProjectLink == nil`, which reads as politeness and is

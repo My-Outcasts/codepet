@@ -3026,6 +3026,7 @@ final class CompanyStore: ObservableObject {
         await approveTask(id: taskId)
     }
 
+    #if DEBUG
     /// Post a pre-written, pet-attributed message with no model call — the day-one
     /// walkthrough's `.petAsks` beat, where the "reply" is scripted copy rather than a live
     /// turn. `chatMessages` stays `private(set)` outside this file (session-only transcript
@@ -3035,6 +3036,7 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(role: .companion, text: text,
                                            companionId: companionId, deptName: deptName))
     }
+    #endif
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,
     /// and clear the draft/drafted state. Persists both tasks + library. Idempotent — a

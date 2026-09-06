@@ -36,15 +36,15 @@ enum DayOneScript {
         "design": (en: "Now that you know who it is for, what should it feel like?",
                    vi: "Giờ bạn đã biết nó dành cho ai — vậy nó nên mang lại cảm giác gì?"),
         "eng": (en: "What do you build it on — and does anything a person writes ever leave their device?",
-                vi: "Bạn sẽ xây trên nền gì — và những gì người ta viết có bao giờ rời khỏi máy của họ không?"),
+                vi: "Bạn sẽ xây trên nền tảng gì — và những gì người ta viết có bao giờ rời khỏi máy của họ không?"),
         "fin": (en: "What does that cost you a month? I cannot price anything until Byte has chosen.",
                 vi: "Mỗi tháng tốn bao nhiêu? Tôi không thể tính giá cho đến khi Byte chọn xong."),
         "support": (en: "What happens when someone is genuinely struggling at 2am?",
                     vi: "Chuyện gì xảy ra khi ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
         "legal": (en: "Are you in trouble for holding their words? Say what you delete, and when.",
-                  vi: "Bạn có gặp rắc rối khi giữ lời của họ không? Hãy nói rõ bạn xoá gì, và khi nào."),
+                  vi: "Bạn có gặp rắc rối khi lưu giữ những gì họ viết không? Hãy nói rõ bạn xoá gì, và khi nào."),
         "ops": (en: "How do you ship without breaking it? Thursday, not Friday.",
-                vi: "Làm sao để phát hành mà không làm hỏng? Thứ Năm, đừng thứ Sáu."),
+                vi: "Làm sao để phát hành mà không làm hỏng? Thứ Năm, chứ không phải thứ Sáu."),
     ]
 
     /// The question for a department, or nil when it has none.

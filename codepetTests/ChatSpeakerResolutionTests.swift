@@ -41,4 +41,29 @@ final class ChatSpeakerResolutionTests: XCTestCase {
         XCTAssertEqual(store.speakerFor(task: nil, text: "ask marketing about this", department: nil)?.companionId, "nova")
         XCTAssertNil(store.speakerFor(task: nil, text: "what should I do today?", department: nil))
     }
+
+    /// The WIRING guard, not the resolution seam. Every test above calls `speakerFor`
+    /// directly and would have passed even while the live app dropped the task on the
+    /// floor — Task 3 already had those, and they were green the whole time this bug was
+    /// live. This one goes through `sendChat`'s own `aboutTask:` parameter, exactly as
+    /// `CopilotChatView.send(aboutTask:)` now forwards it, end to end into the appended
+    /// companion placeholder's stamped `companionId`/`deptName` — so it goes red if a
+    /// future edit drops `aboutTask` anywhere between `sendChat` and the message that gets
+    /// appended, not only if `speakerFor` itself regresses.
+    ///
+    /// `text` is deliberately the exact photographed string, which names no department —
+    /// if `aboutTask` were silently dropped in `sendChat`/`sendMessage`, this would fall
+    /// back to keyword inference (nil) and the placeholder would carry the founder's own
+    /// `company.companionId` ("byte") instead of Marketing's "nova".
+    func testSendChatThreadsAboutTaskIntoTheAppendedMessage() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: { _ in AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) } })
+        await s.hydrate(companyId: "u")
+        let task = task(id: "mur-interviews", dept: "mkt")
+        await s.sendChat("Walk me through: \(task.title)", language: .en, aboutTask: task)
+        let reply = s.chatMessages.first { $0.role == .companion }
+        XCTAssertEqual(reply?.companionId, "nova", "the task's own department, not the founder's default companion")
+        XCTAssertEqual(reply?.deptName, "Marketing")
+    }
 }

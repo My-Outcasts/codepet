@@ -536,7 +536,7 @@ struct CopilotChatView: View {
                 lastActedDeptKey = nil
                 suggestion = nil
             },
-            onSend: send,
+            onSend: { send() },
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
             onVoiceMode: startVoiceMode,
@@ -923,7 +923,7 @@ struct CopilotChatView: View {
                 ? "Hướng dẫn tôi làm: \(task.title)"
                 : "Walk me through: \(task.title)"
             mode = .ask
-            send()
+            send(aboutTask: task)
         case .review:
             companyStore.select(.roadmap)
         }
@@ -1101,7 +1101,18 @@ struct CopilotChatView: View {
     /// selected department focus); `.build` stages a local coding run instead of
     /// a chat turn. Callable directly by `onStarter`/quick-actions too, so it
     /// guards empty input itself rather than relying on the composer's `canSend`.
-    private func send() {
+    /// `aboutTask` carries a task's identity through to `sendChat`'s `aboutTask:`, for
+    /// `speakerFor` to resolve the reply's speaker from the task's own department (a
+    /// recorded fact) rather than falling back to keyword inference over `text`. Every
+    /// existing caller — `onStarter`, quick actions, the typed composer — has no task in
+    /// mind and keeps the default `nil` unchanged. Only `runBeacon`'s `.walkthrough` case
+    /// passes one: it builds the same "Walk me through: <title>" string `MockFlowPlayer`'s
+    /// scripted beat does, but through THIS generic composer, which reads only the bare
+    /// `chatDraft` string — no task reference survived that hop, so a task whose title
+    /// carries no department vocabulary fell back to a keyword guess and signed the reply
+    /// with the product name, or worse, misattributed it (finding logged 6 Sep, live-path
+    /// half of the bug Task 3 fixed only on the demo path).
+    private func send(aboutTask: RoadmapTask? = nil) {
         let text = companyStore.chatDraft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         companyStore.chatDraft = ""
@@ -1166,7 +1177,8 @@ struct CopilotChatView: View {
                                             department: dept, founderAsk: text,
                                             convenesRoom: mode.convenesRoom,
                                             pinned: sendPins,
-                                            attachments: sendAttachments)
+                                            attachments: sendAttachments,
+                                            aboutTask: aboutTask)
             }
         case .build:
             // One code mode. WHERE it runs is the run's business, not the

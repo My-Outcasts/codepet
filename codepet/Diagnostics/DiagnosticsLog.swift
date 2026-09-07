@@ -89,6 +89,38 @@ nonisolated enum DiagnosticsLog {
         return "\(ns.domain)/\(ns.code) — \(ns.localizedDescription)"
     }
 
+    /// Why nothing was sent while prototype mode is on — **carrying the event anyway**, so
+    /// gating the delivery does not also lose the information.
+    ///
+    /// That is the whole point of the wording: diagnostics exist to report failures, and
+    /// prototype mode is the mode demos and development happen in, so a gate that simply
+    /// dropped these events would blind the channel exactly where it is most useful. It is
+    /// also a `#if DEBUG`-only mode, so the unified log is always within reach of whoever
+    /// is running it — which is how this module is read anyway (see the header).
+    ///
+    /// Keys are SORTED. `[String: Any]` has no stable iteration order, so an unsorted render
+    /// would emit a different line for the same event on every run and could not be asserted
+    /// on — and this module's convention is that the wording is the deliverable.
+    nonisolated static func heldByPrototypeMode(_ payload: [String: Any]) -> String {
+        let rendered = payload.keys.sorted()
+            .map { "\($0)=\(payload[$0].map { String(describing: $0) } ?? "")" }
+            .joined(separator: " ")
+        return "not sent — prototype mode is on (fixture session); event kept in this log only: "
+            + rendered
+    }
+
+    /// Why the self-test did not run at all, rather than letting it report a failure it
+    /// would have caused itself.
+    ///
+    /// With prototype mode on, the sink holds the write (see `heldByPrototypeMode`), so the
+    /// read-back finds nothing and `selfTestFailedNoDocument` says "no document" — which
+    /// reads as a broken channel when the channel is fine and the gate is doing its job.
+    /// A deliberate outcome must not be reported as an unexplained failure.
+    nonisolated static func selfTestHeldByPrototypeMode() -> String {
+        "self-test skipped — prototype mode is on, so diagnostics are not sent. "
+            + "Turn prototype mode off to test the destination."
+    }
+
     /// The line a human reads to decide whether the destination works.
     ///
     /// Built as a pure function so its content is testable without a log store: the

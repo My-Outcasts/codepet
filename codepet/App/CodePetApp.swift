@@ -36,6 +36,11 @@ struct CodePetApp: App {
         // while the founder's switch is off. Registering here rather than when the switch
         // flips is what lets it take effect with no relaunch.
         CloudAIBlock.install()
+        // `-CODEPET_LIVE_AI` asks for the prototype to run on the founder's own plan, which is
+        // meaningless with prototype mode off — so it seeds the toggle ON here rather than
+        // implying it in `isOn`. Seeding leaves the toggle usable in both directions; implying
+        // would have pinned it on, which is the complaint this fixes.
+        PrototypeMode.seedFromLiveAIFlag()
         // Skip Firebase under XCTest — Firestore aborts when its store isn't
         // available in the test runner, which would crash the whole test host.
         if !AppEnvironment.isRunningTests {

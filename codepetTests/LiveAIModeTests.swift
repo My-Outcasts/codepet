@@ -113,3 +113,61 @@ final class LiveAIModeTests: XCTestCase {
                        ["CODEPET_MOCK_CHAT", "CODEPET_MOCK_FLOW", "CODEPET_MOCK_AUTOPLAY"])
     }
 }
+
+// MARK: - Live mode turns prototype on without pinning it (7 Sep)
+
+extension LiveAIModeTests {
+
+    private func scratch(_ name: String) -> UserDefaults {
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    /// The founder asked for `-CODEPET_LIVE_AI` to imply prototype-on **without** locking the
+    /// toggle. Seeding the stored preference is what makes both halves true; making `isOn`
+    /// return true whenever `liveAI` is set would have pinned it on, which is the complaint
+    /// this exists to fix.
+    func testLiveAIFlagSeedsPrototypeOnAndLeavesItSwitchable() {
+        let d = scratch("seed-live-ai")
+        let previous = PrototypeMode.store
+        PrototypeMode.store = d
+        defer { PrototypeMode.store = previous }
+
+        d.set(true, forKey: "CODEPET_LIVE_AI")
+        XCTAssertFalse(PrototypeMode.isOn, "nothing seeded yet")
+
+        PrototypeMode.seedFromLiveAIFlag()
+        XCTAssertTrue(PrototypeMode.isOn, "the live flag must switch prototype mode on")
+        XCTAssertFalse(PrototypeMode.isLocked,
+                       "and must NOT lock it — `CODEPET_LIVE_AI` is not a launch key")
+
+        // The half that matters: she can still turn it off.
+        XCTAssertTrue(PrototypeMode.set(false), "the toggle must be usable")
+        XCTAssertFalse(PrototypeMode.isOn, "prototype mode must actually go off")
+    }
+
+    /// Idempotent, and never overrides a choice she has already made.
+    func testSeedingDoesNotOverrideAnExistingChoice() {
+        let d = scratch("seed-live-ai-existing")
+        let previous = PrototypeMode.store
+        PrototypeMode.store = d
+        defer { PrototypeMode.store = previous }
+
+        d.set(true, forKey: "CODEPET_LIVE_AI")
+        d.set(false, forKey: PrototypeMode.key)          // she turned it off herself
+        PrototypeMode.seedFromLiveAIFlag()
+        XCTAssertFalse(PrototypeMode.isOn, "seeding must not undo the founder's own choice")
+    }
+
+    /// Without the flag, seeding does nothing at all.
+    func testNoFlagSeedsNothing() {
+        let d = scratch("seed-live-ai-absent")
+        let previous = PrototypeMode.store
+        PrototypeMode.store = d
+        defer { PrototypeMode.store = previous }
+
+        PrototypeMode.seedFromLiveAIFlag()
+        XCTAssertFalse(PrototypeMode.isOn, "no live flag, no prototype mode")
+    }
+}

@@ -130,6 +130,29 @@ enum PrototypeMode {
     /// Ignored while locked — a launch argument wins, and pretending otherwise would
     /// leave the preference and the running app disagreeing about which one is true.
     @discardableResult
+    /// **`-CODEPET_LIVE_AI` turns prototype mode on, once, WITHOUT locking the toggle.**
+    ///
+    /// Live mode means "run the prototype on my own Claude plan", which is meaningless with
+    /// prototype mode off — so asking for it has to switch it on. The obvious way is to make
+    /// `isOn` return true whenever `liveAI` is set, and that is wrong: the founder could then
+    /// never switch it OFF, which is the exact complaint that started this. A computed
+    /// implication is not a default, it is a lock wearing a different hat.
+    ///
+    /// So it SEEDS the stored preference instead, once at launch and only when the founder has
+    /// no preference of her own yet. After that the toggle behaves normally in both directions.
+    ///
+    /// `CODEPET_LIVE_AI` stays out of `launchKeys` (see that property): the accident those
+    /// three guard against — autoplay driving real Cloud Functions unattended — is unchanged,
+    /// because live mode is fixtures plus a real transport, never a real board.
+    ///
+    /// Called once from `CodePetApp.init`. Idempotent: a second call finds the key set and
+    /// leaves the founder's own choice alone.
+    static func seedFromLiveAIFlag() {
+        guard liveAI, !isLocked else { return }
+        guard store.object(forKey: key) == nil else { return }   // she has already chosen
+        store.set(true, forKey: key)
+    }
+
     static func set(_ on: Bool) -> Bool {
         guard !isLocked else { return false }
         store.set(on, forKey: key)
@@ -156,6 +179,7 @@ enum PrototypeMode {
     static var startsAtColdOpen: Bool { false }
     @discardableResult
     static func set(_ on: Bool) -> Bool { false }
+    static func seedFromLiveAIFlag() {}
     static var allowsCloudWrites: Bool { true }
     #endif
 }

@@ -38,7 +38,13 @@ final class MockCodeRunner: CodeRunning {
         let fm = FileManager.default
 
         // 1. A named candidate we know how to edit nicely.
-        for name in ["greeting.js", "README.md", "index.js", "main.swift"] {
+        // `index.html` leads because the day-one demo's code run is titled "Build the Murror
+        // landing page". Without it the picker fell through to step 2, which sorts entries
+        // alphabetically — so once a previous run had created `CODEPET_MOCK.md`, that file
+        // sorted first (uppercase before lowercase) and was chosen for every run thereafter.
+        // The founder watched a task called "Build the Murror landing page" edit a file whose
+        // own contents read "created by a mock coding run to demonstrate the flow".
+        for name in ["index.html", "greeting.js", "README.md", "index.js", "main.swift"] {
             let p = (dir as NSString).appendingPathComponent(name)
             if let before = try? String(contentsOfFile: p, encoding: .utf8) {
                 return (p, before, transform(before), false)
@@ -49,6 +55,9 @@ final class MockCodeRunner: CodeRunning {
         //    meaningful config/meta file (CLAUDE.md, manifests, lockfiles, licenses)
         //    or a dotfile; the mock should touch ordinary source, not project scaffolding.
         let skip: Set<String> = [
+            // Its own marker from a previous run. Editing it makes the next run a mock
+            // editing the evidence of the last mock — and it sorts first, so it wins forever.
+            "CODEPET_MOCK.md",
             "CLAUDE.md", "AGENTS.md", "LICENSE", "LICENSE.md",
             "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
             "Package.swift", "Package.resolved", "Podfile", "Podfile.lock",

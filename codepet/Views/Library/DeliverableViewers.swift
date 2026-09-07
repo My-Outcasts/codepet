@@ -795,10 +795,11 @@ struct SiteViewer: View {
                     // Copy HTML keeps the frame's slot untouched.
                     Button {
                         do {
-                            let url = SiteExport.fileURL(
-                                forDeliverableId: deliverableId ?? "site")
-                            try SiteExport.write(html: html, to: url)
-                            NSWorkspace.shared.open(url)
+                            // Opens in Google Chrome by name when it is installed, falling back
+                            // to the system default when it is not — `SiteExport.openInBrowser`
+                            // is where that resolution lives, tested without launching either.
+                            try SiteExport.openInBrowser(
+                                html: html, deliverableId: deliverableId ?? "site")
                             openFailed = false
                         } catch {
                             // A button that sometimes does nothing is worse than one that says

@@ -27,7 +27,6 @@ struct MockFlowCaptionBar: View {
     var body: some View {
         VStack(spacing: 8) {
             caption
-            chapters
             transport
         }
         .frame(maxWidth: .infinity)
@@ -78,32 +77,25 @@ struct MockFlowCaptionBar: View {
     /// watch linearly must be short enough to sit through, while one you can enter
     /// anywhere can afford to be complete. The player already had `jump(toChapter:)`;
     /// nothing exposed it.
-    private var chapters: some View {
-        let current = player.currentChapter
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 5) {
-                ForEach(player.chapters, id: \.self) { chapter in
-                    Button { player.jump(toChapter: chapter) } label: {
-                        Text(chapter)
-                            .font(CodepetTheme.inter(CodepetType.footnote,
-                                                     weight: chapter == current ? .semibold : .regular))
-                            .foregroundColor(chapter == current
-                                             ? CodepetTheme.accentPurple : .white.opacity(0.7))
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Capsule().fill(chapter == current
-                                                       ? CodepetTheme.accentPurple.opacity(0.18)
-                                                       : Color.white.opacity(0.06)))
-                            .contentShape(Capsule())
-                            .hoverAffordance(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-        }
-        .frame(maxWidth: 720)
-    }
-
+    ///
+    /// **Folded into one compact label, not a row of chips.** Nine chapters wrapped
+    /// to a second line even at a comfortable width, and two more were about to make
+    /// that worse — a row that grows with the script does not belong in a band
+    /// whose whole job is to stay out of the founder's way. Every capability the
+    /// chip row had survives: `player.chapters` (which mirrors `MockFlowScript.chapters`
+    /// for the tour, or the day-one script's own chapters when that fixture is
+    /// playing — see its doc comment) still lists every chapter in order, jumping
+    /// still goes through `player.jump(toChapter:)`, and the current chapter is
+    /// still marked — as a checkmark row in the menu rather than a filled chip,
+    /// the same idiom `ChatComposer`'s department picker already uses for "which
+    /// one is picked" inside a `Menu`.
+    ///
+    /// **A native `Menu`, not a popover.** `AccountMenuView` swapped to a popover
+    /// because a borderless `Menu` flattens a RICH label (an avatar circle plus a
+    /// name plus a chevron) to a bare disclosure triangle. This label is plain text
+    /// — exactly the shape `ChatComposer`'s `departmentControl` already renders as
+    /// a `Menu` label without incident — so there is nothing here for that failure
+    /// mode to catch.
     private var transport: some View {
         HStack(spacing: 7) {
             button(player.isPlaying ? "❚❚ Pause" : "▶ Play") { player.toggle() }
@@ -116,10 +108,7 @@ struct MockFlowCaptionBar: View {
             ForEach([("Slow", 1.5), ("Steady", 1.0), ("Brisk", 0.6)], id: \.0) { name, value in
                 button(name, on: player.pace == value) { player.pace = value }
             }
-            Text("\(min(player.index + 1, player.beats.count))/\(player.beats.count)")
-                .font(CodepetTheme.inter(CodepetType.footnote))
-                .foregroundColor(CodepetTokens.faint)
-                .padding(.leading, 4)
+            chapterMenu
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(Capsule().fill(Color.black.opacity(0.7)))
@@ -138,6 +127,53 @@ struct MockFlowCaptionBar: View {
                 .hoverAffordance(Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    /// The chapter + position control that replaced the chip row: current chapter,
+    /// the same `n/total` counter the chips row sat beside, and a disclosure that
+    /// opens every chapter in order.
+    ///
+    /// `player.chapters` and `player.jump(toChapter:)` are exactly what the chip row
+    /// read and called — see that property's doc comment for why they mirror
+    /// `MockFlowScript.chapters` / `firstBeat(of:)` rather than duplicating them.
+    /// Falls back to the last chapter if `currentChapter` is nil (the tour has run
+    /// past its final beat and stopped) rather than showing a blank label.
+    private var chapterMenu: some View {
+        let current = player.currentChapter ?? player.chapters.last ?? ""
+        let position = "\(min(player.index + 1, player.beats.count))/\(player.beats.count)"
+        return Menu {
+            ForEach(player.chapters, id: \.self) { chapter in
+                Button { player.jump(toChapter: chapter) } label: {
+                    // Same idiom as `ChatComposer`'s department picker: a checkmark
+                    // `Label` marks the current row, a bare `Text` marks every other —
+                    // the menu's version of the chip row's filled-vs-dim contrast.
+                    if chapter == player.currentChapter {
+                        Label(chapter, systemImage: "checkmark")
+                    } else {
+                        Text(chapter)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(current)
+                    .font(CodepetTheme.inter(CodepetType.subheadline, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .lineLimit(1)
+                Text(position)
+                    .font(CodepetTheme.inter(CodepetType.footnote))
+                    .foregroundColor(CodepetTokens.faint)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9))
+                    .foregroundColor(CodepetTokens.faint)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.18)))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }
 #endif

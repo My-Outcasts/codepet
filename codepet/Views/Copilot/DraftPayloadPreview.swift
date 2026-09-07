@@ -28,6 +28,9 @@ struct DraftPayloadPreview: View {
     let onOpen: () -> Void
 
     @Environment(\.uiLanguage) private var lang
+    /// Set when writing/opening the produced page fails, so the `.site` row can say why instead
+    /// of doing nothing. Same fail-soft pattern as the Library's `SiteViewer`.
+    @State private var openFailed = false
 
     /// Every structured preview routes to the full viewer.
     ///
@@ -178,8 +181,33 @@ struct DraftPayloadPreview: View {
                         .font(.pixelSystem(size: 11, weight: .semibold))
                         .foregroundColor(CodepetTheme.bodyText)
                 }
+                Spacer(minLength: 8)
+                // Reaches the produced page directly from the chat card — previously this
+                // affordance existed only in the Library's `SiteViewer`. In THIS view's own
+                // content, same reasoning as `SiteViewer`'s button: `DraftPayloadPreview` has no
+                // shared `action:` slot to widen for one kind.
+                Button {
+                    do {
+                        try SiteExport.openInBrowser(html: SiteViewer.buildHTML(s),
+                                                      deliverableId: deliverable.id)
+                        openFailed = false
+                    } catch {
+                        openFailed = true
+                    }
+                } label: {
+                    Text(SiteViewer.openLabel(lang))
+                        .font(.pixelSystem(size: 10.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                }
+                .buttonStyle(.plain)
+                .cursorOnHover(.pointingHand)
             }
             .padding(.top, 1)
+            if openFailed {
+                Text(lang == .vi ? "Không mở được" : "Couldn't open")
+                    .font(.pixelSystem(size: 10.5))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
         }
         .padding(11)
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous)

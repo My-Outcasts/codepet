@@ -125,8 +125,18 @@ final class CompanyStore: ObservableObject {
     }
 
     private func makeCodingRun() -> CodingRunCoordinator {
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the coding run goes to
+        // the founder's own Claude Code, like every other model call in live mode. This was
+        // MISSED when live mode was built — chat, task and VC transports moved and this one
+        // did not, so the Code and Redesign chapters stayed a scripted animation while
+        // everything around them was real. The founder asked whether the prototype behaves
+        // like actual use; this was the honest answer's sharpest exception.
+        //
+        // It writes to disk for real, which is safe here only because `.linkDemoFolder` binds
+        // a throwaway directory under `NSTemporaryDirectory()`. Never point this at a folder
+        // that matters without the founder linking it themselves.
         #if DEBUG
-        let mock = MockChat.enabled
+        let mock = MockChat.usesMockTransport
         #else
         let mock = false
         #endif
@@ -379,7 +389,10 @@ final class CompanyStore: ObservableObject {
         // on the wire. Same reason `codeRunner` picks `MockCodeRunner` above.
         self.injectedVCRunner = vcRunner
         #if DEBUG
-        self.vcRunner = vcRunner ?? (MockChat.enabled
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture board stays
+        // fixture, but a convened room dispatches through `LocalTransportRouter` — the same
+        // path the real product uses — instead of `MockVirtualCompany`'s canned frames.
+        self.vcRunner = vcRunner ?? (MockChat.usesMockTransport
                                      ? { MockVirtualCompany.run($0) }
                                      : { LocalTransportRouter.runVirtualCompany($0) })
         #else
@@ -781,7 +794,8 @@ final class CompanyStore: ObservableObject {
     func sendChat(_ raw: String, language: AppLanguage, department: Department? = nil,
                   founderAsk: String? = nil, convenesRoom: Bool = false,
                   pinned: [ContextPin] = [],
-                  attachments: [ChatAttachment] = []) async {
+                  attachments: [ChatAttachment] = [],
+                  aboutTask: RoadmapTask? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
@@ -797,7 +811,8 @@ final class CompanyStore: ObservableObject {
         await sendMessage(text, language: language, department: department,
                           convene: convenesRoom ? words : nil,
                           display: words,
-                          founderAsk: words, pinned: pinned, attachments: attachments)
+                          founderAsk: words, pinned: pinned, attachments: attachments,
+                          aboutTask: aboutTask)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -932,6 +947,46 @@ final class CompanyStore: ObservableObject {
         department?.key ?? DepartmentCompanions.mentionedDeptKey(in: text)
     }
 
+    /// Who speaks for this turn: the task's own department when the turn is about a task,
+    /// else the chip-or-keyword rule.
+    ///
+    /// **Task first, and the order is the point.** A task's `dept` is a recorded fact; a
+    /// keyword match is an inference over prose. Asking "walk me through <task>" names no
+    /// department, so inference returned nil and the reply signed itself with the product's
+    /// name on a Marketing task — the bug the founder photographed on 6 Sep.
+    ///
+    /// `internal` rather than `private` so the resolution is testable without a view. The two
+    /// inputs stay separate for the same reason `actingSpecialist` and `actingDeptKey` are
+    /// separate: who speaks and what they know are different questions.
+    func speakerFor(task: RoadmapTask?, text: String,
+                    department: Department?) -> (companionId: String, deptName: String)? {
+        if let task, let spec = taskSpecialist(for: task) { return spec }
+        return actingSpecialist(text: text, department: department)
+    }
+
+    /// What the model should be grounded in for this turn: the task's own department when the
+    /// turn is about a task, else the chip-or-keyword rule. `speakerFor`'s task-first order,
+    /// mirrored — a task's `dept` is a recorded fact, a keyword match is an inference over prose.
+    ///
+    /// **Deliberately its own resolver, not a second use of `speakerFor`.** The comment above
+    /// `actingDeptKey` records the bug fusing "who speaks" with "what they know" caused; this
+    /// answers "what does the model know," `speakerFor` answers "whose name is on the bubble,"
+    /// and unlike `taskSpecialist` this does not require a mapped pet — `product` resolves in
+    /// `DepartmentCatalog` with no companion, and a task in that department should still ground
+    /// the reply even though nothing relabels the header. `MockChat.route` enforces the
+    /// companion requirement separately before it will use a department's in-character reply.
+    ///
+    /// Before this, `dept_key` was resolved from the chip or a department named in the text only
+    /// — never from the task — so a reply headed "Nova · Marketing" (from `speakerFor`) could
+    /// carry the generic default reply, because the request that produced it told the model
+    /// nothing about marketing.
+    func deptKeyFor(task: RoadmapTask?, text: String, department: Department?) -> String? {
+        if let task, let key = task.dept, DepartmentCatalog.find(key) != nil {
+            return key
+        }
+        return actingDeptKey(text: text, department: department)
+    }
+
     /// Chat-triggered code run: show the founder's ask as a normal message, anchor the
     /// run card to it, and stage the run. With no linked project the coordinator lands
     /// in `.noProject` and the card offers "Link a project".
@@ -1050,8 +1105,10 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(msg)
         engineeringRunAnchorId = msg.id
 
+        // `usesMockTransport`, not `enabled` — same reason as `makeCodingRun`: under
+        // `CODEPET_LIVE_AI` an engineering run is a real one on the founder's own plan.
         #if DEBUG
-        let mock = MockChat.enabled
+        let mock = MockChat.usesMockTransport
         #else
         let mock = false
         #endif
@@ -1217,7 +1274,10 @@ final class CompanyStore: ObservableObject {
         clearEngineeringRun()
         _codingRun = nil
         codingRunBag = nil
-        vcRunner = injectedVCRunner ?? (on
+        // Re-resolved off `usesMockTransport`, not the raw `on` this switch just set — see the
+        // init assignment above for why: `CODEPET_LIVE_AI` keeps prototype mode's fixtures
+        // ("on" stays true) while routing the room through `LocalTransportRouter`.
+        vcRunner = injectedVCRunner ?? (MockChat.usesMockTransport
                                         ? { MockVirtualCompany.run($0) }
                                         : { LocalTransportRouter.runVirtualCompany($0) })
 
@@ -1505,7 +1565,8 @@ final class CompanyStore: ObservableObject {
     private func sendMessage(_ text: String, language: AppLanguage, department: Department? = nil,
                              convene: String? = nil, display: String? = nil,
                              founderAsk: String? = nil, pinned: [ContextPin] = [],
-                             attachments: [ChatAttachment] = []) async {
+                             attachments: [ChatAttachment] = [],
+                             aboutTask: RoadmapTask? = nil) async {
         guard !isCompanionTyping, !isStreaming else { return }
         // The same total-base64 rule the composer refuses with, applied again at the
         // wire. Not belt-and-braces for its own sake: the composer is only ONE caller,
@@ -1560,8 +1621,8 @@ final class CompanyStore: ObservableObject {
         // was Byte writing in Nova's name. Whoever leads the turn now leads it on the wire
         // too, and the department rides along so the CF can ground the answer in that
         // department's expertise.
-        let specialist = actingSpecialist(text: text, department: department)
-        let deptKey = actingDeptKey(text: text, department: department)
+        let specialist = speakerFor(task: aboutTask, text: text, department: department)
+        let deptKey = deptKeyFor(task: aboutTask, text: text, department: department)
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue,
             // The specialist when one leads, else the founder's own companion. Falling back
@@ -1992,7 +2053,7 @@ final class CompanyStore: ObservableObject {
     /// a guard of its own — the host-shadow rule, deleted 26 Aug. Now nothing suppresses it
     /// anywhere, and there is no longer an asymmetry between chat and runs for this comment to
     /// explain.
-    private func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
+    func taskSpecialist(for task: RoadmapTask) -> (companionId: String, deptName: String)? {
         guard let deptKey = task.dept, let dept = DepartmentCatalog.find(deptKey),
               let companionId = DepartmentCompanions.companionId(for: deptKey) else { return nil }
         return (companionId, dept.name)
@@ -3005,6 +3066,76 @@ final class CompanyStore: ObservableObject {
                                              body: body, sourceTaskId: taskId)
         await approveTask(id: taskId)
     }
+
+    #if DEBUG
+    /// Post a pre-written, pet-attributed message with no model call — the day-one
+    /// walkthrough's `.petSays` beat, where the "reply" is scripted copy rather than a live
+    /// turn. `chatMessages` stays `private(set)` outside this file (session-only transcript
+    /// state, mutated only through the store's own methods), so this is the seam a caller in
+    /// another file uses instead of appending directly.
+    func postScriptedCompanionMessage(_ text: String, companionId: String, deptName: String) {
+        chatMessages.append(CopilotMessage(role: .companion, text: text,
+                                           companionId: companionId, deptName: deptName))
+    }
+
+    /// Post a pre-written FOUNDER-attributed message with no model call — the day-one
+    /// walkthrough's `.petSays(line: .asks)` beat.
+    ///
+    /// Amendment, 6 Sep: the question belongs to the founder, not the department that will
+    /// answer it (the brief was "imagine what questions THEY would have"), so it can't post
+    /// the same way `postScriptedCompanionMessage` does. `role: .me`, no `companionId`, no
+    /// `deptName` — right-aligned with no speaker row, exactly like anything else she types.
+    func postScriptedFounderMessage(_ text: String) {
+        chatMessages.append(CopilotMessage(role: .me, text: text))
+    }
+
+    /// Post a pre-written PRODUCT-voiced message with no model call — the day-one opening's
+    /// `summary`/`prompt`/`setup` beats (Amendment 2, 6 Sep). These lines belong to no
+    /// department, so unlike `postScriptedCompanionMessage` there is no `companionId`/
+    /// `deptName` to carry: `role: .companion` with both nil, which is what makes
+    /// `CodepetBrand.header` return nil and the line render as bare prose with no speaker
+    /// row — the rule already shipped, not a case added here. Matches the existing
+    /// `role: .companion, text: text` convention used elsewhere in this file for an
+    /// unattributed reply (e.g. `sendChat`'s own generic-reply path).
+    func postScriptedHostMessage(_ text: String) {
+        chatMessages.append(CopilotMessage(role: .companion, text: text))
+    }
+
+    /// Generate one Codepet line LIVE from a hidden instruction, and post only the answer.
+    ///
+    /// **Why a hidden instruction rather than `sendChat`.** The founder's rule is that she
+    /// writes the script and Codepet answers in real time. Most of Codepet's lines are replies
+    /// to something she said, and `sendChat` handles those. But three of them — the opening
+    /// summary, the prompt for more detail, and each department's closing report — are Codepet
+    /// speaking when she has said nothing. `sendChat` would have to invent a founder message to
+    /// reply to, and inventing her words is the one thing this design must not do.
+    ///
+    /// `CompanyChatClient.send` returns a reply without touching the transcript, so the
+    /// instruction never appears and only the answer does.
+    ///
+    /// **The instruction is how the chain survives.** A generated closing line cannot be relied
+    /// on to hand off to the next department, so the caller tells it to — that is cheaper and
+    /// more honest than keeping an authored line and calling the demo live.
+    ///
+    /// Fail-soft: a nil reply posts the caller's `fallback` (the authored line), so a dead
+    /// transport degrades to the scripted demo rather than to a hole in the conversation.
+    func postLiveLine(instruction: String, fallback: String, language: AppLanguage,
+                      companionId: String? = nil, deptName: String? = nil,
+                      deptKey: String? = nil) async {
+        let req = CompanyChatRequest(
+            companyId: companyId, language: language.rawValue,
+            companionId: companionId ?? company.companionId,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks,
+                                         decisions: company.decisions, library: company.library,
+                                         query: instruction, focusDepartment: nil,
+                                         memoryEnabled: company.founderPrefs.memoryEnabled),
+            history: [], userMessage: instruction, deptKey: deptKey)
+        let reply = await CompanyChatClient.send(req)
+        let text = (reply?.text).flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+        chatMessages.append(CopilotMessage(role: .companion, text: text,
+                                           companionId: companionId, deptName: deptName))
+    }
+    #endif
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,
     /// and clear the draft/drafted state. Persists both tasks + library. Idempotent — a

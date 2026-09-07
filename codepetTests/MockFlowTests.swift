@@ -346,4 +346,145 @@ final class MockFlowTests: XCTestCase {
         XCTAssertTrue(store.company.library.contains { $0.sourceTaskId == "mur-landscape" },
                       "approved but never actually filed to the library")
     }
+
+    // MARK: - a `.runTask` beat waits for its own run to resolve
+
+    /// **The bug this guards.** `MockFlowPlayer` fired `Task { await store.runTask(...) }` for a
+    /// `.runTask` beat and let its OWN timer advance the player on the beat's authored `seconds`
+    /// regardless of whether that run had actually finished. In mock mode a run resolves in
+    /// ~2.5s against a ~2.6s beat, so this never showed; under `CODEPET_LIVE_AI` a real run takes
+    /// 20-60s, and the player kept walking through several more departments' beats — posting
+    /// their `asks`/`frames` lines into the SAME transcript — while the earlier run was still in
+    /// flight. When that run finally resolved, its draft (and the approval that follows it)
+    /// landed underneath whatever department's message was on screen by then: the founder's own
+    /// screenshot, a Sales artifact ("Who Murror Is Not For — Sales Disqualifiers") appearing
+    /// under Support · Sage's message.
+    ///
+    /// **Why this is a DIFFERENT bug than the one `testApproveBeatFilesTheDraftEvenWhenTheRunIs
+    /// StillSlowerThanTheBeat` above guards.** That test's `.approveNewestDraft` wait already
+    /// makes the draft get approved and filed correctly no matter how late it arrives — the
+    /// deliverable is never lost. This bug is about WHERE it lands: the player must not walk
+    /// through later departments' chat lines while an earlier department's run is still pending,
+    /// even though that earlier run's draft will eventually be approved just fine. So the signal
+    /// this test checks is not "did it get filed" (already covered) but "did the NEXT department
+    /// speak before this run resolved" — Sales · Nova's `asks` line must not appear in the
+    /// transcript while `mur-landscape`'s run (Marketing · Nova, the day-one chain's first
+    /// `.runTask`) is still in `runningTaskIds`.
+    ///
+    /// **Reproduced the same way the sibling test above does**: a very low `pace` shrinks the
+    /// script's own real playback far below the injected `taskRunner`'s artificial delay (1.8s
+    /// here — long enough to leave a wide, reliable window; short enough to keep this test fast),
+    /// which is the same shape `CODEPET_LIVE_AI`'s real 20-60s produces against a live beat, just
+    /// scaled down. `execStepNanos`/`execDoneBeatNanos` are zeroed so the injected sleep is the
+    /// only source of delay in the run itself.
+    ///
+    /// Verified red by hand: reverting `MockFlowPlayer.step()`/`schedule(after:)` to the
+    /// fire-and-forget shape (`Task { await store.runTask(...) }` inside `perform()`, with
+    /// `step()` scheduling the next beat unconditionally) makes this fail — the low pace races
+    /// the player straight through Marketing's report and Sales' opening while `mur-landscape` is
+    /// still running.
+    /// **The run beat must not advance until its own run resolves.**
+    ///
+    /// Rewritten 7 Sep after it failed in CI. It used to depend on three wall-clock windows
+    /// lining up — a 0.05 pace, an injected 1.8s sleep, and a 2.2s wait — and its own guard
+    /// ("the run should still be in flight at this point") is what tripped: on CI's timing the
+    /// run had already finished before the assertion looked. A test that only proves something
+    /// when the machine is the right speed proves nothing on any other machine.
+    ///
+    /// The runner now blocks until this test releases it, so the window is controlled rather
+    /// than hoped for, and every wait polls a condition instead of sleeping a guessed duration.
+    func testARunTaskBeatDoesNotAdvanceUntilItsOwnRunResolves() async throws {
+        let previousStepNanos = CompanyStore.execStepNanos
+        let previousDoneBeatNanos = CompanyStore.execDoneBeatNanos
+        defer {
+            CompanyStore.execStepNanos = previousStepNanos
+            CompanyStore.execDoneBeatNanos = previousDoneBeatNanos
+        }
+        CompanyStore.execStepNanos = 0
+        CompanyStore.execDoneBeatNanos = 0
+
+        // The gate the RUN waits on. `@unchecked Sendable` over a lock rather than an actor:
+        // the runner closure is non-isolated and the player is `@MainActor`, and a plain flag
+        // keeps the test readable without hopping actors to read one Bool.
+        final class Gate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var open = false
+            var isOpen: Bool { lock.lock(); defer { lock.unlock() }; return open }
+            func release() { lock.lock(); open = true; lock.unlock() }
+        }
+        let gate = Gate()
+
+        let project = DemoProject.murrorDayOne
+        let seed = CompanyState(brief: project.brief, departments: [], library: project.library(),
+                                stage: .building, companionId: "byte", onboardedAt: Date(),
+                                tasks: project.tasks)
+        let store = CompanyStore(
+            loader: { _ in seed },
+            tasksSaver: { _, _ in true },
+            chatSender: { await MockChat.reply($0) },
+            chatStreamer: { MockChat.stream($0) },
+            taskRunner: { req in
+                // Held open until the test says so — this is what makes the window exact.
+                while !gate.isOpen { try? await Task.sleep(nanoseconds: 5_000_000) }
+                let entry = project.deliverable(for: req.taskTitle)
+                return RunTaskResponse(kind: entry.kind, title: req.taskTitle,
+                                       body: MockChat.fill(entry.body, title: req.taskTitle))
+            },
+            librarySaver: { _, _ in true },
+            firstApprovalSaver: { _, _ in true },
+            decisionsSaver: { _, _ in true },
+            decisionExtractor: { _, _ in [] })
+        await store.hydrate(companyId: "u")
+
+        // **Select the day-one project, or this test proves nothing.**
+        // `MockFlowPlayer` picks its script from `DemoProject.current.id == "murror-day-one"`,
+        // and under XCTest `PrototypeMode.store` is a scratch suite with nothing set — so
+        // `current` falls back to `.codepet` and the player loads the 24-beat TOUR. The
+        // assertion below ("Sales · Nova's ask has not appeared") is then trivially true,
+        // because that chapter does not exist in the tour. This test passed vacuously until
+        // CI's timing tripped its own in-flight guard and exposed it.
+        DemoProject.select("murror-day-one")
+        defer { DemoProject.select("codepet") }
+
+        let player = MockFlowPlayer()
+        player.attach(store: store, language: .en)
+        XCTAssertTrue(player.beats.count > 24,
+                      "the player loaded the 24-beat tour, not the day-one script — every "
+                      + "assertion below would pass without proving anything")
+        // Shrinks the authored beats so the script's own pacing cannot be what holds the player
+        // back — only the fix, or its absence, can.
+        player.pace = 0.05
+        player.play()
+
+        /// Polls a condition instead of sleeping a guessed duration. Returns false on timeout,
+        /// so a hang fails with the assertion's own message rather than as a stalled suite.
+        func waitUntil(_ timeout: TimeInterval = 5, _ cond: @MainActor () -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                if cond() { return true }
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            return cond()
+        }
+
+        let started = await waitUntil(15) { store.runningTaskIds.contains("mur-landscape") }
+        XCTAssertTrue(started,
+                      "mur-landscape's run never started — player at beat \(player.index) of "
+                      + "\(player.beats.count), \(store.chatMessages.count) messages posted")
+
+        // The run is now DEFINITELY in flight: it cannot finish until `gate.release()` below.
+        // Under the unfixed handler the player would already have raced into the next chapter.
+        let salesAsk = DayOneScript.line(for: "sales", .asks, language: .en)
+        XCTAssertFalse(store.chatMessages.contains { $0.text == salesAsk },
+                      "the player advanced into Sales · Nova's chapter while mur-landscape's run "
+                      + "was still in flight — a `.runTask` beat must not advance until its own "
+                      + "run resolves")
+
+        // And it must not stall forever either: once the run resolves, the script moves on.
+        gate.release()
+        let resumed = await waitUntil { !store.runningTaskIds.contains("mur-landscape") }
+        XCTAssertTrue(resumed, "the run never resolved after the gate opened")
+
+        player.pause()
+    }
 }

@@ -377,7 +377,10 @@ enum CompanyChatClient {
 
     static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         #if DEBUG
-        if MockChat.enabled { return await MockChat.reply(req) }
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture company
+        // still loads, but the turn falls through to the real dispatch below instead of a
+        // canned reply — see `MockChat.usesMockTransport`.
+        if MockChat.usesMockTransport { return await MockChat.reply(req) }
         #endif
         guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
         var urlRequest = URLRequest(url: endpoint)
@@ -416,7 +419,8 @@ enum CompanyChatClient {
         authTokenProvider: (() async throws -> String)? = nil
     ) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         #if DEBUG
-        if MockChat.enabled { return MockChat.stream(req) }
+        // Same swap as `send` above — checked here rather than `enabled` for the same reason.
+        if MockChat.usesMockTransport { return MockChat.stream(req) }
         #endif
         let capturedSession = session
         let capturedAuthTokenProvider = authTokenProvider ?? {

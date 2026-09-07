@@ -171,7 +171,10 @@ enum RunTaskClient {
 
     static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
         #if DEBUG
-        if MockChat.enabled { return await MockChat.runResult(req) }
+        // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture board and
+        // tasks stay exactly as they are, but the run itself falls through to the founder's
+        // own Claude Code below instead of a canned deliverable — see `MockChat.usesMockTransport`.
+        if MockChat.usesMockTransport { return await MockChat.runResult(req) }
         #endif
         // The founder's own Claude Code first, when they granted it. Fail-open is preserved
         // (`nil` is what the caller turns into an honest error on the card), but the reason
@@ -183,7 +186,10 @@ enum RunTaskClient {
             do {
                 let body = try JSONEncoder().encode(req)
                 let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
-                return try JSONDecoder().decode(RunTaskResponse.self, from: out)
+                let decoded = try JSONDecoder().decode(RunTaskResponse.self, from: out)
+                LocalTransportRouter.log.error(
+                    "local runTask succeeded: kind=\(decoded.kind, privacy: .public) title=\(decoded.title, privacy: .public) bodyLen=\(decoded.body.count, privacy: .public)")
+                return decoded
             } catch {
                 LocalTransportRouter.log.error(
                     "local runTask failed: \(error.localizedDescription, privacy: .public)")
@@ -192,7 +198,12 @@ enum RunTaskClient {
         case .cloud:
             break
         }
-        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return nil }
+        LocalTransportRouter.log.error(
+            "runTask: cloud branch — requiring a Firebase token (signed-in user: \(Auth.auth().currentUser != nil, privacy: .public))")
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
+            LocalTransportRouter.log.error("runTask: no Firebase token available — returning nil (this is the silent-failure card)")
+            return nil
+        }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")

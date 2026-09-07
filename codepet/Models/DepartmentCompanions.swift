@@ -6,8 +6,8 @@ import Foundation
 /// editable, since nothing depends on the exact cast.
 ///
 /// **There is no host entry, and no host rule.** Codepet is the host: a general turn carries
-/// no `companionId` and `CopilotChatView.headerName` signs it `CodepetBrand.name`. The pets are
-/// department characters and nothing else.
+/// no `companionId`, `CopilotChatView.headerName` returns nil for it, and no speaker row
+/// renders at all. The pets are department characters and nothing else.
 ///
 /// This map used to be read through `specialistId(for:host:)`, which returned nil whenever a
 /// department's pet WAS the founder's own companion — "announcing a handoff to yourself says

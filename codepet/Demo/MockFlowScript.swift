@@ -33,6 +33,33 @@ enum MockFlowScript {
         /// so "run …", "roadmap …" and "long …" each exercise a different reply
         /// shape with no network.
         case say(String)
+        /// A department's pet speaks one of the three lines around its work: it asks, it
+        /// frames how it will approach the work, or it reports what it found.
+        ///
+        /// One intent with three lines rather than three intents — the player's handling is
+        /// identical in all three cases (post the resolved text as that department's pet), and
+        /// a future fourth line should not need a fourth `case` in this enum, which the 24-beat
+        /// tour also compiles against.
+        ///
+        /// Carries the DEPARTMENT KEY and nothing else beyond the line. Two reasons, and both
+        /// were paid for. The cast is remapped from time to time (`eng` moved to byte and `fin`
+        /// to crash on 26 Aug), so a script naming pets directly would keep speaking in a
+        /// retired pet's name. And the prose is resolved at play time because it is a CHAT
+        /// MESSAGE, not a caption: captions in this file are English-only by design, but the
+        /// `asks` line has to be bilingual, and the beat tuple has no language dimension to
+        /// carry it. `frames` and `reports` are English-only by founder decision (6 Sep) — the
+        /// same lookup just returns English regardless of `language` for those two lines.
+        case petSays(deptKey: String, line: DayOneScript.Line)
+        /// One of the four lines that open the day, before any department speaks.
+        ///
+        /// **Amendment 2, 6 Sep.** Kept separate from `.petSays` because these lines belong to
+        /// no department — `summary`, `prompt` and `setup` are the PRODUCT talking, and
+        /// `founderReply` is the founder's own words. Giving any of them a `deptKey` would be a
+        /// lie the header rule would then have to special-case: `CodepetBrand.header` already
+        /// returns nil for a message with neither `companionId` nor `deptName`, which is what
+        /// makes the three product lines render as bare prose with no speaker row, and that is
+        /// the rule as shipped, not an exception added for this beat.
+        case opening(DayOneScript.OpeningLine)
         /// Run the beacon — `RoadmapEngine.nextStep`, the same task the hero card
         /// offers. Produces a real draft through the fixture.
         case runBeacon

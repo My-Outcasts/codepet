@@ -45,6 +45,7 @@ enum LocalTransportRouter {
     /// account switch, or a founder's grant silently stops applying.
     static func apply(companyId: String?) {
         activeCompanyId = (companyId?.isEmpty == false) ? companyId : nil
+        log.error("apply: activeCompanyId set to \(activeCompanyId ?? "nil", privacy: .public)")
     }
 
     /// The one-shot ops, which need the `oneShotSidecar` bundle.
@@ -108,11 +109,19 @@ enum LocalTransportRouter {
     ) -> Transport {
         // No company id means no grant can exist — an ungranted call is a cloud call, not a
         // failure. Onboarding's first enrich lands here if the mirror was never set.
-        guard let companyId, !companyId.isEmpty else { return .cloud }
-        guard authorisation.isAuthorised(companyId) else { return .cloud }
+        guard let companyId, !companyId.isEmpty else {
+            log.error("transport: cloud — no companyId (mirror unset)")
+            return .cloud
+        }
+        guard authorisation.isAuthorised(companyId) else {
+            log.error("transport: cloud — companyId=\(companyId, privacy: .public) not authorised")
+            return .cloud
+        }
         guard sidecarAvailable() else {
+            log.error("transport: localUnavailable — companyId=\(companyId, privacy: .public) authorised but sidecar missing")
             return .localUnavailable("Codepet can't reach its local runner on this Mac.")
         }
+        log.error("transport: local — companyId=\(companyId, privacy: .public) authorised, sidecar available")
         return .local
     }
 }

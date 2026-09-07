@@ -137,4 +137,85 @@ final class DayOneBridgeTests: XCTestCase {
         XCTAssertTrue(carried.contains { $0.taskTitle.contains("12 people") },
                       "link 2 must credit the interviews the founder ran herself")
     }
+
+    /// **Amendment, 6 Sep — the founder asks, the department answers.** `asks` must post as
+    /// the FOUNDER (`role: .me`, no `companionId`) — the brief was "imagine what questions
+    /// THEY would have", and it shipped as the pet asking and then answering itself. `frames`/
+    /// `reports` are unchanged: they still post as the department.
+    ///
+    /// Drives `MockFlowPlayer.perform(_:)` directly (made internal for exactly this) rather
+    /// than the Timer-scheduled `play()` — the real dispatch this whole change lives in, without
+    /// pulling in `Foundation`/`AppKit` run-loop machinery a test has no business depending on.
+    ///
+    /// Verified red: reverting `MockFlowPlayer`'s `line == .asks` branch back to always calling
+    /// `postScriptedCompanionMessage` fails the first assertion below (`ask.role` comes back
+    /// `.companion`, not `.me`).
+    func testAsksPostsAsFounderFramesAndReportsPostAsThePet() async {
+        let store = await dayOneStore()
+        let player = MockFlowPlayer()
+        player.attach(store: store, language: .en)
+        let mkt = DayOneScript.script["mkt"]!
+
+        player.perform(.petSays(deptKey: "mkt", line: .asks))
+        player.perform(.petSays(deptKey: "mkt", line: .frames))
+        player.perform(.petSays(deptKey: "mkt", line: .reports))
+
+        guard let ask = store.chatMessages.first(where: { $0.text == mkt.asks }) else {
+            return XCTFail("the founder's question never posted")
+        }
+        XCTAssertEqual(ask.role, .me, "the founder's own question must post as `.me`, not the pet")
+        XCTAssertNil(ask.companionId, "a founder message carries no companion attribution")
+        XCTAssertNil(ask.deptName, "a founder message carries no department attribution")
+
+        guard let frame = store.chatMessages.first(where: { $0.text == mkt.frames }) else {
+            return XCTFail("the department's `frames` answer never posted")
+        }
+        XCTAssertEqual(frame.role, .companion, "`frames` must still post as the pet")
+        XCTAssertNotNil(frame.companionId, "the pet's `frames` line must carry attribution")
+
+        guard let report = store.chatMessages.first(where: { $0.text == mkt.reports }) else {
+            return XCTFail("the department's `reports` line never posted")
+        }
+        XCTAssertEqual(report.role, .companion, "`reports` must still post as the pet")
+        XCTAssertNotNil(report.companionId, "the pet's `reports` line must carry attribution")
+    }
+
+    /// **Amendment 2, 6 Sep — the opening.** `summary`, `prompt` and `setup` are the PRODUCT
+    /// talking: `role: .companion` with no `companionId` and no `deptName`, which is what makes
+    /// `CodepetBrand.header` return nil and the line render as bare prose with no speaker row.
+    /// `founderReply` is the founder's own words, posted `role: .me` exactly like
+    /// `.petSays(line: .asks)` already does.
+    ///
+    /// Verified red: reverting `MockFlowPlayer`'s `.opening` branch to post every line through
+    /// `postScriptedCompanionMessage(_:companionId:deptName:)` with a real department (e.g.
+    /// `"byte"`/`"Engineering"`) fails every assertion below — the three host lines pick up a
+    /// `companionId`/`deptName` they must not carry, and `founderReply` never gets `role: .me`.
+    func testOpeningPostsTheHostLinesBareAndTheFounderReplyAsFounder() async {
+        let store = await dayOneStore()
+        let player = MockFlowPlayer()
+        player.attach(store: store, language: .en)
+
+        player.perform(.opening(.summary))
+        player.perform(.opening(.prompt))
+        player.perform(.opening(.founderReply))
+        player.perform(.opening(.setup))
+
+        for line: DayOneScript.OpeningLine in [.summary, .prompt, .setup] {
+            let text = DayOneScript.openingText(line)
+            guard let m = store.chatMessages.first(where: { $0.text == text }) else {
+                XCTFail("opening line \(line) never posted"); continue
+            }
+            XCTAssertEqual(m.role, .companion, "\(line) must post as the host, not the founder")
+            XCTAssertNil(m.companionId, "\(line) carries no companion attribution")
+            XCTAssertNil(m.deptName, "\(line) carries no department attribution")
+        }
+
+        let founderText = DayOneScript.openingText(.founderReply)
+        guard let reply = store.chatMessages.first(where: { $0.text == founderText }) else {
+            return XCTFail("the founder's reply never posted")
+        }
+        XCTAssertEqual(reply.role, .me, "the founder's reply must post as `.me`, not the pet")
+        XCTAssertNil(reply.companionId, "a founder message carries no companion attribution")
+        XCTAssertNil(reply.deptName, "a founder message carries no department attribution")
+    }
 }

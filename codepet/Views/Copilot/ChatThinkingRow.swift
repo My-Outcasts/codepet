@@ -1,7 +1,13 @@
 import SwiftUI
 
-/// The streaming/producing state: a breathing companion orb + a label that names
-/// the work (via ChatThinkingLabel), with a subtle light sweep through the text.
+/// The streaming/producing state: a label that names WHO is working and on what
+/// (via ChatThinkingLabel), with a subtle light sweep through the text.
+///
+/// **No orb.** It was a decorative circle that said "something is happening" while the
+/// label said the same thing in words — and on a product built around eight departments
+/// each having their own voice, the one thing neither of them said was WHICH pet. Founder
+/// call, 7 Sep: drop the icon, name the pet. Consistent with the project's standing rule
+/// that only functional icons earn their place.
 /// Replaces the old static typingRow/producingRow. Reduce Motion → orb static +
 /// no sweep. Dock-sized: orb ≤ 22pt, label truncates to one line at the 380pt
 /// dock width instead of wrapping.
@@ -14,11 +20,17 @@ struct ChatThinkingRow: View {
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var label: String { ChatThinkingLabel.text(taskTitle: taskTitle, language: lang) }
+    /// Resolved from `companionId` rather than passed in, so a caller cannot name one pet
+    /// while the avatar-less row is attributed to another. Unknown id → nil → the label falls
+    /// back to the unnamed copy rather than inventing a specialist.
+    private var petName: String? { PetCharacter.all[companionId ?? ""]?.name }
+
+    private var label: String {
+        ChatThinkingLabel.text(petName: petName, taskTitle: taskTitle, language: lang)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            CompanionAvatar(companionId: companionId, size: 22, isWorking: true)
             shimmerLabel
             Spacer(minLength: 24)
         }

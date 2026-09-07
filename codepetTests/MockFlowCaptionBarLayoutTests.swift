@@ -22,12 +22,25 @@ final class MockFlowCaptionBarLayoutTests: XCTestCase {
     }
 
     /// The band has real height, so the inset moves the composer by a real amount.
-    /// Measured idle: 89pt (chapters + transport). With a caption it grows by the
-    /// caption box; the ceiling below is what keeps that from eating the pane.
+    ///
+    /// Measured idle: 89pt when a separate chapter-chips row sat above the transport
+    /// (chips + transport + the 8pt `VStack` spacing between them); 60pt now that the
+    /// chips row is gone and the chapter + position control folds into the transport
+    /// capsule instead (measured with `ImageRenderer` the same way, not estimated —
+    /// see the caption-bar report for the before/after numbers this drove). The floor
+    /// moved down with it: it was 60 because that was comfortably below the old 89pt
+    /// measurement, not because 60 is itself meaningful, and the real height sitting
+    /// exactly ON the old floor doesn't prove the same thing the old floor proved. What
+    /// this test actually guards is "not collapsed to ~0" — a safeAreaInset reserves
+    /// only what its content renders, so a band that measured near-zero would go back
+    /// to floating over the composer with no visible difference from the bug this test
+    /// was written to catch. 30pt keeps that guard with margin under the new real
+    /// height. With a caption it grows by the caption box; the ceiling below is what
+    /// keeps that from eating the pane.
     func testTheBandReservesRealHeight() {
         let bar = MockFlowCaptionBar(player: MockFlowPlayer())
         let h = height(bar)
-        XCTAssertGreaterThan(h, 60,
+        XCTAssertGreaterThan(h, 30,
                              "the band measured \(h)pt — a safeAreaInset reserves what its "
                              + "content renders, so this would leave the transport sitting "
                              + "on top of the composer again")

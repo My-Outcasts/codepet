@@ -82,6 +82,21 @@ final class SiteExportTests: XCTestCase {
         XCTAssertNotEqual(SiteViewer.openLabel(.en), SiteViewer.openLabel(.vi))
     }
 
+    // MARK: - Choosing a browser
+
+    /// The founder asked for Chrome by name. When `NSWorkspace` can resolve it, that resolved
+    /// URL is exactly what gets opened — never re-derived, never assumed.
+    func testChromePresentResolvesToItsURL() {
+        let chrome = URL(fileURLWithPath: "/Applications/Google Chrome.app")
+        XCTAssertEqual(SiteExport.browserTarget(chromeAppURL: chrome), .named(chrome))
+    }
+
+    /// Chrome may not be installed. A button that silently does nothing is worse than one that
+    /// opens the wrong browser, so absence must signal the fallback rather than nothing at all.
+    func testChromeAbsentFallsBackToTheSystemDefault() {
+        XCTAssertEqual(SiteExport.browserTarget(chromeAppURL: nil), .systemDefault)
+    }
+
     /// The browser must show the same page the preview does, not a re-derivation. Asserted
     /// against the real Murror fixture rather than a stub.
     func testTheWrittenFileMatchesWhatThePreviewRenders() throws {

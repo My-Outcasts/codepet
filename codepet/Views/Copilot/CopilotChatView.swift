@@ -536,7 +536,7 @@ struct CopilotChatView: View {
                 lastActedDeptKey = nil
                 suggestion = nil
             },
-            onSend: send,
+            onSend: { send() },
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
             onVoiceMode: startVoiceMode,
@@ -919,11 +919,7 @@ struct CopilotChatView: View {
         case .run:
             Task { await companyStore.runTask(task, language: lang) }
         case .walkthrough:
-            companyStore.chatDraft = lang == .vi
-                ? "Hướng dẫn tôi làm: \(task.title)"
-                : "Walk me through: \(task.title)"
-            mode = .ask
-            send()
+            sendWalkthrough(.compose(for: task, language: lang))
         case .review:
             companyStore.select(.roadmap)
         }
@@ -1096,12 +1092,32 @@ struct CopilotChatView: View {
         }
     }
 
+    /// **The one entry point for "walk me through this task."** Takes a `WalkthroughAsk` —
+    /// the composed text and the task it is about, bound together by `WalkthroughAsk.compose` —
+    /// and always forwards both halves into `send(aboutTask:)`. This is what makes the mistake
+    /// that shipped twice (composing the string, forgetting to also pass the task) a compile
+    /// error for a third caller rather than a silently wrong attribution: there is no way to
+    /// call this with text alone, because a `WalkthroughAsk` cannot exist without its task.
+    private func sendWalkthrough(_ ask: WalkthroughAsk) {
+        companyStore.chatDraft = ask.text
+        mode = .ask
+        send(aboutTask: ask.task)
+    }
+
     /// The `onSend` routing — the core "streamline Let's build in" change.
     /// `.ask`/`.plan` shape the text and stream a grounded chat reply (with any
     /// selected department focus); `.build` stages a local coding run instead of
     /// a chat turn. Callable directly by `onStarter`/quick-actions too, so it
     /// guards empty input itself rather than relying on the composer's `canSend`.
-    private func send() {
+    /// `aboutTask` carries a task's identity through to `sendChat`'s `aboutTask:`, for
+    /// `speakerFor` to resolve the reply's speaker from the task's own department (a
+    /// recorded fact) rather than falling back to keyword inference over `text`. Every
+    /// existing caller — `onStarter`, quick actions, the typed composer — has no task in
+    /// mind and keeps the default `nil` unchanged. Only `sendWalkthrough` above passes one,
+    /// and it can't drop it: `WalkthroughAsk` binds the text and the task together, so there
+    /// is no path from "walk me through" to this function that carries text without a task
+    /// (finding logged 6 Sep, live-path half of the bug Task 3 fixed only on the demo path).
+    private func send(aboutTask: RoadmapTask? = nil) {
         let text = companyStore.chatDraft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         companyStore.chatDraft = ""
@@ -1166,7 +1182,8 @@ struct CopilotChatView: View {
                                             department: dept, founderAsk: text,
                                             convenesRoom: mode.convenesRoom,
                                             pinned: sendPins,
-                                            attachments: sendAttachments)
+                                            attachments: sendAttachments,
+                                            aboutTask: aboutTask)
             }
         case .build:
             // One code mode. WHERE it runs is the run's business, not the
@@ -1363,12 +1380,9 @@ struct CopilotBubble: View {
     /// named the wrong thing. (This reverses the reading I shipped earlier the same day, where
     /// the header carried the CHOSEN companion's name. "The name appears when it responds" meant
     /// when a PET responds, i.e. on a department's task, not on every reply.)
-    private var headerName: String {
-        guard let id = message.companionId, let pet = PetCharacter.all[id] else {
-            return CodepetBrand.name
-        }
-        if let dept = message.deptName, !dept.isEmpty { return "\(pet.name) · \(dept)" }
-        return pet.name
+    /// nil means the product is speaking and no row renders.
+    private var headerName: String? {
+        CodepetBrand.header(companionId: message.companionId, deptName: message.deptName)
     }
     private var headerAccent: Color {
         guard let id = message.companionId else { return companionAccent }
@@ -1390,7 +1404,25 @@ struct CopilotBubble: View {
                 messageActions
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onHover { hovering = $0 }
+            // **`onContinuousHover`, not `onHover`, and the difference is what makes the row
+            // usable.** `onHover` fires only on ENTER and EXIT. The scroll guard below force-
+            // clears `hovering` while the pointer is still inside the message, and `onHover`
+            // has no event left to fire — so the row stayed hidden until the founder left the
+            // message and came back. Under `CODEPET_LIVE_AI` the transcript scrolls on every
+            // streamed chunk, so it cleared continuously and the actions vanished exactly as
+            // she reached for them: she could not copy or rate a reply at all.
+            //
+            // `onContinuousHover` reports on every pointer MOVEMENT inside the view, so a
+            // clear is re-armed by the next mouse move rather than needing a full exit and
+            // re-entry. The scroll guard keeps working for its original case — a reply that
+            // scrolls away under a STATIONARY pointer gets no movement to re-arm it, which is
+            // precisely the stale-lit-row this was written to fix.
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: hovering = true
+                case .ended:  hovering = false
+                }
+            }
             // `.onHover(false)` does not fire when a view disappears from under the pointer
             // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on SIX separate
             // triggers, only one of which (`chatMessages.count` itself) is a change to the
@@ -1661,7 +1693,7 @@ struct CopilotBubble: View {
             actionIcon(copiedMarkdown ? "checkmark" : "square.and.arrow.up",
                        help: lang == .vi ? "Sao chép dạng Markdown" : "Copy as Markdown",
                        tint: copiedMarkdown ? CodepetTheme.accentTeal : nil) {
-                copy(MessageTranscript.markdown(message, speaker: headerName, lang: lang), setting: $copiedMarkdown)
+                copy(MessageTranscript.markdown(message, speaker: headerName ?? CodepetBrand.name, lang: lang), setting: $copiedMarkdown)
             }
             actionIcon("arrow.clockwise",
                        help: retryEnabled
@@ -2006,60 +2038,56 @@ struct CopilotBubble: View {
     private func interviewCard(_ gap: InterviewGap) -> some View {
         let q = EnrichInterview.question(for: gap, language: lang)
         let canSend = !interviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        // Rendered as a teammate card (orb + name + surface) so the first-run
-        // question reads like a companion message in the web chat language.
+        // No orb, no name row: this is a general reply (no `companionId`), and every
+        // other general reply since the pet-voice rework renders as bare prose with
+        // no speaker row (`headerName` returns nil for it). Signing this one card
+        // "Codepet" was the one place the old rule survived — fixed on review.
         return HStack(alignment: .top, spacing: 8) {
-            CompanionOrb(size: 22, glow: false)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(CodepetBrand.name)
-                    .font(CodepetTheme.inter(12.5, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-                MessageCard(hue: companionAccent) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(q.ask)
-                            .font(CodepetTheme.inter(14.5, weight: .semibold))
-                            .foregroundColor(CodepetTheme.primaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(q.why)
-                            .font(CodepetTheme.inter(13))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .fixedSize(horizontal: false, vertical: true)
-                        TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
-                                  text: $interviewDraft, axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(CodepetTheme.inter(13.5))
-                            .lineLimit(1...4)
-                            .padding(.horizontal, 10).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(CodepetTheme.pageBackground))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(CodepetTheme.hairline, lineWidth: 1))
-                        HStack(spacing: 8) {
-                            Button {
-                                let answer = interviewDraft
-                                interviewDraft = ""
-                                Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
-                            } label: {
-                                Text(lang == .vi ? "Gửi" : "Send")
-                                    .font(CodepetTheme.inter(13, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 14).padding(.vertical, 7)
-                                    .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
-                            }
-                            .buttonStyle(.plain).disabled(!canSend)
-                            Button {
-                                interviewDraft = ""
-                                Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
-                            } label: {
-                                Text(lang == .vi ? "Bỏ qua" : "Skip")
-                                    .font(CodepetTheme.inter(13, weight: .medium))
-                                    .foregroundColor(CodepetTheme.mutedText)
-                                    .padding(.horizontal, 14).padding(.vertical, 7)
-                                    .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
-                                    .hoverAffordance(Capsule())
-                            }
-                            .buttonStyle(.plain)
+            MessageCard(hue: companionAccent) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(q.ask)
+                        .font(CodepetTheme.inter(14.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(q.why)
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField(lang == .vi ? "Nhập câu trả lời…" : "Type your answer…",
+                              text: $interviewDraft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(CodepetTheme.inter(13.5))
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(CodepetTheme.pageBackground))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(CodepetTheme.hairline, lineWidth: 1))
+                    HStack(spacing: 8) {
+                        Button {
+                            let answer = interviewDraft
+                            interviewDraft = ""
+                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: answer, language: lang) }
+                        } label: {
+                            Text(lang == .vi ? "Gửi" : "Send")
+                                .font(CodepetTheme.inter(13, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .background(Capsule().fill(canSend ? CodepetTheme.accentPurple : CodepetTheme.mutedText))
                         }
+                        .buttonStyle(.plain).disabled(!canSend)
+                        Button {
+                            interviewDraft = ""
+                            Task { await companyStore.answerInterview(messageId: message.id, gap: gap, answer: nil, language: lang) }
+                        } label: {
+                            Text(lang == .vi ? "Bỏ qua" : "Skip")
+                                .font(CodepetTheme.inter(13, weight: .medium))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                                .hoverAffordance(Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -2188,11 +2216,13 @@ struct CopilotBubble: View {
             // otherwise, and `headerName` carries the "Name · Dept" attribution — so the
             // one place the pet's own name appears is the moment it answers.
             VStack(alignment: .leading, spacing: ChatRhythm.nameToProse) {
-                HStack(spacing: 8) {
-                    CompanionAvatar(companionId: message.companionId, size: 22)
-                    Text(headerName)
-                        .font(CodepetTheme.inter(12.5, weight: .semibold))
-                        .foregroundColor(CodepetTheme.primaryText)
+                if let headerName {
+                    HStack(spacing: 8) {
+                        CompanionAvatar(companionId: message.companionId, size: 22)
+                        Text(headerName)
+                            .font(CodepetTheme.inter(12.5, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
+                    }
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
                     prose(message.text)

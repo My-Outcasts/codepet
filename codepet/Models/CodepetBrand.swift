@@ -24,4 +24,20 @@ enum CodepetBrand {
     static func speakerName(companionId: String?) -> String {
         PetCharacter.all[companionId ?? ""]?.name ?? name
     }
+
+    /// The header a message shows, or nil when the product itself is speaking.
+    ///
+    /// **nil rather than "Codepet".** The founder talks to the product, so it does not
+    /// announce itself on every turn. A pet's name is what makes the moment it works read as
+    /// different — and it only does that if the ordinary turn carries no name at all. Founder
+    /// call, 6 Sep, after watching every day-one reply sign itself "Codepet".
+    ///
+    /// Distinct from `speakerName`, which must always yield a word: the transcript export names
+    /// a speaker even for an ordinary turn. This one answers "does a row render", which is a
+    /// different question and is allowed to say no.
+    static func header(companionId: String?, deptName: String?) -> String? {
+        guard let id = companionId, let pet = PetCharacter.all[id] else { return nil }
+        guard let dept = deptName, !dept.isEmpty else { return pet.name }
+        return "\(pet.name) · \(dept)"
+    }
 }

@@ -53,11 +53,41 @@ enum MessageFeedbackPayload {
 /// the same `messageId`. That is deliberate: `firestore.rules:42` denies clients `read` too,
 /// so no reader IN THIS APP can resolve the duplicate — an external/admin consumer resolves
 /// it by latest `timestamp`. Duplicate messageIds are not a bug.
+/// Whether a thumb may actually be WRITTEN — pure, so the rule is testable.
+///
+/// Split from `submit` for the same reason `MessageFeedbackPayload` is, and the split is what
+/// was missing: `submit`'s own first condition returns early under XCTest, so no test could
+/// ever reach the decision, and there was nowhere to assert it. That is exactly how the
+/// prototype-mode hole survived — not a rule anyone disagreed with, a rule nothing checked.
+enum MessageFeedbackGate {
+    /// - `isRunningTests`: the suite must never write to the real project.
+    /// - `isOptedOut`: `ServerLoggingGate` — an account that has opted out of server logging.
+    /// - `allowsCloudWrites`: `PrototypeMode`'s safety gate. **This is the one that was
+    ///   missing.** A thumb cast in prototype mode rated a FIXTURE reply: its `messageId` and
+    ///   `threadId` name rows that live only in memory and are rebuilt from fixtures on every
+    ///   load, so the document is unresolvable to any consumer — and `firestore.rules:42`
+    ///   denies clients both `read` and `update`, so it can be neither corrected nor cleaned
+    ///   up. The sidebar also promises, in those words, that nothing is written to the
+    ///   founder's account while the mode is on. Found 7 Sep, by a stray thumb during an
+    ///   automated on-screen verification writing a real document from a fixture company.
+    ///
+    ///   Note the gate stops the WRITE, not the vote: `CompanyStore.recordVote` only mutates
+    ///   `chatMessages` in memory, so the thumb still fills in and the founder still sees her
+    ///   rating. That is correct for a mode whose whole premise is fixtures end to end.
+    static func allowsWrite(isRunningTests: Bool, isOptedOut: Bool, allowsCloudWrites: Bool) -> Bool {
+        !isRunningTests && !isOptedOut && allowsCloudWrites
+    }
+}
+
 @MainActor
 enum MessageFeedbackService {
     static func submit(vote: MessageVote, message: CopilotMessage, threadId: String,
                        authManager: AuthManager, appState: AppState) {
-        guard !AppEnvironment.isRunningTests, !ServerLoggingGate.isOptedOut else { return }
+        guard MessageFeedbackGate.allowsWrite(
+            isRunningTests: AppEnvironment.isRunningTests,
+            isOptedOut: ServerLoggingGate.isOptedOut,
+            allowsCloudWrites: PrototypeMode.allowsCloudWrites
+        ) else { return }
         let user = authManager.currentUser
         let data = MessageFeedbackPayload.build(
             vote: vote,

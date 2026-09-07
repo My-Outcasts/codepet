@@ -448,9 +448,22 @@ struct CopilotChatView: View {
     /// first message of each one silently got no pet — the single most common message there
     /// is. The rail now holds in the composer instead, where a guess cannot exist without the
     /// chip that states it, so nothing has to be kept in sync.
-    private var showsDeptChips: Bool {
-        !(surface == .twoMode && !showHistory && isEmptyState)
-    }
+    /// **Hidden everywhere for now (founder, 2026-09-07): "hide the department button, just
+    /// keep the feature where the department shows when its work is mentioned."** So this is
+    /// `false` on every surface, which drops the REST state — the bare "Departments ⌄"
+    /// button — and nothing else.
+    ///
+    /// What survives is the whole of the routing display. `ChatComposer` draws
+    /// `departmentControl` when `showsDeptChips || selectedDept != nil || suggestion != nil`,
+    /// and `guess(for:)` is gated only on `mode` and `suggestionDismissed` — never on this —
+    /// so a guessed department still arrives with its pet and its chip, exactly as before.
+    /// That ordering matters: gating the GUESS here instead is the mistake documented on
+    /// `guess(for:)`, which silently cost the first message of every conversation its pet.
+    ///
+    /// To restore the button, put the predicate back:
+    /// `!(surface == .twoMode && !showHistory && isEmptyState)` — it read "every surface
+    /// except the two-mode hero, where `DepartmentRoster` is the better picker".
+    private var showsDeptChips: Bool { false }
 
     /// The shared composer — one `ChatComposer` instance used in BOTH the empty
     /// hero (injected via `ChatEmptyState`'s trailing closure) and the active
@@ -1404,19 +1417,47 @@ struct CopilotBubble: View {
                 messageActions
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // **`onContinuousHover`, not `onHover`, and the difference is what makes the row
-            // usable.** `onHover` fires only on ENTER and EXIT. The scroll guard below force-
-            // clears `hovering` while the pointer is still inside the message, and `onHover`
-            // has no event left to fire — so the row stayed hidden until the founder left the
-            // message and came back. Under `CODEPET_LIVE_AI` the transcript scrolls on every
-            // streamed chunk, so it cleared continuously and the actions vanished exactly as
-            // she reached for them: she could not copy or rate a reply at all.
+            // **Without this the action row cannot be clicked at all on any reply but the
+            // newest, and it is the HOVER REGION — not the row — that is at fault.**
             //
-            // `onContinuousHover` reports on every pointer MOVEMENT inside the view, so a
-            // clear is re-armed by the next mouse move rather than needing a full exit and
-            // re-entry. The scroll guard keeps working for its original case — a reply that
-            // scrolls away under a STATIONARY pointer gets no movement to re-arm it, which is
-            // precisely the stale-lit-row this was written to fix.
+            // A `VStack` draws nothing of its own, so its hover shape is the UNION of its
+            // children's hit-test shapes. Two things are therefore outside it: the
+            // `proseToAction` gap (spacing belongs to no child), and — because
+            // `messageActions` is held `.allowsHitTesting(hovering || isLast)` — the row's
+            // own band, on every reply that is not the newest. So the shape is just the
+            // prose. Inside a `ScrollView`, and only inside one, leaving the prose delivers
+            // `.onHover(false)` at once, `hovering` goes false, and moving on down never
+            // re-arms it: the region no longer contains the row to be re-entered. The row
+            // lit while the pointer rested on the words and vanished the instant she moved
+            // toward it, unclickable the whole way.
+            //
+            // Measured with a harness that glides the real cursor from the prose onto Copy
+            // and along to the thumbs (2026-09-07): as it shipped, the row took hover in
+            // 0 of 6 passes; with this line, 8 of 9 (the misses whole-pass event dropouts).
+            // Outside a `ScrollView` the same view keeps hover either way, which is why
+            // this never showed up in a preview.
+            //
+            // One solid shape over prose + gap + row means the pointer never leaves. It
+            // does NOT loosen the `.allowsHitTesting` gate below, which is load-bearing for
+            // a different reason — an invisible row must not take a thumb.
+            .contentShape(Rectangle())
+            // **`onContinuousHover`, not `onHover` — the second half of the same bug, found
+            // independently on `feat/pet-voice-and-department-segments` (9d2ce6d).**
+            // `onHover` fires only on ENTER and EXIT. The scroll guard below force-clears
+            // `hovering` while the pointer is still inside the message, and `onHover` then has
+            // no event left to fire — so the row stayed hidden until the founder left the
+            // message and came back. Under `CODEPET_LIVE_AI` the transcript scrolls on every
+            // streamed chunk, so it cleared continuously. `onContinuousHover` reports on every
+            // pointer MOVEMENT inside the view, so a clear is re-armed by the next mouse move.
+            //
+            // **Neither line fixes this alone, which is why it survived one fix already.**
+            // Measured on the glide harness (2026-09-07): `onHover` alone reached the row in
+            // 0 of 6 passes, `onContinuousHover` alone 0 of 3 — and that fix was in the build
+            // the founder recorded at 14:30, still showing the bug. `contentShape` alone
+            // scored 3 of 3, and with `onContinuousHover` 3 of 3. They address different
+            // failures: `contentShape` gives the pointer an unbroken region to TRAVEL to the
+            // row through, `onContinuousHover` re-arms hover after the scroll guard clears it
+            // under a pointer that never left. Removing either brings back a real symptom.
             .onContinuousHover { phase in
                 switch phase {
                 case .active: hovering = true
@@ -1971,11 +2012,28 @@ struct CopilotBubble: View {
     /// wire {category,name} to its `Toolkit` item for the display name/why-line
     /// and the category-appropriate enable verb; tapping runs the GUARDED
     /// enable in `CompanyStore.activateSetup` (never flips an already-on item off).
+    /// **The pill now says what happened.** It used to be an unconditional Enable button that
+    /// read no state at all, so pressing it changed nothing on screen — and it DID work, which
+    /// is the worst version of this: `activateSetup` enabled the item and persisted it while
+    /// the card sat there still offering. The founder pressed "Web research" and reported that
+    /// she could not press the button (7 Sep); the local Firestore cache then showed
+    /// `web-research` written into `enabledTools`. An action with no acknowledgement is
+    /// indistinguishable from a dead control.
+    ///
+    /// It also retires the two pills that really were dead — already-on, and an offer that
+    /// resolves to no catalog item — both of which are silent `guard`s in `activateSetup`.
+    /// `SetupCardState` holds that reasoning and is tested on its own.
+    ///
+    /// State comes from `enabledTools` rather than a per-message `actionConsumed` flag (the
+    /// route `runProposalCard` takes) because this offer is a TOGGLE: what matters is whether
+    /// the item is on, not whether this particular card was the thing that turned it on. That
+    /// is also what makes an already-on offer acknowledge instead of dangling a pill that
+    /// cannot fire.
     @ViewBuilder private func setupInline(_ setup: SetupAction) -> some View {
-        let item = Toolkit.find(category: setup.category, name: setup.name)
-        let why = item?.why
+        let state = SetupCardState.of(setup, enabledTools: companyStore.company.enabledTools)
+        let why = state.item?.why
         VStack(alignment: .leading, spacing: 8) {
-            Text(item?.name ?? setup.name)
+            Text(state.item?.name ?? setup.name)
                 .font(.pixelSystem(size: 12, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             if let why, !why.isEmpty {
@@ -1984,13 +2042,27 @@ struct CopilotBubble: View {
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button { Task { await companyStore.activateSetup(setup) } } label: {
-                Text(item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable"))
-                    .font(.pixelSystem(size: 10, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
-            }.buttonStyle(.plain)
+            switch state {
+            case .offer(let item):
+                Button { Task { await companyStore.activateSetup(setup) } } label: {
+                    Text(item.category.enableVerb(lang))
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+                }.buttonStyle(.plain)
+            case .enabled:
+                // Same acknowledgement as a confirmed run — see `runProposalCard`.
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(lang == .vi ? "Đã bật" : "Enabled")
+                }
+                .font(.pixelSystem(size: 10, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            case .unresolved:
+                // Nothing to press. The name above keeps the record of what was offered.
+                EmptyView()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2720,7 +2792,14 @@ enum ChatRhythm {
     /// fade covers only empty space and touches nothing.
     static let topFade: CGFloat = 28
     /// Tail of the transcript — larger than the head so the last message clears the composer.
-    static let transcriptBottom: CGFloat = 24
+    ///
+    /// **24 was measured on screen as too tight and raised to 40 (founder, 2026-09-07).**
+    /// The tail carries the newest reply's action row, which is pinned visible, so the gap
+    /// is not prose-to-composer but CONTROLS-to-composer: five icons and a timestamp ended
+    /// up reading as a row belonging to the input box below them rather than to the message
+    /// above. 40 is ~1.7 line heights, which puts it just above `speakerChangeGap` (26) —
+    /// correct, since the transcript ending is a bigger break than a change of speaker.
+    static let transcriptBottom: CGFloat = 40
 
     /// The extra gap above a message, given who spoke before it. Pure so the rule is
     /// testable: nil `previous` is the first message in the transcript (no gap to add — the

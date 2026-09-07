@@ -95,6 +95,18 @@ final class MockFlowPlayer: ObservableObject {
     /// should?). Two properties, one scheme, applied twice — not two schemes.
     private var pendingRunWait: Task<Void, Never>?
 
+    /// **Bumped by anything that invalidates the pending step.**
+    ///
+    /// `schedule(after:)`'s timer closure now AWAITS the run/approval waits before calling
+    /// `step()`, and an already-fired closure cannot be cancelled by `timer.invalidate()` —
+    /// it is no longer the timer, it is a suspended task. So a `jump` (which pauses, moves the
+    /// index and plays again) had its own `step()` land on top of the awaiting closure's, and
+    /// the founder saw the same question posted twice.
+    ///
+    /// Before the join, `invalidate()` was enough because the closure ran synchronously. It is
+    /// not enough now, so the closure checks whether it is still the current one.
+    private var stepToken = 0
+
     /// Which sequence is playing. The 24-beat tour by default; the day-one simulation when the
     /// day-one fixture is selected. A stored property rather than a computed one so a running
     /// player cannot have the script changed under it mid-beat — `private(set)` so that
@@ -137,6 +149,7 @@ final class MockFlowPlayer: ObservableObject {
 
     func pause() {
         isPlaying = false
+        stepToken &+= 1   // retires any already-fired timer closure still awaiting its waits
         timer?.invalidate()
         timer = nil
         // See `pendingWait`'s doc comment: this is what makes a bounded wait safe
@@ -312,11 +325,16 @@ final class MockFlowPlayer: ObservableObject {
         // a slow approval was not merely late — it never happened at all, and its task stayed
         // drafted for the rest of the run.
         let approvalWait = pendingWait
+        let token = stepToken
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 await runWait?.value
                 await approvalWait?.value
-                self?.step()
+                // Retired while we were awaiting — a pause, a jump or a restart happened and
+                // has already advanced the player itself. Stepping here would perform a beat
+                // twice.
+                guard let self, self.stepToken == token else { return }
+                self.step()
             }
         }
     }

@@ -428,6 +428,9 @@ enum DayOneScript {
          "That tap is hers. Only now does the run actually start, naming its steps as it "
          + "goes — a process to watch, not a trick performed off screen."),
 
+        ("Code · Byte", 2.6, .approveCodeRun,
+         "And she approves the diff. Nothing reached her files until that tap — the run showed the change and waited, which is the whole promise."),
+
         ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
          "The page exists now — a draft until she approves it, like everything else today."),
 
@@ -470,6 +473,9 @@ enum DayOneScript {
         ("Redesign · Luna", 2.8, .confirmCodeRun,
          "Her tap starts it — a revision, not a rebuild. The page changes; the plan and the "
          + "approval do not."),
+
+        ("Redesign · Luna", 2.6, .approveCodeRun,
+         "Approved again, on a revision this time. The same gate, whether it is the first version or the fourth."),
 
         ("Redesign · Luna", 2.8, .petSays(deptKey: "design", line: .reports),
          "The day's last check: whether the feeling she promised survived being built."),

@@ -8,6 +8,10 @@ import os
 /// role as the top-level store (ProjectStore/reflection are being retired).
 @MainActor
 final class CompanyStore: ObservableObject {
+    /// Same subsystem/category shape `MockFlowPlayer` uses. `os.Logger`, not `print`: `open`
+    /// discards stdout, so a `print` here is invisible in exactly the situation it is needed.
+    private static let log = Logger(subsystem: "app.murror.codepet", category: "CompanyStore")
+
     @Published var view: AppView = .roadmap
     /// User's manual collapse of the docked copilot (session-only). The shell also
     /// auto-collapses on a narrow window via ShellLayout; this is the manual override.
@@ -3119,9 +3123,19 @@ final class CompanyStore: ObservableObject {
     ///
     /// Fail-soft: a nil reply posts the caller's `fallback` (the authored line), so a dead
     /// transport degrades to the scripted demo rather than to a hole in the conversation.
+    ///
+    /// **Fail-soft, not fail-silent — that part was the bug.** The fallback used to be
+    /// indistinguishable from a live reply, so a run whose transport was dead read exactly
+    /// like a working one. On 7 Sep that hid `401 authentication_error: API key is invalid`
+    /// from the deployed function through three authored lines in a row. The message is now
+    /// stamped `scriptedFallback` (the transcript says so under the line) and the result is
+    /// returned, so a caller like `MockFlowPlayer` can surface it in its caption too.
+    ///
+    /// - Returns: `true` when the LIVE reply was used, `false` when the authored fallback was.
+    @discardableResult
     func postLiveLine(instruction: String, fallback: String, language: AppLanguage,
                       companionId: String? = nil, deptName: String? = nil,
-                      deptKey: String? = nil) async {
+                      deptKey: String? = nil) async -> Bool {
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue,
             companionId: companionId ?? company.companionId,
@@ -3131,9 +3145,18 @@ final class CompanyStore: ObservableObject {
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)
         let reply = await CompanyChatClient.send(req)
-        let text = (reply?.text).flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+        // Nil AND empty both count as "did not come back": `CompanyChatClient.send` already
+        // maps an empty reply to nil, but a future transport need not, and an empty bubble is
+        // the one outcome worse than the authored line.
+        let live = (reply?.text).flatMap { $0.isEmpty ? nil : $0 }
+        let text = live ?? fallback
+        if live == nil {
+            Self.log.error("postLiveLine: no live reply — posting the authored fallback (\(fallback.prefix(48), privacy: .public))")
+        }
         chatMessages.append(CopilotMessage(role: .companion, text: text,
+                                           scriptedFallback: live == nil,
                                            companionId: companionId, deptName: deptName))
+        return live != nil
     }
     #endif
 

@@ -127,6 +127,19 @@ enum DiagnosticsBootstrap {
         // sets it under test — but "the reporter must never be the crash" is not a rule
         // to leave resting on one condition.
         guard !AppEnvironment.isRunningTests, selfTestRequested, !didRunSelfTest else { return }
+        // **Held, and it says so.** The sink drops diagnostics while prototype mode is on, so
+        // the read-back below would find nothing and report `selfTestFailedNoDocument` — "no
+        // document for nonce X", which reads as a broken destination when the destination is
+        // untested and the gate is working as designed.
+        //
+        // Deliberately does NOT consume `didRunSelfTest`: nothing here has happened yet, so a
+        // later call (prototype mode having been switched off) should still be able to run the
+        // real thing rather than find the flag already spent.
+        guard PrototypeMode.allowsCloudWrites else {
+            DiagnosticsLog.note(DiagnosticsLog.selfTest,
+                                DiagnosticsLog.selfTestHeldByPrototypeMode())
+            return
+        }
         didRunSelfTest = true
         let nonce = UUID().uuidString
         DiagnosticsReporter.shared.record(

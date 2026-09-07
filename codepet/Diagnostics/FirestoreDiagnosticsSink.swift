@@ -46,6 +46,32 @@ nonisolated final class FirestoreDiagnosticsSink: DiagnosticsSink {
         // the first question anyone will ask of this log is which one it is. Volume is
         // bounded by `DiagnosticsBudget` upstream — a sink that is never reachable sees
         // at most a few hundred lines in a session, not one per failure.
+        // **Prototype mode sends nothing, and it is checked FIRST.**
+        //
+        // This sink writes to `companies/{uid}/diagnostics` — the founder's REAL company
+        // document. In prototype mode the company on screen is a fixture, rebuilt from
+        // fixtures on every load, so its events would land in her live company's subtree
+        // mixed with real ones and indistinguishable from them. `PrototypeMode`'s gate exists
+        // for exactly that ("fixture … must never be written to a real company document"),
+        // and the sidebar states it to her in those words. It was checked in `CompanyData`
+        // only, which covers savers — not a sink that writes its own path.
+        //
+        // First, because the answer does not depend on Firebase or on who is signed in: it is
+        // "not sending" regardless, so there is no reason to touch `FirebaseApp` to find out.
+        //
+        // `true`, not `false` — dropped, never buffered, matching the opted-out case below.
+        // Buffering would be worse than losing it: the mode can be switched off mid-session,
+        // and the queue would then deliver a fixture session's events as if they were real.
+        //
+        // **The event is not lost, only the delivery.** `heldByPrototypeMode` logs the whole
+        // payload, and prototype mode is `#if DEBUG` only, so whoever is running it can read
+        // it back with the predicate in this module's header. Diagnostics exist to report
+        // failures, and this is the mode demos and development run in — a gate that discarded
+        // the events would blind the channel precisely where it earns its keep.
+        guard PrototypeMode.allowsCloudWrites else {
+            DiagnosticsLog.note(Self.log, DiagnosticsLog.heldByPrototypeMode(payload))
+            return true
+        }
         guard FirebaseApp.app() != nil else {
             DiagnosticsLog.note(Self.log, "not reachable — no FirebaseApp configured")
             return false

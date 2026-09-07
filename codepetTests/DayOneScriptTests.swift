@@ -269,6 +269,29 @@ final class DayOneScriptTests: XCTestCase {
         }
     }
 
+    /// **Every trip into Developer must come back.** `.mode(.developer)` opens the CODE pane
+    /// and nothing else switches it back, so a script that enters and never returns plays the
+    /// whole rest of the day on the chat side while the founder watches a dormant Developer
+    /// pane. She reported it as the demo being stuck; it was running perfectly, out of sight —
+    /// the landing page filed, a redesign run, and five departments spoke, none of it visible.
+    func testItAlwaysComesBackFromDeveloperMode() {
+        var inDeveloper = false
+        for b in beats {
+            guard case let .mode(m) = b.intent else { continue }
+            switch m {
+            case .developer:
+                XCTAssertFalse(inDeveloper, "entered Developer twice without returning")
+                inDeveloper = true
+            case .ask:
+                XCTAssertTrue(inDeveloper, "returned to Ask without having entered Developer")
+                inDeveloper = false
+            }
+        }
+        XCTAssertFalse(inDeveloper,
+                       "the script ends in Developer mode — everything after the last "
+                       + "`.mode(.developer)` plays where the founder cannot see it")
+    }
+
     /// The chapter bar reads as the opener plus eight departments plus Amendment 3's two new
     /// chapters plus Amendment 4's redesign, not twenty-one questions.
     ///
@@ -536,14 +559,18 @@ final class DayOneScriptTests: XCTestCase {
                        "Environment · Byte must navigate to exactly `.go(.environment)`")
     }
 
-    /// The code beat enters Developer mode. Goes red if it ever enters `.ask` instead, or
-    /// stops entering a mode at all.
-    func testTheCodeChapterEntersDeveloperMode() {
+    /// The code chapter enters Developer mode AND comes back.
+    ///
+    /// It used to assert `[.developer]` alone, which is how the return trip came to be missing:
+    /// the pane opened and the rest of the day — the landing page filing, the redesign, five
+    /// more departments — played on the chat side behind it. The founder reported the demo as
+    /// stuck. Pinning the pair is what makes a one-way trip fail here instead of on her screen.
+    func testTheCodeChapterEntersAndLeavesDeveloperMode() {
         let modes: [WorkspaceMode] = beats
             .filter { $0.chapter == "Code · Byte" }
             .compactMap { if case let .mode(m) = $0.intent { return m }; return nil }
-        XCTAssertEqual(modes, [.developer],
-                       "Code · Byte must enter exactly `.mode(.developer)`")
+        XCTAssertEqual(modes, [.developer, .ask],
+                       "Code · Byte must enter Developer and return to Ask, in that order")
     }
 
     /// **The precondition ordering.** `Views/Environment/ProjectLinker.swift` is the real

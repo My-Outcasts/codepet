@@ -431,6 +431,16 @@ enum DayOneScript {
         ("Code · Byte", 2.6, .approveCodeRun,
          "And she approves the diff. Nothing reached her files until that tap — the run showed the change and waited, which is the whole promise."),
 
+        // **Back to chat, or the rest of the day plays where nobody is looking.**
+        // `.mode(.developer)` opens the CODE pane and nothing switched back, so from here on
+        // the page being filed, Luna's redesign and all five remaining departments happened on
+        // the chat side while the founder watched a dormant Developer pane. It read as the demo
+        // being stuck — it was running perfectly, out of sight. The 24-beat tour returns with
+        // `.mode(.ask)`; this script only ever made the outbound trip.
+        ("Code · Byte", 2.4, .mode(.ask),
+         "Back to the conversation. The code side did its part; the page itself is filed where "
+         + "every other answer today was."),
+
         ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
          "The page exists now — a draft until she approves it, like everything else today."),
 

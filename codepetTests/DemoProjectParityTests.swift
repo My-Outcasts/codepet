@@ -40,7 +40,7 @@ final class DemoProjectParityTests: XCTestCase {
     func testDayOneScriptOnlyNamesTasksOnTheDayOneBoard() {
         let titles = Set(DemoProject.murrorDayOne.tasks.map(\.title))
         for (dept, entry) in DayOneScript.script {
-            for text in [entry.asks.en, entry.frames, entry.reports] {
+            for text in [entry.asks, entry.frames, entry.reports] {
                 let bolded = text.components(separatedBy: "**")
                     .enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
                 for name in bolded where name.count > 12 {

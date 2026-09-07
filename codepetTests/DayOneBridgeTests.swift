@@ -160,7 +160,7 @@ final class DayOneBridgeTests: XCTestCase {
         player.perform(.petSays(deptKey: "mkt", line: .frames))
         player.perform(.petSays(deptKey: "mkt", line: .reports))
 
-        guard let ask = store.chatMessages.first(where: { $0.text == mkt.asks.en }) else {
+        guard let ask = store.chatMessages.first(where: { $0.text == mkt.asks }) else {
             return XCTFail("the founder's question never posted")
         }
         XCTAssertEqual(ask.role, .me, "the founder's own question must post as `.me`, not the pet")

@@ -89,10 +89,17 @@ enum DayOneScript {
     /// already lives in `frames`/`reports`, so nothing is lost. The Vietnamese here is a rewrite
     /// that still needs a native read (two of three Vietnamese phrases written for this branch
     /// were wrong before a human caught them).
-    static let script: [String: (asks: (en: String, vi: String), frames: String, reports: String)] = [
+    /// **English only, by founder decision (7 Sep).** `asks` was the last bilingual pair left in
+    /// this script — `frames` and `reports` never had one — and the Vietnamese in it was written
+    /// by me and never read by a native speaker. Two of the three vi phrases previously written
+    /// for this branch were wrong (`giữ lời` reads as "keep a promise"; `đừng thứ Sáu` is
+    /// ungrammatical), and both were caught by a person, never by a test. Shipping a fourth
+    /// unreviewed batch to make the type look symmetrical was the worse trade.
+    ///
+    /// This is the SCRIPT's copy only. The app remains bilingual everywhere else.
+    static let script: [String: (asks: String, frames: String, reports: String)] = [
         "mkt": (
-            asks: (en: "Is this a real problem, or just mine?",
-                   vi: "Đây có phải vấn đề thật không, hay chỉ mình tôi thấy vậy?"),
+            asks: "Is this a real problem, or just mine?",
             frames: "The first one is yours — twelve conversations I can't have for you. Once you've had "
                 + "them, I'll scan what's already out there and tell you where those apps stop.",
             reports: "Twelve conversations and a scan, and they agree: every app in this category ends "
@@ -100,8 +107,7 @@ enum DayOneScript {
                 + "— and it's still me asking it."
         ),
         "sales": (
-            asks: (en: "So who is this not for?",
-                    vi: "Vậy sản phẩm này không dành cho ai?"),
+            asks: "So who is this not for?",
             frames: "Same voice, different job. Marketing found who this is for; Sales has to find who "
                 + "it isn't, and be specific enough that it stings.",
             reports: "One of your twelve found it insulting. That's the most useful sentence in the file "
@@ -109,24 +115,21 @@ enum DayOneScript {
                 + "now we know who, she can decide how it feels."
         ),
         "design": (
-            asks: (en: "What should it feel like?",
-                    vi: "Nó nên mang lại cảm giác gì?"),
+            asks: "What should it feel like?",
             frames: "I've read the interviews and the disqualifier list. Feeling comes last, not first "
                 + "— I can only shape it once I know who it's for and who it isn't.",
             reports: "Soft, quiet, unhurried — and never graded. Naming a feeling must not feel like "
                 + "being marked. Byte next: someone has to decide what this actually runs on."
         ),
         "eng": (
-            asks: (en: "What do I build it on? And does anything people write leave their device?",
-                    vi: "Tôi nên xây trên nền tảng gì? Và những gì người ta viết có rời khỏi máy của họ không?"),
+            asks: "What do I build it on? And does anything people write leave their device?",
             frames: "Direction's set, so I can pick a stack. The question that matters isn't the "
                 + "framework — it's whether anything a person writes ever leaves their device.",
             reports: "On-device where it can be, and nothing leaves with a name attached. That decision "
                 + "sets your running cost, which is why Crash goes next and not first."
         ),
         "fin": (
-            asks: (en: "What is this going to cost me a month?",
-                    vi: "Mỗi tháng cái này sẽ tốn của tôi bao nhiêu?"),
+            asks: "What is this going to cost me a month?",
             frames: "I couldn't have answered this an hour ago. Pricing needs a stack — now Byte's "
                 + "chosen, I can put a number on it.",
             reports: "Sixty cents a month per active user, at your numbers, on Byte's stack. Charge "
@@ -134,8 +137,7 @@ enum DayOneScript {
                 + "about loneliness cannot dodge."
         ),
         "support": (
-            asks: (en: "What happens if someone's really struggling at 2am?",
-                    vi: "Chuyện gì xảy ra nếu ai đó thật sự khủng hoảng lúc 2 giờ sáng?"),
+            asks: "What happens if someone's really struggling at 2am?",
             frames: "I want to be careful here. Someone struggling at 2am doesn't need a chatbot being "
                 + "clever, and what the app says then has to be written down, not improvised.",
             reports: "What it says, when it says it, and what it refuses to handle — written as policy "
@@ -143,8 +145,7 @@ enum DayOneScript {
                 + "question too."
         ),
         "legal": (
-            asks: (en: "Am I in trouble for holding what people write?",
-                    vi: "Tôi có gặp rắc rối khi lưu giữ những gì người ta viết không?"),
+            asks: "Am I in trouble for holding what people write?",
             frames: "I've read Sage's policy. People are typing the most private thing they have into "
                 + "this, so the deletion promise has to be plain language first and paperwork second.",
             reports: "One tap and it's gone. No confirmation email, no support ticket, no \"are you "
@@ -152,8 +153,7 @@ enum DayOneScript {
                 + "this without breaking it."
         ),
         "ops": (
-            asks: (en: "How do I ship this without breaking it?",
-                    vi: "Làm sao để phát hành mà không làm hỏng nó?"),
+            asks: "How do I ship this without breaking it?",
             frames: "Still me. Legal was about what you owe them; Operations is about not breaking it "
                 + "while you keep your word.",
             reports: "Thursday, not Friday — a Friday release means a weekend of nobody watching. "
@@ -231,7 +231,7 @@ enum DayOneScript {
         }
         guard let entry = script[deptKey] else { return nil }
         switch line {
-        case .asks: return language == .vi ? entry.asks.vi : entry.asks.en
+        case .asks: return entry.asks
         case .frames: return entry.frames
         case .reports: return entry.reports
         }

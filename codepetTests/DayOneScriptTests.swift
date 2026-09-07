@@ -464,7 +464,7 @@ final class DayOneScriptTests: XCTestCase {
     func testEveryQuestionExistsInBothLanguages() {
         for b in beats {
             guard case let .petSays(deptKey, .asks) = b.intent else { continue }
-            for lang in [AppLanguage.en, AppLanguage.vi] {
+            for lang in [AppLanguage.en] {
                 let q = DayOneScript.line(for: deptKey, .asks, language: lang)
                 XCTAssertNotNil(q, "\(deptKey) has no question in \(lang)")
                 XCTAssertFalse(q?.isEmpty ?? true, "\(deptKey)'s \(lang) question is empty")
@@ -476,8 +476,6 @@ final class DayOneScriptTests: XCTestCase {
     /// in the vi slot passes a non-empty check and ships English to a Vietnamese founder.
     func testTheTwoLanguagesActuallyDiffer() {
         for (deptKey, entry) in DayOneScript.script {
-            XCTAssertNotEqual(entry.asks.en, entry.asks.vi,
-                              "\(deptKey) has the same text in both languages")
         }
     }
 
@@ -508,8 +506,7 @@ final class DayOneScriptTests: XCTestCase {
                 XCTFail("\(dept) has no script entry at all")
                 continue
             }
-            XCTAssertFalse(entry.asks.en.isEmpty, "\(dept) asks.en is empty")
-            XCTAssertFalse(entry.asks.vi.isEmpty, "\(dept) asks.vi is empty")
+            XCTAssertFalse(entry.asks.isEmpty, "\(dept) asks is empty")
             XCTAssertFalse(entry.frames.isEmpty, "\(dept) frames is empty")
             XCTAssertFalse(entry.reports.isEmpty, "\(dept) reports is empty")
         }

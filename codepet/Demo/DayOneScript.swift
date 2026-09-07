@@ -392,6 +392,94 @@ enum DayOneScript {
         ("Design · Luna", 2.4, .petSays(deptKey: "design", line: .reports),
          "She names the feeling and hands the build to Byte — someone has to choose what it runs on."),
 
+        ("Environment · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
+         "Mona's tenth question finally gets a place to land — Byte answers again, the same "
+         + "pet who chose the stack."),
+
+        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
+         "Byte says what has to be connected before a line of code can help her."),
+
+        ("Environment · Byte", 2.6, .go(.environment),
+         "Byte opens Environment — the surface where a folder gets linked and its tools get "
+         + "chosen. Nothing here has been possible until now."),
+
+        ("Environment · Byte", 2.8, .linkDemoFolder,
+         "Linking a folder is not a formality — without one, a code run refuses outright. "
+         + "The same folder this chapter links is the one the next chapter builds on."),
+
+        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .reports),
+         "Linked, with only what this project actually needs switched on."),
+
+        ("Code · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
+         "Her tenth question, asked plainly. Byte already knows what this needs to run on."),
+
+        ("Code · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
+         "Byte takes the tenth question and says how it will work: her machine, her approval, every change shown."),
+
+        ("Code · Byte", 2.6, .mode(.developer),
+         "Developer wakes already linked — the folder from the last chapter, not a fresh "
+         + "ask. The board's tenth question finally has somewhere to run."),
+
+        ("Code · Byte", 2.8, .codeRun("Build the Murror landing page — Luna's direction, Nova's positioning line"),
+         "Byte describes the change and it does not start. The plan shows first — which "
+         + "files, what it may run — and waits for a tap that hasn't happened yet."),
+
+        ("Code · Byte", 2.8, .confirmCodeRun,
+         "That tap is hers. Only now does the run actually start, naming its steps as it "
+         + "goes — a process to watch, not a trick performed off screen."),
+
+        ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
+         "The page exists now — a draft until she approves it, like everything else today."),
+
+        // **The page is actually BUILT here, not merely described.** `.codeRun` above drives
+        // the coding agent in Developer mode; it produces a code change, never a `.site`
+        // deliverable. Without this pair the demo talked about a landing page for two
+        // chapters and never produced one — no card, nothing for "open in Chrome" to open,
+        // and a flow that still effectively ended at the roadmap. The founder found that.
+        //
+        // `mur-site` is `who: .draft` and depends on `mur-brand` + `mur-landscape`, both
+        // filed during the nine — so it is genuinely runnable at exactly this point, rather
+        // than being force-fed. Its `dept` is `mkt`, so the artifact lands as NOVA's: the
+        // landing page is Marketing's task. Byte linked the folder and wrote the code; the
+        // page itself belongs to the department whose board carries it.
+        ("Code · Byte", 2.8, .runTask("mur-site"),
+         "And the page itself gets made — the board's own tenth task, the one the beacon "
+         + "has been pointing at since the roadmap."),
+
+        ("Code · Byte", 2.8, .approveNewestDraft,
+         "Approving files it. Now there is a real page in the Library, and a button that "
+         + "opens it in Chrome like anything else on the web."),
+
+        // Amendment 4, 6 Sep — the redesign. Byte built it; Luna is who set the visual
+        // direction earlier in the day and who looks at the result against that standard.
+        // Same machinery as the build itself (`.codeRun` / `.confirmCodeRun`), never a new
+        // kind of beat — this demonstrates revision, not a second one-shot generation.
+        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .asks),
+         "She's seen the page now — not a description of a feeling but the feeling itself. "
+         + "Her question is really a correction."),
+
+        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .frames),
+         "Luna checks what Byte built against the standard she set at the start of the day."),
+
+        ("Redesign · Luna", 2.6,
+         .codeRun("Redesign the Murror landing page — softer contrast, more white space, "
+                  + "nothing that reads as urgent"),
+         "Same mechanism as the first build: the ask goes in, and the plan shows before "
+         + "anything runs."),
+
+        ("Redesign · Luna", 2.8, .confirmCodeRun,
+         "Her tap starts it — a revision, not a rebuild. The page changes; the plan and the "
+         + "approval do not."),
+
+        ("Redesign · Luna", 2.8, .petSays(deptKey: "design", line: .reports),
+         "The day's last check: whether the feeling she promised survived being built."),
+
+        // The closing beat. Stays inside the last chapter to speak rather than opening a
+        // thirteenth — same rule the Operations hand-back and the original Code chapter both
+        // already followed: no new department content plays here, so no new chapter appears.
+        ("Redesign · Luna", 2.6, .go(.roadmap),
+         "The page exists and has already been through one revision — and the day is not half over. Six more questions are waiting."),
+    
         ("Engineering · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
          "The first question with a bill attached."),
 
@@ -480,8 +568,7 @@ enum DayOneScript {
          + "plan."),
 
         ("Operations · Glitch", 2.8, .go(.roadmap),
-         "The beacon has moved to her tenth question — how people hear about it. Codepet "
-         + "points at the landing page and waits."),
+         "Nine questions answered, a page built and revised, and a board that has moved under all of it. The tenth question is hers: who does she tell first?"),
 
         // Amendment 3, 6 Sep — the environment, the code, and a slimmer bar. The roadmap beat
         // above already hands off into this: Environment and Code are two new chapters that
@@ -494,93 +581,6 @@ enum DayOneScript {
         // a code run: without a linked folder, `startBuild` lands in `.noProject` and refuses.
         // Showing that precondition is what keeps the demo honest with the founder's own
         // constraint that whatever runs in the prototype also works in actual use.
-        ("Environment · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
-         "Mona's tenth question finally gets a place to land — Byte answers again, the same "
-         + "pet who chose the stack."),
-
-        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
-         "Byte says what has to be connected before a line of code can help her."),
-
-        ("Environment · Byte", 2.6, .go(.environment),
-         "Byte opens Environment — the surface where a folder gets linked and its tools get "
-         + "chosen. Nothing here has been possible until now."),
-
-        ("Environment · Byte", 2.8, .linkDemoFolder,
-         "Linking a folder is not a formality — without one, a code run refuses outright. "
-         + "The same folder this chapter links is the one the next chapter builds on."),
-
-        ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .reports),
-         "Linked, with only what this project actually needs switched on."),
-
-        ("Code · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
-         "Her tenth question, asked plainly. Byte already knows what this needs to run on."),
-
-        ("Code · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
-         "Byte takes the tenth question and says how it will work: her machine, her approval, every change shown."),
-
-        ("Code · Byte", 2.6, .mode(.developer),
-         "Developer wakes already linked — the folder from the last chapter, not a fresh "
-         + "ask. The board's tenth question finally has somewhere to run."),
-
-        ("Code · Byte", 2.8, .codeRun("Build the Murror landing page — Luna's direction, Nova's positioning line"),
-         "Byte describes the change and it does not start. The plan shows first — which "
-         + "files, what it may run — and waits for a tap that hasn't happened yet."),
-
-        ("Code · Byte", 2.8, .confirmCodeRun,
-         "That tap is hers. Only now does the run actually start, naming its steps as it "
-         + "goes — a process to watch, not a trick performed off screen."),
-
-        ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
-         "The page exists now — a draft until she approves it, like everything else today."),
-
-        // **The page is actually BUILT here, not merely described.** `.codeRun` above drives
-        // the coding agent in Developer mode; it produces a code change, never a `.site`
-        // deliverable. Without this pair the demo talked about a landing page for two
-        // chapters and never produced one — no card, nothing for "open in Chrome" to open,
-        // and a flow that still effectively ended at the roadmap. The founder found that.
-        //
-        // `mur-site` is `who: .draft` and depends on `mur-brand` + `mur-landscape`, both
-        // filed during the nine — so it is genuinely runnable at exactly this point, rather
-        // than being force-fed. Its `dept` is `mkt`, so the artifact lands as NOVA's: the
-        // landing page is Marketing's task. Byte linked the folder and wrote the code; the
-        // page itself belongs to the department whose board carries it.
-        ("Code · Byte", 2.8, .runTask("mur-site"),
-         "And the page itself gets made — the board's own tenth task, the one the beacon "
-         + "has been pointing at since the roadmap."),
-
-        ("Code · Byte", 2.8, .approveNewestDraft,
-         "Approving files it. Now there is a real page in the Library, and a button that "
-         + "opens it in Chrome like anything else on the web."),
-
-        // Amendment 4, 6 Sep — the redesign. Byte built it; Luna is who set the visual
-        // direction earlier in the day and who looks at the result against that standard.
-        // Same machinery as the build itself (`.codeRun` / `.confirmCodeRun`), never a new
-        // kind of beat — this demonstrates revision, not a second one-shot generation.
-        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .asks),
-         "She's seen the page now — not a description of a feeling but the feeling itself. "
-         + "Her question is really a correction."),
-
-        ("Redesign · Luna", 2.4, .petSays(deptKey: "design", line: .frames),
-         "Luna checks what Byte built against the standard she set at the start of the day."),
-
-        ("Redesign · Luna", 2.6,
-         .codeRun("Redesign the Murror landing page — softer contrast, more white space, "
-                  + "nothing that reads as urgent"),
-         "Same mechanism as the first build: the ask goes in, and the plan shows before "
-         + "anything runs."),
-
-        ("Redesign · Luna", 2.8, .confirmCodeRun,
-         "Her tap starts it — a revision, not a rebuild. The page changes; the plan and the "
-         + "approval do not."),
-
-        ("Redesign · Luna", 2.8, .petSays(deptKey: "design", line: .reports),
-         "The day's last check: whether the feeling she promised survived being built."),
-
-        // The closing beat. Stays inside the last chapter to speak rather than opening a
-        // thirteenth — same rule the Operations hand-back and the original Code chapter both
-        // already followed: no new department content plays here, so no new chapter appears.
-        ("Redesign · Luna", 2.6, .go(.roadmap),
-         "Ten questions in, and the board has moved."),
     ])
 
     /// Numbers the beats so `id` cannot drift from position — the same shape `MockFlowScript`

@@ -72,10 +72,23 @@ final class DayOneScriptTests: XCTestCase {
         // the landing page the roadmap beat has been pointing at. Asserted as a suffix rather
         // than folded into the equality, so a chain link that goes missing or reorders still
         // fails here exactly as before.
-        XCTAssertEqual(Array(acted.prefix(DemoProject.dayOneChain.count)), DemoProject.dayOneChain,
+        // **The chain's own order is the claim; `mur-site` is a guest inside it.**
+        // The landing page was moved forward to just after Design, so it is no longer a
+        // suffix. Filtering to the chain's ids keeps the original guard exactly as strong —
+        // drop a link or reorder two and this still fails — while allowing the one build that
+        // is deliberately interleaved.
+        XCTAssertEqual(acted.filter { DemoProject.dayOneChain.contains($0) },
+                       DemoProject.dayOneChain,
                        "the script's order must BE the chain, not resemble it")
-        XCTAssertEqual(Array(acted.dropFirst(DemoProject.dayOneChain.count)), ["mur-site"],
-                       "after the chain, the script builds the landing page and nothing else")
+        XCTAssertEqual(acted.filter { !DemoProject.dayOneChain.contains($0) }, ["mur-site"],
+                       "exactly one build outside the chain: the landing page")
+        // And it must land AFTER the two tasks it is built on, or the demo shows a
+        // chain-offer card instead of a page — the reason it sits here and not first.
+        let i = acted.firstIndex(of: "mur-site")!
+        for dep in ["mur-brand", "mur-landscape"] {
+            XCTAssertTrue(acted.firstIndex(of: dep).map { $0 < i } ?? false,
+                          "mur-site runs before \(dep) is filed")
+        }
     }
 
     /// Every run beat must be followed by its approval before the next link runs — otherwise the
@@ -272,9 +285,16 @@ final class DayOneScriptTests: XCTestCase {
                        "one opener + eight departments + Environment + Code + Redesign")
         XCTAssertEqual(chapters.first, "Day one")
         XCTAssertEqual(Array(chapters.dropFirst()), [
-            "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
-            "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
+            // **Building moved forward, deliberately.** The founder asked for the landing page
+            // early rather than at the very end. Environment/Code/Redesign sit right after
+            // Design because that is the earliest point `mur-site`'s dependencies
+            // (`mur-brand`, `mur-landscape`) are genuinely filed — any earlier and the demo
+            // shows a chain-offer card instead of a page. Environment travels WITH them: it
+            // links the folder, without which a code run lands in `.noProject`.
+            "Marketing · Nova", "Sales · Nova", "Design · Luna",
             "Environment · Byte", "Code · Byte", "Redesign · Luna",
+            "Engineering · Byte", "Finance · Crash", "Support · Sage", "Legal · Glitch",
+            "Operations · Glitch",
         ])
     }
 
@@ -368,7 +388,7 @@ final class DayOneScriptTests: XCTestCase {
     /// on the board having moved, verbatim from the design doc's closing beat.
     func testItEndsWithTheBoardHavingMoved() throws {
         let last = try XCTUnwrap(beats.last)
-        XCTAssertEqual(last.caption, "Ten questions in, and the board has moved.")
+        XCTAssertEqual(last.caption, "Nine questions answered, a page built and revised, and a board that has moved under all of it. The tenth question is hers: who does she tell first?")
         guard case .go(.roadmap) = last.intent else {
             return XCTFail("the closing beat must be `.go(.roadmap)`, found \(last.intent)")
         }

@@ -2012,11 +2012,28 @@ struct CopilotBubble: View {
     /// wire {category,name} to its `Toolkit` item for the display name/why-line
     /// and the category-appropriate enable verb; tapping runs the GUARDED
     /// enable in `CompanyStore.activateSetup` (never flips an already-on item off).
+    /// **The pill now says what happened.** It used to be an unconditional Enable button that
+    /// read no state at all, so pressing it changed nothing on screen — and it DID work, which
+    /// is the worst version of this: `activateSetup` enabled the item and persisted it while
+    /// the card sat there still offering. The founder pressed "Web research" and reported that
+    /// she could not press the button (7 Sep); the local Firestore cache then showed
+    /// `web-research` written into `enabledTools`. An action with no acknowledgement is
+    /// indistinguishable from a dead control.
+    ///
+    /// It also retires the two pills that really were dead — already-on, and an offer that
+    /// resolves to no catalog item — both of which are silent `guard`s in `activateSetup`.
+    /// `SetupCardState` holds that reasoning and is tested on its own.
+    ///
+    /// State comes from `enabledTools` rather than a per-message `actionConsumed` flag (the
+    /// route `runProposalCard` takes) because this offer is a TOGGLE: what matters is whether
+    /// the item is on, not whether this particular card was the thing that turned it on. That
+    /// is also what makes an already-on offer acknowledge instead of dangling a pill that
+    /// cannot fire.
     @ViewBuilder private func setupInline(_ setup: SetupAction) -> some View {
-        let item = Toolkit.find(category: setup.category, name: setup.name)
-        let why = item?.why
+        let state = SetupCardState.of(setup, enabledTools: companyStore.company.enabledTools)
+        let why = state.item?.why
         VStack(alignment: .leading, spacing: 8) {
-            Text(item?.name ?? setup.name)
+            Text(state.item?.name ?? setup.name)
                 .font(.pixelSystem(size: 12, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             if let why, !why.isEmpty {
@@ -2025,13 +2042,27 @@ struct CopilotBubble: View {
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button { Task { await companyStore.activateSetup(setup) } } label: {
-                Text(item?.category.enableVerb(lang) ?? (lang == .vi ? "Bật" : "Enable"))
-                    .font(.pixelSystem(size: 10, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
-            }.buttonStyle(.plain)
+            switch state {
+            case .offer(let item):
+                Button { Task { await companyStore.activateSetup(setup) } } label: {
+                    Text(item.category.enableVerb(lang))
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+                }.buttonStyle(.plain)
+            case .enabled:
+                // Same acknowledgement as a confirmed run — see `runProposalCard`.
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(lang == .vi ? "Đã bật" : "Enabled")
+                }
+                .font(.pixelSystem(size: 10, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            case .unresolved:
+                // Nothing to press. The name above keeps the record of what was offered.
+                EmptyView()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

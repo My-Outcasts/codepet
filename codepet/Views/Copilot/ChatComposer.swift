@@ -159,7 +159,15 @@ struct ChatComposer: View {
             }
 
             HStack(spacing: 8) {
-                departmentControl
+                // Same condition as `twoModeBody` below, and it is here now because the dock
+                // used to ignore `showsDeptChips` entirely — it drew the control at rest
+                // unconditionally, so turning the rest state off in one place left the dock
+                // still showing a bare "Departments ⌄". A pick or a guess still draws it:
+                // the chip is how a guessed department is stated, and a guess the founder
+                // cannot see must not be acted on.
+                if showsDeptChips || selectedDept != nil || suggestion != nil {
+                    departmentControl
+                }
                 plusMenu
                 micButton
                 voiceButton

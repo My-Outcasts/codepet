@@ -25,8 +25,24 @@ struct ChatThinkingRow: View {
     /// back to the unnamed copy rather than inventing a specialist.
     private var petName: String? { PetCharacter.all[companionId ?? ""]?.name }
 
+    /// The phrase this appearance shows, rolled ONCE.
+    ///
+    /// `@State` with a rolled initial value, rather than something computed in `body`:
+    /// `body` re-runs on every frame of the shimmer (it is a `TimelineView`), and a phrase
+    /// that changed 60 times a second would be far worse than the flat string it replaces.
+    /// SwiftUI keeps the first storage for a given identity and discards later structs'
+    /// initial values, so extra initialisations cannot change what is on screen — and
+    /// `lastShown` is written in `.onAppear` (once per appearance) rather than here, so the
+    /// no-repeat rule is measured against what was actually displayed.
+    ///
+    /// One roll covers both title-less cases: if a department handoff lands mid-reply the
+    /// row switches from the unnamed phrase to the pet-named one at the SAME index, so the
+    /// wording keeps its register instead of jumping to an unrelated line.
+    @State private var variant = ChatThinkingLabel.rolled()
+
     private var label: String {
-        ChatThinkingLabel.text(petName: petName, taskTitle: taskTitle, language: lang)
+        ChatThinkingLabel.text(petName: petName, taskTitle: taskTitle,
+                               language: lang, variant: variant)
     }
 
     var body: some View {
@@ -34,6 +50,7 @@ struct ChatThinkingRow: View {
             shimmerLabel
             Spacer(minLength: 24)
         }
+        .onAppear { ChatThinkingLabel.lastShown = variant }
     }
 
     @ViewBuilder private var shimmerLabel: some View {
@@ -66,6 +83,18 @@ struct ChatThinkingRow: View {
     VStack(alignment: .leading, spacing: 16) {
         ChatThinkingRow(taskTitle: nil)
         ChatThinkingRow(taskTitle: "positioning brief")
+        // Both rotations, reviewable on one canvas. Read off `ChatThinkingLabel` rather
+        // than by building rows: `variant` is private `@State` (rolled once per appearance,
+        // on purpose) and there is no injecting it from out here.
+        Divider()
+        ForEach(0..<ChatThinkingLabel.phraseCount, id: \.self) { i in
+            Text(ChatThinkingLabel.text(taskTitle: nil, language: .en, variant: i)
+                 + "   ·   "
+                 + ChatThinkingLabel.text(petName: "Nova", taskTitle: nil,
+                                          language: .en, variant: i))
+                .font(CodepetTheme.inter(13))
+                .foregroundColor(CodepetTheme.mutedText)
+        }
     }
     .padding(40)
     .frame(width: 380)

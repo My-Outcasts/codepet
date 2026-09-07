@@ -217,12 +217,25 @@ final class MockFlowPlayer: ObservableObject {
         pendingRunWait = Task { [weak self] in
             guard let self, let cid = self.store?.companyId else { return }
             let deadline = Date().addingTimeInterval(ceiling)
+            var started = false
             while !Task.isCancelled {
                 // Re-checked every pass, matching every sibling wait in this file: an account
                 // switch mid-run must bail rather than advance the player against the new
                 // account's state.
                 guard let store = self.store, store.companyId == cid else { return }
-                guard store.runningTaskIds.contains(taskId) else { return }  // done — success or failure
+                // **Wait for it to START before waiting for it to finish.**
+                // `.runTask` fires `Task { await store.runTask(…) }` and arms this immediately
+                // after, so on the first pass the task body has usually not run yet and the id
+                // is NOT in `runningTaskIds`. The original `guard contains else return` read
+                // that as "already done", returned instantly, and let the player advance — the
+                // approve beat then found an empty set, declared the run failed, and every
+                // downstream department reported its dependency missing. Mock mode failed
+                // every single run.
+                //
+                // `started` closes that: absent BEFORE it appears means not begun; absent
+                // AFTER means finished, success or failure either way.
+                if store.runningTaskIds.contains(taskId) { started = true }
+                if started, !store.runningTaskIds.contains(taskId) { return }
                 guard Date() < deadline else {
                     Self.log.error("runTask: still running after \(ceiling, privacy: .public)s at beat \(beatIndex, privacy: .public), task \(taskId, privacy: .public) — advancing without it")
                     self.reportRunFailure(

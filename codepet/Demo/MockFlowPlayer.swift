@@ -536,6 +536,19 @@ final class MockFlowPlayer: ObservableObject {
                 if !live {
                     store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
                 }
+            } else if live, let instruction = DayOneScript.liveInstruction(chapterDept: deptKey) {
+                // `reports` used to stay authored even live, to keep the chain's hand-off. The
+                // instruction now carries the hand-off instead — it names the next department
+                // explicitly — so the line can be genuinely generated without the sequence
+                // falling apart into eight unrelated segments. `text` is the fallback: a dead
+                // transport degrades to the authored demo, not to a hole in the conversation.
+                let beatIndex = index
+                Task {
+                    await store.postLiveLine(instruction: instruction, fallback: text,
+                                             language: language, companionId: companionId,
+                                             deptName: dept.name, deptKey: deptKey)
+                }
+                armChatReplyWait(beatIndex: beatIndex)
             } else {
                 store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
             }
@@ -545,8 +558,19 @@ final class MockFlowPlayer: ObservableObject {
             // `founderReply` is the founder's own words — `role: .me`, right-aligned, exactly
             // like `.petSays(line: .asks)`. `summary`/`prompt`/`setup` are the PRODUCT talking:
             // no companion, no department — see `postScriptedHostMessage`.
+            let live = MockChat.enabled && PrototypeMode.liveAI
             if line == .founderReply {
+                // Her words. Never generated, in either mode — that is the script.
                 store.postScriptedFounderMessage(text)
+            } else if live, let instruction = DayOneScript.openingInstruction(line) {
+                // Codepet opening the conversation before she has said anything. `sendChat`
+                // cannot serve this: it would have to invent a founder message to reply to.
+                let beatIndex = index
+                Task {
+                    await store.postLiveLine(instruction: instruction, fallback: text,
+                                             language: language)
+                }
+                armChatReplyWait(beatIndex: beatIndex)
             } else {
                 store.postScriptedHostMessage(text)
             }

@@ -3100,6 +3100,41 @@ final class CompanyStore: ObservableObject {
     func postScriptedHostMessage(_ text: String) {
         chatMessages.append(CopilotMessage(role: .companion, text: text))
     }
+
+    /// Generate one Codepet line LIVE from a hidden instruction, and post only the answer.
+    ///
+    /// **Why a hidden instruction rather than `sendChat`.** The founder's rule is that she
+    /// writes the script and Codepet answers in real time. Most of Codepet's lines are replies
+    /// to something she said, and `sendChat` handles those. But three of them — the opening
+    /// summary, the prompt for more detail, and each department's closing report — are Codepet
+    /// speaking when she has said nothing. `sendChat` would have to invent a founder message to
+    /// reply to, and inventing her words is the one thing this design must not do.
+    ///
+    /// `CompanyChatClient.send` returns a reply without touching the transcript, so the
+    /// instruction never appears and only the answer does.
+    ///
+    /// **The instruction is how the chain survives.** A generated closing line cannot be relied
+    /// on to hand off to the next department, so the caller tells it to — that is cheaper and
+    /// more honest than keeping an authored line and calling the demo live.
+    ///
+    /// Fail-soft: a nil reply posts the caller's `fallback` (the authored line), so a dead
+    /// transport degrades to the scripted demo rather than to a hole in the conversation.
+    func postLiveLine(instruction: String, fallback: String, language: AppLanguage,
+                      companionId: String? = nil, deptName: String? = nil,
+                      deptKey: String? = nil) async {
+        let req = CompanyChatRequest(
+            companyId: companyId, language: language.rawValue,
+            companionId: companionId ?? company.companionId,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks,
+                                         decisions: company.decisions, library: company.library,
+                                         query: instruction, focusDepartment: nil,
+                                         memoryEnabled: company.founderPrefs.memoryEnabled),
+            history: [], userMessage: instruction, deptKey: deptKey)
+        let reply = await CompanyChatClient.send(req)
+        let text = (reply?.text).flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+        chatMessages.append(CopilotMessage(role: .companion, text: text,
+                                           companionId: companionId, deptName: deptName))
+    }
     #endif
 
     /// Approve a task's draft: copy it into the library exactly once, mark the task done,

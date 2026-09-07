@@ -237,6 +237,52 @@ enum DayOneScript {
         }
     }
 
+    /// The hidden instruction behind each Codepet line that answers nothing she said.
+    ///
+    /// Under `CODEPET_LIVE_AI` these are sent to the model and only the ANSWER is posted; the
+    /// instruction never appears. With the flag off they are unused and the authored copy plays.
+    ///
+    /// **`reports` names the next department on purpose.** A generated closing line will not
+    /// hand off on its own, and the hand-off is what makes nine segments read as one company.
+    /// Instructing it is what let these go live at all without losing the chain.
+    static func liveInstruction(chapterDept: String) -> String? {
+        let nextUp: [String: String] = [
+            "mkt": "Sales — who this is NOT for",
+            "sales": "Luna in Design — what it should feel like",
+            "design": "Byte in Engineering — what it runs on",
+            "eng": "Crash in Finance — what it costs",
+            "fin": "Sage in Support — what happens at 2am",
+            "support": "Glitch in Legal — holding what people write",
+            "legal": "Glitch again, in Operations — shipping without breaking it",
+            "ops": "nothing: hand the tenth question back to her",
+        ]
+        guard let next = nextUp[chapterDept] else { return nil }
+        return "You have just finished this piece of work for the founder. In two sentences, "
+            + "say what you found — concrete and specific to this company, no preamble — and "
+            + "then hand off to \(next). Do not restate the question. Do not use bullet points."
+    }
+
+    /// The three opening lines Codepet says before the founder has said anything.
+    static func openingInstruction(_ line: OpeningLine) -> String? {
+        switch line {
+        case .summary:
+            return "Open the conversation. In two sentences say what you know about this "
+                + "company from onboarding, and be honest that it is all you know — no plan, "
+                + "no brand, no users yet. No preamble, no greeting, no bullet points."
+        case .prompt:
+            return "In one or two sentences, ask the founder for anything else that matters "
+                + "before you bring the departments in — who it is for, what they have tried, "
+                + "what worries them. Ask, do not summarise."
+        case .setup:
+            return "She has just told you why this product matters to her. In two sentences, "
+                + "name the thing worth protecting in what she said, then say that eight "
+                + "departments will answer nine questions and she approves everything before "
+                + "it is filed. No bullet points."
+        case .founderReply:
+            return nil   // her words, never generated
+        }
+    }
+
     static let beats: [MockFlowScript.Beat] = build([
         // Captions DESCRIBE the beat rather than quoting it. They used to be the scripted line
         // repeated verbatim in first person, which read the same words twice in mock mode and,

@@ -262,6 +262,23 @@ enum DayOneScript {
             + "then hand off to \(next). Do not restate the question. Do not use bullet points."
     }
 
+    /// The instruction behind a department's ANSWER to the founder's question.
+    ///
+    /// **Why this is not `sendChat`.** Sending her question through the ordinary chat path is
+    /// what the real product does, and the real product's correct reply is to OFFER to run the
+    /// task — "Want me to run …?". In the script the run is the very next beat, so the offer
+    /// was a question nobody answered and the demo ran the task anyway. A conversation that
+    /// asks permission and then proceeds regardless is worse than one that never asked.
+    ///
+    /// It also caps the length. The generated replies ran to two long paragraphs where the
+    /// authored line was two sentences, which changed the rhythm of every chapter.
+    static func answerInstruction(question: String) -> String {
+        "The founder just asked: \"\(question)\" Answer it in two or three sentences — "
+        + "concrete and specific to this company, no preamble, no bullet points, no headings. "
+        + "Do NOT offer to run anything and do NOT ask her a question back: the work is about "
+        + "to happen anyway, and an offer she cannot answer reads as the product ignoring her."
+    }
+
     /// The three opening lines Codepet says before the founder has said anything.
     static func openingInstruction(_ line: OpeningLine) -> String? {
         switch line {

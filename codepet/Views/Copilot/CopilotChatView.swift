@@ -1404,7 +1404,25 @@ struct CopilotBubble: View {
                 messageActions
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onHover { hovering = $0 }
+            // **`onContinuousHover`, not `onHover`, and the difference is what makes the row
+            // usable.** `onHover` fires only on ENTER and EXIT. The scroll guard below force-
+            // clears `hovering` while the pointer is still inside the message, and `onHover`
+            // has no event left to fire — so the row stayed hidden until the founder left the
+            // message and came back. Under `CODEPET_LIVE_AI` the transcript scrolls on every
+            // streamed chunk, so it cleared continuously and the actions vanished exactly as
+            // she reached for them: she could not copy or rate a reply at all.
+            //
+            // `onContinuousHover` reports on every pointer MOVEMENT inside the view, so a
+            // clear is re-armed by the next mouse move rather than needing a full exit and
+            // re-entry. The scroll guard keeps working for its original case — a reply that
+            // scrolls away under a STATIONARY pointer gets no movement to re-arm it, which is
+            // precisely the stale-lit-row this was written to fix.
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: hovering = true
+                case .ended:  hovering = false
+                }
+            }
             // `.onHover(false)` does not fire when a view disappears from under the pointer
             // (`CodepetTokens.swift:211-214`), and `messageList` autoscrolls on SIX separate
             // triggers, only one of which (`chatMessages.count` itself) is a change to the

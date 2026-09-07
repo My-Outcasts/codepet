@@ -514,20 +514,24 @@ final class MockFlowPlayer: ObservableObject {
             if line == .asks {
                 if live {
                     let beatIndex = index
-                    // **Never arm the department chip for Engineering here.**
-                    // `sendChat` checks `EditCodeRouting.shouldRoute(department:projectLinked:)`
-                    // — `department?.key == "eng" && projectLinked` — BEFORE it does anything
-                    // else, and diverts the whole turn into `startCodeRun`. The `Code · Byte`
-                    // chapter asks its question AFTER `.linkDemoFolder` has run, so arming the
-                    // chip there would silently start a coding run instead of speaking a line:
-                    // the beat would look like it did nothing and the demo would lurch.
+                    // Her question is posted as HERS — scripted, in both modes. Only the answer
+                    // is generated, and it goes through `postLiveLine` rather than `sendChat`
+                    // for the reason `answerInstruction` records: the ordinary chat path
+                    // correctly offers to run the task, and here the run is the next beat, so
+                    // the offer became a question nobody answered.
                     //
-                    // That check reads the RAW argument, not a resolved specialist, so passing
-                    // nil avoids it entirely — and the reply is still attributed correctly,
-                    // because `speakerFor` falls back to the department NAMED in the text and
-                    // every one of these questions names its own department's work.
-                    let armed = dept.key == "eng" ? nil : dept
-                    Task { await store.sendChat(text, language: language, department: armed) }
+                    // That also sidesteps `EditCodeRouting.shouldRoute` entirely — `sendChat`
+                    // diverts an `eng` turn into `startCodeRun` once a project is linked, which
+                    // would have hijacked the Code chapter's question into a coding run.
+                    store.postScriptedFounderMessage(text)
+                    let instruction = DayOneScript.answerInstruction(question: text)
+                    let framed = DayOneScript.line(for: deptKey, .frames, language: language,
+                                                   chapter: chapter) ?? text
+                    Task {
+                        await store.postLiveLine(instruction: instruction, fallback: framed,
+                                                 language: language, companionId: companionId,
+                                                 deptName: dept.name, deptKey: deptKey)
+                    }
                     armChatReplyWait(beatIndex: beatIndex)
                 } else {
                     store.postScriptedFounderMessage(text)

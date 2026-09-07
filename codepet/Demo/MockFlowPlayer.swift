@@ -234,6 +234,40 @@ final class MockFlowPlayer: ObservableObject {
         }
     }
 
+    /// Arms `pendingRunWait` for a LIVE CHAT REPLY rather than a run — same shape, same
+    /// ceilings, same account re-check, different ready condition: a reply is done when the
+    /// store stops streaming and stops showing the typing indicator.
+    ///
+    /// Reuses `pendingRunWait` deliberately. `schedule(after:)` already joins that handle
+    /// before stepping, so a reply gets the same "do not advance past your own beat" guarantee
+    /// runs and approvals now have — and a third handle would be a third thing to forget to
+    /// join. Measured: a live reply streams in ~13s, well inside the mock ceiling.
+    private func armChatReplyWait(beatIndex: Int) {
+        let ceiling = Self.liveApprovalWaitCeiling
+        pendingRunWait?.cancel()
+        pendingRunWait = Task { [weak self] in
+            guard let self, let cid = self.store?.companyId else { return }
+            let deadline = Date().addingTimeInterval(ceiling)
+            // The turn has not necessarily STARTED streaming the instant this arms, so a naive
+            // "stop when not streaming" would return immediately. Wait for it to begin (or for
+            // the reply to have already landed) before waiting for it to end.
+            var started = false
+            while !Task.isCancelled {
+                guard let store = self.store, store.companyId == cid else { return }
+                let busy = store.isStreaming || store.isCompanionTyping
+                if busy { started = true }
+                if started && !busy { return }
+                guard Date() < deadline else {
+                    Self.log.error("liveReply: no reply after \(ceiling, privacy: .public)s at beat \(beatIndex, privacy: .public) — advancing without it")
+                    self.reportRunFailure(
+                        "That reply didn't come back — this step has nothing behind it.")
+                    return
+                }
+                try? await Task.sleep(nanoseconds: Self.approvalPollInterval)
+            }
+        }
+    }
+
     private func schedule(after seconds: Double) {
         timer?.invalidate()
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -460,8 +494,48 @@ final class MockFlowPlayer: ObservableObject {
             // Amendment, 6 Sep: `asks` is the FOUNDER's own question — no speaker row, no
             // companion attribution. `frames`/`reports` are still the department answering,
             // unchanged.
+            // **The founder writes the script; Codepet's answer runs in real time.**
+            // Founder decision, 7 Sep. `asks` is her own question and stays authored in both
+            // modes — that IS the script. Under `CODEPET_LIVE_AI` the department's answer is
+            // generated instead of read from `DayOneScript`: `sendChat` posts her question and
+            // streams a real reply from that department's specialist (~13s, measured), through
+            // the same path the shipping product uses.
+            //
+            // `frames` is SKIPPED live rather than posted, because the live reply IS the
+            // answer it used to stand in for — posting both would have the department answer
+            // twice, once for real and once from a fixture.
+            //
+            // `reports` stays authored even live, and that is a deliberate exception: those
+            // lines carry the chain's hand-off ("Luna's turn: now we know who…"), and a
+            // generated reply cannot be relied on to name the next department. Losing that
+            // would cost the sequence the thing that makes it read as one company rather than
+            // eight unrelated segments. Stated here rather than silently dropped.
+            let live = MockChat.enabled && PrototypeMode.liveAI
             if line == .asks {
-                store.postScriptedFounderMessage(text)
+                if live {
+                    let beatIndex = index
+                    // **Never arm the department chip for Engineering here.**
+                    // `sendChat` checks `EditCodeRouting.shouldRoute(department:projectLinked:)`
+                    // — `department?.key == "eng" && projectLinked` — BEFORE it does anything
+                    // else, and diverts the whole turn into `startCodeRun`. The `Code · Byte`
+                    // chapter asks its question AFTER `.linkDemoFolder` has run, so arming the
+                    // chip there would silently start a coding run instead of speaking a line:
+                    // the beat would look like it did nothing and the demo would lurch.
+                    //
+                    // That check reads the RAW argument, not a resolved specialist, so passing
+                    // nil avoids it entirely — and the reply is still attributed correctly,
+                    // because `speakerFor` falls back to the department NAMED in the text and
+                    // every one of these questions names its own department's work.
+                    let armed = dept.key == "eng" ? nil : dept
+                    Task { await store.sendChat(text, language: language, department: armed) }
+                    armChatReplyWait(beatIndex: beatIndex)
+                } else {
+                    store.postScriptedFounderMessage(text)
+                }
+            } else if line == .frames {
+                if !live {
+                    store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
+                }
             } else {
                 store.postScriptedCompanionMessage(text, companionId: companionId, deptName: dept.name)
             }

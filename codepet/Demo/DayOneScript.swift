@@ -238,6 +238,10 @@ enum DayOneScript {
     }
 
     static let beats: [MockFlowScript.Beat] = build([
+        // Captions DESCRIBE the beat rather than quoting it. They used to be the scripted line
+        // repeated verbatim in first person, which read the same words twice in mock mode and,
+        // once `CODEPET_LIVE_AI` made the reply generated, asserted words that were never said.
+        // A description is true in both modes.
         ("Day one", 3.2, .hold,
          "Mona has a feeling and nothing else — people are lonely and don't know how to reach "
          + "each other. No plan, no brand, no idea where to start. This is the board a founder "
@@ -265,8 +269,7 @@ enum DayOneScript {
         // narration like the `asks` beat above. Its duration is sized off that same text via
         // the readability floor (chars/45 ÷ 1.5 at Slow), same formula every beat here uses.
         ("Marketing · Nova", 2.4, .petSays(deptKey: "mkt", line: .frames),
-         "The first one is yours — twelve conversations I can't have for you. Once you've had "
-         + "them, I'll scan what's already out there and tell you where those apps stop."),
+         "Nova takes the first question — and says plainly which half of it is not hers to answer."),
 
         // Link 1 — Marketing · Nova. The founder's own work, and it stays that way.
         //
@@ -291,16 +294,13 @@ enum DayOneScript {
         // Reporting beat: Marketing holds two links, so it reports once — AFTER BOTH — rather
         // than once per link. Framing is per department, not per link.
         ("Marketing · Nova", 3.0, .petSays(deptKey: "mkt", line: .reports),
-         "Twelve conversations and a scan, and they agree: every app in this category ends "
-         + "with someone understanding themselves alone. That's the gap. Now the harder question "
-         + "— and it's still me asking it."),
+         "The conversations and the scan agree, and Nova names the gap they both leave."),
 
         ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .asks),
          "Mona asks again — same founder, a different department waiting to answer."),
 
         ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .frames),
-         "Same voice, different job. Marketing found who this is for; Sales has to find who "
-         + "it isn't, and be specific enough that it stings."),
+         "The same pet, a different job: finding who this is NOT for, specifically enough to sting."),
 
         // Link 3 — Sales · Nova.
         ("Sales · Nova", 2.6, .runTask("mur-notfor"),
@@ -311,16 +311,13 @@ enum DayOneScript {
          + "artifact that makes the next four decisions easy."),
 
         ("Sales · Nova", 3.2, .petSays(deptKey: "sales", line: .reports),
-         "One of your twelve found it insulting. That's the most useful sentence in the file "
-         + "— it's what stops outreach spending its best hours in the wrong places. Luna's turn: "
-         + "now we know who, she can decide how it feels."),
+         "One dissenting voice turns out to be the most useful line in the file. Luna is handed the feel."),
 
         ("Design · Luna", 2.2, .petSays(deptKey: "design", line: .asks),
          "Her third question. Luna has read the two artifacts and answers it next."),
 
         ("Design · Luna", 2.2, .petSays(deptKey: "design", line: .frames),
-         "I've read the interviews and the disqualifier list. Feeling comes last, not first "
-         + "— I can only shape it once I know who it's for and who it isn't."),
+         "Luna reads what came before her. Feeling is shaped last, once the audience is settled."),
 
         // Link 4 — Design · Luna.
         ("Design · Luna", 2.6, .runTask("mur-brand"),
@@ -330,15 +327,13 @@ enum DayOneScript {
          + "from the brief again."),
 
         ("Design · Luna", 2.4, .petSays(deptKey: "design", line: .reports),
-         "Soft, quiet, unhurried — and never graded. Naming a feeling must not feel like "
-         + "being marked. Byte next: someone has to decide what this actually runs on."),
+         "She names the feeling and hands the build to Byte — someone has to choose what it runs on."),
 
         ("Engineering · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
          "The first question with a bill attached."),
 
         ("Engineering · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
-         "Direction's set, so I can pick a stack. The question that matters isn't the "
-         + "framework — it's whether anything a person writes ever leaves their device."),
+         "Byte picks a stack, and the question that decides it is where a person's words live."),
 
         // Link 5 — Engineering · Byte.
         ("Engineering · Byte", 2.6, .runTask("mur-stack"),
@@ -348,15 +343,13 @@ enum DayOneScript {
          "That decision sets the running cost, which is why Finance is next and not first."),
 
         ("Engineering · Byte", 2.4, .petSays(deptKey: "eng", line: .reports),
-         "On-device where it can be, and nothing leaves with a name attached. That decision "
-         + "sets your running cost, which is why Crash goes next and not first."),
+         "That choice is also a cost, which is why Finance goes next and could not have gone first."),
 
         ("Finance · Crash", 2.2, .petSays(deptKey: "fin", line: .asks),
          "Her question now — Crash explains next why it couldn't have come any sooner."),
 
         ("Finance · Crash", 2.2, .petSays(deptKey: "fin", line: .frames),
-         "I couldn't have answered this an hour ago. Pricing needs a stack — now Byte's "
-         + "chosen, I can put a number on it."),
+         "Crash could not have answered an hour ago. Pricing needs a stack, and now there is one."),
 
         // Link 6 — Finance · Crash.
         ("Finance · Crash", 2.6, .runTask("mur-unitcost"),
@@ -366,16 +359,13 @@ enum DayOneScript {
          + "than describes."),
 
         ("Finance · Crash", 3.0, .petSays(deptKey: "fin", line: .reports),
-         "Sixty cents a month per active user, at your numbers, on Byte's stack. Charge "
-         + "four dollars and you can breathe. Sage is next, and hers is the question a product "
-         + "about loneliness cannot dodge."),
+         "A number she can hold against a price — and the question Sage has to take from here."),
 
         ("Support · Sage", 2.4, .petSays(deptKey: "support", line: .asks),
          "The question a consumer app about loneliness cannot avoid."),
 
         ("Support · Sage", 2.4, .petSays(deptKey: "support", line: .frames),
-         "I want to be careful here. Someone struggling at 2am doesn't need a chatbot being "
-         + "clever, and what the app says then has to be written down, not improvised."),
+         "Sage takes the question a product about loneliness cannot dodge, and takes it carefully."),
 
         // Link 7 — Support · Sage.
         ("Support · Sage", 2.6, .runTask("mur-crisis"),
@@ -385,16 +375,13 @@ enum DayOneScript {
          + "founder-only task later asks a clinician to read."),
 
         ("Support · Sage", 2.8, .petSays(deptKey: "support", line: .reports),
-         "What it says, when it says it, and what it refuses to handle — written as policy "
-         + "rather than left to a prompt. Glitch reads this next: holding those words is a legal "
-         + "question too."),
+         "Written down as policy rather than left to a prompt. Glitch reads it next."),
 
         ("Legal · Glitch", 2.2, .petSays(deptKey: "legal", line: .asks),
          "Glitch reads Sage's policy before answering."),
 
         ("Legal · Glitch", 2.6, .petSays(deptKey: "legal", line: .frames),
-         "I've read Sage's policy. People are typing the most private thing they have into "
-         + "this, so the deletion promise has to be plain language first and paperwork second."),
+         "Glitch reads Sage's policy first. Holding what people write is a legal question too."),
 
         // Link 8 — Legal · Glitch.
         ("Legal · Glitch", 2.6, .runTask("mur-deletion"),
@@ -405,16 +392,13 @@ enum DayOneScript {
          + "sitting on her board, unwritten."),
 
         ("Legal · Glitch", 2.8, .petSays(deptKey: "legal", line: .reports),
-         "One tap and it's gone. No confirmation email, no support ticket, no \"are you "
-         + "sure\" chain designed to make you give up. Same voice for the last one: shipping "
-         + "this without breaking it."),
+         "The deletion promise in plain language, before any paperwork. Same voice for the last one."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .asks),
          "Mona's last question before the day hands one back — Glitch answers again."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .frames),
-         "Still me. Legal was about what you owe them; Operations is about not breaking it "
-         + "while you keep your word."),
+         "Still Glitch. Legal was what she owes them; Operations is not breaking it while she keeps her word."),
 
         // Link 9 — Operations · Glitch.
         ("Operations · Glitch", 2.6, .runTask("mur-rhythm"),
@@ -424,8 +408,7 @@ enum DayOneScript {
          + "back to a task on her roadmap."),
 
         ("Operations · Glitch", 2.4, .petSays(deptKey: "ops", line: .reports),
-         "Thursday, not Friday — a Friday release means a weekend of nobody watching. "
-         + "That's nine questions answered, and the tenth is yours: who do you tell first?"),
+         "Nine questions answered — and the tenth handed back to her, unanswered on purpose."),
 
         // The hand-back stays inside Operations' chapter rather than opening a tenth —
         // no beat here introduces new department content, so no new chapter should appear.
@@ -453,8 +436,7 @@ enum DayOneScript {
          + "pet who chose the stack."),
 
         ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
-         "I picked the stack four questions ago. Before I can touch code, this company needs "
-         + "a folder to work in — and you decide which tools it is allowed to use."),
+         "Byte says what has to be connected before a line of code can help her."),
 
         ("Environment · Byte", 2.6, .go(.environment),
          "Byte opens Environment — the surface where a folder gets linked and its tools get "
@@ -465,15 +447,13 @@ enum DayOneScript {
          + "The same folder this chapter links is the one the next chapter builds on."),
 
         ("Environment · Byte", 2.4, .petSays(deptKey: "eng", line: .reports),
-         "Linked. Three tools on, the rest off until they earn it. Nothing here needs a "
-         + "card yet."),
+         "Linked, with only what this project actually needs switched on."),
 
         ("Code · Byte", 2.2, .petSays(deptKey: "eng", line: .asks),
          "Her tenth question, asked plainly. Byte already knows what this needs to run on."),
 
         ("Code · Byte", 2.4, .petSays(deptKey: "eng", line: .frames),
-         "That is the beacon's tenth question — how people hear about it. I work on your "
-         + "machine, I show you every change, and nothing is saved until you say so."),
+         "Byte takes the tenth question and says how it will work: her machine, her approval, every change shown."),
 
         ("Code · Byte", 2.6, .mode(.developer),
          "Developer wakes already linked — the folder from the last chapter, not a fresh "
@@ -488,8 +468,7 @@ enum DayOneScript {
          + "goes — a process to watch, not a trick performed off screen."),
 
         ("Code · Byte", 2.6, .petSays(deptKey: "eng", line: .reports),
-         "One page, Luna's direction, Nova's positioning line. A draft until you approve "
-         + "it — same as everything else today."),
+         "The page exists now — a draft until she approves it, like everything else today."),
 
         // **The page is actually BUILT here, not merely described.** `.codeRun` above drives
         // the coding agent in Developer mode; it produces a code change, never a `.site`
@@ -532,8 +511,7 @@ enum DayOneScript {
          + "approval do not."),
 
         ("Redesign · Luna", 2.8, .petSays(deptKey: "design", line: .reports),
-         "Same page, calmer. The day's last check is whether the feeling she promised "
-         + "survived being built."),
+         "The day's last check: whether the feeling she promised survived being built."),
 
         // The closing beat. Stays inside the last chapter to speak rather than opening a
         // thirteenth — same rule the Operations hand-back and the original Code chapter both

@@ -602,8 +602,15 @@ final class MockFlowPlayer: ObservableObject {
                 // cannot serve this: it would have to invent a founder message to reply to.
                 let beatIndex = index
                 Task {
-                    await store.postLiveLine(instruction: instruction, fallback: text,
-                                             language: language)
+                    // Caption it when the transport gave us nothing. `armChatReplyWait`'s
+                    // "didn't come back" only fires on a TIMEOUT, so a nil/empty reply used to
+                    // pass with no signal anywhere — see `LiveFallbackNotice`.
+                    let wasLive = await store.postLiveLine(instruction: instruction,
+                                                           fallback: text, language: language)
+                    if !wasLive {
+                        self.reportRunFailure(
+                            "That reply didn't come back — showing the scripted line instead.")
+                    }
                 }
                 armChatReplyWait(beatIndex: beatIndex)
             } else {

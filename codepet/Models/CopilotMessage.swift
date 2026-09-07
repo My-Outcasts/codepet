@@ -29,6 +29,17 @@ struct CopilotMessage: Identifiable, Equatable {
     var interview: InterviewGap?
     /// True once the founder has answered or skipped — collapses the card to a plain bubble.
     var interviewAnswered: Bool
+    /// **True when this line is the AUTHORED fallback, posted because the live reply did not
+    /// come back.** Set only by `postLiveLine` (itself `#if DEBUG`), so it is always false in
+    /// a release build and on every ordinary turn.
+    ///
+    /// It exists because the fallback was invisible: `postLiveLine` posts the scripted line on
+    /// a nil or empty reply, and the transcript then reads exactly like a working live run.
+    /// On 7 Sep a demo run served three authored lines in a row — the deployed function was
+    /// getting `401 authentication_error: API key is invalid` from Anthropic on every call —
+    /// and nothing on screen said so. A run that quietly substitutes fixtures is
+    /// indistinguishable from one that works, which makes it worse than a visible failure.
+    var scriptedFallback: Bool = false
     /// A tapped-to-navigate suggestion from `.done`'s `nav` action; nil for ordinary text.
     /// Rendered as a chip — tapping routes through `CompanyStore.activateNav`.
     var navChip: NavAction?
@@ -144,6 +155,7 @@ struct CopilotMessage: Identifiable, Equatable {
          interview: InterviewGap? = nil, interviewAnswered: Bool = false,
          navChip: NavAction? = nil, setupSuggestion: SetupAction? = nil,
          noted: [RememberedFact]? = nil, producing: Bool = false,
+         scriptedFallback: Bool = false,
          companionId: String? = nil, deptName: String? = nil,
          execSteps: [ExecStep]? = nil, upstream: [UpstreamWork]? = nil,
          chainOffer: ChainOffer? = nil, chainOfferChained: Bool? = nil,
@@ -165,6 +177,7 @@ struct CopilotMessage: Identifiable, Equatable {
         self.setupSuggestion = setupSuggestion
         self.noted = noted
         self.producing = producing
+        self.scriptedFallback = scriptedFallback
         self.companionId = companionId
         self.deptName = deptName
         self.execSteps = execSteps

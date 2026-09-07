@@ -2298,6 +2298,15 @@ struct CopilotBubble: View {
                 }
                 VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
                     prose(message.text)
+                    // The authored line, marked as such. Only `postLiveLine` sets this, and
+                    // only in a DEBUG build, so this is dead in release and on every ordinary
+                    // turn. It sits under the prose rather than replacing it because the line
+                    // is still the demo's line — the point is that it is not the model's.
+                    if message.scriptedFallback {
+                        Text(LiveFallbackNotice.text(lang))
+                            .font(.pixelSystem(size: 10))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
                     inlineActions
                 }
             }

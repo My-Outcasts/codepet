@@ -39,7 +39,7 @@ final class AttachmentBudgetTests: XCTestCase {
                       att("c.png", encoded: encoded)]
 
         // Each one passes the per-file rule on its own — that is why it failed silently.
-        XCTAssertEqual(picked.count, ChatAttachment.max)
+        XCTAssertEqual(picked.count, 3)
         XCTAssertGreaterThan(AttachmentBudget.base64Bytes(picked),
                              AttachmentBudget.maxTotalBase64Bytes,
                              "the three-file worst case must be over the total cap, or this test proves nothing")
@@ -100,11 +100,11 @@ final class AttachmentBudgetTests: XCTestCase {
     /// size branch is evaluated, and an `.overBudget` can never follow a `.tooMany`. The
     /// clause was removed; "first refusal wins" gives the same answer for every input.
     ///
-    /// What is asserted here is the ordering that remains true of the mixed pick: two
-    /// pills, then a huge file (refused for size, count unchanged), then two small ones
-    /// (the first fits, the second is one too many).
+    /// What is asserted here is the ordering that remains true of the mixed pick: nine
+    /// pills at the boundary of the max, then a huge file (refused for size, count unchanged),
+    /// then two small ones (the first fits, the second is one too many).
     func testTheSizeRefusalIsTheOneReportedInAMixedPick() {
-        let current = [att("p0", encoded: 1), att("p1", encoded: 1)]
+        let current = (0..<9).map { att("p\($0)", encoded: 1) }
         let admission = AttachmentBudget.admit([att("huge", encoded: 10_000),
                                                 att("fits", encoded: 1),
                                                 att("one-too-many", encoded: 1)],
@@ -222,5 +222,34 @@ final class AttachmentBudgetTests: XCTestCase {
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "gif"), "image/png")
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "JPG"), "image/jpeg")
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "png"), "image/png")
+    }
+
+    /// **Ten, and the byte budget is what actually binds.** The count is a sanity guard;
+    /// `maxTotalBase64Bytes` is what protects the request, and a downscaled screenshot is
+    /// 1–3 MB, so a realistic set hits bytes long before it hits ten.
+    func testTenFilesFitAndTheEleventhIsRefusedByName() {
+        let candidates = (0..<11).map { att("s\($0).png", encoded: 1024) }
+        let admission = AttachmentBudget.admit(candidates, to: [])
+        XCTAssertEqual(admission.accepted.count, 10)
+        XCTAssertEqual(admission.refused, ["s10.png"])
+        XCTAssertEqual(admission.reason, .tooMany)
+    }
+
+    /// The refusal has to NAME the file and state the rule. "Some files were skipped" is
+    /// not actionable; this is the sentence the founder reads instead of silence.
+    func testTheCountRefusalNamesTheFileAndTheRule() {
+        let admission = AttachmentBudget.admit((0..<11).map { att("s\($0).png", encoded: 1024) },
+                                               to: [])
+        let msg = AttachmentBudget.refusalMessage(admission, .en)
+        XCTAssertNotNil(msg)
+        XCTAssertTrue(msg!.contains("s10.png"), "must name the refused file — got: \(msg!)")
+        XCTAssertTrue(msg!.contains("10"), "must state the cap — got: \(msg!)")
+    }
+
+    /// A pin is grounding, a file is payload. They shared a ceiling only because they share
+    /// a row, and raising one must not drag the other.
+    func testPinsKeepTheirOwnCeiling() {
+        XCTAssertEqual(ContextPin.max, 3)
+        XCTAssertEqual(ChatAttachment.max, 10)
     }
 }

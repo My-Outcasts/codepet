@@ -86,6 +86,13 @@ function frame(event: string, payload: unknown): void {
  *   "permissions not granted", because the toggle drives `enabled_skills` for the Cloud
  *   Function and never reached this list. Added HERE rather than at the call site so the
  *   two flags cannot drift apart again: enabling the tool is what permits it.
+ * - **`WebFetch` rides the SAME `webSearch` flag and the SAME both-places rule.** There is
+ *   no separate "web fetch" toggle — `webSearch` already means "the founder turned web
+ *   research on", and a pasted URL (`https://web.murror.app/welcome`, 8 Sep) needs fetching,
+ *   not searching, so the one switch has to grant both tools. Putting WebFetch in only
+ *   `--tools` and not `--allowedTools` is the #129 bug again, verbatim: the model calls it,
+ *   the call is denied, and the founder is told permissions aren't granted while the toggle
+ *   reads Enabled. So it ships in both arrays below, next to WebSearch, or not at all.
  * - **`Read` + `--restricted`, and only for a turn that carries a file.** `claude -p` cannot
  *   take an image block, so an attachment is written into the run directory and read from
  *   there. `--restricted` is what makes granting Read acceptable: it confines the file
@@ -109,14 +116,19 @@ export function claudeArgs(opts: {
   readAttachments?: boolean;
 }): string[] {
   // See the `WebSearch` note above: available and permitted are two different flags, and
-  // the tool is useless with only the first. Read is subject to exactly the same rule.
+  // the tool is useless with only the first. WebFetch rides the same flag as WebSearch —
+  // see the note above — and Read is subject to exactly the same rule.
   const allowedWithBuiltins = [
     ...opts.allowed,
-    ...(opts.webSearch ? ["WebSearch"] : []),
+    ...(opts.webSearch ? ["WebSearch", "WebFetch"] : []),
     ...(opts.readAttachments ? ["Read"] : []),
   ];
-  // "" when neither is on, which the CLI accepts as "no built-ins".
-  const tools = [opts.webSearch ? "WebSearch" : null, opts.readAttachments ? "Read" : null]
+  // "" when none are on, which the CLI accepts as "no built-ins".
+  const tools = [
+    opts.webSearch ? "WebSearch" : null,
+    opts.webSearch ? "WebFetch" : null,
+    opts.readAttachments ? "Read" : null,
+  ]
     .filter(Boolean)
     .join(",");
   return [
@@ -145,6 +157,75 @@ export function claudeArgs(opts: {
   ];
 }
 
+/**
+ * What a tool call looks like to the founder, or nothing when it does not look like
+ * anything honest. Mirrors the rule `ChatThinkingLabel` already enforces client-side: a
+ * missing or unrecognised target produces NO activity rather than a guess, and the row
+ * that would have shown it falls back to rotation instead.
+ *
+ * `target` is deliberately absent from `searchWeb` — the query is the founder's own
+ * words, and echoing it back adds nothing she doesn't already know she typed.
+ */
+export interface ToolActivity {
+  kind: "readFile" | "fetchPage" | "searchWeb";
+  target?: string;
+}
+
+/** A 380pt dock row, not a status bar — a long URL or filename must not blow it out. */
+const MAX_TOOL_ACTIVITY_TARGET_LENGTH = 60;
+
+function capToolActivityTarget(target: string): string {
+  if (target.length <= MAX_TOOL_ACTIVITY_TARGET_LENGTH) return target;
+  // Ellipsised, not truncated silently — the founder should be able to tell the line
+  // was cut rather than reading a filename or host that happens to end mid-word.
+  return `${target.slice(0, MAX_TOOL_ACTIVITY_TARGET_LENGTH - 1)}…`;
+}
+
+/**
+ * Turns one tool call into founder-facing activity. Pure, and NEVER invents: anything
+ * this cannot honestly describe — including every `mcp__codepet__*` tool, which already
+ * has its own approved copy elsewhere (a run-task card, a nav chip, …) — returns `null`,
+ * and the caller falls back to the plain rotating line rather than showing nothing wrong
+ * but also nothing right.
+ */
+export function toolActivity(name: string, input: unknown): ToolActivity | null {
+  const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  switch (name) {
+    case "Read": {
+      const filePath = typeof i.file_path === "string" ? i.file_path : "";
+      const base = filePath ? path.basename(filePath) : "";
+      // A path that is empty, or that IS its own root ("/", "."), basenames to "" —
+      // that would render as "Luna is reading …", which is worse than no line at all.
+      if (!base) return null;
+      return { kind: "readFile", target: capToolActivityTarget(base) };
+    }
+    case "WebFetch": {
+      const url = typeof i.url === "string" ? i.url : "";
+      if (!url) return null;
+      let host: string, pathname: string;
+      try {
+        const parsed = new URL(url);
+        host = parsed.host;
+        pathname = parsed.pathname;
+      } catch {
+        // Not a well-formed URL. Guessing a target by stripping "https://" textually
+        // would be exactly the invention this function exists to refuse.
+        return null;
+      }
+      if (!host) return null;
+      const target = `${host}${pathname}`.replace(/\/+$/, "");
+      if (!target) return null;
+      return { kind: "fetchPage", target: capToolActivityTarget(target) };
+    }
+    case "WebSearch":
+      // No target: see the doc comment above.
+      return { kind: "searchWeb" };
+    default:
+      // Every other tool, `mcp__codepet__*` included — no approved copy, so no activity.
+      return null;
+  }
+}
+
 /** The user-facing text of a turn, and every tool it called, read out of stream-json. */
 export interface TurnResult {
   text: string;
@@ -169,11 +250,18 @@ export interface TurnResult {
  * MCP tool names arrive namespaced (`mcp__codepet__navigate`); the validators expect the
  * bare name, so the prefix is stripped here — the one place it can be, since everything
  * downstream is shared with the HTTP path.
+ *
+ * `onToolActivity` fires once per tool call that `toolActivity` can honestly describe —
+ * never for one it cannot, `mcp__codepet__*` action tools included. Defaults to a no-op
+ * so every existing caller and test keeps compiling unchanged. Does NOT change what
+ * `acc.toolUses` collects: action resolution at `done` depends on that set exactly as it
+ * was, prefix-stripping and all.
  */
 export function ingestLine(
   line: string,
   acc: TurnResult,
   onDelta: (text: string) => void,
+  onToolActivity: (activity: ToolActivity) => void = () => {},
   serverName = "codepet"
 ): void {
   let o: any;
@@ -231,10 +319,10 @@ export function ingestLine(
     for (const c of o.message?.content ?? []) {
       if (c.type === "tool_use" && typeof c.name === "string") {
         const prefix = `mcp__${serverName}__`;
-        acc.toolUses.push({
-          name: c.name.startsWith(prefix) ? c.name.slice(prefix.length) : c.name,
-          input: c.input,
-        });
+        const bareName = c.name.startsWith(prefix) ? c.name.slice(prefix.length) : c.name;
+        acc.toolUses.push({ name: bareName, input: c.input });
+        const activity = toolActivity(bareName, c.input);
+        if (activity) onToolActivity(activity);
       }
     }
     return;
@@ -354,7 +442,7 @@ async function main(): Promise<void> {
     while ((nl = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
-      ingestLine(line, acc, (t) => frame("delta", { text: t }));
+      ingestLine(line, acc, (t) => frame("delta", { text: t }), (activity) => frame("tool", activity));
     }
   });
 
@@ -363,7 +451,9 @@ async function main(): Promise<void> {
   child.stderr.on("data", (c: string) => (stderr += c));
 
   child.on("close", (code) => {
-    if (buf.trim()) ingestLine(buf, acc, (t) => frame("delta", { text: t }));
+    if (buf.trim()) {
+      ingestLine(buf, acc, (t) => frame("delta", { text: t }), (activity) => frame("tool", activity));
+    }
 
     if (code !== 0 && !acc.text && !acc.toolUses.length) {
       frame("error", { error: "upstream_failure", detail: stderr.trim() || `claude exited ${code}` });

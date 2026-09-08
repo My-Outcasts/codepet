@@ -5,8 +5,8 @@ import Foundation
 ///
 /// This exists because the constraint that actually bites is not the one
 /// `ChatAttachment.maxBytes` describes. `maxBytes` is 8 MB **per file, before
-/// base64**; `ChatAttachment.max` is 3 files. Three of them is ~24 MB raw, which is
-/// **~32 MB once base64 inflates it by 4/3** — and `companyChat` runs on Cloud Run
+/// base64**; `ChatAttachment.max` is 10 files. Ten of them is up to ~80 MB raw, which
+/// is **~107 MB once base64 inflates it by 4/3** — and `companyChat` runs on Cloud Run
 /// gen2, whose HTTP request ceiling is 32 MiB. A request over that is rejected by the
 /// infrastructure: the founder gets a bare 413, `handleCompanyChat` never runs, so
 /// there is nothing in `functions:log`, and the backend's own drop table (which is
@@ -167,5 +167,52 @@ enum AttachmentBudget {
         return lang == .vi
             ? "Codepet chưa đọc được \(list)."
             : "Codepet can't read \(list)."
+    }
+
+    /// What the composer says about a file that is supported but too large. Separate from
+    /// `unsupportedMessage` because the fix is different and the founder can act on it: make
+    /// it smaller, or send fewer pages. The megabyte figure is derived from
+    /// `ChatAttachment.maxBytes`, never typed, so the copy cannot outlive the cap.
+    static func oversizedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        let mb = ChatAttachment.maxBytes / (1024 * 1024)
+        return lang == .vi
+            ? "\(list) quá lớn — mỗi tệp tối đa \(mb) MB."
+            : "\(list) is too big — one file can be \(mb) MB."
+    }
+
+    /// What the founder is told when Engineering routes to the local coding agent with
+    /// files attached. The product decision (final review, F2) is that the coding run does
+    /// not carry files — `startCodeRun` reads a linked folder, not a chat request, so there
+    /// is nowhere for a base64 screenshot to go — but the composer has already cleared its
+    /// tiles by the time that route runs, so silence here reads as the file having gone
+    /// somewhere. Same shape as `unsupportedMessage`: nil when there is nothing to say,
+    /// bilingual, names the files rather than counting them.
+    static func engineeringUnsupportedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        return lang == .vi
+            ? "Các phiên chạy Engineering chưa đọc được tệp — \(list) chưa được gửi. Hãy mô tả, hoặc dán nội dung lỗi vào đây."
+            : "Engineering runs can't read files yet — \(list) wasn't sent. Describe it, or paste the error text."
+    }
+
+    /// What the founder is told when Build mode carries files. Sibling to
+    /// `engineeringUnsupportedMessage`, same reason: `startBuild` stages either
+    /// `startCodeRun` (reads a linked folder) or `startEngineeringRun` (the cloud coding
+    /// agent) — neither is a chat request, so there is nowhere for a base64 screenshot to
+    /// go, and the composer has already cleared its tiles by the time either runs. Without
+    /// this, F1 (`459ee07`, making an images-only turn *sendable*) turned an attachments-only
+    /// Build press into a silent no-op: `canSend`/`send()` let it through, `startBuild` never
+    /// accepts attachments, and `startCodeRun`/`startEngineeringRun` each guard on non-empty
+    /// text and quietly return — tiles gone, nothing sent, nothing said. Same shape as
+    /// `unsupportedMessage`: nil when there is nothing to say, bilingual, names the files
+    /// rather than counting them.
+    static func buildUnsupportedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        return lang == .vi
+            ? "Các phiên chạy Build chưa đọc được tệp — \(list) chưa được gửi. Hãy mô tả, hoặc dán nội dung lỗi vào đây."
+            : "Build runs can't read files yet — \(list) wasn't sent. Describe it, or paste the error text."
     }
 }

@@ -35,9 +35,18 @@ struct ChatAttachment: Identifiable, Equatable {
     /// Size BEFORE encoding — for the cap, and for what the pill shows.
     let byteCount: Int
 
-    /// Matches `ContextPin.max`: both are "things riding the next message", and two
-    /// different ceilings for one pill row would be arbitrary.
-    static let max = 3
+    /// How many files one message may carry.
+    ///
+    /// **This used to be 3 and matched `ContextPin.max`,** on the reasoning that pins and
+    /// files are both "things riding the next message" and two ceilings for one pill row
+    /// would be arbitrary. That reasoning is retired: a pin is GROUNDING (it replaces the
+    /// ranker's guess) and a file is PAYLOAD (it is bytes on the wire), and only one of
+    /// them has a transport cost. `ContextPin.max` stays 3.
+    ///
+    /// Ten is a sanity guard, not the real limit. `AttachmentBudget.maxTotalBase64Bytes`
+    /// is what protects the request, and a downscaled screenshot runs 1–3 MB against a
+    /// 20 MB budget — so in real use the bytes bind first and this number is never reached.
+    static let max = 10
 
     /// Per file, before base64 — a sanity limit, and **no longer the binding one.**
     ///

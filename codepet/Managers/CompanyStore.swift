@@ -179,6 +179,15 @@ final class CompanyStore: ObservableObject {
     /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
+    /// The tool running RIGHT NOW, for `ChatThinkingRow` to name literally ("Luna is
+    /// reading web.murror.app…") instead of showing the rotating generic phrase. Set from
+    /// the sidecar's `tool` frame; cleared at the start of every turn and by the SAME
+    /// unconditional tail that clears `isCompanionTyping`/`isStreaming` (success, error,
+    /// or fallback all funnel through it) — never left pointing at a tool from a turn
+    /// that has already ended. Only the local sidecar path ever sets this: the cloud
+    /// `companyChat` Cloud Function emits no `tool` frame, so a founder on that transport
+    /// never sees this line (a known parity gap, not a bug — see `CompanyChatStreamEvent.tool`).
+    @Published private(set) var currentToolActivity: ChatToolActivity?
     @Published private(set) var runningTaskIds: Set<String> = []
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
@@ -474,6 +483,7 @@ final class CompanyStore: ObservableObject {
             activeThreadId = nil
             isCompanionTyping = false
             isStreaming = false
+            currentToolActivity = nil
             runningTaskIds = []
             activeAgentRuns = []
             isFanningOut = false
@@ -808,9 +818,25 @@ final class CompanyStore: ObservableObject {
                   attachments: [ChatAttachment] = [],
                   aboutTask: RoadmapTask? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        // A turn carrying attachments is complete on its own — bail only when BOTH the
+        // words and the files are empty. `renderTurn` on the backend already accepts a
+        // media-only turn ("a media turn with no text returns the media blocks alone"),
+        // so refusing one here (and in `canSend`/`send()`, which guard the same way for
+        // the same reason) was the bug, not a safety check.
+        guard !text.isEmpty || !attachments.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
             startCodeRun(ask: text)   // echoes the ask, anchors, and proposes the run
+            // **The coding run does not carry files (product decision) — but it must not
+            // make them vanish silently.** The composer has already cleared its tiles by
+            // the time this runs, so the founder-visible mechanism is a chat message from
+            // the store, the same way every other route-level notice reaches her. Only
+            // fires when she actually attached something; a plain eng-routed send with no
+            // attachments (`testSendChatWithEngDeptAndLinkedProjectRoutesToCodingAgent`)
+            // still lands exactly one `.me` message, unchanged.
+            if !attachments.isEmpty,
+               let notice = AttachmentBudget.engineeringUnsupportedMessage(attachments.map(\.filename), language) {
+                chatMessages.append(CopilotMessage(role: .companion, text: notice))
+            }
             dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
             return
         }
@@ -1024,7 +1050,24 @@ final class CompanyStore: ObservableObject {
     /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
     /// spend their Claude plan, and has a folder linked, gets their own agent — see
     /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
-    func startBuild(ask: String) {
+    ///
+    /// **`attachments`/`language` are here to say something, not to carry anything —
+    /// `startBuild` still does not accept files (out of scope; see the doc above).** Neither
+    /// `startCodeRun` nor `startEngineeringRun` is a chat request, so a file attached in Build
+    /// mode has nowhere to go on this route, and the composer clears its tiles before either
+    /// runs. Before this, that loss was silent, and F1 (`459ee07`, making an images-only turn
+    /// sendable) made it worse: an attachments-only Build press cleared the tiles and then hit
+    /// `startCodeRun`/`startEngineeringRun`'s own `!trimmed.isEmpty` guard, so the whole turn
+    /// did nothing — no run, no message, no notice. This fires whenever attachments are
+    /// present, text empty or not, so the founder always sees why the file didn't ride along.
+    /// When `ask` is also empty, the guard below stops the run and this notice is the entire
+    /// founder-visible outcome of the turn — which is honest, not a workaround: there is
+    /// nothing else true to say about a turn that was only a file.
+    func startBuild(ask: String, attachments: [ChatAttachment] = [], language: AppLanguage = .en) {
+        if !attachments.isEmpty,
+           let notice = AttachmentBudget.buildUnsupportedMessage(attachments.map(\.filename), language) {
+            chatMessages.append(CopilotMessage(role: .companion, text: notice))
+        }
         if buildRunsOnFoundersAgent {
             startCodeRun(ask: ask)
         } else {
@@ -1593,6 +1636,12 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text,
                                             attachments: outgoing))
         isCompanionTyping = true
+        // A tool from the PREVIOUS turn must never bleed into this one — the exact class
+        // of stale-state bug this branch exists to avoid. Cleared here rather than only
+        // at the tail, so a turn that starts before the previous tail somehow ran (there
+        // is no such path today, but the guard costs nothing) still shows nothing rather
+        // than a lie.
+        currentToolActivity = nil
         let prior = Array(chatMessages.dropLast().suffix(20))
         // Which past turns keep their files on the wire. `functions/` replays only the
         // last `ATTACHMENT_REPLAY_WINDOW` history entries, so base64 on an older turn is
@@ -1702,6 +1751,8 @@ final class CompanyStore: ObservableObject {
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
+                case .tool(let activity):
+                    currentToolActivity = activity
                 case .done(_, _, let action):
                     // Streaming is now the common success path, so run_task_id
                     // (and nav/setup/remember) handling must fire here too —
@@ -1841,6 +1892,10 @@ final class CompanyStore: ObservableObject {
         // message rather than a rewrite of an answer the founder has already read.
         isCompanionTyping = false
         isStreaming = false
+        // Cleared unconditionally, on the SAME line as the two above — success, error, and
+        // fallback all funnel through this one tail (see the doc comment on the property),
+        // so there is no path where a tool from this turn survives it.
+        currentToolActivity = nil
         // Flush this turn into its thread — bumps `updatedAt` (re-sorts the thread
         // list) and, on the very first turn, derives the thread's title + mints
         // its id. Every early `return` above only fires on an account switch,
@@ -3450,6 +3505,7 @@ final class CompanyStore: ObservableObject {
         activeThreadId = nil
         isCompanionTyping = false
         isStreaming = false
+        currentToolActivity = nil
         runningTaskIds = []
         activeAgentRuns = []
         isFanningOut = false

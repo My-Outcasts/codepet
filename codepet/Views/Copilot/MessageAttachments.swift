@@ -1,0 +1,185 @@
+// codepet/Views/Copilot/MessageAttachments.swift
+import AppKit
+import SwiftUI
+
+/// What the founder's own bubble draws when she attached something to that turn.
+///
+/// **This exists because `CopilotMessage.attachments` had no reader.** The field was
+/// written by `CompanyStore.sendMessage` and read back by the same method to rebuild
+/// `history[].attachments`, so the model's memory of an image worked — while the founder's
+/// transcript showed her a bare sentence and no sign of the three screenshots she had just
+/// sent (reported 8 Sep, with a recording). The round trip was correct on the wire and
+/// invisible on screen.
+///
+/// Lives in its own file rather than in `CopilotChatView.swift`, which is already 2,700
+/// lines: a strip, a cache and a chip are one job, and the bubble only needs to ask for it.
+
+/// Decoded thumbnails, one decode per attachment for the life of the view.
+///
+/// **The decode is the expensive part and `body` is the hot path.** `ChatAttachment.data` is
+/// base64 of an image up to `imageLongEdge` (2576px) — decoding that on every SwiftUI body
+/// evaluation is the same per-frame cost class as the dock divider that repainted on every
+/// drag frame. So the bytes are decoded once, **resampled down to thumbnail size**, and the
+/// full-resolution rep is dropped: holding three 2576px reps per message would be ~60MB of
+/// live pixels for a bubble showing three 72pt squares.
+///
+/// Keyed on `ChatAttachment.id` — `path#byteCount` — so a file edited and re-picked is a
+/// different key and gets re-decoded. Keying on `filename` would serve the stale pixels.
+@MainActor
+final class AttachmentThumbnailCache {
+
+    /// Generous enough for a 72pt square on a 2x display with room to grow, small enough
+    /// that a full transcript of them is cheap.
+    static let thumbnailLongEdge: CGFloat = 200
+
+    private var decoded: [String: NSImage] = [:]
+    /// Attachments already tried and refused, so undecodable bytes are not re-attempted on
+    /// every body evaluation — the failing path has to be memoized too, or it is the very
+    /// per-frame cost this cache exists to remove.
+    private var failed: Set<String> = []
+
+    /// The thumbnail, or nil when there is nothing an image decoder will accept — in which
+    /// case the strip falls back to a chip, which still tells her the file was sent.
+    func image(for attachment: ChatAttachment) -> NSImage? {
+        if let hit = decoded[attachment.id] { return hit }
+        if failed.contains(attachment.id) { return nil }
+        guard let made = Self.decode(attachment) else {
+            failed.insert(attachment.id)
+            return nil
+        }
+        decoded[attachment.id] = made
+        return made
+    }
+
+    private static func decode(_ a: ChatAttachment) -> NSImage? {
+        guard a.kind == .image,
+              let raw = Data(base64Encoded: a.data),
+              let rep = NSBitmapImageRep(data: raw),
+              rep.pixelsWide > 0, rep.pixelsHigh > 0,
+              let cg = rep.cgImage else { return nil }
+
+        // Reuses the picker's own fitter, so "never upscale" holds here too: a 40px favicon
+        // stays 40px rather than being blown up to 200 and looking broken.
+        let fitted = ChatAttachment.fittedSize(
+            for: CGSize(width: rep.pixelsWide, height: rep.pixelsHigh),
+            longEdge: thumbnailLongEdge)
+        let w = Int(fitted.width), h = Int(fitted.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let out = ctx.makeImage() else { return nil }
+        return NSImage(cgImage: out, size: fitted)
+    }
+}
+
+/// One attached file, drawn the same way wherever it appears.
+///
+/// The composer passes `onRemove` and gets a hover `×`; the transcript passes nil and gets a
+/// static thumbnail. One tile rather than two means a file cannot look like one thing before
+/// sending and another after.
+struct AttachmentTile: View {
+    let attachment: ChatAttachment
+    let cache: AttachmentThumbnailCache
+    /// nil in the transcript: a sent attachment is a record, not something still removable.
+    var onRemove: (() -> Void)?
+
+    @State private var hovering = false
+    private let side: CGFloat = 56
+
+    var body: some View {
+        Group {
+            if attachment.kind == .image, let image = cache.image(for: attachment) {
+                Image(nsImage: image)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                // No pixels to show — an unreadable image lands here too, so a torn file
+                // still says what it was rather than drawing a broken box.
+                VStack(spacing: 3) {
+                    Image(systemName: attachment.icon).font(.system(size: 14))
+                    Text(attachment.gloss).font(CodepetTheme.inter(9, weight: .medium))
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: side, height: side)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(CodepetTokens.well))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(CodepetTokens.cardEdge))
+        .overlay(alignment: .topTrailing) {
+            if let onRemove, hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Color.black.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .help("Remove")
+                .padding(3)
+            }
+        }
+        .onHover { hovering = $0 }
+        .help(attachment.filename)
+    }
+}
+
+/// The row of thumbnails and chips above the founder's words.
+///
+/// Right-aligned and sitting ABOVE the text, which is the order the model receives the turn
+/// in — `renderTurn` puts media blocks before the question, because the question is about
+/// the picture. The transcript reading the same way is not a coincidence worth breaking.
+///
+/// **Draws `attachments` directly, in the founder's pick order — not grouped by kind.**
+/// A previous version ran them through `MessageAttachmentLayout.split`, which filtered
+/// images into one group and everything else into a second, drawing all previews before
+/// all chips. `AttachmentTile` already decides per-attachment whether to draw a preview or
+/// a chip, so that grouping was `split`'s only remaining effect, and it was a silent
+/// reorder: the composer renders in pick order, so `[a.png, b.pdf, c.png]` showed as
+/// a, b, c before sending and a, c, b after — the same file landing in a different
+/// position depending on whether you were looking at the composer or the sent transcript.
+/// Rendering `attachments` as given removes the regrouping instead of trying to keep two
+/// orderings in sync.
+struct MessageAttachmentStrip: View {
+    let attachments: [ChatAttachment]
+
+    /// Per-bubble, which is the right scope: these attachments belong to this one message,
+    /// and the cache dies with the row. Held in `@State` so it survives re-evaluation
+    /// rather than being rebuilt (and re-decoding everything) on every pass.
+    @State private var cache = AttachmentThumbnailCache()
+
+    var body: some View {
+        if !attachments.isEmpty {
+            // **`WrapLayout`, not a plain `HStack`.** Written when the cap was 3 tiles —
+            // three 56pt tiles plus spacing fit one row of any dock width that mattered.
+            // The cap rose to 10 afterwards and this strip was not revisited: ten tiles is
+            // ~614pt, which clips or overflows a 380pt dock. Same fix the composer already
+            // has (`ChatComposer.pillRow`), called the same way.
+            //
+            // Trailing alignment survives this: `WrapLayout` self-sizes to its widest row
+            // (see `sizeThatFits`), and the `.frame(maxWidth: .infinity, alignment: .trailing)`
+            // below trailing-aligns that self-sized block against the full column — same as
+            // the outer `VStack(alignment: .trailing)` this strip sits in for the bubble
+            // beneath it. The widest row's right edge lands exactly on that trailing edge.
+            // A shorter WRAPPED row (e.g. 4 tiles under a first row of 6) is left-aligned
+            // *within* that block by `WrapLayout`'s own placement, so it does not itself
+            // hug the trailing edge the way the bubble text does — checked by reasoning
+            // through `placeSubviews`, not by eye (this branch does not launch the app to
+            // verify). Still strictly better than the clip/overflow this replaces, and
+            // matches what the composer accepts for its own (leading-aligned) rows.
+            WrapLayout(spacing: 6, rowSpacing: 6) {
+                ForEach(attachments) { att in
+                    AttachmentTile(attachment: att, cache: cache, onRemove: nil)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}

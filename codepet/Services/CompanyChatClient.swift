@@ -343,8 +343,30 @@ struct ChatDoneAction: Equatable {
 /// companionChat CF, just a different endpoint.
 enum CompanyChatStreamEvent: Equatable {
     case delta(String)
+    /// A tool is running mid-turn. Only the LOCAL sidecar path (`chatSidecar.ts`) ever
+    /// emits the `tool` frame this decodes — the cloud `companyChat` Cloud Function does
+    /// not, so this case simply never arrives on that transport. A known parity gap, not
+    /// a bug: fixing it means teaching the CF to narrate its own tool calls, which is out
+    /// of scope here.
+    case tool(ChatToolActivity)
     /// `action` mirrors the JSON response's `run_task_id`/`nav`/`setup`/`remember`.
     case done(model: String, cacheHit: Bool, action: ChatDoneAction)
+}
+
+/// One tool the founder can see running mid-turn — mirrors `ToolActivity` in
+/// `functions/src/local/chatSidecar.ts`, field for field. `target` is optional for the
+/// same reason it is there: `searchWeb` names no query (it is the founder's own words,
+/// and echoing it back adds nothing), and every tool call with no approved copy never
+/// produces a `tool` frame at all — `toolActivity` on the sidecar side returns `null` and
+/// this case is simply never decoded for it.
+struct ChatToolActivity: Equatable {
+    enum Kind: String, Equatable {
+        case readFile
+        case fetchPage
+        case searchWeb
+    }
+    let kind: Kind
+    let target: String?
 }
 
 /// Small body decoded from an `event: error` frame or a non-200 HTTP response.
@@ -538,6 +560,20 @@ enum CompanyChatClient {
                 // A dropped delta is invisible in the transcript: the text simply lacks that
                 // fragment, which reads as the model having stopped there.
                 streamLog.error("delta frame undecodable — \(payload.count, privacy: .public) bytes DROPPED")
+            }
+        case "tool":
+            struct ToolPayload: Codable { let kind: String; let target: String? }
+            if let p = try? JSONDecoder().decode(ToolPayload.self, from: payload),
+               let kind = ChatToolActivity.Kind(rawValue: p.kind) {
+                continuation.yield(.tool(ChatToolActivity(kind: kind, target: p.target)))
+            } else {
+                // Additive frame: an older client that predates this case would not even
+                // reach this switch arm and falls through `default` below, which must NOT
+                // throw — see the note there. Here, a client that DOES know the frame but
+                // gets a shape it cannot decode (a future kind it has never heard of, say)
+                // simply drops the one activity line rather than failing the turn: the
+                // reply's text is unaffected, so this is a missed nicety, not a truncation.
+                streamLog.error("tool frame undecodable — \(payload.count, privacy: .public) bytes DROPPED")
             }
         case "done":
             struct DonePayload: Codable {

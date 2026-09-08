@@ -66,9 +66,13 @@ enum ContextPin: Identifiable, Equatable {
         return nil
     }
 
-    /// Matches `ChatAttachment.max`, and `selectPriorWork`'s own `max: 3`. Both are
-    /// "things riding the next message", and the pill row shares one ceiling because
-    /// two different ones would be arbitrary to the founder looking at it.
+    /// Matches `selectPriorWork`'s own `max: 3`, not `ChatAttachment.max`. A pin is
+    /// GROUNDING — it replaces the ranker's guess with the founder's choice, and costs
+    /// nothing on the wire beyond the id and title already in the message. An
+    /// attachment is PAYLOAD — bytes that ride the request and can 413 it. Only one of
+    /// them has a transport cost, so only one of them needed to grow when the picker
+    /// did; the two ceilings were deliberately decoupled when `ChatAttachment.max`
+    /// rose to 10.
     static let max = 3
 
     /// Add, de-duped by `id` and capped at `max`.

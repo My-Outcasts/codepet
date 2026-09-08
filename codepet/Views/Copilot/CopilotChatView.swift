@@ -144,7 +144,7 @@ struct CopilotChatView: View {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
     private var canSend: Bool {
-        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
             && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
     }
     /// True while a chat turn OR a parallel fan-out is in flight — gates the
@@ -1043,8 +1043,14 @@ struct CopilotChatView: View {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
                     // The streaming/typing affordance (Task 11) — replaces main's
-                    // static typingRow. Generic label (no single-run step source here).
-                    if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
+                    // static typingRow. Generic label (no single-run step source here) —
+                    // `activity` is the one exception: a tool running mid-turn IS known
+                    // here (`CompanyStore.currentToolActivity`), and is exactly the case
+                    // this row was extended for (8 Sep) so the founder sees a page being
+                    // fetched instead of a rotating "cooking" phrase.
+                    if companyStore.isCompanionTyping {
+                        ChatThinkingRow(activity: companyStore.currentToolActivity).id("typing")
+                    }
                 }
                 .readingColumn(column)
                 .padding(.top, ChatRhythm.transcriptTop(surface))
@@ -1132,7 +1138,12 @@ struct CopilotChatView: View {
     /// (finding logged 6 Sep, live-path half of the bug Task 3 fixed only on the demo path).
     private func send(aboutTask: RoadmapTask? = nil) {
         let text = companyStore.chatDraft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // A turn carrying attachments is complete on its own — bail only when BOTH
+        // the words and the files are empty. See `canSend` and `CompanyStore.sendChat`,
+        // which relax the same guard for the same reason: `renderTurn` on the backend
+        // already accepts a media-only turn ("a media turn with no text returns the
+        // media blocks alone"), so refusing to send one client-side was the bug.
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
         // One message, one handoff. The chip used to survive the send — and `newChat()` and a
@@ -1202,13 +1213,16 @@ struct CopilotChatView: View {
             // One code mode. WHERE it runs is the run's business, not the
             // founder's — `startBuild` decides and says so on the card.
             //
-            // **Pins and attachments are dropped on this path and that is stated rather
-            // than hidden.** `startBuild` stages a local coding run, which reads the linked
-            // folder and not a chat request, so there is nowhere for a pinned deliverable or
-            // a base64 screenshot to go. Attaching a file and pressing Build discards it.
-            // Fixing it means a route into `CodingRunCoordinator`, which is a different
-            // change than wiring the chat wire.
-            companyStore.startBuild(ask: text)
+            // **Pins and attachments are dropped on this path, but no longer silently.**
+            // `startBuild` stages a local or cloud coding run, which reads the linked folder
+            // (or a branch) and not a chat request, so there is nowhere for a pinned
+            // deliverable or a base64 screenshot to go. Attaching a file and pressing Build
+            // still discards it — that is unchanged and out of scope (a route into
+            // `CodingRunCoordinator` is a different change) — but `startBuild` now tells her
+            // so via the same `.companion`-message mechanism F2 uses for the Engineering
+            // route, instead of clearing the tiles and saying nothing. Pins are still dropped
+            // with no notice; only attachments have one today, matching F2's scope.
+            companyStore.startBuild(ask: text, attachments: sendAttachments, language: lang)
         }
     }
 }
@@ -2235,7 +2249,16 @@ struct CopilotBubble: View {
         // draws its fill and 1pt border, so rendering an empty one left a bare bordered
         // box that read as an error state. `ChatThinkingRow` already covers the waiting
         // beat, so render nothing rather than an empty card.
-        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // **`&& attachments.isEmpty` is load-bearing.** Dropping screenshots in with no
+        // typed words is a complete turn — the backend renders it as media blocks alone,
+        // deliberately (`renderTurn`: "a media turn with no text returns the media blocks
+        // alone"). This clause exists so an attachments-only turn still renders its
+        // images here instead of an empty bordered box. Until the fix that let such a
+        // turn be sent at all, this could never fire: `canSend`, `send()` and
+        // `CompanyStore.sendChat` all guarded on non-empty text, so an images-only turn
+        // never left the composer in the first place.
+        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && message.attachments.isEmpty {
             EmptyView()
         } else if message.supersededByRoom && !isMe {
             firstTakeRow
@@ -2254,23 +2277,33 @@ struct CopilotBubble: View {
             // for a recessed track.
             let quiet = surface == .twoMode
             let pad: CGFloat = 14
-            HStack {
-                Spacer(minLength: 24)
-                Text(message.text)
-                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
-                    .lineSpacing(ChatRhythm.proseLeading(surface))
-                    .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
-                    .padding(.horizontal, pad).padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
-                    .fixedSize(horizontal: false, vertical: true)
-                    // The bubble's TEXT lands on the column's right edge, not its
-                    // border — so the founder's words and the reply's words end on
-                    // the same vertical line, and only the bubble's padding
-                    // overhangs it. This is what Claude does, and without it the
-                    // question sits ~7pt inside the answer for no reason a reader
-                    // could name.
-                    .padding(.trailing, quiet ? -pad : 0)
+            VStack(alignment: .trailing, spacing: 6) {
+                // What she attached to THIS turn, above her words — the order the model
+                // receives the turn in, because the question is about the picture. Draws
+                // nothing when she attached nothing, i.e. on every turn to date.
+                MessageAttachmentStrip(attachments: message.attachments)
+                // Guarded, so an images-only turn shows its images and NOT an empty
+                // bubble underneath them — see the `attachments.isEmpty` note above.
+                if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack {
+                        Spacer(minLength: 24)
+                        Text(message.text)
+                            .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                            .lineSpacing(ChatRhythm.proseLeading(surface))
+                            .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
+                            .padding(.horizontal, pad).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
+                            .fixedSize(horizontal: false, vertical: true)
+                            // The bubble's TEXT lands on the column's right edge, not its
+                            // border — so the founder's words and the reply's words end on
+                            // the same vertical line, and only the bubble's padding
+                            // overhangs it. This is what Claude does, and without it the
+                            // question sits ~7pt inside the answer for no reason a reader
+                            // could name.
+                            .padding(.trailing, quiet ? -pad : 0)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {

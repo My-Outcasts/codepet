@@ -282,3 +282,101 @@ extension ChatThinkingLabelTests {
         }
     }
 }
+
+// MARK: - Tool activity (8 Sep — a literal line for a tool running mid-turn)
+
+extension ChatThinkingLabelTests {
+    func testReadFileActivityWithPetEnglish() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .readFile, target: "mml-book.pdf"),
+                                   language: .en),
+            "Luna is reading mml-book.pdf…")
+    }
+    func testReadFileActivityWithPetVietnamese() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .readFile, target: "mml-book.pdf"),
+                                   language: .vi),
+            "Luna đang đọc mml-book.pdf…")
+    }
+
+    func testFetchPageActivityWithPetEnglish() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .fetchPage, target: "web.murror.app/welcome"),
+                                   language: .en),
+            "Luna is reading web.murror.app/welcome…")
+    }
+    func testFetchPageActivityWithPetVietnamese() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .fetchPage, target: "web.murror.app/welcome"),
+                                   language: .vi),
+            "Luna đang đọc web.murror.app/welcome…")
+    }
+
+    func testSearchWebActivityWithPetEnglish() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .searchWeb, target: nil),
+                                   language: .en),
+            "Luna is searching the web…")
+    }
+    func testSearchWebActivityWithPetVietnamese() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .searchWeb, target: nil),
+                                   language: .vi),
+            "Luna đang tìm trên web…")
+    }
+
+    /// No pet — the same lines without a name, mirroring how `taskTitle` already falls
+    /// back (`"Drafting positioning brief…"` with no pet).
+    func testActivityFallsBackToUnnamedCopyWithNoPet() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .readFile, target: "mml-book.pdf"),
+                                   language: .en),
+            "Reading mml-book.pdf…")
+        XCTAssertEqual(
+            ChatThinkingLabel.text(taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .readFile, target: "mml-book.pdf"),
+                                   language: .vi),
+            "Đang đọc mml-book.pdf…")
+        XCTAssertEqual(
+            ChatThinkingLabel.text(taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .searchWeb, target: nil),
+                                   language: .en),
+            "Searching the web…")
+        XCTAssertEqual(
+            ChatThinkingLabel.text(taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .searchWeb, target: nil),
+                                   language: .vi),
+            "Đang tìm trên web…")
+    }
+
+    /// A real activity is exactly as literal as a real task title — it must not vary at
+    /// any rotation index, or the founder would see the tool's own name flicker between
+    /// unrelated phrases.
+    func testActivityIgnoresTheVariant() {
+        for variant in 0..<ChatThinkingLabel.phraseCount {
+            XCTAssertEqual(
+                ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                       activity: ChatToolActivity(kind: .readFile, target: "mml-book.pdf"),
+                                       language: .en, variant: variant),
+                "Luna is reading mml-book.pdf…",
+                "variant \(variant) changed an activity label")
+        }
+    }
+
+    /// A blank target must not render "Luna is reading …" with nothing after "reading" —
+    /// it falls back to plain rotation instead, exactly like a blank task title does.
+    func testBlankActivityTargetFallsBackToRotation() {
+        XCTAssertEqual(
+            ChatThinkingLabel.text(petName: "Luna", taskTitle: nil,
+                                   activity: ChatToolActivity(kind: .readFile, target: "   "),
+                                   language: .en),
+            "Luna is on it…")
+    }
+}

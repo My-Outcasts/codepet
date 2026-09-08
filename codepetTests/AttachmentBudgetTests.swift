@@ -39,7 +39,6 @@ final class AttachmentBudgetTests: XCTestCase {
                       att("c.png", encoded: encoded)]
 
         // Each one passes the per-file rule on its own — that is why it failed silently.
-        XCTAssertEqual(picked.count, ChatAttachment.max)
         XCTAssertGreaterThan(AttachmentBudget.base64Bytes(picked),
                              AttachmentBudget.maxTotalBase64Bytes,
                              "the three-file worst case must be over the total cap, or this test proves nothing")
@@ -100,11 +99,11 @@ final class AttachmentBudgetTests: XCTestCase {
     /// size branch is evaluated, and an `.overBudget` can never follow a `.tooMany`. The
     /// clause was removed; "first refusal wins" gives the same answer for every input.
     ///
-    /// What is asserted here is the ordering that remains true of the mixed pick: two
-    /// pills, then a huge file (refused for size, count unchanged), then two small ones
-    /// (the first fits, the second is one too many).
+    /// What is asserted here is the ordering that remains true of the mixed pick: nine
+    /// pills at the boundary of the max, then a huge file (refused for size, count unchanged),
+    /// then two small ones (the first fits, the second is one too many).
     func testTheSizeRefusalIsTheOneReportedInAMixedPick() {
-        let current = [att("p0", encoded: 1), att("p1", encoded: 1)]
+        let current = (0..<9).map { att("p\($0)", encoded: 1) }
         let admission = AttachmentBudget.admit([att("huge", encoded: 10_000),
                                                 att("fits", encoded: 1),
                                                 att("one-too-many", encoded: 1)],
@@ -203,6 +202,54 @@ final class AttachmentBudgetTests: XCTestCase {
                           AttachmentBudget.unsupportedMessage(["a.sketch"], .vi))
     }
 
+    /// **The reported bug's fix.** A 16 MB `mml-book.pdf` was told "Codepet can't read
+    /// mml-book.pdf" (8 Sep) — false, since PDFs are supported and the real limit is
+    /// `ChatAttachment.maxBytes`. `oversizedMessage` must name the file AND state the
+    /// megabyte figure, and the two assertions have to be genuinely independent —
+    /// an earlier test on this branch used a fixture named `s10.png` and asserted the
+    /// message contained "10", which the FILENAME itself already satisfied. This fixture
+    /// name (`report-manual.pdf`) contains no digits, so the "8" assertion can only pass
+    /// by the limit actually appearing.
+    func testOversizedMessageNamesTheFileAndStatesTheMegabyteLimit() {
+        XCTAssertNil(AttachmentBudget.oversizedMessage([], .en))
+
+        let mb = ChatAttachment.maxBytes / (1024 * 1024)
+        let en = AttachmentBudget.oversizedMessage(["report-manual.pdf"], .en)
+        XCTAssertNotNil(en)
+        XCTAssertTrue(en!.contains("report-manual.pdf"), "does not name the file: \(en!)")
+        XCTAssertTrue(en!.contains("\(mb)"), "does not state the megabyte limit: \(en!)")
+
+        let vi = AttachmentBudget.oversizedMessage(["report-manual.pdf"], .vi)
+        XCTAssertNotNil(vi)
+        XCTAssertTrue(vi!.contains("report-manual.pdf"), "does not name the file: \(vi!)")
+        XCTAssertTrue(vi!.contains("\(mb)"), "does not state the megabyte limit: \(vi!)")
+        XCTAssertNotEqual(en, vi, "the two languages must not collapse to the same copy")
+    }
+
+    /// F2, final review: the Engineering route discards attachments silently unless
+    /// something names them. nil for an empty list mirrors `unsupportedMessage` (no
+    /// notice when there is nothing to report), and both languages must actually name
+    /// the file rather than just acknowledge one was dropped — a founder chasing a bug
+    /// needs to know WHICH screenshot vanished when she attached more than one.
+    func testTheEngineeringNoticeNamesTheFilesAndIsSilentWhenEmpty() {
+        XCTAssertNil(AttachmentBudget.engineeringUnsupportedMessage([], .en))
+        XCTAssertNil(AttachmentBudget.engineeringUnsupportedMessage([], .vi))
+
+        let en = AttachmentBudget.engineeringUnsupportedMessage(["shot.png"], .en)
+        XCTAssertNotNil(en)
+        XCTAssertTrue(en!.contains("shot.png"), "does not name the file: \(en!)")
+
+        let vi = AttachmentBudget.engineeringUnsupportedMessage(["shot.png"], .vi)
+        XCTAssertNotNil(vi)
+        XCTAssertTrue(vi!.contains("shot.png"), "does not name the file: \(vi!)")
+        XCTAssertNotEqual(en, vi, "the two languages must not collapse to the same copy")
+
+        let multi = AttachmentBudget.engineeringUnsupportedMessage(["a.png", "b.png"], .en)
+        XCTAssertNotNil(multi)
+        XCTAssertTrue(multi!.contains("a.png") && multi!.contains("b.png"),
+                      "a mixed pick must name every file, not just the first: \(multi!)")
+    }
+
     /// A clean pick says nothing. The notice is assigned on every pick, so a nil here
     /// is what clears a stale refusal off the composer.
     func testACleanPickProducesNoNotice() {
@@ -222,5 +269,41 @@ final class AttachmentBudgetTests: XCTestCase {
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "gif"), "image/png")
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "JPG"), "image/jpeg")
         XCTAssertEqual(ChatAttachment.downscaledMediaType(pathExtension: "png"), "image/png")
+    }
+
+    /// **Ten, and the byte budget is what actually binds.** The count is a sanity guard;
+    /// `maxTotalBase64Bytes` is what protects the request, and a downscaled screenshot is
+    /// 1–3 MB, so a realistic set hits bytes long before it hits ten.
+    func testTenFilesFitAndTheEleventhIsRefusedByName() {
+        let candidates = (0..<11).map { att("s\($0).png", encoded: 1024) }
+        let admission = AttachmentBudget.admit(candidates, to: [])
+        XCTAssertEqual(admission.accepted.count, 10)
+        XCTAssertEqual(admission.refused, ["s10.png"])
+        XCTAssertEqual(admission.reason, .tooMany)
+    }
+
+    /// The refusal has to NAME the file and state the rule. "Some files were skipped" is
+    /// not actionable; this is the sentence the founder reads instead of silence.
+    ///
+    /// **The filenames deliberately carry no digits.** An earlier version numbered them
+    /// `s0…s10`, so the refused file was `s10.png` and `contains("10")` was satisfied by the
+    /// FILENAME — a `refusalMessage` that dropped the cap entirely would still have passed.
+    /// Letters make the two assertions independent, and the cap is read from the constant so
+    /// the test cannot outlive a change to it.
+    func testTheCountRefusalNamesTheFileAndTheRule() {
+        let names = (0..<11).map { "shot-\(Character(UnicodeScalar(97 + $0)!)).png" }
+        let admission = AttachmentBudget.admit(names.map { att($0, encoded: 1024) }, to: [])
+        let msg = AttachmentBudget.refusalMessage(admission, .en)
+        XCTAssertNotNil(msg)
+        XCTAssertTrue(msg!.contains("shot-k.png"), "must name the refused file — got: \(msg!)")
+        XCTAssertTrue(msg!.contains(String(ChatAttachment.max)),
+                      "must state the cap — got: \(msg!)")
+    }
+
+    /// A pin is grounding, a file is payload. They shared a ceiling only because they share
+    /// a row, and raising one must not drag the other.
+    func testPinsKeepTheirOwnCeiling() {
+        XCTAssertEqual(ContextPin.max, 3)
+        XCTAssertEqual(ChatAttachment.max, 10)
     }
 }

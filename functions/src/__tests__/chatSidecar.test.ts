@@ -1,5 +1,5 @@
 import { toMcpTools, allowedToolNames, handleRpc } from "../local/mcpToolServer";
-import { claudeArgs, ingestLine, renderForPrompt, type TurnResult } from "../local/chatSidecar";
+import { claudeArgs, ingestLine, renderForPrompt, toolActivity, type TurnResult } from "../local/chatSidecar";
 import { buildChatRequest } from "../companyChatCore";
 
 /**
@@ -128,10 +128,10 @@ describe("claudeArgs", () => {
   });
 
   /** A safety property, not tidiness: chat has no business holding Bash, Edit or Write. */
-  it("restricts built-in tools to nothing, or to WebSearch when the skill is on", () => {
+  it("restricts built-in tools to nothing, or to WebSearch+WebFetch when the skill is on", () => {
     expect(claudeArgs(base)[claudeArgs(base).indexOf("--tools") + 1]).toBe("");
     const withSearch = claudeArgs({ ...base, webSearch: true });
-    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
   });
 
   /** Variadic, so anything after it is swallowed — including a positional prompt. */
@@ -152,8 +152,22 @@ describe("claudeArgs", () => {
    */
   it("permits WebSearch, not just enables it", () => {
     const a = claudeArgs({ ...base, webSearch: true });
-    expect(a[a.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(a[a.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
     expect(a.slice(a.indexOf("--allowedTools") + 1)).toContain("WebSearch");
+  });
+
+  /**
+   * **Owner decision, 8 Sep:** grant `WebFetch` gated on the same `web-research` toggle
+   * that already gates `WebSearch` — no separate flag. A pasted live URL
+   * (`https://web.murror.app/welcome`) needs fetching, not searching, and the founder
+   * already turned web research on. Same #129 shape as the WebSearch bug: `--tools` makes
+   * it available, `--allowedTools` is what permits it, and only shipping the first is the
+   * "permissions not granted" apology again.
+   */
+  it("permits WebFetch, not just enables it", () => {
+    const a = claudeArgs({ ...base, webSearch: true });
+    expect(a[a.indexOf("--tools") + 1]).toContain("WebFetch");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toContain("WebFetch");
   });
 
   /** Off means off: nothing should quietly grant a built-in the founder never enabled. */
@@ -162,22 +176,30 @@ describe("claudeArgs", () => {
     expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("WebSearch");
   });
 
-  /** The MCP tools must survive alongside it — permitting one must not replace the others. */
+  /** Off means off for WebFetch too — it rides the same flag, so it must be absent with it. */
+  it("does not permit or enable WebFetch when the skill is off", () => {
+    const a = claudeArgs(base);
+    expect(a[a.indexOf("--tools") + 1]).not.toContain("WebFetch");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("WebFetch");
+  });
+
+  /** The MCP tools must survive alongside it — permitting these must not replace the others. */
   it("keeps the MCP tools permitted when WebSearch is added", () => {
     const a = claudeArgs({ ...base, webSearch: true });
     const permitted = a.slice(a.indexOf("--allowedTools") + 1);
     expect(permitted).toContain("mcp__codepet__navigate");
-    expect(permitted).toHaveLength(2);
+    expect(permitted).toContain("WebFetch");
+    expect(permitted).toHaveLength(3);
   });
 
   /**
-   * WebSearch alone must still be permitted with no MCP tools at all, or the previous
-   * `allowed.length` guard would drop the flag and deny it again.
+   * WebSearch (and WebFetch alongside it) must still be permitted with no MCP tools at
+   * all, or the previous `allowed.length` guard would drop the flag and deny it again.
    */
   it("still permits WebSearch when there are no MCP tools", () => {
     const a = claudeArgs({ ...base, allowed: [], webSearch: true });
     expect(a).toContain("--allowedTools");
-    expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch"]);
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch", "WebFetch"]);
   });
 
   /**
@@ -203,7 +225,7 @@ describe("claudeArgs", () => {
     expect(a).toContain("--restricted");
     expect(a[a.indexOf("--tools") + 1]).toBe("Read");
     const withSearch = claudeArgs({ ...base, readAttachments: true, webSearch: true });
-    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,Read");
+    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch,Read");
     expect(withSearch).toContain("--restricted");
   });
 
@@ -217,6 +239,54 @@ describe("claudeArgs", () => {
     const permitted = a.slice(a.indexOf("--allowedTools") + 1);
     expect(permitted).toContain("Read");
     expect(permitted).toContain("mcp__codepet__navigate");
+  });
+});
+
+describe("toolActivity", () => {
+  it("gives Read a basename, not the absolute temp path", () => {
+    expect(toolActivity("Read", { file_path: "/tmp/codepet-chat-abc123/mml-book.pdf" }))
+      .toEqual({ kind: "readFile", target: "mml-book.pdf" });
+  });
+
+  it("strips the scheme and any trailing slash from a WebFetch url", () => {
+    expect(toolActivity("WebFetch", { url: "https://web.murror.app/welcome" }))
+      .toEqual({ kind: "fetchPage", target: "web.murror.app/welcome" });
+    expect(toolActivity("WebFetch", { url: "https://web.murror.app/" }))
+      .toEqual({ kind: "fetchPage", target: "web.murror.app" });
+  });
+
+  it("gives WebSearch no target — the query is the founder's own words", () => {
+    expect(toolActivity("WebSearch", { query: "best CRM 2026" }))
+      .toEqual({ kind: "searchWeb" });
+  });
+
+  it("describes neither an unrecognised tool nor a codepet action tool", () => {
+    expect(toolActivity("Bash", { command: "ls" })).toBeNull();
+    expect(toolActivity("navigate", { destination: "roadmap" })).toBeNull();
+    // The namespaced form, in case anything ever calls this before stripping.
+    expect(toolActivity("mcp__codepet__navigate", { destination: "roadmap" })).toBeNull();
+  });
+
+  it("never guesses from malformed or missing input", () => {
+    expect(toolActivity("Read", {})).toBeNull();
+    expect(toolActivity("Read", { file_path: 42 })).toBeNull();
+    expect(toolActivity("Read", null)).toBeNull();
+    expect(toolActivity("WebFetch", {})).toBeNull();
+    expect(toolActivity("WebFetch", { url: "not a url" })).toBeNull();
+    // A path that basenames to "" (the root itself) must not render "reading …".
+    expect(toolActivity("Read", { file_path: "/" })).toBeNull();
+  });
+
+  it("caps a long target rather than blowing out the dock row", () => {
+    const longPath = "/tmp/" + "a".repeat(80) + ".pdf";
+    const read = toolActivity("Read", { file_path: longPath });
+    expect(read?.target?.length).toBe(60);
+    expect(read?.target?.endsWith("…")).toBe(true);
+
+    const longUrl = "https://example.com/" + "b".repeat(80);
+    const fetched = toolActivity("WebFetch", { url: longUrl });
+    expect(fetched?.target?.length).toBe(60);
+    expect(fetched?.target?.endsWith("…")).toBe(true);
   });
 });
 
@@ -304,6 +374,51 @@ describe("ingestLine", () => {
     const acc = fresh();
     ingestLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebSearch", input: {} }] } }), acc, () => {});
     expect(acc.toolUses[0].name).toBe("WebSearch");
+  });
+
+  /**
+   * The whole point of the callback: a founder-visible activity fires for a tool this
+   * process can honestly describe, and `acc.toolUses` still collects it — action
+   * resolution at `done` must not lose the call just because it also became a UI line.
+   */
+  it("fires onToolActivity for a describable tool call", () => {
+    const acc = fresh();
+    const activities: unknown[] = [];
+    ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebFetch", input: { url: "https://web.murror.app/welcome" } }] } }),
+      acc,
+      () => {},
+      (a) => activities.push(a)
+    );
+    expect(activities).toEqual([{ kind: "fetchPage", target: "web.murror.app/welcome" }]);
+    expect(acc.toolUses).toEqual([{ name: "WebFetch", input: { url: "https://web.murror.app/welcome" } }]);
+  });
+
+  /**
+   * `navigate` (via `mcp__codepet__navigate`) already has its own approved copy elsewhere
+   * (a nav chip) — no activity line for it, but the resolver at `done` still needs the
+   * call in `acc.toolUses`, prefix stripped exactly as before this change.
+   */
+  it("does not fire onToolActivity for an mcp__codepet__ action tool, but still collects it", () => {
+    const acc = fresh();
+    const activities: unknown[] = [];
+    ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__codepet__navigate", input: { destination: "roadmap" } }] } }),
+      acc,
+      () => {},
+      (a) => activities.push(a)
+    );
+    expect(activities).toEqual([]);
+    expect(acc.toolUses).toEqual([{ name: "navigate", input: { destination: "roadmap" } }]);
+  });
+
+  it("defaults onToolActivity to a no-op so every existing 3-arg call keeps compiling", () => {
+    const acc = fresh();
+    expect(() => ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebSearch", input: {} }] } }),
+      acc,
+      () => {}
+    )).not.toThrow();
   });
 
   it("reports which model actually answered", () => {

@@ -1,6 +1,7 @@
 // codepet/Views/Library/DeliverableExporter.swift
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// Saves a deliverable's files to disk.
 ///
@@ -29,13 +30,22 @@ enum DeliverableExporter {
     /// A throw here can happen after some files have already landed — `PartialWrite` carries
     /// how many, so a caller can tell a partial export from a clean failure instead of
     /// reporting a partial run as a plain success.
+    ///
+    /// `.` and `..` are rejected explicitly, falling back to the same default name used for
+    /// an empty name, rather than trusted to `lastPathComponent` — `lastPathComponent` of
+    /// `".."` IS `".."`, and `directory.appendingPathComponent("..")` resolves to the PARENT
+    /// of the chosen directory. Today the collision loop in `unusedURL` happens to rename that
+    /// away before anything is written, but that is safety by accident, not by design — and
+    /// **the app is not sandboxed** (`codepet/codepet.entitlements` has `app-sandbox` = false),
+    /// so there is no second line of defence if the loop's behaviour ever changes.
     static func write(_ files: [ExportFile], to directory: URL) throws -> [URL] {
         var out: [URL] = []
         for f in files {
-            let safe = (f.name as NSString).lastPathComponent
-            let url = try unusedURL(in: directory, name: safe.isEmpty ? "deliverable" : safe)
+            let raw = (f.name as NSString).lastPathComponent
+            let safe = (raw.isEmpty || raw == "." || raw == "..") ? "deliverable" : raw
+            let url = try unusedURL(in: directory, name: safe)
             do {
-                try f.data.write(to: url)
+                try f.data.write(to: url, options: .atomic)
             } catch {
                 throw PartialWrite(landed: out.count, underlying: error)
             }
@@ -45,9 +55,9 @@ enum DeliverableExporter {
     }
 
     /// Thrown by `write(_:to:)` when the directory rejects a write partway through a set —
-    /// a sandbox denial, a read-only volume, a full disk. `landed` is how many files were
-    /// already written before the one that failed, so `save(_:)` never reports a partial
-    /// export as a clean success.
+    /// a read-only volume, a full disk (the app is not sandboxed, so there is no sandbox
+    /// denial to blame). `landed` is how many files were already written before the one that
+    /// failed, so `save(_:)` never reports a partial export as a clean success.
     struct PartialWrite: Error {
         let landed: Int
         let underlying: Error
@@ -85,10 +95,11 @@ enum DeliverableExporter {
     ///
     /// Cancelling the panel is `.cancelled`, not `.failed` — the founder changed their mind,
     /// which is not an error and must not be shown as one. Only an actual write failure (a
-    /// sandbox denial, a read-only volume, a full disk) is `.failed`. Before this the write
-    /// used `try?` and discarded the result either way, so a press that failed for real looked
-    /// exactly like one that succeeded — the same silent-success shape this app has already
-    /// paid for once (`SiteViewer.openFailed`).
+    /// read-only volume, a full disk — the app is not sandboxed, so there is no sandbox
+    /// denial to blame) is `.failed`. Before this the write used `try?` and discarded the
+    /// result either way, so a press that failed for real looked exactly like one that
+    /// succeeded — the same silent-success shape this app has already paid for once
+    /// (`SiteViewer.openFailed`).
     @MainActor
     @discardableResult
     static func save(_ d: Deliverable) -> Outcome {
@@ -100,9 +111,17 @@ enum DeliverableExporter {
             panel.nameFieldStringValue = files[0].name
             panel.prompt = "Export"
             panel.message = "Save \(d.title)"
+            // Preserve (or re-append) the real extension even if the founder edits the name
+            // field and drops it — otherwise a `.csv` saved without its suffix opens in
+            // nothing. Left unrestricted if the extension does not map to a known type,
+            // rather than guessing one.
+            let ext = (files[0].name as NSString).pathExtension
+            if !ext.isEmpty, let type = UTType(filenameExtension: ext) {
+                panel.allowedContentTypes = [type]
+            }
             guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
             do {
-                try files[0].data.write(to: url)
+                try files[0].data.write(to: url, options: .atomic)
                 return .saved
             } catch {
                 return .failed(landed: 0)

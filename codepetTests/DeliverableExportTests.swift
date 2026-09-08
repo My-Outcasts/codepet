@@ -202,12 +202,62 @@ final class DeliverableExportTests: XCTestCase {
 
     /// The point of exporting a model rather than a number: the reader can see how it was
     /// derived and disagree with it.
-    func testSheetCsvCarriesTheDerivedOutputsAndTheirFormulas() throws {
+    ///
+    /// **This is the sheet CSV's equivalent of `testExportedHtmlIsByteIdenticalToWhatTheViewerRenders`**
+    /// — it exists to stop the CSV growing a second renderer that can silently disagree with
+    /// `SheetViewer`. All six of `SheetModel.compute`'s fields must appear, computed by
+    /// calling the model itself, not by re-deriving them here.
+    func testSheetCsvOutputsMatchSheetModelForEveryField() throws {
         let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        let m = SheetModel.compute(price: 6, waitlist: 1200, conversion: 8, churn: 6)
         XCTAssertTrue(csv.contains("output,value,formula"), csv)
-        XCTAssertTrue(csv.contains("subscribers,96,"), "1200 × 8% = 96 — got:\n\(csv)")
-        XCTAssertTrue(csv.contains("mrr,576,"), "96 × $6 = 576 — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("paid,\(m.paid),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,\(Int(m.mrr)),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("arr,\(Int(m.arr)),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("ltv,\(m.ltv),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("life,\(m.life),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("breakeven,\(m.breakeven),"), "got:\n\(csv)")
+    }
+
+    /// `SheetModel` floors `price` at 1, so a `price` of 0 does not zero out MRR on screen —
+    /// the viewer shows the floored model's MRR. Before this fix the CSV hand-computed
+    /// `subscribers * price` with the RAW (unfloored) price and wrote `mrr,0`: a founder
+    /// comparing the file to the screen would see the two disagree on the number that matters
+    /// most in this export.
+    func testSheetCsvMrrUsesTheFlooredPriceNotZero() throws {
+        let payload = DeliverablePayload(sheet: SheetPayload(
+            price: SheetInput(val: 0, min: 0, max: 20, step: 1),
+            waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
+            conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
+            churn: SheetInput(val: 6, min: 0, max: 30, step: 1),
+            summary: nil))
+        let d = deliverable(.sheet, title: "Pricing model", payload: payload)
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        let m = SheetModel.compute(price: 0, waitlist: 1200, conversion: 8, churn: 6)
+        XCTAssertGreaterThan(m.mrr, 0, "the model itself must floor price — otherwise this test proves nothing")
+        XCTAssertFalse(csv.contains("mrr,0,"), "the CSV must not disagree with the floored model — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,\(Int(m.mrr)),"), "got:\n\(csv)")
+    }
+
+    /// Closes a carried finding: the decimal branch of the CSV's number formatter was
+    /// entirely untested, and `%.4g` silently destroyed large fractional currency
+    /// (`n(9999.99)` → `"1e+04"`). Fractional inputs must render in full, fixed-decimal form.
+    func testSheetCsvRendersFractionalCurrencyInFullNotScientificNotation() throws {
+        let payload = DeliverablePayload(sheet: SheetPayload(
+            price: SheetInput(val: 19.99, min: 0, max: 100, step: 0.01),
+            waitlist: SheetInput(val: 5000, min: 0, max: 5000, step: 50),
+            conversion: SheetInput(val: 50, min: 0, max: 50, step: 1),
+            churn: SheetInput(val: 6, min: 0, max: 30, step: 1),
+            summary: nil))
+        let d = deliverable(.sheet, title: "Pricing model", payload: payload)
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.contains("price,19.99,"), "got:\n\(csv)")
+        XCTAssertFalse(csv.lowercased().contains("e+"), "scientific notation leaked into the CSV — got:\n\(csv)")
+        let m = SheetModel.compute(price: 19.99, waitlist: 5000, conversion: 50, churn: 6)
+        XCTAssertGreaterThan(m.mrr, 9999, "the fixture must actually exercise a large fractional MRR")
+        let expectedMrr = String(format: "%.2f", m.mrr)
+        XCTAssertTrue(csv.contains("mrr,\(expectedMrr),"), "large MRR must render in full — got:\n\(csv)")
     }
 
     func testSheetCsvQuotesTheSummarySoACommaCannotSplitIt() throws {
@@ -270,11 +320,69 @@ final class DeliverableExportTests: XCTestCase {
         XCTAssertTrue(ics.contains("SUMMARY:Why I'm building a journal that answers"), ics)
     }
 
-    /// The founder's calendar app must not reject the file. Every VEVENT needs a UID.
-    func testEveryEventCarriesAUid() throws {
+    /// The founder's calendar app must not reject the file. Every VEVENT needs a UID —
+    /// and, on the same axis, a DTSTAMP: RFC 5545 requires it on every VEVENT, and while
+    /// Apple and Google tolerate its absence, Outlook and strict validators do not.
+    func testEveryEventCarriesAUidAndADtstamp() throws {
         let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
         let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
         XCTAssertEqual(ics.components(separatedBy: "UID:").count - 1, 3, ics)
+        let dtstampLines = ics.components(separatedBy: "\r\n").filter { $0.hasPrefix("DTSTAMP:") }
+        XCTAssertEqual(dtstampLines.count, 3, ics)
+        // DTSTAMP must be a valid RFC 5545 basic UTC datetime (yyyyMMdd'T'HHmmss'Z'), not
+        // merely present: 8 digits, "T", 6 digits, "Z".
+        for line in dtstampLines {
+            let stamp = line.dropFirst("DTSTAMP:".count)
+            XCTAssertEqual(stamp.count, 16, "expected yyyyMMdd'T'HHmmss'Z' — got \(stamp)")
+            let digitsOnly = stamp.filter(\.isNumber)
+            XCTAssertEqual(digitsOnly.count, 14, "expected 14 digits — got \(stamp)")
+            XCTAssertTrue(stamp.hasSuffix("Z"), "expected a trailing Z — got \(stamp)")
+            XCTAssertEqual(stamp[stamp.index(stamp.startIndex, offsetBy: 8)], "T", "expected T at offset 8 — got \(stamp)")
+        }
+    }
+
+    // MARK: - RFC 5545 escaping
+
+    /// Independently mirrors `DeliverableExport.icsEscaped`'s spec (RFC 5545 §3.3.11: a
+    /// backslash, a semicolon, a comma and a newline), computed here rather than by calling
+    /// the private production function — the "expected" string in the test below must not
+    /// depend on the very code under test.
+    private func rfc5545Escaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: ";", with: "\\;")
+            .replacingOccurrences(of: ",", with: "\\,")
+            .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    /// `icsEscaped` was completely unfalsified before this test: the only SUMMARY assertion
+    /// elsewhere in this file (`testIcsWrapsEveryItemAsAnEvent`) uses a string whose sole
+    /// punctuation is an apostrophe, which RFC 5545 does not escape — you could delete
+    /// `icsEscaped`'s body and every existing test would stay green. This fixture drives all
+    /// four characters the function claims to escape: backslash, semicolon, comma, newline.
+    ///
+    /// Built via `JSONSerialization` rather than a hand-typed JSON string literal — escaping
+    /// a literal backslash and a literal newline correctly inside hand-typed JSON source is
+    /// exactly the kind of thing that is easy to get subtly wrong, and `JSONSerialization`
+    /// does it correctly by construction.
+    func testIcsEscapesBackslashSemicolonCommaAndNewlineInSummary() throws {
+        let rawBody = "Ship, then tell people; carefully\\next week\nlater"
+        // Confirm the fixture itself carries all four characters, unescaped — otherwise this
+        // test could pass for the wrong reason.
+        XCTAssertTrue(rawBody.contains(","), rawBody)
+        XCTAssertTrue(rawBody.contains(";"), rawBody)
+        XCTAssertTrue(rawBody.contains("\\"), rawBody)
+        XCTAssertTrue(rawBody.contains("\n"), rawBody)
+
+        let dict: [String: Any] = ["weeks": [["label": "Week 1",
+                                               "items": [["day": "Mon", "kind": "thread", "body": rawBody]]]]]
+        let jsonData = try JSONSerialization.data(withJSONObject: dict)
+        let json = try XCTUnwrap(String(data: jsonData, encoding: .utf8))
+        let p = try payload(json: json)
+
+        let d = deliverable(.calendar, title: "Content calendar", payload: p)
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        let expected = rfc5545Escaped(rawBody)
+        XCTAssertTrue(ics.contains("SUMMARY:\(expected)\r\n"), "got:\n\(ics)")
     }
 
     /// The rule the .ics exists to respect: the generator emits a RELATIVE schedule, so the

@@ -60,6 +60,10 @@ enum DeliverableExport {
             return calendarFiles(d, base: base)
         case .site:
             return [siteFile(d, base: base)]
+        // `.screens` sits here deliberately: a `.png` per screen needs `ImageRenderer` over a
+        // live view, which is a separate plan. Until then `.screens` exports its markdown
+        // `body`, same as `.legal`/`.text`/`.other` — the per-screen fields are intentionally
+        // not in the file.
         case .legal, .text, .other, .screens:
             return [md(base, titled(d, d.body))]
         }
@@ -146,15 +150,17 @@ enum DeliverableExport {
     /// author considered plausible, and the outputs carry their formulas so the reader can
     /// disagree with the derivation rather than only with the result.
     ///
-    /// The two derived rows mirror `SheetViewer`'s own arithmetic. They are recomputed here
-    /// rather than read off the view, because export must work on a deliverable that is not
-    /// on screen.
+    /// **The six output rows come from `SheetModel.compute`, the same pure model
+    /// `SheetViewer` renders on screen.** This file used to hand-derive `subscribers`/`mrr`
+    /// itself, which meant the CSV could disagree with the viewer — `SheetModel` floors
+    /// `price` at 1 and `churn` at 1%, so e.g. a `price` of 0 shows a non-zero MRR on screen
+    /// while the old hand arithmetic wrote `mrr,0`. Calling the model instead buys the CSV
+    /// the same one-renderer guarantee `testExportedHtmlIsByteIdenticalToWhatTheViewerRenders`
+    /// buys the site export, and stops the file quietly dropping four of the six figures the
+    /// founder reads (`arr`, `ltv`, `life`, `breakeven`).
     private static func sheetFile(_ d: Deliverable, base: String) -> ExportFile {
         guard let s = d.payload?.sheet else {
             return md(base, titled(d, d.body))
-        }
-        func n(_ v: Double) -> String {
-            v == v.rounded() ? String(Int(v)) : String(format: "%.4g", v)
         }
         func row(_ name: String, _ i: SheetInput) -> String {
             "\(name),\(n(i.val)),\(n(i.min)),\(n(i.max)),\(n(i.step))\n"
@@ -166,16 +172,28 @@ enum DeliverableExport {
         out += row("conversion", s.conversion)
         out += row("churn", s.churn)
 
-        let subscribers = (s.waitlist.val * s.conversion.val / 100).rounded()
-        let mrr = subscribers * s.price.val
+        let m = SheetModel.compute(price: s.price.val, waitlist: s.waitlist.val,
+                                    conversion: s.conversion.val, churn: s.churn.val)
         out += "\noutput,value,formula\n"
-        out += "subscribers,\(n(subscribers)),waitlist * conversion / 100\n"
-        out += "mrr,\(n(mrr)),subscribers * price\n"
+        out += "paid,\(n(Double(m.paid))),round(waitlist * conversion / 100)\n"
+        out += "mrr,\(n(m.mrr)),paid * price (price floored at 1)\n"
+        out += "arr,\(n(m.arr)),mrr * 12\n"
+        out += "ltv,\(n(Double(m.ltv))),round(price / churn) (price floored at 1; churn floored at 1%)\n"
+        out += "life,\(n(Double(m.life))),round(1 / churn) (churn floored at 1%)\n"
+        out += "breakeven,\(n(Double(m.breakeven))),ceil(2500 / price) (price floored at 1)\n"
 
         if let summary = s.summary, !summary.isEmpty {
             out += "\nsummary,\(csvQuoted(summary))\n"
         }
         return ExportFile(name: "\(base).csv", data: Data(out.utf8))
+    }
+
+    /// A CSV number: whole values print without a decimal, and everything else prints in
+    /// fixed-decimal form. **Never `%g`** — `%.4g` renders `9999.99` as `"1e+04"`, which for a
+    /// currency cell (`mrr`) does not reformat the value, it destroys it. Two decimal places
+    /// is right for currency and loses no significant digit a founder would read.
+    private static func n(_ v: Double) -> String {
+        v == v.rounded() ? String(Int(v)) : String(format: "%.2f", v)
     }
 
     /// A CSV field that may contain a comma, a quote or a newline. Without this a summary
@@ -209,6 +227,12 @@ enum DeliverableExport {
         // never sees the difference and a stray comma cannot shift a column.
 
         var ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Murror//Codepet//EN\r\n"
+        // RFC 5545 requires DTSTAMP on every VEVENT, same axis as the UID requirement below
+        // ("the founder's calendar app must not reject the file"). Apple and Google tolerate
+        // its absence; Outlook and strict validators do not. One timestamp, shared by every
+        // event in this export — it marks when the file was generated, not when any event
+        // happens, so it does not need to vary per event.
+        let stamp = icsTimestamp(Date())
         var n = 0
         for (wi, w) in weeks.enumerated() {
             for i in w.items {
@@ -216,6 +240,7 @@ enum DeliverableExport {
                 let day = icsDate(weekIndex: wi, dayLabel: i.day)
                 ics += "BEGIN:VEVENT\r\n"
                 ics += "UID:\(d.id)-\(n)@codepet.murror.app\r\n"
+                ics += "DTSTAMP:\(stamp)\r\n"
                 ics += "DTSTART;VALUE=DATE:\(day)\r\n"
                 ics += "SUMMARY:\(icsEscaped(i.body))\r\n"
                 ics += "DESCRIPTION:\(icsEscaped("\(w.label) · \(i.kind) — day is relative to export"))\r\n"
@@ -257,6 +282,15 @@ enum DeliverableExport {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyyMMdd"
         fmt.timeZone = TimeZone(identifier: "UTC")
+        return fmt.string(from: date)
+    }
+
+    /// RFC 5545 basic UTC datetime (`yyyyMMdd'T'HHmmss'Z'`), for `DTSTAMP`.
+    private static func icsTimestamp(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        fmt.locale = Locale(identifier: "en_US_POSIX")
         return fmt.string(from: date)
     }
 

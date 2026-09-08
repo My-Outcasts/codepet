@@ -389,8 +389,12 @@ func deliverableBlanksFooter(_ text: String, verb: BlankVerb, lang: AppLanguage)
 struct DeliverableExportButton: View {
     let deliverable: Deliverable
     /// Set only when the write itself failed — never on a cancel — so the button says why
-    /// instead of doing nothing. Same shape as `SiteViewer.openFailed`.
-    @State private var failed = false
+    /// instead of doing nothing. Carries `Outcome.failed`'s `landed` count so a partial
+    /// `dms`/`calendar` export (some files landed before the one that failed) is told apart
+    /// from an outright failure (none did) — collapsing both to one flat message would tell a
+    /// founder with two of four files already in the folder they chose that nothing saved.
+    /// Same shape as `SiteViewer.openFailed`.
+    @State private var failedLanded: Int?
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
@@ -398,9 +402,9 @@ struct DeliverableExportButton: View {
             Button {
                 switch DeliverableExporter.save(deliverable) {
                 case .saved, .cancelled:
-                    failed = false
-                case .failed:
-                    failed = true
+                    failedLanded = nil
+                case .failed(let landed):
+                    failedLanded = landed
                 }
             } label: {
                 Text(lang == .vi ? "Xuất" : "Export")
@@ -410,11 +414,24 @@ struct DeliverableExportButton: View {
             .foregroundColor(CodepetTheme.accentPurple)
             .help(lang == .vi ? "Lưu ra tệp" : "Save to a file")
 
-            if failed {
-                Text(lang == .vi ? "Không lưu được" : "Couldn't save")
+            if let landed = failedLanded {
+                Text(failureText(landed: landed))
                     .font(.pixelSystem(size: 11))
                     .foregroundColor(CodepetTheme.mutedText)
             }
         }
+    }
+
+    /// "Export failed" — not "Save" or "Couldn't save" — because this sits inside the button
+    /// whose whole rationale is that "Save" would imply the founder's work is at risk; the
+    /// failure copy should not smuggle that word back in. When some files landed before the
+    /// one that failed, say how many out of how many were attempted, so a partial `dms`/
+    /// `calendar` export isn't told it saved nothing when two files really are on disk.
+    private func failureText(landed: Int) -> String {
+        guard landed > 0 else {
+            return lang == .vi ? "Xuất thất bại" : "Export failed"
+        }
+        let total = DeliverableExport.files(for: deliverable).count
+        return lang == .vi ? "Đã lưu \(landed)/\(total)" : "Saved \(landed) of \(total)"
     }
 }

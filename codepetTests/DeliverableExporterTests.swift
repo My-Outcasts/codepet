@@ -52,6 +52,24 @@ final class DeliverableExporterTests: XCTestCase {
         XCTAssertEqual(urls[0].lastPathComponent, "escaped.md")
     }
 
+    /// The easy input above (`"../escaped.md"`) is already stripped clean by
+    /// `lastPathComponent` before the guard ever runs. `".."` and `"."` are the inputs where
+    /// the EXPLICIT rejection, not the collision loop, has to do the work: `lastPathComponent`
+    /// of `".."` IS `".."`, and `directory.appendingPathComponent("..")` resolves to the
+    /// PARENT of the chosen directory — the only thing that stopped that before was the
+    /// collision loop renaming an already-existing name, which is safety by accident.
+    func testDotAndDotDotCannotClimbOutOfTheChosenDirectoryEither() throws {
+        for name in ["..", "."] {
+            let urls = try DeliverableExporter.write(
+                [ExportFile(name: name, data: Data("x".utf8))], to: dir)
+            XCTAssertEqual(urls[0].deletingLastPathComponent().standardizedFileURL.path,
+                           dir.standardizedFileURL.path, "name: \(name)")
+            XCTAssertNotEqual(urls[0].lastPathComponent, "..", "name: \(name)")
+            XCTAssertNotEqual(urls[0].lastPathComponent, ".", "name: \(name)")
+            XCTAssertFalse(urls[0].lastPathComponent.isEmpty, "name: \(name)")
+        }
+    }
+
     func testEndToEndADeliverableBecomesFilesOnDisk() throws {
         let d = Deliverable(kind: .checklist, title: "Release rhythm", body: "",
                             payload: DeliverablePayload(items: [

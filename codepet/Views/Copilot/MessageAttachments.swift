@@ -14,30 +14,6 @@ import SwiftUI
 /// Lives in its own file rather than in `CopilotChatView.swift`, which is already 2,700
 /// lines: a strip, a cache and a chip are one job, and the bubble only needs to ask for it.
 
-/// Which attachments can be previewed and which can only be named.
-///
-/// Pure and separated from the view because it is the part with a rule in it. An image has
-/// pixels to show; a PDF or a `.swift` file has nothing to preview and stays a chip — the
-/// same division `renderTurn` makes on the backend, for the same reason.
-enum MessageAttachmentLayout {
-
-    struct Split: Equatable {
-        /// Images, in the order she picked them. The strip must not reshuffle her order.
-        let previews: [ChatAttachment]
-        /// Everything else — named, not shown.
-        let chips: [ChatAttachment]
-
-        /// Whether there is anything at all to draw. Gates the whole strip, so it counts
-        /// chips too: a turn carrying only a PDF still has something to show her.
-        var isEmpty: Bool { previews.isEmpty && chips.isEmpty }
-    }
-
-    static func split(_ attachments: [ChatAttachment]) -> Split {
-        Split(previews: attachments.filter { $0.kind == .image },
-              chips: attachments.filter { $0.kind != .image })
-    }
-}
-
 /// Decoded thumbnails, one decode per attachment for the life of the view.
 ///
 /// **The decode is the expensive part and `body` is the hot path.** `ChatAttachment.data` is
@@ -160,6 +136,17 @@ struct AttachmentTile: View {
 /// Right-aligned and sitting ABOVE the text, which is the order the model receives the turn
 /// in — `renderTurn` puts media blocks before the question, because the question is about
 /// the picture. The transcript reading the same way is not a coincidence worth breaking.
+///
+/// **Draws `attachments` directly, in the founder's pick order — not grouped by kind.**
+/// A previous version ran them through `MessageAttachmentLayout.split`, which filtered
+/// images into one group and everything else into a second, drawing all previews before
+/// all chips. `AttachmentTile` already decides per-attachment whether to draw a preview or
+/// a chip, so that grouping was `split`'s only remaining effect, and it was a silent
+/// reorder: the composer renders in pick order, so `[a.png, b.pdf, c.png]` showed as
+/// a, b, c before sending and a, c, b after — the same file landing in a different
+/// position depending on whether you were looking at the composer or the sent transcript.
+/// Rendering `attachments` as given removes the regrouping instead of trying to keep two
+/// orderings in sync.
 struct MessageAttachmentStrip: View {
     let attachments: [ChatAttachment]
 
@@ -169,8 +156,7 @@ struct MessageAttachmentStrip: View {
     @State private var cache = AttachmentThumbnailCache()
 
     var body: some View {
-        let split = MessageAttachmentLayout.split(attachments)
-        if !split.isEmpty {
+        if !attachments.isEmpty {
             // **`WrapLayout`, not a plain `HStack`.** Written when the cap was 3 tiles —
             // three 56pt tiles plus spacing fit one row of any dock width that mattered.
             // The cap rose to 10 afterwards and this strip was not revisited: ten tiles is
@@ -189,10 +175,7 @@ struct MessageAttachmentStrip: View {
             // verify). Still strictly better than the clip/overflow this replaces, and
             // matches what the composer accepts for its own (leading-aligned) rows.
             WrapLayout(spacing: 6, rowSpacing: 6) {
-                ForEach(split.previews) { att in
-                    AttachmentTile(attachment: att, cache: cache, onRemove: nil)
-                }
-                ForEach(split.chips) { att in
+                ForEach(attachments) { att in
                     AttachmentTile(attachment: att, cache: cache, onRemove: nil)
                 }
             }

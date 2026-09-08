@@ -9,7 +9,10 @@ import XCTest
 /// model's memory of an image worked perfectly — while the founder's own transcript showed
 /// her a bare sentence and no trace of the three screenshots she had just sent (reported
 /// 8 Sep). A round trip that is correct on the wire and invisible on screen is exactly the
-/// class of defect that survives, so the split and the cache are pure and checkable here.
+/// class of defect that survives, so the thumbnail cache — the remaining pure, checkable
+/// part of the strip — is exercised here. (The strip used to route attachments through a
+/// `MessageAttachmentLayout.split` that grouped images before non-images; that reordered
+/// the founder's pick order and was deleted — see `MessageAttachments.swift`.)
 @MainActor
 final class MessageAttachmentStripTests: XCTestCase {
 
@@ -24,35 +27,6 @@ final class MessageAttachmentStripTests: XCTestCase {
     /// renders nothing.
     private var onePixelPNG: String {
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-    }
-
-    // MARK: - The split
-
-    /// Images get a preview; a PDF or a source file has nothing to preview, so it stays a
-    /// chip. Order within each group is the founder's pick order — she attached them in an
-    /// order and the strip must not reshuffle it.
-    func testSplitSendsImagesToPreviewsAndEverythingElseToChips() {
-        let split = MessageAttachmentLayout.split([
-            att("a.png", .image), att("b.pdf", .pdf),
-            att("c.png", .image), att("d.swift", .text),
-        ])
-        XCTAssertEqual(split.previews.map(\.filename), ["a.png", "c.png"])
-        XCTAssertEqual(split.chips.map(\.filename), ["b.pdf", "d.swift"])
-    }
-
-    /// The empty case is the one every existing turn takes. It must produce nothing to draw,
-    /// so a message with no attachment renders byte-identically to what it does today.
-    func testSplitOfNothingDrawsNothing() {
-        let split = MessageAttachmentLayout.split([])
-        XCTAssertTrue(split.isEmpty)
-        XCTAssertTrue(split.previews.isEmpty)
-        XCTAssertTrue(split.chips.isEmpty)
-    }
-
-    /// A turn carrying only a PDF is still a turn with something to draw — `isEmpty` gates
-    /// whether the strip appears at all, so reading it as "no images" would hide the chip.
-    func testAChipAloneStillCountsAsSomethingToDraw() {
-        XCTAssertFalse(MessageAttachmentLayout.split([att("b.pdf", .pdf)]).isEmpty)
     }
 
     // MARK: - The thumbnail cache

@@ -299,7 +299,7 @@ enum DeliverableExport {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run the same command as Step 2.
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Prove the guards are real**
 
@@ -462,7 +462,7 @@ And add to the builders section:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run the same command as Step 2.
-Expected: PASS, 13 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -624,7 +624,7 @@ Add to the builders section:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run the same command as Step 2.
-Expected: PASS, 18 tests.
+Expected: PASS, 19 tests.
 
 - [ ] **Step 5: Prove the quoting guard is real**
 
@@ -989,7 +989,7 @@ Add to the builders section:
 - [ ] **Step 5: Run test to verify it passes**
 
 Run the same command as Step 3.
-Expected: PASS, 29 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 6: Commit**
 

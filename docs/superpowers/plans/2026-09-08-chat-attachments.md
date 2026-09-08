@@ -311,7 +311,33 @@ In `codepet/Views/Environment/AttachmentPicker.swift`, replace `pickAndEncode(li
     }
 ```
 
-This breaks the one caller in `ChatComposer.swift`; Task 4 fixes it. To keep this task's build green, also apply the Task 4 Step 3 edit now if the build fails — or accept a red build until Task 4 and run only the test suite here.
+**Update the one caller in the same step.** `codepetTests` does `@testable import codepet`,
+so a broken app module means this task's OWN tests cannot compile — leaving it until Task 4
+makes Step 4 below impossible, not merely untidy.
+
+In `codepet/Views/Copilot/ChatComposer.swift`, inside `plusMenu`'s attach `Button`, delete
+the two `room` lines and drop the argument:
+
+```swift
+                    Button {
+                        // No `limit:` and no `room` guard. The picker encodes whatever she
+                        // chose and `admit` alone decides — see `pickAndEncode`'s comment
+                        // for the defect that rule exists to prevent.
+                        let picked = AttachmentPicker.pickAndEncode()
+```
+
+That replaces these three lines:
+
+```swift
+                    Button {
+                        let room = ChatAttachment.max - atts.wrappedValue.count
+                        guard room > 0 else { return }
+                        let picked = AttachmentPicker.pickAndEncode(limit: room)
+```
+
+Leave `let full = atts.wrappedValue.count >= ChatAttachment.max` and the `.disabled(full)`
+alone — that greys the menu row when she is already at the cap, which is a statement, not a
+silent trim. Everything from `let admission = ...` onward is unchanged.
 
 - [ ] **Step 4: Run the tests and confirm green**
 
@@ -454,7 +480,7 @@ rule, which is why the two are distinguishable in the notice."
 - Modify: `codepet/Views/Copilot/ChatComposer.swift` (`pillRow`, and the `plusMenu` attach button)
 
 **Interfaces:**
-- Consumes: `MessageAttachmentLayout.split`, `AttachmentThumbnailCache`, `AttachmentPicker.pickAndEncode()` (no argument, from Task 2), `ChatAttachment.max == 10` (Task 3).
+- Consumes: `MessageAttachmentLayout.split`, `AttachmentThumbnailCache`, `ChatAttachment.max == 10` (Task 3). The `plusMenu` call site was already updated in Task 2.
 - Produces: `AttachmentTile(attachment:cache:onRemove:)` where `onRemove: (() -> Void)?`; `WrapLayout(spacing:rowSpacing:)`. Task 5 calls the composer's admit path.
 
 - [ ] **Step 1: Write the failing layout test**
@@ -697,22 +723,7 @@ Add the cache as state near `attachNotice` (line ~130):
 
 `pill(icon:title:gloss:remove:)` stays exactly as it is — it is now the **pins** presentation and nothing else. Do not delete it.
 
-- [ ] **Step 8: Update the attach button for the new picker signature**
-
-In `plusMenu`, replace the four lines beginning `let full =` through `let picked =` with:
-
-```swift
-                    let full = atts.wrappedValue.count >= ChatAttachment.max
-                    Button {
-                        // No `limit:` and no `room` guard. The picker encodes whatever she
-                        // chose and `admit` alone decides — see `pickAndEncode`'s comment
-                        // for the defect that rule exists to prevent.
-                        let picked = AttachmentPicker.pickAndEncode()
-```
-
-Everything from `let admission = AttachmentBudget.admit(...)` onward is unchanged and already correct.
-
-- [ ] **Step 9: Build and check by eye**
+- [ ] **Step 8: Build and check by eye**
 
 ```bash
 xcodebuild -scheme codepet -configuration Debug -destination 'platform=macOS' \
@@ -722,7 +733,7 @@ open ~/Library/Developer/Xcode/DerivedData/CodePet-*/Build/Products/Debug/codepe
 
 Attach 4 images: four tiles, no notice. Attach 11: ten tiles and a notice naming the eleventh. Hover a tile: `×` appears and removes it.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add codepet/Views/Copilot/WrapLayout.swift codepetTests/WrapLayoutTests.swift codepet/Views/Copilot/MessageAttachments.swift codepet/Views/Copilot/ChatComposer.swift

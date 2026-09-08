@@ -79,6 +79,12 @@ struct DeliverableFrame<Content: View>: View {
     let eyebrow: String
     var heading: String = ""
     var action: DeliverableAction = .none
+    /// The deliverable to export, or nil for a frame that offers no export.
+    ///
+    /// A separate slot rather than another `DeliverableAction` case, because copy and export
+    /// are two different affordances the founder may want in either order — not two variants
+    /// of one. Keeping it separate also leaves all seven existing `action:` call sites alone.
+    var export: Deliverable? = nil
     var footer: String? = nil
     var measured: Bool = true
     @ViewBuilder var content: Content
@@ -115,13 +121,18 @@ struct DeliverableFrame<Content: View>: View {
     }
 
     @ViewBuilder private var actionButton: some View {
-        switch action {
-        case .none:
-            EmptyView()
-        case let .copy(text):
-            DeliverableCopyButton(text: text)
-        case let .copyLabelled(text, label, done):
-            DeliverableCopyButton(text: text, label: label, doneLabel: done)
+        HStack(spacing: 10) {
+            switch action {
+            case .none:
+                EmptyView()
+            case let .copy(text):
+                DeliverableCopyButton(text: text)
+            case let .copyLabelled(text, label, done):
+                DeliverableCopyButton(text: text, label: label, doneLabel: done)
+            }
+            if let export {
+                DeliverableExportButton(deliverable: export)
+            }
         }
     }
 }
@@ -369,4 +380,25 @@ func deliverableBlanksFooter(_ text: String, verb: BlankVerb, lang: AppLanguage)
     let blanks = MessagePlaceholders.labels(in: text)
     guard !blanks.isEmpty else { return nil }
     return verb.line(blanks, lang)
+}
+
+/// Save this deliverable to disk. Sits beside Copy in every viewer's frame.
+///
+/// Labelled "Export", not "Save" — nothing in Codepet is unsaved (approving files it), so
+/// "Save" would imply work is at risk. What this does is move a copy out of the app.
+struct DeliverableExportButton: View {
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        Button {
+            DeliverableExporter.save(deliverable)
+        } label: {
+            Text(lang == .vi ? "Xuất" : "Export")
+                .font(.pixelSystem(size: DeliverableStyle.eyebrow, weight: .semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(CodepetTheme.accentPurple)
+        .help(lang == .vi ? "Lưu ra tệp" : "Save to a file")
+    }
 }

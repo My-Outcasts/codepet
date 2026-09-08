@@ -31,10 +31,12 @@ import WebKit
 /// because a checklist is a list, not a stack of cards.
 struct ChecklistViewer: View {
     @State private var items: [ChecklistItem]
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
-    init(items: [ChecklistItem]) {
+    init(items: [ChecklistItem], deliverable: Deliverable) {
         _items = State(initialValue: items)
+        self.deliverable = deliverable
     }
 
     private var doneCount: Int { items.filter(\.done).count }
@@ -50,7 +52,8 @@ struct ChecklistViewer: View {
 
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: deliverable) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -113,6 +116,7 @@ struct DocViewer: View {
     let call: String
     let sections: [DocSection]
     let next: [String]
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// A document, set to be read.
@@ -147,7 +151,8 @@ struct DocViewer: View {
 
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Tài liệu" : "Document",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: deliverable) {
             VStack(alignment: .leading, spacing: Doc.betweenSections) {
                 Text(call)
                     .font(.pixelSystem(size: Doc.lead, weight: .medium))
@@ -206,6 +211,7 @@ struct DocViewer: View {
 /// become eyebrows, which is what they were always trying to be.
 struct PlanViewer: View {
     let payload: DeliverablePayload
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// A section name. An eyebrow, not a same-size grey label — the point of a heading is that
@@ -241,7 +247,8 @@ struct PlanViewer: View {
 
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Kế hoạch" : "Plan",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: deliverable) {
             VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
                 if let goal = payload.goal, !goal.isEmpty {
                     VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
@@ -417,6 +424,7 @@ struct LegalViewer: View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bản nháp pháp lý" : "Legal draft",
             action: .copy(deliverable.body),
+            export: deliverable,
             footer: lang == .vi ? "Bản nháp — không phải tư vấn pháp lý."
                                 : "Draft — not legal advice."
         ) {
@@ -454,6 +462,7 @@ struct PostViewer: View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bài đăng" : "Social post",
             action: .copy(deliverable.body),
+            export: deliverable,
             footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang)
         ) {
             MarkdownView(markdown: deliverable.body)
@@ -469,6 +478,7 @@ struct PostViewer: View {
 /// Mirrors web's CalendarViewer (components/artifact/viewers.tsx) in spirit.
 struct CalendarViewer: View {
     let payload: CalendarPayload
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// Widened from 150. A post's `body` is a sentence, and at reading size a 150pt column broke
@@ -486,6 +496,7 @@ struct CalendarViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Lịch nội dung" : "Content calendar",
                          action: payload.weeks.isEmpty ? .none : .copy(copyText),
+                         export: deliverable,
                          measured: false) {
             if payload.weeks.isEmpty {
                 // An empty state is a sentence addressed to the founder, not a caption. It was
@@ -574,9 +585,11 @@ struct SheetViewer: View {
 
     private let summary: String?
 
+    let deliverable: Deliverable
+
     @Environment(\.uiLanguage) private var lang
 
-    init(payload: SheetPayload) {
+    init(payload: SheetPayload, deliverable: Deliverable) {
         _price = State(initialValue: payload.price.val)
         _waitlist = State(initialValue: payload.waitlist.val)
         _conversion = State(initialValue: payload.conversion.val)
@@ -590,6 +603,7 @@ struct SheetViewer: View {
         churnRange = Self.safeRange(payload.churn)
         churnStep = Swift.max(1, payload.churn.step)
         summary = payload.summary
+        self.deliverable = deliverable
     }
 
     /// A degenerate range (max ≤ min, as could arrive from a malformed payload)
@@ -629,6 +643,7 @@ struct SheetViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Mô hình tài chính" : "Financial model",
                          action: .copy(copyText),
+                         export: deliverable,
                          footer: disclaimer,
                          measured: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -756,6 +771,7 @@ struct SiteViewer: View {
     /// Names the temp file the browser opens, so the same page replaces itself rather than
     /// accumulating copies. Optional with a default so no other call site has to change.
     var deliverableId: String? = nil
+    let deliverable: Deliverable
     @State private var tab: Tab = .preview
     /// Set when the write fails, so the button says why instead of doing nothing.
     @State private var openFailed = false
@@ -785,6 +801,7 @@ struct SiteViewer: View {
             action: .copyLabelled(html,
                                   label: lang == .vi ? "Sao chép HTML" : "Copy HTML",
                                   done: lang == .vi ? "Đã sao chép" : "Copied"),
+            export: deliverable,
             measured: false
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1038,6 +1055,7 @@ struct SiteHTMLWebView: NSViewRepresentable {
 /// pixel-match of web's SVGs (components/artifact/viewers.tsx).
 struct ScreensViewer: View {
     let payload: ScreensPayload
+    let deliverable: Deliverable
     @State private var idx: Int = 0
     @Environment(\.uiLanguage) private var lang
 
@@ -1053,6 +1071,7 @@ struct ScreensViewer: View {
     /// the mockup are brought into line.
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Màn hình" : "Screens",
+                         export: deliverable,
                          measured: false) {
             if screens.isEmpty {
                 DeliverableProse(text: lang == .vi ? "Không có màn hình nào" : "No screens",

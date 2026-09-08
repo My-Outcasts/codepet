@@ -57,9 +57,12 @@ Already exists, already pure, already tested. This spec **removes its competitor
 picker's `prefix(limit)`. After this change there is exactly one place that can refuse a
 file, and it returns a structured reason.
 
-`admit` gains an overflow reason it does not have today: refusal by **count** as well as by
-bytes. `refusalMessage` must name both, and must name the files — "3 attached; IMG_4782.PNG
-and 1 more were not" is actionable, "some files were skipped" is not.
+**Correction to an earlier draft of this spec**, which said `admit` "gains an overflow reason
+it does not have today". It does not: `Reason.tooMany` already exists, `admit` already applies
+it, and `refusalMessage` already renders it naming the files — "IMG_4782.PNG didn't fit — 3
+attachments per message." That machinery has been correct all along and has simply never been
+reachable, because the picker trimmed the list before `admit` could see it. Deleting the trim
+is therefore the entire fix; no new reason, no new message, no new copy to translate.
 
 ### `AttachmentPicker` — encodes, never decides
 
@@ -67,13 +70,17 @@ and 1 more were not" is actionable, "some files were skipped" is not.
 set goes to `admit`. `rejected` keeps its current meaning (unsupported type, unreadable,
 over `maxBytes`) and is no longer overloaded with "silently over the count."
 
-One guard: a pathological selection (hundreds of files) should not be base64-encoded before
-being refused. Encoding walks the selection in order and stops once the accumulated ENCODED
-bytes of the files kept so far exceed `maxTotalBase64Bytes` — the point past which no further
-file can be admitted anyway. Every file the walk reached is still reported, so the founder is
-told what was left out and why. This is a performance guard, not a second cap: it can only
-stop early where `admit` would have refused everything after it regardless. The existing
-per-file `maxBytes` check inside `encode` is unchanged and still runs first.
+**An earlier draft of this spec proposed a "performance guard" that stopped encoding once the
+accumulated bytes passed the budget. That guard is dropped, because it is this bug again.**
+Any limit inside the picker is a second place a file can disappear, and the one that already
+exists produced a founder-visible defect precisely because its skips were unreported. Encoding
+every selection keeps the invariant absolute: the picker encodes, `admit` decides, nothing
+else refuses anything.
+
+The cost of that is bounded and already handled — `encode` refuses any single file over
+`ChatAttachment.maxBytes` (8 MB) and returns nil, so a pathological pick is many small
+encodes, not unbounded memory. If that ever becomes a real problem, the fix is a cap in
+`admit` with a message, not a silent skip in the picker.
 
 `encode(_ url:)` is already public. Drag-and-drop uses it directly, so the drop path and the
 panel path converge before anything is decided.

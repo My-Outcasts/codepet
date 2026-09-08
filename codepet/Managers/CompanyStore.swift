@@ -1040,7 +1040,24 @@ final class CompanyStore: ObservableObject {
     /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
     /// spend their Claude plan, and has a folder linked, gets their own agent — see
     /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
-    func startBuild(ask: String) {
+    ///
+    /// **`attachments`/`language` are here to say something, not to carry anything —
+    /// `startBuild` still does not accept files (out of scope; see the doc above).** Neither
+    /// `startCodeRun` nor `startEngineeringRun` is a chat request, so a file attached in Build
+    /// mode has nowhere to go on this route, and the composer clears its tiles before either
+    /// runs. Before this, that loss was silent, and F1 (`459ee07`, making an images-only turn
+    /// sendable) made it worse: an attachments-only Build press cleared the tiles and then hit
+    /// `startCodeRun`/`startEngineeringRun`'s own `!trimmed.isEmpty` guard, so the whole turn
+    /// did nothing — no run, no message, no notice. This fires whenever attachments are
+    /// present, text empty or not, so the founder always sees why the file didn't ride along.
+    /// When `ask` is also empty, the guard below stops the run and this notice is the entire
+    /// founder-visible outcome of the turn — which is honest, not a workaround: there is
+    /// nothing else true to say about a turn that was only a file.
+    func startBuild(ask: String, attachments: [ChatAttachment] = [], language: AppLanguage = .en) {
+        if !attachments.isEmpty,
+           let notice = AttachmentBudget.buildUnsupportedMessage(attachments.map(\.filename), language) {
+            chatMessages.append(CopilotMessage(role: .companion, text: notice))
+        }
         if buildRunsOnFoundersAgent {
             startCodeRun(ask: ask)
         } else {

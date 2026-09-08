@@ -1207,13 +1207,16 @@ struct CopilotChatView: View {
             // One code mode. WHERE it runs is the run's business, not the
             // founder's — `startBuild` decides and says so on the card.
             //
-            // **Pins and attachments are dropped on this path and that is stated rather
-            // than hidden.** `startBuild` stages a local coding run, which reads the linked
-            // folder and not a chat request, so there is nowhere for a pinned deliverable or
-            // a base64 screenshot to go. Attaching a file and pressing Build discards it.
-            // Fixing it means a route into `CodingRunCoordinator`, which is a different
-            // change than wiring the chat wire.
-            companyStore.startBuild(ask: text)
+            // **Pins and attachments are dropped on this path, but no longer silently.**
+            // `startBuild` stages a local or cloud coding run, which reads the linked folder
+            // (or a branch) and not a chat request, so there is nowhere for a pinned
+            // deliverable or a base64 screenshot to go. Attaching a file and pressing Build
+            // still discards it — that is unchanged and out of scope (a route into
+            // `CodingRunCoordinator` is a different change) — but `startBuild` now tells her
+            // so via the same `.companion`-message mechanism F2 uses for the Engineering
+            // route, instead of clearing the tiles and saying nothing. Pins are still dropped
+            // with no notice; only attachments have one today, matching F2's scope.
+            companyStore.startBuild(ask: text, attachments: sendAttachments, language: lang)
         }
     }
 }

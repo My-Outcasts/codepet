@@ -183,4 +183,23 @@ enum AttachmentBudget {
             ? "Các phiên chạy Engineering chưa đọc được tệp — \(list) chưa được gửi. Hãy mô tả, hoặc dán nội dung lỗi vào đây."
             : "Engineering runs can't read files yet — \(list) wasn't sent. Describe it, or paste the error text."
     }
+
+    /// What the founder is told when Build mode carries files. Sibling to
+    /// `engineeringUnsupportedMessage`, same reason: `startBuild` stages either
+    /// `startCodeRun` (reads a linked folder) or `startEngineeringRun` (the cloud coding
+    /// agent) — neither is a chat request, so there is nowhere for a base64 screenshot to
+    /// go, and the composer has already cleared its tiles by the time either runs. Without
+    /// this, F1 (`459ee07`, making an images-only turn *sendable*) turned an attachments-only
+    /// Build press into a silent no-op: `canSend`/`send()` let it through, `startBuild` never
+    /// accepts attachments, and `startCodeRun`/`startEngineeringRun` each guard on non-empty
+    /// text and quietly return — tiles gone, nothing sent, nothing said. Same shape as
+    /// `unsupportedMessage`: nil when there is nothing to say, bilingual, names the files
+    /// rather than counting them.
+    static func buildUnsupportedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        return lang == .vi
+            ? "Các phiên chạy Build chưa đọc được tệp — \(list) chưa được gửi. Hãy mô tả, hoặc dán nội dung lỗi vào đây."
+            : "Build runs can't read files yet — \(list) wasn't sent. Describe it, or paste the error text."
+    }
 }

@@ -129,6 +129,10 @@ struct ChatComposer: View {
     /// follows is not an answer to it.
     @State private var attachNotice: String?
 
+    /// One decode per file for the life of the composer. See `AttachmentThumbnailCache` —
+    /// `body` runs constantly and `data` is base64 of an image up to 2576px.
+    @State private var tileCache = AttachmentThumbnailCache()
+
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -275,9 +279,13 @@ struct ChatComposer: View {
         if !pinList.isEmpty || !attList.isEmpty || attachNotice != nil {
             VStack(alignment: .leading, spacing: 5) {
                 if !pinList.isEmpty || !attList.isEmpty {
-                    HStack(spacing: 6) {
+                    // Tiles for files, pills for pins — and one wrapping row for both,
+                    // because to the founder they are still the same gesture. Ten tiles
+                    // cannot fit a 380pt dock on one line, and an overflow counter would
+                    // hide part of what she is about to send.
+                    WrapLayout(spacing: 6, rowSpacing: 6) {
                         ForEach(attList) { att in
-                            pill(icon: att.icon, title: att.filename, gloss: att.gloss) {
+                            AttachmentTile(attachment: att, cache: tileCache) {
                                 attachments?.wrappedValue = ChatAttachment.removing(att, from: attList)
                             }
                         }
@@ -286,7 +294,6 @@ struct ChatComposer: View {
                                 pins?.wrappedValue = ContextPin.removing(pin, from: pinList)
                             }
                         }
-                        Spacer(minLength: 0)
                     }
                 }
                 if let attachNotice { noticeRow(attachNotice) }

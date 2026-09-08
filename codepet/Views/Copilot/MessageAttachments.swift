@@ -101,6 +101,60 @@ final class AttachmentThumbnailCache {
     }
 }
 
+/// One attached file, drawn the same way wherever it appears.
+///
+/// The composer passes `onRemove` and gets a hover `×`; the transcript passes nil and gets a
+/// static thumbnail. One tile rather than two means a file cannot look like one thing before
+/// sending and another after.
+struct AttachmentTile: View {
+    let attachment: ChatAttachment
+    let cache: AttachmentThumbnailCache
+    /// nil in the transcript: a sent attachment is a record, not something still removable.
+    var onRemove: (() -> Void)?
+
+    @State private var hovering = false
+    private let side: CGFloat = 56
+
+    var body: some View {
+        Group {
+            if attachment.kind == .image, let image = cache.image(for: attachment) {
+                Image(nsImage: image)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                // No pixels to show — an unreadable image lands here too, so a torn file
+                // still says what it was rather than drawing a broken box.
+                VStack(spacing: 3) {
+                    Image(systemName: attachment.icon).font(.system(size: 14))
+                    Text(attachment.gloss).font(CodepetTheme.inter(9, weight: .medium))
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .frame(width: side, height: side)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(CodepetTokens.well))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(CodepetTokens.cardEdge))
+        .overlay(alignment: .topTrailing) {
+            if let onRemove, hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Color.black.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .help("Remove")
+                .padding(3)
+            }
+        }
+        .onHover { hovering = $0 }
+        .help(attachment.filename)
+    }
+}
+
 /// The row of thumbnails and chips above the founder's words.
 ///
 /// Right-aligned and sitting ABOVE the text, which is the order the model receives the turn
@@ -114,58 +168,19 @@ struct MessageAttachmentStrip: View {
     /// rather than being rebuilt (and re-decoding everything) on every pass.
     @State private var cache = AttachmentThumbnailCache()
 
-    /// Tall enough to recognise a screenshot, short enough that three fit the 380pt dock.
-    private let thumbHeight: CGFloat = 72
-
     var body: some View {
         let split = MessageAttachmentLayout.split(attachments)
         if !split.isEmpty {
             HStack(alignment: .bottom, spacing: 6) {
                 Spacer(minLength: 24)
                 ForEach(split.previews) { att in
-                    if let image = cache.image(for: att) {
-                        thumbnail(image, name: att.filename)
-                    } else {
-                        // Decoded to nothing — name it rather than showing a torn box.
-                        chip(att)
-                    }
+                    AttachmentTile(attachment: att, cache: cache, onRemove: nil)
                 }
-                ForEach(split.chips) { att in chip(att) }
+                ForEach(split.chips) { att in
+                    AttachmentTile(attachment: att, cache: cache, onRemove: nil)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
-    }
-
-    private func thumbnail(_ image: NSImage, name: String) -> some View {
-        Image(nsImage: image)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .frame(height: thumbHeight)
-            // A wide screenshot would otherwise push the whole row off the left edge.
-            .frame(maxWidth: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(CodepetTokens.cardEdge))
-            .help(name)
-    }
-
-    /// The composer's pill vocabulary, minus the remove button — a sent attachment is a
-    /// record, not something she can still take back.
-    private func chip(_ att: ChatAttachment) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: att.icon).font(.system(size: 9))
-            Text(att.filename)
-                .font(CodepetTheme.inter(CodepetType.subheadline, weight: .medium))
-                .lineLimit(1).truncationMode(.middle)
-            Text(att.gloss)
-                .font(CodepetTheme.inter(9, weight: .medium))
-                .foregroundColor(CodepetTokens.faint)
-        }
-        .foregroundColor(CodepetTheme.mutedText)
-        .padding(.horizontal, 8).frame(height: 22)
-        .background(Capsule().fill(CodepetTokens.well))
-        .overlay(Capsule().stroke(CodepetTokens.cardEdge))
-        .frame(maxWidth: 210)
-        .help(att.filename)
     }
 }

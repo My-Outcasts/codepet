@@ -179,6 +179,15 @@ final class CompanyStore: ObservableObject {
     /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
+    /// The tool running RIGHT NOW, for `ChatThinkingRow` to name literally ("Luna is
+    /// reading web.murror.app…") instead of showing the rotating generic phrase. Set from
+    /// the sidecar's `tool` frame; cleared at the start of every turn and by the SAME
+    /// unconditional tail that clears `isCompanionTyping`/`isStreaming` (success, error,
+    /// or fallback all funnel through it) — never left pointing at a tool from a turn
+    /// that has already ended. Only the local sidecar path ever sets this: the cloud
+    /// `companyChat` Cloud Function emits no `tool` frame, so a founder on that transport
+    /// never sees this line (a known parity gap, not a bug — see `CompanyChatStreamEvent.tool`).
+    @Published private(set) var currentToolActivity: ChatToolActivity?
     @Published private(set) var runningTaskIds: Set<String> = []
     /// Live parallel department-agent runs (the chat fan-out). Rendered as one
     /// AgentsWorkingRow; empty ⇒ no row. Seeded by `fanOutNextMoves`, cleared when
@@ -474,6 +483,7 @@ final class CompanyStore: ObservableObject {
             activeThreadId = nil
             isCompanionTyping = false
             isStreaming = false
+            currentToolActivity = nil
             runningTaskIds = []
             activeAgentRuns = []
             isFanningOut = false
@@ -1626,6 +1636,12 @@ final class CompanyStore: ObservableObject {
         chatMessages.append(CopilotMessage(role: .me, text: display ?? text,
                                             attachments: outgoing))
         isCompanionTyping = true
+        // A tool from the PREVIOUS turn must never bleed into this one — the exact class
+        // of stale-state bug this branch exists to avoid. Cleared here rather than only
+        // at the tail, so a turn that starts before the previous tail somehow ran (there
+        // is no such path today, but the guard costs nothing) still shows nothing rather
+        // than a lie.
+        currentToolActivity = nil
         let prior = Array(chatMessages.dropLast().suffix(20))
         // Which past turns keep their files on the wire. `functions/` replays only the
         // last `ATTACHMENT_REPLAY_WINDOW` history entries, so base64 on an older turn is
@@ -1735,6 +1751,8 @@ final class CompanyStore: ObservableObject {
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
+                case .tool(let activity):
+                    currentToolActivity = activity
                 case .done(_, _, let action):
                     // Streaming is now the common success path, so run_task_id
                     // (and nav/setup/remember) handling must fire here too —
@@ -1874,6 +1892,10 @@ final class CompanyStore: ObservableObject {
         // message rather than a rewrite of an answer the founder has already read.
         isCompanionTyping = false
         isStreaming = false
+        // Cleared unconditionally, on the SAME line as the two above — success, error, and
+        // fallback all funnel through this one tail (see the doc comment on the property),
+        // so there is no path where a tool from this turn survives it.
+        currentToolActivity = nil
         // Flush this turn into its thread — bumps `updatedAt` (re-sorts the thread
         // list) and, on the very first turn, derives the thread's title + mints
         // its id. Every early `return` above only fires on an account switch,
@@ -3483,6 +3505,7 @@ final class CompanyStore: ObservableObject {
         activeThreadId = nil
         isCompanionTyping = false
         isStreaming = false
+        currentToolActivity = nil
         runningTaskIds = []
         activeAgentRuns = []
         isFanningOut = false

@@ -98,6 +98,10 @@ enum ChatTransportRouter {
                 switch event {
                 case .delta(let chunk):
                     text += chunk
+                case .tool:
+                    // This fold produces one NON-streaming reply — there is no row to show
+                    // a mid-turn tool on here, and no text/action it contributes either.
+                    break
                 case .done(_, _, let done):
                     action = done
                 }

@@ -23,6 +23,14 @@ import Foundation
 /// `rolled()` is the one impure convenience the view uses, and `lastShown` is what makes
 /// "never the same phrase twice running" true of what was actually on screen — see
 /// `ChatThinkingRow`.
+///
+/// **`activity` (8 Sep) joins `taskTitle` as a second title-like, non-rotating case.** A tool
+/// target — a filename, a fetched page, "the web" — is exactly the kind of honest name the
+/// doc above already carves out an exception for: real work with a real subject, not a mood.
+/// Same non-fabrication rule too: `ChatToolActivity` only ever reaches this label already
+/// resolved (the sidecar's `toolActivity` returns `null` for anything it cannot honestly
+/// describe, and no frame is sent for it), so `text` never has to guess here either — a
+/// blank or missing target still falls back to plain rotation rather than naming nothing.
 enum ChatThinkingLabel {
 
     /// The title-less phrases with NO pet to name, in a fixed order.
@@ -94,12 +102,25 @@ enum ChatThinkingLabel {
         return choice < previous ? choice : choice + 1
     }
 
+    /// `activity` is checked BEFORE `taskTitle` when both are somehow present. Reasoning:
+    /// a tool call is the freshest, most literal thing happening right now — "Luna is
+    /// reading web.murror.app…" mid-draft tells the founder more than the higher-level
+    /// "Luna is drafting the positioning brief…" it would otherwise show — and today the
+    /// two never actually co-occur (`activity` rides an ordinary chat turn, `taskTitle` a
+    /// task run), so this ordering has no observable effect yet. It only decides what
+    /// happens the day that changes, which is why it is written down rather than left to
+    /// whichever branch happened to come first in the switch below.
     static func text(petName: String? = nil, taskTitle: String?,
+                     activity: ChatToolActivity? = nil,
                      language: AppLanguage, variant: Int = 0) -> String {
         let pet = petName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = taskTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasPet = !(pet ?? "").isEmpty
         let hasTitle = !(title ?? "").isEmpty
+
+        if let line = activityText(activity, pet: hasPet ? pet : nil, language: language) {
+            return line
+        }
 
         switch (hasPet, hasTitle) {
         case (true, true):
@@ -113,6 +134,34 @@ enum ChatThinkingLabel {
         case (false, false):
             let set = phrases(language)
             return set[floorMod(variant, set.count)]
+        }
+    }
+
+    /// The literal line for one running tool call, or `nil` when there is nothing honest
+    /// to say — `activity` absent, or a `readFile`/`fetchPage` whose target trims to
+    /// empty. `nil` here is what makes `text` fall through to plain rotation instead of
+    /// rendering "Luna is reading …" with nothing after "reading". `searchWeb` needs no
+    /// target check: it never carries one.
+    ///
+    /// `pet` is already resolved (trimmed, blank-checked) by the caller — passed as `nil`
+    /// rather than re-deriving, so this can't disagree with `text` about whether a pet
+    /// name is present.
+    private static func activityText(_ activity: ChatToolActivity?, pet: String?,
+                                     language: AppLanguage) -> String? {
+        guard let activity else { return nil }
+        switch activity.kind {
+        case .readFile, .fetchPage:
+            let target = activity.target?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !target.isEmpty else { return nil }
+            if let pet {
+                return language == .vi ? "\(pet) đang đọc \(target)…" : "\(pet) is reading \(target)…"
+            }
+            return language == .vi ? "Đang đọc \(target)…" : "Reading \(target)…"
+        case .searchWeb:
+            if let pet {
+                return language == .vi ? "\(pet) đang tìm trên web…" : "\(pet) is searching the web…"
+            }
+            return language == .vi ? "Đang tìm trên web…" : "Searching the web…"
         }
     }
 

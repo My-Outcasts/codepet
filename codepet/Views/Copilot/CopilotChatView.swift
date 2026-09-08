@@ -1043,8 +1043,14 @@ struct CopilotChatView: View {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
                     // The streaming/typing affordance (Task 11) — replaces main's
-                    // static typingRow. Generic label (no single-run step source here).
-                    if companyStore.isCompanionTyping { ChatThinkingRow().id("typing") }
+                    // static typingRow. Generic label (no single-run step source here) —
+                    // `activity` is the one exception: a tool running mid-turn IS known
+                    // here (`CompanyStore.currentToolActivity`), and is exactly the case
+                    // this row was extended for (8 Sep) so the founder sees a page being
+                    // fetched instead of a rotating "cooking" phrase.
+                    if companyStore.isCompanionTyping {
+                        ChatThinkingRow(activity: companyStore.currentToolActivity).id("typing")
+                    }
                 }
                 .readingColumn(column)
                 .padding(.top, ChatRhythm.transcriptTop(surface))

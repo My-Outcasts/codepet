@@ -195,6 +195,71 @@ final class CompanyChatClientTests: XCTestCase {
         }
     }
 
+    /// The whole point of the new frame: a tool running mid-turn decodes into
+    /// `.tool(ChatToolActivity)`, exactly like a `delta` decodes into `.delta`.
+    func testSendStreamDecodesToolFrame() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: tool\ndata: {\"kind\":\"fetchPage\",\"target\":\"web.murror.app/welcome\"}\n\n".data(using: .utf8)!,
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(),
+            session: mockedCompanyChatSession(),
+            authTokenProvider: { "fake" }
+        ) {
+            collected.append(ev)
+        }
+        XCTAssertEqual(collected.first,
+                        .tool(ChatToolActivity(kind: .fetchPage, target: "web.murror.app/welcome")))
+    }
+
+    /// **Additive frame, both directions.** An older client reaching a NEWER sidecar (one
+    /// that started sending some future frame this build has never heard of) must not fail
+    /// the turn — the reply keeps streaming, only the unrecognised frame is dropped. This
+    /// is what makes `tool` itself safe to have added: the same `default: break` is what
+    /// let an OLD client survive a sidecar that already sends it.
+    func testSendStreamIgnoresAnUnknownEventWithoutThrowing() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: some_future_frame\ndata: {\"whatever\":true}\n\n".data(using: .utf8)!,
+            "event: delta\ndata: {\"text\":\"still works\"}\n\n".data(using: .utf8)!,
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(),
+            session: mockedCompanyChatSession(),
+            authTokenProvider: { "fake" }
+        ) {
+            collected.append(ev)
+        }
+        XCTAssertEqual(collected,
+                        [.delta("still works"), .done(model: "m", cacheHit: false, action: ChatDoneAction())])
+    }
+
+    /// The unit-level version of the test above, directly against `handleStreamFrame`
+    /// rather than through the whole SSE byte pipeline: an unrecognised event must not
+    /// throw, and must yield nothing.
+    func testHandleStreamFrameIgnoresUnknownEventWithoutThrowing() async throws {
+        var thrown: Error?
+        var yielded: [CompanyChatStreamEvent] = []
+        let stream = AsyncThrowingStream<CompanyChatStreamEvent, Error> { continuation in
+            do {
+                try CompanyChatClient.handleStreamFrame(
+                    frame: SSEFrame(event: "some_future_frame", data: "{\"whatever\":true}"),
+                    continuation: continuation)
+            } catch {
+                thrown = error
+            }
+            continuation.finish()
+        }
+        for try await ev in stream { yielded.append(ev) }
+        XCTAssertNil(thrown, "handleStreamFrame threw on an unrecognised event: \(String(describing: thrown))")
+        XCTAssertTrue(yielded.isEmpty)
+    }
+
     func testSendStreamNoTokenThrowsNotSignedIn() async {
         CompanyChatMockURLProtocol.reset()
         do {

@@ -317,6 +317,26 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertFalse(s.isCompanionTyping)   // cleared by end of send regardless; covered above too
     }
 
+    /// A tool from THIS turn must never outlive it: the tail clears `currentToolActivity`
+    /// unconditionally, on the same line as `isCompanionTyping`/`isStreaming`. Without that
+    /// line, a `.tool` frame received mid-stream would stay on the store forever — exactly
+    /// the class of stale-state bug this branch exists to remove.
+    func testCurrentToolActivityClearsAtTheTail() async {
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
+            AsyncThrowingStream { c in
+                c.yield(.tool(ChatToolActivity(kind: .fetchPage, target: "web.murror.app/welcome")))
+                c.yield(.delta("Here you go"))
+                c.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction()))
+                c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("what's on the page?", language: .en)
+        XCTAssertNil(s.currentToolActivity)
+    }
+
     /// A stream that yields ZERO frames at all — no `.delta`, no `.done` — the
     /// exact shape the live CF collapses to pre-deploy: a plain JSON body with
     /// no `event:`/`data:` lines parses to zero SSE frames, so the stream just

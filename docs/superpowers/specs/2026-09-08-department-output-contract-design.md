@@ -203,21 +203,34 @@ must not disagree about what the document is.
 
 Every kind exports to a file. Nothing leaves without the founder choosing it.
 
-| Kind | Export |
-| --- | --- |
-| `doc`, `bizplan`, `legal`, `plan` | `.md` + `.pdf` |
-| `sheet` | `.csv` — inputs, outputs, and the formula |
-| `calendar` | `.csv` + `.ics` |
-| `site` | `.html` folder, ready to host |
-| `post`, `dms`, `email` | `.txt` per item |
-| `screens` | `.png` per screen |
-| `checklist` | `.md` |
+**Shipped** marks what phase 1 actually delivered; the rest is designed and not built.
 
-**Where it goes.** `DeliverableFrame`'s `action:` slot, whose comment warns that "that frame is
-shared by 9 viewers and 13 deliverable kinds, and widening a shared API to serve one kind is the
-wrong trade." Export is the case that inverts the objection: it serves **every** kind, so widening
-the shared frame is correct here for exactly the reason it was wrong before. `action:` gains an
-export case alongside `.copy`.
+| Kind | Export | Status |
+| --- | --- | --- |
+| `doc`, `legal`, `plan` | `.md` | **shipped** |
+| `doc`, `bizplan`, `legal`, `plan` | `.pdf` | needs `ImageRenderer` over a live view — separate plan |
+| `bizplan` | `.md` | blocked: the kind does not exist until phase 4 |
+| `sheet` | `.csv` — inputs with ranges, all six outputs with formulas | **shipped** |
+| `calendar` | `.csv` + `.ics` | **shipped** |
+| `site` | one self-contained `.html`, ready to host | **shipped** — a single file, not a folder: `buildHTML` inlines its styles, so there are no sibling assets |
+| `post`, `email` | `.txt` | **shipped** |
+| `dms` | `.txt` per message | **shipped** |
+| `checklist` | `.md` | **shipped** |
+| `screens` | `.png` per screen | needs `ImageRenderer` — separate plan. Ships its markdown body meanwhile, and the per-screen fields are deliberately not in the file |
+
+**Where it goes.** `DeliverableFrame`, whose comment warns that "that frame is shared by 9 viewers
+and 13 deliverable kinds, and widening a shared API to serve one kind is the wrong trade." Export
+is the case that inverts the objection: it serves **every** kind, so widening the shared frame is
+correct here for exactly the reason it was wrong before.
+
+**As a separate `export:` slot, not another `action:` case** (built 8 Sep). Copy and export are two
+affordances the founder may want in either order, not two variants of one — and a new slot left
+every existing `action:` call site untouched. **There are eleven frame call sites, not nine**: nine
+in `DeliverableViewers.swift`, one in `LibraryView.swift`'s catch-all (which is what a payload-less
+`sheet` renders through), and one in `MessageDraftCard.swift` (which serves `email` and
+payload-less `dms`). `DmsViewer` has no frame at all — it is sibling message cards — so it carries
+the export affordance on its own eyebrow row. The chat draft card passes no deliverable, because
+before approval there is no filed artifact to export: that is the one legitimate omission.
 
 **Overwriting is the panel's job for a single file** (founder decision, 8 Sep). `NSSavePanel`
 already asks Replace/Cancel, which is founder confirmation at the point of naming and clearer than
@@ -225,8 +238,26 @@ silently writing a differently-named file. A **set** (`dms`, `calendar`) is pick
 with no per-file prompt, so there the rule is never-overwrite: a repeat becomes `plan-2.md`. The
 rule is narrow because the guarantee is only needed where the panel cannot give it.
 
-**The mechanism.** The founder picks a destination through `NSSavePanel`; the app writes and never
-uploads. Rendering is per-kind and pure where it can be — a function from payload to file bytes,
+**The mechanism.** A single file goes through `NSSavePanel` with its name pre-filled; a **set**
+(`dms`, `calendar`) is picked as a directory through `NSOpenPanel`, because asking once per file
+would be four panels for one press. The app writes and never uploads.
+
+**A failed write says so.** Both paths report their outcome rather than discarding it — a
+read-only volume or a full disk must not produce a button that does nothing and says nothing, the
+failure this project has already paid for once. A set can fail *after* some files have landed, so
+the result carries how many did and the button says "Saved 2 of 4" rather than claiming total
+failure. Cancelling is not a failure and shows nothing.
+
+**Export reads live view state through a pure seam.** `ChecklistViewer` and `SheetViewer` expose a
+static `exportSubject(...)` that rebuilds a `Deliverable` from their current `@State` — same
+identity, only the live fields replaced. That is how "export takes what is on screen" is achieved
+without any view state reaching the pure core, and it is testable without driving `@State`.
+
+**The sheet CSV shares `SheetModel`.** Its six outputs are computed by the same pure model
+`SheetViewer` renders through, with a test pinning the file's values against it. An exporter that
+recomputed the arithmetic itself was written first and diverged from the screen wherever the
+model's floors applied — the second-renderer mistake the `site` export's byte-equality test exists
+to prevent, repeated in Finance's export before review caught it. Rendering is per-kind and pure where it can be — a function from payload to file bytes,
 testable without a view — which is the same split that made `DepartmentPickerRows` assertable.
 `.pdf` is the one exception: it renders through the existing viewer via `ImageRenderer`, so the
 exported page looks like the artifact the founder approved rather than a second layout that can

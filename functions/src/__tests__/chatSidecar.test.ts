@@ -1,5 +1,5 @@
 import { toMcpTools, allowedToolNames, handleRpc } from "../local/mcpToolServer";
-import { claudeArgs, ingestLine, renderForPrompt, type TurnResult } from "../local/chatSidecar";
+import { claudeArgs, ingestLine, renderForPrompt, toolActivity, type TurnResult } from "../local/chatSidecar";
 import { buildChatRequest } from "../companyChatCore";
 
 /**
@@ -242,6 +242,54 @@ describe("claudeArgs", () => {
   });
 });
 
+describe("toolActivity", () => {
+  it("gives Read a basename, not the absolute temp path", () => {
+    expect(toolActivity("Read", { file_path: "/tmp/codepet-chat-abc123/mml-book.pdf" }))
+      .toEqual({ kind: "readFile", target: "mml-book.pdf" });
+  });
+
+  it("strips the scheme and any trailing slash from a WebFetch url", () => {
+    expect(toolActivity("WebFetch", { url: "https://web.murror.app/welcome" }))
+      .toEqual({ kind: "fetchPage", target: "web.murror.app/welcome" });
+    expect(toolActivity("WebFetch", { url: "https://web.murror.app/" }))
+      .toEqual({ kind: "fetchPage", target: "web.murror.app" });
+  });
+
+  it("gives WebSearch no target — the query is the founder's own words", () => {
+    expect(toolActivity("WebSearch", { query: "best CRM 2026" }))
+      .toEqual({ kind: "searchWeb" });
+  });
+
+  it("describes neither an unrecognised tool nor a codepet action tool", () => {
+    expect(toolActivity("Bash", { command: "ls" })).toBeNull();
+    expect(toolActivity("navigate", { destination: "roadmap" })).toBeNull();
+    // The namespaced form, in case anything ever calls this before stripping.
+    expect(toolActivity("mcp__codepet__navigate", { destination: "roadmap" })).toBeNull();
+  });
+
+  it("never guesses from malformed or missing input", () => {
+    expect(toolActivity("Read", {})).toBeNull();
+    expect(toolActivity("Read", { file_path: 42 })).toBeNull();
+    expect(toolActivity("Read", null)).toBeNull();
+    expect(toolActivity("WebFetch", {})).toBeNull();
+    expect(toolActivity("WebFetch", { url: "not a url" })).toBeNull();
+    // A path that basenames to "" (the root itself) must not render "reading …".
+    expect(toolActivity("Read", { file_path: "/" })).toBeNull();
+  });
+
+  it("caps a long target rather than blowing out the dock row", () => {
+    const longPath = "/tmp/" + "a".repeat(80) + ".pdf";
+    const read = toolActivity("Read", { file_path: longPath });
+    expect(read?.target?.length).toBe(60);
+    expect(read?.target?.endsWith("…")).toBe(true);
+
+    const longUrl = "https://example.com/" + "b".repeat(80);
+    const fetched = toolActivity("WebFetch", { url: longUrl });
+    expect(fetched?.target?.length).toBe(60);
+    expect(fetched?.target?.endsWith("…")).toBe(true);
+  });
+});
+
 describe("ingestLine", () => {
   const fresh = (): TurnResult => ({ text: "", toolUses: [], model: null });
 
@@ -326,6 +374,51 @@ describe("ingestLine", () => {
     const acc = fresh();
     ingestLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebSearch", input: {} }] } }), acc, () => {});
     expect(acc.toolUses[0].name).toBe("WebSearch");
+  });
+
+  /**
+   * The whole point of the callback: a founder-visible activity fires for a tool this
+   * process can honestly describe, and `acc.toolUses` still collects it — action
+   * resolution at `done` must not lose the call just because it also became a UI line.
+   */
+  it("fires onToolActivity for a describable tool call", () => {
+    const acc = fresh();
+    const activities: unknown[] = [];
+    ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebFetch", input: { url: "https://web.murror.app/welcome" } }] } }),
+      acc,
+      () => {},
+      (a) => activities.push(a)
+    );
+    expect(activities).toEqual([{ kind: "fetchPage", target: "web.murror.app/welcome" }]);
+    expect(acc.toolUses).toEqual([{ name: "WebFetch", input: { url: "https://web.murror.app/welcome" } }]);
+  });
+
+  /**
+   * `navigate` (via `mcp__codepet__navigate`) already has its own approved copy elsewhere
+   * (a nav chip) — no activity line for it, but the resolver at `done` still needs the
+   * call in `acc.toolUses`, prefix stripped exactly as before this change.
+   */
+  it("does not fire onToolActivity for an mcp__codepet__ action tool, but still collects it", () => {
+    const acc = fresh();
+    const activities: unknown[] = [];
+    ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__codepet__navigate", input: { destination: "roadmap" } }] } }),
+      acc,
+      () => {},
+      (a) => activities.push(a)
+    );
+    expect(activities).toEqual([]);
+    expect(acc.toolUses).toEqual([{ name: "navigate", input: { destination: "roadmap" } }]);
+  });
+
+  it("defaults onToolActivity to a no-op so every existing 3-arg call keeps compiling", () => {
+    const acc = fresh();
+    expect(() => ingestLine(
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "WebSearch", input: {} }] } }),
+      acc,
+      () => {}
+    )).not.toThrow();
   });
 
   it("reports which model actually answered", () => {

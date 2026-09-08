@@ -18,19 +18,49 @@ enum DeliverableExporter {
     /// Split out from `save(_:)` so it is testable — the panel is the only part a test
     /// cannot drive, which is the limit `AttachmentPicker` already records for its own.
     ///
-    /// Never overwrites. A repeat export becomes `plan-2.md`, because the founder pressing
-    /// Export twice is asking for a second copy, not asking to destroy the first.
+    /// Never overwrites: a repeat becomes `plan-2.md`. This is the rule for a SET, which the
+    /// founder picks as a directory with no per-file prompt — the only place the panel cannot
+    /// ask. A single file goes through `NSSavePanel`, which asks Replace/Cancel itself, and
+    /// that is left alone deliberately (founder decision, 8 Sep): a founder who types a name
+    /// should get that name or an explicit prompt, not a silently different file.
     /// A name is reduced to its last path component first, so nothing can be written
     /// outside the chosen directory.
+    ///
+    /// A throw here can happen after some files have already landed — `PartialWrite` carries
+    /// how many, so a caller can tell a partial export from a clean failure instead of
+    /// reporting a partial run as a plain success.
     static func write(_ files: [ExportFile], to directory: URL) throws -> [URL] {
         var out: [URL] = []
         for f in files {
             let safe = (f.name as NSString).lastPathComponent
             let url = try unusedURL(in: directory, name: safe.isEmpty ? "deliverable" : safe)
-            try f.data.write(to: url)
+            do {
+                try f.data.write(to: url)
+            } catch {
+                throw PartialWrite(landed: out.count, underlying: error)
+            }
             out.append(url)
         }
         return out
+    }
+
+    /// Thrown by `write(_:to:)` when the directory rejects a write partway through a set —
+    /// a sandbox denial, a read-only volume, a full disk. `landed` is how many files were
+    /// already written before the one that failed, so `save(_:)` never reports a partial
+    /// export as a clean success.
+    struct PartialWrite: Error {
+        let landed: Int
+        let underlying: Error
+    }
+
+    /// What `save(_:)` did, so the founder is told the difference between "you cancelled"
+    /// (say nothing) and "the write failed" (say so) rather than both reading as silence.
+    enum Outcome: Equatable {
+        case saved
+        case cancelled
+        /// A write failed. `landed` is how many files made it to disk first — 0 for the
+        /// single-file path, where nothing is ever partial.
+        case failed(landed: Int)
     }
 
     private static func unusedURL(in directory: URL, name: String) throws -> URL {
@@ -47,24 +77,36 @@ enum DeliverableExporter {
         return candidate
     }
 
-    /// Ask the founder where to put it, then write.
+    /// Ask the founder where to put it, then write — and say what happened.
     ///
     /// One file gets a save panel with the name pre-filled; several get a directory picker,
     /// because `dms` and `calendar` produce a set and asking once per file would be four
     /// panels for one press.
+    ///
+    /// Cancelling the panel is `.cancelled`, not `.failed` — the founder changed their mind,
+    /// which is not an error and must not be shown as one. Only an actual write failure (a
+    /// sandbox denial, a read-only volume, a full disk) is `.failed`. Before this the write
+    /// used `try?` and discarded the result either way, so a press that failed for real looked
+    /// exactly like one that succeeded — the same silent-success shape this app has already
+    /// paid for once (`SiteViewer.openFailed`).
     @MainActor
-    static func save(_ d: Deliverable) {
+    @discardableResult
+    static func save(_ d: Deliverable) -> Outcome {
         let files = DeliverableExport.files(for: d)
-        guard !files.isEmpty else { return }
+        guard !files.isEmpty else { return .cancelled }
 
         if files.count == 1 {
             let panel = NSSavePanel()
             panel.nameFieldStringValue = files[0].name
             panel.prompt = "Export"
             panel.message = "Save \(d.title)"
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            try? files[0].data.write(to: url)
-            return
+            guard panel.runModal() == .OK, let url = panel.url else { return .cancelled }
+            do {
+                try files[0].data.write(to: url)
+                return .saved
+            } catch {
+                return .failed(landed: 0)
+            }
         }
 
         let panel = NSOpenPanel()
@@ -73,7 +115,14 @@ enum DeliverableExporter {
         panel.canCreateDirectories = true
         panel.prompt = "Export"
         panel.message = "Save \(files.count) files from \(d.title)"
-        guard panel.runModal() == .OK, let dir = panel.url else { return }
-        _ = try? write(files, to: dir)
+        guard panel.runModal() == .OK, let dir = panel.url else { return .cancelled }
+        do {
+            _ = try write(files, to: dir)
+            return .saved
+        } catch let partial as PartialWrite {
+            return .failed(landed: partial.landed)
+        } catch {
+            return .failed(landed: 0)
+        }
     }
 }

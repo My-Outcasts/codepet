@@ -50,10 +50,23 @@ struct ChecklistViewer: View {
         items.map { "- [\($0.done ? "x" : " ")] \($0.t)" }.joined(separator: "\n")
     }
 
+    /// Founder decision (I4): Export takes what is on screen, matching Copy — so a founder who
+    /// has ticked boxes exports the ticked list, not the untouched payload. Built as a pure
+    /// static rather than reading `@State` from `DeliverableExport` (which stays pure and
+    /// view-blind): same identity, only the payload's `items` swapped for the live ones. A
+    /// static function so a test can drive it without going through private `@State`.
+    static func exportSubject(_ deliverable: Deliverable, items: [ChecklistItem]) -> Deliverable {
+        var d = deliverable
+        var payload = d.payload ?? DeliverablePayload()
+        payload.items = items
+        d.payload = payload
+        return d
+    }
+
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
                          action: .copy(copyText),
-                         export: deliverable) {
+                         export: Self.exportSubject(deliverable, items: items)) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -337,11 +350,20 @@ struct PlanViewer: View {
 /// only works if the two message kinds agree with each other.
 struct DmsViewer: View {
     let messages: [DmMessage]
+    let deliverable: Deliverable
     @State private var sent: Set<Int> = []
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // `DmsViewer` builds its own per-message cards rather than one `DeliverableFrame`
+            // — a structured `.dms` is several sibling cards, not one framed document — so
+            // there is no eyebrow row to hang Export on. A bare header carrying just the
+            // button is the smallest addition that does not restructure the per-card layout.
+            HStack {
+                Spacer()
+                DeliverableExportButton(deliverable: deliverable)
+            }
             ForEach(Array(messages.enumerated()), id: \.offset) { i, message in
                 card(index: i, message: message)
             }
@@ -631,6 +653,25 @@ struct SheetViewer: View {
         return lines.joined(separator: "\n")
     }
 
+    /// Founder decision (I4): Export takes what is on screen, matching Copy — the founder
+    /// moves the sliders to get numbers out, and before this Export re-rendered the untouched
+    /// payload while Copy read the live model. Built as a pure static so it is testable without
+    /// reaching into private `@State`: same identity, only the payload's four `SheetInput.val`
+    /// fields swapped for the live slider values — `min`/`max`/`step` are untouched, because
+    /// only `val` ever moves.
+    static func exportSubject(_ deliverable: Deliverable, price: Double, waitlist: Double,
+                               conversion: Double, churn: Double) -> Deliverable {
+        guard var payload = deliverable.payload, var sheet = payload.sheet else { return deliverable }
+        sheet.price.val = price
+        sheet.waitlist.val = waitlist
+        sheet.conversion.val = conversion
+        sheet.churn.val = churn
+        payload.sheet = sheet
+        var d = deliverable
+        d.payload = payload
+        return d
+    }
+
     /// Not financial advice — the card's footer, not a loose third line under it.
     private var disclaimer: String {
         lang == .vi
@@ -643,7 +684,8 @@ struct SheetViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Mô hình tài chính" : "Financial model",
                          action: .copy(copyText),
-                         export: deliverable,
+                         export: Self.exportSubject(deliverable, price: price, waitlist: waitlist,
+                                                     conversion: conversion, churn: churn),
                          footer: disclaimer,
                          measured: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -752,7 +794,8 @@ struct EmailViewer: View {
     var body: some View {
         MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
                            heading: deliverable.title,
-                           text: deliverable.body)
+                           text: deliverable.body,
+                           export: deliverable)
     }
 }
 

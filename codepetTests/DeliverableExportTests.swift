@@ -351,4 +351,68 @@ final class DeliverableExportTests: XCTestCase {
         let d = deliverable(.site, title: "Landing page", body: "copy only")
         XCTAssertEqual(DeliverableExport.files(for: d)[0].name, "landing-page.md")
     }
+
+    // MARK: - I4: Export takes what is on screen, matching Copy
+
+    /// `ChecklistViewer` reads live `@State`, unreachable from a test — so the payload-rebuild
+    /// step is a pure static, `exportSubject(_:items:)`, tested directly here rather than
+    /// through the view. Ticking a box in the view mutates its `items` array exactly the way
+    /// this test constructs one; the assertion is that Export renders THAT, not the untouched
+    /// payload the deliverable arrived with.
+    func testChecklistExportSubjectReflectsLiveTicks() throws {
+        let untouched = deliverable(.checklist, title: "Launch checklist",
+                                    payload: DeliverablePayload(items: [
+                                        ChecklistItem(t: "Tag the build", done: false),
+                                        ChecklistItem(t: "Write the notes", done: false)]))
+        // Simulates the founder ticking the first box — what `ChecklistViewer` would have
+        // done to its own `@State private var items` by this point.
+        let ticked = [ChecklistItem(t: "Tag the build", done: true),
+                      ChecklistItem(t: "Write the notes", done: false)]
+        let subject = ChecklistViewer.exportSubject(untouched, items: ticked)
+
+        XCTAssertEqual(subject.id, untouched.id)
+        XCTAssertEqual(subject.kind, untouched.kind)
+        XCTAssertEqual(subject.title, untouched.title)
+
+        let text = try XCTUnwrap(String(data: DeliverableExport.files(for: subject)[0].data,
+                                        encoding: .utf8))
+        XCTAssertTrue(text.contains("- [x] Tag the build"), text)
+        XCTAssertTrue(text.contains("- [ ] Write the notes"), text)
+
+        // And the untouched deliverable's own export is unaffected — `exportSubject` copies
+        // rather than mutating in place.
+        let originalText = try XCTUnwrap(String(data: DeliverableExport.files(for: untouched)[0].data,
+                                                 encoding: .utf8))
+        XCTAssertTrue(originalText.contains("- [ ] Tag the build"), originalText)
+    }
+
+    /// `SheetViewer` reads its sliders' live `@State`, also unreachable from a test — same
+    /// fix, `exportSubject(_:price:waitlist:conversion:churn:)`. Moving a slider changes only
+    /// `SheetInput.val`; `min`/`max`/`step` never move, and the test pins that too.
+    func testSheetExportSubjectReflectsLiveSliderValues() throws {
+        let payload = DeliverablePayload(sheet: SheetPayload(
+            price: SheetInput(val: 20, min: 5, max: 100, step: 1),
+            waitlist: SheetInput(val: 500, min: 0, max: 5000, step: 10),
+            conversion: SheetInput(val: 10, min: 0, max: 100, step: 1),
+            churn: SheetInput(val: 4, min: 0, max: 50, step: 1),
+            summary: nil))
+        let untouched = deliverable(.sheet, title: "Pricing model", payload: payload)
+
+        // Simulates the founder dragging the price and waitlist sliders.
+        let subject = SheetViewer.exportSubject(untouched, price: 35, waitlist: 1200,
+                                                conversion: 10, churn: 4)
+
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: subject)[0].data,
+                                       encoding: .utf8))
+        XCTAssertTrue(csv.contains("price,35,5,100,1"), csv)
+        XCTAssertTrue(csv.contains("waitlist,1200,0,5000,10"), csv)
+        // Untouched inputs carry their range through unchanged.
+        XCTAssertTrue(csv.contains("conversion,10,0,100,1"), csv)
+        XCTAssertTrue(csv.contains("churn,4,0,50,1"), csv)
+
+        // The original deliverable's export is unaffected.
+        let originalCsv = try XCTUnwrap(String(data: DeliverableExport.files(for: untouched)[0].data,
+                                               encoding: .utf8))
+        XCTAssertTrue(originalCsv.contains("price,20,5,100,1"), originalCsv)
+    }
 }

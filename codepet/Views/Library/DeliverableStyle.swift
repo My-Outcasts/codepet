@@ -388,17 +388,33 @@ func deliverableBlanksFooter(_ text: String, verb: BlankVerb, lang: AppLanguage)
 /// "Save" would imply work is at risk. What this does is move a copy out of the app.
 struct DeliverableExportButton: View {
     let deliverable: Deliverable
+    /// Set only when the write itself failed — never on a cancel — so the button says why
+    /// instead of doing nothing. Same shape as `SiteViewer.openFailed`.
+    @State private var failed = false
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
-        Button {
-            DeliverableExporter.save(deliverable)
-        } label: {
-            Text(lang == .vi ? "Xuất" : "Export")
-                .font(.pixelSystem(size: DeliverableStyle.eyebrow, weight: .semibold))
+        HStack(spacing: 6) {
+            Button {
+                switch DeliverableExporter.save(deliverable) {
+                case .saved, .cancelled:
+                    failed = false
+                case .failed:
+                    failed = true
+                }
+            } label: {
+                Text(lang == .vi ? "Xuất" : "Export")
+                    .font(.pixelSystem(size: DeliverableStyle.eyebrow, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(CodepetTheme.accentPurple)
+            .help(lang == .vi ? "Lưu ra tệp" : "Save to a file")
+
+            if failed {
+                Text(lang == .vi ? "Không lưu được" : "Couldn't save")
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
         }
-        .buttonStyle(.plain)
-        .foregroundColor(CodepetTheme.accentPurple)
-        .help(lang == .vi ? "Lưu ra tệp" : "Save to a file")
     }
 }

@@ -163,4 +163,53 @@ final class DeliverableExportTests: XCTestCase {
         let files = DeliverableExport.files(for: d)
         XCTAssertEqual(files[0].name, "day-14-check-in.txt")
     }
+
+    // MARK: - sheet
+
+    private func sheetPayload() -> DeliverablePayload {
+        DeliverablePayload(sheet: SheetPayload(
+            price: SheetInput(val: 6, min: 0, max: 20, step: 1),
+            waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
+            conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
+            churn: SheetInput(val: 6, min: 0, max: 30, step: 1),
+            summary: "At $6 and 8% conversion the model clears cost."))
+    }
+
+    func testSheetExportsCsvNotMarkdown() {
+        let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].name, "pricing-model.csv")
+    }
+
+    func testSheetCsvCarriesEveryInputWithItsRange() throws {
+        let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.hasPrefix("input,value,min,max,step\n"), csv)
+        XCTAssertTrue(csv.contains("price,6,0,20,1"), csv)
+        XCTAssertTrue(csv.contains("waitlist,1200,0,5000,50"), csv)
+        XCTAssertTrue(csv.contains("conversion,8,0,50,1"), csv)
+        XCTAssertTrue(csv.contains("churn,6,0,30,1"), csv)
+    }
+
+    /// The point of exporting a model rather than a number: the reader can see how it was
+    /// derived and disagree with it.
+    func testSheetCsvCarriesTheDerivedOutputsAndTheirFormulas() throws {
+        let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.contains("output,value,formula"), csv)
+        XCTAssertTrue(csv.contains("subscribers,96,"), "1200 × 8% = 96 — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,576,"), "96 × $6 = 576 — got:\n\(csv)")
+    }
+
+    func testSheetCsvQuotesTheSummarySoACommaCannotSplitIt() throws {
+        let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.contains("\"At $6 and 8% conversion the model clears cost.\""), csv)
+    }
+
+    func testSheetWithNoPayloadFallsBackToMarkdown() {
+        let d = deliverable(.sheet, title: "Pricing model", body: "prose only")
+        XCTAssertEqual(DeliverableExport.files(for: d)[0].name, "pricing-model.md")
+    }
 }

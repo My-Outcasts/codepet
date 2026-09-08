@@ -54,7 +54,9 @@ enum DeliverableExport {
             return [txt(base, d.body)]
         case .dms:
             return dmsFiles(d, base: base)
-        case .legal, .text, .other, .sheet, .calendar, .site, .screens:
+        case .sheet:
+            return [sheetFile(d, base: base)]
+        case .legal, .text, .other, .calendar, .site, .screens:
             return [md(base, titled(d, d.body))]
         }
     }
@@ -134,5 +136,47 @@ enum DeliverableExport {
             let text = "To: \(m.name)\nWhy: \(m.note)\n\n\(m.msg)"
             return ExportFile(name: "\(base)-\(i + 1)-\(who).txt", data: Data((text + "\n").utf8))
         }
+    }
+
+    /// A model, not a number. The inputs carry their ranges so the reader can see what the
+    /// author considered plausible, and the outputs carry their formulas so the reader can
+    /// disagree with the derivation rather than only with the result.
+    ///
+    /// The two derived rows mirror `SheetViewer`'s own arithmetic. They are recomputed here
+    /// rather than read off the view, because export must work on a deliverable that is not
+    /// on screen.
+    private static func sheetFile(_ d: Deliverable, base: String) -> ExportFile {
+        guard let s = d.payload?.sheet else {
+            return md(base, titled(d, d.body))
+        }
+        func n(_ v: Double) -> String {
+            v == v.rounded() ? String(Int(v)) : String(format: "%.4g", v)
+        }
+        func row(_ name: String, _ i: SheetInput) -> String {
+            "\(name),\(n(i.val)),\(n(i.min)),\(n(i.max)),\(n(i.step))\n"
+        }
+
+        var out = "input,value,min,max,step\n"
+        out += row("price", s.price)
+        out += row("waitlist", s.waitlist)
+        out += row("conversion", s.conversion)
+        out += row("churn", s.churn)
+
+        let subscribers = (s.waitlist.val * s.conversion.val / 100).rounded()
+        let mrr = subscribers * s.price.val
+        out += "\noutput,value,formula\n"
+        out += "subscribers,\(n(subscribers)),waitlist * conversion / 100\n"
+        out += "mrr,\(n(mrr)),subscribers * price\n"
+
+        if let summary = s.summary, !summary.isEmpty {
+            out += "\nsummary,\(csvQuoted(summary))\n"
+        }
+        return ExportFile(name: "\(base).csv", data: Data(out.utf8))
+    }
+
+    /// A CSV field that may contain a comma, a quote or a newline. Without this a summary
+    /// sentence silently becomes several columns.
+    private static func csvQuoted(_ s: String) -> String {
+        "\"\(s.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 }

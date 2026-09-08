@@ -5,8 +5,8 @@ import Foundation
 ///
 /// This exists because the constraint that actually bites is not the one
 /// `ChatAttachment.maxBytes` describes. `maxBytes` is 8 MB **per file, before
-/// base64**; `ChatAttachment.max` is 3 files. Three of them is ~24 MB raw, which is
-/// **~32 MB once base64 inflates it by 4/3** — and `companyChat` runs on Cloud Run
+/// base64**; `ChatAttachment.max` is 10 files. Ten of them is up to ~80 MB raw, which
+/// is **~107 MB once base64 inflates it by 4/3** — and `companyChat` runs on Cloud Run
 /// gen2, whose HTTP request ceiling is 32 MiB. A request over that is rejected by the
 /// infrastructure: the founder gets a bare 413, `handleCompanyChat` never runs, so
 /// there is nothing in `functions:log`, and the backend's own drop table (which is

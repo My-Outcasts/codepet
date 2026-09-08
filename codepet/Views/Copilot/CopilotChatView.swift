@@ -2235,7 +2235,13 @@ struct CopilotBubble: View {
         // draws its fill and 1pt border, so rendering an empty one left a bare bordered
         // box that read as an error state. `ChatThinkingRow` already covers the waiting
         // beat, so render nothing rather than an empty card.
-        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // **`&& attachments.isEmpty` is load-bearing.** Dropping screenshots in with no
+        // typed words is a complete turn — the backend renders it as media blocks alone,
+        // deliberately (`renderTurn`: "a media turn with no text returns the media blocks
+        // alone"). Without this clause the founder sent that turn, got an answer about
+        // images, and her own message drew nothing whatsoever above it.
+        if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && message.attachments.isEmpty {
             EmptyView()
         } else if message.supersededByRoom && !isMe {
             firstTakeRow
@@ -2254,23 +2260,33 @@ struct CopilotBubble: View {
             // for a recessed track.
             let quiet = surface == .twoMode
             let pad: CGFloat = 14
-            HStack {
-                Spacer(minLength: 24)
-                Text(message.text)
-                    .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
-                    .lineSpacing(ChatRhythm.proseLeading(surface))
-                    .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
-                    .padding(.horizontal, pad).padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
-                    .fixedSize(horizontal: false, vertical: true)
-                    // The bubble's TEXT lands on the column's right edge, not its
-                    // border — so the founder's words and the reply's words end on
-                    // the same vertical line, and only the bubble's padding
-                    // overhangs it. This is what Claude does, and without it the
-                    // question sits ~7pt inside the answer for no reason a reader
-                    // could name.
-                    .padding(.trailing, quiet ? -pad : 0)
+            VStack(alignment: .trailing, spacing: 6) {
+                // What she attached to THIS turn, above her words — the order the model
+                // receives the turn in, because the question is about the picture. Draws
+                // nothing when she attached nothing, i.e. on every turn to date.
+                MessageAttachmentStrip(attachments: message.attachments)
+                // Guarded, so an images-only turn shows its images and NOT an empty
+                // bubble underneath them — see the `attachments.isEmpty` note above.
+                if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack {
+                        Spacer(minLength: 24)
+                        Text(message.text)
+                            .font(CodepetTheme.inter(ChatRhythm.prose(surface)))
+                            .lineSpacing(ChatRhythm.proseLeading(surface))
+                            .foregroundColor(quiet ? CodepetTheme.bodyText : .white)
+                            .padding(.horizontal, pad).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(quiet ? CodepetTokens.well : CodepetTheme.accentPurple))
+                            .fixedSize(horizontal: false, vertical: true)
+                            // The bubble's TEXT lands on the column's right edge, not its
+                            // border — so the founder's words and the reply's words end on
+                            // the same vertical line, and only the bubble's padding
+                            // overhangs it. This is what Claude does, and without it the
+                            // question sits ~7pt inside the answer for no reason a reader
+                            // could name.
+                            .padding(.trailing, quiet ? -pad : 0)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         } else {

@@ -144,7 +144,14 @@ final class CompanyStore: ObservableObject {
         #else
         let mock = false
         #endif
-        let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter()
+        // The web-research skill reaches the coding run from here, as a closure so it is read
+        // when a run STARTS rather than when this coordinator is first built (see
+        // `ClaudeCodeRunAdapter.allowsWebSearch`). `[weak self]` because the adapter outlives
+        // nothing here but the store owns this graph, and a strong capture would be a cycle.
+        let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter(
+            allowsWebSearch: { [weak self] in
+                self?.company.enabledTools.contains(Toolkit.webResearchId) ?? false
+            })
         let c = CodingRunCoordinator(runner: runner)
         // Re-publish the nested coordinator's changes so views observing only
         // CompanyStore re-render as the run progresses (otherwise the card "sticks").

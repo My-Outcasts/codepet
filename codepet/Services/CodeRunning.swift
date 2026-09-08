@@ -23,6 +23,20 @@ protocol CodeRunning {
 @MainActor
 final class ClaudeCodeRunAdapter: CodeRunning {
 
+    /// Whether the founder's `web-research` skill is on, asked FRESH on every run.
+    ///
+    /// A closure and not a `Bool` because of when this object is built: the coordinator and
+    /// this adapter are created once, lazily, while the toolkit toggle can be flipped at any
+    /// time from Environment. A snapshot taken at construction would answer for whatever the
+    /// setting happened to be the first time a run started and never change again — the same
+    /// staleness class as `LocalTransportRouter`'s company mirror, which exists for this
+    /// reason. Defaults to off so every other caller and every test keeps the scoped list.
+    private let allowsWebSearch: () -> Bool
+
+    init(allowsWebSearch: @escaping () -> Bool = { false }) {
+        self.allowsWebSearch = allowsWebSearch
+    }
+
     func run(prompt: String, workingDir: String, onStep: @escaping (ExecStep) -> Void) async -> CodeRunOutcome {
         // A FRESH runner per call: reusing one instance would replay its last
         // `.finished` on the new subscription (resuming instantly with stale diffs
@@ -63,7 +77,9 @@ final class ClaudeCodeRunAdapter: CodeRunning {
                     break
                 }
             }
-            runner.run(prompt: prompt, projectDir: workingDir)
+            // Read at RUN time, not at construction — see `allowsWebSearch`.
+            runner.run(prompt: prompt, projectDir: workingDir,
+                       allowedTools: CodeRunTools.allowed(webSearch: allowsWebSearch()))
         }
     }
 }

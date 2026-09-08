@@ -58,7 +58,9 @@ enum DeliverableExport {
             return [sheetFile(d, base: base)]
         case .calendar:
             return calendarFiles(d, base: base)
-        case .legal, .text, .other, .site, .screens:
+        case .site:
+            return [siteFile(d, base: base)]
+        case .legal, .text, .other, .screens:
             return [md(base, titled(d, d.body))]
         }
     }
@@ -224,6 +226,20 @@ enum DeliverableExport {
 
         return [ExportFile(name: "\(base).csv", data: Data(csv.utf8)),
                 ExportFile(name: "\(base).ics", data: Data(ics.utf8))]
+    }
+
+    /// One `.html` file, ready to open in a browser or drop on a host.
+    ///
+    /// **Reuses `SiteViewer.buildHTML`.** The spec called for an ".html folder"; a single
+    /// self-contained document satisfies the intent with less machinery, because the builder
+    /// already inlines its own styles — there are no sibling assets to place beside it.
+    /// Sharing the builder is the load-bearing part: a second renderer here could drift from
+    /// the page the founder looked at and approved.
+    private static func siteFile(_ d: Deliverable, base: String) -> ExportFile {
+        guard let site = d.payload?.site else {
+            return md(base, titled(d, d.body))
+        }
+        return ExportFile(name: "\(base).html", data: Data(SiteViewer.buildHTML(site).utf8))
     }
 
     /// A floating all-day date: today, plus the week offset, plus the weekday the label names.

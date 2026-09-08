@@ -293,4 +293,62 @@ final class DeliverableExportTests: XCTestCase {
         let d = deliverable(.calendar, title: "Content calendar", body: "prose only")
         XCTAssertEqual(DeliverableExport.files(for: d).map(\.name), ["content-calendar.md"])
     }
+
+    // MARK: - site
+
+    /// Decoded, not constructed — `SitePayload` declares `init(from:)` and so has no
+    /// memberwise initialiser. `title`, `brand`, `headline`, `ctaPrimary`, `finalTitle` and
+    /// `finalCta` are REQUIRED anchors that throw when absent; everything else is soft.
+    private func sitePayload() throws -> DeliverablePayload {
+        try payload(json: """
+        {
+          "title": "Murror — a journal that answers",
+          "brand": "Murror",
+          "headline": "A journal that answers",
+          "sub": "Private by design. Nothing leaves your phone unless you ask.",
+          "ctaPrimary": "Get early access",
+          "howEyebrow": "How it works",
+          "howTitle": "Three steps",
+          "steps": [{"h": "Write", "p": "Say anything."}],
+          "featEyebrow": "Why",
+          "featTitle": "What makes it different",
+          "features": [{"h": "No streaks", "p": "We cut them."}],
+          "finalTitle": "Start tonight",
+          "finalCta": "Get early access",
+          "accent": "80C830",
+          "footNote": "Murror"
+        }
+        """)
+    }
+
+    func testSiteExportsOneHtmlFile() throws {
+        let d = deliverable(.site, title: "Landing page", payload: try sitePayload())
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].name, "landing-page.html")
+    }
+
+    /// Ready to host means a complete document, not a fragment.
+    func testExportedSiteIsACompleteDocument() throws {
+        let d = deliverable(.site, title: "Landing page", payload: try sitePayload())
+        let html = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(html.lowercased().contains("<!doctype html"), String(html.prefix(200)))
+        XCTAssertTrue(html.contains("</html>"), String(html.suffix(200)))
+        XCTAssertTrue(html.contains("A journal that answers"), "the headline is missing")
+    }
+
+    /// The exported file and the on-screen page come from ONE builder. If this ever fails,
+    /// export has grown a second renderer and the two can disagree.
+    func testExportedHtmlIsByteIdenticalToWhatTheViewerRenders() throws {
+        let fixture = try sitePayload()
+        let p = try XCTUnwrap(fixture.site)
+        let d = deliverable(.site, title: "Landing page", payload: fixture)
+        let exported = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertEqual(exported, SiteViewer.buildHTML(p))
+    }
+
+    func testSiteWithNoPayloadFallsBackToMarkdown() {
+        let d = deliverable(.site, title: "Landing page", body: "copy only")
+        XCTAssertEqual(DeliverableExport.files(for: d)[0].name, "landing-page.md")
+    }
 }

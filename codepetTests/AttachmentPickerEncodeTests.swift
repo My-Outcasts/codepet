@@ -8,6 +8,11 @@ import XCTest
 /// so a file removed by the trim was reported nowhere. The founder picked four images, three
 /// appeared, and nothing was said (8 Sep). `AttachmentBudget.admit` never saw the fourth, so
 /// the refusal machinery that would have named it was never reachable.
+///
+/// `rejected` is now two buckets, `unsupported` and `oversized` — see `AttachmentPicker.Encoded`
+/// — because a 16 MB `mml-book.pdf` was told "Codepet can't read mml-book.pdf" (reported 8
+/// Sep): false and unactionable, since PDFs are supported and the only problem was
+/// `ChatAttachment.maxBytes`.
 @MainActor
 final class AttachmentPickerEncodeTests: XCTestCase {
 
@@ -37,7 +42,8 @@ final class AttachmentPickerEncodeTests: XCTestCase {
         let urls = try (0..<(ChatAttachment.max + 4)).map { try png("shot\($0).png") }
         let out = AttachmentPicker.encodeAll(urls)
         XCTAssertEqual(out.attachments.count, ChatAttachment.max + 4)
-        XCTAssertTrue(out.rejected.isEmpty)
+        XCTAssertTrue(out.unsupported.isEmpty)
+        XCTAssertTrue(out.oversized.isEmpty)
     }
 
     /// Order is the founder's pick order, because the notice names files in that order.
@@ -47,15 +53,33 @@ final class AttachmentPickerEncodeTests: XCTestCase {
                        ["b.png", "a.png", "c.png"])
     }
 
-    /// `rejected` keeps its ONE meaning: the picker could not read this file. It is no
-    /// longer overloaded with "silently over the count", which is what hid the bug.
-    func testRejectedMeansUnreadableAndNothingElse() throws {
+    /// `unsupported` keeps its ONE meaning: the picker could not read this file at all — an
+    /// extension it does not handle, or bytes it failed to open. It is no longer overloaded
+    /// with "silently over the count" (which is what hid the original bug) NOR with "too big"
+    /// (which is what hid the `mml-book.pdf` bug, reported 8 Sep — see `AttachmentPicker`).
+    func testUnsupportedMeansUnreadableAndNothingElse() throws {
         let good = try png("ok.png")
         let bad = dir.appendingPathComponent("notes.sketch")
         try Data("x".utf8).write(to: bad)
         let out = AttachmentPicker.encodeAll([good, bad])
         XCTAssertEqual(out.attachments.map(\.filename), ["ok.png"])
-        XCTAssertEqual(out.rejected, ["notes.sketch"])
+        XCTAssertEqual(out.unsupported, ["notes.sketch"])
+        XCTAssertTrue(out.oversized.isEmpty)
+    }
+
+    /// **The reported bug, exactly.** A 16 MB `mml-book.pdf` was told "Codepet can't read
+    /// mml-book.pdf" — false, since PDFs are supported and the only problem was
+    /// `ChatAttachment.maxBytes`. An oversized-but-supported file must land in `oversized`,
+    /// never in `unsupported`, so the composer can say something the founder can act on.
+    func testAnOversizedSupportedFileLandsInOversizedNotUnsupported() throws {
+        let url = dir.appendingPathComponent("mml-book.pdf")
+        // Sparse-ish: repeated bytes, not a real 16 MB fixture committed to the repo.
+        let big = Data(repeating: 0x41, count: ChatAttachment.maxBytes + 1024)
+        try big.write(to: url)
+        let out = AttachmentPicker.encodeAll([url])
+        XCTAssertTrue(out.attachments.isEmpty)
+        XCTAssertTrue(out.unsupported.isEmpty)
+        XCTAssertEqual(out.oversized, ["mml-book.pdf"])
     }
 
     /// Everything the picker returns must be admissible input: `admit` decides, and with

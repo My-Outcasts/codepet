@@ -169,6 +169,19 @@ enum AttachmentBudget {
             : "Codepet can't read \(list)."
     }
 
+    /// What the composer says about a file that is supported but too large. Separate from
+    /// `unsupportedMessage` because the fix is different and the founder can act on it: make
+    /// it smaller, or send fewer pages. The megabyte figure is derived from
+    /// `ChatAttachment.maxBytes`, never typed, so the copy cannot outlive the cap.
+    static func oversizedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        let mb = ChatAttachment.maxBytes / (1024 * 1024)
+        return lang == .vi
+            ? "\(list) quá lớn — mỗi tệp tối đa \(mb) MB."
+            : "\(list) is too big — one file can be \(mb) MB."
+    }
+
     /// What the founder is told when Engineering routes to the local coding agent with
     /// files attached. The product decision (final review, F2) is that the coding run does
     /// not carry files — `startCodeRun` reads a linked folder, not a chat request, so there

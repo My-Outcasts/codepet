@@ -202,6 +202,30 @@ final class AttachmentBudgetTests: XCTestCase {
                           AttachmentBudget.unsupportedMessage(["a.sketch"], .vi))
     }
 
+    /// **The reported bug's fix.** A 16 MB `mml-book.pdf` was told "Codepet can't read
+    /// mml-book.pdf" (8 Sep) — false, since PDFs are supported and the real limit is
+    /// `ChatAttachment.maxBytes`. `oversizedMessage` must name the file AND state the
+    /// megabyte figure, and the two assertions have to be genuinely independent —
+    /// an earlier test on this branch used a fixture named `s10.png` and asserted the
+    /// message contained "10", which the FILENAME itself already satisfied. This fixture
+    /// name (`report-manual.pdf`) contains no digits, so the "8" assertion can only pass
+    /// by the limit actually appearing.
+    func testOversizedMessageNamesTheFileAndStatesTheMegabyteLimit() {
+        XCTAssertNil(AttachmentBudget.oversizedMessage([], .en))
+
+        let mb = ChatAttachment.maxBytes / (1024 * 1024)
+        let en = AttachmentBudget.oversizedMessage(["report-manual.pdf"], .en)
+        XCTAssertNotNil(en)
+        XCTAssertTrue(en!.contains("report-manual.pdf"), "does not name the file: \(en!)")
+        XCTAssertTrue(en!.contains("\(mb)"), "does not state the megabyte limit: \(en!)")
+
+        let vi = AttachmentBudget.oversizedMessage(["report-manual.pdf"], .vi)
+        XCTAssertNotNil(vi)
+        XCTAssertTrue(vi!.contains("report-manual.pdf"), "does not name the file: \(vi!)")
+        XCTAssertTrue(vi!.contains("\(mb)"), "does not state the megabyte limit: \(vi!)")
+        XCTAssertNotEqual(en, vi, "the two languages must not collapse to the same copy")
+    }
+
     /// F2, final review: the Engineering route discards attachments silently unless
     /// something names them. nil for an empty list mirrors `unsupportedMessage` (no
     /// notice when there is nothing to report), and both languages must actually name

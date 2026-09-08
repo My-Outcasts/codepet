@@ -826,7 +826,12 @@ struct ChatComposer: View {
     /// Take a freshly encoded pick and let `admit` decide — the ONE path for both the
     /// `+` menu and a drop. Two copies of this sequence would be two chances to skip the
     /// notice, and a skipped notice is the defect this whole change exists to end.
-    private func absorb(_ picked: (attachments: [ChatAttachment], rejected: [String])) {
+    ///
+    /// `picked.unsupported` and `picked.oversized` are two different buckets on purpose —
+    /// see `AttachmentPicker.encodeAll`. Folding them into one message would resurrect the
+    /// exact defect this fixes: a 16 MB `mml-book.pdf` was told "Codepet can't read
+    /// mml-book.pdf" (reported 8 Sep) when the true, actionable reason was the 8 MB cap.
+    private func absorb(_ picked: (attachments: [ChatAttachment], unsupported: [String], oversized: [String])) {
         guard let atts = attachments else { return }
         let admission = AttachmentBudget.admit(picked.attachments, to: atts.wrappedValue)
         var next = atts.wrappedValue
@@ -834,7 +839,8 @@ struct ChatComposer: View {
         atts.wrappedValue = next
         // Assigned every time, so a clean pick clears a stale refusal.
         let lines = [AttachmentBudget.refusalMessage(admission, lang),
-                     AttachmentBudget.unsupportedMessage(picked.rejected, lang)]
+                     AttachmentBudget.unsupportedMessage(picked.unsupported, lang),
+                     AttachmentBudget.oversizedMessage(picked.oversized, lang)]
             .compactMap { $0 }
         attachNotice = lines.isEmpty ? nil : lines.joined(separator: " ")
     }
@@ -863,9 +869,11 @@ struct ChatComposer: View {
                 // panel still reaches `absorb` with an empty pick); the drop now matches.
                 var picked = AttachmentPicker.encodeAll(urls)
                 if unresolved > 0 {
-                    picked.rejected.append(unresolved == 1
-                                           ? "1 dropped item"
-                                           : "\(unresolved) dropped items")
+                    // A provider that yields no URL is unreadable, not oversized — it never
+                    // got far enough to be measured against `ChatAttachment.maxBytes`.
+                    picked.unsupported.append(unresolved == 1
+                                              ? "1 dropped item"
+                                              : "\(unresolved) dropped items")
                 }
                 absorb(picked)
             }

@@ -816,6 +816,17 @@ final class CompanyStore: ObservableObject {
         guard !text.isEmpty || !attachments.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
             startCodeRun(ask: text)   // echoes the ask, anchors, and proposes the run
+            // **The coding run does not carry files (product decision) — but it must not
+            // make them vanish silently.** The composer has already cleared its tiles by
+            // the time this runs, so the founder-visible mechanism is a chat message from
+            // the store, the same way every other route-level notice reaches her. Only
+            // fires when she actually attached something; a plain eng-routed send with no
+            // attachments (`testSendChatWithEngDeptAndLinkedProjectRoutesToCodingAgent`)
+            // still lands exactly one `.me` message, unchanged.
+            if !attachments.isEmpty,
+               let notice = AttachmentBudget.engineeringUnsupportedMessage(attachments.map(\.filename), language) {
+                chatMessages.append(CopilotMessage(role: .companion, text: notice))
+            }
             dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
             return
         }

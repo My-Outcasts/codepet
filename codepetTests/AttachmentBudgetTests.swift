@@ -202,6 +202,30 @@ final class AttachmentBudgetTests: XCTestCase {
                           AttachmentBudget.unsupportedMessage(["a.sketch"], .vi))
     }
 
+    /// F2, final review: the Engineering route discards attachments silently unless
+    /// something names them. nil for an empty list mirrors `unsupportedMessage` (no
+    /// notice when there is nothing to report), and both languages must actually name
+    /// the file rather than just acknowledge one was dropped — a founder chasing a bug
+    /// needs to know WHICH screenshot vanished when she attached more than one.
+    func testTheEngineeringNoticeNamesTheFilesAndIsSilentWhenEmpty() {
+        XCTAssertNil(AttachmentBudget.engineeringUnsupportedMessage([], .en))
+        XCTAssertNil(AttachmentBudget.engineeringUnsupportedMessage([], .vi))
+
+        let en = AttachmentBudget.engineeringUnsupportedMessage(["shot.png"], .en)
+        XCTAssertNotNil(en)
+        XCTAssertTrue(en!.contains("shot.png"), "does not name the file: \(en!)")
+
+        let vi = AttachmentBudget.engineeringUnsupportedMessage(["shot.png"], .vi)
+        XCTAssertNotNil(vi)
+        XCTAssertTrue(vi!.contains("shot.png"), "does not name the file: \(vi!)")
+        XCTAssertNotEqual(en, vi, "the two languages must not collapse to the same copy")
+
+        let multi = AttachmentBudget.engineeringUnsupportedMessage(["a.png", "b.png"], .en)
+        XCTAssertNotNil(multi)
+        XCTAssertTrue(multi!.contains("a.png") && multi!.contains("b.png"),
+                      "a mixed pick must name every file, not just the first: \(multi!)")
+    }
+
     /// A clean pick says nothing. The notice is assigned on every pick, so a nil here
     /// is what clears a stale refusal off the composer.
     func testACleanPickProducesNoNotice() {

@@ -168,4 +168,19 @@ enum AttachmentBudget {
             ? "Codepet chưa đọc được \(list)."
             : "Codepet can't read \(list)."
     }
+
+    /// What the founder is told when Engineering routes to the local coding agent with
+    /// files attached. The product decision (final review, F2) is that the coding run does
+    /// not carry files — `startCodeRun` reads a linked folder, not a chat request, so there
+    /// is nowhere for a base64 screenshot to go — but the composer has already cleared its
+    /// tiles by the time that route runs, so silence here reads as the file having gone
+    /// somewhere. Same shape as `unsupportedMessage`: nil when there is nothing to say,
+    /// bilingual, names the files rather than counting them.
+    static func engineeringUnsupportedMessage(_ names: [String], _ lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let list = names.joined(separator: ", ")
+        return lang == .vi
+            ? "Các phiên chạy Engineering chưa đọc được tệp — \(list) chưa được gửi. Hãy mô tả, hoặc dán nội dung lỗi vào đây."
+            : "Engineering runs can't read files yet — \(list) wasn't sent. Describe it, or paste the error text."
+    }
 }

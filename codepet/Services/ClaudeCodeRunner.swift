@@ -101,7 +101,7 @@ final class ClaudeCodeRunner: ObservableObject {
     ///   - maxTurns: hard cap so a stuck run can't keep consuming the user's plan.
     func run(prompt: String,
              projectDir: String,
-             allowedTools: [String] = ["Edit", "Write", "Read", "Bash", "Glob", "Grep"],
+             allowedTools: [String] = CodeRunTools.base,
              maxTurns: Int = 8) {
 
         guard !isRunning else { return }
@@ -131,7 +131,9 @@ final class ClaudeCodeRunner: ObservableObject {
         let shell = Self.loginShells.first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
 
         // Build the claude invocation. Prompt comes from stdin (no arg quoting).
-        let toolsArg = allowedTools.joined(separator: ",")
+        // See `CodeRunTools.argument`: comma-joined, no spaces, because this is interpolated
+        // into one quoted shell argument.
+        let toolsArg = CodeRunTools.argument(allowedTools)
         let claudeCmd = """
         claude -p \
         --output-format stream-json \

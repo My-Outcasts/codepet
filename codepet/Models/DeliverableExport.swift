@@ -233,8 +233,11 @@ enum DeliverableExport {
         let key = dayLabel.lowercased().prefix(3)
         let within = offsets[String(key)] ?? 0
         let days = weekIndex * 7 + within
-        let date = Calendar(identifier: .gregorian)
-            .date(byAdding: .day, value: days, to: Date()) ?? Date()
+        // Arithmetic must use the same time zone as the formatter (UTC) to avoid emitting
+        // a day that is off by one near midnight on local timezone boundaries.
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let date = cal.date(byAdding: .day, value: days, to: Date()) ?? Date()
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyyMMdd"
         fmt.timeZone = TimeZone(identifier: "UTC")

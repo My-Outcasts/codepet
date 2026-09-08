@@ -277,6 +277,18 @@ final class DeliverableExportTests: XCTestCase {
         XCTAssertEqual(ics.components(separatedBy: "UID:").count - 1, 3, ics)
     }
 
+    /// The rule the .ics exists to respect: the generator emits a RELATIVE schedule, so the
+    /// file must say so rather than presenting a computed day as a real commitment. Without
+    /// this, a founder reads Codepet's arithmetic as Marketing's chosen date.
+    func testEveryEventSaysItsDayIsRelative() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        XCTAssertEqual(ics.components(separatedBy: "DESCRIPTION:").count - 1, 3,
+                       "every event needs a DESCRIPTION carrying the caveat — got:\n\(ics)")
+        XCTAssertEqual(ics.components(separatedBy: "day is relative to export").count - 1, 3,
+                       "each DESCRIPTION must say the day is relative — got:\n\(ics)")
+    }
+
     func testCalendarWithNoPayloadFallsBackToMarkdown() {
         let d = deliverable(.calendar, title: "Content calendar", body: "prose only")
         XCTAssertEqual(DeliverableExport.files(for: d).map(\.name), ["content-calendar.md"])

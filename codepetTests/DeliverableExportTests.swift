@@ -25,6 +25,14 @@ final class DeliverableExportTests: XCTestCase {
     /// `ChecklistItem`, `DocSection`, `PlanChange`, `DmMessage`, `SheetInput`,
     /// `SheetPayload`, `SiteContent` and `CalendarPayload` declare no initialiser and DO
     /// have a memberwise init, so those are constructed directly below.
+    ///
+    /// **The payload wire shape is FLAT.** `DeliverablePayload.init(from:)` decodes the
+    /// nested structs off the SAME decoder — `try? CalendarPayload(from: decoder)` — because
+    /// the generator's `record_deliverable` schema puts `weeks`, `price`, `title`, `brand`,
+    /// `steps` and `screens` at the top level of `payload`. There is no `{"calendar": {...}}`
+    /// wrapper on the wire, and a fixture that invents one does not describe production.
+    /// This is also what the `steps` key collision between `plan` ([String]) and `site`
+    /// ([SiteContent]) is about, and why each nested decode is `try?`.
     private func payload(json: String) throws -> DeliverablePayload {
         try JSONDecoder().decode(DeliverablePayload.self, from: Data(json.utf8))
     }
@@ -217,9 +225,12 @@ final class DeliverableExportTests: XCTestCase {
 
     /// Decoded, not constructed — `CalendarWeek` and `CalendarItem` both declare
     /// `init(from:)` and therefore have no memberwise initialiser. See `payload(json:)`.
+    ///
+    /// **Flat, not nested.** `DeliverablePayload` decodes `CalendarPayload` off the same
+    /// decoder, because the generator puts `weeks` at the top level of `payload`.
     private func calendarPayload() throws -> DeliverablePayload {
         try payload(json: """
-        {"calendar": {"weeks": [
+        {"weeks": [
           {"label": "Week 1", "items": [
             {"day": "Mon", "kind": "thread", "body": "Why I'm building a journal that answers"},
             {"day": "Fri", "kind": "post", "body": "What we refuse to do on a bad night"}
@@ -227,7 +238,7 @@ final class DeliverableExportTests: XCTestCase {
           {"label": "Week 2", "items": [
             {"day": "Tue", "kind": "post", "body": "On-device vs server"}
           ]}
-        ]}}
+        ]}
         """)
     }
 

@@ -144,14 +144,23 @@ enum AttachmentPicker {
     /// **`loadItem(forTypeIdentifier:)` for `.fileURL` returns `NSSecureCoding`, and which
     /// concrete type arrives depends on the drag SOURCE** — Finder, a browser and another app
     /// do not agree. The first version of the drop path handled only `Data`, so a drag that
-    /// handed back an `NSURL` resolved to nothing and the whole feature looked inert.
+    /// handed back a URL object resolved to nothing and the whole feature looked inert.
+    ///
+    /// **There is deliberately no `NSURL` branch.** One was written and then measured to be
+    /// unreachable: Swift bridges `NSURL` to `URL`, so `item as? URL` already catches it, and
+    /// deleting the branch changed no test result. It is recorded here so it is not helpfully
+    /// re-added.
+    ///
+    /// **The `Data` branch needs its own `isFileURL` check.**
+    /// `URL(dataRepresentation:relativeTo:)` is lenient — it returns a non-nil URL with an
+    /// empty scheme for arbitrary bytes, so without the check two garbage bytes resolved to
+    /// something this function claimed was a file.
     ///
     /// `Any?` rather than `NSSecureCoding?` so a test can drive it with each shape.
     /// Returns nil for anything that is not a file URL, and the caller must REPORT that
     /// rather than discard it — see `acceptingDrops`.
     static func fileURL(from item: Any?) -> URL? {
         if let url = item as? URL { return url }
-        if let ns = item as? NSURL { return ns as URL }
         // `URL(dataRepresentation:relativeTo:)` is lenient: fed the two raw bytes 0xFF,0xFE
         // (not a real dropped path — see the resolver tests) it still returns a URL, with no
         // scheme and `isFileURL` false, rather than nil. Checking `isFileURL` here matches the

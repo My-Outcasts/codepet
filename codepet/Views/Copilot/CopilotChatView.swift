@@ -144,7 +144,7 @@ struct CopilotChatView: View {
         PetCharacter.all[companyStore.company.companionId]?.color ?? CodepetTheme.accentPurple
     }
     private var canSend: Bool {
-        !companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
             && !companyStore.isCompanionTyping && !companyStore.isStreaming && !companyStore.isFanningOut
     }
     /// True while a chat turn OR a parallel fan-out is in flight — gates the
@@ -1132,7 +1132,12 @@ struct CopilotChatView: View {
     /// (finding logged 6 Sep, live-path half of the bug Task 3 fixed only on the demo path).
     private func send(aboutTask: RoadmapTask? = nil) {
         let text = companyStore.chatDraft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // A turn carrying attachments is complete on its own — bail only when BOTH
+        // the words and the files are empty. See `canSend` and `CompanyStore.sendChat`,
+        // which relax the same guard for the same reason: `renderTurn` on the backend
+        // already accepts a media-only turn ("a media turn with no text returns the
+        // media blocks alone"), so refusing to send one client-side was the bug.
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         companyStore.chatDraft = ""
         showHistory = false   // sending always returns to the live conversation
         // One message, one handoff. The chip used to survive the send — and `newChat()` and a
@@ -2238,8 +2243,11 @@ struct CopilotBubble: View {
         // **`&& attachments.isEmpty` is load-bearing.** Dropping screenshots in with no
         // typed words is a complete turn — the backend renders it as media blocks alone,
         // deliberately (`renderTurn`: "a media turn with no text returns the media blocks
-        // alone"). Without this clause the founder sent that turn, got an answer about
-        // images, and her own message drew nothing whatsoever above it.
+        // alone"). This clause exists so an attachments-only turn still renders its
+        // images here instead of an empty bordered box. Until the fix that let such a
+        // turn be sent at all, this could never fire: `canSend`, `send()` and
+        // `CompanyStore.sendChat` all guarded on non-empty text, so an images-only turn
+        // never left the composer in the first place.
         if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && message.attachments.isEmpty {
             EmptyView()

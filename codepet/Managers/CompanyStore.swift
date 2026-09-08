@@ -808,7 +808,12 @@ final class CompanyStore: ObservableObject {
                   attachments: [ChatAttachment] = [],
                   aboutTask: RoadmapTask? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        // A turn carrying attachments is complete on its own — bail only when BOTH the
+        // words and the files are empty. `renderTurn` on the backend already accepts a
+        // media-only turn ("a media turn with no text returns the media blocks alone"),
+        // so refusing one here (and in `canSend`/`send()`, which guard the same way for
+        // the same reason) was the bug, not a safety check.
+        guard !text.isEmpty || !attachments.isEmpty else { return }
         if EditCodeRouting.shouldRoute(department: department, projectLinked: activeProjectLink != nil) {
             startCodeRun(ask: text)   // echoes the ask, anchors, and proposes the run
             dockCollapsed = false     // reveal the dock (no `.chat` destination on main)

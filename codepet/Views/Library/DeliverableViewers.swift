@@ -354,15 +354,33 @@ struct DmsViewer: View {
     @State private var sent: Set<Int> = []
     @Environment(\.uiLanguage) private var lang
 
+    /// The whole set as pasteable text, matching what `DeliverableExport.dmsFiles(_:base:)`
+    /// writes per recipient — same building block (`To:` / `Why:` / the message), so Copy and
+    /// Export can never hand the founder different documents for the same set. A pure static so
+    /// a test can assert the two stay in lockstep without going through `NSPasteboard`.
+    static func copyAllText(_ messages: [DmMessage]) -> String {
+        messages
+            .map { "To: \($0.name)\nWhy: \($0.note)\n\n\($0.msg)" }
+            .joined(separator: "\n\n---\n\n")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // `DmsViewer` builds its own per-message cards rather than one `DeliverableFrame`
-            // — a structured `.dms` is several sibling cards, not one framed document — so
-            // there is no eyebrow row to hang Export on. A bare header carrying just the
-            // button is the smallest addition that does not restructure the per-card layout.
-            HStack {
-                Spacer()
-                DeliverableExportButton(deliverable: deliverable)
+            // — a structured `.dms` is several sibling cards, not one framed document — so this
+            // hand-builds the same header `DeliverableFrame` draws (spacing: 0, matching its own
+            // header+rule block): eyebrow left, Copy/Export right, a rule beneath. Set-level,
+            // distinct from each card's own eyebrow + Copy.
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    DeliverableEyebrow(text: lang == .vi ? "Tiếp cận" : "Outreach")
+                    Spacer(minLength: 12)
+                    HStack(spacing: 10) {
+                        DeliverableCopyButton(text: Self.copyAllText(messages))
+                        DeliverableExportButton(deliverable: deliverable)
+                    }
+                }
+                DeliverableRule().padding(.vertical, 14)
             }
             ForEach(Array(messages.enumerated()), id: \.offset) { i, message in
                 card(index: i, message: message)

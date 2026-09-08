@@ -166,6 +166,34 @@ final class DeliverableExportTests: XCTestCase {
         XCTAssertEqual(files[0].name, "outreach.txt")
     }
 
+    /// `DmsViewer`'s set-level Copy and `DeliverableExport.dmsFiles(_:base:)` must never hand
+    /// the founder different documents for the same set — the standing principle on this
+    /// branch. Asserts the copy-all text and the concatenated export files carry the same
+    /// recipients, notes and messages, rather than trusting that two hand-written strings
+    /// happen to agree.
+    func testDmsCopyAllAgreesWithWhatExportWrites() throws {
+        let messages = [
+            DmMessage(name: "Lapsed journaler", note: "quit over streaks",
+                      msg: "We cut the streak counter. Want the first build?"),
+            DmMessage(name: "Privacy-first buyer", note: "asked about training",
+                      msg: "Nothing leaves your phone unless you ask."),
+        ]
+        let d = deliverable(.dms, title: "Early access", payload: DeliverablePayload(messages: messages))
+        let files = DeliverableExport.files(for: d)
+        let exportedTexts = try files.map { try XCTUnwrap(String(data: $0.data, encoding: .utf8)) }
+        let copyAll = DmsViewer.copyAllText(messages)
+
+        XCTAssertEqual(files.count, messages.count)
+        for message in messages {
+            XCTAssertTrue(copyAll.contains(message.name), "copy-all is missing recipient \(message.name)")
+            XCTAssertTrue(copyAll.contains(message.note), "copy-all is missing the note for \(message.name)")
+            XCTAssertTrue(copyAll.contains(message.msg), "copy-all is missing the message for \(message.name)")
+            XCTAssertTrue(exportedTexts.contains {
+                $0.contains(message.name) && $0.contains(message.note) && $0.contains(message.msg)
+            }, "no exported file carries the same recipient+note+message trio as copy-all for \(message.name)")
+        }
+    }
+
     func testEmailExportsAsText() throws {
         let d = deliverable(.email, title: "Day 14 check-in", body: "How has the first fortnight been?")
         let files = DeliverableExport.files(for: d)

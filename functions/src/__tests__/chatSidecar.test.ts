@@ -179,6 +179,45 @@ describe("claudeArgs", () => {
     expect(a).toContain("--allowedTools");
     expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch"]);
   });
+
+  /**
+   * Read is granted ONLY for a turn that actually carries a file, so an ordinary turn's
+   * flags stay exactly what they were.
+   */
+  it("leaves an ordinary turn's flags exactly as they were", () => {
+    const a = claudeArgs(base);
+    expect(a).not.toContain("--restricted");
+    expect(a[a.indexOf("--tools") + 1]).not.toContain("Read");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("Read");
+  });
+
+  /**
+   * `--restricted` is what makes granting Read acceptable: it confines the file tools to
+   * the working directory, which is the per-turn temp dir holding nothing but the files the
+   * sidecar just wrote there. Read WITHOUT it is filesystem-wide, which is the safety
+   * property this file's flag notes exist to defend — so the two ship together or not at
+   * all.
+   */
+  it("confines the file tools to the run directory whenever it grants Read", () => {
+    const a = claudeArgs({ ...base, readAttachments: true });
+    expect(a).toContain("--restricted");
+    expect(a[a.indexOf("--tools") + 1]).toBe("Read");
+    const withSearch = claudeArgs({ ...base, readAttachments: true, webSearch: true });
+    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,Read");
+    expect(withSearch).toContain("--restricted");
+  });
+
+  /**
+   * The same rule the WebSearch bug above was: `--tools` makes Read AVAILABLE,
+   * `--allowedTools` is what PERMITS it. Only the first would deny the call and hand the
+   * founder an apology — the exact shape of the bug this fix exists to end.
+   */
+  it("permits Read, not just enables it", () => {
+    const a = claudeArgs({ ...base, readAttachments: true });
+    const permitted = a.slice(a.indexOf("--allowedTools") + 1);
+    expect(permitted).toContain("Read");
+    expect(permitted).toContain("mcp__codepet__navigate");
+  });
 });
 
 describe("ingestLine", () => {
@@ -315,14 +354,72 @@ describe("renderForPrompt", () => {
   });
 
   /**
-   * A founder who attached a screenshot must be able to tell it was not read. Dropping it
-   * silently makes the model look like it ignored them.
+   * Still reachable, and still the right answer for a caller with nowhere to put the bytes
+   * (`oneShotOps` passes no writer). A founder who attached a screenshot must be able to
+   * tell it was not read; dropping it silently makes the model look like it ignored them.
    */
   it("names an attachment it cannot carry rather than dropping it silently", () => {
     const out = renderForPrompt([
       { role: "user", content: [{ type: "text", text: "look" }, { type: "image" } as any] },
     ]);
     expect(out).toContain("look");
+    expect(out).toContain("attachment omitted");
+  });
+
+  /**
+   * **The reported bug (8 Sep).** Five screenshots reached the sidecar as real image blocks
+   * and every one was replaced by "[attachment omitted …]" — which the pet then read back
+   * as its own excuse, so the founder heard the transport's limitation in the voice of the
+   * specialist she had asked. `claude -p` still cannot take an image block, but it can open
+   * a file, so the bytes go to disk and the prompt points at them.
+   */
+  it("points at an attachment written to disk instead of omitting it", () => {
+    const out = renderForPrompt(
+      [{ role: "user", content: [{ type: "text", text: "look" }, { type: "image" } as any] }],
+      () => "attachment-1.png",
+    );
+    expect(out).toContain("look");
+    expect(out).toContain("attachment-1.png");
+    expect(out).not.toContain("attachment omitted");
+  });
+
+  /**
+   * The writer is handed the block so it can write the bytes and pick an extension from the
+   * media type. Two images in one turn must not collide — the founder attached five.
+   */
+  it("gives the writer every media block, and keeps two in one turn apart", () => {
+    const seen: unknown[] = [];
+    const out = renderForPrompt(
+      [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AA" } },
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BB" } },
+            { type: "text", text: "two shots" },
+          ] as any,
+        },
+      ],
+      (block) => {
+        seen.push(block);
+        return `attachment-${seen.length}.png`;
+      },
+    );
+    expect(seen).toHaveLength(2);
+    expect((seen[1] as any).source.media_type).toBe("image/jpeg");
+    expect(out).toContain("attachment-1.png");
+    expect(out).toContain("attachment-2.png");
+  });
+
+  /**
+   * A writer that declines — an unwritable run dir, a media type with no extension — must
+   * fall back to naming the attachment, not crash the turn.
+   */
+  it("falls back to omitting when the writer declines a block", () => {
+    const out = renderForPrompt(
+      [{ role: "user", content: [{ type: "text", text: "look" }, { type: "image" } as any] }],
+      () => null,
+    );
     expect(out).toContain("attachment omitted");
   });
 

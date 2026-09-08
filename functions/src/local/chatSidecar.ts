@@ -42,6 +42,21 @@ import { toMcpTools, allowedToolNames, serveMcp } from "./mcpToolServer";
  */
 const MCP_SERVER_FLAG = "--mcp-server";
 
+/**
+ * The extension Read needs to recognise a saved attachment. Keyed by the media types
+ * `mediaBlock` in `companyChatCore` is allowed to emit — anything else has no entry, so
+ * `saveAttachment` declines it and the block falls back to being named. `image/jpeg` maps
+ * to `.jpg` for the same reason the client maps `.jpg` to `image/jpeg`: the pair has two
+ * spellings and only one of them is right.
+ */
+const ATTACHMENT_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
 function frame(event: string, payload: unknown): void {
   process.stdout.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
@@ -71,6 +86,16 @@ function frame(event: string, payload: unknown): void {
  *   "permissions not granted", because the toggle drives `enabled_skills` for the Cloud
  *   Function and never reached this list. Added HERE rather than at the call site so the
  *   two flags cannot drift apart again: enabling the tool is what permits it.
+ * - **`Read` + `--restricted`, and only for a turn that carries a file.** `claude -p` cannot
+ *   take an image block, so an attachment is written into the run directory and read from
+ *   there. `--restricted` is what makes granting Read acceptable: it confines the file
+ *   tools to the working directory, which is that same per-turn temp dir, holding nothing
+ *   but `tools.json`, `mcp.json` and the files this process just wrote. Read WITHOUT it is
+ *   filesystem-wide — the founder's repos, keys and Documents — which is the safety
+ *   property two bullets up. Measured: `--restricted` leaves `mcp_servers: [codepet
+ *   connected]` and the tool list intact, so it costs the turn nothing; and a Read one
+ *   directory above cwd is refused. Both flags are off for a turn with no attachment, so
+ *   ordinary flags are byte-identical to what they were.
  * - Prompt on stdin, never as an argument — the variadic flag above would swallow it.
  */
 export function claudeArgs(opts: {
@@ -80,12 +105,20 @@ export function claudeArgs(opts: {
   effort?: string;
   webSearch: boolean;
   systemPrompt: string;
+  /** True only for a turn that actually wrote a file into the run dir — see `--restricted`. */
+  readAttachments?: boolean;
 }): string[] {
   // See the `WebSearch` note above: available and permitted are two different flags, and
-  // the tool is useless with only the first.
-  const allowedWithBuiltins = opts.webSearch
-    ? [...opts.allowed, "WebSearch"]
-    : opts.allowed;
+  // the tool is useless with only the first. Read is subject to exactly the same rule.
+  const allowedWithBuiltins = [
+    ...opts.allowed,
+    ...(opts.webSearch ? ["WebSearch"] : []),
+    ...(opts.readAttachments ? ["Read"] : []),
+  ];
+  // "" when neither is on, which the CLI accepts as "no built-ins".
+  const tools = [opts.webSearch ? "WebSearch" : null, opts.readAttachments ? "Read" : null]
+    .filter(Boolean)
+    .join(",");
   return [
     "-p",
     // REPLACE, not append. Claude Code's own system prompt is a coding assistant's; byte's
@@ -100,7 +133,9 @@ export function claudeArgs(opts: {
     "--include-partial-messages",
     // Empty string when off, which the CLI accepts as "no built-ins" — the restriction is
     // the safety property described above.
-    "--tools", opts.webSearch ? "WebSearch" : "",
+    "--tools", tools,
+    // Never granted without this: see the `Read` note above.
+    ...(opts.readAttachments ? ["--restricted"] : []),
     ...(opts.model ? ["--model", opts.model] : []),
     // Verified on 2.1.241 that --effort is accepted alongside every model Codepet offers,
     // Haiku 4.5 included: the API rejects `effort` on some models but the CLI absorbs that
@@ -259,6 +294,31 @@ async function main(): Promise<void> {
   );
 
   const acc: TurnResult = { text: "", toolUses: [], model: null };
+
+  // Every media block this turn carries, written into the run dir so Claude Code can open
+  // it. Named by position rather than by the founder's filename: `buildMessages` keeps only
+  // what the API needs on a content block, so the filename is not here to use — and a
+  // counter that never rewinds keeps the five screenshots of one turn apart.
+  let saved = 0;
+  const saveAttachment = (block: unknown): string | null => {
+    const b = block as { source?: { data?: unknown; media_type?: unknown } };
+    const data = b?.source?.data;
+    const mediaType = typeof b?.source?.media_type === "string" ? b.source.media_type : "";
+    const ext = ATTACHMENT_EXTENSIONS[mediaType];
+    if (typeof data !== "string" || !data || !ext) return null;
+    const name = `attachment-${++saved}.${ext}`;
+    try {
+      fs.writeFileSync(path.join(dir, name), Buffer.from(data, "base64"));
+    } catch {
+      return null; // the number stays spent, so the next name is still unique
+    }
+    return name;
+  };
+
+  // Rendered BEFORE the flags, because whether anything was written is what decides
+  // `readAttachments` — and therefore whether this turn is granted Read at all.
+  const prompt = flattenTranscript(built.messages, saveAttachment);
+
   const args = claudeArgs({
     mcpConfigPath,
     allowed,
@@ -266,6 +326,7 @@ async function main(): Promise<void> {
     effort: process.env.CODEPET_CHAT_EFFORT,
     webSearch,
     systemPrompt: built.systemBlocks.map((b) => b.text).join("\n\n"),
+    readAttachments: saved > 0,
   });
 
   // A login shell so the founder's PATH resolves, and the two credential variables
@@ -282,7 +343,7 @@ async function main(): Promise<void> {
   // The turn's prompt goes on stdin, never as an argument: `--allowedTools` above is
   // variadic and would swallow it. `renderForPrompt` is what carries the history, since
   // `claude -p` takes one prompt rather than a messages array.
-  child.stdin.write(flattenTranscript(built.messages));
+  child.stdin.write(prompt);
   child.stdin.end();
 
   let buf = "";

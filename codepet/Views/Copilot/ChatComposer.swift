@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The chat composer — one reusable input surface used in BOTH the empty hero
 /// and the docked active conversation. Owns no state: draft/mode live in the
@@ -133,6 +134,10 @@ struct ChatComposer: View {
     /// `body` runs constantly and `data` is base64 of an image up to 2576px.
     @State private var tileCache = AttachmentThumbnailCache()
 
+    /// True while a drag is over the composer. Drives the border highlight — an invisible
+    /// drop target is indistinguishable from a broken one.
+    @State private var dropTargeted = false
+
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -151,7 +156,7 @@ struct ChatComposer: View {
     /// The dock: chips on their own row (380pt cannot hold chips + controls), and
     /// the mode pill, which still drives `ChatMode` in main's shell.
     private var dockBody: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let stack = VStack(alignment: .leading, spacing: 12) {
             pillRow
 
             ComposerField(placeholder: placeholder, text: $draft, focus: focus, onSend: onSend)
@@ -190,9 +195,14 @@ struct ChatComposer: View {
                 .stroke(accent.opacity(focus.wrappedValue ? 0.9 : 0.5),
                         lineWidth: focus.wrappedValue ? 1.5 : 1.2)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent, lineWidth: dropTargeted ? 2 : 0)
+        )
         .codepetShadow(CodepetTheme.floatingShadow)
         .shadow(color: (focus.wrappedValue && !reduceTransparency) ? accent.opacity(0.28) : .clear, radius: 18)
         .opacity(isBusy ? 0.72 : 1.0)
+        return acceptingDrops(stack)
     }
 
     /// The prototype's composer: input, then ONE control row — chips, `+`, send.
@@ -204,7 +214,7 @@ struct ChatComposer: View {
     /// outline (the dock's) makes the composer the loudest thing on a pane it no
     /// longer has to compete for attention in.
     private var twoModeBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let stack = VStack(alignment: .leading, spacing: 10) {
             pillRow
 
             ComposerField(placeholder: placeholder, text: $draft, focus: focus,
@@ -262,9 +272,14 @@ struct ChatComposer: View {
                             .opacity(focus.wrappedValue ? 0.9 : 0.35),
                         lineWidth: 1)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accent, lineWidth: dropTargeted ? 2 : 0)
+        )
         .shadow(color: restShadow.color, radius: restShadow.radius, x: restShadow.x, y: restShadow.y)
         .shadow(color: (focus.wrappedValue && !reduceTransparency) ? accent.opacity(0.28) : .clear, radius: 16)
         .opacity(isBusy ? 0.62 : 1.0)
+        return acceptingDrops(stack)
     }
 
     /// What the founder pinned or attached, above the field — Claude's attachment
@@ -674,20 +689,7 @@ struct ChatComposer: View {
                         // No `limit:` and no `room` guard. The picker encodes whatever she
                         // chose and `admit` alone decides — see `pickAndEncode`'s comment
                         // for the defect that rule exists to prevent.
-                        let picked = AttachmentPicker.pickAndEncode()
-                        // `AttachmentBudget` owns BOTH caps, so the file count and the
-                        // total encoded size are decided in one pure place that a test
-                        // can reach — and the store applies the same call at the wire.
-                        let admission = AttachmentBudget.admit(picked.attachments,
-                                                               to: atts.wrappedValue)
-                        var next = atts.wrappedValue
-                        for a in admission.accepted { next = ChatAttachment.adding(a, to: next) }
-                        atts.wrappedValue = next
-                        // Assigned every time, so a clean pick clears a stale refusal.
-                        let lines = [AttachmentBudget.refusalMessage(admission, lang),
-                                     AttachmentBudget.unsupportedMessage(picked.rejected, lang)]
-                            .compactMap { $0 }
-                        attachNotice = lines.isEmpty ? nil : lines.joined(separator: " ")
+                        absorb(AttachmentPicker.pickAndEncode())
                     } label: {
                         menuRow(PlusMenu.attachLabel(lang),
                                 full ? PlusMenu.attachFullDetail(lang)
@@ -819,6 +821,43 @@ struct ChatComposer: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    /// Take a freshly encoded pick and let `admit` decide — the ONE path for both the
+    /// `+` menu and a drop. Two copies of this sequence would be two chances to skip the
+    /// notice, and a skipped notice is the defect this whole change exists to end.
+    private func absorb(_ picked: (attachments: [ChatAttachment], rejected: [String])) {
+        guard let atts = attachments else { return }
+        let admission = AttachmentBudget.admit(picked.attachments, to: atts.wrappedValue)
+        var next = atts.wrappedValue
+        for a in admission.accepted { next = ChatAttachment.adding(a, to: next) }
+        atts.wrappedValue = next
+        // Assigned every time, so a clean pick clears a stale refusal.
+        let lines = [AttachmentBudget.refusalMessage(admission, lang),
+                     AttachmentBudget.unsupportedMessage(picked.rejected, lang)]
+            .compactMap { $0 }
+        attachNotice = lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    /// Files dropped on the composer go through the SAME encode-then-admit path as the
+    /// `+` menu, so a drop cannot bypass the cap or the notice.
+    private func acceptingDrops<V: View>(_ content: V) -> some View {
+        content.onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            guard attachments != nil else { return false }
+            Task { @MainActor in
+                var urls: [URL] = []
+                for p in providers {
+                    if let item = try? await p.loadItem(forTypeIdentifier: UTType.fileURL.identifier),
+                       let data = item as? Data,
+                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        urls.append(url)
+                    }
+                }
+                guard !urls.isEmpty else { return }
+                absorb(AttachmentPicker.encodeAll(urls))
+            }
+            return true
+        }
     }
 
     /// Voice mode — spec §1. `waveform` rather than `mic`: the mic glyph means

@@ -39,11 +39,17 @@ final class DeliverableExporterTests: XCTestCase {
     }
 
     /// A name cannot escape the directory the founder chose.
+    ///
+    /// Compared by `.path`, not by `URL ==`. `deletingLastPathComponent()` returns a URL WITH
+    /// a trailing slash and URL equality is string-based, so `file:///tmp/x/` != `file:///tmp/x`
+    /// and an assertion on the URLs fails while the paths are identical.
     func testANameCannotClimbOutOfTheChosenDirectory() throws {
         let urls = try DeliverableExporter.write(
             [ExportFile(name: "../escaped.md", data: Data("x".utf8))], to: dir)
-        XCTAssertEqual(urls[0].deletingLastPathComponent().standardizedFileURL,
-                       dir.standardizedFileURL)
+        XCTAssertEqual(urls[0].deletingLastPathComponent().standardizedFileURL.path,
+                       dir.standardizedFileURL.path)
+        // The security property, not just the neighbourhood: the `../` is gone.
+        XCTAssertEqual(urls[0].lastPathComponent, "escaped.md")
     }
 
     func testEndToEndADeliverableBecomesFilesOnDisk() throws {

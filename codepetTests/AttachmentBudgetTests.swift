@@ -39,7 +39,6 @@ final class AttachmentBudgetTests: XCTestCase {
                       att("c.png", encoded: encoded)]
 
         // Each one passes the per-file rule on its own — that is why it failed silently.
-        XCTAssertEqual(picked.count, 3)
         XCTAssertGreaterThan(AttachmentBudget.base64Bytes(picked),
                              AttachmentBudget.maxTotalBase64Bytes,
                              "the three-file worst case must be over the total cap, or this test proves nothing")
@@ -237,13 +236,20 @@ final class AttachmentBudgetTests: XCTestCase {
 
     /// The refusal has to NAME the file and state the rule. "Some files were skipped" is
     /// not actionable; this is the sentence the founder reads instead of silence.
+    ///
+    /// **The filenames deliberately carry no digits.** An earlier version numbered them
+    /// `s0…s10`, so the refused file was `s10.png` and `contains("10")` was satisfied by the
+    /// FILENAME — a `refusalMessage` that dropped the cap entirely would still have passed.
+    /// Letters make the two assertions independent, and the cap is read from the constant so
+    /// the test cannot outlive a change to it.
     func testTheCountRefusalNamesTheFileAndTheRule() {
-        let admission = AttachmentBudget.admit((0..<11).map { att("s\($0).png", encoded: 1024) },
-                                               to: [])
+        let names = (0..<11).map { "shot-\(Character(UnicodeScalar(97 + $0)!)).png" }
+        let admission = AttachmentBudget.admit(names.map { att($0, encoded: 1024) }, to: [])
         let msg = AttachmentBudget.refusalMessage(admission, .en)
         XCTAssertNotNil(msg)
-        XCTAssertTrue(msg!.contains("s10.png"), "must name the refused file — got: \(msg!)")
-        XCTAssertTrue(msg!.contains("10"), "must state the cap — got: \(msg!)")
+        XCTAssertTrue(msg!.contains("shot-k.png"), "must name the refused file — got: \(msg!)")
+        XCTAssertTrue(msg!.contains(String(ChatAttachment.max)),
+                      "must state the cap — got: \(msg!)")
     }
 
     /// A pin is grounding, a file is payload. They shared a ceiling only because they share

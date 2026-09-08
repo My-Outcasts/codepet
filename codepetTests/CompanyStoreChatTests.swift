@@ -524,6 +524,48 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.map(\.role), [.me])       // no companion streaming turn
     }
 
+    /// F2's notice, exercised through the real route rather than the pure string
+    /// function alone (`AttachmentBudgetTests
+    /// .testTheEngineeringNoticeNamesTheFilesAndIsSilentWhenEmpty` only proves the
+    /// copy; this proves it actually reaches `chatMessages`). Engineering department +
+    /// linked project + a non-empty attachment list must land a `.companion` message
+    /// naming the file, on top of everything `testSendChatWithEngDeptAndLinkedProject
+    /// RoutesToCodingAgent` already asserts — the coding run is still staged, and the
+    /// founder's own ask is still the only `.me` message.
+    ///
+    /// **Mutation check:** deleting the `AttachmentBudget.engineeringUnsupportedMessage`
+    /// call in `CompanyStore.sendChat`'s `EditCodeRouting.shouldRoute` branch turns this
+    /// test red (`XCTAssertNotNil(notice)` fails, message count drops to 1) — verified
+    /// 8 Sep, then restored.
+    func testSendChatWithEngDeptAndLinkedProjectAndAttachmentsTellsFounderTheFileDidNotRide() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
+        let s = CompanyStore(
+            loader: { _ in .empty }, saver: { _, _ in true },
+            chatSender: { _ in XCTFail("must not call chat client when routed to coding agent"); return nil },
+            chatStreamer: { _ in
+                XCTFail("must not call chat streamer when routed to coding agent")
+                return AsyncThrowingStream { $0.finish() }
+            },
+            identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"))
+        await s.hydrate(companyId: "u")
+        s.linkProject(path: dir.path, bootstrapClaudeMd: false)
+        let eng = DepartmentCatalog.find("eng")!
+        let shot = ChatAttachment(id: "shot.png", kind: .image, filename: "shot.png",
+                                  mediaType: "image/png", data: "QQ==", byteCount: 4)
+        await s.sendChat("add a health check endpoint", language: .en, department: eng,
+                         attachments: [shot])
+        XCTAssertNotNil(s.codingRun.run)                                // the run still stages
+        XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion])   // ask, then the notice
+        let notice = s.chatMessages.last
+        XCTAssertEqual(notice?.role, .companion)
+        XCTAssertTrue(notice?.text.contains("shot.png") ?? false,
+                      "notice must name the dropped file: \(String(describing: notice?.text))")
+    }
+
     /// Without a linked project, the same Engineering-department ask does NOT route
     /// to the coding agent (mirrors `EditCodeRouting.shouldRoute`'s `projectLinked`
     /// gate) — it falls through to the ordinary grounded chat send.
@@ -558,6 +600,40 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertNotNil(s.codingRun.run)                   // a run was staged (.build → startCodeRun)
         XCTAssertEqual(s.chatMessages.map(\.role), [.me])  // echoed ask, no companion turn
         XCTAssertEqual(s.chatMessages.last?.text, "add a health check endpoint")
+    }
+
+    /// CRITICAL fix: before this, an attachments-only Build turn was a total silent
+    /// no-op — F1 (`459ee07`) let `canSend`/`send()` through with an empty draft as
+    /// long as attachments were present, but `startBuild` never accepted them and
+    /// `startCodeRun`/`startEngineeringRun` each independently guard on non-empty text
+    /// and return, so the composer cleared its tiles and nothing else happened: no
+    /// run, no message, no notice. `startBuild(ask:attachments:language:)` now appends
+    /// a `.companion` notice (same mechanism as F2's Engineering notice) whenever
+    /// attachments ride the call, so an attachments-only Build turn is never silent —
+    /// the notice is the entire founder-visible outcome, which is the honest thing to
+    /// say about a turn that was only a file.
+    ///
+    /// **Mutation check:** deleting the `AttachmentBudget.buildUnsupportedMessage` call
+    /// in `CompanyStore.startBuild` turns this test red (`XCTAssertNotNil(notice)`
+    /// fails, `chatMessages` is empty) — verified 8 Sep, then restored.
+    func testBuildModeWithAttachmentsAndNoTextTellsFounderTheFileDidNotRide() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("build mode must not call chat client"); return nil },
+                             chatStreamer: { _ in
+                                 XCTFail("build mode must not call chat streamer")
+                                 return AsyncThrowingStream { $0.finish() }
+                             })
+        await s.hydrate(companyId: "u")
+        let shot = ChatAttachment(id: "shot.png", kind: .image, filename: "shot.png",
+                                  mediaType: "image/png", data: "QQ==", byteCount: 4)
+        // Empty ask, attachments only — exactly the turn F1 made reachable and silent.
+        s.startBuild(ask: "", attachments: [shot], language: .en)
+        XCTAssertNil(s.codingRun.run, "no run should stage from an empty ask")
+        XCTAssertEqual(s.chatMessages.count, 1, "the notice must be the whole visible outcome")
+        let notice = s.chatMessages.first
+        XCTAssertEqual(notice?.role, .companion)
+        XCTAssertTrue(notice?.text.contains("shot.png") ?? false,
+                      "notice must name the file that didn't ride: \(String(describing: notice?.text))")
     }
 
     /// The `.ask`/`.plan` branch routes through the ordinary grounded chat path

@@ -14,17 +14,23 @@ import UniformTypeIdentifiers
 /// happens on this side of the wire — which is why tuning it never needs a deploy.
 enum AttachmentPicker {
 
-    /// Open the panel and encode whatever the founder picked, dropping anything we
-    /// cannot honour rather than half-accepting it.
+    /// Open the panel and encode whatever the founder picked.
     ///
-    /// Returns only the files that survived: an unsupported extension, an unreadable
-    /// file, or one over `ChatAttachment.maxBytes` is skipped. `rejected` names them
-    /// so the caller can say so instead of the founder wondering where her file went.
-    static func pickAndEncode(limit: Int) -> (attachments: [ChatAttachment], rejected: [String]) {
+    /// **This function no longer has a limit, and that is the fix.** It used to take one
+    /// and trim with `panel.urls.prefix(limit)` — while `rejected` collected only files that
+    /// FAILED TO ENCODE, so a file removed by the trim was reported nowhere. The founder
+    /// picked four images, three appeared, and nothing was said (8 Sep). The panel had
+    /// offered her a fourth selection and then taken it back in silence.
+    ///
+    /// `AttachmentBudget.admit` owns both caps, is pure and is tested, and its `.tooMany`
+    /// refusal has always rendered a message naming the files. That machinery was simply
+    /// unreachable, because this function trimmed the list before `admit` could see it. So
+    /// there is now exactly one place a file can be refused, and it must say why.
+    static func pickAndEncode() -> (attachments: [ChatAttachment], rejected: [String]) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = limit > 1
+        panel.allowsMultipleSelection = true
         panel.allowedContentTypes = ChatAttachment.allowedExtensions.compactMap {
             UTType(filenameExtension: $0)
         }
@@ -32,10 +38,22 @@ enum AttachmentPicker {
         panel.message = "Screenshots, PDFs, and text files. Images are resized before sending."
 
         guard panel.runModal() == .OK else { return ([], []) }
+        return encodeAll(panel.urls)
+    }
 
+    /// Encode a set of files, keeping the founder's order.
+    ///
+    /// Split out from the panel so it is reachable from a test with fixture URLs — the
+    /// `NSOpenPanel` is the only part of this file a test cannot drive.
+    ///
+    /// **Deliberately has no cap of any kind.** A limit here is a second place a file can
+    /// disappear, and the last one produced a defect the founder could see and we could
+    /// not explain. `encode` already refuses a single file over `ChatAttachment.maxBytes`,
+    /// which bounds the cost; everything else is `admit`'s to judge.
+    static func encodeAll(_ urls: [URL]) -> (attachments: [ChatAttachment], rejected: [String]) {
         var out: [ChatAttachment] = []
         var rejected: [String] = []
-        for url in panel.urls.prefix(limit) {
+        for url in urls {
             if let a = encode(url) { out.append(a) } else { rejected.append(url.lastPathComponent) }
         }
         return (out, rejected)

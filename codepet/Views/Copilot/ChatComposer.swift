@@ -664,9 +664,10 @@ struct ChatComposer: View {
                 if let atts = attachments {
                     let full = atts.wrappedValue.count >= ChatAttachment.max
                     Button {
-                        let room = ChatAttachment.max - atts.wrappedValue.count
-                        guard room > 0 else { return }
-                        let picked = AttachmentPicker.pickAndEncode(limit: room)
+                        // No `limit:` and no `room` guard. The picker encodes whatever she
+                        // chose and `admit` alone decides — see `pickAndEncode`'s comment
+                        // for the defect that rule exists to prevent.
+                        let picked = AttachmentPicker.pickAndEncode()
                         // `AttachmentBudget` owns BOTH caps, so the file count and the
                         // total encoded size are decided in one pure place that a test
                         // can reach — and the store applies the same call at the wire.

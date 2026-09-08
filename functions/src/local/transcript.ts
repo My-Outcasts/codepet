@@ -42,18 +42,35 @@ export interface TranscriptMessage {
  * So flattening is not a first cut to be improved later. It is the only shape `claude -p`
  * supports, and the divergence from the HTTP path is permanent for this transport.
  *
- * Attachments cannot ride a text prompt. They are named rather than dropped silently, so a
- * founder who attached a screenshot sees that it was not read instead of wondering why the
+ * **Attachments go to disk, because a text prompt cannot carry an image block but Claude
+ * Code can open a file.** A caller with somewhere to put the bytes passes `saveMedia`; it
+ * writes the block and returns the filename, and the prompt then points at it. Only
+ * `chatSidecar` does — it has a per-turn run directory and confines Read to it with
+ * `--restricted`. `oneShotOps` passes nothing and keeps the behaviour below.
+ *
+ * Reported 8 Sep: five screenshots reached the sidecar as real image blocks and every one
+ * became "[attachment omitted …]", which the pet then read back as its own excuse ("this
+ * path can't open them") — so the founder was told the transport's problem in the voice of
+ * the specialist she had asked, and read it as the specialist refusing her.
+ *
+ * With no writer — or one that declines a block — the old text stands: a founder who
+ * attached a screenshot still sees that it was not read, instead of wondering why the
  * answer ignores it.
  */
-export function flattenTranscript(messages: TranscriptMessage[]): string {
+export function flattenTranscript(
+  messages: TranscriptMessage[],
+  saveMedia?: (block: unknown) => string | null,
+): string {
   const text = (content: TranscriptMessage["content"]): string => {
     if (typeof content === "string") return content;
     return content
       .map((b) => {
         const blk = b as { type?: string; text?: string };
         if (blk.type === "text") return blk.text ?? "";
-        return `[attachment omitted: ${blk.type ?? "unknown"} — this path cannot read files]`;
+        const name = saveMedia?.(b) ?? null;
+        return name
+          ? `[attachment: ${name} — the founder attached this file; read it from your working directory before answering]`
+          : `[attachment omitted: ${blk.type ?? "unknown"} — this path cannot read files]`;
       })
       .filter(Boolean)
       .join("\n");

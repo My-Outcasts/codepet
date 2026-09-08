@@ -62,6 +62,15 @@ function frame(event: string, payload: unknown): void {
  * - `--allowedTools` last, because it is variadic. It also has to be there at all: without
  *   it the model emits the tool_use and the call is denied, so the founder gets an
  *   apology instead of an answer.
+ * - **`WebSearch` goes in `--allowedTools` too, not just `--tools`.** The rule on the line
+ *   above applies to it and was not applied: `--tools` makes a built-in AVAILABLE, while
+ *   `--allowedTools` is what PERMITS it, so `--tools WebSearch` alongside an allow-list of
+ *   only `mcp__codepet__*` names produced exactly the failure described — the model called
+ *   the tool, the call was denied, and the founder got an apology. Reported 7 Sep: the
+ *   toolkit toggle read "Web research — Enabled" and every search still came back
+ *   "permissions not granted", because the toggle drives `enabled_skills` for the Cloud
+ *   Function and never reached this list. Added HERE rather than at the call site so the
+ *   two flags cannot drift apart again: enabling the tool is what permits it.
  * - Prompt on stdin, never as an argument — the variadic flag above would swallow it.
  */
 export function claudeArgs(opts: {
@@ -72,6 +81,11 @@ export function claudeArgs(opts: {
   webSearch: boolean;
   systemPrompt: string;
 }): string[] {
+  // See the `WebSearch` note above: available and permitted are two different flags, and
+  // the tool is useless with only the first.
+  const allowedWithBuiltins = opts.webSearch
+    ? [...opts.allowed, "WebSearch"]
+    : opts.allowed;
   return [
     "-p",
     // REPLACE, not append. Claude Code's own system prompt is a coding assistant's; byte's
@@ -84,13 +98,15 @@ export function claudeArgs(opts: {
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
+    // Empty string when off, which the CLI accepts as "no built-ins" — the restriction is
+    // the safety property described above.
     "--tools", opts.webSearch ? "WebSearch" : "",
     ...(opts.model ? ["--model", opts.model] : []),
     // Verified on 2.1.241 that --effort is accepted alongside every model Codepet offers,
     // Haiku 4.5 included: the API rejects `effort` on some models but the CLI absorbs that
     // rather than passing the error through.
     ...(opts.effort ? ["--effort", opts.effort] : []),
-    ...(opts.allowed.length ? ["--allowedTools", ...opts.allowed] : []),
+    ...(allowedWithBuiltins.length ? ["--allowedTools", ...allowedWithBuiltins] : []),
   ];
 }
 
@@ -99,6 +115,12 @@ export interface TurnResult {
   text: string;
   toolUses: Array<{ name: string; input: unknown }>;
   model: string | null;
+  /**
+   * Which stream block the last text came from. Bookkeeping for the paragraph break in
+   * `ingestLine`, not part of the answer — optional so every existing constructor and test
+   * fixture stays valid.
+   */
+  lastTextBlock?: number;
 }
 
 /**
@@ -137,7 +159,35 @@ export function ingestLine(
     const ev = o.event;
     if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
       const t = ev.delta.text ?? "";
-      if (t) { acc.text += t; onDelta(t); }
+      if (t) {
+        // **A NEW text block is a new paragraph, not a continuation.** Text arrives as
+        // deltas that were simply concatenated, so when a turn emits text, then a tool
+        // call, then more text, the two blocks ran together with no separator at all:
+        // "…rather than recite from memory.Web research is queued to switch on" and
+        // "…going to pull real pages.Still blocked on my end" (founder screenshots,
+        // 7 Sep). Every such sentence pair is one denied tool call away from happening,
+        // so it shows up exactly when something has gone wrong — the worst time to look
+        // broken.
+        //
+        // Keyed on the block INDEX the delta carries, not on `content_block_start`:
+        // deltas always carry `index`, and relying on a second event type would make
+        // this depend on the CLI continuing to emit it. An index we cannot read falls
+        // through to the old behaviour rather than guessing.
+        const idx = typeof ev.index === "number" ? ev.index : undefined;
+        if (
+          idx !== undefined &&
+          acc.lastTextBlock !== undefined &&
+          idx !== acc.lastTextBlock &&
+          acc.text &&
+          !/\s$/.test(acc.text)
+        ) {
+          acc.text += "\n\n";
+          onDelta("\n\n");
+        }
+        if (idx !== undefined) acc.lastTextBlock = idx;
+        acc.text += t;
+        onDelta(t);
+      }
     }
     return;
   }

@@ -143,10 +143,104 @@ describe("claudeArgs", () => {
   it("omits allowedTools entirely when there are no tools to allow", () => {
     expect(claudeArgs({ ...base, allowed: [] })).not.toContain("--allowedTools");
   });
+
+  /**
+   * **The reported bug.** `--tools` makes WebSearch AVAILABLE; `--allowedTools` is what
+   * PERMITS it. Shipping only the first is the "apology instead of an answer" case this
+   * file's own flag notes warn about: the founder saw "Web research — Enabled" while every
+   * search came back "permissions not granted" (7 Sep).
+   */
+  it("permits WebSearch, not just enables it", () => {
+    const a = claudeArgs({ ...base, webSearch: true });
+    expect(a[a.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toContain("WebSearch");
+  });
+
+  /** Off means off: nothing should quietly grant a built-in the founder never enabled. */
+  it("does not permit WebSearch when the skill is off", () => {
+    const a = claudeArgs(base);
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("WebSearch");
+  });
+
+  /** The MCP tools must survive alongside it — permitting one must not replace the others. */
+  it("keeps the MCP tools permitted when WebSearch is added", () => {
+    const a = claudeArgs({ ...base, webSearch: true });
+    const permitted = a.slice(a.indexOf("--allowedTools") + 1);
+    expect(permitted).toContain("mcp__codepet__navigate");
+    expect(permitted).toHaveLength(2);
+  });
+
+  /**
+   * WebSearch alone must still be permitted with no MCP tools at all, or the previous
+   * `allowed.length` guard would drop the flag and deny it again.
+   */
+  it("still permits WebSearch when there are no MCP tools", () => {
+    const a = claudeArgs({ ...base, allowed: [], webSearch: true });
+    expect(a).toContain("--allowedTools");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch"]);
+  });
 });
 
 describe("ingestLine", () => {
   const fresh = (): TurnResult => ({ text: "", toolUses: [], model: null });
+
+  /** One text delta from a given stream block. */
+  const delta = (text: string, index?: number) =>
+    JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+    });
+
+  /**
+   * **The reported bug, verbatim.** A turn that emits text, then a denied tool call, then
+   * more text had its two blocks concatenated with no separator, so the founder read
+   * "…rather than recite from memory.Web research is queued to switch on" (screenshot,
+   * 7 Sep). It surfaces exactly when a tool call fails — the worst moment to look broken.
+   */
+  it("does not run two text blocks together", () => {
+    const acc = fresh();
+    const seen: string[] = [];
+    ingestLine(delta("Turning it on so I can go look rather than recite from memory.", 0), acc, (t) => seen.push(t));
+    ingestLine(delta("Web research is queued to switch on.", 2), acc, (t) => seen.push(t));
+    expect(acc.text).not.toContain("memory.Web");
+    expect(acc.text).toContain("memory.\n\nWeb research");
+    // The break has to reach the stream too, or it appears only after a reload.
+    expect(seen).toContain("\n\n");
+  });
+
+  /** Deltas WITHIN one block are a single sentence being typed — never separated. */
+  it("does not break inside a block", () => {
+    const acc = fresh();
+    ingestLine(delta("Hel", 0), acc, () => {});
+    ingestLine(delta("lo", 0), acc, () => {});
+    expect(acc.text).toBe("Hello");
+  });
+
+  /** No doubled break when the model already ended its block with whitespace. */
+  it("does not add a second break when one is already there", () => {
+    const acc = fresh();
+    ingestLine(delta("Done.\n\n", 0), acc, () => {});
+    ingestLine(delta("Next", 1), acc, () => {});
+    expect(acc.text).toBe("Done.\n\nNext");
+  });
+
+  /** Never a leading break: the first block has nothing to be separated from. */
+  it("does not open the reply with a break", () => {
+    const acc = fresh();
+    ingestLine(delta("First", 3), acc, () => {});
+    expect(acc.text).toBe("First");
+  });
+
+  /**
+   * A stream without `index` falls through to the old concatenation rather than guessing.
+   * Pinned so the fix cannot start depending on a field the CLI might stop sending.
+   */
+  it("falls back to plain concatenation when the block index is absent", () => {
+    const acc = fresh();
+    ingestLine(delta("a"), acc, () => {});
+    ingestLine(delta("b"), acc, () => {});
+    expect(acc.text).toBe("ab");
+  });
 
   it("streams partial text so the reply arrives as it is written", () => {
     const acc = fresh();

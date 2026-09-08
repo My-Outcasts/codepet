@@ -86,6 +86,13 @@ function frame(event: string, payload: unknown): void {
  *   "permissions not granted", because the toggle drives `enabled_skills` for the Cloud
  *   Function and never reached this list. Added HERE rather than at the call site so the
  *   two flags cannot drift apart again: enabling the tool is what permits it.
+ * - **`WebFetch` rides the SAME `webSearch` flag and the SAME both-places rule.** There is
+ *   no separate "web fetch" toggle — `webSearch` already means "the founder turned web
+ *   research on", and a pasted URL (`https://web.murror.app/welcome`, 8 Sep) needs fetching,
+ *   not searching, so the one switch has to grant both tools. Putting WebFetch in only
+ *   `--tools` and not `--allowedTools` is the #129 bug again, verbatim: the model calls it,
+ *   the call is denied, and the founder is told permissions aren't granted while the toggle
+ *   reads Enabled. So it ships in both arrays below, next to WebSearch, or not at all.
  * - **`Read` + `--restricted`, and only for a turn that carries a file.** `claude -p` cannot
  *   take an image block, so an attachment is written into the run directory and read from
  *   there. `--restricted` is what makes granting Read acceptable: it confines the file
@@ -109,14 +116,19 @@ export function claudeArgs(opts: {
   readAttachments?: boolean;
 }): string[] {
   // See the `WebSearch` note above: available and permitted are two different flags, and
-  // the tool is useless with only the first. Read is subject to exactly the same rule.
+  // the tool is useless with only the first. WebFetch rides the same flag as WebSearch —
+  // see the note above — and Read is subject to exactly the same rule.
   const allowedWithBuiltins = [
     ...opts.allowed,
-    ...(opts.webSearch ? ["WebSearch"] : []),
+    ...(opts.webSearch ? ["WebSearch", "WebFetch"] : []),
     ...(opts.readAttachments ? ["Read"] : []),
   ];
-  // "" when neither is on, which the CLI accepts as "no built-ins".
-  const tools = [opts.webSearch ? "WebSearch" : null, opts.readAttachments ? "Read" : null]
+  // "" when none are on, which the CLI accepts as "no built-ins".
+  const tools = [
+    opts.webSearch ? "WebSearch" : null,
+    opts.webSearch ? "WebFetch" : null,
+    opts.readAttachments ? "Read" : null,
+  ]
     .filter(Boolean)
     .join(",");
   return [

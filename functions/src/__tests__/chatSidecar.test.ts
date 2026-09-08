@@ -128,10 +128,10 @@ describe("claudeArgs", () => {
   });
 
   /** A safety property, not tidiness: chat has no business holding Bash, Edit or Write. */
-  it("restricts built-in tools to nothing, or to WebSearch when the skill is on", () => {
+  it("restricts built-in tools to nothing, or to WebSearch+WebFetch when the skill is on", () => {
     expect(claudeArgs(base)[claudeArgs(base).indexOf("--tools") + 1]).toBe("");
     const withSearch = claudeArgs({ ...base, webSearch: true });
-    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
   });
 
   /** Variadic, so anything after it is swallowed — including a positional prompt. */
@@ -152,8 +152,22 @@ describe("claudeArgs", () => {
    */
   it("permits WebSearch, not just enables it", () => {
     const a = claudeArgs({ ...base, webSearch: true });
-    expect(a[a.indexOf("--tools") + 1]).toBe("WebSearch");
+    expect(a[a.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
     expect(a.slice(a.indexOf("--allowedTools") + 1)).toContain("WebSearch");
+  });
+
+  /**
+   * **Owner decision, 8 Sep:** grant `WebFetch` gated on the same `web-research` toggle
+   * that already gates `WebSearch` — no separate flag. A pasted live URL
+   * (`https://web.murror.app/welcome`) needs fetching, not searching, and the founder
+   * already turned web research on. Same #129 shape as the WebSearch bug: `--tools` makes
+   * it available, `--allowedTools` is what permits it, and only shipping the first is the
+   * "permissions not granted" apology again.
+   */
+  it("permits WebFetch, not just enables it", () => {
+    const a = claudeArgs({ ...base, webSearch: true });
+    expect(a[a.indexOf("--tools") + 1]).toContain("WebFetch");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toContain("WebFetch");
   });
 
   /** Off means off: nothing should quietly grant a built-in the founder never enabled. */
@@ -162,22 +176,30 @@ describe("claudeArgs", () => {
     expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("WebSearch");
   });
 
-  /** The MCP tools must survive alongside it — permitting one must not replace the others. */
+  /** Off means off for WebFetch too — it rides the same flag, so it must be absent with it. */
+  it("does not permit or enable WebFetch when the skill is off", () => {
+    const a = claudeArgs(base);
+    expect(a[a.indexOf("--tools") + 1]).not.toContain("WebFetch");
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).not.toContain("WebFetch");
+  });
+
+  /** The MCP tools must survive alongside it — permitting these must not replace the others. */
   it("keeps the MCP tools permitted when WebSearch is added", () => {
     const a = claudeArgs({ ...base, webSearch: true });
     const permitted = a.slice(a.indexOf("--allowedTools") + 1);
     expect(permitted).toContain("mcp__codepet__navigate");
-    expect(permitted).toHaveLength(2);
+    expect(permitted).toContain("WebFetch");
+    expect(permitted).toHaveLength(3);
   });
 
   /**
-   * WebSearch alone must still be permitted with no MCP tools at all, or the previous
-   * `allowed.length` guard would drop the flag and deny it again.
+   * WebSearch (and WebFetch alongside it) must still be permitted with no MCP tools at
+   * all, or the previous `allowed.length` guard would drop the flag and deny it again.
    */
   it("still permits WebSearch when there are no MCP tools", () => {
     const a = claudeArgs({ ...base, allowed: [], webSearch: true });
     expect(a).toContain("--allowedTools");
-    expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch"]);
+    expect(a.slice(a.indexOf("--allowedTools") + 1)).toEqual(["WebSearch", "WebFetch"]);
   });
 
   /**
@@ -203,7 +225,7 @@ describe("claudeArgs", () => {
     expect(a).toContain("--restricted");
     expect(a[a.indexOf("--tools") + 1]).toBe("Read");
     const withSearch = claudeArgs({ ...base, readAttachments: true, webSearch: true });
-    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,Read");
+    expect(withSearch[withSearch.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch,Read");
     expect(withSearch).toContain("--restricted");
   });
 

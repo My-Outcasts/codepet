@@ -212,4 +212,62 @@ final class DeliverableExportTests: XCTestCase {
         let d = deliverable(.sheet, title: "Pricing model", body: "prose only")
         XCTAssertEqual(DeliverableExport.files(for: d)[0].name, "pricing-model.md")
     }
+
+    // MARK: - calendar
+
+    /// Decoded, not constructed — `CalendarWeek` and `CalendarItem` both declare
+    /// `init(from:)` and therefore have no memberwise initialiser. See `payload(json:)`.
+    private func calendarPayload() throws -> DeliverablePayload {
+        try payload(json: """
+        {"calendar": {"weeks": [
+          {"label": "Week 1", "items": [
+            {"day": "Mon", "kind": "thread", "body": "Why I'm building a journal that answers"},
+            {"day": "Fri", "kind": "post", "body": "What we refuse to do on a bad night"}
+          ]},
+          {"label": "Week 2", "items": [
+            {"day": "Tue", "kind": "post", "body": "On-device vs server"}
+          ]}
+        ]}}
+        """)
+    }
+
+    func testCalendarExportsBothASpreadsheetAndACalendarFile() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let names = DeliverableExport.files(for: d).map(\.name)
+        XCTAssertEqual(names, ["content-calendar.csv", "content-calendar.ics"])
+    }
+
+    /// Every field is quoted, including week/day/kind. They are model-authored strings and
+    /// can contain a comma; a reader never sees the difference and a stray comma cannot shift
+    /// a column.
+    func testCalendarCsvHasOneRowPerItemWithItsWeek() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.hasPrefix("week,day,kind,body\n"), csv)
+        XCTAssertEqual(csv.components(separatedBy: "\n").filter { !$0.isEmpty }.count, 4,
+                       "header + 3 items — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("\"Week 1\",\"Mon\",\"thread\",\"Why I'm building a journal that answers\""), csv)
+    }
+
+    /// An .ics with no VEVENT is a file that opens to nothing.
+    func testIcsWrapsEveryItemAsAnEvent() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        XCTAssertTrue(ics.hasPrefix("BEGIN:VCALENDAR\r\n"), ics)
+        XCTAssertTrue(ics.hasSuffix("END:VCALENDAR\r\n"), ics)
+        XCTAssertEqual(ics.components(separatedBy: "BEGIN:VEVENT").count - 1, 3, ics)
+        XCTAssertTrue(ics.contains("SUMMARY:Why I'm building a journal that answers"), ics)
+    }
+
+    /// The founder's calendar app must not reject the file. Every VEVENT needs a UID.
+    func testEveryEventCarriesAUid() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        XCTAssertEqual(ics.components(separatedBy: "UID:").count - 1, 3, ics)
+    }
+
+    func testCalendarWithNoPayloadFallsBackToMarkdown() {
+        let d = deliverable(.calendar, title: "Content calendar", body: "prose only")
+        XCTAssertEqual(DeliverableExport.files(for: d).map(\.name), ["content-calendar.md"])
+    }
 }

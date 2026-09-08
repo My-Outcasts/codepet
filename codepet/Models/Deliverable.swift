@@ -230,10 +230,10 @@ struct DeliverablePayload: Codable, Hashable {
         risks = (try? c.decodeIfPresent(String.self, forKey: .risks)) ?? nil
         messages = (try? c.decodeIfPresent([DmMessage].self, forKey: .messages)) ?? nil
 
-        calendar = try? CalendarPayload(from: decoder)
-        sheet = try? SheetPayload(from: decoder)
-        site = try? SitePayload(from: decoder)
-        screens = try? ScreensPayload(from: decoder)
+        calendar = try? c.decodeIfPresent(CalendarPayload.self, forKey: .calendar)
+        sheet = try? c.decodeIfPresent(SheetPayload.self, forKey: .sheet)
+        site = try? c.decodeIfPresent(SitePayload.self, forKey: .site)
+        screens = try? c.decodeIfPresent(ScreensPayload.self, forKey: .screens)
     }
 }
 

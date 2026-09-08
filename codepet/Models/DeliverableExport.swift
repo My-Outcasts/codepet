@@ -56,7 +56,9 @@ enum DeliverableExport {
             return dmsFiles(d, base: base)
         case .sheet:
             return [sheetFile(d, base: base)]
-        case .legal, .text, .other, .calendar, .site, .screens:
+        case .calendar:
+            return calendarFiles(d, base: base)
+        case .legal, .text, .other, .site, .screens:
             return [md(base, titled(d, d.body))]
         }
     }
@@ -178,5 +180,72 @@ enum DeliverableExport {
     /// sentence silently becomes several columns.
     private static func csvQuoted(_ s: String) -> String {
         "\"\(s.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    /// Two files, because a content calendar is read two ways: as a table to edit, and as
+    /// events to drop into the calendar the founder actually lives in.
+    ///
+    /// **The .ics carries no dates.** `CalendarItem.day` is "Mon", not 2026-09-14 — the
+    /// generator produces a relative schedule, and inventing absolute dates would be
+    /// inventing data (the rule `PostViewer` states: never render what the app does not
+    /// know). Each event is therefore an all-day VEVENT on a floating day counted from the
+    /// export date, and the description says so. A founder who wants real dates moves them
+    /// once, in their own calendar.
+    private static func calendarFiles(_ d: Deliverable, base: String) -> [ExportFile] {
+        guard let weeks = d.payload?.calendar?.weeks, !weeks.isEmpty else {
+            return [md(base, titled(d, d.body))]
+        }
+
+        var csv = "week,day,kind,body\n"
+        for w in weeks {
+            for i in w.items {
+                csv += "\(csvQuoted(w.label)),\(csvQuoted(i.day)),\(csvQuoted(i.kind)),\(csvQuoted(i.body))\n"
+            }
+        }
+        // Plain values read better than quoted ones where the field cannot contain a comma,
+        // but week/day/kind are model-authored strings and can. Quote them all; a reader
+        // never sees the difference and a stray comma cannot shift a column.
+
+        var ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Murror//Codepet//EN\r\n"
+        var n = 0
+        for (wi, w) in weeks.enumerated() {
+            for i in w.items {
+                n += 1
+                let day = icsDate(weekIndex: wi, dayLabel: i.day)
+                ics += "BEGIN:VEVENT\r\n"
+                ics += "UID:\(d.id)-\(n)@codepet.murror.app\r\n"
+                ics += "DTSTART;VALUE=DATE:\(day)\r\n"
+                ics += "SUMMARY:\(icsEscaped(i.body))\r\n"
+                ics += "DESCRIPTION:\(icsEscaped("\(w.label) · \(i.kind) — day is relative to export"))\r\n"
+                ics += "END:VEVENT\r\n"
+            }
+        }
+        ics += "END:VCALENDAR\r\n"
+
+        return [ExportFile(name: "\(base).csv", data: Data(csv.utf8)),
+                ExportFile(name: "\(base).ics", data: Data(ics.utf8))]
+    }
+
+    /// A floating all-day date: today, plus the week offset, plus the weekday the label names.
+    /// An unrecognised label lands on the Monday of its week rather than failing the export.
+    private static func icsDate(weekIndex: Int, dayLabel: String) -> String {
+        let offsets = ["mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6]
+        let key = dayLabel.lowercased().prefix(3)
+        let within = offsets[String(key)] ?? 0
+        let days = weekIndex * 7 + within
+        let date = Calendar(identifier: .gregorian)
+            .date(byAdding: .day, value: days, to: Date()) ?? Date()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        return fmt.string(from: date)
+    }
+
+    /// RFC 5545 text escaping: backslash, semicolon, comma and newline.
+    private static func icsEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: ";", with: "\\;")
+            .replacingOccurrences(of: ",", with: "\\,")
+            .replacingOccurrences(of: "\n", with: "\\n")
     }
 }

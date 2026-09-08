@@ -114,4 +114,53 @@ final class DeliverableExportTests: XCTestCase {
                            "\(kind) exported nothing — a founder would see a dead button")
         }
     }
+
+    // MARK: - sendable text
+
+    func testPostExportsPlainTextNotMarkdown() throws {
+        let d = deliverable(.post, title: "Launch post", body: "We built a journal that answers.")
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].name, "launch-post.txt")
+        let text = try XCTUnwrap(String(data: files[0].data, encoding: .utf8))
+        XCTAssertEqual(text, "We built a journal that answers.\n")
+    }
+
+    /// No `# Title` heading: a post is pasted into a composer, and a markdown heading pasted
+    /// into X is a literal hash.
+    func testPostCarriesNoMarkdownHeading() throws {
+        let d = deliverable(.post, title: "Launch post", body: "Body only.")
+        let text = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertFalse(text.contains("#"), text)
+    }
+
+    func testDmsExportsOneFilePerMessageBecauseEachGoesToSomeoneElse() throws {
+        let d = deliverable(.dms, title: "Early access",
+                            payload: DeliverablePayload(messages: [
+                                DmMessage(name: "Lapsed journaler", note: "quit over streaks",
+                                          msg: "We cut the streak counter. Want the first build?"),
+                                DmMessage(name: "Privacy-first buyer", note: "asked about training",
+                                          msg: "Nothing leaves your phone unless you ask."),
+                            ]))
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(files[0].name, "early-access-1-lapsed-journaler.txt")
+        XCTAssertEqual(files[1].name, "early-access-2-privacy-first-buyer.txt")
+        let first = try XCTUnwrap(String(data: files[0].data, encoding: .utf8))
+        XCTAssertTrue(first.contains("We cut the streak counter."), first)
+        XCTAssertTrue(first.contains("quit over streaks"), "the note says why this target — keep it")
+    }
+
+    func testDmsWithNoMessagesStillExportsTheBody() throws {
+        let d = deliverable(.dms, title: "Outreach", body: "the prose version")
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].name, "outreach.txt")
+    }
+
+    func testEmailExportsAsText() throws {
+        let d = deliverable(.email, title: "Day 14 check-in", body: "How has the first fortnight been?")
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files[0].name, "day-14-check-in.txt")
+    }
 }

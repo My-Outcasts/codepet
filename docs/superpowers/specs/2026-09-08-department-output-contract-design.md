@@ -192,6 +192,13 @@ cap stays where it is.
 **A filed artifact is immutable.** Moving a `sheet` slider is an exploration, and the viewer offers
 "save as a new version". Approval is the founder's signature and must not change under them.
 
+**Export takes what is on screen** (founder decision, 8 Sep). Exporting is not editing, so this does
+not weaken the rule above: the filed artifact is untouched, and the file the founder receives shows
+the sliders they moved and the boxes they ticked. The alternative — exporting the as-drafted payload
+— was rejected because the founder moves the sliders *in order to* get numbers out, and the button
+beside Copy would have handed back the original ones. Copy already reads live state; the two buttons
+must not disagree about what the document is.
+
 ### Export
 
 Every kind exports to a file. Nothing leaves without the founder choosing it.
@@ -211,6 +218,12 @@ shared by 9 viewers and 13 deliverable kinds, and widening a shared API to serve
 wrong trade." Export is the case that inverts the objection: it serves **every** kind, so widening
 the shared frame is correct here for exactly the reason it was wrong before. `action:` gains an
 export case alongside `.copy`.
+
+**Overwriting is the panel's job for a single file** (founder decision, 8 Sep). `NSSavePanel`
+already asks Replace/Cancel, which is founder confirmation at the point of naming and clearer than
+silently writing a differently-named file. A **set** (`dms`, `calendar`) is picked as a directory
+with no per-file prompt, so there the rule is never-overwrite: a repeat becomes `plan-2.md`. The
+rule is narrow because the guarantee is only needed where the panel cannot give it.
 
 **The mechanism.** The founder picks a destination through `NSSavePanel`; the app writes and never
 uploads. Rendering is per-kind and pure where it can be — a function from payload to file bytes,

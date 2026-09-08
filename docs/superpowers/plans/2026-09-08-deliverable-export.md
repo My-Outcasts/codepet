@@ -1145,8 +1145,11 @@ enum DeliverableExporter {
     /// Split out from `save(_:)` so it is testable — the panel is the only part a test
     /// cannot drive, which is the limit `AttachmentPicker` already records for its own.
     ///
-    /// Never overwrites. A repeat export becomes `plan-2.md`, because the founder pressing
-    /// Export twice is asking for a second copy, not asking to destroy the first.
+    /// Never overwrites: a repeat becomes `plan-2.md`. This is the rule for a SET, which the
+    /// founder picks as a directory with no per-file prompt — the only place the panel cannot
+    /// ask. A single file goes through `NSSavePanel`, which asks Replace/Cancel itself, and
+    /// that is left alone deliberately (founder decision, 8 Sep): a founder who types a name
+    /// should get that name or an explicit prompt, not a silently different file.
     /// A name is reduced to its last path component first, so nothing can be written
     /// outside the chosen directory.
     static func write(_ files: [ExportFile], to directory: URL) throws -> [URL] {

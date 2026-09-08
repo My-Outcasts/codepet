@@ -171,8 +171,24 @@ struct MessageAttachmentStrip: View {
     var body: some View {
         let split = MessageAttachmentLayout.split(attachments)
         if !split.isEmpty {
-            HStack(alignment: .bottom, spacing: 6) {
-                Spacer(minLength: 24)
+            // **`WrapLayout`, not a plain `HStack`.** Written when the cap was 3 tiles —
+            // three 56pt tiles plus spacing fit one row of any dock width that mattered.
+            // The cap rose to 10 afterwards and this strip was not revisited: ten tiles is
+            // ~614pt, which clips or overflows a 380pt dock. Same fix the composer already
+            // has (`ChatComposer.pillRow`), called the same way.
+            //
+            // Trailing alignment survives this: `WrapLayout` self-sizes to its widest row
+            // (see `sizeThatFits`), and the `.frame(maxWidth: .infinity, alignment: .trailing)`
+            // below trailing-aligns that self-sized block against the full column — same as
+            // the outer `VStack(alignment: .trailing)` this strip sits in for the bubble
+            // beneath it. The widest row's right edge lands exactly on that trailing edge.
+            // A shorter WRAPPED row (e.g. 4 tiles under a first row of 6) is left-aligned
+            // *within* that block by `WrapLayout`'s own placement, so it does not itself
+            // hug the trailing edge the way the bubble text does — checked by reasoning
+            // through `placeSubviews`, not by eye (this branch does not launch the app to
+            // verify). Still strictly better than the clip/overflow this replaces, and
+            // matches what the composer accepts for its own (leading-aligned) rows.
+            WrapLayout(spacing: 6, rowSpacing: 6) {
                 ForEach(split.previews) { att in
                     AttachmentTile(attachment: att, cache: cache, onRemove: nil)
                 }

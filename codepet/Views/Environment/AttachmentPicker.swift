@@ -138,4 +138,28 @@ enum AttachmentPicker {
             using: isJPEG ? .jpeg : .png,
             properties: isJPEG ? [.compressionFactor: 0.82] : [:])
     }
+
+    /// Resolve one drag provider's loaded item to a file URL.
+    ///
+    /// **`loadItem(forTypeIdentifier:)` for `.fileURL` returns `NSSecureCoding`, and which
+    /// concrete type arrives depends on the drag SOURCE** — Finder, a browser and another app
+    /// do not agree. The first version of the drop path handled only `Data`, so a drag that
+    /// handed back an `NSURL` resolved to nothing and the whole feature looked inert.
+    ///
+    /// `Any?` rather than `NSSecureCoding?` so a test can drive it with each shape.
+    /// Returns nil for anything that is not a file URL, and the caller must REPORT that
+    /// rather than discard it — see `acceptingDrops`.
+    static func fileURL(from item: Any?) -> URL? {
+        if let url = item as? URL { return url }
+        if let ns = item as? NSURL { return ns as URL }
+        // `URL(dataRepresentation:relativeTo:)` is lenient: fed the two raw bytes 0xFF,0xFE
+        // (not a real dropped path — see the resolver tests) it still returns a URL, with no
+        // scheme and `isFileURL` false, rather than nil. Checking `isFileURL` here matches the
+        // guard the String branch already has below and keeps this function's contract —
+        // "nil for anything that is not a file URL" — true for garbage bytes too.
+        if let data = item as? Data,
+           let url = URL(dataRepresentation: data, relativeTo: nil), url.isFileURL { return url }
+        if let s = item as? String, let url = URL(string: s), url.isFileURL { return url }
+        return nil
+    }
 }

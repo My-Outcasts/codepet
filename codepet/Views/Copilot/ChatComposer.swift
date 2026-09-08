@@ -846,15 +846,28 @@ struct ChatComposer: View {
             guard attachments != nil else { return false }
             Task { @MainActor in
                 var urls: [URL] = []
+                var unresolved = 0
                 for p in providers {
-                    if let item = try? await p.loadItem(forTypeIdentifier: UTType.fileURL.identifier),
-                       let data = item as? Data,
-                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    let item = try? await p.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
+                    if let url = AttachmentPicker.fileURL(from: item) {
                         urls.append(url)
+                    } else {
+                        unresolved += 1
                     }
                 }
-                guard !urls.isEmpty else { return }
-                absorb(AttachmentPicker.encodeAll(urls))
+                // **`absorb` is called unconditionally, and that is the fix.** Returning early
+                // on an empty resolve — which the first version did — meant a drop the founder
+                // watched land produced no tiles, no notice, and did not even clear a stale
+                // one. Silence is exactly what this branch exists to stop, and it had
+                // reappeared on the new entry point. The `+` menu always reports (a cancelled
+                // panel still reaches `absorb` with an empty pick); the drop now matches.
+                var picked = AttachmentPicker.encodeAll(urls)
+                if unresolved > 0 {
+                    picked.rejected.append(unresolved == 1
+                                           ? "1 dropped item"
+                                           : "\(unresolved) dropped items")
+                }
+                absorb(picked)
             }
             return true
         }

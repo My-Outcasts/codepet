@@ -67,4 +67,27 @@ final class AttachmentPickerEncodeTests: XCTestCase {
         XCTAssertEqual(admission.accepted.count, 3)
         XCTAssertTrue(admission.refused.isEmpty)
     }
+
+    // MARK: - Resolving what a drag actually hands us
+
+    /// **The drop path handled only `Data` and would have looked inert for any drag source
+    /// that hands back an `NSURL`.** Which type arrives depends on the source, so all of
+    /// them are pinned here rather than trusted.
+    func testResolvesAFileURLFromEveryShapeADragCanHandBack() throws {
+        let file = try png("dropped.png")
+        XCTAssertEqual(AttachmentPicker.fileURL(from: file), file, "a URL must pass through")
+        XCTAssertEqual(AttachmentPicker.fileURL(from: file as NSURL), file, "an NSURL must convert")
+        XCTAssertEqual(AttachmentPicker.fileURL(from: file.dataRepresentation), file,
+                       "a Data representation must decode")
+    }
+
+    /// Anything that is not a file URL resolves to nil, so the caller can COUNT it and say so.
+    /// Returning nil silently is only safe because `acceptingDrops` reports the count.
+    func testRefusesWhatIsNotAFileURL() {
+        XCTAssertNil(AttachmentPicker.fileURL(from: nil))
+        XCTAssertNil(AttachmentPicker.fileURL(from: 42))
+        XCTAssertNil(AttachmentPicker.fileURL(from: Data([0xFF, 0xFE])))
+        XCTAssertNil(AttachmentPicker.fileURL(from: "https://example.com"),
+                     "a web URL is not a file and must not be attached")
+    }
 }

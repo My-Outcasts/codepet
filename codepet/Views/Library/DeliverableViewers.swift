@@ -31,10 +31,12 @@ import WebKit
 /// because a checklist is a list, not a stack of cards.
 struct ChecklistViewer: View {
     @State private var items: [ChecklistItem]
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
-    init(items: [ChecklistItem]) {
+    init(items: [ChecklistItem], deliverable: Deliverable) {
         _items = State(initialValue: items)
+        self.deliverable = deliverable
     }
 
     private var doneCount: Int { items.filter(\.done).count }
@@ -48,9 +50,23 @@ struct ChecklistViewer: View {
         items.map { "- [\($0.done ? "x" : " ")] \($0.t)" }.joined(separator: "\n")
     }
 
+    /// Founder decision (I4): Export takes what is on screen, matching Copy — so a founder who
+    /// has ticked boxes exports the ticked list, not the untouched payload. Built as a pure
+    /// static rather than reading `@State` from `DeliverableExport` (which stays pure and
+    /// view-blind): same identity, only the payload's `items` swapped for the live ones. A
+    /// static function so a test can drive it without going through private `@State`.
+    static func exportSubject(_ deliverable: Deliverable, items: [ChecklistItem]) -> Deliverable {
+        var d = deliverable
+        var payload = d.payload ?? DeliverablePayload()
+        payload.items = items
+        d.payload = payload
+        return d
+    }
+
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: Self.exportSubject(deliverable, items: items)) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -113,6 +129,7 @@ struct DocViewer: View {
     let call: String
     let sections: [DocSection]
     let next: [String]
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// A document, set to be read.
@@ -147,7 +164,8 @@ struct DocViewer: View {
 
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Tài liệu" : "Document",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: deliverable) {
             VStack(alignment: .leading, spacing: Doc.betweenSections) {
                 Text(call)
                     .font(.pixelSystem(size: Doc.lead, weight: .medium))
@@ -206,6 +224,7 @@ struct DocViewer: View {
 /// become eyebrows, which is what they were always trying to be.
 struct PlanViewer: View {
     let payload: DeliverablePayload
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// A section name. An eyebrow, not a same-size grey label — the point of a heading is that
@@ -241,7 +260,8 @@ struct PlanViewer: View {
 
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Kế hoạch" : "Plan",
-                         action: .copy(copyText)) {
+                         action: .copy(copyText),
+                         export: deliverable) {
             VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
                 if let goal = payload.goal, !goal.isEmpty {
                     VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
@@ -320,6 +340,35 @@ struct PlanViewer: View {
 }
 
 // MARK: - DmsViewer
+/// `DmsViewer`'s set-level header — eyebrow left, Copy/Export right, a rule beneath.
+///
+/// Its own view rather than an inline `VStack` so a layout test can measure WHERE it draws.
+/// It has to line up with the message cards below it, and those get their inset from
+/// `deliverableCardChrome`; nothing was holding the two together.
+struct DmsSetHeader: View {
+    let messages: [DmMessage]
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                DeliverableEyebrow(text: lang == .vi ? "Tiếp cận" : "Outreach")
+                Spacer(minLength: 12)
+                HStack(spacing: 10) {
+                    DeliverableCopyButton(text: DmsViewer.copyAllText(messages))
+                    DeliverableExportButton(deliverable: deliverable)
+                }
+            }
+            DeliverableRule().padding(.vertical, 14)
+        }
+        // The SAME inset the message cards get from `deliverableCardChrome`, taken from the
+        // same constant. Without it the eyebrow and the rule drew flush to the sheet edge,
+        // 16pt left of every card below, and the rule full-bled past both card borders.
+        .padding(.horizontal, DeliverableStyle.padding)
+    }
+}
+
 
 /// Renders a dms payload as one message card per recipient: the name as the heading with its
 /// `note` chip and Copy on the header row, the message at reading size with its blanks tinted,
@@ -330,11 +379,28 @@ struct PlanViewer: View {
 /// only works if the two message kinds agree with each other.
 struct DmsViewer: View {
     let messages: [DmMessage]
+    let deliverable: Deliverable
     @State private var sent: Set<Int> = []
     @Environment(\.uiLanguage) private var lang
 
+    /// The whole set as pasteable text, matching what `DeliverableExport.dmsFiles(_:base:)`
+    /// writes per recipient — same building block (`To:` / `Why:` / the message), so Copy and
+    /// Export can never hand the founder different documents for the same set. A pure static so
+    /// a test can assert the two stay in lockstep without going through `NSPasteboard`.
+    static func copyAllText(_ messages: [DmMessage]) -> String {
+        messages
+            .map { "To: \($0.name)\nWhy: \($0.note)\n\n\($0.msg)" }
+            .joined(separator: "\n\n---\n\n")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // `DmsViewer` builds its own per-message cards rather than one `DeliverableFrame`
+            // — a structured `.dms` is several sibling cards, not one framed document — so this
+            // hand-builds the same header `DeliverableFrame` draws (spacing: 0, matching its own
+            // header+rule block): eyebrow left, Copy/Export right, a rule beneath. Set-level,
+            // distinct from each card's own eyebrow + Copy.
+            DmsSetHeader(messages: messages, deliverable: deliverable)
             ForEach(Array(messages.enumerated()), id: \.offset) { i, message in
                 card(index: i, message: message)
             }
@@ -417,6 +483,7 @@ struct LegalViewer: View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bản nháp pháp lý" : "Legal draft",
             action: .copy(deliverable.body),
+            export: deliverable,
             footer: lang == .vi ? "Bản nháp — không phải tư vấn pháp lý."
                                 : "Draft — not legal advice."
         ) {
@@ -454,6 +521,7 @@ struct PostViewer: View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bài đăng" : "Social post",
             action: .copy(deliverable.body),
+            export: deliverable,
             footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang)
         ) {
             MarkdownView(markdown: deliverable.body)
@@ -469,6 +537,7 @@ struct PostViewer: View {
 /// Mirrors web's CalendarViewer (components/artifact/viewers.tsx) in spirit.
 struct CalendarViewer: View {
     let payload: CalendarPayload
+    let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
 
     /// Widened from 150. A post's `body` is a sentence, and at reading size a 150pt column broke
@@ -486,6 +555,7 @@ struct CalendarViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Lịch nội dung" : "Content calendar",
                          action: payload.weeks.isEmpty ? .none : .copy(copyText),
+                         export: deliverable,
                          measured: false) {
             if payload.weeks.isEmpty {
                 // An empty state is a sentence addressed to the founder, not a caption. It was
@@ -574,9 +644,11 @@ struct SheetViewer: View {
 
     private let summary: String?
 
+    let deliverable: Deliverable
+
     @Environment(\.uiLanguage) private var lang
 
-    init(payload: SheetPayload) {
+    init(payload: SheetPayload, deliverable: Deliverable) {
         _price = State(initialValue: payload.price.val)
         _waitlist = State(initialValue: payload.waitlist.val)
         _conversion = State(initialValue: payload.conversion.val)
@@ -590,6 +662,7 @@ struct SheetViewer: View {
         churnRange = Self.safeRange(payload.churn)
         churnStep = Swift.max(1, payload.churn.step)
         summary = payload.summary
+        self.deliverable = deliverable
     }
 
     /// A degenerate range (max ≤ min, as could arrive from a malformed payload)
@@ -617,6 +690,25 @@ struct SheetViewer: View {
         return lines.joined(separator: "\n")
     }
 
+    /// Founder decision (I4): Export takes what is on screen, matching Copy — the founder
+    /// moves the sliders to get numbers out, and before this Export re-rendered the untouched
+    /// payload while Copy read the live model. Built as a pure static so it is testable without
+    /// reaching into private `@State`: same identity, only the payload's four `SheetInput.val`
+    /// fields swapped for the live slider values — `min`/`max`/`step` are untouched, because
+    /// only `val` ever moves.
+    static func exportSubject(_ deliverable: Deliverable, price: Double, waitlist: Double,
+                               conversion: Double, churn: Double) -> Deliverable {
+        guard var payload = deliverable.payload, var sheet = payload.sheet else { return deliverable }
+        sheet.price.val = price
+        sheet.waitlist.val = waitlist
+        sheet.conversion.val = conversion
+        sheet.churn.val = churn
+        payload.sheet = sheet
+        var d = deliverable
+        d.payload = payload
+        return d
+    }
+
     /// Not financial advice — the card's footer, not a loose third line under it.
     private var disclaimer: String {
         lang == .vi
@@ -629,6 +721,8 @@ struct SheetViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Mô hình tài chính" : "Financial model",
                          action: .copy(copyText),
+                         export: Self.exportSubject(deliverable, price: price, waitlist: waitlist,
+                                                     conversion: conversion, churn: churn),
                          footer: disclaimer,
                          measured: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -737,7 +831,8 @@ struct EmailViewer: View {
     var body: some View {
         MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
                            heading: deliverable.title,
-                           text: deliverable.body)
+                           text: deliverable.body,
+                           export: deliverable)
     }
 }
 
@@ -756,6 +851,7 @@ struct SiteViewer: View {
     /// Names the temp file the browser opens, so the same page replaces itself rather than
     /// accumulating copies. Optional with a default so no other call site has to change.
     var deliverableId: String? = nil
+    let deliverable: Deliverable
     @State private var tab: Tab = .preview
     /// Set when the write fails, so the button says why instead of doing nothing.
     @State private var openFailed = false
@@ -785,6 +881,7 @@ struct SiteViewer: View {
             action: .copyLabelled(html,
                                   label: lang == .vi ? "Sao chép HTML" : "Copy HTML",
                                   done: lang == .vi ? "Đã sao chép" : "Copied"),
+            export: deliverable,
             measured: false
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1038,6 +1135,7 @@ struct SiteHTMLWebView: NSViewRepresentable {
 /// pixel-match of web's SVGs (components/artifact/viewers.tsx).
 struct ScreensViewer: View {
     let payload: ScreensPayload
+    let deliverable: Deliverable
     @State private var idx: Int = 0
     @Environment(\.uiLanguage) private var lang
 
@@ -1053,6 +1151,7 @@ struct ScreensViewer: View {
     /// the mockup are brought into line.
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Màn hình" : "Screens",
+                         export: deliverable,
                          measured: false) {
             if screens.isEmpty {
                 DeliverableProse(text: lang == .vi ? "Không có màn hình nào" : "No screens",

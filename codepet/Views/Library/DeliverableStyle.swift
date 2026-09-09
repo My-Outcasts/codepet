@@ -79,6 +79,12 @@ struct DeliverableFrame<Content: View>: View {
     let eyebrow: String
     var heading: String = ""
     var action: DeliverableAction = .none
+    /// The deliverable to export, or nil for a frame that offers no export.
+    ///
+    /// A separate slot rather than another `DeliverableAction` case, because copy and export
+    /// are two different affordances the founder may want in either order — not two variants
+    /// of one. Keeping it separate also leaves all seven existing `action:` call sites alone.
+    var export: Deliverable? = nil
     var footer: String? = nil
     var measured: Bool = true
     @ViewBuilder var content: Content
@@ -115,13 +121,18 @@ struct DeliverableFrame<Content: View>: View {
     }
 
     @ViewBuilder private var actionButton: some View {
-        switch action {
-        case .none:
-            EmptyView()
-        case let .copy(text):
-            DeliverableCopyButton(text: text)
-        case let .copyLabelled(text, label, done):
-            DeliverableCopyButton(text: text, label: label, doneLabel: done)
+        HStack(spacing: 10) {
+            switch action {
+            case .none:
+                EmptyView()
+            case let .copy(text):
+                DeliverableCopyButton(text: text)
+            case let .copyLabelled(text, label, done):
+                DeliverableCopyButton(text: text, label: label, doneLabel: done)
+            }
+            if let export {
+                DeliverableExportButton(deliverable: export)
+            }
         }
     }
 }
@@ -369,4 +380,77 @@ func deliverableBlanksFooter(_ text: String, verb: BlankVerb, lang: AppLanguage)
     let blanks = MessagePlaceholders.labels(in: text)
     guard !blanks.isEmpty else { return nil }
     return verb.line(blanks, lang)
+}
+
+/// Save this deliverable to disk. Sits beside Copy in every viewer's frame.
+///
+/// Labelled "Export", not "Save" — nothing in Codepet is unsaved (approving files it), so
+/// "Save" would imply work is at risk. What this does is move a copy out of the app.
+struct DeliverableExportButton: View {
+    let deliverable: Deliverable
+    /// Set only when the write itself failed — never on a cancel — so the button says why
+    /// instead of doing nothing. Carries `Outcome.failed`'s `landed` count so a partial
+    /// `dms`/`calendar` export (some files landed before the one that failed) is told apart
+    /// from an outright failure (none did) — collapsing both to one flat message would tell a
+    /// founder with two of four files already in the folder they chose that nothing saved.
+    /// Same shape as `SiteViewer.openFailed`.
+    @State private var failedLanded: Int?
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                switch DeliverableExporter.save(deliverable) {
+                case .saved, .cancelled:
+                    failedLanded = nil
+                case .failed(let landed):
+                    failedLanded = landed
+                }
+            } label: {
+                Text(lang == .vi ? "Xuất" : "Export")
+                    .font(.pixelSystem(size: DeliverableStyle.eyebrow, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(CodepetTheme.accentPurple)
+            .help(lang == .vi ? "Lưu ra tệp" : "Save to a file")
+
+            if let landed = failedLanded {
+                Text(failureText(landed: landed))
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+        }
+        // The notice belongs to the deliverable that failed, not to the button.
+        // `SheetViewer` and `ChecklistViewer` recompute their export subject on every slider
+        // move and tick, but this `@State` outlived all of it — so "Export failed" sat on
+        // screen through every later edit until the founder pressed Export again.
+        .onChange(of: deliverable) { failedLanded = nil }
+    }
+
+    /// "Export failed" — not "Save" or "Couldn't save" — because this sits inside the button
+    /// whose whole rationale is that "Save" would imply the founder's work is at risk; the
+    /// failure copy should not smuggle that word back in. When some files landed before the
+    /// one that failed, say how many out of how many were attempted, so a partial `dms`/
+    /// `calendar` export isn't told it saved nothing when two files really are on disk.
+    private func failureText(landed: Int) -> String {
+        Self.failureText(landed: landed,
+                         total: DeliverableExport.files(for: deliverable).count,
+                         lang: lang)
+    }
+
+    /// A pure static so a test can assert the wording without standing up a view — the same
+    /// reason `DmsViewer.copyAllText` is one.
+    static func failureText(landed: Int, total: Int, lang: AppLanguage) -> String {
+        guard landed > 0 else {
+            return lang == .vi ? "Xuất thất bại" : "Export failed"
+        }
+        // "Saved 2 of 4" is a SUCCESS sentence. Rendered in muted text with no failure word,
+        // it told a founder whose four-file export died after two files that everything was
+        // fine — the same silent-success failure the enable-card carried. The counts still
+        // matter (two files really are on disk), so they stay; what changes is that the
+        // sentence leads with the failure.
+        return lang == .vi
+            ? "Xuất thất bại sau \(landed)/\(total)"
+            : "Export failed after \(landed) of \(total)"
+    }
 }

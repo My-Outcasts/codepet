@@ -44,6 +44,10 @@ struct MessageDraftViewer: View {
     let eyebrow: String
     let heading: String
     let text: String
+    /// The deliverable to export, or nil where there is none to file — the chat draft card
+    /// uses this same view before anything has been approved, and has no `Deliverable` to
+    /// hand `DeliverableFrame`. Library call sites (`.email`, payload-less `.dms`) pass one.
+    var export: Deliverable? = nil
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
@@ -51,6 +55,7 @@ struct MessageDraftViewer: View {
             eyebrow: eyebrow,
             heading: heading,
             action: .copy(text),
+            export: export,
             footer: deliverableBlanksFooter(text, verb: .send, lang: lang)
         ) {
             DeliverableProse(text: text)

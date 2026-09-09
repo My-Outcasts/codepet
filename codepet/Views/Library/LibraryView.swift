@@ -465,24 +465,26 @@ struct DeliverableBodyView: View {
         Group {
             switch deliverable.kind {
             case .checklist where !(deliverable.payload?.items?.isEmpty ?? true):
-                ChecklistViewer(items: deliverable.payload!.items!)
+                ChecklistViewer(items: deliverable.payload!.items!, deliverable: deliverable)
             case .doc where !(deliverable.payload?.call?.isEmpty ?? true):
                 DocViewer(call: deliverable.payload!.call!,
                           sections: deliverable.payload?.sections ?? [],
-                          next: deliverable.payload?.next ?? [])
+                          next: deliverable.payload?.next ?? [],
+                          deliverable: deliverable)
             case .plan where !(deliverable.payload?.goal?.isEmpty ?? true):
-                PlanViewer(payload: deliverable.payload!)
+                PlanViewer(payload: deliverable.payload!, deliverable: deliverable)
             case .dms where !(deliverable.payload?.messages?.isEmpty ?? true):
-                DmsViewer(messages: deliverable.payload!.messages!)
+                DmsViewer(messages: deliverable.payload!.messages!, deliverable: deliverable)
             case .calendar where deliverable.payload?.calendar != nil:
-                CalendarViewer(payload: deliverable.payload!.calendar!)
+                CalendarViewer(payload: deliverable.payload!.calendar!, deliverable: deliverable)
             case .sheet where deliverable.payload?.sheet != nil:
-                SheetViewer(payload: deliverable.payload!.sheet!)
+                SheetViewer(payload: deliverable.payload!.sheet!, deliverable: deliverable)
             case .site where deliverable.payload?.site != nil:
                 SiteViewer(payload: deliverable.payload!.site!,
-                           deliverableId: deliverable.id)
+                           deliverableId: deliverable.id,
+                           deliverable: deliverable)
             case .screens where deliverable.payload?.screens != nil:
-                ScreensViewer(payload: deliverable.payload!.screens!)
+                ScreensViewer(payload: deliverable.payload!.screens!, deliverable: deliverable)
             case .legal:
                 LegalViewer(deliverable: deliverable)
             case .post:
@@ -494,14 +496,16 @@ struct DeliverableBodyView: View {
             case .dms:
                 MessageDraftViewer(eyebrow: lang == .vi ? "Tin nhắn" : "Message",
                                    heading: deliverable.title,
-                                   text: deliverable.body)
+                                   text: deliverable.body,
+                                   export: deliverable)
             // Everything else — `.text`, `.other`, and any kind that lost its payload. It still
             // gets the card, the eyebrow naming what it is, and Copy: a deliverable with no
             // structured shape is not a deliverable with no identity, and bare prose on the page
             // was the Aug 10 report's exact complaint about messages.
             default:
                 DeliverableFrame(eyebrow: deliverable.kind.label(lang),
-                                 action: .copy(deliverable.body)) {
+                                 action: .copy(deliverable.body),
+                                 export: deliverable) {
                     MarkdownView(markdown: deliverable.body)
                 }
             }

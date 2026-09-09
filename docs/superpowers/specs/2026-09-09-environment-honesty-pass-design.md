@@ -161,11 +161,17 @@ means a later-shipped item arrives already on, which is what they asked for.
 
 ### 7. `defaultEnabledIds` is fixed as data, not as a filter
 
-`explorer`'s `defaultOn` becomes `false`, and `defaultEnabledIds` reads the
-*bundled* constant rather than the live set. First-run seeding must be
+`explorer`'s `defaultOn` becomes `false`. First-run seeding must be
 deterministic: routing it through a network fetch would seed a founder's first
-company differently depending on connectivity. A test asserts no `defaultOn`
-item is unbuilt, so the two cannot drift.
+company differently depending on connectivity, so nothing here reads the live
+manifest.
+
+**`defaultEnabledIds` itself stays unfiltered, and the guard test asserts on the
+raw `defaultOn` data.** This distinction is the whole point. Filtering the
+accessor through `isBuilt` would look like belt-and-braces and would in fact
+destroy the guard: a future default-on fake would be silently masked rather than
+caught, and the test would pass forever. The data is fixed as data; the test
+watches the data.
 
 ## Call sites
 
@@ -180,7 +186,23 @@ Each verified against `origin/main` @ `977a633`.
 | 5 | `CompanyStore:1672` | `env_setup` filter gains `&& $0.isBuilt(builtSkills:)` |
 | 6 | `CompanyStore.toggleTool:3475` | early-return guard on an unbuilt id |
 | 7 | `EnvironmentView:379` (browse row) | "Not built yet" in place of the toggle |
-| 8 | `functions/src/` | new `capabilities` callable exporting `IMPLEMENTED_SKILLS` |
+| 8 | `functions/src/` | new `capabilities` endpoint exporting `IMPLEMENTED_SKILLS` |
+| 9 | `SetupCardState.swift` + `CopilotChatView:2047` | a `notBuilt` case, so a chat enable-card draws no pill |
+| 10 | `EnvironmentView:178` (EN `companionText`) | drop "I've turned on the skills and agents I can" |
+
+**Rows 9 and 10 were found while writing the implementation plan**, and row 9 is
+the important one: the guard at #6 would otherwise *create* a bug. A stale
+transcript can still hold an enable-card for an unbuilt item after #5 stops the
+CF offering new ones. `SetupCardState.of` returns `.offer` for anything
+resolvable and off, so the founder presses Enable, the guard silently returns,
+and a working-looking button does nothing — the exact 7 Sep incident that
+`SetupCardState` was written to prevent, and its own doc comment states the rule
+being broken: *"a card that cannot act must not show a pill that pretends it
+can."*
+
+Row 10 is the same lie in prose: the EN copy had the companion reporting that it
+had turned on agents, which it cannot do. The VI string never made that claim, so
+fixing it also brings the two languages into parity.
 
 **The guard at #6 is the invariant; #7 is only the UX.** Views not rendering a
 control is what the founder sees, but the chokepoint in `toggleTool` is what

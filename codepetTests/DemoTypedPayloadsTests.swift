@@ -124,4 +124,48 @@ final class DemoTypedPayloadsTests: XCTestCase {
         XCTAssertEqual(text.components(separatedBy: "- [ ]").count - 1, 5, text)
         XCTAssertTrue(text.contains("Thursday morning"), text)
     }
+
+    // MARK: - the calendar export, which had no source in either demo until now
+
+    /// `calendar` was the one export path with nothing in either demo project able to produce
+    /// it: no fixture carried that kind, so `.csv` + `.ics` were reachable only from unit tests
+    /// built on synthetic payloads. The launch checklist supplies one now — its body was always
+    /// a T-minus schedule, and `plan` (the code-change shape) never described it.
+    func testTheLaunchScheduleIsACalendarAndExportsBothFiles() throws {
+        let entry = DemoProject.murror.deliverable(for: "Write the launch checklist")
+        XCTAssertEqual(entry.kind, "calendar")
+        let json = try XCTUnwrap(entry.payloadJSON, "the launch calendar carries no payload")
+        let payload = try JSONDecoder().decode(DeliverablePayload.self, from: Data(json.utf8))
+        let weeks = try XCTUnwrap(payload.calendar?.weeks, "the calendar payload decoded to nil")
+        XCTAssertEqual(weeks.count, 5, "T-7, T-5, T-2, T-0, T+7")
+        XCTAssertEqual(weeks.flatMap(\.items).count, 11)
+        XCTAssertTrue(weeks[0].items[0].body.contains("clinician"),
+                      "the blocking item leads, because it is the one that stops a launch")
+
+        let d = Deliverable(kind: .calendar, title: "Write the launch checklist",
+                            body: "", payload: payload)
+        let files = DeliverableExport.files(for: d)
+        XCTAssertEqual(files.map(\.name), ["write-the-launch-checklist.csv",
+                                           "write-the-launch-checklist.ics"])
+    }
+
+    /// The demo can now produce every export format the feature ships except the two that need
+    /// `ImageRenderer` (`.pdf`, and `screens` as `.png`), which are a separate plan.
+    func testTheDemoCoversEveryShippedExportFormat() throws {
+        var produced: Set<String> = []
+        for entry in DemoProject.murror.deliverables {
+            let payload = entry.payloadJSON.flatMap {
+                try? JSONDecoder().decode(DeliverablePayload.self, from: Data($0.utf8))
+            }
+            let d = Deliverable(kind: DeliverableKind(raw: entry.kind), title: "Fixture probe",
+                                body: entry.body, payload: payload)
+            for f in DeliverableExport.files(for: d) {
+                produced.insert((f.name as NSString).pathExtension)
+            }
+        }
+        for ext in ["md", "txt", "csv", "ics", "html"] {
+            XCTAssertTrue(produced.contains(ext),
+                          "no fixture produces .\(ext) — that export path is undemonstrable. Got: \(produced.sorted())")
+        }
+    }
 }

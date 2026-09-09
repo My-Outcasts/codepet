@@ -51,7 +51,14 @@ final class DemoProjectEightDepartmentsTests: XCTestCase {
             "Ship an email capture": "checklist",
             "Find the first 20 users": "dms",
             "Answer the first questions": "doc",
-            "Write the launch checklist": "plan",
+            // Re-typed from `plan` on 9 Sep. This guard is about SHADOWING — that a new keyword
+            // does not steal another department's entry — and the launch checklist still reaches
+            // its own entry; only that entry's kind changed. `plan` is the code-change shape
+            // (goal/steps/changes/verify/risks) and the body is a T-minus schedule with no code
+            // changes in it, so the kind never described the writing. It is also the only fixture
+            // in either demo project that produces a `.ics`, which is what makes the calendar
+            // export reachable in the app at all.
+            "Write the launch checklist": "calendar",
             "Draft the privacy policy": "legal",
         ]
         for (title, kind) in existing {

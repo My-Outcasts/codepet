@@ -1672,8 +1672,11 @@ final class CompanyStore: ObservableObject {
             .map { RunnableRef(id: $0.id, title: $0.title) }
         // The currently-OFF toolkit items — lets the CF decide whether to
         // suggest turning one on (`setup` in the reply).
+        // `isBuilt` is what stops `setup_capability` pitching something that does
+        // nothing. The CF offers only what this list carries, so filtering here
+        // needs no backend change.
         let envSetup = Toolkit.catalog
-            .filter { !company.enabledTools.contains($0.id) }
+            .filter { !company.enabledTools.contains($0.id) && $0.isBuilt(builtSkills: builtSkills) }
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
         // The other half: the skills that are ON. Without this the CF could only
         // ever be told what to offer, never what the founder already chose.
@@ -3491,6 +3494,17 @@ final class CompanyStore: ObservableObject {
     }
 
     func toggleTool(id: String) async {
+        // THE invariant, and the reason it lives here rather than only in the views:
+        // an unbuilt item must be unreachable from EVERY call site — the two
+        // Environment controls, `applySetup` acting on the companion's
+        // `setup_capability`, and any site added later. A row that renders no control
+        // is the UX; this is what makes the fake on-state impossible.
+        //
+        // It blocks turning an unbuilt item OFF as well, which is intended: the
+        // stored id is preserved deliberately so a later-shipped item arrives on.
+        // An id outside the catalog cannot be built by definition, so it is rejected.
+        guard let item = Toolkit.catalog.first(where: { $0.id == id }),
+              item.isBuilt(builtSkills: builtSkills) else { return }
         if company.enabledTools.contains(id) {
             company.enabledTools.remove(id)
         } else {

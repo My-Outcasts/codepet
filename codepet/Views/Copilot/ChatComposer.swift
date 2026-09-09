@@ -704,6 +704,13 @@ struct ChatComposer: View {
                 // answer not at all, which is the exact thing the previous version of this
                 // file removed the row to avoid. So this flips the real switch, and the tool
                 // appears or disappears from the request because of it.
+                // Task 5's guard silently rejects an unbuilt id, and this row's icon
+                // reads off `enabledTools`, so without this the founder would press a
+                // live-looking row and get nothing. Disabled rather than hidden: a
+                // greyed row states the real state, where a vanished one states nothing.
+                let webResearchBuilt = Toolkit.catalog
+                    .first { $0.id == Toolkit.webResearchId }?
+                    .isBuilt(builtSkills: companyStore.builtSkills) ?? false
                 Button {
                     Task { await companyStore.toggleTool(id: Toolkit.webResearchId) }
                 } label: {
@@ -711,6 +718,7 @@ struct ChatComposer: View {
                             icon: companyStore.company.enabledTools.contains(Toolkit.webResearchId)
                                 ? "checkmark" : "globe")
                 }
+                .disabled(!webResearchBuilt)
                 Menu {
                     Button(PlusMenu.changeFolderLabel(lang)) {
                         _ = ProjectLinker.pickAndLink(into: companyStore, language: lang)

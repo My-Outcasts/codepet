@@ -12,11 +12,10 @@ struct EnvironmentView: View {
 
     private var isDark: Bool { scheme == .dark }
     private var enabled: Set<String> { companyStore.company.enabledTools }
-    /// web `recs` = every recommended item, on or off (an enabled one shows its
-    /// "done" state in the card rather than dropping out of the grid).
-    // Interim: bundled floor, not the live per-founder manifest — `CompanyStore.builtSkills`
-    // doesn't exist until Task 4. Task 7 replaces this with the live value.
-    private var recs: [ToolItem] { Toolkit.recommended(builtSkills: Toolkit.bundledBuiltSkills) }
+    /// web `recs` = every recommended item that is actually built. An unbuilt item
+    /// stays visible in Browse all, labelled — a catalog may show the future, but a
+    /// card promising a benefit may only offer what exists.
+    private var recs: [ToolItem] { Toolkit.recommended(builtSkills: companyStore.builtSkills) }
     // Recommended-but-off connectors — the accounts still needing a founder to connect
     // them (same "needs you" tag basis the recommendation cards show).
     private var needsYouCount: Int {
@@ -47,8 +46,12 @@ struct EnvironmentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // The server owns connector state, so re-read it whenever this surface
         // appears — a consent completed in another window must not leave a stale
-        // "Connect" button here.
-        .task { await companyStore.refreshConnectorStatus() }
+        // "Connect" button here. The skill manifest rides along for the same
+        // reason: a skill deployed since launch must not read as unbuilt.
+        .task {
+            await companyStore.refreshConnectorStatus()
+            await companyStore.refreshCapabilities()
+        }
     }
 
     private var header: some View {
@@ -177,8 +180,11 @@ struct EnvironmentView: View {
         let tail = needsYouCount > 0
             ? " — you just need to connect \(needsYouCount) account\(plural)."
             : "."
+        // "I've turned on the skills and agents I can" was here and is gone: no
+        // agent can be on, so the companion was claiming something it had not done.
+        // This now matches the VI string, which never made the agents claim.
         return Text("Based on your ") + boldStage
-             + Text(", here's the toolkit I'd set up. I've turned on the skills and agents I can\(tail)")
+             + Text(", here's the toolkit I'd set up\(tail)")
     }
 
     // MARK: Recommended — web `.erec` grid of `.rcard`s
@@ -338,12 +344,16 @@ struct ToolRowView: View {
 
     /// The connector behind this row, when a real consent flow exists for it.
     ///
-    /// `nil` for skills and agents — which are genuine local flips — and also for
-    /// connectors whose OAuth is not built yet. Those keep the toggle they have
-    /// today rather than being quietly disabled; see the note in the PR.
+    /// `nil` for skills and agents, which are genuine local flips. Also `nil` for a
+    /// connector whose OAuth is not built — but such a row now renders no control at
+    /// all (see `isBuilt`), so it can no longer fall through to a local toggle.
     private var provider: ConnectorProvider? {
         item.category == .connectors ? ConnectorProvider(rawValue: item.id) : nil
     }
+
+    /// Whether this row's item does anything today. An unbuilt item renders no
+    /// control: there must be nothing to press and no on-state to fake.
+    private var isBuilt: Bool { item.isBuilt(builtSkills: companyStore.builtSkills) }
 
     /// A real connector reports the server's view of whether a token exists. Only
     /// a local toggle may report the local flag.
@@ -368,54 +378,70 @@ struct ToolRowView: View {
                     .foregroundColor(CodepetTheme.primaryText)
             }
             Spacer(minLength: 8)
-            Button {
-                if let provider {
-                    // A real connector: consent, then reconcile from the server.
-                    // Never flips a local flag on its own — the token has to exist.
-                    connecting = true
-                    Task {
-                        await companyStore.connectProvider(provider)
-                        connecting = false
-                    }
-                } else {
-                    Task { await companyStore.toggleTool(id: item.id) }
-                }
-            } label: {
-                if connecting {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(.horizontal, 15).padding(.vertical, 4)
-                } else if on {
-                    // web `.eb.on` — borderless, quiet: a filled tick + muted label
-                    HStack(spacing: 6) {
-                        Text("✓")
-                            .font(CodepetTheme.inter(10, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 18, height: 18)
-                            .background(Circle().fill(CodepetTheme.accentPurple))
-                        Text(item.category.onLabel(lang))
-                            .font(CodepetTheme.inter(12))
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                    .padding(6)
-                } else {
-                    Text(item.category.enableVerb(lang))
-                        .font(CodepetTheme.inter(12, weight: .semibold))
-                        .foregroundColor(CodepetTheme.accentPurple)
-                        .padding(.horizontal, 15).padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(CodepetTheme.surface))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(CodepetTokens.accentLine, lineWidth: 1))
-                }
+            if isBuilt {
+                control
+            } else {
+                // Replaces the control entirely rather than disabling it. A dimmed
+                // toggle still reads as something to press; a plain label does not.
+                Text(lang == .vi ? "Chưa xây dựng" : "Not built yet")
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .padding(.horizontal, 15).padding(.vertical, 6)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
-            .fixedSize()
-            .disabled(connecting)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(hovered ? CodepetTokens.surface2 : Color.clear)   // .erow:hover
         .onHover { h in hovered = h }
+    }
+
+    /// The row's enable/on control, lifted out of `body` unchanged. Only reached
+    /// when `isBuilt`, so it never has to reason about an unbuilt item.
+    @ViewBuilder private var control: some View {
+        Button {
+            if let provider {
+                // A real connector: consent, then reconcile from the server.
+                // Never flips a local flag on its own — the token has to exist.
+                connecting = true
+                Task {
+                    await companyStore.connectProvider(provider)
+                    connecting = false
+                }
+            } else {
+                Task { await companyStore.toggleTool(id: item.id) }
+            }
+        } label: {
+            if connecting {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.horizontal, 15).padding(.vertical, 4)
+            } else if on {
+                // web `.eb.on` — borderless, quiet: a filled tick + muted label
+                HStack(spacing: 6) {
+                    Text("✓")
+                        .font(CodepetTheme.inter(10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(CodepetTheme.accentPurple))
+                    Text(item.category.onLabel(lang))
+                        .font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                .padding(6)
+            } else {
+                Text(item.category.enableVerb(lang))
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .padding(.horizontal, 15).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(CodepetTheme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(CodepetTokens.accentLine, lineWidth: 1))
+            }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(connecting)
     }
 }

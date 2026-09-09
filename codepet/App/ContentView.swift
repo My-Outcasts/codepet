@@ -183,6 +183,7 @@ struct ContentView: View {
                   companyStore.companyId != Self.prototypeCompanyId else { return }
             await companyStore.hydrate(companyId: Self.prototypeCompanyId)
             await companyStore.greetIfNeeded(language: appState.uiLanguage)
+            await companyStore.refreshCapabilities()
         }
         .onReceive(authManager.$currentUser) { user in
             guard let user = user else {
@@ -248,6 +249,7 @@ struct ContentView: View {
             Task {
                 await companyStore.hydrate(companyId: user.uid)
                 await companyStore.greetIfNeeded(language: appState.uiLanguage)
+                await companyStore.refreshCapabilities()
                 appState.activeChar = companyStore.company.companionId
             }
 

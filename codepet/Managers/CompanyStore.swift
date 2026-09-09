@@ -236,6 +236,7 @@ final class CompanyStore: ObservableObject {
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
+    private let capabilitiesFetcher: () async -> Set<String>?
     private let companionSaver: (String, String) async -> Bool
     private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
@@ -348,6 +349,7 @@ final class CompanyStore: ObservableObject {
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
+         capabilitiesFetcher: @escaping () async -> Set<String>? = CapabilitiesClient.fetch,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
@@ -421,6 +423,7 @@ final class CompanyStore: ObservableObject {
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
+        self.capabilitiesFetcher = capabilitiesFetcher
         self.companionSaver = companionSaver
         self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
@@ -3452,6 +3455,21 @@ final class CompanyStore: ObservableObject {
     func refreshConnectorStatus() async {
         guard let cid = companyId else { return }
         connectedProviders = await CompanyData.loadConnectorStatus(cid)
+    }
+
+    /// The skills the backend implements, as last read.
+    ///
+    /// Seeded from the bundled floor rather than empty so first paint is never wrong
+    /// in the unsafe direction, then widened by the manifest. Read by every
+    /// `isBuilt(builtSkills:)` call in the app.
+    @Published private(set) var builtSkills: Set<String> = Toolkit.bundledBuiltSkills
+
+    /// Re-read the backend's skill manifest.
+    ///
+    /// Falls back to the bundled floor, never to empty: an empty set would render
+    /// every skill as unbuilt, which is a worse lie than the one this pass fixes.
+    func refreshCapabilities() async {
+        builtSkills = await capabilitiesFetcher() ?? Toolkit.bundledBuiltSkills
     }
 
     /// Run a provider's consent flow, then reconcile from the server rather than

@@ -340,6 +340,35 @@ struct PlanViewer: View {
 }
 
 // MARK: - DmsViewer
+/// `DmsViewer`'s set-level header — eyebrow left, Copy/Export right, a rule beneath.
+///
+/// Its own view rather than an inline `VStack` so a layout test can measure WHERE it draws.
+/// It has to line up with the message cards below it, and those get their inset from
+/// `deliverableCardChrome`; nothing was holding the two together.
+struct DmsSetHeader: View {
+    let messages: [DmMessage]
+    let deliverable: Deliverable
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                DeliverableEyebrow(text: lang == .vi ? "Tiếp cận" : "Outreach")
+                Spacer(minLength: 12)
+                HStack(spacing: 10) {
+                    DeliverableCopyButton(text: DmsViewer.copyAllText(messages))
+                    DeliverableExportButton(deliverable: deliverable)
+                }
+            }
+            DeliverableRule().padding(.vertical, 14)
+        }
+        // The SAME inset the message cards get from `deliverableCardChrome`, taken from the
+        // same constant. Without it the eyebrow and the rule drew flush to the sheet edge,
+        // 16pt left of every card below, and the rule full-bled past both card borders.
+        .padding(.horizontal, DeliverableStyle.padding)
+    }
+}
+
 
 /// Renders a dms payload as one message card per recipient: the name as the heading with its
 /// `note` chip and Copy on the header row, the message at reading size with its blanks tinted,
@@ -371,17 +400,7 @@ struct DmsViewer: View {
             // hand-builds the same header `DeliverableFrame` draws (spacing: 0, matching its own
             // header+rule block): eyebrow left, Copy/Export right, a rule beneath. Set-level,
             // distinct from each card's own eyebrow + Copy.
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    DeliverableEyebrow(text: lang == .vi ? "Tiếp cận" : "Outreach")
-                    Spacer(minLength: 12)
-                    HStack(spacing: 10) {
-                        DeliverableCopyButton(text: Self.copyAllText(messages))
-                        DeliverableExportButton(deliverable: deliverable)
-                    }
-                }
-                DeliverableRule().padding(.vertical, 14)
-            }
+            DmsSetHeader(messages: messages, deliverable: deliverable)
             ForEach(Array(messages.enumerated()), id: \.offset) { i, message in
                 card(index: i, message: message)
             }

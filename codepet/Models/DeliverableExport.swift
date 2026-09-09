@@ -41,7 +41,9 @@ enum DeliverableExport {
         return out.isEmpty ? fallback : out
     }
 
-    static func files(for d: Deliverable) -> [ExportFile] {
+    /// `locale` is the seam that makes the `.ics` date formatting testable: it is the locale
+    /// the formatters would otherwise inherit from the process. Production passes `.current`.
+    static func files(for d: Deliverable, locale: Locale = .current) -> [ExportFile] {
         let base = slug(d.title)
         switch d.kind {
         case .doc:
@@ -57,7 +59,7 @@ enum DeliverableExport {
         case .sheet:
             return [sheetFile(d, base: base)]
         case .calendar:
-            return calendarFiles(d, base: base)
+            return calendarFiles(d, base: base, locale: locale)
         case .site:
             return [siteFile(d, base: base)]
         // `.screens` sits here deliberately: a `.png` per screen needs `ImageRenderer` over a
@@ -178,8 +180,8 @@ enum DeliverableExport {
         out += "paid,\(n(Double(m.paid))),round(waitlist * conversion / 100)\n"
         out += "mrr,\(n(m.mrr)),paid * price (price floored at 1)\n"
         out += "arr,\(n(m.arr)),mrr * 12\n"
-        out += "ltv,\(n(Double(m.ltv))),round(price / churn) (price floored at 1; churn floored at 1%)\n"
-        out += "life,\(n(Double(m.life))),round(1 / churn) (churn floored at 1%)\n"
+        out += "ltv,\(n(Double(m.ltv))),round(price / (churn / 100)) (price floored at 1; churn floored at 1%)\n"
+        out += "life,\(n(Double(m.life))),round(1 / (churn / 100)) (churn floored at 1%)\n"
         out += "breakeven,\(n(Double(m.breakeven))),ceil(2500 / price) (price floored at 1)\n"
 
         if let summary = s.summary, !summary.isEmpty {
@@ -193,7 +195,21 @@ enum DeliverableExport {
     /// currency cell (`mrr`) does not reformat the value, it destroys it. Two decimal places
     /// is right for currency and loses no significant digit a founder would read.
     private static func n(_ v: Double) -> String {
-        v == v.rounded() ? String(Int(v)) : String(format: "%.2f", v)
+        // `Int(_ Double)` TRAPS on non-finite input and on anything past `Int.max`, and these
+        // values arrive straight from the model-generated payload with no magnitude guard —
+        // so the old `String(Int(v))` hard-crashed the app the moment the founder pressed
+        // Export on a slider bound like `1e19`. `SheetModel.compute` guards its own input;
+        // this formatter guarded neither.
+        //
+        // A non-finite bound is not a number a founder can read, so the cell is left EMPTY
+        // rather than printing "inf" or inventing a 0 that would read as a real value.
+        guard v.isFinite else { return "" }
+        // 2^53 — past this a Double carries no integral precision anyway, so the whole-number
+        // branch has nothing left to say and fixed-decimal is both safe and honest.
+        if v == v.rounded(), v.magnitude < 9_007_199_254_740_992 {
+            return String(Int64(v))
+        }
+        return String(format: "%.2f", v)
     }
 
     /// A CSV field that may contain a comma, a quote or a newline. Without this a summary
@@ -211,7 +227,7 @@ enum DeliverableExport {
     /// know). Each event is therefore an all-day VEVENT on a floating day counted from the
     /// export date, and the description says so. A founder who wants real dates moves them
     /// once, in their own calendar.
-    private static func calendarFiles(_ d: Deliverable, base: String) -> [ExportFile] {
+    private static func calendarFiles(_ d: Deliverable, base: String, locale: Locale) -> [ExportFile] {
         guard let weeks = d.payload?.calendar?.weeks, !weeks.isEmpty else {
             return [md(base, titled(d, d.body))]
         }
@@ -237,13 +253,13 @@ enum DeliverableExport {
         for (wi, w) in weeks.enumerated() {
             for i in w.items {
                 n += 1
-                let day = icsDate(weekIndex: wi, dayLabel: i.day)
+                let day = icsDate(weekIndex: wi, dayLabel: i.day, locale: locale)
                 ics += "BEGIN:VEVENT\r\n"
                 ics += "UID:\(d.id)-\(n)@codepet.murror.app\r\n"
                 ics += "DTSTAMP:\(stamp)\r\n"
                 ics += "DTSTART;VALUE=DATE:\(day)\r\n"
                 ics += "SUMMARY:\(icsEscaped(i.body))\r\n"
-                ics += "DESCRIPTION:\(icsEscaped("\(w.label) · \(i.kind) — day is relative to export"))\r\n"
+                ics += "DESCRIPTION:\(icsEscaped("\(w.label) · \(i.day) · \(i.kind) — day is relative to export"))\r\n"
                 ics += "END:VEVENT\r\n"
             }
         }
@@ -269,7 +285,7 @@ enum DeliverableExport {
 
     /// A floating all-day date: today, plus the week offset, plus the weekday the label names.
     /// An unrecognised label lands on the Monday of its week rather than failing the export.
-    private static func icsDate(weekIndex: Int, dayLabel: String) -> String {
+    private static func icsDate(weekIndex: Int, dayLabel: String, locale: Locale) -> String {
         let offsets = ["mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6]
         let key = dayLabel.lowercased().prefix(3)
         let within = offsets[String(key)] ?? 0
@@ -279,24 +295,52 @@ enum DeliverableExport {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         let date = cal.date(byAdding: .day, value: days, to: Date()) ?? Date()
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyyMMdd"
-        fmt.timeZone = TimeZone(identifier: "UTC")
-        return fmt.string(from: date)
+        return fmt("yyyyMMdd", ambient: locale).string(from: date)
     }
 
     /// RFC 5545 basic UTC datetime (`yyyyMMdd'T'HHmmss'Z'`), for `DTSTAMP`.
     private static func icsTimestamp(_ date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        fmt.timeZone = TimeZone(identifier: "UTC")
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        return fmt.string(from: date)
+        fmt("yyyyMMdd'T'HHmmss'Z'", ambient: .current).string(from: date)
+    }
+
+    /// A formatter for an RFC 5545 wire value — one place, because the two callers drifted.
+    ///
+    /// **The calendar and the numbering system are pinned, not inherited.** `icsTimestamp`
+    /// set `en_US_POSIX`; `icsDate` set only the format and the time zone, so its `yyyy` was
+    /// rendered in whatever calendar the Mac is set to. On a Mac defaulting to the Buddhist
+    /// calendar that emits `DTSTART;VALUE=DATE:25690909` — a date 543 years out, and a file
+    /// most calendar apps reject outright. A wire format is not localised; only the founder's
+    /// screen is.
+    ///
+    /// `ambient` is the process locale the formatter would otherwise inherit. It is taken as a
+    /// parameter rather than read from `Locale.current` so a test can pass a hostile one and
+    /// prove the output does not move — see
+    /// `testIcsDatesAreIdenticalWhateverCalendarTheMacIsSetTo`.
+    private static func fmt(_ format: String, ambient: Locale) -> DateFormatter {
+        var components = Locale.Components(locale: ambient)
+        components.calendar = .gregorian
+        components.numberingSystem = "latn"
+
+        let f = DateFormatter()
+        f.dateFormat = format
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(components: components)
+        f.calendar = Calendar(identifier: .gregorian)
+        return f
     }
 
     /// RFC 5545 text escaping: backslash, semicolon, comma and newline.
+    ///
+    /// **Carriage returns are folded into `\n` FIRST.** RFC 5545 line breaks are CRLF, so a
+    /// bare `\r` left inside a property value is a line break to a strict parser — the same
+    /// split-across-two-physical-lines corruption this escaping exists to prevent, which the
+    /// original `\n`-only version still allowed through. Folding happens before the backslash
+    /// escape because it introduces no backslashes of its own; doing it after would double the
+    /// ones this adds.
     private static func icsEscaped(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
+        s.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: ";", with: "\\;")
             .replacingOccurrences(of: ",", with: "\\,")
             .replacingOccurrences(of: "\n", with: "\\n")

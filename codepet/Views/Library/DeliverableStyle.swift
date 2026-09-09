@@ -420,6 +420,11 @@ struct DeliverableExportButton: View {
                     .foregroundColor(CodepetTheme.mutedText)
             }
         }
+        // The notice belongs to the deliverable that failed, not to the button.
+        // `SheetViewer` and `ChecklistViewer` recompute their export subject on every slider
+        // move and tick, but this `@State` outlived all of it — so "Export failed" sat on
+        // screen through every later edit until the founder pressed Export again.
+        .onChange(of: deliverable) { failedLanded = nil }
     }
 
     /// "Export failed" — not "Save" or "Couldn't save" — because this sits inside the button
@@ -428,10 +433,24 @@ struct DeliverableExportButton: View {
     /// one that failed, say how many out of how many were attempted, so a partial `dms`/
     /// `calendar` export isn't told it saved nothing when two files really are on disk.
     private func failureText(landed: Int) -> String {
+        Self.failureText(landed: landed,
+                         total: DeliverableExport.files(for: deliverable).count,
+                         lang: lang)
+    }
+
+    /// A pure static so a test can assert the wording without standing up a view — the same
+    /// reason `DmsViewer.copyAllText` is one.
+    static func failureText(landed: Int, total: Int, lang: AppLanguage) -> String {
         guard landed > 0 else {
             return lang == .vi ? "Xuất thất bại" : "Export failed"
         }
-        let total = DeliverableExport.files(for: deliverable).count
-        return lang == .vi ? "Đã lưu \(landed)/\(total)" : "Saved \(landed) of \(total)"
+        // "Saved 2 of 4" is a SUCCESS sentence. Rendered in muted text with no failure word,
+        // it told a founder whose four-file export died after two files that everything was
+        // fine — the same silent-success failure the enable-card carried. The counts still
+        // matter (two files really are on disk), so they stay; what changes is that the
+        // sentence leads with the failure.
+        return lang == .vi
+            ? "Xuất thất bại sau \(landed)/\(total)"
+            : "Export failed after \(landed) of \(total)"
     }
 }

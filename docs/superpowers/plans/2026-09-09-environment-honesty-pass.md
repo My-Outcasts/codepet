@@ -18,6 +18,9 @@ Spec: `docs/superpowers/specs/2026-09-09-environment-honesty-pass-design.md`
 - A whole-target `xcodebuild test` exits 65 on a clean checkout and ~27 tests never finish — this is landmine 3, not a regression. Run per-suite with `-only-testing:`.
 - Never introduce a new `@MainActor ObservableObject`: the XCTest host on Xcode 26.2 crashes when one deallocates. New types here are `enum` namespaces or pure extensions. `CompanyStore` is already an `ObservableObject` and is testable **through its injected closures** — follow `codepetTests/CompanyStoreChatTests.swift`.
 - Functions test command: `cd functions && npx jest src/__tests__/<file> 2>&1 | tail -25`.
+- **A fresh worktree has no `functions/node_modules`** (gitignored), so the first Jest or
+  `tsc` run in it needs `cd functions && npm install` first. Found during Task 3. Install
+  only; never commit the tree.
 - Cloud Functions region `us-central1`, project `devpet-8f4b1`. Endpoint URLs are hardcoded per client in this repo; there is no shared base-URL constant.
 - SourceKit cross-file diagnostics are false positives — trust `xcodebuild`.
 - Do **not** push, open a PR, or deploy at any point in this plan. Commit locally only. Pushing and deploying need the founder's explicit go-ahead.

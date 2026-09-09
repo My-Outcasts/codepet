@@ -68,6 +68,9 @@ extension DemoProject {
                 **What it points at**
                 The gap is between feeling something and being able to say it to a person. \
                 Anything that only closes the first half is a diary, and they already have one.
+                """,
+                payloadJSON: """
+                {"call":"The gap is between feeling something and being able to say it to a person. Anything that closes only the first half is a diary, and they already have one.","sections":[{"h":"The pattern","p":"Eleven of the twelve could name the last time they wanted to reach out and did not. Nobody was short of contacts — what stopped them was not knowing what they would say once the person picked up."},{"h":"The one who disagreed","p":"One found the framing insulting: she does not want help understanding herself, she wants fewer obligations. She is not a persuasion problem, and she is not wrong about herself."},{"h":"What this rules out","p":"A mood tracker. All twelve had tried one and stopped, and none could say what it had ever told them. Numbers on a chart are not the thing that was missing."}],"next":["Write down who this is not for, before outreach starts","Re-run these questions once twenty people have used it for a fortnight"]}
                 """),
 
             DemoDeliverable(
@@ -104,6 +107,9 @@ extension DemoProject {
                 **One thing to refuse**
                 Streaks. Every app in this set has them, and every person we interviewed had \
                 broken one and stopped.
+                """,
+                payloadJSON: """
+                {"call":"The category has solved the private half and left the second half untouched. AI that brings people closer is not a softer version of what these do — it is the half they all stop before.","sections":[{"h":"What day three looks like","p":"Journals give a blank page and a streak counter. Mood trackers give five emoji and a chart nobody reads back. AI companions are endlessly agreeable and keep the conversation inside the app, which is where it stays."},{"h":"Two things to steal","p":"A first session that asks for nothing — the best onboarding in the category asks for no account — and crisis routing that is built in rather than bolted on."},{"h":"One thing to refuse","p":"Streaks. Every app in this set has them, and every person interviewed had broken one and stopped using the app that counted it."}],"next":["Decide the first session asks for no account","Rule streaks out in writing, so they cannot return later as a growth idea"]}
                 """),
 
             DemoDeliverable(
@@ -140,6 +146,9 @@ extension DemoProject {
                 **The test**
                 Screenshot any screen and ask: does this look like a room, or a report card? \
                 If it is a report card, the amber is doing too much or the serif is missing.
+                """,
+                payloadJSON: """
+                {"call":"Warm dark. The screen should feel like a lit room at night rather than a form to fill in — decided against the worry that naming a feeling in an app feels like being graded.","sections":[{"h":"Palette","p":"Ground deep navy #12141C — the room, not the paper. One amber #E8A24C for a single thing per screen. Warm off-white #F2EFE9 for text, because pure white on navy reads as a dialog box. No red in the ordinary flow: red belongs to the crisis path so it means only that."},{"h":"Type","p":"One serif for the users own words, one clean sans for everything the app says. The distinction is load-bearing — what you wrote should not look like what the app wrote."},{"h":"What this rules out","p":"Progress rings, badges, confetti, streak flames. Anything that scores the user contradicts the one worry this direction exists to answer."}],"next":["Screenshot every screen and ask: a room, or a report card?"]}
                 """),
 
                         DemoDeliverable(
@@ -418,6 +427,9 @@ extension DemoProject {
                 trends, comparisons, "people like you". Those are the obvious second-year roadmap \
                 items and this decision closes them. Say so now rather than discovering it when \
                 someone asks for a dashboard.
+                """,
+                payloadJSON: """
+                {"call":"On-device inference for anything touching an entry. The promise is that entries never leave with a name attached, and the only version of that promise worth making is the one the architecture keeps.","sections":[{"h":"What that costs","p":"A smaller model, a slower first-run download, and no server logs to debug from. All three are real, and all three are worth it."},{"h":"What still reaches a server","p":"Crisis-resource lookup by region, and nothing else. It carries no entry text and no identifier."},{"h":"What this rules out","p":"Any feature needing to read across users entries — trends, comparisons, people like you. Those are the obvious second-year roadmap items, and this decision closes them. Say so now rather than when someone asks for a dashboard."}],"next":["Measure on-device recall past three thousand entries","Write the deletion promise so it matches what the architecture actually does"]}
                 """),
 
             DemoDeliverable(
@@ -441,6 +453,9 @@ extension DemoProject {
 
                 **Confidence.** Low on session length, high on per-token cost. Re-run it once \
                 twenty people have used it for a fortnight.
+                """,
+                payloadJSON: """
+                {"price":{"val":6,"min":0,"max":20,"step":1},"waitlist":{"val":400,"min":50,"max":5000,"step":50},"conversion":{"val":8,"min":1,"max":40,"step":1},"churn":{"val":9,"min":1,"max":25,"step":1},"summary":"At $6 with 8% of 400 converting, 32 paying users produce $192 a month against roughly $3.50 of inference at $0.11 per active user. Margin is not the constraint; conversion is. Session length moves the cost most — ten minutes of writing costs about triple three minutes — which is why pricing should not be built around a session cap."}
                 """),
 
             DemoDeliverable(
@@ -466,6 +481,9 @@ extension DemoProject {
                 **Teams and workplaces.** The moment an employer can see it, the honesty the whole \
                 thing depends on is gone. Refuse this one even when it is the only cheque on the \
                 table.
+                """,
+                payloadJSON: """
+                {"call":"Four groups this is not for, written down so outreach stops spending its best hours in the wrong places.","sections":[{"h":"The person who found it insulting","p":"She does not want help understanding herself, she wants fewer obligations. Every product like this has her, and pitching her is how you learn the wrong lesson from a rejection."},{"h":"People in crisis right now","p":"This is a practice, not treatment, and it says so. Reaching for someone mid-crisis is both ineffective and wrong, which is why the crisis path exists to decline gracefully."},{"h":"Teams and workplaces","p":"The moment an employer can see it, the honesty the whole thing depends on is gone. Refuse this one even when it is the only cheque on the table."}],"next":["Point outreach at the eleven, not the twelfth","Decline the first workplace pilot in writing, before it is offered"]}
                 """),
 
             DemoDeliverable(
@@ -491,6 +509,9 @@ extension DemoProject {
                 is a number, and that nobody will be told.
 
                 _A clinician reads this before launch. Until they have, it is a draft._
+                """,
+                payloadJSON: """
+                {"call":"A crisis resource for their region, shown immediately and without an interstitial. This path is built in and cannot be turned off. Policy, not copy — the wording can change, the behaviour cannot.","sections":[{"h":"What the app does not do","p":"It does not try to handle it. No breathing exercise, no reframing, no follow-up question — every one of those reads as the product deciding it is qualified, and it is not."},{"h":"What it does not do to the entry","p":"Nothing. Not deleted, not flagged, not escalated, not attached to a name. Someone who learns the app reports them is someone who never writes honestly again."},{"h":"The one thing it says","p":"That this is more than a practice can hold, that there is a number, and that nobody will be told."}],"next":["A clinician reads this before launch — until they have, it is a draft","Run the crisis path by hand on a real device every release"]}
                 """),
 
             DemoDeliverable(
@@ -512,6 +533,9 @@ extension DemoProject {
 
                 **What stops a release.** A failing crisis path, and nothing else. Everything else \
                 waits a week — a rhythm that bends for urgency is not a rhythm.
+                """,
+                payloadJSON: """
+                {"items":[{"t":"Cut from main on Thursday morning — whatever is merged is what ships","done":false},{"t":"Run the crisis path by hand on a real device","done":false},{"t":"Check the on-device model still loads on the oldest supported phone","done":false},{"t":"Ship to 10% for a day, then the rest","done":false},{"t":"Write two lines in the changelog a person would understand","done":false}]}
                 """),
 
             DemoDeliverable(

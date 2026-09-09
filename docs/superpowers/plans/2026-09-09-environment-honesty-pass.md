@@ -712,21 +712,29 @@ Append to `codepetTests/CompanyStoreCapabilitiesTests.swift`, inside the class:
         var calls: [[String]] = []
     }
 
+    /// NOTE the `hydrate` call and the `async` return. Without them the store never
+    /// loads through the injected `loader`, so `companyId` stays nil and
+    /// `company.enabledTools` stays empty — which made
+    /// `testAStoredUnbuiltIdSurvivesUntouched` pass BEFORE the guard existed, for
+    /// entirely the wrong reason, and made `testTogglingABuiltItemStillWorks` fail
+    /// even with correct code. A test that passes for the wrong reason is the exact
+    /// trap this plan's testing section warns about; it was caught in review.
     private func storeWithSpy(
         enabled: Set<String>,
         capabilities: @escaping () async -> Set<String>? = { Toolkit.bundledBuiltSkills }
-    ) -> (CompanyStore, SaveSpy) {
+    ) async -> (CompanyStore, SaveSpy) {
         let spy = SaveSpy()
         var state = CompanyState.empty
         state.enabledTools = enabled
         let s = CompanyStore(loader: { _ in state }, saver: { _, _ in true },
                              toolsSaver: { _, ids in spy.calls.append(ids); return true },
                              capabilitiesFetcher: capabilities)
+        await s.hydrate(companyId: "test-co")
         return (s, spy)
     }
 
     func testTogglingAnUnbuiltItemNeitherChangesStateNorWrites() async {
-        let (s, spy) = storeWithSpy(enabled: [])
+        let (s, spy) = await storeWithSpy(enabled: [])
         await s.refreshCapabilities()
         await s.toggleTool(id: "code-reviewer")     // an agent: nothing can run one
         XCTAssertFalse(s.company.enabledTools.contains("code-reviewer"))
@@ -734,7 +742,7 @@ Append to `codepetTests/CompanyStoreCapabilitiesTests.swift`, inside the class:
     }
 
     func testTogglingAnUnbuiltConnectorDoesNotWrite() async {
-        let (s, spy) = storeWithSpy(enabled: [])
+        let (s, spy) = await storeWithSpy(enabled: [])
         await s.refreshCapabilities()
         await s.toggleTool(id: "notion")            // recommended, but no OAuth exists
         XCTAssertFalse(s.company.enabledTools.contains("notion"))
@@ -742,7 +750,7 @@ Append to `codepetTests/CompanyStoreCapabilitiesTests.swift`, inside the class:
     }
 
     func testTogglingABuiltItemStillWorks() async {
-        let (s, spy) = storeWithSpy(enabled: [])
+        let (s, spy) = await storeWithSpy(enabled: [])
         await s.refreshCapabilities()
         await s.toggleTool(id: "web-research")
         XCTAssertTrue(s.company.enabledTools.contains("web-research"))
@@ -750,7 +758,7 @@ Append to `codepetTests/CompanyStoreCapabilitiesTests.swift`, inside the class:
     }
 
     func testAnIdOutsideTheCatalogIsRejected() async {
-        let (s, spy) = storeWithSpy(enabled: [])
+        let (s, spy) = await storeWithSpy(enabled: [])
         await s.refreshCapabilities()
         await s.toggleTool(id: "not-a-real-tool")
         XCTAssertFalse(s.company.enabledTools.contains("not-a-real-tool"))
@@ -760,7 +768,7 @@ Append to `codepetTests/CompanyStoreCapabilitiesTests.swift`, inside the class:
     func testAStoredUnbuiltIdSurvivesUntouched() async {
         // The migration decision: leave the data, fix the read. The founder's
         // original intent is preserved, so a later-shipped item arrives already on.
-        let (s, spy) = storeWithSpy(enabled: ["prd-writer", "github", "explorer"])
+        let (s, spy) = await storeWithSpy(enabled: ["prd-writer", "github", "explorer"])
         await s.refreshCapabilities()
         await s.toggleTool(id: "explorer")
         XCTAssertTrue(s.company.enabledTools.contains("explorer"),

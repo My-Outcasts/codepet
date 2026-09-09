@@ -3495,10 +3495,12 @@ final class CompanyStore: ObservableObject {
 
     func toggleTool(id: String) async {
         // THE invariant, and the reason it lives here rather than only in the views:
-        // an unbuilt item must be unreachable from EVERY call site — the two
-        // Environment controls, `applySetup` acting on the companion's
-        // `setup_capability`, and any site added later. A row that renders no control
-        // is the UX; this is what makes the fake on-state impossible.
+        // an unbuilt item must be unreachable from EVERY call site. Those are the
+        // Browse-all row, `activateSetup` acting on the companion's
+        // `setup_capability`, the composer's web-research row, and any site added
+        // later. (The Recommended card cannot reach here for an unbuilt item —
+        // `Toolkit.recommended(builtSkills:)` already filters it out.) A control that
+        // renders nothing is the UX; this is what makes the fake on-state impossible.
         //
         // It blocks turning an unbuilt item OFF as well, which is intended: the
         // stored id is preserved deliberately so a later-shipped item arrives on.

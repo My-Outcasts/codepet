@@ -115,5 +115,52 @@ final class CompanyStoreCapabilitiesTests: XCTestCase {
         XCTAssertTrue(s.company.enabledTools.contains("explorer"),
                       "nothing in this pass may write to founder prefs")
         XCTAssertTrue(spy.calls.isEmpty)
+
+        // The place this promise is actually at risk: a LEGITIMATE write. Toggling
+        // a built item persists the whole `enabledTools` set via `toolsSaver`, so
+        // "explorer" must still ride along in that write, not just survive while
+        // untouched.
+        await s.toggleTool(id: "web-research")
+        XCTAssertTrue(s.company.enabledTools.contains("explorer"),
+                      "a real write must still carry the stored unbuilt id")
+        XCTAssertTrue(spy.calls.last?.contains("explorer") ?? false,
+                      "the persisted set must not have dropped explorer")
+    }
+
+    // Both tests below pin the guard against the LIVE manifest, not the bundled
+    // floor. Every test above this comment leaves `capabilities` at its default
+    // (`{ Toolkit.bundledBuiltSkills }`), which is also `builtSkills`'s initial
+    // value — so `refreshCapabilities()` is a no-op in all of them, and the guard
+    // could read a hardcoded `Toolkit.bundledBuiltSkills` instead of `builtSkills`
+    // and still pass every one. Do not "simplify" these away: they are the only
+    // tests that actually exercise the fetched manifest.
+
+    func testAWiderManifestLetsANewlyBuiltSkillThrough() async {
+        // Pins the guard against the live manifest, not the floor: "changelog" is
+        // a real catalog skill deliberately absent from
+        // `Toolkit.bundledBuiltSkills`, so this can only pass if the guard reads
+        // `builtSkills` (widened by the fetch) rather than a hardcoded floor.
+        let (s, spy) = await storeWithSpy(
+            enabled: [],
+            capabilities: { ["web-research", "prd-writer", "changelog"] }
+        )
+        await s.refreshCapabilities()
+        await s.toggleTool(id: "changelog")
+        XCTAssertTrue(s.company.enabledTools.contains("changelog"),
+                      "a skill the live manifest reports as built must be toggleable")
+        XCTAssertEqual(spy.calls.count, 1, "the newly-built skill must reach the saver")
+    }
+
+    func testANarrowerManifestBlocksSomethingTheFloorWouldHaveAllowed() async {
+        // Pins the guard against the live manifest, not the floor: the floor alone
+        // would let "web-research" through, so this can only pass if the guard
+        // (and the `env_setup` filter it shares its reasoning with) reads the
+        // narrowed `builtSkills` rather than a hardcoded floor.
+        let (s, spy) = await storeWithSpy(enabled: [], capabilities: { [] })
+        await s.refreshCapabilities()
+        await s.toggleTool(id: "web-research")
+        XCTAssertFalse(s.company.enabledTools.contains("web-research"),
+                       "a manifest narrower than the floor must block it")
+        XCTAssertTrue(spy.calls.isEmpty, "a blocked toggle must not write")
     }
 }

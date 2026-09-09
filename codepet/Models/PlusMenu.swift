@@ -12,12 +12,30 @@ import Foundation
 /// Codepet's answer to "what does it see" is not files. It is the company: the
 /// Library, the roadmap, what Codepet knows, the linked folder.
 ///
-/// **Every row carries a description** (§7.7). ChatGPT captions every row; Claude
-/// captions none. ChatGPT is right, and this repo has the evidence — the founder
-/// had to ask what `Convene the room · ~10 credits` meant. The room's caption is
-/// deliberately NOT duplicated here: it comes from `RoomOffer.detail(_:)`, which
-/// already holds exactly that sentence. Two copies is how a menu and its help tag
-/// drift apart.
+/// **Only the priced row carries a VISIBLE description**, and §7.7 says so having
+/// first decided the opposite. The original call was ChatGPT's pattern — caption
+/// every row, against Claude's bare labels — and this repo had the evidence for it:
+/// the founder had to ask what `Convene the room · ~10 credits` meant. Then two
+/// implementations failed on screen. A `VStack` of two `Text`s in a row's label
+/// rendered as one line; a newline inside a single `Text` fared no better. SwiftUI
+/// flattens anything handed to a `Menu` to `(title, image)` and keeps the first
+/// string, so captioning every row is an HTML pattern and `NSMenu` will not do it.
+/// Revised the same evening, 21 Aug: caption `Convene the room` alone — the row that
+/// prompted the question, and the only one where not knowing costs money. The rest
+/// stand on their labels, which is what a Mac menu does anyway.
+///
+/// **So every `detail` below is a `.help()` tooltip, not a second line** — free,
+/// better than nothing, and not the answer, since nobody hovers a menu row before
+/// clicking. The mechanism that DOES work is a bare `Text` *item* rather than a
+/// label: a standalone `Text` is not flattened, which is how `ChatComposer` captions
+/// the room and how `tierMenu` renders. Real two-line rows mean
+/// `NSMenuItem.subtitle` and an AppKit menu (the target is 26.2, so the API is
+/// there) — a bridge, not a copy tweak. Do not re-try it in a `Button` label; that
+/// road is already walked, twice.
+///
+/// The room's caption is deliberately NOT duplicated here: it comes from
+/// `RoomOffer.detail(_:)`, which already holds exactly that sentence. Two copies is
+/// how a menu and its help tag drift apart.
 enum PlusMenu {
 
     /// Enough to recognise last week's work without turning a menu into a file

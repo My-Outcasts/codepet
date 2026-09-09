@@ -3497,10 +3497,14 @@ final class CompanyStore: ObservableObject {
         // THE invariant, and the reason it lives here rather than only in the views:
         // an unbuilt item must be unreachable from EVERY call site. Those are the
         // Browse-all row, `activateSetup` acting on the companion's
-        // `setup_capability`, the composer's web-research row, and any site added
-        // later. (The Recommended card cannot reach here for an unbuilt item —
-        // `Toolkit.recommended(builtSkills:)` already filters it out.) A control that
-        // renders nothing is the UX; this is what makes the fake on-state impossible.
+        // `setup_capability`, the composer's web-research row, `connectProvider`'s
+        // post-OAuth mirror (above), and any site added later. `connectProvider` is
+        // safe by construction rather than by this guard catching it: it can only
+        // pass an id whose `ConnectorProvider` case exists, which is the same fact
+        // `isBuilt` checks for a connector. (The Recommended card cannot reach here
+        // for an unbuilt item — `Toolkit.recommended(builtSkills:)` already filters
+        // it out.) A control that renders nothing is the UX; this is what makes the
+        // fake on-state impossible.
         //
         // It blocks turning an unbuilt item OFF as well, which is intended: the
         // stored id is preserved deliberately so a later-shipped item arrives on.

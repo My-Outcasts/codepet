@@ -79,10 +79,14 @@ final class SetupCardStateTests: XCTestCase {
                        .offer(Toolkit.find(category: "skills", name: "Web research")!))
     }
 
-    /// A card offering something that does not exist must draw no pill. Reachable
-    /// from stale transcript history after the `env_setup` filter stops the CF
-    /// offering new ones — and without this, the press would hit `toggleTool`'s
-    /// guard and return silently, which is the 7 Sep bug all over again.
+    /// A card for an unbuilt item must draw no pill. NOT reachable from stale
+    /// transcript history — `chatMessages` is session-only and non-`Codable`, and
+    /// `env_setup` only ever offers items that are both off and built, so a card
+    /// can't be minted for an unbuilt item in the first place. The genuinely
+    /// reachable path is mid-session: `refreshCapabilities()` narrows `builtSkills`
+    /// after a card from earlier in the same session already exists. Without this
+    /// case, the press would hit `toggleTool`'s guard and return silently, which is
+    /// the 7 Sep bug all over again.
     func testAnUnbuiltItemDrawsNoControlEvenThoughItIsOff() {
         let codeReview = SetupAction(category: "skills", name: "Code review")
         let state = SetupCardState.of(codeReview,
@@ -107,5 +111,19 @@ final class SetupCardStateTests: XCTestCase {
                                          enabledTools: [],
                                          builtSkills: ["code-review"]),
                        .offer(Toolkit.find(category: "skills", name: "Code review")!))
+    }
+
+    /// Pins the ordering in `of`: unbuilt is checked BEFORE already-on. A stored-on id for
+    /// an unbuilt item (the mid-session-narrowing case `.notBuilt`'s doc comment describes)
+    /// must render `.notBuilt`, never `.enabled` — it does nothing, and saying "Enabled" for
+    /// something that does nothing is exactly the fiction this whole type exists to remove.
+    /// Checked by inverting the order back locally and confirming this is the only test in
+    /// the suite that goes red: every other `.enabled` fixture uses a built item.
+    func testAStoredOnButUnbuiltItemIsNotBuiltNotEnabled() {
+        let codeReview = SetupAction(category: "skills", name: "Code review")
+        let state = SetupCardState.of(codeReview,
+                                      enabledTools: ["code-review"],
+                                      builtSkills: Toolkit.bundledBuiltSkills)
+        XCTAssertEqual(state, .notBuilt(Toolkit.find(category: "skills", name: "Code review")!))
     }
 }

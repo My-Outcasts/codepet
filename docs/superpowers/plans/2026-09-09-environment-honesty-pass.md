@@ -191,7 +191,17 @@ This step is not optional. Five tests in an earlier plan could not fail; breakin
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Models/Toolkit.swift codepetTests/ToolkitIsBuiltTests.swift
-git commit -m "Add ToolItem.isBuilt, one predicate over three honest authorities"
+git commit -F - <<'MSG'
+Add ToolItem.isBuilt, one predicate over three honest authorities
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -341,7 +351,17 @@ Temporarily set `code-review`'s `defaultOn` to `true`, re-run Step 4, and confir
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Models/Toolkit.swift codepetTests/ToolkitIsBuiltTests.swift codepetTests/ToolkitTests.swift
-git commit -m "Stop defaulting and recommending items that do nothing"
+git commit -F - <<'MSG'
+Stop defaulting and recommending items that do nothing
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -475,7 +495,17 @@ Expected: no output. `index.ts` importing a new module is where a typo surfaces,
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add functions/src/capabilities.ts functions/src/__tests__/capabilities.test.ts functions/src/index.ts
-git commit -m "Serve IMPLEMENTED_SKILLS so the client need not hard-code what is built"
+git commit -F - <<'MSG'
+Serve IMPLEMENTED_SKILLS so the client need not hard-code what is built
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -645,7 +675,17 @@ Temporarily change `refreshCapabilities()` to `builtSkills = await capabilitiesF
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Services/CapabilitiesClient.swift codepet/Managers/CompanyStore.swift codepetTests/CompanyStoreCapabilitiesTests.swift
-git commit -m "Read the skill manifest, falling back to the bundled floor not empty"
+git commit -F - <<'MSG'
+Read the skill manifest, falling back to the bundled floor not empty
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -810,7 +850,17 @@ Temporarily delete the `guard` line pair from `toggleTool`, re-run Step 4, and c
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Managers/CompanyStore.swift codepetTests/CompanyStoreCapabilitiesTests.swift
-git commit -m "Guard toggleTool and env_setup so an unbuilt item can never turn on"
+git commit -F - <<'MSG'
+Guard toggleTool and env_setup so an unbuilt item can never turn on
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -987,7 +1037,17 @@ Temporarily change the last line of `of` to `return .offer(item)`, re-run Step 6
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Models/SetupCardState.swift codepet/Views/Copilot/CopilotChatView.swift codepetTests/SetupCardStateTests.swift
-git commit -m "Draw no pill on an enable-card for something that is not built"
+git commit -F - <<'MSG'
+Draw no pill on an enable-card for something that is not built
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 
@@ -1005,13 +1065,16 @@ git status --short   # must be empty
 
 - [ ] **Step 1: Point the recommendation grid at the live manifest**
 
-In `codepet/Views/Environment/EnvironmentView.swift`, change line 17 from:
+In `codepet/Views/Environment/EnvironmentView.swift`, the `recs` line is now at
+**line 19** and already calls the function form with an INTERIM argument, because
+Task 2 had to keep the project compiling before `CompanyStore.builtSkills`
+existed. It currently reads:
 
 ```swift
-    private var recs: [ToolItem] { Toolkit.recommended }
+    private var recs: [ToolItem] { Toolkit.recommended(builtSkills: Toolkit.bundledBuiltSkills) }
 ```
 
-to:
+Switch that argument from the bundled constant to the live per-founder value:
 
 ```swift
     /// web `recs` = every recommended item that is actually built. An unbuilt item
@@ -1184,7 +1247,17 @@ Confirm all four, by looking:
 ```bash
 cd ~/Developer/codepet-env-honesty
 git add codepet/Views/Environment/EnvironmentView.swift
-git commit -m "Render the real state of an unbuilt toolkit item"
+git commit -F - <<'MSG'
+Render the real state of an unbuilt toolkit item
+
+<Write a real body here before committing: WHY this change exists, and the
+alternative you rejected. CLAUDE.md's working agreements require it — "commit
+messages carry the reasoning ... they are the only durable record once scratch
+files are gone" — and a subject-only message is a review finding, not a style
+preference.>
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
 git status --short   # must be empty
 ```
 

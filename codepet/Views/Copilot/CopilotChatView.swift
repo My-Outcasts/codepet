@@ -2044,7 +2044,9 @@ struct CopilotBubble: View {
     /// is also what makes an already-on offer acknowledge instead of dangling a pill that
     /// cannot fire.
     @ViewBuilder private func setupInline(_ setup: SetupAction) -> some View {
-        let state = SetupCardState.of(setup, enabledTools: companyStore.company.enabledTools)
+        let state = SetupCardState.of(setup,
+                                      enabledTools: companyStore.company.enabledTools,
+                                      builtSkills: companyStore.builtSkills)
         let why = state.item?.why
         VStack(alignment: .leading, spacing: 8) {
             Text(state.item?.name ?? setup.name)
@@ -2073,6 +2075,12 @@ struct CopilotBubble: View {
                 }
                 .font(.pixelSystem(size: 10, weight: .semibold))
                 .foregroundColor(CodepetTheme.accentTeal)
+            case .notBuilt:
+                // Named above, with no pill. `toggleTool` would reject the press
+                // anyway, and a button whose press does nothing reads as broken.
+                Text(lang == .vi ? "Chưa xây dựng" : "Not built yet")
+                    .font(.pixelSystem(size: 10, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
             case .unresolved:
                 // Nothing to press. The name above keeps the record of what was offered.
                 EmptyView()

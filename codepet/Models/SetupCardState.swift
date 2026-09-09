@@ -33,18 +33,34 @@ enum SetupCardState: Equatable {
     /// Resolves to nothing in the catalog: keep the transcript record of what was offered,
     /// but draw no control, because no control could work.
     case unresolved
+    /// Resolvable, off, and does nothing yet: title it, and draw NO button.
+    ///
+    /// Distinct from `unresolved` on purpose — the item is real and nameable, it
+    /// simply has no implementation — and distinct from `offer` because the rule
+    /// this whole type exists to enforce is that a card which cannot act must not
+    /// show a pill that pretends it can. Without this case, `toggleTool`'s guard
+    /// would turn the press into a silent no-op: the 7 Sep bug exactly.
+    case notBuilt(ToolItem)
 
-    static func of(_ setup: SetupAction, enabledTools: Set<String>) -> SetupCardState {
+    /// `builtSkills` is required rather than defaulted: a defaulted gate is how
+    /// `sendChat`'s `convenesRoom:` left eight tests red for a day, and this one
+    /// decides whether a control appears at all.
+    static func of(_ setup: SetupAction,
+                   enabledTools: Set<String>,
+                   builtSkills: Set<String>) -> SetupCardState {
         guard let item = Toolkit.find(category: setup.category, name: setup.name) else {
             return .unresolved
         }
-        return enabledTools.contains(item.id) ? .enabled(item) : .offer(item)
+        // Already-on is checked FIRST, so a stored id for something since un-built
+        // still acknowledges rather than reading as unavailable.
+        if enabledTools.contains(item.id) { return .enabled(item) }
+        return item.isBuilt(builtSkills: builtSkills) ? .offer(item) : .notBuilt(item)
     }
 
     /// The item behind the offer, when there is one — what the card titles itself with.
     var item: ToolItem? {
         switch self {
-        case .offer(let i), .enabled(let i): return i
+        case .offer(let i), .enabled(let i), .notBuilt(let i): return i
         case .unresolved: return nil
         }
     }

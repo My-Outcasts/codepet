@@ -65,36 +65,38 @@ import XCTest
 
 final class ToolkitIsBuiltTests: XCTestCase {
 
-    private func item(_ id: String) -> ToolItem {
-        guard let found = Toolkit.catalog.first(where: { $0.id == id }) else {
-            XCTFail("no catalog item '\(id)'")
-            fatalError("no catalog item '\(id)'")
-        }
-        return found
+    /// `throws` + `XCTUnwrap` rather than a `fatalError` helper. A `fatalError`
+    /// here would kill the test HOST on a mistyped id, and a dead host in this
+    /// repo reads as landmine 3 (the `@MainActor ObservableObject` crash) — so a
+    /// typo would present as a toolchain bug and cost real time. Every test using
+    /// it is therefore `func test…() throws`.
+    private func item(_ id: String) throws -> ToolItem {
+        try XCTUnwrap(Toolkit.catalog.first(where: { $0.id == id }),
+                      "no catalog item '\(id)'")
     }
 
-    func testSkillIsBuiltOnlyWhenTheManifestNamesIt() {
-        XCTAssertTrue(item("web-research").isBuilt(builtSkills: ["web-research"]))
-        XCTAssertFalse(item("web-research").isBuilt(builtSkills: []))
+    func testSkillIsBuiltOnlyWhenTheManifestNamesIt() throws {
+        XCTAssertTrue(try item("web-research").isBuilt(builtSkills: ["web-research"]))
+        XCTAssertFalse(try item("web-research").isBuilt(builtSkills: []))
         // In the catalog, and NOT in the CF's IMPLEMENTED_SKILLS today.
-        XCTAssertFalse(item("code-review").isBuilt(builtSkills: Toolkit.bundledBuiltSkills))
-        XCTAssertFalse(item("changelog").isBuilt(builtSkills: Toolkit.bundledBuiltSkills))
+        XCTAssertFalse(try item("code-review").isBuilt(builtSkills: Toolkit.bundledBuiltSkills))
+        XCTAssertFalse(try item("changelog").isBuilt(builtSkills: Toolkit.bundledBuiltSkills))
     }
 
-    func testAManifestArrivingLaterBuildsASkillWithNoClientChange() {
+    func testAManifestArrivingLaterBuildsASkillWithNoClientChange() throws {
         // The property Toolkit.swift defends: shipping a skill is a backend deploy,
         // not a client release. A manifest naming 'changelog' must build it here.
-        XCTAssertTrue(item("changelog").isBuilt(builtSkills: ["changelog"]))
+        XCTAssertTrue(try item("changelog").isBuilt(builtSkills: ["changelog"]))
     }
 
-    func testConnectorIsBuiltOnlyWhenAProviderCaseExists() {
-        XCTAssertTrue(item("github").isBuilt(builtSkills: []))
+    func testConnectorIsBuiltOnlyWhenAProviderCaseExists() throws {
+        XCTAssertTrue(try item("github").isBuilt(builtSkills: []))
         // Note the manifest passed in NAMES these connectors. A skills manifest
         // must never be able to build a connector — the categories are separate
         // authorities, and this is the assertion that proves it.
         let lying: Set<String> = ["notion", "figma", "slack", "linear"]
         for id in ["notion", "figma", "slack", "linear"] {
-            XCTAssertFalse(item(id).isBuilt(builtSkills: lying),
+            XCTAssertFalse(try item(id).isBuilt(builtSkills: lying),
                            "\(id) has no ConnectorProvider case")
         }
     }
@@ -1076,11 +1078,16 @@ In `ToolRowView`, replace the now-stale doc comment on `provider` (lines 336-341
     private var isBuilt: Bool { item.isBuilt(builtSkills: companyStore.builtSkills) }
 ```
 
-Then in `body`, wrap the existing `Button` (line 368, `Button {`, through line 412, `.disabled(connecting)`) in an `isBuilt` branch. The result:
+Then MOVE the existing `Button` (line 368, `Button {`, through line 412, `.disabled(connecting)`) out of `body` into a computed property, unchanged, and give `body` a two-line branch in its place.
+
+Extracting rather than wrapping the block in an `else` is deliberate: `body` is already a 60-line `HStack`, and nesting the control another level makes the row's shape unreadable. `ToolRowView` states its other decisions the same way — `provider` and `on` are both computed properties — so this follows the file rather than fighting it.
+
+In `body`, replace lines 368-412 (the whole `Button` through `.disabled(connecting)`) with:
 
 ```swift
-            Spacer(minLength: 8)
-            if !isBuilt {
+            if isBuilt {
+                control
+            } else {
                 // Replaces the control entirely rather than disabling it. A dimmed
                 // toggle still reads as something to press; a plain label does not.
                 Text(lang == .vi ? "Chưa xây dựng" : "Not built yet")
@@ -1088,52 +1095,60 @@ Then in `body`, wrap the existing `Button` (line 368, `Button {`, through line 4
                     .foregroundColor(CodepetTheme.mutedText)
                     .padding(.horizontal, 15).padding(.vertical, 6)
                     .fixedSize()
-            } else {
-                Button {
-                    if let provider {
-                        // A real connector: consent, then reconcile from the server.
-                        // Never flips a local flag on its own — the token has to exist.
-                        connecting = true
-                        Task {
-                            await companyStore.connectProvider(provider)
-                            connecting = false
-                        }
-                    } else {
-                        Task { await companyStore.toggleTool(id: item.id) }
-                    }
-                } label: {
-                    if connecting {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.horizontal, 15).padding(.vertical, 4)
-                    } else if on {
-                        // web `.eb.on` — borderless, quiet: a filled tick + muted label
-                        HStack(spacing: 6) {
-                            Text("✓")
-                                .font(CodepetTheme.inter(10, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 18, height: 18)
-                                .background(Circle().fill(CodepetTheme.accentPurple))
-                            Text(item.category.onLabel(lang))
-                                .font(CodepetTheme.inter(12))
-                                .foregroundColor(CodepetTheme.mutedText)
-                        }
-                        .padding(6)
-                    } else {
-                        Text(item.category.enableVerb(lang))
-                            .font(CodepetTheme.inter(12, weight: .semibold))
-                            .foregroundColor(CodepetTheme.accentPurple)
-                            .padding(.horizontal, 15).padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(CodepetTheme.surface))
-                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(CodepetTokens.accentLine, lineWidth: 1))
-                    }
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .disabled(connecting)
             }
+```
+
+Then add the extracted control below `body`, its contents byte-for-byte as they were:
+
+```swift
+    /// The row's enable/on control, lifted out of `body` unchanged. Only reached
+    /// when `isBuilt`, so it never has to reason about an unbuilt item.
+    @ViewBuilder private var control: some View {
+        Button {
+            if let provider {
+                // A real connector: consent, then reconcile from the server.
+                // Never flips a local flag on its own — the token has to exist.
+                connecting = true
+                Task {
+                    await companyStore.connectProvider(provider)
+                    connecting = false
+                }
+            } else {
+                Task { await companyStore.toggleTool(id: item.id) }
+            }
+        } label: {
+            if connecting {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.horizontal, 15).padding(.vertical, 4)
+            } else if on {
+                // web `.eb.on` — borderless, quiet: a filled tick + muted label
+                HStack(spacing: 6) {
+                    Text("✓")
+                        .font(CodepetTheme.inter(10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(CodepetTheme.accentPurple))
+                    Text(item.category.onLabel(lang))
+                        .font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                .padding(6)
+            } else {
+                Text(item.category.enableVerb(lang))
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .padding(.horizontal, 15).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(CodepetTheme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(CodepetTokens.accentLine, lineWidth: 1))
+            }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(connecting)
+    }
 ```
 
 - [ ] **Step 5: Build the app, signed**

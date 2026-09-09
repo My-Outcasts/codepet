@@ -212,7 +212,7 @@ git status --short   # must be empty
 **Files:**
 - Modify: `codepet/Models/Toolkit.swift` (the `explorer` catalog entry; `recommended`)
 - Modify: `codepetTests/ToolkitTests.swift:11` and `:39-40`
-- Test: `codepetTests/ToolkitIsBuiltTests.swift` (append two tests)
+- Test: `codepetTests/ToolkitIsBuiltTests.swift` (append three tests)
 
 **Interfaces:**
 - Consumes: `ToolItem.isBuilt(builtSkills:)`, `Toolkit.bundledBuiltSkills` (Task 1).
@@ -801,10 +801,12 @@ to:
 ```swift
     func toggleTool(id: String) async {
         // THE invariant, and the reason it lives here rather than only in the views:
-        // an unbuilt item must be unreachable from EVERY call site — the two
-        // Environment controls, `applySetup` acting on the companion's
-        // `setup_capability`, and any site added later. A row that renders no control
-        // is the UX; this is what makes the fake on-state impossible.
+        // an unbuilt item must be unreachable from EVERY call site. Those are the
+        // Browse-all row, `activateSetup` acting on the companion's
+        // `setup_capability`, the composer's web-research row, and any site added
+        // later. (The Recommended card cannot reach here for an unbuilt item —
+        // `Toolkit.recommended(builtSkills:)` already filters it out.) A control that
+        // renders nothing is the UX; this is what makes the fake on-state impossible.
         //
         // It blocks turning an unbuilt item OFF as well, which is intended: the
         // stored id is preserved deliberately so a later-shipped item arrives on.
@@ -883,7 +885,7 @@ That is exactly the 7 Sep incident recorded in `SetupCardState.swift`'s own doc 
 **Files:**
 - Modify: `codepet/Models/SetupCardState.swift` (a new case; `of` gains a parameter)
 - Modify: `codepet/Views/Copilot/CopilotChatView.swift:2047` (the one call site) and its `switch` at `:2059-2079`
-- Test: `codepetTests/SetupCardStateTests.swift` (append two tests; update 11 existing call sites)
+- Test: `codepetTests/SetupCardStateTests.swift` (append three tests; update 11 existing call sites)
 
 **Interfaces:**
 - Consumes: `ToolItem.isBuilt(builtSkills:)` (Task 1), `CompanyStore.builtSkills` (Task 4).
@@ -1224,6 +1226,61 @@ Then add the extracted control below `body`, its contents byte-for-byte as they 
         .disabled(connecting)
     }
 ```
+
+- [ ] **Step 4b: Stop the composer's web-research row being a silent dead control**
+
+Task 5's review found `codepet/Views/Copilot/ChatComposer.swift:708` — a fourth
+`toggleTool` call site that no task owned. It is the 🌐 plus-menu row, and it calls
+`toggleTool(id: Toolkit.webResearchId)`.
+
+It is safe *today* only because `web-research` is in `Toolkit.bundledBuiltSkills`. The
+moment the manifest returns without it — which `testAnEmptyManifestIsHonoured...`
+explicitly blesses as a legitimate answer, not a failure — the guard swallows the press
+while the row's own icon keeps reading off `enabledTools`. The founder presses it and
+nothing happens: the repo's "can't press it = silent success" landmine.
+
+Add above the `Button`:
+
+```swift
+                // Task 5's guard silently rejects an unbuilt id, and this row's icon
+                // reads off `enabledTools`, so without this the founder would press a
+                // live-looking row and get nothing. Disabled rather than hidden: a
+                // greyed row states the real state, where a vanished one states nothing.
+                let webResearchBuilt = Toolkit.catalog
+                    .first { $0.id == Toolkit.webResearchId }?
+                    .isBuilt(builtSkills: companyStore.builtSkills) ?? false
+```
+
+and attach to that `Button`:
+
+```swift
+                .disabled(!webResearchBuilt)
+```
+
+- [ ] **Step 4c: Fetch the manifest once per session, not only in the Environment tab**
+
+Task 5's review also found that `refreshCapabilities()` had no production caller at all,
+and that Step 2 above wires it only into `EnvironmentView`'s `.task` — while the
+`env_setup` filter added in Task 5 runs on **every chat turn**. So a founder who never
+opens the Environment tab has their chat payload filtered against the two-item bundled
+floor, and a backend-only skill is never pitched.
+
+**It must NOT go inside `hydrate`.** The default `capabilitiesFetcher` is the real network
+client and 34 suites call `hydrate`, so that would put a live fetch in all of them. The
+repo already solved this exact shape: CLAUDE.md records that `greetIfNeeded` is
+deliberately *not* part of `hydrate` and that "ContentView calls both in order."
+
+Follow that. In `codepet/App/ContentView.swift` there are two `hydrate` sites, each
+already followed by `greetIfNeeded` — the fixture path at lines 184-185 and the
+signed-in path at lines 249-250. Add a third line to BOTH, after `greetIfNeeded`:
+
+```swift
+                await companyStore.refreshCapabilities()
+```
+
+Keeping it beside `greetIfNeeded` rather than inside `hydrate` is the point: `hydrate`
+loads company DATA, and this starts a network read. A failed fetch is already harmless —
+it falls back to the bundled floor — so neither path needs a guard.
 
 - [ ] **Step 5: Build the app, signed**
 

@@ -207,7 +207,7 @@ fixing it also brings the two languages into parity.
 **The guard at #6 is the invariant; #7 is only the UX.** Views not rendering a
 control is what the founder sees, but the chokepoint in `toggleTool` is what
 makes the fake on-state unreachable from *any* call site — including
-`applySetup:2735` and any future one. This mirrors the lesson that `founderAsk`
+`activateSetup:2738` and any future one. This mirrors the lesson that `founderAsk`
 must be stamped at exactly one site.
 
 Two toggle call sites need no gate because they are built by construction:

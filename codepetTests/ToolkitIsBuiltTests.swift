@@ -52,4 +52,32 @@ final class ToolkitIsBuiltTests: XCTestCase {
     func testBundledFallbackNamesTheTwoSkillsTheCFImplements() {
         XCTAssertEqual(Toolkit.bundledBuiltSkills, ["web-research", "prd-writer"])
     }
+
+    func testNothingUnbuiltShipsDefaultOn() {
+        // The drift guard. It asserts on the RAW `defaultOn` data rather than on
+        // `defaultEnabledIds`, and that distinction is the whole point: if
+        // `defaultEnabledIds` filtered by isBuilt, this test would pass forever
+        // even after somebody re-added a default-on item that does nothing.
+        let defaults = Toolkit.catalog.filter(\.defaultOn)
+        for item in defaults {
+            XCTAssertTrue(item.isBuilt(builtSkills: Toolkit.bundledBuiltSkills),
+                          "'\(item.id)' ships defaultOn but does nothing")
+        }
+        XCTAssertFalse(defaults.isEmpty, "a catalog with no defaults would pass vacuously")
+    }
+
+    func testRecommendationsOnlyOfferWhatCanBeActedOn() {
+        let recs = Toolkit.recommended(builtSkills: Toolkit.bundledBuiltSkills)
+        XCTAssertEqual(recs.map(\.id).sorted(), ["github", "prd-writer"])
+        // Browse all still carries them; only the pitch drops them.
+        for id in ["code-review", "notion", "test-writer"] {
+            XCTAssertTrue(Toolkit.catalog.contains { $0.id == id },
+                          "\(id) must remain in the catalog")
+        }
+    }
+
+    func testALaterManifestWidensRecommendationsWithNoClientChange() {
+        let recs = Toolkit.recommended(builtSkills: ["prd-writer", "code-review"])
+        XCTAssertTrue(recs.map(\.id).contains("code-review"))
+    }
 }

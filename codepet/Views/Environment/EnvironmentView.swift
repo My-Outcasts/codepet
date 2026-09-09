@@ -14,7 +14,9 @@ struct EnvironmentView: View {
     private var enabled: Set<String> { companyStore.company.enabledTools }
     /// web `recs` = every recommended item, on or off (an enabled one shows its
     /// "done" state in the card rather than dropping out of the grid).
-    private var recs: [ToolItem] { Toolkit.recommended }
+    // Interim: bundled floor, not the live per-founder manifest — `CompanyStore.builtSkills`
+    // doesn't exist until Task 4. Task 7 replaces this with the live value.
+    private var recs: [ToolItem] { Toolkit.recommended(builtSkills: Toolkit.bundledBuiltSkills) }
     // Recommended-but-off connectors — the accounts still needing a founder to connect
     // them (same "needs you" tag basis the recommendation cards show).
     private var needsYouCount: Int {

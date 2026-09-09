@@ -90,9 +90,12 @@ enum Toolkit {
         ToolItem(id: "code-reviewer", name: "Code Reviewer", badge: "Cr",
                  detail: "A subagent that audits changes for correctness.",
                  category: .agents, recommended: false, why: nil, defaultOn: false),
+        // defaultOn was true and is now false: nothing can run an agent, so every
+        // company was seeded with one that does nothing. The stored id is left alone
+        // in existing companies (see the spec) — this only stops NEW ones.
         ToolItem(id: "explorer", name: "Explorer", badge: "Ex",
                  detail: "Searches the codebase to answer questions fast.",
-                 category: .agents, recommended: false, why: nil, defaultOn: true),
+                 category: .agents, recommended: false, why: nil, defaultOn: false),
         ToolItem(id: "test-writer", name: "Test Writer", badge: "Tw",
                  detail: "Generates tests for new code.",
                  category: .agents, recommended: true,
@@ -123,7 +126,17 @@ enum Toolkit {
     static func enabledSkillIds(in enabled: Set<String>) -> [String] {
         items(in: .skills).map(\.id).filter(enabled.contains).sorted()
     }
-    static var recommended: [ToolItem] { catalog.filter(\.recommended) }
+    /// The items worth pitching — recommended AND actually built.
+    ///
+    /// The line is drawn at intent: Browse all is a catalog and may honestly show
+    /// the future, but a card headed "Recommended for your project" whose `why`
+    /// promises a benefit is a pitch, and a pitch may only offer what exists.
+    ///
+    /// Takes the live manifest rather than the bundled floor, so a skill shipped
+    /// backend-only becomes recommendable on deploy with no client release.
+    static func recommended(builtSkills: Set<String>) -> [ToolItem] {
+        catalog.filter { $0.recommended && $0.isBuilt(builtSkills: builtSkills) }
+    }
 
     /// The skills this binary is compiled knowing about, used ONLY until the live
     /// manifest arrives: first paint, offline, or a failed fetch.

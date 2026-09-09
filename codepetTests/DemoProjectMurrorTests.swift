@@ -186,6 +186,14 @@ final class DemoProjectMurrorTests: XCTestCase {
             case "screens": XCTAssertNotNil(p.screens, "screens payload did not decode")
             case "sheet":   XCTAssertNotNil(p.sheet, "sheet payload did not decode")
             case "dms":     XCTAssertNotNil(p.messages, "dms payload did not decode")
+            // `doc` reads `call` FIRST and renders `sections` beneath it. Asserting only
+            // `sections` would pass on a payload whose decision line never decoded, and the
+            // decision is the half the founder reads.
+            case "doc":
+                XCTAssertNotNil(p.call, "doc payload decoded without its `call`")
+                XCTAssertNotNil(p.sections, "doc payload decoded without its `sections`")
+            case "checklist":
+                XCTAssertNotNil(p.items, "checklist payload did not decode")
             default:        XCTFail("\(entry.kind) carries a payload with no assertion here")
             }
         }

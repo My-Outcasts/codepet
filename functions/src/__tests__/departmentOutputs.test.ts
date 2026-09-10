@@ -10,6 +10,7 @@ import {
   coerceDeliverable,
   deliverableTool,
   DELIVERABLE_TOOL,
+  PAYLOAD_FIELD_KINDS,
   RunTaskArgs,
 } from "../runTaskCore";
 import { ONE_SHOT_OPS, schemaInstruction } from "../local/oneShotOps";
@@ -407,5 +408,85 @@ describe("every payload field is classified", () => {
 
   test("the schema still declares the fields this map was written against", () => {
     expect(declared.length).toBe(37);
+  });
+});
+
+/**
+ * The map, cross-checked against the schema's own field descriptions.
+ *
+ * The coverage and count tests above catch a field left OUT of the map, and one classified to a
+ * kind no department has. Neither catches a field classified to the WRONG live kind, which is
+ * the failure that matters: put `price` under `doc` and the four sheet inputs get offered to all
+ * eight departments; put `screens` under `site` and Marketing is offered a kind it cannot
+ * produce — the exact defect the narrowing exists to prevent. Both mutations pass every other
+ * test in this file.
+ *
+ * Every description begins with the kinds that field belongs to ("checklist: …", "doc/legal: …",
+ * "plan: … site: …"). That prose is not the source of truth for what gets sent — the map is —
+ * but the two must agree, and this is what says so.
+ */
+describe("the payload field map agrees with the schema's own descriptions", () => {
+  const props = (DELIVERABLE_TOOL.input_schema as any).properties.payload.properties as
+    Record<string, { description?: string }>;
+
+  /** Kinds named by a description: at its start, or after a sentence break, `a:` or `a/b:`. */
+  const kindsInDescription = (d: string): string[] => {
+    const out = new Set<string>();
+    for (const m of d.matchAll(/(?:^|\.\s+)([a-z]+(?:\/[a-z]+)*):/g)) {
+      for (const k of (m[1] as string).split("/")) out.add(k);
+    }
+    return [...out].sort();
+  };
+
+  test("each field is classified under exactly the kinds its description names", () => {
+    const mismatched = Object.entries(props)
+      .map(([field, spec]) => ({
+        field,
+        fromMap: [...(PAYLOAD_FIELD_KINDS[field] ?? [])].sort(),
+        fromDescription: kindsInDescription(spec.description ?? ""),
+      }))
+      .filter((r) => r.fromMap.join(",") !== r.fromDescription.join(","));
+    expect(mismatched).toEqual([]);
+  });
+
+  /** The descriptions must actually name kinds, or the check above passes on empty sets. */
+  test("every description names at least one real kind", () => {
+    for (const [field, spec] of Object.entries(props)) {
+      const named = kindsInDescription(spec.description ?? "");
+      expect(named.length).toBeGreaterThan(0);
+      for (const k of named) expect([...DELIVERABLE_KINDS]).toContain(k);
+      expect(field).toBeTruthy();
+    }
+  });
+});
+
+/**
+ * Two shapes no live department has, which the contract's own docstrings contemplate.
+ * Injected into `DEPARTMENT_OUTPUTS` for the length of one test, because the eight real
+ * departments cannot exercise either branch.
+ */
+describe("contract shapes the eight live departments cannot reach", () => {
+  const withDept = (key: string, o: { primary: string[]; allowed: string[] }, run: () => void) => {
+    (DEPARTMENT_OUTPUTS as Record<string, { primary: string[]; allowed: string[] }>)[key] = o;
+    try {
+      run();
+    } finally {
+      delete (DEPARTMENT_OUTPUTS as Record<string, unknown>)[key];
+    }
+  };
+
+  /** `doc` reachable only via `allowed` still has to be the fallback — else Finding 1 returns. */
+  test("falls back to doc when doc is allowed rather than primary", () => {
+    withDept("__docAllowed", { primary: ["site"], allowed: ["doc"] }, () => {
+      expect(coerceKindForDepartment("__docAllowed", "screens")).toBe("doc");
+    });
+  });
+
+  /** An empty contract must not emit `enum: []`, which no value can satisfy. */
+  test("omits the kind enum entirely for a department that declares nothing", () => {
+    withDept("__empty", { primary: [], allowed: [] }, () => {
+      const kind = (deliverableTool("__empty").input_schema as any).properties.kind;
+      expect(kind.enum).toBeUndefined();
+    });
   });
 });

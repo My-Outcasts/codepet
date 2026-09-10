@@ -432,9 +432,10 @@ export function coerceDeliverable(
   if (!body) return null;
 
   const rawKind = typeof r.kind === "string" ? r.kind.trim() : "";
-  // Department first, then the kind vocabulary: an unreadable kind should become the shape that
-  // department usually produces, not a generic `doc`. `doc` stays the floor for a dept-less
-  // task, which has no contract to fall back on.
+  // The contract judges the kind first, then the kind vocabulary catches what is left. An
+  // out-of-contract kind becomes `doc` — see `coerceKindForDepartment`, which explains why the
+  // department's speciality is the wrong answer once the payload has been dropped. `doc` is also
+  // the floor for a dept-less task, which has no contract to judge against.
   const contractKind = coerceKindForDepartment(deptKey, rawKind);
   const kind = DELIVERABLE_KINDS.has(contractKind) ? contractKind : "doc";
 
@@ -464,7 +465,7 @@ export const DELIVERABLE_SYSTEM =
  * drifts the first time a description is reworded. Declared here instead, with a test asserting
  * it covers every field the schema declares, so adding a field without classifying it goes red.
  */
-const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
+export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   items: ["checklist"],
   call: ["doc"],
   sections: ["doc", "legal"],
@@ -592,8 +593,9 @@ export interface DeliverableToolShape {
  * The prompt tells the model which kinds it may use; this stops the schema from contradicting it
  * two paragraphs later. On the local transport that is not a nicety: `renderPrompt` emits
  * `prompt + schemaInstruction(schema)`, so an unnarrowed schema spells out the `screens` and
- * `site` fields immediately AFTER the prompt has said "Do not use any other kind" — measured at
- * 2,813 prompt characters followed by 14,768 with the schema appended. On the API path the enum
+ * `site` fields immediately AFTER the prompt has said "Do not use any other kind" — measured for
+ * Finance at 2,810 prompt characters, 14,765 with the unnarrowed schema appended, 7,291 with the
+ * narrowed one. On the API path the enum
  * goes further than steering: an out-of-contract kind becomes impossible rather than coerced.
  *
  * Returns the shared `DELIVERABLE_TOOL` itself — the same object, not a copy — for a dept-less or
@@ -624,7 +626,10 @@ export function deliverableTool(deptKey?: string | null): DeliverableToolShape {
       ...schema,
       properties: {
         ...schema.properties,
-        kind: { ...schema.properties.kind, enum: kinds },
+        // No `enum: []` for a department that declares nothing: an empty enum matches no value,
+        // so the forced tool call could never be satisfied. Such a department has no contract to
+        // apply, which is the same thing `coerceKindForDepartment` concludes.
+        kind: { ...schema.properties.kind, ...(kinds.length ? { enum: kinds } : {}) },
         payload: { ...payload, properties: fields },
       },
     },

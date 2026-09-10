@@ -342,9 +342,11 @@ export function coerceKindForDepartment(k: string | null | undefined, kind: stri
   const o = k ? DEPARTMENT_OUTPUTS[k] : undefined;
   if (!o) return kind;
   if (o.primary.includes(kind) || o.allowed.includes(kind)) return kind;
-  // `doc` where the department has it (all eight do); `primary[0]` is the guard for a future
-  // department declared without it, and `?? "doc"` for one declared with no primary at all.
-  return o.primary.includes("doc") ? "doc" : o.primary[0] ?? "doc";
+  // `doc` wherever the department has it — primary OR allowed, since either satisfies the
+  // contract and a department with `doc` merely allowed would otherwise fall to a speciality
+  // whose payload has just been dropped. `primary[0]` guards a future department without `doc`
+  // at all, and `?? "doc"` one declared with no primary.
+  return [...o.primary, ...o.allowed].includes("doc") ? "doc" : o.primary[0] ?? "doc";
 }
 
 /** Scaffold block: mandate + skills + ONLY the current-stage focus + anti-patterns. */

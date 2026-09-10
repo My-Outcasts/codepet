@@ -4,7 +4,13 @@ import {
   departmentOutputBlock,
   coerceKindForDepartment,
 } from "../departments";
-import { DELIVERABLE_KINDS } from "../runTaskCore";
+import {
+  DELIVERABLE_KINDS,
+  buildRunTaskPrompt,
+  coerceDeliverable,
+  RunTaskArgs,
+} from "../runTaskCore";
+import { ONE_SHOT_OPS } from "../local/oneShotOps";
 
 /**
  * The department output contract.
@@ -141,5 +147,90 @@ describe("coerceKindForDepartment", () => {
   /** An unknown kind string is still coerced — it would otherwise decode to `other`. */
   test("coerces a kind that is not a deliverable kind at all", () => {
     expect(coerceKindForDepartment("ops", "spreadsheet")).toBe(DEPARTMENT_OUTPUTS.ops.primary[0]);
+  });
+});
+
+/**
+ * The contract has to reach the prompt and the parse, or it is a table nobody consults.
+ */
+describe("the run prompt carries the contract", () => {
+  const base = {
+    taskTitle: "Work out what a month of inference costs",
+    taskDetail: "",
+    language: "en",
+  } as unknown as RunTaskArgs;
+
+  test("names the department's kinds instead of the whole list", () => {
+    const p = buildRunTaskPrompt({ ...base, deptKey: "fin" });
+    expect(p).toContain("This function produces sheet, doc.");
+  });
+
+  test("does not offer the full kind list once a department is known", () => {
+    const p = buildRunTaskPrompt({ ...base, deptKey: "fin" });
+    expect(p).not.toContain("screens");
+  });
+
+  /** A dept-less task keeps the behaviour it had: the whole list, no contract. */
+  test("still offers every kind when the task has no department", () => {
+    const p = buildRunTaskPrompt({ ...base, deptKey: undefined });
+    expect(p).toContain("screens");
+    expect(p).not.toContain("This function produces");
+  });
+});
+
+/**
+ * Steering the prompt is not enforcement. `claude -p` cannot be forced to a tool call, so the
+ * local path asks for the schema in prose and parses the reply; the API path can be forced to
+ * the tool but not to a particular `kind` inside it. Either way an out-of-contract kind can
+ * arrive, and the parse is the last place to catch it before the founder's library.
+ */
+describe("the parse holds the contract", () => {
+  const raw = { kind: "screens", title: "Onboarding", body: "# Screens" };
+
+  test("rewrites a kind the department cannot produce", () => {
+    expect(coerceDeliverable(raw, "T", "fin")?.kind).toBe("sheet");
+  });
+
+  test("leaves a kind the department may produce", () => {
+    expect(coerceDeliverable({ ...raw, kind: "legal" }, "T", "fin")?.kind).toBe("legal");
+  });
+
+  test("leaves a dept-less task's kind alone", () => {
+    expect(coerceDeliverable(raw, "T", undefined)?.kind).toBe("screens");
+  });
+
+  /** A garbage kind becomes the department's usual output, not a generic doc. */
+  test("gives a department its first primary for an unreadable kind", () => {
+    expect(coerceDeliverable({ ...raw, kind: "spreadsheet" }, "T", "ops")?.kind).toBe("checklist");
+  });
+
+  /** Legacy: with no department there is no contract, so the old `doc` floor still applies. */
+  test("still floors an unreadable kind to doc with no department", () => {
+    expect(coerceDeliverable({ ...raw, kind: "spreadsheet" }, "T")?.kind).toBe("doc");
+  });
+});
+
+/**
+ * The third place. `handleRunTask` and the `runTask` entry in `ONE_SHOT_OPS` narrow the same
+ * wire body separately, and the local path is the DEFAULT for a founder running on their own
+ * Claude plan — the transport nobody curls. Miss it there and the contract holds only for the
+ * traffic that never reaches most founders.
+ */
+describe("the local transport holds the contract too", () => {
+  const body = { task_title: "Work out what a month of inference costs", dept_key: "fin" };
+
+  test("coerces an out-of-contract kind on the way back through the sidecar", () => {
+    const d = ONE_SHOT_OPS.runTask.respond(
+      body,
+      { kind: "screens", title: "Onboarding", body: "# Screens" },
+      { model: "m", nowISO: "t" }
+    ) as { kind: string };
+    expect(d.kind).toBe("sheet");
+  });
+
+  test("narrows dept_key the same way the prompt side does", () => {
+    const p = ONE_SHOT_OPS.runTask.plan(body).prompt;
+    expect(p).toContain("This function produces sheet, doc.");
+    expect(p).not.toContain("screens");
   });
 });

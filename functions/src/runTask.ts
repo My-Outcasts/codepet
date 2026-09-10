@@ -66,6 +66,10 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  // Narrowed once: the prompt asks for this department's kinds and `coerceDeliverable` holds
+  // the same contract against the reply, so the two cannot read the wire field differently.
+  const deptKey = typeof body.dept_key === "string" ? body.dept_key : undefined;
+
   const prompt = buildRunTaskPrompt({
     companionId: typeof body.companion_id === "string" ? body.companion_id : "byte",
     language: body.language === "vi" ? "vi" : "en",
@@ -76,7 +80,7 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
     current: typeof body.current === "string" ? body.current : undefined,
     // The owning department of the task, so the deliverable is written with that function's
     // expertise. Absent for a legacy dept-less task; unknown keys resolve to no brief.
-    deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+    deptKey,
     // What the departments this task depends on already produced. Narrowed by the shared
     // `parseUpstream` rather than inline, so this handler and the ONE_SHOT_OPS entry cannot
     // read the same wire field two different ways.
@@ -94,7 +98,7 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
       messages: [{ role: "user", content: prompt }],
     });
     const block = response.content.find((b) => b.type === "tool_use") as any;
-    const deliverable = coerceDeliverable(block?.input, taskTitle);
+    const deliverable = coerceDeliverable(block?.input, taskTitle, deptKey);
     if (!deliverable) { res.status(502).json({ error: "generation_failed" }); return; }
     res.status(200).json(deliverable);
   } catch (err) {

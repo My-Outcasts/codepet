@@ -81,6 +81,7 @@ struct DraftPayloadPreview: View {
         case .checklist: return !(p.items ?? []).isEmpty
         case .doc:       return !(p.call ?? "").isEmpty || !(p.sections ?? []).isEmpty
         case .plan:      return !(p.goal ?? "").isEmpty
+        case .calendar:  return !(p.calendar?.weeks ?? []).isEmpty
         default:         return false
         }
     }
@@ -138,6 +139,7 @@ struct DraftPayloadPreview: View {
         case .checklist: if let i = p?.items { checklist(i) }
         case .doc:       doc(call: p?.call ?? "", sections: p?.sections ?? [])
         case .plan:      plan(goal: p?.goal ?? "", steps: p?.steps ?? [], changes: p?.changes ?? [])
+        case .calendar:  if let c = p?.calendar { calendar(c) }
         default:         EmptyView()
         }
     }
@@ -355,6 +357,43 @@ struct DraftPayloadPreview: View {
             if items.count > 3 {
                 Text(lang == .vi ? "+\(items.count - 3) mục nữa"
                                  : "+\(items.count - 3) more")
+                    .font(.pixelSystem(size: 10.5, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentPurple)
+            }
+        }
+    }
+
+    // MARK: - calendar
+
+    /// A schedule reads as its blocks, not its items: the founder wants to see the SHAPE of the
+    /// plan on a card — how many phases and roughly what is in each — and the full grid is one
+    /// tap away. Showing the first few items flat would lose the grouping, which is the only
+    /// thing distinguishing this from a checklist.
+    ///
+    /// The item count per block is what makes a phase legible at a glance; `+n more` on the
+    /// blocks matches how `checklist` and `dms` truncate, so the three read alike.
+    private func calendar(_ c: CalendarPayload) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(c.weeks.prefix(3).enumerated()), id: \.offset) { _, week in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 10))
+                        .foregroundColor(CodepetTheme.accentOrange)
+                    Text(week.label)
+                        .font(.pixelSystem(size: 11.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .lineLimit(1)
+                    Text(week.items.count == 1
+                         ? (lang == .vi ? "1 mục" : "1 item")
+                         : (lang == .vi ? "\(week.items.count) mục" : "\(week.items.count) items"))
+                        .font(.pixelSystem(size: 10.5))
+                        .foregroundColor(CodepetTheme.bodyText)
+                    Spacer(minLength: 0)
+                }
+            }
+            if c.weeks.count > 3 {
+                Text(lang == .vi ? "+\(c.weeks.count - 3) giai đoạn nữa"
+                                 : "+\(c.weeks.count - 3) more")
                     .font(.pixelSystem(size: 10.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentPurple)
             }

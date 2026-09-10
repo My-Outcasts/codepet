@@ -148,7 +148,10 @@ final class DemoProjectMurrorTests: XCTestCase {
             ("Ship an email capture", "checklist"),
             ("Find the first 20 users", "dms"),
             ("Answer the first questions", "doc"),
-            ("Write the launch checklist", "plan"),
+            // Re-typed from `plan` on 9 Sep: `plan` is the code-change shape and that body is a
+            // T-minus schedule with no code changes in it. Also the only fixture in either demo
+            // project that produces a `.ics`, so the calendar export is reachable in the app.
+            ("Write the launch checklist", "calendar"),
             ("Draft the privacy policy", "legal"),
         ]
         for (title, kind) in expected {
@@ -194,6 +197,8 @@ final class DemoProjectMurrorTests: XCTestCase {
                 XCTAssertNotNil(p.sections, "doc payload decoded without its `sections`")
             case "checklist":
                 XCTAssertNotNil(p.items, "checklist payload did not decode")
+            case "calendar":
+                XCTAssertNotNil(p.calendar, "calendar payload did not decode")
             default:        XCTFail("\(entry.kind) carries a payload with no assertion here")
             }
         }

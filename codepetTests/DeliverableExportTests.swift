@@ -551,4 +551,76 @@ final class DeliverableExportTests: XCTestCase {
                                                encoding: .utf8))
         XCTAssertTrue(originalCsv.contains("price,20,5,100,1"), originalCsv)
     }
+
+    // MARK: - RFC 5545 line folding
+
+    /// §3.1: no line may exceed 75 octets. Before folding, 7 of the launch calendar's 81 lines
+    /// broke this, the longest at 160 — tolerated by Apple and Google, rejected by stricter
+    /// parsers, and a spec violation either way.
+    func testNoIcsLineExceedsSeventyFiveOctets() throws {
+        let d = deliverable(.calendar, title: "Long lines", payload: try longBodyCalendar())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        let over = ics.components(separatedBy: "\r\n").filter { $0.utf8.count > 75 }
+        XCTAssertTrue(over.isEmpty,
+                      "\(over.count) line(s) over 75 octets, longest \(over.map(\.utf8.count).max() ?? 0):\n"
+                        + over.joined(separator: "\n"))
+    }
+
+    /// Folding must be REVERSIBLE. A parser unfolds by deleting each CRLF-plus-space, so doing
+    /// that must return exactly the property the exporter meant to write — otherwise the file
+    /// is well-formed and says the wrong thing, which is worse than failing to parse.
+    func testUnfoldingRestoresTheOriginalPropertyText() throws {
+        let d = deliverable(.calendar, title: "Long lines", payload: try longBodyCalendar())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        let unfolded = ics.replacingOccurrences(of: "\r\n ", with: "")
+        // Compare against the ESCAPED body: `icsEscaped` runs before folding, so `;` and `,`
+        // reach the file as `\\;` and `\\,`. Asserting the raw body here would fail on correct
+        // output — which is exactly what it did on the first run.
+        let escaped = longBody
+            .replacingOccurrences(of: ";", with: "\\;")
+            .replacingOccurrences(of: ",", with: "\\,")
+        XCTAssertTrue(unfolded.contains("SUMMARY:" + escaped),
+                      "unfolded text lost the body.\nexpected: SUMMARY:\(escaped)\ngot:\n\(unfolded)")
+    }
+
+    /// The failure mode that produces a file nothing can recover: a fold placed inside a
+    /// multi-byte sequence. This body is full of `·` (2 octets) and `—` (3), so a byte-counting
+    /// split would land mid-character and the result would not decode as UTF-8 at all.
+    func testFoldingNeverSplitsAMultiByteCharacter() throws {
+        let d = deliverable(.calendar, title: "Long lines", payload: try longBodyCalendar())
+        let data = DeliverableExport.files(for: d)[1].data
+        XCTAssertNotNil(String(data: data, encoding: .utf8),
+                        "the .ics is no longer valid UTF-8 — a fold split a character")
+        let ics = try XCTUnwrap(String(data: data, encoding: .utf8))
+        for piece in ics.components(separatedBy: "\r\n ") where !piece.isEmpty {
+            XCTAssertFalse(piece.unicodeScalars.contains { $0.value == 0xFFFD },
+                           "a replacement character appeared, so a fold broke a sequence")
+        }
+    }
+
+    /// A short line is left exactly as it was — folding must not touch what does not need it.
+    func testShortIcsLinesAreNotFolded() throws {
+        let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
+        let ics = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[1].data, encoding: .utf8))
+        XCTAssertTrue(ics.contains("\r\nVERSION:2.0\r\n"), ics)
+        XCTAssertTrue(ics.contains("DTSTART;VALUE=DATE:"), ics)
+    }
+
+    /// A body long enough to need folding, carrying the multi-byte characters this content
+    /// actually uses.
+    private var longBody: String {
+        "The crisis path is reviewed by a clinician — not tested by us · reviewed · and unsigned "
+            + "the launch moves; everything else here is negotiable and this one is not, which is "
+            + "why it sits first in the schedule rather than anywhere else."
+    }
+
+    private func longBodyCalendar() throws -> DeliverablePayload {
+        try payload(json: """
+        {"weeks": [
+          {"label": "Blocking", "items": [
+            {"day": "T-7", "kind": "review", "body": "\(longBody)"}
+          ]}
+        ]}
+        """)
+    }
 }

@@ -255,11 +255,11 @@ enum DeliverableExport {
                 n += 1
                 let day = icsDate(weekIndex: wi, dayLabel: i.day, locale: locale)
                 ics += "BEGIN:VEVENT\r\n"
-                ics += "UID:\(d.id)-\(n)@codepet.murror.app\r\n"
-                ics += "DTSTAMP:\(stamp)\r\n"
-                ics += "DTSTART;VALUE=DATE:\(day)\r\n"
-                ics += "SUMMARY:\(icsEscaped(i.body))\r\n"
-                ics += "DESCRIPTION:\(icsEscaped("\(w.label) · \(i.day) · \(i.kind) — day is relative to export"))\r\n"
+                ics += icsFolded("UID:\(d.id)-\(n)@codepet.murror.app") + "\r\n"
+                ics += icsFolded("DTSTAMP:\(stamp)") + "\r\n"
+                ics += icsFolded("DTSTART;VALUE=DATE:\(day)") + "\r\n"
+                ics += icsFolded("SUMMARY:\(icsEscaped(i.body))") + "\r\n"
+                ics += icsFolded("DESCRIPTION:\(icsEscaped("\(w.label) · \(i.day) · \(i.kind) — day is relative to export"))") + "\r\n"
                 ics += "END:VEVENT\r\n"
             }
         }
@@ -327,6 +327,40 @@ enum DeliverableExport {
         f.locale = Locale(components: components)
         f.calendar = Calendar(identifier: .gregorian)
         return f
+    }
+
+    /// RFC 5545 §3.1 line folding: no line may exceed **75 octets**, and a longer one is split
+    /// with CRLF followed by a single space, which a parser unfolds by removing exactly those
+    /// two. Without it a long `SUMMARY` is a spec violation — tolerated by Apple and Google,
+    /// rejected by stricter parsers, and this content routinely runs past 75 because the bodies
+    /// are model-authored sentences (measured: 7 of 81 lines, longest 160).
+    ///
+    /// **Octets, not characters.** These strings carry `·` (2 bytes) and `—` (3), so counting
+    /// characters would still emit an over-long line — and splitting mid-sequence would produce
+    /// invalid UTF-8 that cannot be unfolded back into the original text at all. This walks
+    /// whole characters and measures their encoded width.
+    ///
+    /// A continuation line spends one of its own octets on the leading space, so the budget
+    /// after the first line is 74.
+    private static func icsFolded(_ line: String) -> String {
+        guard line.utf8.count > 75 else { return line }
+        var out: [String] = []
+        var chunk = ""
+        var used = 0
+        var limit = 75
+        for ch in line {
+            let w = String(ch).utf8.count
+            if used + w > limit {
+                out.append(chunk)
+                chunk = ""
+                used = 0
+                limit = 74
+            }
+            chunk.append(ch)
+            used += w
+        }
+        if !chunk.isEmpty { out.append(chunk) }
+        return out.joined(separator: "\r\n ")
     }
 
     /// RFC 5545 text escaping: backslash, semicolon, comma and newline.

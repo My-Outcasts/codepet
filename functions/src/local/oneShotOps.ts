@@ -92,7 +92,7 @@ import {
 } from "../extractDecisionsCore";
 import {
   DELIVERABLE_SYSTEM,
-  DELIVERABLE_TOOL,
+  deliverableTool,
   buildRunTaskPrompt,
   coerceDeliverable,
   parseUpstream,
@@ -335,7 +335,11 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
           // on their own Claude plan — silently drops the field on the transport nobody curls.
           upstream: parseUpstream(body.upstream),
         }),
-        schema: DELIVERABLE_TOOL.input_schema,
+        // The same narrowing, and it matters more here: `renderPrompt` appends this schema
+        // AFTER the prompt, so an unnarrowed one would spell out every closed kind's fields
+        // directly beneath "Do not use any other kind".
+        schema: deliverableTool(typeof body.dept_key === "string" ? body.dept_key : undefined)
+          .input_schema,
       };
     },
     respond(body, parsed) {

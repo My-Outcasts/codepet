@@ -456,6 +456,54 @@ export function coerceDeliverable(
 export const DELIVERABLE_SYSTEM =
   "You produce real, finished work product for a solo founder's company — never a plan to do the work, the work itself.";
 
+/**
+ * Which payload fields belong to which kinds.
+ *
+ * The schema's own field descriptions already carry this ("checklist: 5-7 ordered steps."), but
+ * parsing prose to decide what to put in front of a model would be a second source of truth that
+ * drifts the first time a description is reworded. Declared here instead, with a test asserting
+ * it covers every field the schema declares, so adding a field without classifying it goes red.
+ */
+const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
+  items: ["checklist"],
+  call: ["doc"],
+  sections: ["doc", "legal"],
+  next: ["doc"],
+  goal: ["plan"],
+  changes: ["plan"],
+  verify: ["plan"],
+  risks: ["plan"],
+  steps: ["plan", "site"],
+  messages: ["dms"],
+  weeks: ["calendar"],
+  price: ["sheet"],
+  waitlist: ["sheet"],
+  conversion: ["sheet"],
+  churn: ["sheet"],
+  summary: ["sheet"],
+  title: ["site"],
+  brand: ["site"],
+  kicker: ["site"],
+  headline: ["site"],
+  headlineHi: ["site"],
+  sub: ["site"],
+  ctaPrimary: ["site"],
+  ctaSecondary: ["site"],
+  howEyebrow: ["site"],
+  howTitle: ["site"],
+  featEyebrow: ["site"],
+  featTitle: ["site"],
+  features: ["site"],
+  quote: ["site"],
+  quoteBy: ["site"],
+  finalTitle: ["site"],
+  finalSub: ["site"],
+  finalCta: ["site"],
+  accent: ["site"],
+  footNote: ["site"],
+  screens: ["screens"],
+};
+
 export const DELIVERABLE_TOOL = {
   name: "record_deliverable",
   description: "Record the finished deliverable produced for this task.",
@@ -530,3 +578,55 @@ export const DELIVERABLE_TOOL = {
     required: ["kind", "title", "body"],
   },
 } as const;
+
+/** The tool as a transport hands it over: same shape, optionally narrowed to one department. */
+export interface DeliverableToolShape {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * The forced tool, narrowed to one department's contract.
+ *
+ * The prompt tells the model which kinds it may use; this stops the schema from contradicting it
+ * two paragraphs later. On the local transport that is not a nicety: `renderPrompt` emits
+ * `prompt + schemaInstruction(schema)`, so an unnarrowed schema spells out the `screens` and
+ * `site` fields immediately AFTER the prompt has said "Do not use any other kind" — measured at
+ * 2,813 prompt characters followed by 14,768 with the schema appended. On the API path the enum
+ * goes further than steering: an out-of-contract kind becomes impossible rather than coerced.
+ *
+ * Returns the shared `DELIVERABLE_TOOL` itself — the same object, not a copy — for a dept-less or
+ * unknown department, so a legacy task is handed the exact schema it has always been handed.
+ */
+export function deliverableTool(deptKey?: string | null): DeliverableToolShape {
+  const o = deptKey ? DEPARTMENT_OUTPUTS[deptKey] : undefined;
+  if (!o) return DELIVERABLE_TOOL as unknown as DeliverableToolShape;
+
+  const kinds = [...o.primary, ...o.allowed];
+  const schema = DELIVERABLE_TOOL.input_schema as unknown as {
+    properties: Record<string, Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const payload = schema.properties.payload as {
+    properties: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+  const fields = Object.fromEntries(
+    Object.entries(payload.properties).filter(([f]) =>
+      (PAYLOAD_FIELD_KINDS[f] ?? []).some((k) => kinds.includes(k))
+    )
+  );
+
+  return {
+    name: DELIVERABLE_TOOL.name,
+    description: DELIVERABLE_TOOL.description,
+    input_schema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        kind: { ...schema.properties.kind, enum: kinds },
+        payload: { ...payload, properties: fields },
+      },
+    },
+  };
+}

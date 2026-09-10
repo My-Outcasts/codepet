@@ -326,9 +326,14 @@ export function departmentOutputBlock(k?: string | null): string {
  * local path asks for the schema in prose and parses the reply, and every op there validates or
  * coerces what it got rather than trusting it. This gives the kind the same treatment.
  *
- * An out-of-contract kind becomes the department's FIRST primary — the shape that department
- * most often produces — rather than being rejected, because a founder waiting on a deliverable
- * is better served by the right department's usual output than by a failed run.
+ * An out-of-contract kind becomes **`doc`**, not the department's speciality. The reason is what
+ * happens to the payload: the model built it for the kind IT chose, so `coercePayload` rejects it
+ * under the new kind and drops it, and all that survives is the markdown `body`. `doc` is the one
+ * kind whose contract IS "prose in the body", and it is primary for all eight departments — so it
+ * both satisfies the contract and describes what is actually being handed over. Relabelling
+ * onboarding-screen copy as `sheet` would file it in the founder's Library as a "live model" and
+ * lie about its shape. An empty or unreadable kind gets the same treatment: the absence of a kind
+ * is not evidence of a sheet.
  *
  * A dept-less or unknown department is left alone: there is no contract to judge against, and
  * guessing one would change what legacy tasks produce.
@@ -336,7 +341,10 @@ export function departmentOutputBlock(k?: string | null): string {
 export function coerceKindForDepartment(k: string | null | undefined, kind: string): string {
   const o = k ? DEPARTMENT_OUTPUTS[k] : undefined;
   if (!o) return kind;
-  return o.primary.includes(kind) || o.allowed.includes(kind) ? kind : o.primary[0];
+  if (o.primary.includes(kind) || o.allowed.includes(kind)) return kind;
+  // `doc` where the department has it (all eight do); `primary[0]` is the guard for a future
+  // department declared without it, and `?? "doc"` for one declared with no primary at all.
+  return o.primary.includes("doc") ? "doc" : o.primary[0] ?? "doc";
 }
 
 /** Scaffold block: mandate + skills + ONLY the current-stage focus + anti-patterns. */

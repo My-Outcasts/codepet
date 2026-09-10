@@ -8,9 +8,13 @@ import {
   DELIVERABLE_KINDS,
   buildRunTaskPrompt,
   coerceDeliverable,
+  deliverableTool,
+  DELIVERABLE_TOOL,
   RunTaskArgs,
 } from "../runTaskCore";
-import { ONE_SHOT_OPS } from "../local/oneShotOps";
+import { ONE_SHOT_OPS, schemaInstruction } from "../local/oneShotOps";
+import { DEPT_KEYS } from "../generateRoadmapCore";
+import { TASK_DEPTS } from "../companyChatCore";
 
 /**
  * The department output contract.
@@ -122,13 +126,30 @@ describe("coerceKindForDepartment", () => {
     expect(coerceKindForDepartment("fin", allowed)).toBe(allowed);
   });
 
-  test("falls back to the department's first primary for a kind it cannot produce", () => {
-    expect(coerceKindForDepartment("fin", "screens")).toBe(DEPARTMENT_OUTPUTS.fin.primary[0]);
+  /**
+   * An out-of-contract kind becomes `doc`, NOT the department's first primary.
+   *
+   * The payload was built for the kind the model chose, so `coercePayload` rejects it under the
+   * new kind and it is dropped: all that survives is the markdown `body`. `doc` is the only kind
+   * whose contract IS "prose in the body", and it is primary for all eight departments, so it
+   * both satisfies the contract and describes what is actually being handed over. Relabelling
+   * screens copy as `sheet` would put it in the Library as a "live model" and lie to the founder.
+   */
+  test("falls back to doc for a kind the department cannot produce", () => {
+    expect(coerceKindForDepartment("fin", "screens")).toBe("doc");
+    expect(coerceKindForDepartment("design", "sheet")).toBe("doc");
   });
 
   test("rescues the untyped fallbacks, which no department may emit", () => {
-    expect(coerceKindForDepartment("legal", "text")).toBe(DEPARTMENT_OUTPUTS.legal.primary[0]);
-    expect(coerceKindForDepartment("legal", "other")).toBe(DEPARTMENT_OUTPUTS.legal.primary[0]);
+    expect(coerceKindForDepartment("legal", "text")).toBe("doc");
+    expect(coerceKindForDepartment("legal", "other")).toBe("doc");
+  });
+
+  /** Every department has `doc` primary, so the fallback always satisfies the contract. */
+  test("every department can produce the fallback it would be given", () => {
+    for (const [k, o] of Object.entries(DEPARTMENT_OUTPUTS)) {
+      expect([...o.primary, ...o.allowed]).toContain(coerceKindForDepartment(k, "screens"));
+    }
   });
 
   /**
@@ -146,7 +167,12 @@ describe("coerceKindForDepartment", () => {
 
   /** An unknown kind string is still coerced — it would otherwise decode to `other`. */
   test("coerces a kind that is not a deliverable kind at all", () => {
-    expect(coerceKindForDepartment("ops", "spreadsheet")).toBe(DEPARTMENT_OUTPUTS.ops.primary[0]);
+    expect(coerceKindForDepartment("ops", "spreadsheet")).toBe("doc");
+  });
+
+  /** An absent kind is not evidence of anything. It must not become a signature kind. */
+  test("gives doc for an empty kind rather than the department's speciality", () => {
+    expect(coerceKindForDepartment("fin", "")).toBe("doc");
   });
 });
 
@@ -188,7 +214,7 @@ describe("the parse holds the contract", () => {
   const raw = { kind: "screens", title: "Onboarding", body: "# Screens" };
 
   test("rewrites a kind the department cannot produce", () => {
-    expect(coerceDeliverable(raw, "T", "fin")?.kind).toBe("sheet");
+    expect(coerceDeliverable(raw, "T", "fin")?.kind).toBe("doc");
   });
 
   test("leaves a kind the department may produce", () => {
@@ -199,9 +225,13 @@ describe("the parse holds the contract", () => {
     expect(coerceDeliverable(raw, "T", undefined)?.kind).toBe("screens");
   });
 
-  /** A garbage kind becomes the department's usual output, not a generic doc. */
-  test("gives a department its first primary for an unreadable kind", () => {
-    expect(coerceDeliverable({ ...raw, kind: "spreadsheet" }, "T", "ops")?.kind).toBe("checklist");
+  /**
+   * A garbage kind becomes `doc`, like any other out-of-contract kind. It was briefly the
+   * department's speciality (`ops` → `checklist`), which read well until you notice the payload
+   * has been dropped and the body is whatever the model wrote — prose, i.e. a doc.
+   */
+  test("gives doc for an unreadable kind rather than the department's speciality", () => {
+    expect(coerceDeliverable({ ...raw, kind: "spreadsheet" }, "T", "ops")?.kind).toBe("doc");
   });
 
   /** Legacy: with no department there is no contract, so the old `doc` floor still applies. */
@@ -225,12 +255,157 @@ describe("the local transport holds the contract too", () => {
       { kind: "screens", title: "Onboarding", body: "# Screens" },
       { model: "m", nowISO: "t" }
     ) as { kind: string };
-    expect(d.kind).toBe("sheet");
+    expect(d.kind).toBe("doc");
   });
 
   test("narrows dept_key the same way the prompt side does", () => {
     const p = ONE_SHOT_OPS.runTask.plan(body).prompt;
     expect(p).toContain("This function produces sheet, doc.");
     expect(p).not.toContain("screens");
+  });
+});
+
+/**
+ * What happens to the payload when the kind is rewritten under it.
+ *
+ * The model built `payload` for the kind IT chose. Once the contract renames the kind, that
+ * payload no longer matches, `coercePayload` rejects it, and only the markdown body survives.
+ * That is the right outcome — a screens payload under `kind: "sheet"` would break the sheet
+ * viewer — but it means the kind must describe prose, which is why the fallback is `doc`.
+ */
+describe("a rewritten kind and its payload", () => {
+  const screensPayload = {
+    screens: [
+      { name: "Connect", time: "1m", kick: "k", title: "t", sub: "s", art: "connect", cta: "c", note: "n" },
+      { name: "Session", time: "1m", kick: "k", title: "t", sub: "s", art: "session", cta: "c", note: "n" },
+      { name: "Recap", time: "1m", kick: "k", title: "t", sub: "s", art: "recap", cta: "c", note: "n" },
+    ],
+  };
+  const raw = { kind: "screens", title: "Onboarding", body: "# Screens", payload: screensPayload };
+
+  test("drops the payload it can no longer honour, and says doc rather than sheet", () => {
+    const d = coerceDeliverable(raw, "T", "fin");
+    expect(d?.kind).toBe("doc");
+    expect(d?.payload).toBeUndefined();
+    expect(d?.body).toBe("# Screens");
+  });
+
+  /** The in-contract path must be untouched: Design may produce screens, payload and all. */
+  test("keeps the payload when the department may produce that kind", () => {
+    const d = coerceDeliverable(raw, "T", "design");
+    expect(d?.kind).toBe("screens");
+    expect(d?.payload).toEqual(screensPayload);
+  });
+
+  test("a reply with no kind at all becomes doc, not the department's speciality", () => {
+    expect(coerceDeliverable({ body: "b" }, "T", "fin")?.kind).toBe("doc");
+  });
+});
+
+/**
+ * The forced tool's schema is the other half of the steer, and on the local transport it is
+ * appended AFTER the prompt: `renderPrompt` emits `prompt + schemaInstruction(schema)`. An
+ * unnarrowed schema therefore spells out the `screens` and `site` fields immediately after the
+ * prompt has said "Do not use any other kind" — measured at 2,813 prompt chars followed by
+ * 14,768 with the schema. Narrowing the schema is what closes that.
+ */
+describe("the tool schema carries the contract", () => {
+  const kindEnum = (k?: string) =>
+    (deliverableTool(k).input_schema as any).properties.kind.enum;
+  const payloadKeys = (k?: string) =>
+    Object.keys((deliverableTool(k).input_schema as any).properties.payload.properties ?? {});
+
+  test("offers a department only its own kinds", () => {
+    expect(kindEnum("fin")).toEqual(["sheet", "doc", "legal"]);
+  });
+
+  test("drops the payload fields of kinds the department cannot produce", () => {
+    expect(payloadKeys("fin")).not.toContain("screens");
+    expect(payloadKeys("fin")).not.toContain("ctaPrimary");
+  });
+
+  test("keeps the payload fields of kinds it can", () => {
+    expect(payloadKeys("design")).toContain("screens");
+  });
+
+  /** A dept-less task keeps the exact schema it had — no enum, every kind's fields. */
+  test("leaves a dept-less task's schema alone", () => {
+    expect(deliverableTool(undefined)).toBe(DELIVERABLE_TOOL);
+    expect((DELIVERABLE_TOOL.input_schema as any).properties.kind.enum).toBeUndefined();
+  });
+
+  /** End to end on the transport that actually appends it. */
+  test("the local transport no longer re-offers a closed kind", () => {
+    const plan = ONE_SHOT_OPS.runTask.plan({ task_title: "Cost of inference", dept_key: "fin" });
+    const sent = `${plan.prompt}\n\n${schemaInstruction(plan.schema)}`;
+    expect(sent).not.toContain("screens");
+    expect(sent).toContain("This function produces sheet, doc.");
+  });
+});
+
+/**
+ * The three hand-written eight-key lists that must agree.
+ *
+ * `DEPT_KEYS` gates what the roadmap may tag a task with, `TASK_DEPTS` what chat may, and
+ * `DEPARTMENT_OUTPUTS` which of those have a contract. Add Product to the first two and forget
+ * the third and every Product task runs with the full kind list and no contract, silently, with
+ * this suite green. The spec's build order puts Product behind `bizplan`, so today they agree —
+ * this is the tripwire for the day someone changes that.
+ */
+describe("the department key lists agree", () => {
+  test("roadmap, chat and the contract name the same departments", () => {
+    expect([...DEPT_KEYS].sort()).toEqual(Object.keys(DEPARTMENT_OUTPUTS).sort());
+    expect([...TASK_DEPTS].sort()).toEqual(Object.keys(DEPARTMENT_OUTPUTS).sort());
+  });
+});
+
+/**
+ * The legacy prompt, pinned.
+ *
+ * Byte-parity for a dept-less task is the strongest backward-compatibility property in this
+ * change and it was verified by hand against the previous commit. Without a test, a later edit
+ * to `payloadBlock` or `orList` could shift every legacy prompt with the suite still green.
+ */
+describe("a dept-less task's prompt is unchanged", () => {
+  const p = () =>
+    buildRunTaskPrompt({
+      companionId: "byte", language: "en", context: "Acme",
+      taskTitle: "T", taskDetail: "", deptKey: undefined,
+    } as unknown as RunTaskArgs);
+
+  test("still offers every kind, and no contract sentence", () => {
+    for (const k of DELIVERABLE_KINDS) expect(p()).toContain(k);
+    expect(p()).not.toContain("This function produces");
+  });
+
+  test("still names all eight kinds in the payload guide preamble", () => {
+    expect(p()).toContain("checklist, doc, plan, dms, calendar, sheet, site, or screens");
+  });
+});
+
+/**
+ * `PAYLOAD_FIELD_KINDS` is the map the schema narrowing consults, and it is hand-written beside
+ * a 37-field schema. A field missing from it is silently dropped from EVERY department's schema
+ * — the model would never be asked for it again — so the map has to be exhaustive by test, not
+ * by care.
+ */
+describe("every payload field is classified", () => {
+  const declared = Object.keys(
+    (DELIVERABLE_TOOL.input_schema as any).properties.payload.properties
+  );
+
+  test("no schema field is left unclassified", () => {
+    // A classified field survives for at least one department; an unclassified one survives for
+    // none. Design + Finance + Operations + Legal between them cover every kind that has fields.
+    const covered = new Set(
+      ["design", "fin", "ops", "legal", "mkt", "sales", "eng", "support"].flatMap((d) =>
+        Object.keys((deliverableTool(d).input_schema as any).properties.payload.properties)
+      )
+    );
+    expect(declared.filter((f) => !covered.has(f))).toEqual([]);
+  });
+
+  test("the schema still declares the fields this map was written against", () => {
+    expect(declared.length).toBe(37);
   });
 });

@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as logger from "firebase-functions/logger";
 import { verifyAuth } from "./auth";
 import { checkAndIncrement } from "./rateLimit";
-import { DELIVERABLE_SYSTEM, DELIVERABLE_TOOL, buildRunTaskPrompt, coerceDeliverable, parseUpstream } from "./runTaskCore";
+import { DELIVERABLE_SYSTEM, deliverableTool, buildRunTaskPrompt, coerceDeliverable, parseUpstream } from "./runTaskCore";
 
 // Sonnet 5 rather than Opus 4.8: this is schema-forced generation, the shape
 // Sonnet 5 is closest to Opus on, at 40% less per token ($3/$15 vs $5/$25).
@@ -93,7 +93,10 @@ export async function handleRunTask(req: Request, res: Response): Promise<void> 
       max_tokens: RUN_MAX_TOKENS,
       output_config: { effort: RUN_EFFORT },
       system: DELIVERABLE_SYSTEM,
-      tools: [DELIVERABLE_TOOL as any],
+      // Narrowed to the department, so the schema cannot re-offer a kind the prompt just
+      // closed. The `enum` also makes an out-of-contract kind impossible here, rather than
+      // something `coerceDeliverable` has to catch afterwards.
+      tools: [deliverableTool(deptKey) as any],
       tool_choice: { type: "tool", name: "record_deliverable" },
       messages: [{ role: "user", content: prompt }],
     });

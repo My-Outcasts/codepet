@@ -10,7 +10,7 @@ import { claudeArgs, renderPrompt } from "../local/oneShotSidecar";
 import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBrief";
 import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBrief";
 import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
-import { DELIVERABLE_TOOL, buildRunTaskPrompt } from "../runTaskCore";
+import { deliverableTool, buildRunTaskPrompt } from "../runTaskCore";
 import {
   DECISIONS_EXTRACT_SCHEMA,
   buildExtractPrompt,
@@ -329,7 +329,12 @@ describe("runTask op", () => {
       current: undefined,
       deptKey: "mkt",
     }));
-    expect(plan.schema).toBe(DELIVERABLE_TOOL.input_schema);
+    // Narrowed to the department now, not the shared constant: the schema is appended after the
+    // prompt on this transport, so handing over the unnarrowed one would re-offer every kind the
+    // prompt just closed. Structural, because the builder returns a fresh object per department.
+    expect(plan.schema).toEqual(deliverableTool("mkt").input_schema);
+    expect((plan.schema as any).properties.kind.enum)
+      .toEqual(["calendar", "post", "doc", "dms", "email", "site"]);
   });
 
   /**

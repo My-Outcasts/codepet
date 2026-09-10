@@ -794,7 +794,8 @@ export interface NewTaskIntent {
   owner: "founder" | "codepet";
 }
 
-const TASK_DEPTS = ["eng", "design", "mkt", "sales", "support", "fin", "ops", "legal"];
+/** Exported so a test can assert it agrees with `DEPT_KEYS` and `DEPARTMENT_OUTPUTS`. */
+export const TASK_DEPTS = ["eng", "design", "mkt", "sales", "support", "fin", "ops", "legal"];
 const MAX_TASK_TITLE = 120;
 
 /** The validated intent to add a task. `null` when there is no usable title. */

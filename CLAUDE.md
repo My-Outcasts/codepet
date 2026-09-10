@@ -260,38 +260,6 @@ Day one and mid-flight are ONE task list. Four things break the bridge between t
 
 ---
 
-# Workspaces
-
-This project is managed across 5 separate workspaces. Each workspace has a specific purpose. Never mix concerns across workspaces.
-
-## 1. Codepet macOS app
-**Purpose:** All development work on the native macOS SwiftUI app.
-**Scope:** SwiftUI views, models, managers, services, assets, Firebase integration, UI/UX changes, bug fixes, and feature development.
-**Key files:** Everything under `codepet/` in the Xcode project.
-**When to use:** Writing code, fixing bugs, designing screens, adjusting animations, updating assets.
-
-## 2. Codepet macOS app — App Store
-**Purpose:** App Store listing, metadata, screenshots, and submission.
-**Scope:** App Store Connect configuration, app description, keywords, screenshots, privacy policy, age rating, pricing, and review responses.
-**When to use:** Preparing or updating the App Store listing, responding to reviews, updating metadata.
-
-## 3. Codepet macOS app — TestFlight
-**Purpose:** Beta testing and distribution.
-**Scope:** TestFlight builds, tester management, beta feedback, build versioning, provisioning profiles, and testing notes.
-**When to use:** Uploading builds, managing testers, reviewing crash reports, writing test notes.
-
-## 4. Codepet macOS app — GitHub
-**Purpose:** Source control, collaboration, and CI/CD.
-**Scope:** Git commits, branches, pull requests, issues, GitHub Actions, and code reviews.
-**When to use:** Committing code, creating PRs, managing issues, setting up workflows.
-
-## 5. Codepet multi agent
-**Purpose:** Multi-agent system design and coordination.
-**Scope:** Creating and coordinating AI agents across different roles — Marketing, Business, QA, Backend (BE), and Frontend (FE). Agent definitions, workflows, inter-agent communication, and task delegation.
-**When to use:** Designing agent roles, building agent workflows, testing multi-agent coordination, defining agent responsibilities.
-
----
-
 # Daily Summary Format
 
 When summarizing work at the end of a session, use this format:

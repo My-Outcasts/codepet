@@ -92,7 +92,7 @@ import {
 } from "../extractDecisionsCore";
 import {
   DELIVERABLE_SYSTEM,
-  DELIVERABLE_TOOL,
+  deliverableTool,
   buildRunTaskPrompt,
   coerceDeliverable,
   parseUpstream,
@@ -320,6 +320,10 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
     plan(body) {
       const taskTitle = typeof body?.task_title === "string" ? body.task_title.trim() : "";
       if (!taskTitle) throw new OneShotBadRequest("task_title required");
+      // Narrowed once and shared by the prompt and the schema, exactly as `handleRunTask` does
+      // it: this file's own rule is that the two transports cannot read a wire field two
+      // different ways, and writing the same expression three times in one op invites that.
+      const deptKey = typeof body.dept_key === "string" ? body.dept_key : undefined;
       return {
         system: DELIVERABLE_SYSTEM,
         prompt: buildRunTaskPrompt({
@@ -330,12 +334,15 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
           taskDetail: typeof body.task_detail === "string" ? body.task_detail : "",
           reviseNote: typeof body.revise_note === "string" ? body.revise_note : undefined,
           current: typeof body.current === "string" ? body.current : undefined,
-          deptKey: typeof body.dept_key === "string" ? body.dept_key : undefined,
+          deptKey,
           // The third place. Miss it and the local path — the DEFAULT for a founder running
           // on their own Claude plan — silently drops the field on the transport nobody curls.
           upstream: parseUpstream(body.upstream),
         }),
-        schema: DELIVERABLE_TOOL.input_schema,
+        // The same narrowing, and it matters more here: `renderPrompt` appends this schema
+        // AFTER the prompt, so an unnarrowed one would spell out every closed kind's fields
+        // directly beneath "Do not use any other kind".
+        schema: deliverableTool(deptKey).input_schema,
       };
     },
     respond(body, parsed) {
@@ -343,7 +350,14 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       // Same coercion, and the same refusal: the handler answers 502 rather than storing a
       // deliverable it could not read, because a half-parsed one reaches the library and
       // the founder's approval flow.
-      const deliverable = coerceDeliverable(parsed, taskTitle);
+      // `dept_key` narrowed exactly as `plan` above narrows it, for the same reason: the
+      // department's output contract has to judge the reply on this transport too, and the
+      // local path is the default for a founder running on their own Claude plan.
+      const deliverable = coerceDeliverable(
+        parsed,
+        taskTitle,
+        typeof body?.dept_key === "string" ? body.dept_key : undefined
+      );
       if (!deliverable) throw new OneShotUnusableAnswer("no deliverable in the reply");
       return deliverable;
     },

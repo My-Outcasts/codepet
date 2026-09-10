@@ -3,7 +3,13 @@
 // The IO handler lives in runTask.ts and imports from here.
 
 import { companionFor } from "./companyChatCore";
-import { departmentBrief, DEPARTMENT_NAMES } from "./departments";
+import {
+  departmentBrief,
+  DEPARTMENT_NAMES,
+  DEPARTMENT_OUTPUTS,
+  departmentOutputBlock,
+  coerceKindForDepartment,
+} from "./departments";
 
 // Mirrors native `DeliverableKind`. Keep in sync with codepet/Models — this is the
 // contract the Swift client decodes `kind` against.
@@ -94,13 +100,56 @@ export interface RunTaskArgs {
   upstream?: UpstreamWork[];
 }
 
+/**
+ * The per-kind payload guide — one entry per structured kind, in the order it renders.
+ *
+ * This was one flat string naming all eight kinds. It has to be addressable by kind now: a
+ * department declares which kinds it may hand back, and a guide that still explains all eight
+ * both wastes the prompt and re-offers the kind the contract just closed.
+ */
+const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
+  ["checklist", "Build a concrete setup/launch checklist — exactly 5-7 actionable steps in order (`items[].t`), each with `done` true only for obvious already-satisfied prerequisites."],
+  ["doc", "`call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions."],
+  ["plan", "an HONEST code-change plan — `goal` (one line), `steps[]` (3-5 ordered), `changes[]` = {area, edit} in plain terms (no fabricated file paths), `verify[]` (future-tense checks), `risks` (one line). Never claim it shipped."],
+  ["dms", "exactly 4 personalized 1:1 outreach `messages[]` = {name (persona placeholder), note (why a strong target), msg (warm specific DM)}."],
+  ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
+  ["sheet", "a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input."],
+  ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
+  ["screens", "exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order."],
+];
+
+/** "a", "a or b", "a, b, or c" — the prose the guide preamble used to spell out by hand. */
+const orList = (xs: readonly string[]): string =>
+  xs.length < 2
+    ? xs[0] ?? ""
+    : xs.length === 2
+      ? `${xs[0]} or ${xs[1]}`
+      : `${xs.slice(0, -1).join(", ")}, or ${xs[xs.length - 1]}`;
+
 /** Build the companion-voiced generation prompt for a single roadmap task. */
 export function buildRunTaskPrompt(args: RunTaskArgs): string {
   const c = companionFor(args.companionId);
   const context = clip(args.context, 4000);
   const taskTitle = clip(args.taskTitle, 200);
   const taskDetail = clip(args.taskDetail, 1000);
-  const kindsList = Array.from(DELIVERABLE_KINDS).join(", ");
+  // Which kinds this run is allowed to produce. A department declares its own contract
+  // (`DEPARTMENT_OUTPUTS`); a dept-less legacy task keeps the whole list, because inventing a
+  // contract for a task that never had one would change what it produces.
+  const contract = args.deptKey ? DEPARTMENT_OUTPUTS[args.deptKey] : undefined;
+  const kinds = contract
+    ? [...contract.primary, ...contract.allowed]
+    : Array.from(DELIVERABLE_KINDS);
+  const kindsList = kinds.join(", ");
+  // The payload guide, narrowed the same way. Constraining only `kindsList` would leave every
+  // kind named a second time down here — both the wrong instruction (Finance does not need to
+  // know how to fill a `screens` payload) and a re-offer of the kind the contract just closed.
+  const guide = PAYLOAD_GUIDE.filter(([k]) => kinds.includes(k));
+  const payloadBlock = guide.length
+    ? "\n\nALWAYS write the markdown `body`. If (and only if) the kind you chose is " +
+      orList(guide.map(([k]) => k)) +
+      ", ALSO fill `payload` with that kind's structured fields (leave `payload` empty for any other kind):\n" +
+      guide.map(([k, g]) => `- ${k}: ${g}`).join("\n")
+    : "\n\nALWAYS write the markdown `body`. Leave `payload` empty.";
   const vi = args.language === "vi" ? "\n\nWrite the title and body in natural, fluent Vietnamese." : "";
   const reviseNote = clip(args.reviseNote, 500);
   const current = clip(args.current, 6000);
@@ -117,9 +166,15 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
   // marketing knowledge behind it. Empty for a dept-less (legacy) task.
   const deptBrief = departmentBrief(args.deptKey);
   const deptName = args.deptKey ? DEPARTMENT_NAMES[args.deptKey] : undefined;
+  // The output contract rides with the department identity, not with the kind list further
+  // down: "This function produces …" only has a referent once "the Finance function" has been
+  // named. Empty for a dept-less task, so its paragraph is unchanged.
+  const deptOutputs = departmentOutputBlock(args.deptKey);
   const deptBlock = deptBrief && deptName
     ? `You are doing this work as the ${deptName} function of the founder's company:\n${deptBrief}\n` +
-      `Produce what that function would actually produce, at the level of specificity it would use.\n\n`
+      `Produce what that function would actually produce, at the level of specificity it would use.\n` +
+      (deptOutputs ? `${deptOutputs}\n` : "") +
+      `\n`
     : "";
 
   // What the departments this task depends on have already produced. Same shape as the
@@ -150,15 +205,7 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
     `Task to complete: ${taskTitle || "(untitled task)"}\n` +
     (taskDetail ? `Task detail: ${taskDetail}\n` : "") +
     `\nProduce the REAL deliverable for this task — not a plan to do it, not a description of what you would do, the actual finished artifact (the document, the copy, the checklist, the email, whatever the task calls for), written as markdown in the body. Pick whichever "kind" best fits what you produced from this exact list: ${kindsList}. Give it a short, clear title. Ground everything in the founder's actual company context above — do not invent facts about them.` +
-    "\n\nALWAYS write the markdown `body`. If (and only if) the kind you chose is checklist, doc, plan, dms, calendar, sheet, site, or screens, ALSO fill `payload` with that kind's structured fields (leave `payload` empty for any other kind):\n" +
-    "- checklist: Build a concrete setup/launch checklist — exactly 5-7 actionable steps in order (`items[].t`), each with `done` true only for obvious already-satisfied prerequisites.\n" +
-    "- doc: `call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions.\n" +
-    "- plan: an HONEST code-change plan — `goal` (one line), `steps[]` (3-5 ordered), `changes[]` = {area, edit} in plain terms (no fabricated file paths), `verify[]` (future-tense checks), `risks` (one line). Never claim it shipped.\n" +
-    "- dms: exactly 4 personalized 1:1 outreach `messages[]` = {name (persona placeholder), note (why a strong target), msg (warm specific DM)}.\n" +
-    "- calendar: a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company.\n" +
-    "- sheet: a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input.\n" +
-    "- site: copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML.\n" +
-    "- screens: exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order." +
+    payloadBlock +
     // Length discipline. Every field above says what to produce and none said how
     // long, so `body` — the part the founder actually reads — was unbounded.
     // Framed as what a finished artifact looks like rather than as a word cap:
@@ -367,14 +414,30 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
   return null;
 }
 
-/** Validate + coerce the model's raw tool input into a safe deliverable, or null if unusable. */
-export function coerceDeliverable(raw: unknown, taskTitle: string): Deliverable | null {
+/**
+ * Validate + coerce the model's raw tool input into a safe deliverable, or null if unusable.
+ *
+ * `deptKey` is the owning department of the task, and it closes the contract the prompt only
+ * asked for: neither transport can force a particular `kind` (the API forces the tool but not
+ * its fields, and `claude -p` cannot be forced to a tool call at all), so an out-of-contract
+ * kind can still arrive. Absent → no contract to judge against, and the kind is left alone.
+ */
+export function coerceDeliverable(
+  raw: unknown,
+  taskTitle: string,
+  deptKey?: string | null
+): Deliverable | null {
   const r = (raw ?? {}) as Record<string, unknown>;
   const body = typeof r.body === "string" ? r.body.trim() : "";
   if (!body) return null;
 
   const rawKind = typeof r.kind === "string" ? r.kind.trim() : "";
-  const kind = DELIVERABLE_KINDS.has(rawKind) ? rawKind : "doc";
+  // The contract judges the kind first, then the kind vocabulary catches what is left. An
+  // out-of-contract kind becomes `doc` — see `coerceKindForDepartment`, which explains why the
+  // department's speciality is the wrong answer once the payload has been dropped. `doc` is also
+  // the floor for a dept-less task, which has no contract to judge against.
+  const contractKind = coerceKindForDepartment(deptKey, rawKind);
+  const kind = DELIVERABLE_KINDS.has(contractKind) ? contractKind : "doc";
 
   const rawTitle = typeof r.title === "string" ? r.title.trim() : "";
   const title = rawTitle || clip(taskTitle, 200) || "Untitled deliverable";
@@ -393,6 +456,54 @@ export function coerceDeliverable(raw: unknown, taskTitle: string): Deliverable 
 // `input_schema` into its prompt, which is the only way a payload this large stays in step.
 export const DELIVERABLE_SYSTEM =
   "You produce real, finished work product for a solo founder's company — never a plan to do the work, the work itself.";
+
+/**
+ * Which payload fields belong to which kinds.
+ *
+ * The schema's own field descriptions already carry this ("checklist: 5-7 ordered steps."), but
+ * parsing prose to decide what to put in front of a model would be a second source of truth that
+ * drifts the first time a description is reworded. Declared here instead, with a test asserting
+ * it covers every field the schema declares, so adding a field without classifying it goes red.
+ */
+export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
+  items: ["checklist"],
+  call: ["doc"],
+  sections: ["doc", "legal"],
+  next: ["doc"],
+  goal: ["plan"],
+  changes: ["plan"],
+  verify: ["plan"],
+  risks: ["plan"],
+  steps: ["plan", "site"],
+  messages: ["dms"],
+  weeks: ["calendar"],
+  price: ["sheet"],
+  waitlist: ["sheet"],
+  conversion: ["sheet"],
+  churn: ["sheet"],
+  summary: ["sheet"],
+  title: ["site"],
+  brand: ["site"],
+  kicker: ["site"],
+  headline: ["site"],
+  headlineHi: ["site"],
+  sub: ["site"],
+  ctaPrimary: ["site"],
+  ctaSecondary: ["site"],
+  howEyebrow: ["site"],
+  howTitle: ["site"],
+  featEyebrow: ["site"],
+  featTitle: ["site"],
+  features: ["site"],
+  quote: ["site"],
+  quoteBy: ["site"],
+  finalTitle: ["site"],
+  finalSub: ["site"],
+  finalCta: ["site"],
+  accent: ["site"],
+  footNote: ["site"],
+  screens: ["screens"],
+};
 
 export const DELIVERABLE_TOOL = {
   name: "record_deliverable",
@@ -468,3 +579,59 @@ export const DELIVERABLE_TOOL = {
     required: ["kind", "title", "body"],
   },
 } as const;
+
+/** The tool as a transport hands it over: same shape, optionally narrowed to one department. */
+export interface DeliverableToolShape {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * The forced tool, narrowed to one department's contract.
+ *
+ * The prompt tells the model which kinds it may use; this stops the schema from contradicting it
+ * two paragraphs later. On the local transport that is not a nicety: `renderPrompt` emits
+ * `prompt + schemaInstruction(schema)`, so an unnarrowed schema spells out the `screens` and
+ * `site` fields immediately AFTER the prompt has said "Do not use any other kind" — measured for
+ * Finance at 2,810 prompt characters, 14,765 with the unnarrowed schema appended, 7,291 with the
+ * narrowed one. On the API path the enum
+ * goes further than steering: an out-of-contract kind becomes impossible rather than coerced.
+ *
+ * Returns the shared `DELIVERABLE_TOOL` itself — the same object, not a copy — for a dept-less or
+ * unknown department, so a legacy task is handed the exact schema it has always been handed.
+ */
+export function deliverableTool(deptKey?: string | null): DeliverableToolShape {
+  const o = deptKey ? DEPARTMENT_OUTPUTS[deptKey] : undefined;
+  if (!o) return DELIVERABLE_TOOL as unknown as DeliverableToolShape;
+
+  const kinds = [...o.primary, ...o.allowed];
+  const schema = DELIVERABLE_TOOL.input_schema as unknown as {
+    properties: Record<string, Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const payload = schema.properties.payload as {
+    properties: Record<string, unknown>;
+  } & Record<string, unknown>;
+
+  const fields = Object.fromEntries(
+    Object.entries(payload.properties).filter(([f]) =>
+      (PAYLOAD_FIELD_KINDS[f] ?? []).some((k) => kinds.includes(k))
+    )
+  );
+
+  return {
+    name: DELIVERABLE_TOOL.name,
+    description: DELIVERABLE_TOOL.description,
+    input_schema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        // No `enum: []` for a department that declares nothing: an empty enum matches no value,
+        // so the forced tool call could never be satisfied. Such a department has no contract to
+        // apply, which is the same thing `coerceKindForDepartment` concludes.
+        kind: { ...schema.properties.kind, ...(kinds.length ? { enum: kinds } : {}) },
+        payload: { ...payload, properties: fields },
+      },
+    },
+  };
+}

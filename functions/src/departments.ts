@@ -274,6 +274,81 @@ export const DEPARTMENT_FOUNDATIONS: Record<string, DepartmentFoundation> = {
   },
 };
 
+/**
+ * What each department is allowed to hand back.
+ *
+ * **The gap this closes.** `DEPARTMENT_FOUNDATIONS` gave a department expertise and never an
+ * output SHAPE, while the generator's prompt said "Pick whichever `kind` best fits what you
+ * produced from this exact list" — the whole list. So Finance could return `screens` and nothing
+ * anywhere would notice, because a kind is only ever decoded, never judged.
+ *
+ * `primary` steers the prompt; `allowed` is reachable when the ask plainly calls for it. Anything
+ * else is closed. The split matters: a hard single-kind contract would force an off-profile ask
+ * into the wrong shape, and no contract at all is what this replaces.
+ *
+ * **`text` and `other` appear in no row, deliberately.** They are the untyped fallbacks —
+ * `other` exists so an unrecognised string fails open on decode rather than throwing, which
+ * makes it a decode guard rather than an output. A department able to choose either is a
+ * department able to hand the founder prose with no shape at all.
+ *
+ * Product is absent because it is off the roster (`dept-product.png` is a copy of Engineering's
+ * art and it has no pet). It arrives with `bizplan`.
+ */
+export const DEPARTMENT_OUTPUTS: Record<string, { primary: string[]; allowed: string[] }> = {
+  eng:     { primary: ["doc", "plan", "checklist"], allowed: ["email"] },
+  design:  { primary: ["screens", "site", "doc"],   allowed: ["post"] },
+  mkt:     { primary: ["calendar", "post", "doc"],  allowed: ["dms", "email", "site"] },
+  sales:   { primary: ["dms", "email", "doc"],      allowed: ["sheet", "calendar"] },
+  support: { primary: ["doc", "email", "checklist"], allowed: ["legal"] },
+  fin:     { primary: ["sheet", "doc"],             allowed: ["legal"] },
+  ops:     { primary: ["checklist", "calendar", "doc"], allowed: ["plan", "email"] },
+  legal:   { primary: ["legal", "doc"],             allowed: ["checklist", "email"] },
+};
+
+/**
+ * The contract as a prompt fragment. Empty for a dept-less or unknown department, so a legacy
+ * task keeps the behaviour it had — inventing a contract for a task that never had one would
+ * change what it produces.
+ */
+export function departmentOutputBlock(k?: string | null): string {
+  const o = k ? DEPARTMENT_OUTPUTS[k] : undefined;
+  if (!o) return '';
+  const also = o.allowed.length
+    ? ` It may use ${o.allowed.join(', ')} instead when the task plainly calls for one of those.`
+    : '';
+  return `This function produces ${o.primary.join(', ')}.${also} Do not use any other kind.`;
+}
+
+/**
+ * The kind actually recorded, after the contract.
+ *
+ * Steering the prompt is not enough on its own: `claude -p` cannot force a tool call, so the
+ * local path asks for the schema in prose and parses the reply, and every op there validates or
+ * coerces what it got rather than trusting it. This gives the kind the same treatment.
+ *
+ * An out-of-contract kind becomes **`doc`**, not the department's speciality. The reason is what
+ * happens to the payload: the model built it for the kind IT chose, so `coercePayload` rejects it
+ * under the new kind and drops it, and all that survives is the markdown `body`. `doc` is the one
+ * kind whose contract IS "prose in the body", and it is primary for all eight departments — so it
+ * both satisfies the contract and describes what is actually being handed over. Relabelling
+ * onboarding-screen copy as `sheet` would file it in the founder's Library as a "live model" and
+ * lie about its shape. An empty or unreadable kind gets the same treatment: the absence of a kind
+ * is not evidence of a sheet.
+ *
+ * A dept-less or unknown department is left alone: there is no contract to judge against, and
+ * guessing one would change what legacy tasks produce.
+ */
+export function coerceKindForDepartment(k: string | null | undefined, kind: string): string {
+  const o = k ? DEPARTMENT_OUTPUTS[k] : undefined;
+  if (!o) return kind;
+  if (o.primary.includes(kind) || o.allowed.includes(kind)) return kind;
+  // `doc` wherever the department has it — primary OR allowed, since either satisfies the
+  // contract and a department with `doc` merely allowed would otherwise fall to a speciality
+  // whose payload has just been dropped. `primary[0]` guards a future department without `doc`
+  // at all, and `?? "doc"` one declared with no primary.
+  return [...o.primary, ...o.allowed].includes("doc") ? "doc" : o.primary[0] ?? "doc";
+}
+
 /** Scaffold block: mandate + skills + ONLY the current-stage focus + anti-patterns. */
 export function departmentBlock(k: string, stage: string): string {
   const f = DEPARTMENT_FOUNDATIONS[k];

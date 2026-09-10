@@ -183,6 +183,7 @@ struct ContentView: View {
                   companyStore.companyId != Self.prototypeCompanyId else { return }
             await companyStore.hydrate(companyId: Self.prototypeCompanyId)
             await companyStore.greetIfNeeded(language: appState.uiLanguage)
+            await companyStore.refreshCapabilities()
         }
         .onReceive(authManager.$currentUser) { user in
             guard let user = user else {
@@ -245,10 +246,19 @@ struct ContentView: View {
             // Hydrate the account's company, then reconcile the shell/game sprite
             // (appState.activeChar) with the account-scoped companion of record
             // (company.companionId) so the header, Copilot, and AI persona all agree.
+            //
+            // The reconciliation runs BEFORE refreshCapabilities(), deliberately:
+            // greetIfNeeded early-returns for a returning founder, so
+            // refreshCapabilities() is the only network hop left between hydrate and
+            // this assignment, and its `URLSession.shared.data(from:)` carries the
+            // default 60-second request timeout. On a hanging or captive-portal
+            // network, leaving activeChar after that call left the header, Copilot,
+            // and AI persona showing the WRONG companion for up to a minute.
             Task {
                 await companyStore.hydrate(companyId: user.uid)
                 await companyStore.greetIfNeeded(language: appState.uiLanguage)
                 appState.activeChar = companyStore.company.companionId
+                await companyStore.refreshCapabilities()
             }
 
             // Legacy onboarding flag — keep code that still reads it satisfied.

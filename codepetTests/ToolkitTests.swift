@@ -8,7 +8,9 @@ final class ToolkitTests: XCTestCase {
         XCTAssertEqual(Set(Toolkit.catalog.map(\.id)).count, 13)
     }
     func testDefaultsAndPartition() {
-        XCTAssertEqual(Toolkit.defaultEnabledIds, ["prd-writer", "github", "explorer"])
+        // `explorer` was here and was removed: it is an agent, nothing can run one,
+        // and shipping it defaultOn gave every company a fake enabled agent.
+        XCTAssertEqual(Toolkit.defaultEnabledIds, ["prd-writer", "github"])
         XCTAssertTrue(Toolkit.defaultEnabledIds.isSubset(of: Set(Toolkit.catalog.map(\.id))))
         let sum = ToolCategory.allCases.map { Toolkit.items(in: $0).count }.reduce(0, +)
         XCTAssertEqual(sum, 13)
@@ -36,8 +38,9 @@ final class ToolkitTests: XCTestCase {
         XCTAssertTrue(Toolkit.enabledSkillIds(in: Toolkit.defaultEnabledIds).contains("prd-writer"))
     }
     func testRecommendedNonEmptyAllHaveWhy() {
-        XCTAssertFalse(Toolkit.recommended.isEmpty)
-        XCTAssertTrue(Toolkit.recommended.allSatisfy { $0.why != nil })
+        let recs = Toolkit.recommended(builtSkills: Toolkit.bundledBuiltSkills)
+        XCTAssertFalse(recs.isEmpty)
+        XCTAssertTrue(recs.allSatisfy { $0.why != nil })
     }
     func testCategoryLabelsBothLanguages() {
         for c in ToolCategory.allCases {

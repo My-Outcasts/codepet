@@ -2,16 +2,16 @@ import Foundation
 
 /// What an enable-card should DRAW, given the offer and what is already on.
 ///
-/// **This exists because the card had exactly one state and two of the three cases were a
-/// lie.** `setupInline` rendered a name, an optional why-line and an Enable pill, none of
-/// which read `enabledTools` — so pressing Enable changed nothing on screen. It worked:
-/// `activateSetup` resolved the item, flipped it on and persisted it. The founder pressed
-/// "Web research", got no acknowledgement of any kind, and reported that she could not press
-/// the button (7 Sep). Proven after the fact from the local Firestore cache, which held one
-/// record of `enabledTools` without `web-research` and a later one with it.
+/// **This exists because the card had exactly one state and two of its three original
+/// cases were a lie.** `setupInline` rendered a name, an optional why-line and an Enable
+/// pill, none of which read `enabledTools` — so pressing Enable changed nothing on screen.
+/// It worked: `activateSetup` resolved the item, flipped it on and persisted it. The founder
+/// pressed "Web research", got no acknowledgement of any kind, and reported that she could
+/// not press the button (7 Sep). Proven after the fact from the local Firestore cache, which
+/// held one record of `enabledTools` without `web-research` and a later one with it.
 ///
-/// The other two cases were genuinely dead pills, and both are `guard`s in `activateSetup`
-/// that return silently:
+/// The other three cases are genuinely dead pills. Two are `guard`s in `activateSetup` that
+/// return silently:
 ///   - the item is ALREADY on — `!enabledTools.contains(item.id)` fails. Reachable: a second
 ///     press of the same card, and `CompanyStoreChatTests`
 ///     `testDoneWithSetupAppendsSuggestionAndActivateSetupIsGuarded` pins the behaviour.
@@ -20,31 +20,65 @@ import Foundation
 ///     unreachable there; it stays a case rather than a `precondition` because the card is
 ///     built from a decoded payload, and a card that cannot act must not show a pill that
 ///     pretends it can.
+/// The third, `.notBuilt` (the newest of the four), guards the same fact one level down: it
+/// is `toggleTool`'s own guard, not `activateSetup`'s, and exists for the same reason — a
+/// card that cannot act must not show a pill that pretends it can.
 ///
-/// Pure, so the three cases are testable without a store or a view — same shape as
+/// Pure, so the four cases are testable without a store or a view — same shape as
 /// `DepartmentChipState.of` and `MessageActionRules.canRetry`.
 enum SetupCardState: Equatable {
     /// Resolvable and currently off: draw the Enable button. It is the only state that can act.
     case offer(ToolItem)
-    /// Resolvable and already on: acknowledge it, and draw NO button. Retired rather than
-    /// removed, the same rule `runProposalCard` follows — a vanished affordance loses the
-    /// fact that the thing is on.
+    /// Resolvable, already on, AND built: acknowledge it, and draw NO button. Retired rather
+    /// than removed, the same rule `runProposalCard` follows — a vanished affordance loses
+    /// the fact that the thing is on. The "and built" is load-bearing since the unbuilt check
+    /// in `of` runs first: a stored-on id for an unbuilt item can never reach this case, it
+    /// reaches `.notBuilt` instead — see that ordering's comment below.
     case enabled(ToolItem)
     /// Resolves to nothing in the catalog: keep the transcript record of what was offered,
     /// but draw no control, because no control could work.
     case unresolved
+    /// Resolvable, off, and does nothing yet: title it, and draw NO button.
+    ///
+    /// Distinct from `unresolved` on purpose — the item is real and nameable, it
+    /// simply has no implementation — and distinct from `offer` because the rule
+    /// this whole type exists to enforce is that a card which cannot act must not
+    /// show a pill that pretends it can. Without this case, `toggleTool`'s guard
+    /// would turn the press into a silent no-op: the 7 Sep bug exactly.
+    ///
+    /// NOT reachable from stale chat history: `chatMessages` is session-only and
+    /// non-`Codable` (see `CompanyStore.swift`), so no transcript persists to go
+    /// stale, and `env_setup` only ever offers items that are both off and built —
+    /// a card can't be minted for an unbuilt item in the first place. What actually
+    /// reaches this case is a mid-session manifest narrowing: the founder opens the
+    /// Environment tab, `refreshCapabilities()` returns a set narrower than before,
+    /// and an existing card from earlier in the SAME session now names an item that
+    /// is no longer built.
+    case notBuilt(ToolItem)
 
-    static func of(_ setup: SetupAction, enabledTools: Set<String>) -> SetupCardState {
+    /// `builtSkills` is required rather than defaulted: a defaulted gate is how
+    /// `sendChat`'s `convenesRoom:` left eight tests red for a day, and this one
+    /// decides whether a control appears at all.
+    static func of(_ setup: SetupAction,
+                   enabledTools: Set<String>,
+                   builtSkills: Set<String>) -> SetupCardState {
         guard let item = Toolkit.find(category: setup.category, name: setup.name) else {
             return .unresolved
         }
+        // Unbuilt is checked BEFORE already-on, deliberately. A stored id for an
+        // unbuilt item must NOT read as "Enabled" — it does nothing, and this whole
+        // pass exists to stop the product confirming that fiction. `ToolRowView`
+        // and the spec's Decision 6 table both render such an item "Not built yet";
+        // this keeps the chat card in agreement with them rather than contradicting
+        // the row eight inches away.
+        guard item.isBuilt(builtSkills: builtSkills) else { return .notBuilt(item) }
         return enabledTools.contains(item.id) ? .enabled(item) : .offer(item)
     }
 
     /// The item behind the offer, when there is one — what the card titles itself with.
     var item: ToolItem? {
         switch self {
-        case .offer(let i), .enabled(let i): return i
+        case .offer(let i), .enabled(let i), .notBuilt(let i): return i
         case .unresolved: return nil
         }
     }

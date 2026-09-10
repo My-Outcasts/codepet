@@ -236,6 +236,7 @@ final class CompanyStore: ObservableObject {
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
+    private let capabilitiesFetcher: () async -> Set<String>?
     private let companionSaver: (String, String) async -> Bool
     private let founderPrefsSaver: (String, FounderPrefs) async -> Bool
     private let introSeenSaver: (String, Date) async -> Bool
@@ -348,6 +349,7 @@ final class CompanyStore: ObservableObject {
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
+         capabilitiesFetcher: @escaping () async -> Set<String>? = CapabilitiesClient.fetch,
          companionSaver: @escaping (String, String) async -> Bool = CompanyData.saveCompanionId,
          founderPrefsSaver: @escaping (String, FounderPrefs) async -> Bool = CompanyData.saveFounderPrefs,
          introSeenSaver: @escaping (String, Date) async -> Bool = CompanyData.saveIntroSeen,
@@ -421,6 +423,7 @@ final class CompanyStore: ObservableObject {
         self.taskRunner = taskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
+        self.capabilitiesFetcher = capabilitiesFetcher
         self.companionSaver = companionSaver
         self.founderPrefsSaver = founderPrefsSaver
         self.introSeenSaver = introSeenSaver
@@ -1669,8 +1672,11 @@ final class CompanyStore: ObservableObject {
             .map { RunnableRef(id: $0.id, title: $0.title) }
         // The currently-OFF toolkit items — lets the CF decide whether to
         // suggest turning one on (`setup` in the reply).
+        // `isBuilt` is what stops `setup_capability` pitching something that does
+        // nothing. The CF offers only what this list carries, so filtering here
+        // needs no backend change.
         let envSetup = Toolkit.catalog
-            .filter { !company.enabledTools.contains($0.id) }
+            .filter { !company.enabledTools.contains($0.id) && $0.isBuilt(builtSkills: builtSkills) }
             .map { SetupItemDTO(category: $0.category.rawValue, name: $0.name, why: $0.why) }
         // The other half: the skills that are ON. Without this the CF could only
         // ever be told what to offer, never what the founder already chose.
@@ -3454,6 +3460,21 @@ final class CompanyStore: ObservableObject {
         connectedProviders = await CompanyData.loadConnectorStatus(cid)
     }
 
+    /// The skills the backend implements, as last read.
+    ///
+    /// Seeded from the bundled floor rather than empty so first paint is never wrong
+    /// in the unsafe direction, then widened by the manifest. Read by every
+    /// `isBuilt(builtSkills:)` call in the app.
+    @Published private(set) var builtSkills: Set<String> = Toolkit.bundledBuiltSkills
+
+    /// Re-read the backend's skill manifest.
+    ///
+    /// Falls back to the bundled floor, never to empty: an empty set would render
+    /// every skill as unbuilt, which is a worse lie than the one this pass fixes.
+    func refreshCapabilities() async {
+        builtSkills = await capabilitiesFetcher() ?? Toolkit.bundledBuiltSkills
+    }
+
     /// Run a provider's consent flow, then reconcile from the server rather than
     /// assuming success — the token is written by the Cloud Function, so the
     /// server is the only thing that knows whether it landed.
@@ -3473,6 +3494,23 @@ final class CompanyStore: ObservableObject {
     }
 
     func toggleTool(id: String) async {
+        // THE invariant, and the reason it lives here rather than only in the views:
+        // an unbuilt item must be unreachable from EVERY call site. Those are the
+        // Browse-all row, `activateSetup` acting on the companion's
+        // `setup_capability`, the composer's web-research row, `connectProvider`'s
+        // post-OAuth mirror (above), and any site added later. `connectProvider` is
+        // safe by construction rather than by this guard catching it: it can only
+        // pass an id whose `ConnectorProvider` case exists, which is the same fact
+        // `isBuilt` checks for a connector. (The Recommended card cannot reach here
+        // for an unbuilt item — `Toolkit.recommended(builtSkills:)` already filters
+        // it out.) A control that renders nothing is the UX; this is what makes the
+        // fake on-state impossible.
+        //
+        // It blocks turning an unbuilt item OFF as well, which is intended: the
+        // stored id is preserved deliberately so a later-shipped item arrives on.
+        // An id outside the catalog cannot be built by definition, so it is rejected.
+        guard let item = Toolkit.catalog.first(where: { $0.id == id }),
+              item.isBuilt(builtSkills: builtSkills) else { return }
         if company.enabledTools.contains(id) {
             company.enabledTools.remove(id)
         } else {

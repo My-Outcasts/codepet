@@ -90,9 +90,12 @@ enum Toolkit {
         ToolItem(id: "code-reviewer", name: "Code Reviewer", badge: "Cr",
                  detail: "A subagent that audits changes for correctness.",
                  category: .agents, recommended: false, why: nil, defaultOn: false),
+        // defaultOn was true and is now false: nothing can run an agent, so every
+        // company was seeded with one that does nothing. The stored id is left alone
+        // in existing companies (see the spec) — this only stops NEW ones.
         ToolItem(id: "explorer", name: "Explorer", badge: "Ex",
                  detail: "Searches the codebase to answer questions fast.",
-                 category: .agents, recommended: false, why: nil, defaultOn: true),
+                 category: .agents, recommended: false, why: nil, defaultOn: false),
         ToolItem(id: "test-writer", name: "Test Writer", badge: "Tw",
                  detail: "Generates tests for new code.",
                  category: .agents, recommended: true,
@@ -123,7 +126,26 @@ enum Toolkit {
     static func enabledSkillIds(in enabled: Set<String>) -> [String] {
         items(in: .skills).map(\.id).filter(enabled.contains).sorted()
     }
-    static var recommended: [ToolItem] { catalog.filter(\.recommended) }
+    /// The items worth pitching — recommended AND actually built.
+    ///
+    /// The line is drawn at intent: Browse all is a catalog and may honestly show
+    /// the future, but a card headed "Recommended for your project" whose `why`
+    /// promises a benefit is a pitch, and a pitch may only offer what exists.
+    ///
+    /// Takes the live manifest rather than the bundled floor, so a skill shipped
+    /// backend-only becomes recommendable on deploy with no client release.
+    static func recommended(builtSkills: Set<String>) -> [ToolItem] {
+        catalog.filter { $0.recommended && $0.isBuilt(builtSkills: builtSkills) }
+    }
+
+    /// The skills this binary is compiled knowing about, used ONLY until the live
+    /// manifest arrives: first paint, offline, or a failed fetch.
+    ///
+    /// A floor, not a copy to keep in sync. `IMPLEMENTED_SKILLS` in the CF stays the
+    /// authority, so a skill shipped backend-only becomes built via the manifest
+    /// without this list changing.
+    static let bundledBuiltSkills: Set<String> = ["web-research", "prd-writer"]
+
     static var defaultEnabledIds: Set<String> { Set(catalog.filter(\.defaultOn).map(\.id)) }
 
     /// Resolve a chat `setup`/`env_setup` {category,name} pair to its catalog item —
@@ -135,5 +157,32 @@ enum Toolkit {
         guard !nm.isEmpty else { return nil }
         return catalog.first { $0.category.rawValue == cat && $0.name.lowercased() == nm }
             ?? catalog.first { $0.name.lowercased() == nm }
+    }
+}
+
+extension ToolItem {
+
+    /// Whether this item does anything at all today.
+    ///
+    /// Three categories, three honest authorities, one accessor — so no view and no
+    /// payload has to know where the truth came from:
+    ///
+    ///  - **skills**: the CF owns it (`IMPLEMENTED_SKILLS`), delivered as `builtSkills`.
+    ///    `parseEnabledSkills` drops any id it has not implemented, so a skill absent
+    ///    from the manifest genuinely cannot affect a turn.
+    ///  - **connectors**: `ConnectorProvider` IS the OAuth implementation, so the enum
+    ///    having a case is the same fact as the consent flow existing. Adding
+    ///    `case notion` builds that row and nothing else needs to change.
+    ///  - **agents**: nothing can run one. This is the single line that changes when
+    ///    subagents land — see the local Claude Code execution design.
+    ///
+    /// Takes the skill set rather than reading a singleton: hidden global state makes
+    /// every gate untestable, and a new observable service type would trip landmine 3.
+    func isBuilt(builtSkills: Set<String>) -> Bool {
+        switch category {
+        case .skills:     return builtSkills.contains(id)
+        case .connectors: return ConnectorProvider(rawValue: id) != nil
+        case .agents:     return false
+        }
     }
 }

@@ -18,6 +18,7 @@ import { handleVirtualCompanyRun } from "./company/virtualCompany";
 // repo is now the only source.
 import { handleEnrichBrief } from "./enrichBrief";
 import { handleCompanyChat } from "./companyChat";
+import { handleCapabilities } from "./capabilities";
 import { handleRunTask } from "./runTask";
 import { handleGenerateRoadmap } from "./generateRoadmap";
 import { handleExtractDecisions } from "./extractDecisions";
@@ -84,6 +85,11 @@ export const companyChat = onRequest(
   },
   handleCompanyChat
 );
+
+// Which skills the backend implements, so the Environment tab can tell a built
+// item from an unbuilt one. Unauthenticated by design — a static constant with
+// no founder data, read on first paint before a token necessarily exists.
+export const capabilities = onRequest({ cors: false }, handleCapabilities);
 
 // The GitHub connector's consent round-trip. `githubOAuthCallback` is reached by
 // a browser redirect from GitHub, not by the app, so it is deliberately NOT

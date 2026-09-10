@@ -438,16 +438,22 @@ final class CompanyStoreChatTests: XCTestCase {
 
     /// Enabling an OFF tool via `activateSetup` resolves {category,name} → the
     /// `Toolkit` item id and turns it on (persisting via `toolsSaver`).
+    ///
+    /// Uses "web-research" (a built skill), not "Notion" — the invariant added in the
+    /// environment-honesty pass makes `activateSetup` a no-op for an unbuilt item
+    /// (Notion has recommended:true but no OAuth provider case), and that no-op path
+    /// is covered by `CompanyStoreCapabilitiesTests.testTogglingAnUnbuiltConnectorDoesNotWrite`.
+    /// This test is about the real, built path still working end-to-end.
     func testActivateSetupEnablesOffTool() async {
         var savedIds: [String] = []
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in nil }, chatStreamer: Self.failingStreamer,
                              toolsSaver: { _, ids in savedIds = ids; return true })
         await s.hydrate(companyId: "u")
-        XCTAssertFalse(s.company.enabledTools.contains("notion"))
-        await s.activateSetup(SetupAction(category: "connectors", name: "Notion"))
-        XCTAssertTrue(s.company.enabledTools.contains("notion"))
-        XCTAssertTrue(savedIds.contains("notion"))
+        XCTAssertFalse(s.company.enabledTools.contains("web-research"))
+        await s.activateSetup(SetupAction(category: "skills", name: "Web research"))
+        XCTAssertTrue(s.company.enabledTools.contains("web-research"))
+        XCTAssertTrue(savedIds.contains("web-research"))
     }
 
     /// A `.done` carrying `remember` facts auto-merges into `company.decisions`,
@@ -467,7 +473,11 @@ final class CompanyStoreChatTests: XCTestCase {
     }
 
     /// `sendChat` populates `env_setup` from the company's currently-OFF toolkit
-    /// items (mirrors the web's off-toolkit filter).
+    /// items (mirrors the web's off-toolkit filter) — AND, since the
+    /// environment-honesty pass, only from items that are actually built.
+    /// "Notion" is OFF by default but unbuilt (no OAuth provider case), so it is
+    /// no longer offered; "web-research" is OFF by default and IS in
+    /// `Toolkit.bundledBuiltSkills`, so it stands in as the OFF-and-offered case.
     func testSendChatPopulatesEnvSetupFromOffTools() async {
         var capturedEnvSetup: [SetupItemDTO]?
         let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { req in
@@ -483,7 +493,8 @@ final class CompanyStoreChatTests: XCTestCase {
         await s.hydrate(companyId: "u")
         await s.sendChat("hi", language: .en)
         let names = Set((capturedEnvSetup ?? []).map(\.name))
-        XCTAssertTrue(names.contains("Notion"))    // OFF by default
+        XCTAssertTrue(names.contains("Web research"))  // OFF by default, and built
+        XCTAssertFalse(names.contains("Notion"))       // OFF by default, but unbuilt
         XCTAssertFalse(names.contains("GitHub"))   // ON by default — must not be offered
     }
 

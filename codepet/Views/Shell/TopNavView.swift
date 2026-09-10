@@ -97,7 +97,7 @@ struct TopNavView: View {
         switch v {
         case .tasks:       return TopbarCounts.tasks(companyStore.company.tasks)
         case .library:     return TopbarCounts.library(companyStore.company.library)
-        case .environment: return TopbarCounts.envPending(enabled: companyStore.company.enabledTools)
+        case .environment: return TopbarCounts.envPending(enabled: companyStore.company.enabledTools, builtSkills: companyStore.builtSkills)
         default:           return 0
         }
     }

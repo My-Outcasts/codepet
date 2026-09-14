@@ -29,6 +29,79 @@ final class PrototypeModeTests: XCTestCase {
                        ["CODEPET_MOCK_CHAT", "CODEPET_MOCK_FLOW", "CODEPET_MOCK_AUTOPLAY"])
     }
 
+    /// **A directly-passed `-cp_prototypeMode` locks the switch too.**
+    ///
+    /// This is the argument that was missing. `NSArgumentDomain` outranks every preference
+    /// file for ANY key, not only the three declared flags — so launching with
+    /// `-cp_prototypeMode NO` pins `isOn` to false for the process, while `isLocked` looked
+    /// only at `launchKeys` and reported the switch live. The result was the precise failure
+    /// this type exists to prevent: the toggle turned the mode ON, and every press to turn it
+    /// OFF was swallowed by `setPrototypeMode`'s `on != isOn` guard, which returns `true` —
+    /// a dead control reporting success, with no caption to say why.
+    ///
+    /// The scratch store under XCTest does not carry `NSArgumentDomain`, so the argument's
+    /// effect on `isOn` is written directly; what is under test is that `isLocked` consults
+    /// the arguments at all.
+    func testADirectPreferenceArgumentLocksTheSwitch() {
+        let savedArgs = PrototypeMode.arguments
+        defer { PrototypeMode.arguments = savedArgs }
+
+        PrototypeMode.arguments = ["/path/to/codepet", "-" + PrototypeMode.key, "NO"]
+        XCTAssertTrue(PrototypeMode.isLocked,
+                      "an argument that outranks the preference left the switch reported live")
+    }
+
+    /// A lock must refuse the write rather than report a change it cannot make.
+    /// The store value is restored as well as the arguments: if the lock ever regresses,
+    /// `set` WRITES before returning, and a leaked `cp_prototypeMode` would then fail two
+    /// unrelated tests further down the alphabet instead of this one. A test that only
+    /// fails cleanly while the code is correct is not much of a test — issue #117 was
+    /// this same shape, one domain leaking into another suite.
+    func testSetIsRefusedWhileAPreferenceArgumentHoldsIt() {
+        let savedArgs = PrototypeMode.arguments
+        let savedValue = PrototypeMode.store.object(forKey: PrototypeMode.key)
+        defer {
+            PrototypeMode.arguments = savedArgs
+            if let v = savedValue { PrototypeMode.store.set(v, forKey: PrototypeMode.key) }
+            else { PrototypeMode.store.removeObject(forKey: PrototypeMode.key) }
+        }
+
+        PrototypeMode.arguments = ["/path/to/codepet", "-" + PrototypeMode.key, "NO"]
+        XCTAssertFalse(PrototypeMode.set(true),
+                       "it reported a change the argument domain would have overridden")
+    }
+
+    /// **The caption must not claim the wrong direction.** The three flags can only force the
+    /// mode ON, so "held on by a launch argument" was always true before. A direct
+    /// `-cp_prototypeMode NO` holds it OFF, and a caption offering to "relaunch to switch off"
+    /// something already off would be a second dead affordance on top of the first.
+    func testALockReportsWhichWayItIsHeld() {
+        let savedArgs = PrototypeMode.arguments
+        let savedValue = PrototypeMode.store.object(forKey: PrototypeMode.key)
+        defer {
+            PrototypeMode.arguments = savedArgs
+            if let v = savedValue { PrototypeMode.store.set(v, forKey: PrototypeMode.key) }
+            else { PrototypeMode.store.removeObject(forKey: PrototypeMode.key) }
+        }
+
+        PrototypeMode.arguments = ["/path/to/codepet", "-" + PrototypeMode.key, "NO"]
+        PrototypeMode.store.set(false, forKey: PrototypeMode.key)   // what the argument pins
+        XCTAssertEqual(PrototypeMode.lockedValue, false, "a lock holding it OFF read as ON")
+
+        PrototypeMode.store.set(true, forKey: PrototypeMode.key)
+        XCTAssertEqual(PrototypeMode.lockedValue, true, "a lock holding it ON read as OFF")
+    }
+
+    /// Unlocked is still the normal case: no argument, no lock, and nothing to explain.
+    func testNoArgumentMeansNoLockAndNoLockedValue() {
+        let savedArgs = PrototypeMode.arguments
+        defer { PrototypeMode.arguments = savedArgs }
+
+        PrototypeMode.arguments = ["/path/to/codepet"]
+        XCTAssertFalse(PrototypeMode.isLocked)
+        XCTAssertNil(PrototypeMode.lockedValue)
+    }
+
     /// **A locked switch must refuse, not lie.** `NSArgumentDomain` outranks every
     /// preference file, so when a launch argument holds the mode on, writing the
     /// preference cannot turn it off. `set` returns false so the UI can say why

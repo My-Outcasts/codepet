@@ -733,7 +733,13 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         case .blocked(let reason):
             LocalTransportRouter.log.error(
                 "one-shot \(op, privacy: .public) blocked: \(String(describing: reason), privacy: .public)")
-            throw LocalOneShotRunner.Failure.unavailable
+            // The REASON, not a stand-in for it. This threw `Failure.unavailable`, whose
+            // text is "…Reinstalling Codepet should restore it." — so a founder whose only
+            // problem was an ungranted toggle was sent to reinstall the app, while the
+            // notGranted that would have told her about Settings went to the log line above
+            // and no further. `.blocked` is what carries a reason the whole way out, which
+            // is why `failClosed` below already throws it for the streaming ops.
+            throw ReflectionAPIError.blocked(reason)
         case .local:
             let out = try await LocalOneShotRunner.run(
                 op: op, body: try JSONEncoder().encode(request))

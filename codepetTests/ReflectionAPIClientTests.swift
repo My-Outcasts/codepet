@@ -193,6 +193,40 @@ final class ReflectionAPIClientTests: XCTestCase {
                        "a blocked call still built an HTTP request")
     }
 
+    /// The NON-streaming ops have to name her fix too, and they did not.
+    ///
+    /// `localOneShot` logged the real reason and then threw
+    /// `LocalOneShotRunner.Failure.unavailable`, whose founder-facing text is "Codepet
+    /// can't reach its local runner on this Mac. Reinstalling Codepet should restore it."
+    /// So a founder whose only problem is an ungranted toggle was told to reinstall the
+    /// app — the exact mis-routing `BlockReason` exists to stop, and the one
+    /// `LocalTransportRouterTests.testAMissingSidecarDoesNotChangeAnUngrantedFoundersReason`
+    /// guards one layer down. The reason reached the log and died there.
+    @MainActor
+    func testUngrantedOneShotTellsHerToGrantRatherThanToReinstall() async {
+        MockURLProtocol.reset()
+        LocalTransportRouter.apply(companyId: nil)
+        defer { LocalTransportRouter.apply(companyId: nil) }
+
+        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
+        do {
+            _ = try await client.summarizeTurn(makeMinimalTurnRequest())
+            XCTFail("an ungranted founder must not get a summary")
+        } catch {
+            guard case ReflectionAPIError.blocked(let reason) = error else {
+                let shown = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                return XCTFail("expected .blocked(.notGranted); the founder is told: \"\(shown)\"")
+            }
+            XCTAssertEqual(reason, .notGranted)
+            XCTAssertTrue(reason.founderText.contains("Settings"),
+                          "her fix is a toggle, so the copy has to point at it: \(reason.founderText)")
+            XCTAssertFalse(reason.founderText.lowercased().contains("reinstall"),
+                           "an ungranted founder was told to reinstall: \(reason.founderText)")
+        }
+        XCTAssertEqual(MockURLProtocol.attemptedRequests.count, 0,
+                       "a blocked one-shot still built an HTTP request")
+    }
+
     private func makeMinimalSessionRequest() -> SummarizeSessionRequest {
         SummarizeSessionRequest(
             sessionId: "s1",

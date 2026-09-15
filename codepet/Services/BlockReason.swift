@@ -25,7 +25,7 @@ enum BlockReason: Equatable {
         case .notGranted:
             return "Codepet needs permission to use your Claude plan. Turn it on in Settings."
         case .claudeCodeMissing:
-            return "Codepet runs on Claude Code. install it, then try again."
+            return "Codepet runs on Claude Code. Install it, then try again."
         case .sidecarMissing:
             return "Codepet can't reach its local runner on this Mac."
         case .noFolderLinked:

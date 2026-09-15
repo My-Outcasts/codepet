@@ -13,7 +13,7 @@ import FirebaseFirestore
 /// previous arrangement was not stronger: on the local path `generatePlan` already answered
 /// `tier: "full"` because there was no entitlement to read.
 enum PlanTier: String, Equatable {
-    case free
+    case preview
     case full
 }
 
@@ -22,13 +22,27 @@ enum PlanTier: String, Equatable {
 /// which kills the XCTest host and reads as an assertion failure.
 struct PlanTierResolver {
 
+    /// Mirrors the server's `PLAN_GATING_ENABLED`. That flag shipped `false`, so
+    /// `resolvePlanTier` always answered `"full"` and the Firestore-reading branches below
+    /// it never ran in production — they were dead code behind a disabled flag.
+    ///
+    /// **Turning this on is a product decision, not a refactor.** The `pro` / `pro_until`
+    /// branches this gates were never exercised in production; flipping this default would
+    /// start gating founders who have always had everything, not merely port existing
+    /// behavior. Default stays `false` so the port is behavior-identical to what shipped.
+    var gatingEnabled: Bool = false
+
     var read: (String) async -> [String: Any]? = { uid in
         try? await Firestore.firestore()
             .collection("entitlements").document(uid).getDocument().data()
     }
 
     func tier(uid: String) async -> PlanTier {
-        guard let doc = await read(uid), let pro = doc["pro"] as? Bool else { return .free }
-        return pro ? .full : .free
+        guard gatingEnabled else { return .full }
+        guard let doc = await read(uid), let pro = doc["pro"] as? Bool, pro else { return .preview }
+        if let proUntil = doc["pro_until"] as? Timestamp, proUntil.dateValue() < Date() {
+            return .preview
+        }
+        return .full
     }
 }

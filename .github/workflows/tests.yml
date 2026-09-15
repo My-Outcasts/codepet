@@ -65,6 +65,33 @@ jobs:
         # green, `tsc` red, because the request-body interfaces had not learned the new field.
         run: npx tsc --noEmit
 
+      - name: Bundle the sidecars
+        # **The check nothing else performs.** `functions/src` holds two kinds of code that look
+        # identical in a listing: hosted handlers, and the builders esbuild inlines into the
+        # macOS app. The bundles are gitignored and Jest never builds them — so deleting a
+        # bundled file leaves this whole job green and breaks the app on a founder's machine.
+        #
+        # That is not hypothetical. The claude-code-only branch came within one step of deleting
+        # `company/`, whose `orchestrate.ts` and `router.ts` are inlined into `vcSidecar`. It was
+        # caught by hand. A meeting that will not start is not a failure CI should leave to
+        # whoever happens to re-read the import graph.
+        #
+        # Bundling only — the flags mirror `scripts/build-sidecar.sh`. It does not run the
+        # bundles, because the runtime checks there need the `claude` CLI, which no runner has.
+        # Compiling the closure is what catches a deleted dependency.
+        #
+        # `|| exit 1` rather than relying on `set -e`: a failing command inside a `for` loop is
+        # exactly where shells disagree about ERR_EXIT, and this guard was written with the loop
+        # silently completing on a bundle that had already failed. A guard whose behaviour
+        # depends on which shell runs it is not a guard.
+        run: |
+          for entry in chatSidecar oneShotSidecar vcSidecar; do
+            echo "▸ bundling $entry"
+            npx esbuild "src/local/$entry.ts" \
+              --bundle --platform=node --target=node20 --format=cjs \
+              --outfile="/tmp/$entry.js" || exit 1
+          done
+
       - name: Test
         # 34 suites / 502 tests as of a134421. JEST here, not vitest — the web app used vitest
         # and confusing the two has cost time before.

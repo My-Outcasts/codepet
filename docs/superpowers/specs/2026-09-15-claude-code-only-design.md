@@ -39,6 +39,36 @@ is removed instead of repaired.
 The hard gate is what makes the rest safe. With it, the cloud branch is unreachable by
 construction rather than merely unused, so deleting it cannot strand a founder mid-session.
 
+## `CloudAIBlock` already exists, and it does half of this
+
+**Amendment, same day.** This spec was first written without reference to
+`codepet/Services/CloudAIBlock.swift`, which is the authority `CLAUDE.md` points at and which
+already implements the hard part.
+
+It is a `URLProtocol` interceptor registered at launch, sitting BELOW all six HTTP clients —
+deliberately, because "there is no shared HTTP helper: six clients build their own requests, and
+a guarantee that only holds for the clients someone remembered to update is not a guarantee." It
+refuses any request whose last path component is in `blockedPaths`, per request, with no relaunch
+needed. Today it is opt-in, persisted per company at `cp_neverUseApiKey_<companyId>`.
+
+So Phase 1 does not invent a mechanism. It makes this one unconditional: the refusal stops being
+a switch the founder may set and becomes how the app behaves. The switch and its Settings control
+are removed with the choice.
+
+**Keep it after the handlers are deleted.** Production stays deployed by decision, so the
+endpoints remain reachable by URL until a later undeploy. The interceptor is the belt to the
+routing change's braces, and it is the only one of the two that covers a client nobody remembered
+to update.
+
+**On 17 versus 18.** `blockedPaths` holds 17 entries; 18 exports declare `ANTHROPIC_API_KEY`. Both
+are right: `engWebhook` is inbound from Anthropic's agent service, so it spends the key but is not
+a path the app ever calls. The 17 are the client's concern; the 18 are the repo's.
+
+Its doc comment also records which neighbours must NOT be blocked, and that list matches the 10
+survivors above: `githubOAuthStart` / `githubOAuthCallback` spend a GitHub secret, and
+`engDiff` / `engShip` / `engPreview` / `engListRepos` / `engLinkRepo` / `engCreateRepo` /
+`engBalance` are GitHub and Firestore only.
+
 ## Architecture: the seam survives, its meaning changes
 
 `LocalTransportRouter.transport()` answers *local or cloud*. It becomes *which runner, or why

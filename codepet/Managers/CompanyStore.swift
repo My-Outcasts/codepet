@@ -342,8 +342,9 @@ final class CompanyStore: ObservableObject {
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = { await ChatTransportRouter.send($0) },
          // Routed per turn rather than fixed here: `ChatTransportRouter` reads the
          // founder's grant (`cp_claudeCodeAuthorised`, keyed per company id, which
-         // arrives on the request) and sends the turn to their own Claude Code or to
-         // the Cloud Function. Every test that injects its own streamer is untouched.
+         // arrives on the request) and sends the turn to their own Claude Code, or
+         // blocks it and says why (see `BlockReason`) — there is no Cloud Function
+         // branch any more. Every test that injects its own streamer is untouched.
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { ChatTransportRouter.sendStream($0) },
          vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
@@ -3202,9 +3203,10 @@ final class CompanyStore: ObservableObject {
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)
         let reply = await chatSender(req)
-        // Nil AND empty both count as "did not come back": `CompanyChatClient.send` already
-        // maps an empty reply to nil, but a future transport need not, and an empty bubble is
-        // the one outcome worse than the authored line.
+        // Nil AND empty both count as "did not come back": `postLiveLine` goes through the
+        // injected `chatSender` seam (`ChatTransportRouter.send` by default), and that seam
+        // already maps an empty reply to nil — but a future transport need not, and an empty
+        // bubble is the one outcome worse than the authored line.
         let live = (reply?.text).flatMap { $0.isEmpty ? nil : $0 }
         let text = live ?? fallback
         if live == nil {

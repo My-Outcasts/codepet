@@ -204,10 +204,13 @@ final class ChatTransportRouterTests: XCTestCase {
         }
     }
 
-    /// The tail action shows the reason's own words, not a generic runner sentence. The
-    /// store reads `founderText`/`founderTextVi` straight off this value, so this string IS
-    /// what a blocked founder sees in the chat bubble.
-    func testTheChatTailShowsTheReasonsOwnCopy() {
+    /// `BlockReason.notGranted`'s own English copy, pinned as a literal. This does NOT touch
+    /// the chat tail — it asserts the `BlockReason` value alone; the tail's actual behaviour
+    /// (that `CompanyStore` writes this string into the placeholder for a `.stop` reason) is
+    /// covered end-to-end by `CompanyStoreChatTests
+    /// .testStopReasonWritesTheFounderTextWhenLanguageIsEnglish` (and its `.vi` counterpart),
+    /// which is where that promise now lives.
+    func testBlockReasonNotGrantedHasItsOwnEnglishCopy() {
         XCTAssertEqual(BlockReason.notGranted.founderText,
                        "Codepet needs permission to use your Claude plan. Turn it on in Settings.")
     }

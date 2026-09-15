@@ -179,8 +179,11 @@ final class BlockReasonTests: XCTestCase {
 
     /// The copy names the fix, not the internal state. "not authorised" is our word for it.
     func testTheCopyNamesAnActionTheFounderCanTake() {
-        XCTAssertTrue(BlockReason.claudeCodeMissing.founderText.contains("install"))
-        XCTAssertTrue(BlockReason.noFolderLinked.founderText.contains("folder"))
+        // Case-insensitive: the copy reads "Install it, then try again." A case-sensitive
+        // `contains("install")` fails against it, and the cheapest way to make it pass is to
+        // lowercase the copy — shipping a sentence that starts with a small letter.
+        XCTAssertTrue(BlockReason.claudeCodeMissing.founderText.lowercased().contains("install"))
+        XCTAssertTrue(BlockReason.noFolderLinked.founderText.lowercased().contains("folder"))
     }
 }
 ```

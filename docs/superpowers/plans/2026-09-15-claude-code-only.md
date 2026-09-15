@@ -908,14 +908,14 @@ EOF
 
 **Files:**
 - Modify: `functions/src/engineering/engBudget.ts`
-- Test: `functions/src/__tests__/engBudget.test.ts`
+- Test: `functions/src/engineering/__tests__/engBudget.test.ts`
 
 **Interfaces:**
 - Produces: `engBudget.ts` keeps any non-credit helpers; `CREDIT_CENTS`, `DEFAULT_RUN_CREDITS`, `creditsToBudget` and `listCostToCredits` are gone.
 
 - [ ] **Step 1: Delete the credit tests that no longer describe anything**
 
-Remove the cases in `functions/src/__tests__/engBudget.test.ts` that assert on `CREDIT_CENTS`, `DEFAULT_RUN_CREDITS`, `creditsToBudget` or `listCostToCredits`.
+Remove the cases in `functions/src/engineering/__tests__/engBudget.test.ts` that assert on `CREDIT_CENTS`, `DEFAULT_RUN_CREDITS`, `creditsToBudget` or `listCostToCredits`.
 
 - [ ] **Step 2: Run the suite and watch it fail to compile**
 
@@ -925,7 +925,19 @@ cd functions && npx jest src/__tests__/engBudget.test.ts
 
 Expected: FAIL — the file still imports symbols the test no longer uses, or the remaining tests reference deleted ones.
 
-- [ ] **Step 3: Delete the four symbols** from `functions/src/engineering/engBudget.ts`, and any import of them elsewhere that `tsc` flags.
+- [ ] **Step 3: Delete the four symbols** from `functions/src/engineering/engBudget.ts`.
+
+Their only non-test consumers are `engStartRun.ts` (`creditsToBudget`) and `engWebhook.ts`
+(`listCostToCredits`), and **both files are deleted in Task 8** — so if Task 8 is complete there
+is nothing else to update. Verify rather than assume:
+
+```bash
+cd ~/Developer/codepet-dept-outputs/functions
+grep -rn "CREDIT_CENTS\|DEFAULT_RUN_CREDITS\|creditsToBudget\|listCostToCredits" src \
+  --exclude-dir=__tests__ | grep -v "engBudget.ts:"
+```
+
+Expected: no output. Any line here is a consumer Task 8 did not remove — resolve it before deleting.
 
 - [ ] **Step 4: Verify**
 

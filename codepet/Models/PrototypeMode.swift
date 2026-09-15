@@ -83,10 +83,34 @@ enum PrototypeMode {
         return scratch
     }()
 
-    /// Forced on from the command line, and therefore not switchable this session.
+    /// **The launch arguments, as a seam** — the same reason `store` above is one.
+    /// `isLocked` is the property that decides whether the UI offers a control at all, and
+    /// `ProcessInfo.arguments` cannot be set from a test, so the lock could only ever be
+    /// asserted in whichever direction the test runner happened to be launched. One test
+    /// below used to branch on `isLocked` and assert nothing in the common case.
+    static var arguments: [String] = ProcessInfo.processInfo.arguments
+
+    /// Forced from the command line, and therefore not switchable this session.
+    ///
+    /// **`cp_prototypeMode` itself counts, not only the three declared flags.**
+    /// `NSArgumentDomain` outranks every preference file for ANY key, so launching with
+    /// `-cp_prototypeMode NO` pins `isOn` for the process exactly as a flag would. Reading
+    /// only `launchKeys` missed that: the switch rendered live, `set` returned true, and
+    /// `CompanyStore.setPrototypeMode`'s `on != isOn` guard swallowed every press in the
+    /// direction the argument already held — returning `true` as it did so. That is a dead
+    /// control reporting success, which is the one outcome this type was written to avoid.
     static var isLocked: Bool {
-        launchKeys.contains { store.bool(forKey: $0) && wasPassedAsArgument($0) }
+        if wasPassedAsArgument(key) { return true }
+        return launchKeys.contains { store.bool(forKey: $0) && wasPassedAsArgument($0) }
     }
+
+    /// **Which way a lock holds it**, or `nil` when nothing is locked.
+    ///
+    /// The caption has to name the direction. The three flags can only force the mode ON, so
+    /// "held on by a launch argument" was always true before; a direct `-cp_prototypeMode NO`
+    /// holds it OFF, and offering to "relaunch to switch off" something already off would put
+    /// a second dead affordance on top of the first.
+    static var lockedValue: Bool? { isLocked ? isOn : nil }
 
     static var isOn: Bool {
         if launchKeys.contains(where: { store.bool(forKey: $0) }) { return true }
@@ -170,10 +194,11 @@ enum PrototypeMode {
     /// apart — the argument domain is layered under the same lookup — so the flag's
     /// presence in `ProcessInfo` is the only way to know the switch is outranked.
     private static func wasPassedAsArgument(_ name: String) -> Bool {
-        ProcessInfo.processInfo.arguments.contains("-" + name)
+        arguments.contains("-" + name)
     }
     #else
     static var isLocked: Bool { true }
+    static var lockedValue: Bool? { false }
     static var isOn: Bool { false }
     static var liveAI: Bool { false }
     static var startsAtColdOpen: Bool { false }

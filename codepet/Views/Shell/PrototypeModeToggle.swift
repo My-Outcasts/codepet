@@ -48,10 +48,18 @@ struct PrototypeModeToggle: View {
     /// Says what the mode does and never claims more. The write sentence is the
     /// load-bearing one — it is the reason this is safe to leave switched on.
     private var caption: String {
-        if PrototypeMode.isLocked {
+        // Names the direction the argument holds it in. A `-cp_prototypeMode NO` holds the
+        // mode OFF, and the old wording offered to relaunch and "switch off" something that
+        // was already off.
+        if let held = PrototypeMode.lockedValue {
+            if held {
+                return lang == .vi
+                    ? "Bật bằng tham số khởi chạy — khởi động lại không kèm cờ để tắt."
+                    : "Held on by a launch argument — relaunch without it to switch off."
+            }
             return lang == .vi
-                ? "Bật bằng tham số khởi chạy — khởi động lại không kèm cờ để tắt."
-                : "Held on by a launch argument — relaunch without it to switch off."
+                ? "Tắt bằng tham số khởi chạy — khởi động lại không kèm cờ để bật."
+                : "Held off by a launch argument — relaunch without it to switch on."
         }
         return companyStore.prototypeModeOn
             ? (lang == .vi

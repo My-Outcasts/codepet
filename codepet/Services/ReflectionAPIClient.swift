@@ -1,4 +1,5 @@
 import Foundation
+import os
 import FirebaseAuth
 import FirebaseCore
 
@@ -706,23 +707,26 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
 
     // MARK: - The founder's own Claude Code, for the non-streaming ops
 
-    /// Run `op` on the founder's Claude Code when they granted it, decoding the SAME
-    /// response DTO the Cloud Function's 200 carries.
+    /// Run `op` on the founder's Claude Code, decoding the SAME response DTO the Cloud
+    /// Function's 200 used to carry.
     ///
-    /// Returns nil for an ungranted founder, which means "carry on to the HTTP path" — so a
-    /// call site is two lines and cannot accidentally skip the cloud path it already had.
-    /// A granted founder whose Mac cannot run it gets a thrown error, never a quiet cloud
-    /// call: that would spend the API key they said not to spend. `LocalTransportRouter`
-    /// records why in full.
+    /// **It never returns nil any more, and that is the change.** It used to answer nil for an
+    /// ungranted founder, meaning "carry on to the HTTP path below"; that path spends an
+    /// Anthropic key Codepet no longer holds, so the only thing it can produce is a 401. A
+    /// founder who cannot run locally now gets a thrown error naming the reason instead.
+    ///
+    /// The optional return is kept so the eight call sites stay two lines each, and so the
+    /// HTTP bodies below them — which several suites still exercise as SSE/status parsing —
+    /// do not have to be deleted in the same change.
     private func localOneShot<Request: Encodable, Response: Decodable>(
         op: String,
         request: Request,
         as: Response.Type
     ) async throws -> Response? {
         switch LocalTransportRouter.forOneShot() {
-        case .cloud:
-            return nil
-        case .localUnavailable:
+        case .blocked(let reason):
+            LocalTransportRouter.log.error(
+                "one-shot \(op, privacy: .public) blocked: \(String(describing: reason), privacy: .public)")
             throw LocalOneShotRunner.Failure.unavailable
         case .local:
             let out = try await LocalOneShotRunner.run(
@@ -800,12 +804,21 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         }
     }
 
-    /// `.local` when this turn belongs on the founder's plan, nil when it belongs in the cloud.
-    /// A granted founder whose Mac cannot run it gets `.localUnavailable`, which is still not
-    /// nil: the stream then fails with a reason instead of quietly spending the API key.
+    /// `.local` when this turn belongs on the founder's plan, nil when the SSE path below is
+    /// taken instead.
+    ///
+    /// **This is the one route in this file that still ends at a Cloud Function, and it is
+    /// deliberately left alone by the change that removed the others.** The three streaming
+    /// ops (`summarizeTurn`, `summarizeSession`, `chatSession`) reach their HTTP bodies
+    /// through here, and five tests in `ReflectionAPIClientTests` drive those bodies with a
+    /// stubbed `URLSession` to pin the SSE framing. In production the route is already dead:
+    /// all three are in `CloudAIBlock.blockedPaths`, so the request is refused at the URL
+    /// layer before it leaves the app. Failing it closed here means deleting those five
+    /// tests, which belongs in the change that removes the streaming HTTP paths themselves.
     private func localStreamOp() -> LocalTransportRouter.Transport? {
         let transport = LocalTransportRouter.forOneShot()
-        return transport == .cloud ? nil : transport
+        if case .blocked(.notGranted) = transport { return nil }
+        return transport
     }
 
     func summarizeTurnStream(_ request: SummarizeTurnRequest) -> AsyncThrowingStream<NarrativeStreamEvent, Error> {

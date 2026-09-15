@@ -1,7 +1,6 @@
 // codepet/Services/RunTaskClient.swift
 import Foundation
 import os
-import FirebaseAuth
 
 /// One upstream department's finished work, travelling with a downstream run.
 ///
@@ -162,12 +161,13 @@ struct RunTaskResponse: Codable {
     var payload: DeliverablePayload?
 }
 
-/// Fail-open client for the (planned) runTask Cloud Function. Returns the decoded
-/// response on 200, `nil` on any error / non-200 / unreachable — callers never handle
-/// throws. The CF is authored + deployed separately (node-22 bundle, like companyChat);
-/// until then this returns nil and the run surfaces an honest error.
+/// Fail-open client for `runTask`. Returns the decoded response, or `nil` on any error —
+/// callers never handle throws, and `nil` is what the card turns into an honest error.
+///
+/// It runs on the founder's own Claude Code or not at all. There is no hosted runner behind
+/// it any more: `runTask` is one of the seventeen endpoints that spent an Anthropic key
+/// Codepet no longer holds.
 enum RunTaskClient {
-    static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/runTask")!
 
     static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
         #if DEBUG
@@ -176,13 +176,10 @@ enum RunTaskClient {
         // own Claude Code below instead of a canned deliverable — see `MockChat.usesMockTransport`.
         if MockChat.usesMockTransport { return await MockChat.runResult(req) }
         #endif
-        // The founder's own Claude Code first, when they granted it. Fail-open is preserved
-        // (`nil` is what the caller turns into an honest error on the card), but the reason
-        // is LOGGED — a run that silently produced nothing is the hardest failure here to
-        // diagnose. It never falls through to the Cloud Function: that would spend the API
-        // key the grant exists to stop spending.
+        // Fail-open is preserved, but the reason is LOGGED — a run that silently produced
+        // nothing is the hardest failure here to diagnose.
         switch LocalTransportRouter.forOneShot() {
-        case .local, .localUnavailable:
+        case .local:
             do {
                 let body = try JSONEncoder().encode(req)
                 let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
@@ -195,25 +192,10 @@ enum RunTaskClient {
                     "local runTask failed: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
-        case .cloud:
-            break
-        }
-        LocalTransportRouter.log.error(
-            "runTask: cloud branch — requiring a Firebase token (signed-in user: \(Auth.auth().currentUser != nil, privacy: .public))")
-        guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
-            LocalTransportRouter.log.error("runTask: no Firebase token available — returning nil (this is the silent-failure card)")
+        case .blocked(let reason):
+            LocalTransportRouter.log.error(
+                "runTask blocked: \(String(describing: reason), privacy: .public)")
             return nil
         }
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let body = try? JSONEncoder().encode(req) else { return nil }
-        urlRequest.httpBody = body
-        guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(RunTaskResponse.self, from: data)
-        else { return nil }
-        return decoded
     }
 }

@@ -448,6 +448,38 @@ EOF
 
 ---
 
+### Task 3b: the streaming ops stop falling through to HTTP
+
+**Added mid-execution.** Task 3 closed the one `.cloud` site this plan identified in
+`ReflectionAPIClient.swift`. It did not close a second route the plan never named:
+`localStreamOp()` returns `nil` for `.blocked(.notGranted)`, and the three streaming callers then
+fall straight through to the SSE HTTP path — building a request to `summarizeTurn`,
+`summarizeSession` or `chatSession` for a founder with no grant.
+
+Dead in production today, because all three are in `CloudAIBlock.blockedPaths` and the
+interceptor refuses them at the URL layer. Dead for real after Task 8 deletes the handlers. But
+"unreachable because something below it says no" is the state Task 5 exists to prevent for
+`startSessionBuild`, and the same argument applies here.
+
+**Files:**
+- Modify: `codepet/Services/ReflectionAPIClient.swift` — `localStreamOp()` and its three callers
+- Test: `codepetTests/ReflectionAPIClientTests.swift` and the SSE suites that drive the HTTP body
+
+**The judgement this needs.** Five existing SSE tests drive those HTTP bodies through an injected
+`URLSession`. They describe a transport that is being deleted, so they cannot simply be kept — but
+deleting five tests to make a change look clean is how coverage disappears. For each one decide,
+and say which you did: does it test SSE PARSING (keep it — point it at the local path's stream),
+or does it test that the HTTP request is issued (delete it — that behaviour is going)?
+
+- [ ] **Step 1:** Read all five and classify each as parsing or dispatch, in the report, before changing anything.
+- [ ] **Step 2:** Write the failing test — an ungranted founder's `summarizeTurnStream` yields a failure carrying `BlockReason.notGranted`, not an HTTP attempt.
+- [ ] **Step 3:** Run it, watch it fail.
+- [ ] **Step 4:** Make `localStreamOp`'s blocked result propagate instead of returning `nil`, so the callers fail closed.
+- [ ] **Step 5:** Re-home or delete the five SSE tests per your Step 1 classification.
+- [ ] **Step 6:** Run the reflection suites; commit.
+
+---
+
 ### Task 4: `ChatTransportRouter` drops `.cloud`
 
 Streaming chat has its own enum and two `case .cloud` branches. Same change, separate task because it can be reviewed and reverted independently.

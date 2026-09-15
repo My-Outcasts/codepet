@@ -573,85 +573,55 @@ EOF
 
 ---
 
-### Task 5: A build with no folder linked is blocked, not sent to the cloud agent
+### Task 5: a build with no folder linked asks for a folder
 
-`CLAUDE.md` names `startSessionBuild` with no folder as the only call that can still reach the cloud agent by design. With the agent's functions deleted, that route has to close.
+**Rewritten at pre-flight.** The original version targeted `CodingRunCoordinator.startSessionBuild`
+and a `.failed(String)` state. Both were wrong: the function lives in `CompanyStore`, and a better
+affordance already exists.
 
-**Files:**
-- Modify: `codepet/Managers/CodingRunCoordinator.swift` (the `startSessionBuild` / `startBuild` dispatch)
-- Test: `codepetTests/CodingRunCoordinatorTests.swift`
-
-**Interfaces:**
-- Consumes: `BlockReason.noFolderLinked` from Task 2.
-- Produces: `startSessionBuild` returns/If it currently dispatches to the cloud agent, it now sets the run to `.failed(BlockReason.noFolderLinked.founderText)`.
-
-- [ ] **Step 1: Find the dispatch and write the failing test**
-
-```bash
-grep -n "startSessionBuild" -A 20 codepet/Managers/CodingRunCoordinator.swift | head -30
-```
-
-Append to `codepetTests/CodingRunCoordinatorTests.swift`:
+**What is actually there:**
 
 ```swift
-/// **A grant is not a folder.** `startBuild` sends a granted founder WITH a linked folder to
-/// `ClaudeCodeRunner`; without one it used to reach the cloud coding agent, because a local
-/// run would land in `.noProject`. That agent's functions no longer exist, so the call would
-/// now fail remotely with nothing to say. It fails here instead, naming the fix.
-func testABuildWithNoFolderLinkedIsBlockedAndSaysWhy() async {
-    let coordinator = CodingRunCoordinator()
-    await coordinator.startSessionBuild(folder: nil, prompt: "add a button")
-    guard case .failed(let message) = coordinator.state else {
-        return XCTFail("a build with no folder did not fail; state was \(coordinator.state)")
-    }
-    XCTAssertEqual(message, BlockReason.noFolderLinked.founderText)
+func startSessionBuild(ask: String) {
+    if activeProjectLink != nil { startCodeRun(ask: ask) }      // local, ClaudeCodeRunner
+    else { startEngineeringRun(ask: ask) }                       // the CLOUD coding agent
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+`startBuild` (`CompanyStore.swift:1066`) has the same shape — its own doc says "Cloud by default,
+and not because it is better", and `CLAUDE.md` adds "a grant is not a folder: without one it still
+goes cloud". **So both Build entry points reach the cloud agent, not just the session one.** The
+original task named only `startSessionBuild` and would have left the other open.
 
-```bash
-xcodebuild test -project codepet.xcodeproj -scheme codepet -configuration Debug \
-  -destination 'platform=macOS' DEVELOPMENT_TEAM=YL72VTKBR7 \
-  CODE_SIGN_IDENTITY="Apple Development" -allowProvisioningUpdates \
-  -only-testing:codepetTests/CodingRunCoordinatorTests 2>&1 | grep -E "Test Case .*failed|error:|Executed"
-```
+**This removes a capability that is already broken, not a working one.** `engStartRun`, `engStream`
+and `engSendTurn` all declare `ANTHROPIC_API_KEY` and are on the deletion list; they answer 401
+today. A founder without a linked folder cannot Build now regardless — the difference is whether
+she is told why.
 
-Expected: FAIL — the run dispatches instead of failing.
+**Reuse `.noProject`, do not invent a failure string.** `CodingRunCoordinator:39` already stages
+`EditCodeRun(ask:backend:.shadow, phase:.noProject)`, and `CompanyStore:1029` records that its card
+offers "Link a project". That is the affordance this task needs; a `.failed` string would be a
+dead end where a working button already exists.
 
-- [ ] **Step 3: Close the route**
+**Files:**
+- Modify: `codepet/Managers/CompanyStore.swift` — `startSessionBuild` (~1094) and `startBuild` (~1066)
+- Test: `codepetTests/` — whichever suite covers the build entry points
 
-Replace the cloud-agent dispatch in `startSessionBuild` with:
+**Interfaces:**
+- Consumes: the existing `.noProject` phase and its card.
+- Produces: neither Build entry point calls `startEngineeringRun` when no folder is linked.
 
-```swift
-        guard folder != nil else {
-            // The cloud coding agent's functions are gone; there is nothing on the other end
-            // of this call. Say what to do instead of failing on a 404 a minute from now.
-            state = .failed(BlockReason.noFolderLinked.founderText)
-            return
-        }
-```
-
-- [ ] **Step 4: Run the tests**
-
-Same command as Step 2. Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add codepet/Managers/CodingRunCoordinator.swift codepetTests/CodingRunCoordinatorTests.swift
-git commit -F - <<'EOF'
-A build with no folder asks for a folder
-
-CLAUDE.md named `startSessionBuild` with no folder linked as the only call that could still
-reach the cloud coding agent by design. Those functions are being deleted, so the route would
-have become the one thing the rest of this change exists to prevent: a live call to something
-that is not there.
-
-It fails locally now, with the fix in the message, rather than after a round trip to a handler
-that no longer exists.
-EOF
-```
+- [ ] **Step 1:** Write the failing tests — `startSessionBuild` and `startBuild`, each with no
+  linked project, stage a `.noProject` run and do NOT call `startEngineeringRun`.
+- [ ] **Step 2:** Run them, watch them fail (both currently dispatch to the cloud agent).
+- [ ] **Step 3:** Route both no-folder branches to the same `.noProject` staging `startBuild`
+  already uses, so the founder gets the "Link a project" card.
+- [ ] **Step 4:** Run green. Confirm the WITH-folder path is untouched — a linked project must
+  still reach `startCodeRun`, and a test must assert it.
+- [ ] **Step 5:** Decide `switchBuildToLocal` and `localBuildAvailable`: both exist to offer
+  "run this on my machine instead" as an alternative to a cloud run that can no longer happen.
+  Report whether they are now dead, and leave them if unsure — Task 8 sweeps with the functions.
+- [ ] **Step 6:** Commit.
 
 ---
 

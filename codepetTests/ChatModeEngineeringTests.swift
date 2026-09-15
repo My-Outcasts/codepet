@@ -223,6 +223,45 @@ final class BuildDestinationTests: XCTestCase {
                 isAuthorised: { $0 == granted }, setAuthorised: { _, _ in }))
     }
 
+    /// The one state that still reaches the cloud coding agent: a folder IS linked and the
+    /// founder has NOT granted her Claude plan. `engStartRun` 401s today, so before that
+    /// dispatch fires the founder must see why the build cannot run and how to fix it —
+    /// `BlockReason.notGranted`'s own copy, not a new sentence.
+    func testBuildWithAFolderButNoGrantNoticesTheFounderBeforeTheCloudRun() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertTrue(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderText },
+            "an ungranted, folder-linked Build did not tell the founder why it cannot run"
+        )
+        // The branch itself is unchanged: it still reaches the cloud agent (Task 7's onboarding
+        // gate is what stops that dispatch, not this notice).
+        XCTAssertNotNil(store.engineeringRunStore)
+        XCTAssertNil(store.codingRun.run)
+    }
+
+    /// Same case in Vietnamese — the recorded defect here is a ternary that returns the SAME
+    /// string on both branches (`lang == .vi ? why : why`), so an English-only assertion would
+    /// pass even if `.vi` silently got English copy.
+    func testBuildWithAFolderButNoGrantNoticesInVietnamese() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startBuild(ask: "add stripe checkout", language: .vi)
+
+        XCTAssertTrue(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderTextVi },
+            "the Vietnamese founder was not shown the Vietnamese notice"
+        )
+        XCTAssertFalse(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderText },
+            "the Vietnamese founder was shown the English notice instead"
+        )
+    }
+
     func testTheSwitchActuallyMovesTheRunToTheOtherMachine() {
         // And drops the cloud one: two coding agents on one ask, writing to two
         // different places, is a state no card could explain.

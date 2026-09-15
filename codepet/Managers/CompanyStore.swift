@@ -1085,6 +1085,14 @@ final class CompanyStore: ObservableObject {
         if buildRunsOnFoundersAgent || activeProjectLink == nil {
             startCodeRun(ask: ask)
         } else {
+            // `engStartRun` 401s (the key deleted 26 Aug 2026) rather than answering, so the
+            // founder gets a silent stall unless something on screen says why. `BlockReason
+            // .notGranted` already names the fix — grant Codepet permission to use her Claude
+            // plan, in Settings — so this reuses its copy rather than writing a new sentence.
+            // This does not change the branch itself: Task 7's onboarding gate is what stops
+            // `startEngineeringRun` from firing, not this notice.
+            let why = language == .vi ? BlockReason.notGranted.founderTextVi : BlockReason.notGranted.founderText
+            chatMessages.append(CopilotMessage(role: .companion, text: why))
             startEngineeringRun(ask: ask)
         }
     }

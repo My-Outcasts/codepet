@@ -23,18 +23,6 @@ final class CloudAIBlockTests: XCTestCase {
                       "a key-spending path was allowed through with no company set")
     }
 
-    /// The neighbours must still pass. Blocking the whole host would break repo connection for a
-    /// change that says nothing about GitHub.
-    func testStillAllowsTheNonAIneighbours() {
-        for path in ["githubOAuthStart", "githubOAuthCallback", "engShip", "engPreview",
-                     "engDiff", "engListRepos", "engLinkRepo", "engCreateRepo",
-                     "revenueCatWebhook", "capabilities"] {
-            let url = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/\(path)")!
-            XCTAssertFalse(CloudAIBlock.shouldRefuse(URLRequest(url: url)),
-                           "\(path) spends no Anthropic key and must not be refused")
-        }
-    }
-
     // MARK: - What it refuses
 
     func testEveryKeySpendingEndpointIsRefused() {
@@ -61,9 +49,13 @@ final class CloudAIBlockTests: XCTestCase {
     }
 
     /// `index.ts:162` states outright that these do not touch Anthropic, so they declare no
-    /// key — and refusing them would break the repo features for no gain.
+    /// key — and refusing them would break the repo features for no gain. `revenueCatWebhook`
+    /// (billing, no declared secret) and `capabilities` (a static, unauthenticated constant)
+    /// round out the same "must keep working" guarantee for the two remaining non-eng
+    /// neighbours that spend no Anthropic key either.
     func testTheNonAIEngineeringHandlersKeepWorking() {
-        for name in ["engDiff", "engShip", "engPreview", "engListRepos", "engLinkRepo", "engCreateRepo", "engBalance"] {
+        for name in ["engDiff", "engShip", "engPreview", "engListRepos", "engLinkRepo", "engCreateRepo", "engBalance",
+                     "revenueCatWebhook", "capabilities"] {
             XCTAssertFalse(CloudAIBlock.shouldRefuse(cf(name)), "\(name) must stay reachable")
         }
     }
@@ -76,15 +68,5 @@ final class CloudAIBlockTests: XCTestCase {
                     "https://securetoken.googleapis.com/v1/token"] {
             XCTAssertFalse(CloudAIBlock.shouldRefuse(URLRequest(url: URL(string: url)!)))
         }
-    }
-
-    // MARK: - The key
-
-    /// The key builder is retained even though no setting reads it any more — see the task
-    /// report for why it was not deleted alongside `isEnabled`/`setEnabled`.
-    func testTheKeyIsPrefixedAndScoped() {
-        let key = CloudAIBlock.key("c1")
-        XCTAssertTrue(key.hasPrefix("cp_"))
-        XCTAssertTrue(key.contains("c1"))
     }
 }

@@ -22,11 +22,6 @@ enum CloudAIBlock {
 
     static let log = Logger(subsystem: "app.murror.codepet", category: "CloudAIBlock")
 
-    /// Persisted per company id, never device-global — the same reasoning
-    /// `ClaudeCodeAuthorisation` records. One Mac can hold two accounts, and founder A
-    /// deciding to run without the key must not silently break founder B's app.
-    static func key(_ companyId: String) -> String { "cp_neverUseApiKey_\(companyId)" }
-
     /// **Every Cloud Function that declares `ANTHROPIC_API_KEY` and is reachable from the
     /// app.** Derived from the `secrets:` declarations in `functions/src/index.ts`, which is
     /// the authority — not from memory of which features feel AI-ish.

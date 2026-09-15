@@ -3,12 +3,13 @@ import {
   estimatePromptTokens,
   MODEL,
   MODEL_PRICING,
+  PLAN_MODEL,
   NARRATIVE_TOOL,
   priceFor,
   SESSION_SUMMARY_TOOL,
   SESSION_SYSTEM_PROMPT,
   SYSTEM_PROMPT
-} from "../anthropic";
+} from "../anthropicCore";
 
 /** A prefix long enough to clear any floor in MODEL_PRICING. */
 const LONG = "x".repeat(4096 * 4);
@@ -92,5 +93,19 @@ describe("cacheableSystemBlock", () => {
         tools: SESSION_SUMMARY_TOOL
       }).cache_control
     ).toBeUndefined();
+  });
+});
+
+// Migrated out of wireShape.test.ts when the hosted SDK call sites were deleted. The
+// constants themselves are not hosted code — anthropicCore is bundled into the app by
+// build-sidecar.sh — and the cost analysis these pin is still the reason each one is
+// the model it is.
+describe("model constants actually point where the cost analysis assumed", () => {
+  test("PLAN_MODEL is Sonnet 5, whose cache floor is 1024 not 4096", () => {
+    expect(PLAN_MODEL).toBe("claude-sonnet-5");
+  });
+
+  test("MODEL is still the cheapest tier for the highest-volume path", () => {
+    expect(MODEL.startsWith("claude-haiku-4-5")).toBe(true);
   });
 });

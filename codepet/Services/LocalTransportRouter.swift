@@ -1,9 +1,15 @@
 import Foundation
 import os
 
-/// Decides whether a model call that is NOT chat runs on the founder's own Claude Code or
-/// on the Cloud Function — the one-shot ops (`enrichBrief`, `synthesizeBrief`,
-/// `generateRoadmap`, `runTask`) and the virtual company meeting.
+/// Decides whether a model call that is NOT chat can run on the founder's own Claude Code —
+/// the one-shot ops (`enrichBrief`, `synthesizeBrief`, `generateRoadmap`, `runTask`) and the
+/// virtual company meeting.
+///
+/// **There is only one runner now.** Codepet holds no Anthropic key — it was deleted on
+/// 26 Aug 2026 — so the Cloud Functions these calls used to fall back to answer 401 and
+/// nothing else. The router therefore answers "the founder's own Claude Code, or why not"
+/// rather than "whose machine": a second provider extends that question, it does not
+/// replace it.
 ///
 /// **The same switch chat follows, deliberately.** `ClaudeCodeAuthorisation` means "Codepet
 /// may spend my Claude plan". A founder who granted that did not grant it for chat; they
@@ -12,33 +18,27 @@ import os
 /// in full — this is its non-streaming twin, separate only because availability is a
 /// different question (a different bundle has to be on disk).
 ///
-/// **It never falls back to cloud.** A granted founder whose machine cannot run the local
-/// path FAILS, with a reason. Falling back would spend the API key they had just said not to
-/// spend — and since `CloudAIBlock` may be refusing that host anyway, it would fail as an
-/// unexplained network error instead of an answerable one.
-///
 /// **Why an active-company mirror.** The grant is keyed per company id, and these clients
 /// take none: `ReflectionAPIClient.enrichBrief(_:)` is called from onboarding models that
 /// know nothing about companies, and widening every signature would reach mocks and tests
-/// that have no stake in transports. So whoever knows the company says once — the same
-/// shape, and the same call site, as `CloudAIBlock.apply(companyId:)`.
+/// that have no stake in transports. So whoever knows the company says once, on load and on
+/// account switch — `CompanyStore.hydrate` is the one call site.
 enum LocalTransportRouter {
 
     static let log = Logger(subsystem: "app.murror.codepet", category: "LocalTransport")
 
     enum Transport: Equatable {
-        case cloud
         case local
-        /// Granted, but this machine cannot honour it. Carries the founder-facing reason;
-        /// silently using cloud instead is the one thing this case exists to prevent.
-        case localUnavailable(String)
+        /// Cannot run here, and why. **There is deliberately no hosted case**: Codepet holds
+        /// no Anthropic key, so "fall back to the Cloud Function" is not a slower success, it
+        /// is a 401 the founder cannot act on.
+        case blocked(BlockReason)
     }
 
     /// The signed-in company, as last reported by whoever knows it.
     ///
-    /// A MIRROR of a fact that lives elsewhere, exactly like `CloudAIBlock.isRefusing`, and
-    /// nil until someone says — which routes to cloud, the behaviour every build had before
-    /// this file existed.
+    /// A MIRROR of a fact that lives elsewhere, and nil until someone says — which now blocks
+    /// rather than routing to a hosted runner, because there is no hosted runner to route to.
     private(set) nonisolated(unsafe) static var activeCompanyId: String?
 
     /// Point the mirror at a company. Safe to call repeatedly; call it on load and on
@@ -70,33 +70,32 @@ enum LocalTransportRouter {
                   sidecarAvailable: { LocalVirtualCompanyStreamer.isAvailable() })
     }
 
-    /// Drop-in for `VirtualCompanyClient.run`: same signature, routes per run.
+    /// Runs a meeting, or fails it with a reason.
     ///
     /// Shaped like `ChatTransportRouter.sendStream` so the store's three `vcRunner`
-    /// assignments each change by one word, and none of them has to know which machine won.
+    /// assignments each change by one word, and none of them has to know which runner won.
     ///
-    /// `.localUnavailable` FAILS the run rather than reaching for the Cloud Function. A
-    /// meeting is the most expensive thing Codepet buys — the measured ~$0.20 against
-    /// ~$0.005 for an ordinary turn — so a silent fallback here is the most expensive
-    /// possible version of the mistake the grant exists to prevent.
+    /// `.blocked` FAILS the run rather than reaching for the Cloud Function. A meeting is the
+    /// most expensive thing Codepet buys — the measured ~$0.20 against ~$0.005 for an ordinary
+    /// turn — so a silent fallback here would be the most expensive possible version of the
+    /// mistake the grant exists to prevent, and since the key is gone it would not even buy an
+    /// answer.
     static func runVirtualCompany(
         _ req: VirtualCompanyRequest
     ) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
         // `VirtualCompanyRequest` carries no company id — it never needed one, since the CF
-        // reads the uid off the token. So the grant is read from the mirror, the same way the
+        // read the uid off the token. So the grant is read from the mirror, the same way the
         // one-shot ops read it.
         switch forVirtualCompany() {
-        case .cloud:
-            return VirtualCompanyClient.run(req)
         case .local:
             return LocalVirtualCompanyStreamer.run(req)
-        case .localUnavailable(let reason):
-            log.error("meeting refused: \(reason, privacy: .public)")
+        case .blocked(let reason):
+            log.error("meeting blocked: \(String(describing: reason), privacy: .public)")
             return AsyncThrowingStream { $0.finish(throwing: VirtualCompanyRunError.malformedResponse) }
         }
     }
 
-    /// Which transport a call should use, given what its own transport needs on disk.
+    /// Whether a call can run here, given what its own transport needs on disk.
     ///
     /// Deliberately does NOT probe for `claude` — that costs a subprocess per call and
     /// `ClaudeCodeEnvironment` already answers it in Settings, where the founder is looking
@@ -107,21 +106,19 @@ enum LocalTransportRouter {
         authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
         sidecarAvailable: () -> Bool
     ) -> Transport {
-        // No company id means no grant can exist — an ungranted call is a cloud call, not a
-        // failure. Onboarding's first enrich lands here if the mirror was never set.
         guard let companyId, !companyId.isEmpty else {
-            log.error("transport: cloud — no companyId (mirror unset)")
-            return .cloud
+            log.error("transport: blocked — no companyId (mirror unset)")
+            return .blocked(.notGranted)
         }
         guard authorisation.isAuthorised(companyId) else {
-            log.error("transport: cloud — companyId=\(companyId, privacy: .public) not authorised")
-            return .cloud
+            log.error("transport: blocked — companyId=\(companyId, privacy: .public) not granted")
+            return .blocked(.notGranted)
         }
         guard sidecarAvailable() else {
-            log.error("transport: localUnavailable — companyId=\(companyId, privacy: .public) authorised but sidecar missing")
-            return .localUnavailable("Codepet can't reach its local runner on this Mac.")
+            log.error("transport: blocked — companyId=\(companyId, privacy: .public) granted but sidecar missing")
+            return .blocked(.sidecarMissing)
         }
-        log.error("transport: local — companyId=\(companyId, privacy: .public) authorised, sidecar available")
+        log.error("transport: local — companyId=\(companyId, privacy: .public) granted, sidecar available")
         return .local
     }
 }

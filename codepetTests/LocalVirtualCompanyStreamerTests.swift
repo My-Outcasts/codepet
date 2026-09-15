@@ -114,11 +114,14 @@ final class VirtualCompanyTransportTests: XCTestCase {
         super.tearDown()
     }
 
-    func testAnUngrantedFounderKeepsTheCloudRoom() {
+    /// An ungranted founder has no room at all now. The hosted meeting answered 401 from the
+    /// day the API key was deleted, so "keeps the cloud room" was never a fallback — it was a
+    /// failure the founder could not read.
+    func testAnUngrantedFounderIsBlockedRatherThanSentToTheCloudRoom() {
         XCTAssertEqual(
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
-            .cloud)
+            .blocked(.notGranted))
     }
 
     func testAGrantedFounderConvenesTheRoomOnTheirOwnPlan() {
@@ -135,11 +138,11 @@ final class VirtualCompanyTransportTests: XCTestCase {
         granted.insert("c1")
         let t = LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                                sidecarAvailable: { false })
-        XCTAssertNotEqual(t, .cloud)
-        guard case .localUnavailable(let reason) = t else {
-            return XCTFail("expected localUnavailable, got \(t)")
+        XCTAssertEqual(t, .blocked(.sidecarMissing))
+        guard case .blocked(let reason) = t else {
+            return XCTFail("expected blocked, got \(t)")
         }
-        XCTAssertFalse(reason.isEmpty)
+        XCTAssertFalse(reason.founderText.isEmpty)
     }
 
     /// The two local transports are asked separately, so one missing bundle cannot take the
@@ -150,7 +153,7 @@ final class VirtualCompanyTransportTests: XCTestCase {
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
             .local)
-        guard case .localUnavailable = LocalTransportRouter.transport(
+        guard case .blocked(.sidecarMissing) = LocalTransportRouter.transport(
             companyId: "c1", authorisation: authorisation, sidecarAvailable: { false }) else {
             return XCTFail("a missing bundle must not read as available")
         }

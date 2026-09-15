@@ -2,7 +2,6 @@
 import Foundation
 import os
 import FirebaseFirestore
-import FirebaseAuth
 
 /// The companies/{uid} Firestore document (mirrors the web CompanyDoc:
 /// lib/firebase/schema.ts). Departments + library live in subcollections
@@ -331,9 +330,6 @@ enum CompanyData {
         }
     }
 
-    private static let roadmapEndpoint =
-        URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateRoadmap")!
-
     private struct RoadmapRequest: Encodable {
         let language: String
         let brief: CompanyBrief
@@ -342,10 +338,12 @@ enum CompanyData {
         let tasks: [RoadmapTask]
     }
 
-    /// Fetch the generated roadmap from the `generateRoadmap` Cloud Function (phase/deps
-    /// RoadmapTask shape). FAIL-OPEN: returns `[]` on no signed-in user / any error /
-    /// non-200 / unreachable — `generateRoadmap` treats `[]` as "no change", so the board
-    /// is never clobbered.
+    /// Generate the roadmap (phase/deps RoadmapTask shape) on the founder's own Claude Code.
+    /// FAIL-OPEN: returns `[]` on any error — the caller treats `[]` as "no change", so the
+    /// board is never clobbered.
+    ///
+    /// There is no hosted fallback: `generateRoadmap` spent the Anthropic key Codepet no
+    /// longer holds.
     static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
         #if DEBUG
         // The canned roadmap, with a beat of delay so the analysis screen plays
@@ -357,13 +355,11 @@ enum CompanyData {
             return MockChat.roadmap()
         }
         #endif
-        // The founder's own Claude Code first, when they granted it. Fail-open still applies
-        // — `[]` is what the caller reads as "no change" — but the reason is LOGGED rather
-        // than swallowed, because a granted founder staring at an empty board otherwise has
-        // nothing to act on. It never falls through to the Cloud Function: that would spend
-        // the API key the grant exists to stop spending.
+        // Fail-open still applies — `[]` is what the caller reads as "no change" — but the
+        // reason is LOGGED rather than swallowed, because a founder staring at an empty board
+        // otherwise has nothing to act on.
         switch LocalTransportRouter.forOneShot() {
-        case .local, .localUnavailable:
+        case .local:
             do {
                 let body = try JSONEncoder().encode(
                     RoadmapRequest(language: language.rawValue, brief: brief))
@@ -374,22 +370,11 @@ enum CompanyData {
                     "local roadmap failed: \(error.localizedDescription, privacy: .public)")
                 return []
             }
-        case .cloud:
-            break
+        case .blocked(let reason):
+            LocalTransportRouter.log.error(
+                "generateRoadmap blocked: \(String(describing: reason), privacy: .public)")
+            return []
         }
-        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return [] }
-        var req = URLRequest(url: roadmapEndpoint)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let body = try? JSONEncoder().encode(
-            RoadmapRequest(language: language.rawValue, brief: brief)) else { return [] }
-        req.httpBody = body
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(RoadmapResponse.self, from: data)
-        else { return [] }
-        return decoded.tasks
     }
 
     /// Load companies/{uid} from Firestore; fail-soft to .empty. Decodes via

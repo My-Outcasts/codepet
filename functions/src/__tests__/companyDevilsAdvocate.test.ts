@@ -5,7 +5,7 @@ import {
   runDevilsAdvocate
 } from "../company/devilsAdvocate";
 import { AgentPosition, Conflict, FounderContext, TokenUsage } from "../company/types";
-import { SYNTHESIS_MODEL } from "../anthropic";
+import { SYNTHESIS_MODEL } from "../anthropicCore";
 
 const founder: FounderContext = {
   profile: "Solo technical founder.",

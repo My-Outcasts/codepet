@@ -1,4 +1,4 @@
-import { validatePayload } from "../summarizeTurn";
+import { validatePayload } from "../summarizeTurnCore";
 
 describe("validatePayload", () => {
   const valid = {

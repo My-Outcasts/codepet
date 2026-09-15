@@ -1,4 +1,4 @@
-import { validateDictionaryPayload, dictCacheKey } from "../generateDictionary";
+import { validateDictionaryPayload } from "../generateDictionaryCore";
 
 const validTerm = { term: "OAuth", seen_in: [{ file: "LoginView.swift", snippet: "ASWebAuthenticationSession(...)" }], evolution: "encountered" as const };
 
@@ -58,19 +58,7 @@ describe("validateDictionaryPayload", () => {
   });
 });
 
-describe("dictCacheKey", () => {
-  test("slugifies the term and includes language + evolution", () => {
-    expect(dictCacheKey("uid1", "async / await", "en", "mastered"))
-      .toBe("uid1__async-await__en__mastered");
-  });
-
-  test("different evolution stages produce different keys", () => {
-    const a = dictCacheKey("uid1", "OAuth", "en", "encountered");
-    const b = dictCacheKey("uid1", "OAuth", "en", "used");
-    expect(a).not.toBe(b);
-  });
-
-  test("strips leading/trailing separators from punctuation-heavy tokens", () => {
-    expect(dictCacheKey("uid1", ".env", "vi", "used")).toBe("uid1__env__vi__used");
-  });
-});
+// The `dictCacheKey` describe went with generateDictionary.ts. That key addressed the
+// server-side dictionary_cache collection, which only the hosted handler ever read or
+// wrote; the local path regenerates a term on the founder's own quota and has no cache
+// to key. Nothing else calls it — the behaviour left with the handler.

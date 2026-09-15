@@ -27,7 +27,7 @@ import { runDevilsAdvocate, shouldInvokeDevilsAdvocate } from "./devilsAdvocate"
 import { runSynthesis } from "./synthesis";
 import { budgetState } from "./budget";
 import { newBlackboard, recordPosition, recordUsage } from "./blackboard";
-import { ROUTER_MODEL } from "../anthropic";
+import { ROUTER_MODEL } from "../anthropicCore";
 import { AGENT_DEPARTMENT_KEY, AgentId, Blackboard, FounderContext } from "./types";
 
 const MAX_REQUEST_CHARS = 4000;

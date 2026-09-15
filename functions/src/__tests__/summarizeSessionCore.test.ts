@@ -1,4 +1,4 @@
-import { validateSessionPayload } from "../summarizeSession";
+import { validateSessionPayload } from "../summarizeSessionCore";
 
 describe("validateSessionPayload", () => {
   const valid = {

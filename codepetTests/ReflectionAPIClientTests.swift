@@ -113,109 +113,143 @@ final class ReflectionAPIClientTests: XCTestCase {
         XCTAssertEqual(history.first?["role"] as? String, "user")
     }
 
-    // MARK: - Streaming tests
+    // MARK: - Streaming
+    //
+    // Five tests used to sit here, driving the SSE bodies of `chatSessionStream` through a
+    // stubbed `URLSession`. Those bodies are gone: the routing below them now fails closed,
+    // which made every line after the switch unreachable — the compiler said so in three
+    // `will never be executed` warnings — so the frame decoders they exercised
+    // (`handleNarrativeFrame`, `handleSessionFrame`, `handle`) went with them.
+    //
+    // What happened to each is recorded in `.superpowers/sdd/task-3b-report.md`. The short
+    // version: two were pure HTTP status mapping and are simply gone with the requests they
+    // mapped; two decoded frames into events and had no subject left once the decoders were
+    // deleted; and the fifth — a frame split across two reads — moved to
+    // `SSEParserTests.testHoldsAFrameAcrossSeparateFeeds`, because `SSEParser` itself
+    // survives this phase and `LocalChatStreamer` still parses the sidecar's SSE with it.
 
+    // MARK: - Failing closed when the founder has not granted
+
+    /// An ungranted founder must get the REASON, and must not have a request built on her
+    /// behalf. `localStreamOp` used to answer nil for exactly this founder, meaning "carry
+    /// on to the SSE path below" — a path that spends an Anthropic key Codepet no longer
+    /// holds, so the only thing it could produce is a 401 she cannot act on.
+    ///
+    /// `CloudAIBlock` already refuses these three paths at the URL layer, so this was dead
+    /// in production. That is not a reason to leave it written: "unreachable because
+    /// something underneath says no" is the state this phase exists to remove.
     @MainActor
-    func testChatStreamHappyPathEmitsDeltasAndDone() async throws {
+    func testUngrantedSummarizeTurnStreamFailsWithTheReasonAndIssuesNoRequest() async {
         MockURLProtocol.reset()
-        MockURLProtocol.responseChunks = [
-            "event: delta\ndata: {\"text\":\"Together \"}\n\n".data(using: .utf8)!,
-            "event: delta\ndata: {\"text\":\"we kept \"}\n\n".data(using: .utf8)!,
-            "event: done\ndata: {\"model\":\"claude-haiku-4-5-20251001\",\"cache_hit\":true}\n\n".data(using: .utf8)!
-        ]
+        LocalTransportRouter.apply(companyId: nil)
+        defer { LocalTransportRouter.apply(companyId: nil) }
 
         let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
-        let request = makeMinimalChatRequest()
-        var collected: [ChatStreamEvent] = []
-        for try await ev in client.chatSessionStream(request) {
-            collected.append(ev)
-        }
-        XCTAssertEqual(collected.count, 3, "expected 3 stream events, got \(collected.count)")
-        guard collected.count == 3 else { return }
-        XCTAssertEqual(collected[0], .delta("Together "))
-        XCTAssertEqual(collected[1], .delta("we kept "))
-        if case let .done(model, cacheHit) = collected[2] {
-            XCTAssertEqual(model, "claude-haiku-4-5-20251001")
-            XCTAssertTrue(cacheHit)
-        } else {
-            XCTFail("expected .done")
-        }
-    }
-
-    @MainActor
-    func testChatStreamSplitChunkParsesCorrectly() async throws {
-        MockURLProtocol.reset()
-        MockURLProtocol.responseChunks = [
-            "event: delta\ndata: {\"text\":\"He".data(using: .utf8)!,
-            "llo\"}\n\nevent: done\ndata: {\"model\":\"m\",\"cache_hit\":false}\n\n".data(using: .utf8)!
-        ]
-        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
-        var collected: [ChatStreamEvent] = []
-        for try await ev in client.chatSessionStream(makeMinimalChatRequest()) {
-            collected.append(ev)
-        }
-        XCTAssertEqual(collected.first, .delta("Hello"))
-    }
-
-    @MainActor
-    func testChatStream401Throws() async {
-        MockURLProtocol.reset()
-        MockURLProtocol.responseStatus = 401
-        MockURLProtocol.responseHeaders = ["Content-Type": "application/json"]
-        MockURLProtocol.responseChunks = ["{\"error\":\"invalid_token\"}".data(using: .utf8)!]
-
-        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
+        var collected: [NarrativeStreamEvent] = []
         do {
-            for try await _ in client.chatSessionStream(makeMinimalChatRequest()) {}
-            XCTFail("expected error")
-        } catch ReflectionAPIError.http(let status, _) {
-            XCTAssertEqual(status, 401)
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
-    }
-
-    @MainActor
-    func testChatStream429ThrowsWithBody() async {
-        MockURLProtocol.reset()
-        MockURLProtocol.responseStatus = 429
-        MockURLProtocol.responseHeaders = ["Content-Type": "application/json"]
-        MockURLProtocol.responseChunks = [
-            "{\"error\":\"daily_limit_reached\",\"reset_at\":\"2026-05-08T00:00:00Z\",\"limit\":50}".data(using: .utf8)!
-        ]
-
-        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
-        do {
-            for try await _ in client.chatSessionStream(makeMinimalChatRequest()) {}
-            XCTFail("expected error")
-        } catch ReflectionAPIError.http(let status, let body) {
-            XCTAssertEqual(status, 429)
-            XCTAssertEqual(body?.error, "daily_limit_reached")
-            XCTAssertEqual(body?.limit, 50)
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
-    }
-
-    @MainActor
-    func testChatStreamMidStreamErrorThrows() async {
-        MockURLProtocol.reset()
-        MockURLProtocol.responseChunks = [
-            "event: delta\ndata: {\"text\":\"hi\"}\n\nevent: error\ndata: {\"error\":\"upstream_failure\"}\n\n".data(using: .utf8)!
-        ]
-        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
-        var collected: [ChatStreamEvent] = []
-        do {
-            for try await ev in client.chatSessionStream(makeMinimalChatRequest()) {
+            for try await ev in client.summarizeTurnStream(makeMinimalTurnRequest()) {
                 collected.append(ev)
             }
-            XCTFail("expected error")
-        } catch ReflectionAPIError.http(let status, _) {
-            XCTAssertEqual(collected, [.delta("hi")])
-            XCTAssertEqual(status, 502)
+            XCTFail("an ungranted founder must not get a stream that completes")
+        } catch ReflectionAPIError.blocked(let reason) {
+            XCTAssertEqual(reason, .notGranted)
         } catch {
-            XCTFail("unexpected error: \(error)")
+            XCTFail("expected .blocked(.notGranted), got \(error)")
         }
+        XCTAssertEqual(collected, [], "a blocked call must yield nothing, not a started event")
+        XCTAssertEqual(MockURLProtocol.attemptedRequests.count, 0,
+                       "a blocked call still built an HTTP request: \(MockURLProtocol.attemptedRequests.compactMap { $0.url?.absoluteString })")
+    }
+
+    /// The sibling ops read the same grant through the same helper, so a fix that only
+    /// reached `summarizeTurnStream` would leave two of the three routes open.
+    @MainActor
+    func testUngrantedSessionAndChatStreamsFailClosedToo() async {
+        MockURLProtocol.reset()
+        LocalTransportRouter.apply(companyId: nil)
+        defer { LocalTransportRouter.apply(companyId: nil) }
+
+        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
+
+        do {
+            for try await _ in client.summarizeSessionStream(makeMinimalSessionRequest()) {}
+            XCTFail("summarizeSessionStream completed for an ungranted founder")
+        } catch ReflectionAPIError.blocked(let reason) {
+            XCTAssertEqual(reason, .notGranted)
+        } catch {
+            XCTFail("summarizeSessionStream: expected .blocked(.notGranted), got \(error)")
+        }
+
+        do {
+            for try await _ in client.chatSessionStream(makeMinimalChatRequest()) {}
+            XCTFail("chatSessionStream completed for an ungranted founder")
+        } catch ReflectionAPIError.blocked(let reason) {
+            XCTAssertEqual(reason, .notGranted)
+        } catch {
+            XCTFail("chatSessionStream: expected .blocked(.notGranted), got \(error)")
+        }
+
+        XCTAssertEqual(MockURLProtocol.attemptedRequests.count, 0,
+                       "a blocked call still built an HTTP request")
+    }
+
+    /// The NON-streaming ops have to name her fix too, and they did not.
+    ///
+    /// `localOneShot` logged the real reason and then threw
+    /// `LocalOneShotRunner.Failure.unavailable`, whose founder-facing text is "Codepet
+    /// can't reach its local runner on this Mac. Reinstalling Codepet should restore it."
+    /// So a founder whose only problem is an ungranted toggle was told to reinstall the
+    /// app — the exact mis-routing `BlockReason` exists to stop, and the one
+    /// `LocalTransportRouterTests.testAMissingSidecarDoesNotChangeAnUngrantedFoundersReason`
+    /// guards one layer down. The reason reached the log and died there.
+    @MainActor
+    func testUngrantedOneShotTellsHerToGrantRatherThanToReinstall() async {
+        MockURLProtocol.reset()
+        LocalTransportRouter.apply(companyId: nil)
+        defer { LocalTransportRouter.apply(companyId: nil) }
+
+        let client = ReflectionAPIClient(session: mockedURLSession(), authTokenProvider: { "fake" })
+        do {
+            _ = try await client.summarizeTurn(makeMinimalTurnRequest())
+            XCTFail("an ungranted founder must not get a summary")
+        } catch {
+            guard case ReflectionAPIError.blocked(let reason) = error else {
+                let shown = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                return XCTFail("expected .blocked(.notGranted); the founder is told: \"\(shown)\"")
+            }
+            XCTAssertEqual(reason, .notGranted)
+            XCTAssertTrue(reason.founderText.contains("Settings"),
+                          "her fix is a toggle, so the copy has to point at it: \(reason.founderText)")
+            XCTAssertFalse(reason.founderText.lowercased().contains("reinstall"),
+                           "an ungranted founder was told to reinstall: \(reason.founderText)")
+        }
+        XCTAssertEqual(MockURLProtocol.attemptedRequests.count, 0,
+                       "a blocked one-shot still built an HTTP request")
+    }
+
+    private func makeMinimalSessionRequest() -> SummarizeSessionRequest {
+        SummarizeSessionRequest(
+            sessionId: "s1",
+            language: "en",
+            turns: [],
+            petPersona: nil,
+            userBrief: nil,
+            petMemory: nil
+        )
+    }
+
+    private func makeMinimalTurnRequest() -> SummarizeTurnRequest {
+        SummarizeTurnRequest(
+            turnId: "s1:t1",
+            sessionId: "s1",
+            language: "en",
+            prompt: "hi",
+            events: [],
+            rawSummary: "",
+            petPersona: nil,
+            userBrief: nil,
+            petMemory: nil
+        )
     }
 
     private func makeMinimalChatRequest() -> ChatSessionRequest {
@@ -251,15 +285,23 @@ final class MockURLProtocol: URLProtocol {
     /// Each entry is a chunk delivered to the consumer. Useful for testing split-frame parsing.
     static var responseChunks: [Data] = []
     static var responseError: Error?
+    /// Every request that reached the transport. A blocked call must leave this EMPTY —
+    /// asserting on the events alone would pass just as well if the request went out and
+    /// came back 401, which is the exact failure this phase removes.
+    static var attemptedRequests: [URLRequest] = []
 
     static func reset() {
         responseStatus = 200
         responseHeaders = ["Content-Type": "text/event-stream"]
         responseChunks = []
         responseError = nil
+        attemptedRequests = []
     }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canInit(with request: URLRequest) -> Bool {
+        attemptedRequests.append(request)
+        return true
+    }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {

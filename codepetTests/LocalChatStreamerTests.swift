@@ -159,6 +159,32 @@ final class LocalChatStreamerTests: XCTestCase {
         XCTAssertEqual(action.nav?.destination, "roadmap")
     }
 
+    /// A founder who has already watched half an answer arrive must still have it when the
+    /// stream fails afterwards. The sidecar emits deltas and can then emit an `error` frame
+    /// — `LocalChatStreamer.sendStream` decodes both through this same `handleStreamFrame`
+    /// — so "it threw" and "what she had already read survived the throw" are two different
+    /// promises, and only the first is covered above.
+    ///
+    /// This is the second assertion of the deleted `testChatStreamMidStreamErrorThrows`.
+    /// Dropping it left the behaviour live and unwatched: a decoder that buffered deltas
+    /// until `done` would pass every other case in this file and blank her screen here.
+    func testDeltasAlreadyDeliveredSurviveAMidStreamError() async {
+        var collected: [CompanyChatStreamEvent] = []
+        do {
+            try await collect(frames: [
+                SSEFrame(event: "delta", data: #"{"text":"hi"}"#),
+                SSEFrame(event: "error", data: #"{"error":"upstream_failure","detail":"claude exited 1"}"#)
+            ], into: &collected)
+            XCTFail("an error frame after a delta must not resolve quietly")
+        } catch {
+            // Expected — assertion one. Assertion two is below, and it is the one nothing
+            // else in the suite makes.
+        }
+        XCTAssertEqual(
+            collected, [.delta("hi")],
+            "the delta the founder had already read was discarded when the stream threw")
+    }
+
     func testASharedErrorFrameThrows() async {
         do {
             _ = try await collect(frames: [
@@ -171,8 +197,16 @@ final class LocalChatStreamerTests: XCTestCase {
         }
     }
 
-    /// Drive frames through the shared decoder the way the transport does.
-    private func collect(frames: [SSEFrame]) async throws -> [CompanyChatStreamEvent] {
+    /// Drive frames through the shared decoder the way the transport does, appending each
+    /// event to `out` AS IT ARRIVES.
+    ///
+    /// The `inout` is the whole point. Returning the array meant a throwing run discarded
+    /// everything it had collected, so no test could see what the founder had already read
+    /// when the stream failed — the half of `testChatStreamMidStreamErrorThrows` that the
+    /// error-frame case above does not cover.
+    private func collect(
+        frames: [SSEFrame], into out: inout [CompanyChatStreamEvent]
+    ) async throws {
         let stream = AsyncThrowingStream<CompanyChatStreamEvent, Error> { continuation in
             do {
                 for frame in frames {
@@ -183,8 +217,14 @@ final class LocalChatStreamerTests: XCTestCase {
                 continuation.finish(throwing: error)
             }
         }
-        var out: [CompanyChatStreamEvent] = []
         for try await event in stream { out.append(event) }
+    }
+
+    /// The same drive, for the cases that only care about a clean run's events.
+    @discardableResult
+    private func collect(frames: [SSEFrame]) async throws -> [CompanyChatStreamEvent] {
+        var out: [CompanyChatStreamEvent] = []
+        try await collect(frames: frames, into: &out)
         return out
     }
 }

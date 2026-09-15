@@ -1,4 +1,4 @@
-import { hasEnrichableSignal, buildEnrichPrompt, mergeEnrichment, BriefEnrichment } from "../enrichBrief";
+import { hasEnrichableSignal, buildEnrichPrompt, mergeEnrichment, BriefEnrichment } from "../enrichBriefCore";
 
 describe("hasEnrichableSignal", () => {
   it("is true with a one-liner or notes, false without", () => {

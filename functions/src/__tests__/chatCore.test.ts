@@ -1,4 +1,4 @@
-import { validateChatPayload } from "../chat";
+import { validateChatPayload } from "../chatCore";
 
 describe("validateChatPayload", () => {
   const valid = {
@@ -80,7 +80,7 @@ describe("validateChatPayload", () => {
   });
 });
 
-import { buildChatSystemPrompt, buildChatUserMessage, buildChatMessages, CHAT_SYSTEM_PROMPT } from "../chat";
+import { buildChatSystemPrompt, buildChatUserMessage, buildChatMessages, CHAT_SYSTEM_PROMPT } from "../chatCore";
 
 describe("buildChatSystemPrompt", () => {
   test("substitutes language and persona", () => {
@@ -175,135 +175,8 @@ describe("buildChatMessages", () => {
   });
 });
 
-import { handleChatSession, __setStreamFactoryForTests, __resetStreamFactoryForTests } from "../chat";
-
-// Verify-auth + rate-limit are mocked through the actual modules' env in a real
-// test runner setup. For this plan we mock at module level.
-jest.mock("../auth", () => ({
-  verifyAuth: jest.fn(async (header: string | undefined) => {
-    if (header === "Bearer good") return { uid: "user1" };
-    return null;
-  }),
-  extractBearerToken: (h: string | undefined) => (h?.startsWith("Bearer ") ? h.slice(7) : null)
-}));
-
-jest.mock("../rateLimit", () => ({
-  checkAndIncrement: jest.fn(async (uid: string) => ({
-    allowed: uid !== "capped",
-    resetAt: new Date("2026-05-08T00:00:00Z"),
-    limit: 50
-  }))
-}));
-
-function makeReq(overrides: any = {}): any {
-  return {
-    method: "POST",
-    headers: { authorization: "Bearer good" },
-    body: {
-      session_id: "s1",
-      language: "en",
-      session_context: { turns: [{ prompt: "hi", events: [] }] },
-      history: [],
-      user_message: "what happened?"
-    },
-    ...overrides
-  };
-}
-
-function makeRes() {
-  const headers: Record<string, string> = {};
-  let statusCode = 0;
-  const writes: string[] = [];
-  let ended = false;
-  return {
-    statusCode,
-    headers,
-    writes,
-    ended: () => ended,
-    setHeader(k: string, v: string) { headers[k] = v; },
-    status(code: number) { statusCode = code; (this as any).statusCode = code; return this; },
-    json(obj: any) { writes.push(JSON.stringify(obj)); ended = true; (this as any).statusCode = (this as any).statusCode || 200; },
-    write(chunk: string) { writes.push(chunk); return true; },
-    end() { ended = true; },
-    flushHeaders() { /* noop */ }
-  };
-}
-
-describe("handleChatSession", () => {
-  beforeEach(() => __resetStreamFactoryForTests());
-
-  test("rejects non-POST methods", async () => {
-    const req = makeReq({ method: "GET" });
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-    expect((res as any).statusCode).toBe(405);
-  });
-
-  test("returns 401 for missing auth", async () => {
-    const req = makeReq({ headers: { authorization: undefined } });
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-    expect((res as any).statusCode).toBe(401);
-  });
-
-  test("returns 400 for invalid payload", async () => {
-    const req = makeReq({ body: { session_id: "" } });
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-    expect((res as any).statusCode).toBe(400);
-  });
-
-  test("returns 429 when rate-limited", async () => {
-    // Force rate-limit to deny.
-    const rl = require("../rateLimit");
-    rl.checkAndIncrement.mockImplementationOnce(async () => ({
-      allowed: false,
-      resetAt: new Date("2026-05-08T00:00:00Z"),
-      limit: 50
-    }));
-    const req = makeReq();
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-    expect((res as any).statusCode).toBe(429);
-  });
-
-  test("happy path streams deltas and a done frame", async () => {
-    __setStreamFactoryForTests(async function* () {
-      yield { type: "text", text: "Together " };
-      yield { type: "text", text: "we kept " };
-      yield { type: "text", text: "circling." };
-      yield {
-        type: "done",
-        usage: { cache_read_input_tokens: 10, input_tokens: 5, output_tokens: 5 }
-      };
-    });
-
-    const req = makeReq();
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-
-    expect((res as any).headers["Content-Type"]).toBe("text/event-stream");
-    const body = (res as any).writes.join("");
-    expect(body).toContain('event: delta\ndata: {"text":"Together "}');
-    expect(body).toContain('event: delta\ndata: {"text":"we kept "}');
-    expect(body).toContain('event: delta\ndata: {"text":"circling."}');
-    expect(body).toContain('event: done');
-    expect(body).toContain('"cache_hit":true');
-  });
-
-  test("mid-stream Anthropic error emits an error frame", async () => {
-    __setStreamFactoryForTests(async function* () {
-      yield { type: "text", text: "Together " };
-      throw new Error("upstream blew up");
-    });
-
-    const req = makeReq();
-    const res = makeRes();
-    await handleChatSession(req as any, res as any);
-
-    const body = (res as any).writes.join("");
-    expect(body).toContain('event: delta\ndata: {"text":"Together "}');
-    expect(body).toContain('event: error');
-    expect((res as any).statusCode).toBe(200);  // headers already sent
-  });
-});
+// `handleChatSession`'s own describe block was deleted with the handler: the hosted
+// chatSession streamed through the Anthropic SDK, and the local path streams through
+// local/chatSidecar.ts instead (covered by chatSidecar.test.ts). What survives here is
+// chatCore.ts — the validation and the prompt assembly — which esbuild bundles into the
+// app and which both transports share.

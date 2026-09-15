@@ -43,10 +43,14 @@ nonisolated enum ChatTurnDiagnostic {
             case .notSignedIn: return "notSignedIn"
             case .http: return "http"
             case .malformedResponse: return "malformedResponse"
-            // Distinct in diagnostics too: a beta week full of these means the local
-            // runner is not reaching founders, which is a packaging problem, not a
+            // Distinct in diagnostics too: a beta week full of these means turns are not
+            // reaching a runner at all, which is a packaging or a grant problem, not a
             // network one — and the two would be indistinguishable folded together.
-            case .localUnavailable: return "localUnavailable"
+            //
+            // The TOKEN keeps its old spelling on purpose even though the case was renamed
+            // to `.blocked`: it is what already-collected diagnostics are grouped by, and
+            // renaming it would split one failure into two in the history.
+            case .blocked: return "localUnavailable"
             }
         case let urlError as URLError:
             return urlError.code == .notConnectedToInternet ? "offline" : "network"

@@ -64,6 +64,26 @@ final class SSEParserTests: XCTestCase {
         XCTAssertEqual(frames, [SSEFrame(event: "message", data: "hi")])
     }
 
+    /// A frame that arrives in two pieces must not dispatch early, and must not lose the
+    /// half it already has.
+    ///
+    /// **Nothing covered this before.** Every other case here hands over one complete batch
+    /// in a single `feedLines` call, so the parser's state between calls went untested; the
+    /// only thing proving it was an SSE chunk split mid-frame over HTTP, in a transport that
+    /// no longer exists. `LocalChatStreamer` depends on exactly this — it keeps the trailing
+    /// partial line in `pending` and feeds whole lines as they complete, so a parser that
+    /// reset between feeds would truncate a `data:` line and hand the founder half a reply.
+    func testHoldsAFrameAcrossSeparateFeeds() {
+        var parser = SSEParser()
+        XCTAssertEqual(parser.feedLines(["event: delta"]), [],
+                       "no blank line yet — nothing may dispatch")
+        XCTAssertEqual(parser.feedLines(["data: {\"text\":\"Hello\"}"]), [],
+                       "still no blank line — nothing may dispatch")
+        XCTAssertEqual(parser.feedLines([""]),
+                       [SSEFrame(event: "delta", data: "{\"text\":\"Hello\"}")],
+                       "the frame built across three feeds arrived truncated or not at all")
+    }
+
     func testStripsLeadingSpaceAfterColon() {
         // Per the SSE spec, a single space after the colon is stripped.
         var parser = SSEParser()

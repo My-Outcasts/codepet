@@ -342,8 +342,9 @@ final class CompanyStore: ObservableObject {
          chatSender: @escaping (CompanyChatRequest) async -> CompanyChatReply? = { await ChatTransportRouter.send($0) },
          // Routed per turn rather than fixed here: `ChatTransportRouter` reads the
          // founder's grant (`cp_claudeCodeAuthorised`, keyed per company id, which
-         // arrives on the request) and sends the turn to their own Claude Code or to
-         // the Cloud Function. Every test that injects its own streamer is untouched.
+         // arrives on the request) and sends the turn to their own Claude Code, or
+         // blocks it and says why (see `BlockReason`) — there is no Cloud Function
+         // branch any more. Every test that injects its own streamer is untouched.
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { ChatTransportRouter.sendStream($0) },
          vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
          taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
@@ -445,19 +446,14 @@ final class CompanyStore: ObservableObject {
 
     var isSettingsOpen: Bool { settingsSection != nil }
 
-    /// Open settings, optionally on a specific section (chat cards deep-link this way).
-    /// Point `CloudAIBlock`'s mirror at this account's setting.
+    /// Point `LocalTransportRouter`'s mirror at this account.
     ///
-    /// The mirror exists because `URLProtocol.canInit` is a class function and cannot reach
-    /// the signed-in company, so someone who knows it has to say. Called on load and on
-    /// account switch — miss either and a founder who turned the key off would find it
-    /// quietly back on next launch.
+    /// The mirror exists because `LocalTransportRouter` cannot reach the signed-in company
+    /// itself — its callers are onboarding models and API clients that take no company id —
+    /// so whoever knows it has to say. Called on load and on account switch — miss either
+    /// and a founder's grant silently stops routing the non-streaming ops onto their own
+    /// plan.
     func applyCloudAIBlock() {
-        CloudAIBlock.apply(companyId: companyId)
-        // Same call site, same reason: `LocalTransportRouter` cannot reach the signed-in
-        // company either — its callers are onboarding models and API clients that take no
-        // company id — so whoever knows it has to say. Miss this and a founder's grant
-        // silently stops routing the non-streaming ops onto their own plan.
         LocalTransportRouter.apply(companyId: companyId)
     }
 
@@ -503,8 +499,9 @@ final class CompanyStore: ObservableObject {
         // one decides which account's bindings resolve, and a report written while the map
         // still points at the previous founder would carry their project ids.
         identityMap.account = companyId
-        // Before anything can make a request for this account. A founder who turned the key
-        // off must not find it back on because the mirror was still pointing at nobody.
+        // Before anything can make a request for this account. A founder who granted their
+        // plan must not find it silently ungranted because the mirror was still pointing at
+        // nobody.
         applyCloudAIBlock()
         claudeModel = modelPreference.model(companyId)
         claudeEffort = modelPreference.effort(companyId)
@@ -1050,6 +1047,15 @@ final class CompanyStore: ObservableObject {
     /// Falling back to local when no repo is linked would be exactly that
     /// silent routing. Instead the cloud run refuses — cheaply, before the
     /// balance is read — and the connect-or-create sheet opens.
+    ///
+    /// **With no folder linked, the cloud agent is no longer the refusal.** It cannot refuse
+    /// cheaply or otherwise: `engStartRun` spends the Anthropic key deleted on 26 Aug 2026 and
+    /// answers 401, so a founder with nothing linked got a network error where a reason
+    /// belonged. `startCodeRun` with a nil link stages `.noProject`, whose card says what is
+    /// missing and carries the button that supplies it — the same refusal, from the path that
+    /// can still give it. This is NOT the silent routing above: nothing runs on either machine,
+    /// so no bill moves; the founder is asked for a folder.
+    ///
     /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
     /// spend their Claude plan, and has a folder linked, gets their own agent — see
     /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
@@ -1071,9 +1077,22 @@ final class CompanyStore: ObservableObject {
            let notice = AttachmentBudget.buildUnsupportedMessage(attachments.map(\.filename), language) {
             chatMessages.append(CopilotMessage(role: .companion, text: notice))
         }
-        if buildRunsOnFoundersAgent {
+        // One state still reaches the cloud agent: a folder IS linked and the founder has not
+        // granted their Claude plan. Sending that founder to the local runner would spend the
+        // plan they were never asked about — `ClaudeCodeAuthorisation` is the one switch — so
+        // this arm is deliberately left alone here and belongs with the grant work, not with
+        // the folder gate.
+        if buildRunsOnFoundersAgent || activeProjectLink == nil {
             startCodeRun(ask: ask)
         } else {
+            // `engStartRun` 401s (the key deleted 26 Aug 2026) rather than answering, so the
+            // founder gets a silent stall unless something on screen says why. `BlockReason
+            // .notGranted` already names the fix — grant Codepet permission to use her Claude
+            // plan, in Settings — so this reuses its copy rather than writing a new sentence.
+            // This does not change the branch itself: Task 7's onboarding gate is what stops
+            // `startEngineeringRun` from firing, not this notice.
+            let why = language == .vi ? BlockReason.notGranted.founderTextVi : BlockReason.notGranted.founderText
+            chatMessages.append(CopilotMessage(role: .companion, text: why))
             startEngineeringRun(ask: ask)
         }
     }
@@ -1085,7 +1104,9 @@ final class CompanyStore: ObservableObject {
     /// directly would pick a machine behind the founder's back — same button,
     /// different bill."* It was picking one, and picking it wrong — always local, so
     /// a founder whose Developer was awake on a CLOUD repo with no folder linked
-    /// typed a task and got `.noProject` staring back.
+    /// typed a task and got `.noProject` staring back. (That outcome is now the
+    /// deliberate one — see below — but it was reached by a view making a decision that
+    /// was never its to make, which is what the guard protects and still protects.)
     ///
     /// Not routed through `startBuild`, which is cloud-first with a "run it locally
     /// instead" escape on the resulting card. That shape belongs to the dock, where a
@@ -1094,12 +1115,21 @@ final class CompanyStore: ObservableObject {
     /// sending a local session to the cloud would contradict the chip above the
     /// composer and bill for it. The decision still lives here rather than in the
     /// view, which is what the guard is actually protecting.
+    ///
+    /// **The no-folder branch no longer goes to the cloud agent.** It was the last call that
+    /// reached it by design, on the reasoning that a Developer session on a cloud repo had
+    /// already declared its machine. That reasoning assumed the machine could answer;
+    /// `engStartRun` spends the Anthropic key deleted on 26 Aug 2026 and 401s, so what the
+    /// founder actually got was an unexplained failure in place of the one fact that matters —
+    /// no folder is linked. `startCodeRun` stages `.noProject` for exactly that, so the whole
+    /// body is now one call: with a link it runs, without one it says why not.
+    ///
+    /// Still a function, not a rename of `startCodeRun` at the call site: `DeveloperWorkPane`
+    /// must not name a machine (`EngineeringReachabilityTests
+    /// .testNothingBypassesTheDestinationDecision` fails it for that), and this is where the
+    /// decision is recorded whatever it becomes next.
     func startSessionBuild(ask: String) {
-        if activeProjectLink != nil {
-            startCodeRun(ask: ask)
-        } else {
-            startEngineeringRun(ask: ask)
-        }
+        startCodeRun(ask: ask)
     }
 
     /// Whether "run this on my machine instead" is a real offer.
@@ -1874,7 +1904,7 @@ final class CompanyStore: ObservableObject {
             // Claude plan; answering from the Cloud Function instead would spend the key
             // that grant exists to stop — so the turn ends here, saying why.
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = Self.localUnavailableCopy(reason, language: language)
+                chatMessages[i].text = language == .vi ? reason.founderTextVi : reason.founderText
             }
         case .none:
             break
@@ -2301,19 +2331,6 @@ final class CompanyStore: ObservableObject {
     /// says only what the action it belongs to actually delivers: the chip below it opens
     /// a place or offers a switch, and neither is work being produced. "On it — putting
     /// that together now." is reserved for the one case where something IS being made.
-    /// What the founder reads when they granted their own Claude plan and this machine
-    /// cannot honour it.
-    ///
-    /// Names the cause, and says the one thing that stops it reading as a bug in Codepet:
-    /// their grant is why nothing was charged elsewhere. Points at the switch rather than
-    /// at a support page, because the switch is the fix — turning it off restores the
-    /// cloud path immediately.
-    static func localUnavailableCopy(_ reason: String, language: AppLanguage) -> String {
-        language == .vi
-            ? "\(reason)\n\nBạn đã cho Codepet dùng gói Claude của mình, nên mình không tự gọi sang đường trả phí. Mở Cài đặt → Claude Code để kiểm tra, hoặc tắt công tắc đó nếu muốn dùng lại đường cũ."
-            : "\(reason)\n\nYou've set Codepet to use your own Claude plan, so I didn't quietly fall back to the paid path. Open Settings → Claude Code to check it, or turn that switch off to go back to the old route."
-    }
-
     private static func leadInCopy(_ kind: ChatTailAction.LeadIn, language: AppLanguage) -> String {
         let vi = language == .vi
         switch kind {
@@ -3182,8 +3199,14 @@ final class CompanyStore: ObservableObject {
     /// speaking when she has said nothing. `sendChat` would have to invent a founder message to
     /// reply to, and inventing her words is the one thing this design must not do.
     ///
-    /// `CompanyChatClient.send` returns a reply without touching the transcript, so the
-    /// instruction never appears and only the answer does.
+    /// Goes through `chatSender` — the same seam `sendChat`'s non-streaming retry uses,
+    /// defaulted to `ChatTransportRouter.send` — rather than `CompanyChatClient.send`
+    /// directly. It used to call the client directly, which skipped the router: a founder
+    /// who had granted her Claude plan still had this one call go straight to the (now
+    /// keyless, 401-answering) Cloud Function, `reply` came back nil every time, and the
+    /// demo's live line was dead for exactly the founders it was built for. `chatSender`
+    /// returns a reply without touching the transcript, so the instruction never appears
+    /// and only the answer does.
     ///
     /// **The instruction is how the chain survives.** A generated closing line cannot be relied
     /// on to hand off to the next department, so the caller tells it to — that is cheaper and
@@ -3212,10 +3235,11 @@ final class CompanyStore: ObservableObject {
                                          query: instruction, focusDepartment: nil,
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)
-        let reply = await CompanyChatClient.send(req)
-        // Nil AND empty both count as "did not come back": `CompanyChatClient.send` already
-        // maps an empty reply to nil, but a future transport need not, and an empty bubble is
-        // the one outcome worse than the authored line.
+        let reply = await chatSender(req)
+        // Nil AND empty both count as "did not come back": `postLiveLine` goes through the
+        // injected `chatSender` seam (`ChatTransportRouter.send` by default), and that seam
+        // already maps an empty reply to nil — but a future transport need not, and an empty
+        // bubble is the one outcome worse than the authored line.
         let live = (reply?.text).flatMap { $0.isEmpty ? nil : $0 }
         let text = live ?? fallback
         if live == nil {
@@ -3524,7 +3548,7 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         // Signed out: the mirror must stop reflecting the previous account, or their
-        // refusal would silently govern whoever signs in next.
+        // grant would silently govern whoever signs in next.
         applyCloudAIBlock()
         company = .empty
         // Read off the company we just reset to (so it can't drift from what `reset()`

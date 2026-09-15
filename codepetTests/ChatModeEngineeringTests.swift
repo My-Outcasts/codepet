@@ -134,15 +134,18 @@ final class BuildDestinationTests: XCTestCase {
                             identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"))
     }
 
-    func testBuildGoesToTheCloudAgent() {
-        // Cloud is the default because it is the one that works for a customer:
-        // the local runner shells out to the `claude` CLI, which nobody who
-        // downloads Codepet has. Defaulting to local would ship a mode that
-        // does nothing for anyone but us.
+    /// Was `testBuildGoesToTheCloudAgent`, which asserted the exact opposite: with nothing
+    /// linked, Build started the cloud coding agent. That agent runs on `engStartRun`, which
+    /// declares `ANTHROPIC_API_KEY` and has answered 401 since the key was deleted on
+    /// 26 Aug 2026 — so the old default was not "the one that works for a customer" any more,
+    /// it was a network error with no explanation. `.noProject` is the same refusal the local
+    /// runner already gives, and its card carries the button that fixes it.
+    func testBuildWithNoFolderLinkedAsksForOneInsteadOfTheCloud() {
         let store = makeStore()
         store.startBuild(ask: "add stripe checkout")
-        XCTAssertNotNil(store.engineeringRunStore, "Build did not start a cloud run")
-        XCTAssertNil(store.codingRun.run, "Build silently started the LOCAL agent")
+        XCTAssertEqual(store.codingRun.run?.phase, .noProject,
+                       "Build with nothing linked did not stage the Link-a-project card")
+        XCTAssertNil(store.engineeringRunStore, "Build still dispatched to the cloud coding agent")
     }
 
     func testBuildStaysInTheCloudEVENWHENAFolderIsLinked() {
@@ -180,18 +183,18 @@ final class BuildDestinationTests: XCTestCase {
         XCTAssertNil(store.engineeringRunStore, "a granted Build still spent the API key")
     }
 
-    /// A grant is not a folder. Without one the local run lands in `.noProject`, so falling
-    /// into it instead of the connect sheet would be the silent routing `startBuild` exists
-    /// to avoid — the cloud refusal is what opens that sheet.
-    func testAGrantWithNoFolderIsStillNotALocalBuild() async {
+    /// A grant is not a folder — but the answer to "no folder" is now to ask for one, not to
+    /// send the run to an agent that cannot answer. This case asserted the cloud dispatch
+    /// before; `.noProject` is where both halves of that sentence now land.
+    func testAGrantWithNoFolderStillAsksForAFolder() async {
         let store = grantedStore()
         await store.hydrate(companyId: "c1")
-        XCTAssertFalse(store.buildRunsOnFoundersAgent)
+        XCTAssertFalse(store.buildRunsOnFoundersAgent, "the fixture linked a folder by accident")
 
         store.startBuild(ask: "add stripe checkout")
 
-        XCTAssertNotNil(store.engineeringRunStore)
-        XCTAssertNil(store.codingRun.run)
+        XCTAssertEqual(store.codingRun.run?.phase, .noProject)
+        XCTAssertNil(store.engineeringRunStore, "a granted founder was sent to the cloud agent")
     }
 
     /// The grant is per company id — one Mac has one Claude Code login, so founder A's
@@ -220,6 +223,45 @@ final class BuildDestinationTests: XCTestCase {
                 isAuthorised: { $0 == granted }, setAuthorised: { _, _ in }))
     }
 
+    /// The one state that still reaches the cloud coding agent: a folder IS linked and the
+    /// founder has NOT granted her Claude plan. `engStartRun` 401s today, so before that
+    /// dispatch fires the founder must see why the build cannot run and how to fix it —
+    /// `BlockReason.notGranted`'s own copy, not a new sentence.
+    func testBuildWithAFolderButNoGrantNoticesTheFounderBeforeTheCloudRun() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertTrue(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderText },
+            "an ungranted, folder-linked Build did not tell the founder why it cannot run"
+        )
+        // The branch itself is unchanged: it still reaches the cloud agent (Task 7's onboarding
+        // gate is what stops that dispatch, not this notice).
+        XCTAssertNotNil(store.engineeringRunStore)
+        XCTAssertNil(store.codingRun.run)
+    }
+
+    /// Same case in Vietnamese — the recorded defect here is a ternary that returns the SAME
+    /// string on both branches (`lang == .vi ? why : why`), so an English-only assertion would
+    /// pass even if `.vi` silently got English copy.
+    func testBuildWithAFolderButNoGrantNoticesInVietnamese() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startBuild(ask: "add stripe checkout", language: .vi)
+
+        XCTAssertTrue(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderTextVi },
+            "the Vietnamese founder was not shown the Vietnamese notice"
+        )
+        XCTAssertFalse(
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.notGranted.founderText },
+            "the Vietnamese founder was shown the English notice instead"
+        )
+    }
+
     func testTheSwitchActuallyMovesTheRunToTheOtherMachine() {
         // And drops the cloud one: two coding agents on one ask, writing to two
         // different places, is a state no card could explain.
@@ -244,8 +286,13 @@ final class BuildDestinationTests: XCTestCase {
     func testSwitchingWithNoProjectLinkedChangesNothing() {
         // The control is hidden in this state; this is the guard behind it, so
         // a stale closure cannot start a run against a folder that is not there.
+        //
+        // The precondition is built with `startEngineeringRun` directly because no Build
+        // entry point reaches the cloud agent with nothing linked any more — that is this
+        // task's whole change. The assertions are unchanged: the guard, not the route, is
+        // what this case has always protected.
         let store = makeStore()
-        store.startBuild(ask: "add stripe checkout")
+        store.startEngineeringRun(ask: "add stripe checkout")
         store.switchBuildToLocal(ask: "add stripe checkout")
         XCTAssertNotNil(store.engineeringRunStore, "the cloud run was dropped for nothing")
         XCTAssertNil(store.codingRun.run)
@@ -261,5 +308,86 @@ final class BuildDestinationTests: XCTestCase {
         XCTAssertFalse(EngineeringResultBar.canSwitchToLocal(.reviewing))
         XCTAssertFalse(EngineeringResultBar.canSwitchToLocal(.budgetReached))
         XCTAssertFalse(EngineeringResultBar.canSwitchToLocal(.failed("x")))
+    }
+}
+
+/// The OTHER Build entry point: a two-mode Developer session (`DeveloperWorkPane`).
+///
+/// It had the same shape as `startBuild` — linked folder → local, nothing linked → the cloud
+/// coding agent — and `CLAUDE.md` recorded it as "the only call left that can reach the cloud
+/// agent by design". That design rested on the cloud agent being able to answer. It cannot:
+/// `engStartRun` spends the Anthropic key deleted on 26 Aug 2026 and 401s.
+@MainActor
+final class SessionBuildDestinationTests: XCTestCase {
+
+    private var previousMockFlag: Any?
+
+    override func setUp() {
+        super.setUp()
+        // Same reason as `BuildDestinationTests`: without the flag a cloud run builds a real
+        // `EngineeringClient`, which reaches `Auth.auth()` and TRAPS on unconfigured Firebase
+        // (landmine #4) from a detached Task, after the test has already passed.
+        previousMockFlag = PrototypeMode.store.object(forKey: "CODEPET_MOCK_CHAT")
+        PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_CHAT")
+    }
+
+    override func tearDown() {
+        if let previousMockFlag {
+            PrototypeMode.store.set(previousMockFlag, forKey: "CODEPET_MOCK_CHAT")
+        } else {
+            PrototypeMode.store.removeObject(forKey: "CODEPET_MOCK_CHAT")
+        }
+        super.tearDown()
+    }
+
+    private func makeStore() -> CompanyStore {
+        let state = CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                                 stage: .idea, companionId: "byte", onboardedAt: nil, tasks: [])
+        let suite = UserDefaults(suiteName: "cp.tests.\(UUID().uuidString)")!
+        return CompanyStore(loader: { _ in state }, saver: { _, _ in true },
+                            identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"))
+    }
+
+    func testASessionBuildWithNoFolderAsksForOneInsteadOfTheCloud() {
+        let store = makeStore()
+        store.startSessionBuild(ask: "add stripe checkout")
+        XCTAssertEqual(store.codingRun.run?.phase, .noProject,
+                       "a session Build with nothing linked did not stage the no-project card")
+        XCTAssertNil(store.engineeringRunStore,
+                     "a session Build still dispatched to the cloud coding agent")
+    }
+
+    /// The regression that would silently disable local builds. Routing the no-folder branch
+    /// must not route the WITH-folder one: a linked project still reaches `startCodeRun`, and
+    /// a run that stages `.noProject` with a folder present is a Developer pane that can never
+    /// run anything.
+    func testASessionBuildWithAFolderStillRunsOnTheFoundersMachine() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+
+        store.startSessionBuild(ask: "add stripe checkout")
+
+        XCTAssertNotNil(store.codingRun.run, "a linked session Build staged no local run at all")
+        XCTAssertNotEqual(store.codingRun.run?.phase, .noProject,
+                          "a linked session Build was told there is no project")
+        XCTAssertNil(store.engineeringRunStore)
+        XCTAssertEqual(store.codingRun.run?.ask, "add stripe checkout")
+    }
+
+    /// The ask reaches the transcript either way — a refusal the founder cannot see their own
+    /// sentence next to is the dead end `.noProject` exists to avoid.
+    func testTheAskIsStillEchoedWhenThereIsNoFolder() {
+        let store = makeStore()
+        store.startSessionBuild(ask: "add stripe checkout")
+        XCTAssertEqual(store.chatMessages.map(\.text), ["add stripe checkout"])
+        XCTAssertEqual(store.codingRun.run?.ask, "add stripe checkout")
+    }
+
+    func testABlankSessionBuildStartsNothing() {
+        let store = makeStore()
+        store.startSessionBuild(ask: "   ")
+        XCTAssertNil(store.codingRun.run)
+        XCTAssertNil(store.engineeringRunStore)
+        XCTAssertTrue(store.chatMessages.isEmpty)
     }
 }

@@ -6,7 +6,7 @@ import {
 } from "../company/budget";
 import { newBlackboard, recordUsage } from "../company/blackboard";
 import { FounderContext } from "../company/types";
-import { AGENT_MODEL, MODEL_PRICING, SYNTHESIS_MODEL } from "../anthropic";
+import { AGENT_MODEL, MODEL_PRICING, SYNTHESIS_MODEL } from "../anthropicCore";
 
 const founder: FounderContext = {
   profile: "Solo technical founder.",

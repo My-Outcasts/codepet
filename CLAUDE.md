@@ -59,8 +59,9 @@ The feature that convenes departments to argue a decision. Backend in `functions
 The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function
 declaring `ANTHROPIC_API_KEY` answers 401 at runtime. **Every one of them now has a local
 path** — all seventeen entries in `CloudAIBlock.blockedPaths`, company layer and learning
-layer both. The Cloud Functions are still deployed and still the default for a founder who has
-not granted their plan; they simply cannot answer until a key exists again.
+layer both. The Cloud Functions are still deployed and now inert: nothing in the app routes to
+them any more, and a founder who has not granted their plan gets `.blocked(.notGranted)` — a
+reason on screen — rather than a silent fall back to the cloud.
 
 - **`CloudAIBlock.blockedPaths` (`codepet/Services/CloudAIBlock.swift`) is the checklist** of
   every endpoint that spends the key. Derive from it, not from memory of which features feel
@@ -86,15 +87,20 @@ not granted their plan; they simply cannot answer until a key exists again.
   parsed (`extractJson`). Every op validates or coerces what it got — that coercion IS the
   safety story on this transport
 - Build (`startBuild`) sends a granted founder with a linked folder to `ClaudeCodeRunner`
-  instead of the cloud coding agent. A grant is not a folder: without one it still goes cloud,
-  because the local run would land in `.noProject`
+  instead of the cloud coding agent. A grant is not a folder — but **with no folder linked,
+  both Build entry points now stage `.noProject`** rather than the cloud agent, because that
+  agent spends the deleted key and 401s: a card that says "Link a project" is the refusal, and
+  it carries the button that fixes it
 - **What the local path does not reproduce, per feature:** no server-side caches (the
   narrative cache, the dictionary term cache, prompt caching) — work the cloud would have
   served free is regenerated on the founder's quota; no blackboard write for a meeting; no
   rate limit; no kill switch; and `generatePlan` answers `tier: "full"` because there is no
   entitlement to read on the founder's own machine and the tokens are theirs
-- The only call left that can reach the cloud agent by design is `startSessionBuild` with no
-  folder linked: a two-mode Developer session already declared its machine on the session bar
+- **One state still reaches the cloud coding agent:** `startBuild` with a folder linked and no
+  grant. It is not the folder gate's business — routing that founder to `ClaudeCodeRunner`
+  would spend the Claude plan they were never asked about, and `ClaudeCodeAuthorisation` is the
+  one switch. `BlockReason.notGranted` is the affordance it wants; the Build card cannot render
+  a `BlockReason` yet. `startSessionBuild` with no folder was the other one and is now closed
 
 ## Landmines
 

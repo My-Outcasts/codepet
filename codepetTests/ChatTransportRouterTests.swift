@@ -30,10 +30,11 @@ final class ChatTransportRouterTests: XCTestCase {
 
     // MARK: - The grant decides
 
-    /// The default is unchanged for everyone who has not granted anything. A founder who
-    /// has never opened the Claude Code panel must keep the chat they already had.
-    func testAnUngrantedFounderStaysOnCloud() {
-        XCTAssertEqual(transport(companyId: "c1"), .cloud)
+    /// A founder who has never opened the Claude Code panel used to get the Cloud Function.
+    /// There is nothing behind it now, so she is told what to turn on instead of being sent
+    /// somewhere that answers 401.
+    func testAnUngrantedFounderIsBlockedRatherThanSentToTheCloud() {
+        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted))
     }
 
     func testAGrantedFounderGoesLocal() {
@@ -45,14 +46,15 @@ final class ChatTransportRouterTests: XCTestCase {
     /// founder's turn onto the plan the first one signed in with.
     func testOneFoundersGrantDoesNotRouteAnothersTurn() {
         granted.insert("c1")
-        XCTAssertEqual(transport(companyId: "c2"), .cloud)
+        XCTAssertEqual(transport(companyId: "c2"), .blocked(.notGranted))
     }
 
-    /// No company id means no grant can exist. That is an ungranted turn, not a broken
-    /// one — failing here would break chat before onboarding finishes.
-    func testNoCompanyIdIsACloudTurnNotAFailure() {
-        XCTAssertEqual(transport(companyId: nil), .cloud)
-        XCTAssertEqual(transport(companyId: ""), .cloud)
+    /// No company id means no grant can exist, and an empty string is not a company id
+    /// either. Both used to route to the Cloud Function; both now say the one thing that is
+    /// true of them — nothing has granted this turn a runner.
+    func testNoCompanyIdAndAnEmptyOneAreBothBlockedOnTheGrant() {
+        XCTAssertEqual(transport(companyId: nil), .blocked(.notGranted))
+        XCTAssertEqual(transport(companyId: ""), .blocked(.notGranted))
     }
 
     // MARK: - Never silently spend the key they said not to spend
@@ -60,21 +62,23 @@ final class ChatTransportRouterTests: XCTestCase {
     /// THE most important case in this file. A granted founder whose machine cannot run
     /// the local path must NOT be quietly served by the Cloud Function: that breaks the
     /// no-silent-routing rule recorded at CompanyStore.swift:743, and it spends an API key
-    /// they had just said should not be spent. It fails, with a reason.
-    func testAGrantedFounderWithNoSidecarFailsRatherThanFallingBackToCloud() {
+    /// they had just said should not be spent — one that no longer exists to spend. It
+    /// fails, naming the runner rather than the grant she already gave.
+    func testAGrantedFounderWithNoSidecarIsBlockedWithTheSidecarReason() {
         granted.insert("c1")
         let t = transport(companyId: "c1", sidecar: false)
-        XCTAssertNotEqual(t, .cloud, "must never silently fall back to the paid path")
-        guard case .localUnavailable(let reason) = t else {
-            return XCTFail("expected localUnavailable, got \(t)")
+        XCTAssertNotEqual(t, .local, "a missing runner is not a local turn")
+        guard case .blocked(let reason) = t else {
+            return XCTFail("expected blocked, got \(t)")
         }
-        XCTAssertFalse(reason.isEmpty, "the founder needs something to act on")
+        XCTAssertEqual(reason, .sidecarMissing)
+        XCTAssertFalse(reason.founderText.isEmpty, "the founder needs something to act on")
     }
 
-    /// A missing sidecar must not affect someone who never granted anything — they were
-    /// always going to cloud and nothing about their turn has changed.
-    func testAMissingSidecarDoesNotDisturbAnUngrantedFounder() {
-        XCTAssertEqual(transport(companyId: "c1", sidecar: false), .cloud)
+    /// A missing sidecar must not change what an ungranted founder is TOLD: the grant is
+    /// the first thing to fix, and naming the runner instead sends her to the wrong screen.
+    func testAMissingSidecarDoesNotChangeAnUngrantedFoundersReason() {
+        XCTAssertEqual(transport(companyId: "c1", sidecar: false), .blocked(.notGranted))
     }
 
     // MARK: - The non-streaming retry
@@ -155,11 +159,16 @@ final class ChatTransportRouterTests: XCTestCase {
 
     // MARK: - The failure a founder can act on
 
-    /// `localUnavailable` is its own error case so the UI can say the true thing. Folded
-    /// into `malformedResponse` it would read as a bug in the reply, and a beta week of
-    /// these would look like a network problem rather than the packaging problem it is.
-    func testLocalUnavailableIsDistinguishableFromEveryRetryableFailure() {
-        XCTAssertEqual(ChatTurnDiagnostic.cause(of: CompanyChatStreamError.localUnavailable("x")),
+    /// `blocked` is its own error case so the UI can say the true thing. Folded into
+    /// `malformedResponse` it would read as a bug in the reply, and a beta week of these
+    /// would look like a network problem rather than the packaging or grant problem it is.
+    ///
+    /// The diagnostic TOKEN keeps its old spelling deliberately, so already-collected
+    /// diagnostics are not split in two by a rename.
+    func testABlockedTurnIsDistinguishableFromEveryRetryableFailure() {
+        XCTAssertEqual(ChatTurnDiagnostic.cause(of: CompanyChatStreamError.blocked(.sidecarMissing)),
+                       "localUnavailable")
+        XCTAssertEqual(ChatTurnDiagnostic.cause(of: CompanyChatStreamError.blocked(.notGranted)),
                        "localUnavailable")
         XCTAssertEqual(ChatTurnDiagnostic.cause(of: CompanyChatStreamError.malformedResponse),
                        "malformedResponse")
@@ -168,17 +177,73 @@ final class ChatTransportRouterTests: XCTestCase {
     /// The stream must THROW rather than finish empty. A stream that finishes with no
     /// events makes the store fall back to the non-streaming sender, which would reach
     /// the Cloud Function — the silent fallback this whole design refuses.
-    func testTheUnavailableStreamThrowsInsteadOfFinishingEmpty() async {
+    func testTheBlockedStreamThrowsInsteadOfFinishingEmpty() async {
         let stream = AsyncThrowingStream<CompanyChatStreamEvent, Error> {
-            $0.finish(throwing: CompanyChatStreamError.localUnavailable("no runner"))
+            $0.finish(throwing: CompanyChatStreamError.blocked(.sidecarMissing))
         }
         do {
             for try await _ in stream { XCTFail("no event should arrive") }
             XCTFail("must throw, not finish quietly")
-        } catch CompanyChatStreamError.localUnavailable(let reason) {
-            XCTAssertEqual(reason, "no runner")
+        } catch CompanyChatStreamError.blocked(let reason) {
+            XCTAssertEqual(reason, .sidecarMissing)
         } catch {
             XCTFail("wrong error: \(error)")
         }
+    }
+
+    // MARK: - There is no third destination
+
+    /// The load-bearing totality test: it fails to COMPILE the day someone adds a case that
+    /// reaches a hosted endpoint, which is the only moment that mistake is cheap.
+    func testChatTransportIsOnlyEverLocalOrBlocked() {
+        let cases: [ChatTransportRouter.Transport] = [.local, .blocked(.notGranted)]
+        for c in cases {
+            switch c {
+            case .local, .blocked: continue   // exhaustive: adding a case breaks the build
+            }
+        }
+    }
+
+    /// `BlockReason.notGranted`'s own English copy, pinned as a literal. This does NOT touch
+    /// the chat tail — it asserts the `BlockReason` value alone; the tail's actual behaviour
+    /// (that `CompanyStore` writes this string into the placeholder for a `.stop` reason) is
+    /// covered end-to-end by `CompanyStoreChatTests
+    /// .testStopReasonWritesTheFounderTextWhenLanguageIsEnglish` (and its `.vi` counterpart),
+    /// which is where that promise now lives.
+    func testBlockReasonNotGrantedHasItsOwnEnglishCopy() {
+        XCTAssertEqual(BlockReason.notGranted.founderText,
+                       "Codepet needs permission to use your Claude plan. Turn it on in Settings.")
+    }
+
+    /// The guard that carries the router's refusal one layer up, and the reason it names.
+    ///
+    /// `.fallback` calls the non-streaming sender, so if `decide` did not stop here a blocked
+    /// turn would be retried — and the founder would be told nothing about why the first
+    /// attempt failed. Delete the `.blocked` check in `ChatTailAction.decide` and this goes
+    /// red: the same inputs answer `.fallback`.
+    func testABlockedStreamStopsTheTurnAndCarriesItsReason() {
+        let tail = ChatTailAction.decide(
+            streamThrew: true, receivedDone: false, streamedText: "", action: nil,
+            streamError: CompanyChatStreamError.blocked(.sidecarMissing))
+        XCTAssertEqual(tail, .stop(reason: .sidecarMissing))
+    }
+
+    /// The reason is carried through, not flattened to one word — an ungranted founder must
+    /// not be told to reinstall Codepet.
+    func testTheStoppedTurnKeepsWhicheverReasonBlockedIt() {
+        let tail = ChatTailAction.decide(
+            streamThrew: true, receivedDone: false, streamedText: "", action: nil,
+            streamError: CompanyChatStreamError.blocked(.notGranted))
+        XCTAssertEqual(tail, .stop(reason: .notGranted))
+    }
+
+    /// Every OTHER stream failure is still worth a second, non-streaming attempt. Without
+    /// this the stop rule could be written as "any error stops", which would delete the
+    /// retry that exists because a turn can die before its `done` frame for ordinary reasons.
+    func testAnOrdinaryStreamFailureStillFallsBack() {
+        let tail = ChatTailAction.decide(
+            streamThrew: true, receivedDone: false, streamedText: "", action: nil,
+            streamError: CompanyChatStreamError.malformedResponse)
+        XCTAssertEqual(tail, .fallback)
     }
 }

@@ -719,4 +719,56 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.first?.text.contains("Talk to 5 potential customers") ?? false)
         XCTAssertEqual(s.chatMessages.last?.text, "Đây là cách làm.")
     }
+
+    // MARK: - .stop(reason:) tail — the founder-facing BlockReason copy
+
+    /// A `chatStreamer` that throws `CompanyChatStreamError.blocked(reason)` before
+    /// yielding anything — the shape `ChatTailAction.decide` reads as `.stop(reason:)`.
+    private static func blockedStreamer(_ reason: BlockReason)
+        -> (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
+        { _ in
+            AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.blocked(reason)) }
+        }
+    }
+
+    /// Pins `CompanyStore.swift`'s `.stop(reason:)` case (~line 1873) to `reason.founderText`
+    /// when the founder's language is English. `chatSender` must never be consulted here —
+    /// `.stop` exists specifically so a blocked turn is NOT retried on the other transport
+    /// (see `ChatTailAction.stop`'s doc comment) — so it is wired to `XCTFail` to catch a
+    /// regression that reintroduces the retry as well as one that drops the copy.
+    ///
+    /// **Mutation check:** hardcoding line 1873 to an English literal (e.g. `"Turn on Claude
+    /// Code access in Settings."`) leaves this test green (the literal can be made to match)
+    /// but turns `testStopReasonWritesTheVietnameseCopyWhenLanguageIsVi` red, because a fixed
+    /// English literal cannot also equal the Vietnamese string — see that test for the
+    /// half of this pair a hardcoded line cannot survive.
+    func testStopReasonWritesTheFounderTextWhenLanguageIsEnglish() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderText)
+    }
+
+    /// The `.vi` half of the same line: this codebase has a recorded defect shaped exactly
+    /// like `lang == .vi ? why : why` — a language ternary that returns the same string
+    /// either way. `testStopReasonWritesTheFounderTextWhenLanguageIsEnglish` alone cannot
+    /// catch that shape (English matches either branch of such a ternary); asserting the
+    /// Vietnamese string here, and that it differs from the English one, is what would go
+    /// red on that defect.
+    ///
+    /// **Mutation check:** hardcoding line 1873 to an English literal turns this test red —
+    /// `s.chatMessages.last?.text` is the hardcoded English string, which is neither equal
+    /// to `founderTextVi` nor even a match for the "not the English string" assertion.
+    /// Verified: see the fix-pass report for the actual run.
+    func testStopReasonWritesTheVietnameseCopyWhenLanguageIsVi() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .vi)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderTextVi)
+        XCTAssertNotEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderText)
+    }
 }

@@ -96,6 +96,10 @@ final class SessionChatController: ObservableObject {
             return .networkOrServer(message: "malformed response")
         case .network(let err):
             return .networkOrServer(message: String(describing: err))
+        case .blocked(let reason):
+            // The reason already names the founder's next move; wrapping it in "network or
+            // server" wording would be a lie about whose problem it is.
+            return .networkOrServer(message: reason.founderText)
         }
     }
 }

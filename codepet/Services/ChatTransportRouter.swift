@@ -1,20 +1,25 @@
 import Foundation
 import os
 
-/// Decides whether a chat turn runs on the founder's own Claude Code or on the Cloud
-/// Function, and hands it to whichever wins.
+/// Decides whether a chat turn can run on the founder's own Claude Code, and hands it over
+/// when it can.
+///
+/// **There is only one runner now.** Codepet holds no Anthropic key — it was deleted on
+/// 26 Aug 2026 — so the `companyChat` Cloud Function this used to fall back to answers 401
+/// and nothing else. The router therefore answers "the founder's own Claude Code, or why
+/// not" rather than "whose machine".
 ///
 /// **One switch decides, and it is the one that already exists.**
 /// `cp_claudeCodeAuthorised` means "Codepet may spend my Claude plan". A founder who
 /// granted that did not grant it for some features; they granted it. So chat follows it
-/// like everything else will, and there is no second knob to learn. The alternative —
+/// like everything else does, and there is no second knob to learn. The alternative —
 /// cloud by default with a per-turn "run this on my Claude" offer, the shape `Build`
 /// uses (`localBuildAvailable` / `switchBuildToLocal`) — was considered and rejected for
 /// chat: Build happens a few times a week, chat happens dozens of times a day, and it
 /// would leave the API key paying for most messages, which is the thing this work exists
 /// to stop.
 ///
-/// **It never falls back to cloud.** That would break two things at once: the
+/// **It never falls back to the hosted path.** That would break two things at once: the
 /// no-silent-routing rule recorded at `CompanyStore.swift:743`, and the founder's
 /// expectation that granting the switch stopped Codepet spending anyone else's money. So
 /// an unavailable local path FAILS, with a reason the UI can act on.
@@ -26,11 +31,12 @@ enum ChatTransportRouter {
     static let log = Logger(subsystem: "app.murror.codepet", category: "ChatTransport")
 
     enum Transport: Equatable {
-        case cloud
         case local
-        /// Granted, but this machine cannot honour it. Carries the founder-facing reason;
-        /// silently using cloud instead is the one thing this case exists to prevent.
-        case localUnavailable(String)
+        /// Cannot run here, and why. **There is deliberately no hosted case**: Codepet holds
+        /// no Anthropic key, so "fall back to the Cloud Function" is not a slower success, it
+        /// is a 401 the founder cannot act on. Shaped exactly like
+        /// `LocalTransportRouter.Transport` so the two cannot drift.
+        case blocked(BlockReason)
     }
 
     /// Which transport a turn should use.
@@ -44,13 +50,11 @@ enum ChatTransportRouter {
         authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
         sidecarAvailable: () -> Bool = { LocalChatStreamer.isAvailable() }
     ) -> Transport {
-        // No company id means no grant can exist — an ungranted turn is a cloud turn, not
-        // a failure.
-        guard let companyId, !companyId.isEmpty else { return .cloud }
-        guard authorisation.isAuthorised(companyId) else { return .cloud }
-        guard sidecarAvailable() else {
-            return .localUnavailable("Codepet can't reach its local runner on this Mac.")
-        }
+        // No company id means no grant can exist. That used to route to the Cloud Function;
+        // there is nothing there to route to now, so it blocks on the grant it lacks.
+        guard let companyId, !companyId.isEmpty else { return .blocked(.notGranted) }
+        guard authorisation.isAuthorised(companyId) else { return .blocked(.notGranted) }
+        guard sidecarAvailable() else { return .blocked(.sidecarMissing) }
         return .local
     }
 
@@ -66,14 +70,12 @@ enum ChatTransportRouter {
     /// the whole turn instead of streaming it. A second attempt is what the fallback IS, and
     /// on this transport it costs another turn of the founder's plan rather than money.
     ///
-    /// `nil` on failure, exactly like the cloud sender, so the store's refusal copy is what
-    /// the founder sees rather than an unexplained empty reply.
+    /// `nil` on failure, the shape the store already handles, so its refusal copy is what the
+    /// founder sees rather than an unexplained empty reply.
     static func send(_ req: CompanyChatRequest) async -> CompanyChatReply? {
         switch transport(companyId: req.companyId) {
-        case .cloud:
-            return await CompanyChatClient.send(req)
-        case .localUnavailable(let reason):
-            log.error("non-streaming retry refused: \(reason, privacy: .public)")
+        case .blocked(let reason):
+            log.error("non-streaming retry refused: \(String(describing: reason), privacy: .public)")
             return nil
         case .local:
             return await collect(LocalChatStreamer.sendStream(req))
@@ -123,14 +125,12 @@ enum ChatTransportRouter {
     /// Drop-in for `CompanyChatClient.sendStream`: same signature, routes per turn.
     static func sendStream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         switch transport(companyId: req.companyId) {
-        case .cloud:
-            return CompanyChatClient.sendStream(req)
         case .local:
             log.info("chat turn routed to the founder's Claude Code")
             return LocalChatStreamer.sendStream(req)
-        case .localUnavailable(let reason):
-            log.error("granted but unavailable: \(reason, privacy: .public)")
-            return AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.localUnavailable(reason)) }
+        case .blocked(let reason):
+            log.error("blocked: \(String(describing: reason), privacy: .public)")
+            return AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.blocked(reason)) }
         }
     }
 }

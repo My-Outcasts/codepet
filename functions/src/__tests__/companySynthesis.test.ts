@@ -14,7 +14,7 @@ import {
   FounderContext,
   TokenUsage
 } from "../company/types";
-import { SYNTHESIS_MODEL } from "../anthropic";
+import { SYNTHESIS_MODEL } from "../anthropicCore";
 import { BRIEF_MAX_TOKENS, PATCH_MAX_TOKENS, POSITION_MAX_TOKENS } from "../company/router";
 
 const founder: FounderContext = {

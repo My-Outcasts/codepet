@@ -1,6 +1,6 @@
 import { ROUTING_TOOL, parseRoutingToolInput, runIntake } from "../company/router";
 import { FounderContext, TokenUsage } from "../company/types";
-import { ROUTER_MODEL } from "../anthropic";
+import { ROUTER_MODEL } from "../anthropicCore";
 
 const founder: FounderContext = {
   profile: "Solo technical founder.",

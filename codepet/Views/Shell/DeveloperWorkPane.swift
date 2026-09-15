@@ -151,6 +151,10 @@ struct DeveloperWorkPane: View {
     /// `startSessionBuild` and not `startCodeRun`: the view must not choose the
     /// machine. It was choosing, and choosing wrong — always local, so an awake
     /// Developer on a cloud repo with no folder linked got `.noProject` back.
+    /// `startSessionBuild` now stages `.noProject` for that case itself, on purpose —
+    /// the cloud coding agent spends a deleted API key — so the two agree on the
+    /// outcome and differ on who decided it. Which is the whole point: the decision is
+    /// recorded in the store, where it can change without touching this pane.
     private var composer: some View {
         VStack(spacing: 8) {
             ChatComposer(

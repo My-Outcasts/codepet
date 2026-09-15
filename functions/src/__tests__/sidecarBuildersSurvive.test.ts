@@ -10,8 +10,17 @@ import { ONE_SHOT_OPS } from "../local/oneShotOps";
  */
 describe("the sidecar's builders survive the deletion", () => {
   test("every one-shot op still resolves", () => {
-    const names = Object.keys(ONE_SHOT_OPS);
-    expect(names.length).toBeGreaterThanOrEqual(12);
+    // **A pinned list, not a floor.** This read `toBeGreaterThanOrEqual(12)`, which a RENAME
+    // satisfies: drop `chatSession` and add `chatSessionV2` and the count is still 12 with both
+    // halves still functions. The Swift call sites name these keys as strings, so a rename has
+    // to fail HERE, in jest, rather than at run time on a founder's machine — which is the
+    // reason this file exists at all.
+    const names = Object.keys(ONE_SHOT_OPS).sort();
+    expect(names).toEqual([
+      "chatSession", "distillReference", "enrichBrief", "extractDecisions",
+      "generateDictionary", "generateGuidance", "generatePlan", "generateRoadmap",
+      "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
+    ]);
     for (const n of names) {
       expect(typeof ONE_SHOT_OPS[n].plan).toBe("function");
       expect(typeof ONE_SHOT_OPS[n].respond).toBe("function");

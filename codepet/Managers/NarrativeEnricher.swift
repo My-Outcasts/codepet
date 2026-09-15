@@ -114,6 +114,13 @@ final class NarrativeEnricher: ObservableObject {
                     return recordFailure(turn.id, reason: .quota, error: err)
                 case .http(400, _), .malformedResponse:
                     return recordFailure(turn.id, reason: .badResponse, error: err)
+                case .blocked:
+                    // Deliberately NOT in the retrying branch. A grant does not change
+                    // between two attempts a second apart, so a retry here spends the
+                    // budget on a certainty and delays the message that names the fix.
+                    // `.auth` is the honest bucket: a permission the founder can give,
+                    // not an outage to wait out.
+                    return recordFailure(turn.id, reason: .auth, error: err)
                 case .http, .network:
                     if attempt == 0 {
                         logger.warning("turn enrich transient error, retrying: turn=\(turn.id) error=\(String(describing: err))")

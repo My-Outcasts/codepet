@@ -663,6 +663,13 @@ enum ReflectionAPIError: Error {
     case http(status: Int, body: SummarizeTurnError?)
     case malformedResponse
     case network(Error)
+    /// The call cannot run on this Mac, and why.
+    ///
+    /// **Not an `http` with a made-up status.** A blocked call never left the app, so there
+    /// is no status to report and no server that said anything; reusing `.http` would make
+    /// the founder's own ungranted toggle read as an outage. The reason carries copy she can
+    /// act on — `BlockReason.founderText` names the fix, not the state.
+    case blocked(BlockReason)
 }
 
 @MainActor
@@ -670,7 +677,6 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
 
     static let endpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/summarizeTurn")!
     private static let sessionEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/summarizeSession")!
-    private static let chatEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/chatSession")!
     private static let guidanceEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generateGuidance")!
     private static let planEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/generatePlan")!
     private static let distillEndpoint = URL(string: "https://us-central1-devpet-8f4b1.cloudfunctions.net/distillReference")!
@@ -785,9 +791,8 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     /// (`.started`, which is what shows "generating…") and then lands the whole narrative.
     private func localNarrativeStream(
         _ request: SummarizeTurnRequest
-    ) -> AsyncThrowingStream<NarrativeStreamEvent, Error>? {
-        guard localStreamOp() != nil else { return nil }
-        return AsyncThrowingStream { continuation in
+    ) -> AsyncThrowingStream<NarrativeStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
             Task {
                 do {
                     let body = try await LocalOneShotRunner.run(
@@ -804,121 +809,45 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         }
     }
 
-    /// `.local` when this turn belongs on the founder's plan, nil when the SSE path below is
-    /// taken instead.
+    /// Where a streaming op runs, or why it cannot run at all.
     ///
-    /// **This is the one route in this file that still ends at a Cloud Function, and it is
-    /// deliberately left alone by the change that removed the others.** The three streaming
-    /// ops (`summarizeTurn`, `summarizeSession`, `chatSession`) reach their HTTP bodies
-    /// through here, and five tests in `ReflectionAPIClientTests` drive those bodies with a
-    /// stubbed `URLSession` to pin the SSE framing. In production the route is already dead:
-    /// all three are in `CloudAIBlock.blockedPaths`, so the request is refused at the URL
-    /// layer before it leaves the app. Failing it closed here means deleting those five
-    /// tests, which belongs in the change that removes the streaming HTTP paths themselves.
-    private func localStreamOp() -> LocalTransportRouter.Transport? {
-        let transport = LocalTransportRouter.forOneShot()
-        if case .blocked(.notGranted) = transport { return nil }
-        return transport
+    /// **It used to answer nil for an ungranted founder, and that nil was a route.** The three
+    /// streaming ops (`summarizeTurn`, `summarizeSession`, `chatSession`) read it as "no local
+    /// path, carry on to the SSE request below" — a request to a Cloud Function that spends an
+    /// Anthropic key Codepet has not held since 26 Aug 2026, so the only thing it could
+    /// produce was a 401 with nothing in it the founder could act on.
+    ///
+    /// It was already dead in production: all three names are in `CloudAIBlock.blockedPaths`
+    /// and the interceptor refuses them at the URL layer. That is exactly why it had to be
+    /// closed here too — "unreachable because something underneath says no" is a route that
+    /// still reads as a route to whoever edits this file next, and one lifted guard away from
+    /// being one again.
+    ///
+    /// The non-optional return is the whole point: there is no third answer, so there is
+    /// nowhere for a caller to fall through TO.
+    private func localStreamOp() -> LocalTransportRouter.Transport {
+        LocalTransportRouter.forOneShot()
+    }
+
+    /// The stream a blocked founder gets: no events, and an error naming her next move.
+    ///
+    /// It finishes rather than yielding `.started` first, because `.started` is what renders
+    /// "generating…" — showing that for a call which never began is the fake progress the
+    /// contract forbids.
+    private static func failClosed<Event>(
+        op: String, reason: BlockReason
+    ) -> AsyncThrowingStream<Event, Error> {
+        LocalTransportRouter.log.error(
+            "stream \(op, privacy: .public) blocked: \(String(describing: reason), privacy: .public)")
+        return AsyncThrowingStream { $0.finish(throwing: ReflectionAPIError.blocked(reason)) }
     }
 
     func summarizeTurnStream(_ request: SummarizeTurnRequest) -> AsyncThrowingStream<NarrativeStreamEvent, Error> {
-        if let local = localNarrativeStream(request) { return local }
-        let capturedSession = session
-        let capturedAuthTokenProvider = authTokenProvider
-        // Append ?stream=true to the endpoint URL
-        var streamURL = URLComponents(url: Self.endpoint, resolvingAgainstBaseURL: false)!
-        streamURL.queryItems = [URLQueryItem(name: "stream", value: "true")]
-        let url = streamURL.url!
-
-        return AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                do {
-                    let token = try await capturedAuthTokenProvider()
-
-                    var urlRequest = URLRequest(url: url)
-                    urlRequest.httpMethod = "POST"
-                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    urlRequest.httpBody = try JSONEncoder().encode(request)
-
-                    let (bytes, response) = try await capturedSession.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse else {
-                        throw ReflectionAPIError.malformedResponse
-                    }
-
-                    if http.statusCode != 200 {
-                        var data = Data()
-                        for try await byte in bytes { data.append(byte) }
-                        let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: data)
-                        throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
-                    }
-
-                    // SSE connection opened — signal generating state
-                    continuation.yield(.started)
-
-                    var parser = SSEParser()
-                    var lineBuffer: [UInt8] = []
-                    for try await byte in bytes {
-                        if byte == UInt8(ascii: "\n") {
-                            let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                            lineBuffer.removeAll(keepingCapacity: true)
-                            for frame in parser.feedLines([line]) {
-                                try Self.handleNarrativeFrame(frame: frame, continuation: continuation)
-                            }
-                        } else {
-                            lineBuffer.append(byte)
-                        }
-                    }
-                    if !lineBuffer.isEmpty {
-                        let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                        for frame in parser.feedLines([line]) {
-                            try Self.handleNarrativeFrame(frame: frame, continuation: continuation)
-                        }
-                    }
-                    for frame in parser.feedLines([""]) {
-                        try Self.handleNarrativeFrame(frame: frame, continuation: continuation)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private static func handleNarrativeFrame(
-        frame: SSEFrame,
-        continuation: AsyncThrowingStream<NarrativeStreamEvent, Error>.Continuation
-    ) throws {
-        guard let payload = frame.data.data(using: .utf8) else { return }
-        switch frame.event {
-        case "delta":
-            struct DeltaPayload: Codable { let json: String }
-            if let d = try? JSONDecoder().decode(DeltaPayload.self, from: payload) {
-                continuation.yield(.jsonDelta(d.json))
-            }
-        case "done":
-            struct DonePayload: Codable {
-                let turnId: String
-                let narrative: SummarizeTurnResponse.NarrativePayload
-                let model: String
-                let cacheHit: Bool
-                enum CodingKeys: String, CodingKey {
-                    case turnId = "turn_id"
-                    case narrative, model
-                    case cacheHit = "cache_hit"
-                }
-            }
-            if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
-                continuation.yield(.done(narrative: d.narrative, model: d.model, cacheHit: d.cacheHit))
-            }
-        case "error":
-            let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: payload)
-            throw ReflectionAPIError.http(status: 502, body: parsed)
-        default:
-            break
+        switch localStreamOp() {
+        case .blocked(let reason):
+            return Self.failClosed(op: "summarizeTurn", reason: reason)
+        case .local:
+            return localNarrativeStream(request)
         }
     }
 
@@ -949,7 +878,10 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     }
 
     func summarizeSessionStream(_ request: SummarizeSessionRequest) -> AsyncThrowingStream<SessionSummaryStreamEvent, Error> {
-        if localStreamOp() != nil {
+        switch localStreamOp() {
+        case .blocked(let reason):
+            return Self.failClosed(op: "summarizeSession", reason: reason)
+        case .local:
             return AsyncThrowingStream { continuation in
                 Task {
                     do {
@@ -967,103 +899,13 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
                 }
             }
         }
-        let capturedSession = session
-        let capturedAuthTokenProvider = authTokenProvider
-        var streamURL = URLComponents(url: Self.sessionEndpoint, resolvingAgainstBaseURL: false)!
-        streamURL.queryItems = [URLQueryItem(name: "stream", value: "true")]
-        let url = streamURL.url!
-
-        return AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                do {
-                    let token = try await capturedAuthTokenProvider()
-
-                    var urlRequest = URLRequest(url: url)
-                    urlRequest.httpMethod = "POST"
-                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    urlRequest.httpBody = try JSONEncoder().encode(request)
-
-                    let (bytes, response) = try await capturedSession.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse else {
-                        throw ReflectionAPIError.malformedResponse
-                    }
-
-                    if http.statusCode != 200 {
-                        var data = Data()
-                        for try await byte in bytes { data.append(byte) }
-                        let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: data)
-                        throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
-                    }
-
-                    continuation.yield(.started)
-
-                    var parser = SSEParser()
-                    var lineBuffer: [UInt8] = []
-                    for try await byte in bytes {
-                        if byte == UInt8(ascii: "\n") {
-                            let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                            lineBuffer.removeAll(keepingCapacity: true)
-                            for frame in parser.feedLines([line]) {
-                                try Self.handleSessionFrame(frame: frame, continuation: continuation)
-                            }
-                        } else {
-                            lineBuffer.append(byte)
-                        }
-                    }
-                    if !lineBuffer.isEmpty {
-                        let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                        for frame in parser.feedLines([line]) {
-                            try Self.handleSessionFrame(frame: frame, continuation: continuation)
-                        }
-                    }
-                    for frame in parser.feedLines([""]) {
-                        try Self.handleSessionFrame(frame: frame, continuation: continuation)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private static func handleSessionFrame(
-        frame: SSEFrame,
-        continuation: AsyncThrowingStream<SessionSummaryStreamEvent, Error>.Continuation
-    ) throws {
-        guard let payload = frame.data.data(using: .utf8) else { return }
-        switch frame.event {
-        case "delta":
-            struct DeltaPayload: Codable { let json: String }
-            if let d = try? JSONDecoder().decode(DeltaPayload.self, from: payload) {
-                continuation.yield(.jsonDelta(d.json))
-            }
-        case "done":
-            struct DonePayload: Codable {
-                let sessionId: String
-                let summary: SummarizeSessionResponse.SummaryPayload
-                let model: String
-                enum CodingKeys: String, CodingKey {
-                    case sessionId = "session_id"
-                    case summary, model
-                }
-            }
-            if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
-                continuation.yield(.done(summary: d.summary, model: d.model, briefUpdate: d.summary.briefUpdate, projectOverview: d.summary.projectOverview))
-            }
-        case "error":
-            let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: payload)
-            throw ReflectionAPIError.http(status: 502, body: parsed)
-        default:
-            break
-        }
     }
 
     func chatSessionStream(_ request: ChatSessionRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
-        if localStreamOp() != nil {
+        switch localStreamOp() {
+        case .blocked(let reason):
+            return Self.failClosed(op: "chatSession", reason: reason)
+        case .local:
             return AsyncThrowingStream { continuation in
                 Task {
                     do {
@@ -1081,99 +923,6 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
                     }
                 }
             }
-        }
-        // Capture actor-isolated values before entering the Task, so the Task
-        // can run detached (off MainActor) and freely use URLSession.bytes without
-        // risking a deadlock on the main actor while waiting for streaming data.
-        let capturedSession = session
-        let capturedAuthTokenProvider = authTokenProvider
-        let chatEndpoint = Self.chatEndpoint
-
-        return AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                do {
-                    let token = try await capturedAuthTokenProvider()
-
-                    var urlRequest = URLRequest(url: chatEndpoint)
-                    urlRequest.httpMethod = "POST"
-                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    urlRequest.httpBody = try JSONEncoder().encode(request)
-
-                    let (bytes, response) = try await capturedSession.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse else {
-                        throw ReflectionAPIError.malformedResponse
-                    }
-
-                    if http.statusCode != 200 {
-                        // Non-streaming error body. Read fully then throw.
-                        var data = Data()
-                        for try await byte in bytes {
-                            data.append(byte)
-                        }
-                        let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: data)
-                        throw ReflectionAPIError.http(status: http.statusCode, body: parsed)
-                    }
-
-                    var parser = SSEParser()
-                    var lineBuffer: [UInt8] = []
-                    for try await byte in bytes {
-                        if byte == UInt8(ascii: "\n") {
-                            let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                            lineBuffer.removeAll(keepingCapacity: true)
-                            for frame in parser.feedLines([line]) {
-                                try Self.handle(frame: frame, continuation: continuation)
-                            }
-                        } else {
-                            lineBuffer.append(byte)
-                        }
-                    }
-                    // Flush leftover bytes (no trailing newline).
-                    if !lineBuffer.isEmpty {
-                        let line = String(bytes: lineBuffer, encoding: .utf8) ?? ""
-                        for frame in parser.feedLines([line]) {
-                            try Self.handle(frame: frame, continuation: continuation)
-                        }
-                    }
-                    // Flush any final frame (server should always end with blank line, but be safe).
-                    for frame in parser.feedLines([""]) {
-                        try Self.handle(frame: frame, continuation: continuation)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private static func handle(
-        frame: SSEFrame,
-        continuation: AsyncThrowingStream<ChatStreamEvent, Error>.Continuation
-    ) throws {
-        guard let payload = frame.data.data(using: .utf8) else { return }
-        switch frame.event {
-        case "delta":
-            struct DeltaPayload: Codable { let text: String }
-            if let d = try? JSONDecoder().decode(DeltaPayload.self, from: payload) {
-                continuation.yield(.delta(d.text))
-            }
-        case "done":
-            struct DonePayload: Codable {
-                let model: String
-                let cacheHit: Bool
-                enum CodingKeys: String, CodingKey { case model; case cacheHit = "cache_hit" }
-            }
-            if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
-                continuation.yield(.done(model: d.model, cacheHit: d.cacheHit))
-            }
-        case "error":
-            let parsed = try? JSONDecoder().decode(SummarizeTurnError.self, from: payload)
-            throw ReflectionAPIError.http(status: 502, body: parsed)
-        default:
-            break
         }
     }
 

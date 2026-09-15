@@ -27,5 +27,9 @@ final class BlockReasonTests: XCTestCase {
         // began with a small letter. The assertion is about the WORD being there, not its case.
         XCTAssertTrue(BlockReason.claudeCodeMissing.founderText.lowercased().contains("install"))
         XCTAssertTrue(BlockReason.noFolderLinked.founderText.lowercased().contains("folder"))
+        // `sidecarMissing` is the one that read as a bare statement of fact — true, and
+        // useless to the founder, who cannot run the build script that produces the bundle.
+        // What she can do is reinstall, so the copy has to say so.
+        XCTAssertTrue(BlockReason.sidecarMissing.founderText.lowercased().contains("reinstall"))
     }
 }

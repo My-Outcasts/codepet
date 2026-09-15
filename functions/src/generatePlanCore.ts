@@ -8,7 +8,11 @@
  * transports.
  */
 
-import { PlanTier } from "./entitlements";
+// The tier vocabulary itself, declared here rather than imported from the hosted
+// `entitlements.ts`, which went with the AI handlers. `applyTier` is bundled into the
+// app by build-sidecar.sh, so it must not reach back into hosted-only code; the local
+// path has no entitlement document to read and always answers "full".
+export type PlanTier = "preview" | "full";
 import { NarrativeSummaryInput } from "./generateGuidanceCore";
 
 // MARK: - Plan-specific types

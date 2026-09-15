@@ -1,6 +1,6 @@
 import { newBlackboard, recordPosition, recordUsage } from "../company/blackboard";
 import { AgentPosition, FounderContext } from "../company/types";
-import { AGENT_MODEL, MODEL_PRICING } from "../anthropic";
+import { AGENT_MODEL, MODEL_PRICING } from "../anthropicCore";
 
 const founder: FounderContext = {
   profile: "Solo technical founder.",

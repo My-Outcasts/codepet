@@ -1,4 +1,4 @@
-import { buildUserMessage, NARRATIVE_TOOL, SYSTEM_PROMPT } from "../anthropic";
+import { buildUserMessage, NARRATIVE_TOOL, SYSTEM_PROMPT } from "../anthropicCore";
 
 describe("anthropic prompt builders", () => {
   test("buildUserMessage includes prompt and events", () => {

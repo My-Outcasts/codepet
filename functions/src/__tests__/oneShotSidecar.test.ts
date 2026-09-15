@@ -7,8 +7,8 @@ import {
   schemaInstruction,
 } from "../local/oneShotOps";
 import { claudeArgs, renderPrompt } from "../local/oneShotSidecar";
-import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBrief";
-import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBrief";
+import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBriefCore";
+import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBriefCore";
 import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
 import { deliverableTool, buildRunTaskPrompt } from "../runTaskCore";
 import {

@@ -4,7 +4,7 @@ import {
   runIndependentPass
 } from "../company/independentPass";
 import { AgentId, FounderContext, TokenUsage } from "../company/types";
-import { AGENT_MODEL } from "../anthropic";
+import { AGENT_MODEL } from "../anthropicCore";
 import { POSITION_EFFORT } from "../company/router";
 
 const founder: FounderContext = {

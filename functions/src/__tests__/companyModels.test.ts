@@ -1,4 +1,4 @@
-import { ROUTER_MODEL, AGENT_MODEL, SYNTHESIS_MODEL, MODEL_PRICING } from "../anthropic";
+import { ROUTER_MODEL, AGENT_MODEL, SYNTHESIS_MODEL, MODEL_PRICING } from "../anthropicCore";
 
 describe("virtual company model tiering", () => {
   test("router uses the cheapest tier", () => {

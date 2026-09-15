@@ -1,4 +1,4 @@
-import { validateRunPayload } from "../company/virtualCompany";
+import { validateRunPayload } from "../company/orchestrate";
 
 describe("validateRunPayload", () => {
   const valid = {

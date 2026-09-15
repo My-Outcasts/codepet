@@ -1,6 +1,6 @@
 import { AGENT_DEFS, composeAgentSystem } from "../company/registry";
 import { ALL_AGENTS, FounderContext, DEPARTMENT_AGENTS } from "../company/types";
-import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropic";
+import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropicCore";
 
 const founder: FounderContext = {
   profile: "Solo technical founder, one prior product that plateaued at 200 users.",

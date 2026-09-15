@@ -1,4 +1,4 @@
-import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropic";
+import { AGENT_MODEL, SYNTHESIS_MODEL } from "../anthropicCore";
 import { buildSharedPrefix } from "./preamble";
 import { AgentId, FounderContext } from "./types";
 

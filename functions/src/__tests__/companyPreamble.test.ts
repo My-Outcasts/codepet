@@ -4,7 +4,7 @@ import {
   buildSharedPrefix,
   estimateTokens
 } from "../company/preamble";
-import { MODEL_PRICING, AGENT_MODEL } from "../anthropic";
+import { MODEL_PRICING, AGENT_MODEL } from "../anthropicCore";
 import { FounderContext } from "../company/types";
 
 const founder: FounderContext = {

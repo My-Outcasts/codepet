@@ -1,4 +1,4 @@
-import { MODEL_PRICING } from "../anthropic";
+import { MODEL_PRICING } from "../anthropicCore";
 import { AgentId, AgentPosition, Blackboard, FounderContext, TokenUsage } from "./types";
 
 export function newBlackboard(args: {

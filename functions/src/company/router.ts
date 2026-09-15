@@ -1,4 +1,4 @@
-import { Effort, ROUTER_MODEL } from "../anthropic";
+import { Effort, ROUTER_MODEL } from "../anthropicCore";
 import { composeAgentSystem, SystemBlock } from "./registry";
 import {
   AgentId,

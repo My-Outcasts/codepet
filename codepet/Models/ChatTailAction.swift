@@ -30,7 +30,7 @@ enum ChatTailAction: Equatable {
     /// would have been quietly answered by the Cloud Function, spending the API key they
     /// had just said should not be spent. `ChatTransportRouter` refuses that routing, and
     /// without this case the refusal was undone one layer up, in the tail.
-    case stop(reason: String)
+    case stop(reason: BlockReason)
 
     /// Which promise the lead-in is allowed to make. Only a run is "putting that
     /// together now": that one line used to be written for EVERY textless reply, so a
@@ -66,7 +66,7 @@ enum ChatTailAction: Equatable {
                        streamError: Error? = nil) -> ChatTailAction {
         // Checked BEFORE the `.fallback` rule below, because that rule is precisely what
         // this must prevent.
-        if case .localUnavailable(let reason)? = streamError as? CompanyChatStreamError {
+        if case .blocked(let reason)? = streamError as? CompanyChatStreamError {
             return .stop(reason: reason)
         }
         if streamThrew || !receivedDone { return .fallback }

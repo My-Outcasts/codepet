@@ -1870,7 +1870,7 @@ final class CompanyStore: ObservableObject {
             // Claude plan; answering from the Cloud Function instead would spend the key
             // that grant exists to stop — so the turn ends here, saying why.
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = Self.localUnavailableCopy(reason, language: language)
+                chatMessages[i].text = language == .vi ? reason.founderTextVi : reason.founderText
             }
         case .none:
             break
@@ -2297,19 +2297,6 @@ final class CompanyStore: ObservableObject {
     /// says only what the action it belongs to actually delivers: the chip below it opens
     /// a place or offers a switch, and neither is work being produced. "On it — putting
     /// that together now." is reserved for the one case where something IS being made.
-    /// What the founder reads when they granted their own Claude plan and this machine
-    /// cannot honour it.
-    ///
-    /// Names the cause, and says the one thing that stops it reading as a bug in Codepet:
-    /// their grant is why nothing was charged elsewhere. Points at the switch rather than
-    /// at a support page, because the switch is the fix — turning it off restores the
-    /// cloud path immediately.
-    static func localUnavailableCopy(_ reason: String, language: AppLanguage) -> String {
-        language == .vi
-            ? "\(reason)\n\nBạn đã cho Codepet dùng gói Claude của mình, nên mình không tự gọi sang đường trả phí. Mở Cài đặt → Claude Code để kiểm tra, hoặc tắt công tắc đó nếu muốn dùng lại đường cũ."
-            : "\(reason)\n\nYou've set Codepet to use your own Claude plan, so I didn't quietly fall back to the paid path. Open Settings → Claude Code to check it, or turn that switch off to go back to the old route."
-    }
-
     private static func leadInCopy(_ kind: ChatTailAction.LeadIn, language: AppLanguage) -> String {
         let vi = language == .vi
         switch kind {

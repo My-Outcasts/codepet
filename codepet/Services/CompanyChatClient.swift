@@ -378,11 +378,14 @@ struct CompanyChatStreamErrorBody: Codable, Equatable {
 /// Typed error for `CompanyChatClient.sendStream`, mirroring `ReflectionAPIError`.
 enum CompanyChatStreamError: Error, Equatable {
     case notSignedIn
-    /// The founder granted Codepet their Claude plan, and this machine cannot honour it.
-    /// Its own case because the honest response is NOT to try the cloud — that would spend
-    /// an API key they had just said should not be spent — so this must be tellable apart
-    /// from every failure where a retry makes sense.
-    case localUnavailable(String)
+    /// The turn cannot run on this Mac, and why. Its own case because the honest response is
+    /// NOT to retry on the hosted path: that path spends an API key Codepet no longer holds,
+    /// and a founder who granted their own plan said not to spend one anyway. So this must be
+    /// tellable apart from every failure where a retry makes sense.
+    ///
+    /// Carries `BlockReason` rather than a string so the chat tail and the run card cannot
+    /// describe the same blocker in different words.
+    case blocked(BlockReason)
     case http(status: Int, body: CompanyChatStreamErrorBody?)
     case malformedResponse
 }

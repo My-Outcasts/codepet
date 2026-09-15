@@ -12,6 +12,7 @@ import {
   parseEnabledSkills,
   buildSkillsBlock,
   WEB_SEARCH_TOOL,
+  resolveActions,
 } from "../companyChatCore";
 
 describe("companionFor", () => {
@@ -349,5 +350,120 @@ describe("WEB_SEARCH_TOOL", () => {
   it("caps searches per request so one turn cannot outspend a day of chat", () => {
     expect(WEB_SEARCH_TOOL.max_uses).toBeGreaterThan(0);
     expect(WEB_SEARCH_TOOL.max_uses).toBeLessThanOrEqual(5);
+  });
+});
+
+/**
+ * `resolveActions` is the one place the mutual exclusion between the client actions is
+ * decided, and it runs in the sidecar bundle shipped inside the app (chatSidecar.ts calls
+ * it with the same lists `buildChatRequest` prompted with). The individual validators are
+ * asserted above in isolation; what is asserted HERE is the chain between them —
+ * run_task beats navigate beats setup, complete_task excludes add_task, and remember_fact
+ * is orthogonal to all of it. Deleting a `!runTaskId` guard has to turn one of these red.
+ *
+ * Ported from the deleted `companyChat.test.ts` (9051460), which asserted these same
+ * behaviours through the now-removed HTTP handler: cases at lines 517, 686, 710, 729, 748.
+ */
+describe("resolveActions — the precedence chain", () => {
+  const runnable = [{ id: "t1", title: "Draft pricing page" }];
+  const envSetup = [{ category: "skills" as const, name: "Code Review" }];
+  const openTasks = [{ id: "o1", title: "Call the bank" }];
+
+  // companyChat.test.ts:517 — "run_task_id stays null when the model's tool_use
+  // references a task not in runnable"
+  it("leaves runTaskId null when run_task names a task that is not runnable", () => {
+    const r = resolveActions(
+      [{ name: "run_task", input: { task_id: "made-up" } }],
+      runnable,
+      [],
+      []
+    );
+    expect(r.runTaskId).toBeNull();
+  });
+
+  // companyChat.test.ts:686 — "remember_fact is orthogonal — it co-occurs with run_task
+  // in the same turn"
+  it("resolves remember_fact alongside run_task — it is orthogonal, not excluded", () => {
+    const r = resolveActions(
+      [
+        { name: "run_task", input: { task_id: "t1" } },
+        {
+          name: "remember_fact",
+          input: { facts: [{ topic: "goal", statement: "Ship the pricing page this week." }] },
+        },
+      ],
+      runnable,
+      [],
+      []
+    );
+    expect(r.runTaskId).toBe("t1");
+    expect(r.remember).toEqual([{ topic: "goal", statement: "Ship the pricing page this week." }]);
+  });
+
+  // companyChat.test.ts:710 — "mutual exclusion: run_task wins over navigate when both
+  // are somehow present"
+  it("run_task wins over navigate when both are present", () => {
+    const r = resolveActions(
+      [
+        { name: "run_task", input: { task_id: "t1" } },
+        { name: "navigate", input: { destination: "roadmap" } },
+      ],
+      runnable,
+      [],
+      []
+    );
+    expect(r.runTaskId).toBe("t1");
+    expect(r.nav).toBeNull();
+  });
+
+  // companyChat.test.ts:729 — "mutual exclusion: navigate wins over setup_capability when
+  // run_task didn't fire"
+  it("navigate wins over setup_capability when run_task did not fire", () => {
+    const r = resolveActions(
+      [
+        { name: "navigate", input: { destination: "library" } },
+        { name: "setup_capability", input: { category: "skills", name: "Code Review" } },
+      ],
+      [],
+      envSetup,
+      []
+    );
+    expect(r.nav).toEqual({ destination: "library" });
+    expect(r.setup).toBeNull();
+  });
+
+  // companyChat.test.ts:748 — "falls through to setup_capability when run_task fired but
+  // was hallucinated (invalid)"
+  it("falls through to setup_capability when run_task fired but was hallucinated", () => {
+    const r = resolveActions(
+      [
+        { name: "run_task", input: { task_id: "made-up" } },
+        { name: "setup_capability", input: { category: "skills", name: "Code Review" } },
+      ],
+      runnable,
+      envSetup,
+      []
+    );
+    expect(r.runTaskId).toBeNull();
+    expect(r.setup).toEqual({ category: "skills", name: "Code Review" });
+  });
+
+  // Not one of the five recovered cases — the other half of the chain named in the
+  // review. The two roadmap verbs are independent of run/nav/setup but exclude EACH
+  // OTHER, and nothing asserted that either.
+  it("complete_task excludes add_task, and both are independent of run_task", () => {
+    const r = resolveActions(
+      [
+        { name: "run_task", input: { task_id: "t1" } },
+        { name: "complete_task", input: { task_id: "o1" } },
+        { name: "add_task", input: { title: "Write the launch email" } },
+      ],
+      runnable,
+      [],
+      openTasks
+    );
+    expect(r.runTaskId).toBe("t1");
+    expect(r.completeTaskId).toBe("o1");
+    expect(r.addTask).toBeNull();
   });
 });

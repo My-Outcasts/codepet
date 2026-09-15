@@ -93,6 +93,43 @@ describe("buildChatRequest", () => {
     expect(built.envSetup).toEqual([{ category: "skills", name: "web-research" }]);
   });
 
+  /**
+   * The founder's tone setting (Settings → AI) reaches the model through this builder
+   * and nowhere else. Two things must hold, and neither is visible from `styleBlock`
+   * tested in isolation: the fragment must stay OUT of the cached static block (a
+   * per-founder string in the cached prefix shatters cache sharing for everyone), and
+   * it must HEAD the volatile block so it is read as an override of the persona's
+   * "No hype, no filler, no emoji" clause rather than a contradiction of it.
+   *
+   * Ported from the deleted `companyChat.test.ts` (9051460) cases at lines 426 and 444,
+   * which asserted this wiring through the now-removed HTTP handler.
+   */
+  it("style_fragment lands at the head of the volatile block, after the persona, before the company", () => {
+    const { systemBlocks } = buildChatRequest({
+      ...base,
+      context: "Project: Acme.",
+      style_fragment: "Never use emoji.",
+    });
+    const [staticBlock, volatileBlock] = systemBlocks;
+    // Static (cached) block keeps the persona sentence and gains nothing.
+    expect(staticBlock.text).toContain("no emoji");
+    expect(staticBlock.text).not.toContain("Never use emoji.");
+    // Volatile block: style first, company grounding after it.
+    expect(
+      volatileBlock.text.startsWith("\n\nHow the founder wants you to write:\nNever use emoji.")
+    ).toBe(true);
+    expect(volatileBlock.text.indexOf("How the founder wants you to write:")).toBeLessThan(
+      volatileBlock.text.indexOf("The founder's company:")
+    );
+  });
+
+  it("omitting style_fragment leaves the system prompt byte-for-byte unchanged", () => {
+    const { systemBlocks } = buildChatRequest({ ...base, context: "Project: Acme." });
+    const volatileBlock = systemBlocks[1];
+    expect(volatileBlock.text).not.toContain("How the founder wants you to write");
+    expect(volatileBlock.text.startsWith("\n\nThe founder's company:")).toBe(true);
+  });
+
   it("survives a body with nothing in it", () => {
     // Every field is client-supplied and the body is applied with an `as` cast, so the
     // builder must not throw on an empty object — the handler 400s on a missing

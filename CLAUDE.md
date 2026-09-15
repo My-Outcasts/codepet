@@ -59,8 +59,9 @@ The feature that convenes departments to argue a decision. Backend in `functions
 The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function
 declaring `ANTHROPIC_API_KEY` answers 401 at runtime. **Every one of them now has a local
 path** — all seventeen entries in `CloudAIBlock.blockedPaths`, company layer and learning
-layer both. The Cloud Functions are still deployed and still the default for a founder who has
-not granted their plan; they simply cannot answer until a key exists again.
+layer both. The Cloud Functions are still deployed and now inert: nothing in the app routes to
+them any more, and a founder who has not granted their plan gets `.blocked(.notGranted)` — a
+reason on screen — rather than a silent fall back to the cloud.
 
 - **`CloudAIBlock.blockedPaths` (`codepet/Services/CloudAIBlock.swift`) is the checklist** of
   every endpoint that spends the key. Derive from it, not from memory of which features feel

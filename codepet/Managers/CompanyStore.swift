@@ -445,19 +445,14 @@ final class CompanyStore: ObservableObject {
 
     var isSettingsOpen: Bool { settingsSection != nil }
 
-    /// Open settings, optionally on a specific section (chat cards deep-link this way).
-    /// Point `CloudAIBlock`'s mirror at this account's setting.
+    /// Point `LocalTransportRouter`'s mirror at this account.
     ///
-    /// The mirror exists because `URLProtocol.canInit` is a class function and cannot reach
-    /// the signed-in company, so someone who knows it has to say. Called on load and on
-    /// account switch — miss either and a founder who turned the key off would find it
-    /// quietly back on next launch.
+    /// The mirror exists because `LocalTransportRouter` cannot reach the signed-in company
+    /// itself — its callers are onboarding models and API clients that take no company id —
+    /// so whoever knows it has to say. Called on load and on account switch — miss either
+    /// and a founder's grant silently stops routing the non-streaming ops onto their own
+    /// plan.
     func applyCloudAIBlock() {
-        CloudAIBlock.apply(companyId: companyId)
-        // Same call site, same reason: `LocalTransportRouter` cannot reach the signed-in
-        // company either — its callers are onboarding models and API clients that take no
-        // company id — so whoever knows it has to say. Miss this and a founder's grant
-        // silently stops routing the non-streaming ops onto their own plan.
         LocalTransportRouter.apply(companyId: companyId)
     }
 
@@ -503,8 +498,9 @@ final class CompanyStore: ObservableObject {
         // one decides which account's bindings resolve, and a report written while the map
         // still points at the previous founder would carry their project ids.
         identityMap.account = companyId
-        // Before anything can make a request for this account. A founder who turned the key
-        // off must not find it back on because the mirror was still pointing at nobody.
+        // Before anything can make a request for this account. A founder who granted their
+        // plan must not find it silently ungranted because the mirror was still pointing at
+        // nobody.
         applyCloudAIBlock()
         claudeModel = modelPreference.model(companyId)
         claudeEffort = modelPreference.effort(companyId)
@@ -3524,7 +3520,7 @@ final class CompanyStore: ObservableObject {
         hydrationToken &+= 1
         companyId = nil
         // Signed out: the mirror must stop reflecting the previous account, or their
-        // refusal would silently govern whoever signs in next.
+        // grant would silently govern whoever signs in next.
         applyCloudAIBlock()
         company = .empty
         // Read off the company we just reset to (so it can't drift from what `reset()`

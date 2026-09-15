@@ -3165,8 +3165,14 @@ final class CompanyStore: ObservableObject {
     /// speaking when she has said nothing. `sendChat` would have to invent a founder message to
     /// reply to, and inventing her words is the one thing this design must not do.
     ///
-    /// `CompanyChatClient.send` returns a reply without touching the transcript, so the
-    /// instruction never appears and only the answer does.
+    /// Goes through `chatSender` — the same seam `sendChat`'s non-streaming retry uses,
+    /// defaulted to `ChatTransportRouter.send` — rather than `CompanyChatClient.send`
+    /// directly. It used to call the client directly, which skipped the router: a founder
+    /// who had granted her Claude plan still had this one call go straight to the (now
+    /// keyless, 401-answering) Cloud Function, `reply` came back nil every time, and the
+    /// demo's live line was dead for exactly the founders it was built for. `chatSender`
+    /// returns a reply without touching the transcript, so the instruction never appears
+    /// and only the answer does.
     ///
     /// **The instruction is how the chain survives.** A generated closing line cannot be relied
     /// on to hand off to the next department, so the caller tells it to — that is cheaper and
@@ -3195,7 +3201,7 @@ final class CompanyStore: ObservableObject {
                                          query: instruction, focusDepartment: nil,
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)
-        let reply = await CompanyChatClient.send(req)
+        let reply = await chatSender(req)
         // Nil AND empty both count as "did not come back": `CompanyChatClient.send` already
         // maps an empty reply to nil, but a future transport need not, and an empty bubble is
         // the one outcome worse than the authored line.

@@ -855,6 +855,36 @@ gone — find out which before going on. Then delete exactly those paths, and re
 **Do not delete any `*Core.ts` file.** The `find` above cannot match one, because no core file is
 named after an export — that is the point of the naming.
 
+### Three corrections found at pre-flight — read before deleting anything
+
+**1. `chatSession` has no file.** It is declared inline in `index.ts` (~line 63). Removing its
+`export const` block is the whole job; the `find` above reports it MISSING, and that is correct.
+
+**2. `virtualCompanyRun`'s handler is `company/virtualCompany.ts`,** not a file named after the
+export. Delete that ONE file — it is genuinely the HTTP handler, importing `@anthropic-ai/sdk`,
+`verifyAuth`, `checkAndIncrement` and an express `Response`.
+
+**3. THE REST OF `company/` MUST SURVIVE, and the `*Core.ts` rule does not protect it.**
+`local/vcSidecar.ts` imports `../company/router` and `../company/orchestrate`, so esbuild inlines
+that whole graph into the app's meeting bundle. Those files carry ordinary names — `router.ts`,
+`orchestrate.ts`, `registry.ts`, `killSwitch.ts`, `blackboardStore.ts`, `types.ts` and the rest —
+so the naming convention that makes `*Core.ts` self-evidently local gives no warning here at all.
+
+Deleting `company/` wholesale would take the virtual-company engine off the local path while
+every test still passed, because the sidecar bundles are gitignored and nothing in `jest` builds
+them.
+
+**What each sidecar needs, measured rather than assumed:**
+
+| Bundle | Imports |
+| --- | --- |
+| `oneShotSidecar.ts` | `./claudeCli`, `./oneShotOps` (which pulls every `*Core.ts`) |
+| `vcSidecar.ts` | `../company/orchestrate`, `../company/router`, `./claudeCli`, `./oneShotOps` |
+| `chatSidecar.ts` | `../companyChatCore`, `./mcpToolServer`, `./transcript` |
+
+Delete only `company/virtualCompany.ts` from that directory. If `tsc` then flags something in
+`company/` as unused, LEAVE IT — unused by the hosted path is not unused by the bundle.
+
 Then remove the matching `export const` blocks and their `import` lines from `functions/src/index.ts`. **Do not delete any `*Core.ts` file.**
 
 - [ ] **Step 4: Verify the builders survived and the suite is green**

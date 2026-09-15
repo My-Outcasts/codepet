@@ -1047,6 +1047,15 @@ final class CompanyStore: ObservableObject {
     /// Falling back to local when no repo is linked would be exactly that
     /// silent routing. Instead the cloud run refuses — cheaply, before the
     /// balance is read — and the connect-or-create sheet opens.
+    ///
+    /// **With no folder linked, the cloud agent is no longer the refusal.** It cannot refuse
+    /// cheaply or otherwise: `engStartRun` spends the Anthropic key deleted on 26 Aug 2026 and
+    /// answers 401, so a founder with nothing linked got a network error where a reason
+    /// belonged. `startCodeRun` with a nil link stages `.noProject`, whose card says what is
+    /// missing and carries the button that supplies it — the same refusal, from the path that
+    /// can still give it. This is NOT the silent routing above: nothing runs on either machine,
+    /// so no bill moves; the founder is asked for a folder.
+    ///
     /// **Since the grant exists, the default is conditional.** A founder who said Codepet may
     /// spend their Claude plan, and has a folder linked, gets their own agent — see
     /// `buildRunsOnFoundersAgent`. Everyone else keeps the cloud default described above.
@@ -1068,7 +1077,12 @@ final class CompanyStore: ObservableObject {
            let notice = AttachmentBudget.buildUnsupportedMessage(attachments.map(\.filename), language) {
             chatMessages.append(CopilotMessage(role: .companion, text: notice))
         }
-        if buildRunsOnFoundersAgent {
+        // One state still reaches the cloud agent: a folder IS linked and the founder has not
+        // granted their Claude plan. Sending that founder to the local runner would spend the
+        // plan they were never asked about — `ClaudeCodeAuthorisation` is the one switch — so
+        // this arm is deliberately left alone here and belongs with the grant work, not with
+        // the folder gate.
+        if buildRunsOnFoundersAgent || activeProjectLink == nil {
             startCodeRun(ask: ask)
         } else {
             startEngineeringRun(ask: ask)
@@ -1082,7 +1096,9 @@ final class CompanyStore: ObservableObject {
     /// directly would pick a machine behind the founder's back — same button,
     /// different bill."* It was picking one, and picking it wrong — always local, so
     /// a founder whose Developer was awake on a CLOUD repo with no folder linked
-    /// typed a task and got `.noProject` staring back.
+    /// typed a task and got `.noProject` staring back. (That outcome is now the
+    /// deliberate one — see below — but it was reached by a view making a decision that
+    /// was never its to make, which is what the guard protects and still protects.)
     ///
     /// Not routed through `startBuild`, which is cloud-first with a "run it locally
     /// instead" escape on the resulting card. That shape belongs to the dock, where a
@@ -1091,12 +1107,21 @@ final class CompanyStore: ObservableObject {
     /// sending a local session to the cloud would contradict the chip above the
     /// composer and bill for it. The decision still lives here rather than in the
     /// view, which is what the guard is actually protecting.
+    ///
+    /// **The no-folder branch no longer goes to the cloud agent.** It was the last call that
+    /// reached it by design, on the reasoning that a Developer session on a cloud repo had
+    /// already declared its machine. That reasoning assumed the machine could answer;
+    /// `engStartRun` spends the Anthropic key deleted on 26 Aug 2026 and 401s, so what the
+    /// founder actually got was an unexplained failure in place of the one fact that matters —
+    /// no folder is linked. `startCodeRun` stages `.noProject` for exactly that, so the whole
+    /// body is now one call: with a link it runs, without one it says why not.
+    ///
+    /// Still a function, not a rename of `startCodeRun` at the call site: `DeveloperWorkPane`
+    /// must not name a machine (`EngineeringReachabilityTests
+    /// .testNothingBypassesTheDestinationDecision` fails it for that), and this is where the
+    /// decision is recorded whatever it becomes next.
     func startSessionBuild(ask: String) {
-        if activeProjectLink != nil {
-            startCodeRun(ask: ask)
-        } else {
-            startEngineeringRun(ask: ask)
-        }
+        startCodeRun(ask: ask)
     }
 
     /// Whether "run this on my machine instead" is a real offer.

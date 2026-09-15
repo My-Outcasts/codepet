@@ -233,7 +233,7 @@ enum BlockReason: Equatable {
         case .claudeCodeMissing:
             return "Codepet runs on Claude Code. Install it, then try again."
         case .sidecarMissing:
-            return "Codepet can't reach its local runner on this Mac."
+            return "Codepet can't reach its local runner on this Mac. Reinstalling Codepet should restore it."
         case .noFolderLinked:
             return "Link a project folder to this session before building."
         }
@@ -246,7 +246,7 @@ enum BlockReason: Equatable {
         case .claudeCodeMissing:
             return "Codepet chạy trên Claude Code. Hãy cài đặt rồi thử lại."
         case .sidecarMissing:
-            return "Codepet không tìm thấy trình chạy cục bộ trên máy này."
+            return "Codepet không tìm thấy trình chạy cục bộ trên máy này. Cài đặt lại Codepet sẽ khôi phục nó."
         case .noFolderLinked:
             return "Hãy liên kết thư mục dự án cho phiên này trước khi build."
         }

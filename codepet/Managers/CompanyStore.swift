@@ -1453,7 +1453,7 @@ final class CompanyStore: ObservableObject {
     /// `startBuild` is documented to avoid.
     var buildRunsOnFoundersAgent: Bool {
         guard let companyId else { return false }
-        return localBuildAvailable && claudeAuthorisation.isAuthorised(companyId)
+        return localBuildAvailable && claudeAuthorisation.isAuthorised(.claudeCode, companyId)
     }
 
     let claudeAuthorisation: ClaudeCodeAuthorisation

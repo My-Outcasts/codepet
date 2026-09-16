@@ -220,7 +220,7 @@ final class BuildDestinationTests: XCTestCase {
             loader: { _ in state }, saver: { _, _ in true },
             identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"),
             claudeAuthorisation: ClaudeCodeAuthorisation(
-                isAuthorised: { $0 == granted }, setAuthorised: { _, _ in }))
+                isAuthorised: { $1 == granted }, setAuthorised: { _, _, _ in }))
     }
 
     /// The one state that still reaches the cloud coding agent: a folder IS linked and the

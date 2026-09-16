@@ -64,7 +64,7 @@ enum ChatTransportRouter {
         // No company id means no grant can exist. That used to route to the Cloud Function;
         // there is nothing there to route to now, so it blocks on the grant it lacks.
         guard let companyId, !companyId.isEmpty else { return .blocked(.notGranted) }
-        guard authorisation.isAuthorised(companyId) else { return .blocked(.notGranted) }
+        guard authorisation.isAuthorised(.claudeCode, companyId) else { return .blocked(.notGranted) }
         guard sidecarAvailable() else { return .blocked(.sidecarMissing) }
         // Unconditional, and it is the whole of chat's provider story: chat has one runner.
         // See `Transport.local` above for why the value is carried at all.

@@ -174,7 +174,7 @@ struct ClaudeCodePanel: View {
                     get: { granted },
                     set: { on in
                         granted = on
-                        authorisation.setAuthorised(companyId, on)
+                        authorisation.setAuthorised(.claudeCode, companyId, on)
                         Task { await refresh() }
                     }
                 ))
@@ -297,14 +297,14 @@ struct ClaudeCodePanel: View {
         // Reload the switch from storage, so the rendered position is always what was
         // actually persisted — including after an account switch.
         if let companyId {
-            granted = authorisation.isAuthorised(companyId)
+            granted = authorisation.isAuthorised(.claudeCode, companyId)
         } else {
             granted = false
         }
         probing = true
         // No company id means no grant can exist yet, so the probe is told `false` rather
         // than guessing — the panel then shows the machine facts and offers no toggle.
-        let granted = companyId.map { authorisation.isAuthorised($0) } ?? false
+        let granted = companyId.map { authorisation.isAuthorised(.claudeCode, $0) } ?? false
         status = await ClaudeCodeEnvironment.probe(authorised: granted)
         probing = false
         copied = false

@@ -5,20 +5,33 @@ import XCTest
 /// here is a guard on that, not on a rendering detail.
 final class ChatTransportRouterTests: XCTestCase {
 
+    /// Claude Code grants. Named for the plan it spends, because the grant is now per
+    /// PROVIDER — a founder who granted this one was never asked about Codex.
     private var granted: Set<String> = []
+    /// Codex grants, kept separate so a case can hold one WITHOUT the other. A single table
+    /// would make "a Codex grant does not route to Claude Code" unprovable here.
+    private var codexGranted: Set<String> = []
 
     /// A grant table in memory, so no case touches the real defaults domain or leaks a
     /// grant into the next one.
     private var authorisation: ClaudeCodeAuthorisation {
         ClaudeCodeAuthorisation(
-            isAuthorised: { [self] in granted.contains($0) },
-            setAuthorised: { [self] id, on in
-                if on { granted.insert(id) } else { granted.remove(id) }
+            isAuthorised: { [self] provider, id in
+                switch provider {
+                case .claudeCode: return granted.contains(id)
+                case .codex:      return codexGranted.contains(id)
+                }
+            },
+            setAuthorised: { [self] provider, id, on in
+                switch provider {
+                case .claudeCode: if on { granted.insert(id) } else { granted.remove(id) }
+                case .codex:      if on { codexGranted.insert(id) } else { codexGranted.remove(id) }
+                }
             }
         )
     }
 
-    override func setUp() { super.setUp(); granted = [] }
+    override func setUp() { super.setUp(); granted = []; codexGranted = [] }
 
     private func transport(
         companyId: String?,
@@ -33,6 +46,15 @@ final class ChatTransportRouterTests: XCTestCase {
     /// A founder who has never opened the Claude Code panel used to get the Cloud Function.
     /// There is nothing behind it now, so she is told what to turn on instead of being sent
     /// somewhere that answers 401.
+    /// **A Codex grant is not a Claude grant.** Chat still pins `.claudeCode`; per-provider
+    /// consent exists now, provider selection does not. A founder who granted only Codex has
+    /// said nothing about her Claude plan, so chat blocks exactly as it did before the split.
+    func testACodexGrantAloneDoesNotUnblockChat() {
+        codexGranted.insert("c1")
+        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted),
+                       "a Codex grant was read as permission to spend the Claude plan")
+    }
+
     func testAnUngrantedFounderIsBlockedRatherThanSentToTheCloud() {
         XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted))
     }

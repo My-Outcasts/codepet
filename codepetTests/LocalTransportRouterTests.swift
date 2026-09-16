@@ -9,15 +9,28 @@ import XCTest
 /// deliberately identical in what they decide from the grant.
 final class LocalTransportRouterTests: XCTestCase {
 
+    /// Claude Code grants. Named for the plan it spends, because the grant is now per
+    /// PROVIDER — a founder who granted this one was never asked about Codex.
     private var granted: Set<String> = []
+    /// Codex grants, kept separate so a case can hold one WITHOUT the other. A single table
+    /// would make "a Codex grant does not route to Claude Code" unprovable here.
+    private var codexGranted: Set<String> = []
 
     /// A grant table in memory, so no case touches the real defaults domain or leaks a
     /// grant into the next one.
     private var authorisation: ClaudeCodeAuthorisation {
         ClaudeCodeAuthorisation(
-            isAuthorised: { [self] in granted.contains($0) },
-            setAuthorised: { [self] id, on in
-                if on { granted.insert(id) } else { granted.remove(id) }
+            isAuthorised: { [self] provider, id in
+                switch provider {
+                case .claudeCode: return granted.contains(id)
+                case .codex:      return codexGranted.contains(id)
+                }
+            },
+            setAuthorised: { [self] provider, id, on in
+                switch provider {
+                case .claudeCode: if on { granted.insert(id) } else { granted.remove(id) }
+                case .codex:      if on { codexGranted.insert(id) } else { codexGranted.remove(id) }
+                }
             }
         )
     }
@@ -25,6 +38,7 @@ final class LocalTransportRouterTests: XCTestCase {
     override func setUp() {
         super.setUp()
         granted = []
+        codexGranted = []
         LocalTransportRouter.apply(companyId: nil)
     }
 
@@ -74,6 +88,25 @@ final class LocalTransportRouterTests: XCTestCase {
             XCTAssertEqual(transport(companyId: id), .local(.claudeCode),
                            "\(id) routed to something other than the one grant that exists")
         }
+    }
+
+    /// **A Codex grant alone changes no routing, and that is deliberate.** Per-provider
+    /// consent now EXISTS, but provider SELECTION does not: this router still derives
+    /// `.claudeCode` from the Claude grant and nothing else. A founder who granted only
+    /// Codex has said nothing about her Claude plan, so she is `.notGranted` here — the
+    /// same answer she got before the split, for the same reason.
+    func testACodexGrantAloneDoesNotRouteLocal() {
+        codexGranted.insert("c1")
+        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted),
+                       "a Codex grant was read as permission to spend the Claude plan")
+    }
+
+    /// The mirror: the Claude grant still routes exactly as it did, with no Codex grant
+    /// anywhere. The split must be invisible to a founder who only ever granted Claude.
+    func testAClaudeGrantStillRoutesLocalWithNoCodexGrant() {
+        granted.insert("c1")
+        XCTAssertTrue(codexGranted.isEmpty, "setup sanity: no Codex grant exists")
+        XCTAssertEqual(transport(companyId: "c1"), .local(.claudeCode))
     }
 
     /// One Mac has one Claude Code login, so a grant that was not keyed per company would
@@ -157,7 +190,7 @@ final class LocalTransportRouterTests: XCTestCase {
 
     func testAnUngrantedCompanyIsBlockedRatherThanSentToTheCloud() {
         var auth = ClaudeCodeAuthorisation()
-        auth.isAuthorised = { _ in false }
+        auth.isAuthorised = { _, _ in false }
         let t = LocalTransportRouter.transport(companyId: "c1", authorisation: auth,
                                                sidecarAvailable: { true })
         XCTAssertEqual(t, .blocked(.notGranted))
@@ -165,7 +198,7 @@ final class LocalTransportRouterTests: XCTestCase {
 
     func testAGrantedCompanyWithNoSidecarSaysSo() {
         var auth = ClaudeCodeAuthorisation()
-        auth.isAuthorised = { _ in true }
+        auth.isAuthorised = { _, _ in true }
         let t = LocalTransportRouter.transport(companyId: "c1", authorisation: auth,
                                                sidecarAvailable: { false })
         XCTAssertEqual(t, .blocked(.sidecarMissing))

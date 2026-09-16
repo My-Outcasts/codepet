@@ -25,11 +25,11 @@ final class ClaudeCodeAuthorisationTests: XCTestCase {
 
     private func authorisation() -> ClaudeCodeAuthorisation {
         ClaudeCodeAuthorisation(
-            isAuthorised: { [defaults] in
-                defaults!.bool(forKey: ClaudeCodeAuthorisation.key($0))
+            isAuthorised: { [defaults] provider, companyId in
+                defaults!.bool(forKey: ClaudeCodeAuthorisation.key(provider, companyId))
             },
-            setAuthorised: { [defaults] companyId, on in
-                defaults!.set(on, forKey: ClaudeCodeAuthorisation.key(companyId))
+            setAuthorised: { [defaults] provider, companyId, on in
+                defaults!.set(on, forKey: ClaudeCodeAuthorisation.key(provider, companyId))
             }
         )
     }
@@ -37,20 +37,20 @@ final class ClaudeCodeAuthorisationTests: XCTestCase {
     /// The whole point of the toggle: nothing spends the founder's plan until they
     /// say so. A missing key must read as "not granted", never as "probably fine".
     func testGrantIsOffUntilItIsGiven() {
-        XCTAssertFalse(authorisation().isAuthorised("company-a"))
+        XCTAssertFalse(authorisation().isAuthorised(.claudeCode, "company-a"))
     }
 
     func testGrantRoundTrips() {
         let auth = authorisation()
-        auth.setAuthorised("company-a", true)
-        XCTAssertTrue(auth.isAuthorised("company-a"))
+        auth.setAuthorised(.claudeCode, "company-a", true)
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, "company-a"))
     }
 
     func testGrantCanBeWithdrawn() {
         let auth = authorisation()
-        auth.setAuthorised("company-a", true)
-        auth.setAuthorised("company-a", false)
-        XCTAssertFalse(auth.isAuthorised("company-a"))
+        auth.setAuthorised(.claudeCode, "company-a", true)
+        auth.setAuthorised(.claudeCode, "company-a", false)
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, "company-a"))
     }
 
     /// Keyed per company, not per device — the same reasoning
@@ -60,15 +60,15 @@ final class ClaudeCodeAuthorisationTests: XCTestCase {
     /// would never be asked.
     func testOneFoundersGrantDoesNotAuthoriseAnother() {
         let auth = authorisation()
-        auth.setAuthorised("company-a", true)
-        XCTAssertFalse(auth.isAuthorised("company-b"))
+        auth.setAuthorised(.claudeCode, "company-a", true)
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, "company-b"))
     }
 
     /// The key carries the `cp_` prefix so `AccountDataStore` snapshots it per uid on
     /// an account switch, and the company suffix keeps it correct even if some future
     /// switch path forgets to go through that vault.
     func testKeyIsPrefixedAndScopedToTheCompany() {
-        let key = ClaudeCodeAuthorisation.key("company-a")
+        let key = ClaudeCodeAuthorisation.key(.claudeCode, "company-a")
         XCTAssertTrue(key.hasPrefix("cp_"), "must be swept by AccountDataStore")
         XCTAssertTrue(key.contains("company-a"), "must not be device-global")
     }

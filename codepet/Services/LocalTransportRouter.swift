@@ -116,7 +116,7 @@ enum LocalTransportRouter {
             log.error("transport: blocked — no companyId (mirror unset)")
             return .blocked(.notGranted)
         }
-        guard authorisation.isAuthorised(companyId) else {
+        guard authorisation.isAuthorised(.claudeCode, companyId) else {
             log.error("transport: blocked — companyId=\(companyId, privacy: .public) not granted")
             return .blocked(.notGranted)
         }

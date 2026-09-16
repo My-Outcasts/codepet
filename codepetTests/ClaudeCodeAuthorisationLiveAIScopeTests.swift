@@ -36,14 +36,14 @@ final class ClaudeCodeAuthorisationLiveAIScopeTests: XCTestCase {
         clearPrototypeState()
         // Defensive: these are freshly minted UUIDs, so neither key should exist, but
         // clear explicitly rather than trust that.
-        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(ungranted))
-        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(storedGrant))
+        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(.claudeCode, ungranted))
+        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(.claudeCode, storedGrant))
     }
 
     override func tearDown() {
         clearPrototypeState()
-        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(ungranted))
-        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(storedGrant))
+        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(.claudeCode, ungranted))
+        UserDefaults.standard.removeObject(forKey: ClaudeCodeAuthorisation.key(.claudeCode, storedGrant))
         super.tearDown()
     }
 
@@ -65,9 +65,9 @@ final class ClaudeCodeAuthorisationLiveAIScopeTests: XCTestCase {
 
         let auth = ClaudeCodeAuthorisation()
 
-        XCTAssertTrue(auth.isAuthorised(ContentView.prototypeCompanyId),
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, ContentView.prototypeCompanyId),
                       "the prototype id must still be authorised — this is not a narrowing")
-        XCTAssertTrue(auth.isAuthorised(ungranted),
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, ungranted),
                       "a signed-in founder's real (never granted) uid must ALSO be authorised "
                       + "while prototype mode + liveAI are both on — this is the exact bug")
     }
@@ -81,8 +81,8 @@ final class ClaudeCodeAuthorisationLiveAIScopeTests: XCTestCase {
         XCTAssertFalse(PrototypeMode.isOn, "test setup sanity: prototype mode must be off here")
 
         let auth = ClaudeCodeAuthorisation()
-        XCTAssertFalse(auth.isAuthorised(ContentView.prototypeCompanyId))
-        XCTAssertFalse(auth.isAuthorised(ungranted))
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, ContentView.prototypeCompanyId))
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, ungranted))
     }
 
     /// With `liveAI` off (prototype mode on or not), nothing here grants anything — it falls
@@ -91,20 +91,20 @@ final class ClaudeCodeAuthorisationLiveAIScopeTests: XCTestCase {
         PrototypeMode.store.set(true, forKey: PrototypeMode.key)
         XCTAssertFalse(PrototypeMode.liveAI)
         let auth = ClaudeCodeAuthorisation()
-        XCTAssertFalse(auth.isAuthorised(ContentView.prototypeCompanyId),
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, ContentView.prototypeCompanyId),
                        "the gate's default must be untouched: no flag, no grant")
-        XCTAssertFalse(auth.isAuthorised(ungranted))
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, ungranted))
     }
 
     /// A real company's stored grant is exactly as authoritative with `liveAI` off as on.
     func testStoredGrantForARealCompanyIsUnchangedByLiveAIEitherWay() {
-        UserDefaults.standard.set(true, forKey: ClaudeCodeAuthorisation.key(storedGrant))
+        UserDefaults.standard.set(true, forKey: ClaudeCodeAuthorisation.key(.claudeCode, storedGrant))
         let auth = ClaudeCodeAuthorisation()
 
-        XCTAssertTrue(auth.isAuthorised(storedGrant), "liveAI off: the real grant still holds")
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, storedGrant), "liveAI off: the real grant still holds")
         PrototypeMode.store.set(true, forKey: PrototypeMode.key)
         PrototypeMode.store.set(true, forKey: "CODEPET_LIVE_AI")
-        XCTAssertTrue(auth.isAuthorised(storedGrant), "liveAI on: the real grant still holds, unmodified")
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, storedGrant), "liveAI on: the real grant still holds, unmodified")
     }
 
     // MARK: - The injected-closure seam survives
@@ -115,11 +115,11 @@ final class ClaudeCodeAuthorisationLiveAIScopeTests: XCTestCase {
         PrototypeMode.store.set(true, forKey: PrototypeMode.key)
         PrototypeMode.store.set(true, forKey: "CODEPET_LIVE_AI")
         let auth = ClaudeCodeAuthorisation(
-            isAuthorised: { $0 == "only-this-one" },
-            setAuthorised: { _, _ in }
+            isAuthorised: { $1 == "only-this-one" },
+            setAuthorised: { _, _, _ in }
         )
-        XCTAssertFalse(auth.isAuthorised(ContentView.prototypeCompanyId),
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, ContentView.prototypeCompanyId),
                        "an injected closure must not be bypassed by the default's liveAI branch")
-        XCTAssertTrue(auth.isAuthorised("only-this-one"))
+        XCTAssertTrue(auth.isAuthorised(.claudeCode, "only-this-one"))
     }
 }

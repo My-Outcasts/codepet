@@ -966,8 +966,22 @@ git commit -m "feat: settings reviews and revokes each provider grant"
 ### Task 8: Onboarding checks installation, and nothing more
 
 **Files:**
-- Modify: the CLI step in `codepet/Views/Onboarding/` (find with `grep -rln "CLIStatus\|ClaudeCode" codepet/Views/Onboarding`)
+- Create: `codepet/Views/Onboarding/OnboardingProviderStep.swift`
+- Modify: `codepet/Views/Onboarding/OnboardingView.swift`
 - Test: `codepetTests/OnboardingProviderStepTests.swift` (create)
+
+**There is NO existing CLI step to modify — this creates one.** Phase 1 deferred its onboarding
+gate pending this design, and nothing in `codepet/Views/Onboarding/` references `CLIStatus`,
+`CLIEnvironment`, or `claude` today. An earlier draft of this plan said "modify the CLI step",
+which was wrong.
+
+**Mind the flow's shape.** `OnboardingView` drives the interview with a plain
+`@State private var step = 0` and a `switch` over integer cases (1…6), with each button
+advancing by literal assignment (`step = 2`, `step = 3`, …). Inserting a step in the middle
+renumbers every case and every assignment after it — a large, error-prone diff for a gate that
+does not care where it sits. **Append it instead**, so no existing case number changes. If a
+mid-flow position is genuinely better, say so in the report and leave the renumbering to a
+separate change.
 
 Installation is a fact and can be detected; consent is a decision and needs a reason. Asking a
 founder to let Codepet spend a plan before she has seen it do anything is a bad trade for both

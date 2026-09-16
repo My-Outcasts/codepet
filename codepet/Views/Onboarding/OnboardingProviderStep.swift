@@ -24,6 +24,18 @@ import AppKit
 /// the same reason.
 enum OnboardingProviderStep {
     /// Codepet needs ONE way to run a model, not a preferred one.
+    ///
+    /// **Cannot write a grant, by construction, not by convention.** This is a pure
+    /// static function on a `Set<AIProvider>` — no store parameter, no `ProviderAuthorisation`
+    /// in scope, no global it could reach around its own signature. There is nothing here
+    /// for a "never writes a grant" test to catch: any such test can only assert on a
+    /// `FakeAuthStore` this function never sees, which passes whether or not `passes` is
+    /// even called (this is exactly what shipped once, as `testOnboardingWritesNoGrant` —
+    /// deleted, because a test that cannot fail is worse than no test). The real guard
+    /// against onboarding writing a grant lives at the call sites in `OnboardingView`
+    /// (`attemptFinish`, `recheckProviderAndFinishIfReady`, `refreshProviderStatus`,
+    /// `finish()`): none of them holds a `ProviderAuthorisation`, and `CLIEnvironment.probe`
+    /// is called there with `authorised: false` hardcoded, never read from a store.
     static func passes(installed: Set<AIProvider>) -> Bool { !installed.isEmpty }
 }
 
@@ -124,15 +136,9 @@ struct OnboardingProviderGateView: View {
         }
     }
 
-    /// **Claude Code** — same command as `ClaudeCodePanel`'s install group.
-    /// **Codex** — `brew install codex`, a Homebrew **cask** (verified on a real machine:
-    /// it links to `/opt/homebrew/bin/codex` on Apple silicon). The npm global route
-    /// (`npm install -g @openai/codex`) failed with EACCES on that same machine, so it is
-    /// deliberately not offered as the primary instruction.
+    /// Reads `AIProvider.installCommand` — the one shared copy, so this screen and
+    /// `ClaudeCodePanel` can never drift onto two different install commands.
     private func installCommand(for provider: AIProvider) -> String {
-        switch provider {
-        case .claudeCode: return "curl -fsSL https://claude.ai/install.sh | bash"
-        case .codex:      return "brew install codex"
-        }
+        provider.installCommand
     }
 }

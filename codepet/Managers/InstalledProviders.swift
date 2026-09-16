@@ -18,4 +18,14 @@ final class InstalledProviders {
         }
         installed = found
     }
+
+    /// Updates the cache from `CLIStatus` a caller already probed, instead of running
+    /// `probeInstall` a second time to get the same answer. `OnboardingView`'s
+    /// "Check again" needs the full status (install + auth) per provider regardless —
+    /// `CLIEnvironment.probe` runs `probeInstall` internally on the way to that — so
+    /// calling `refresh()` first, only to re-derive the same install facts a moment
+    /// later, doubled the subprocesses every tap spawned for no different answer.
+    func apply(_ statuses: [AIProvider: CLIStatus]) {
+        installed = Set(statuses.filter { $0.value.install != .missing }.keys)
+    }
 }

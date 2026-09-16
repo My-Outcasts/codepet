@@ -49,8 +49,10 @@ struct ClaudeCodePanel: View {
     var authorisation = ProviderAuthorisation()
 
     /// The documented native installer. Shown for copying, never run on the founder's
-    /// behalf: they should see what is about to be put on their machine.
-    private static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
+    /// behalf: they should see what is about to be put on their machine. Reads
+    /// `AIProvider.installCommand` — the one shared copy, so this panel and
+    /// `OnboardingProviderStep` can never drift onto two different install commands.
+    private static let installCommand = AIProvider.claudeCode.installCommand
 
     private var companyId: String? { companyStore.companyId }
 

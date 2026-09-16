@@ -31,4 +31,21 @@ enum AIProvider: String, CaseIterable, Equatable {
         case .codex: return "Codex"
         }
     }
+
+    /// The one command shown to install this provider's CLI. A fact about the provider,
+    /// not about a screen — hoisted here so `OnboardingProviderStep` and `ClaudeCodePanel`
+    /// read the same string instead of each hardcoding its own copy. Two copies is how a
+    /// future installer change updates one screen and quietly leaves the other telling
+    /// founders to run a stale command.
+    ///
+    /// **Codex** is `brew install codex`, a Homebrew **cask** — verified on a real
+    /// machine, where it links to `/opt/homebrew/bin/codex` on Apple silicon. The npm
+    /// global route (`npm install -g @openai/codex`) failed with EACCES on that same
+    /// machine, so it is deliberately never offered.
+    var installCommand: String {
+        switch self {
+        case .claudeCode: return "curl -fsSL https://claude.ai/install.sh | bash"
+        case .codex:      return "brew install codex"
+        }
+    }
 }

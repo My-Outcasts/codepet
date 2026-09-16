@@ -324,13 +324,18 @@ struct OnboardingView: View {
         }
     }
 
+    /// Probes each provider ONCE. `CLIEnvironment.probe` already runs `probeInstall`
+    /// internally on the way to its auth check, so a separate `installedProviders.refresh()`
+    /// beforehand was a second, redundant round of the same subprocesses — every "Check
+    /// again" tap spawned roughly twice what it needed. `installedProviders.apply` derives
+    /// the cache `attemptFinish` reads from these same results instead.
     private func refreshProviderStatus() async {
         providerProbing = true
-        await companyStore.installedProviders.refresh()
         var next: [AIProvider: CLIStatus] = [:]
         for provider in AIProvider.allCases {
             next[provider] = await CLIEnvironment.probe(provider: provider, authorised: false)
         }
+        companyStore.installedProviders.apply(next)
         providerStatus = next
         providerProbing = false
     }

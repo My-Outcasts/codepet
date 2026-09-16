@@ -19,11 +19,11 @@ final class OnboardingProviderStepTests: XCTestCase {
         XCTAssertFalse(OnboardingProviderStep.passes(installed: []))
     }
 
-    /// Onboarding must never write a grant. Consent belongs where the plan is spent.
-    func testOnboardingWritesNoGrant() {
-        let store = FakeAuthStore()
-        _ = OnboardingProviderStep.passes(installed: [.codex])
-        XCTAssertFalse(store.isAuthorised(.codex, "c1"))
-        XCTAssertFalse(store.isAuthorised(.claudeCode, "c1"))
-    }
+    // No `testOnboardingWritesNoGrant` here — see `OnboardingProviderStep.passes`'s doc
+    // comment. `passes(installed:)` takes no store and reaches no global, so it cannot
+    // write a grant BY CONSTRUCTION; a test built around a `FakeAuthStore` that
+    // `passes` has no way to touch would pass no matter what the code does (verified:
+    // deleting the `passes(...)` call itself and even the whole app-level path that
+    // reaches `ProviderAuthorisation` still left the old assertions green). Real
+    // guarantee needs no test that cannot fail.
 }

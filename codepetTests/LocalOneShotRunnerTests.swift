@@ -149,6 +149,13 @@ final class LocalOneShotRunnerTests: XCTestCase {
 
     // MARK: - CODEPET_CLI_PROVIDER reaches the child environment (Critical 1)
 
+    /// **These assert the CONSUMER's vocabulary, not the producer's.** An earlier version of
+    /// this test asserted `"claudeCode"` — `AIProvider.rawValue` — which made it a
+    /// `rawValue == rawValue` tautology that certified a broken build green: the sidecar's
+    /// `adapterFor` accepts only `undefined`/`""`/`"claude"`/`"codex"` and throws otherwise, so
+    /// every Claude run was failing outright while this test passed. Assert the literal strings
+    /// the sidecar accepts; never re-derive them from the enum under test.
+    ///
     /// `oneShotSidecar.js:176` reads `process.env.CODEPET_CLI_PROVIDER` and THROWS on any
     /// value it does not recognise (`adapterFor` — see that file's `:57`), so the value here
     /// must be exactly `AIProvider.rawValue`, never a display name or a guess.
@@ -170,7 +177,9 @@ final class LocalOneShotRunnerTests: XCTestCase {
         let env = LocalOneShotRunner.buildEnvironment(
             provider: .claudeCode, companyId: "c1", modelPreference: ClaudeCodeModelPreference(),
             baseEnvironment: ["PATH": "/usr/bin"])
-        XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "claudeCode")
+        XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "claude",
+                       "the sidecar's adapterFor accepts \"claude\", never \"claudeCode\" — "
+                       + "it THROWS on an unrecognised value, so this is a hard failure, not a fallback")
     }
 
     /// The provider tag must survive alongside the existing credential scrub — one must not

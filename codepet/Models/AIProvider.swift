@@ -23,6 +23,24 @@ enum AIProvider: String, CaseIterable, Equatable {
     /// OpenAI's `codex` CLI. Nameable here; not yet reachable from any router.
     case codex
 
+    /// What the SIDECAR must be handed, which is **not** `rawValue`.
+    ///
+    /// `oneShotSidecar`'s `adapterFor` accepts exactly `undefined`, `""`, `"claude"` or
+    /// `"codex"`, and THROWS on anything else — so a Claude run handed `"claudeCode"` does not
+    /// quietly fall back, it fails outright. That is precisely what shipped for one commit:
+    /// `rawValue` was passed as the wire word on the assumption the two vocabularies matched.
+    ///
+    /// They are separate on purpose and must stay separate. `rawValue` is the PERSISTED form,
+    /// pinned by test; this is the CLI's word. Changing either must not silently change the
+    /// other, and each is pinned on both sides of the boundary — the Swift test asserts the
+    /// string the sidecar accepts, and the sidecar's own test asserts the string Swift sends.
+    var cliName: String {
+        switch self {
+        case .claudeCode: return "claude"
+        case .codex: return "codex"
+        }
+    }
+
     /// What the founder is shown. **Never the raw value** — she did not pick `claudeCode`,
     /// she picked a product, and the credit line on a run has to read like the product's name.
     var displayName: String {

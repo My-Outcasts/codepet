@@ -96,7 +96,8 @@ enum LocalOneShotRunner {
     /// reads it at `adapterFor(process.env.CODEPET_CLI_PROVIDER)` and picks the Claude or
     /// Codex adapter accordingly, falling back to Claude when the variable is absent and
     /// THROWING on anything it does not recognise — so this must be exactly
-    /// `provider.rawValue`, never a guess, and it is a required parameter here (no default)
+    /// `provider.cliName` — the CLI's word, NOT `rawValue` — and it is a required parameter
+    /// here (no default)
     /// so a caller cannot forget it and silently fall back to Claude again.
     static func buildEnvironment(
         provider: AIProvider,
@@ -110,7 +111,7 @@ enum LocalOneShotRunner {
         // account this whole design exists to stop using. The sidecar strips them again on
         // its own child.
         var env = LoginShellRunner.scrubbedEnvironment(baseEnvironment)
-        env["CODEPET_CLI_PROVIDER"] = provider.rawValue
+        env["CODEPET_CLI_PROVIDER"] = provider.cliName
         // The founder's model choice, as an alias so it tracks the latest of that tier.
         // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at all and
         // leave the decision to their own Claude Code. Same variables chat uses: the pick is

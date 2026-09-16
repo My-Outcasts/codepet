@@ -598,6 +598,26 @@ describe("choosing the provider", () => {
   });
 
   /**
+   * The other half of a contract that spans two languages.
+   *
+   * Swift sets `CODEPET_CLI_PROVIDER` from `AIProvider.cliName`. For one commit it sent
+   * `rawValue` instead — `"claudeCode"` — which is not in the set above, so `adapterFor` threw
+   * and EVERY Claude one-shot op failed outright: runTask, generateRoadmap, extractDecisions,
+   * summarizeTurn, summarizeSession, chatSession, enrichBrief. A wrong-provider bug became a
+   * total-failure bug, and the Swift test asserted `"claudeCode" == "claudeCode"`, so it passed.
+   *
+   * Neither side could catch that alone. This pins the exact literals Swift is allowed to send;
+   * `LocalOneShotRunnerTests` pins that Swift sends these and not its own raw values. Changing
+   * `AIProvider.cliName` without changing this test is the mistake this exists to make loud.
+   */
+  it("accepts exactly the strings the Swift app sends, and rejects its rawValues", () => {
+    expect(adapterFor("claude")).toBe(claudeAdapter);
+    expect(adapterFor("codex")).toBe(codexAdapter);
+    // `AIProvider.rawValue` — the PERSISTED form. Never the wire word.
+    expect(() => adapterFor("claudeCode")).toThrow(/no local runner/);
+  });
+
+  /**
    * THE guard. A name this build does not have must FAIL, not fall back: falling back would
    * run the founder's work on the other provider's plan and report success, which is the
    * same silent-degradation shape `--strict-config` exists to close on the Codex side.

@@ -2448,6 +2448,7 @@ final class CompanyStore: ObservableObject {
         // re-derived for the view, so what the founder is told the run built on is exactly
         // what the prompt was given.
         let request = runRequest(for: task, language: language, extraUpstream: extraUpstream)
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(request)
         _ = await reveal.value   // let every revealed step land before finishing
         guard companyId == cid else { return nil }
@@ -2465,7 +2466,7 @@ final class CompanyStore: ObservableObject {
         // rather than from `steps`, so it reflects the completed state that was on screen.
         let finishedSteps = chatMessages.first { $0.id == producingId }?.execSteps
         chatMessages.removeAll { $0.id == producingId }
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName,
                                                execSteps: finishedSteps, upstream: request.upstream))
@@ -2864,6 +2865,7 @@ final class CompanyStore: ObservableObject {
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
               let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
                                                   reviseNote: reviseNote,
                                                   current: reviseNote != nil ? draft.body : nil))
@@ -2872,7 +2874,7 @@ final class CompanyStore: ObservableObject {
         guard companyId == cid,
               let j = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[j].draftApproved,
-              let fresh = buildDeliverable(from: result, task: task) else { return }
+              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
         chatMessages[j].draft = fresh
     }
 
@@ -2886,12 +2888,13 @@ final class CompanyStore: ObservableObject {
         guard let task = company.tasks.first(where: { $0.id == taskId }),
               let draft = task.draft, !task.done, task.drafted else { return }
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
                                                  reviseNote: reviseNote, current: draft.body))
         guard companyId == cid,
               let j = company.tasks.firstIndex(where: { $0.id == taskId }),
               !company.tasks[j].done, company.tasks[j].drafted,
-              let fresh = buildDeliverable(from: result, task: task) else { return }
+              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
         company.tasks[j].draft = fresh
         if let cid { _ = await tasksSaver(cid, company.tasks) }
     }
@@ -2930,14 +2933,34 @@ final class CompanyStore: ObservableObject {
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,
     /// canonical createdAt, non-empty title (fallback task.title) + body. Returns nil
     /// on a nil result or empty body — never a malformed deliverable.
-    private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask) -> Deliverable? {
+    ///
+    /// `producedBy` is NOT defaulted, deliberately: a defaulted provenance is exactly how a
+    /// Codex run would get silently stamped "Claude", which is the one lie this field exists
+    /// to prevent. Every caller must say which provider actually ran, or `nil` if it
+    /// genuinely doesn't know.
+    private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask,
+                                  producedBy: AIProvider?) -> Deliverable? {
         let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard let result, !body.isEmpty else { return nil }
         let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return Deliverable(
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
             title: title.isEmpty ? task.title : title, body: body,
-            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload)
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload,
+            producedBy: producedBy)
+    }
+
+    /// Which provider will actually run a one-shot op for `cid`, right now — the same
+    /// question `RunTaskClient.run` answers internally via `LocalTransportRouter.forOneShot`,
+    /// asked again here so the deliverable it produces can be stamped with the answer.
+    /// `.blocked` reads as "don't know" (nil): a run that was blocked never reaches
+    /// `buildDeliverable` anyway (its `taskRunner` result is nil), so this only matters for
+    /// the `.local` case in practice.
+    private func currentProvider(for cid: String?) -> AIProvider? {
+        switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation) {
+        case .local(let provider): return provider
+        case .blocked: return nil
+        }
     }
 
     /// Execute-log pacing (tunable; tests set to 0 to stay instant). `execStepNanos`
@@ -3036,6 +3059,7 @@ final class CompanyStore: ObservableObject {
                 activeAgentRuns[ri].steps[idx].done = true
             }
         }
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language))
         _ = await reveal.value
         guard companyId == cid else { return }
@@ -3045,7 +3069,7 @@ final class CompanyStore: ObservableObject {
         }
         let companionId = activeAgentRuns.first(where: { $0.id == runId })?.companionId
         let deptName = activeAgentRuns.first(where: { $0.id == runId })?.deptName
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
                 activeAgentRuns[ri].status = .done
             }
@@ -3310,10 +3334,11 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].actionConsumed = true
         runningTaskIds.insert(task.id)
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language))
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
         } else {
             // Restore the one-tap action so the "try again" copy stays honest (the task

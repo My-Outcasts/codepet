@@ -297,9 +297,21 @@ struct Deliverable: Codable, Hashable, Identifiable {
     var createdAt: String?    // ISO-8601 (JSON-safe; newest-first sort is lexicographic)
     var sourceTaskId: String?
     var payload: DeliverablePayload?
+    /// Which founder plan paid for this deliverable.
+    ///
+    /// Optional, and permanently so: every deliverable written before 16 Sep 2026 has no
+    /// provenance, and there is no honest way to backfill one. The card renders this only
+    /// when it is present — the Aug 10 rule, that a card which always carries a status
+    /// line teaches you to stop reading it.
+    ///
+    /// Stored as the provider, not the model id. "Which plan paid for this" is the
+    /// question a founder asks; the model that answered is a different, noisier fact, and
+    /// on Codex it is not reported at all.
+    var producedBy: AIProvider? = nil
 
     init(id: String = UUID().uuidString, kind: DeliverableKind, title: String, body: String,
-         createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil) {
+         createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil,
+         producedBy: AIProvider? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -307,5 +319,50 @@ struct Deliverable: Codable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.sourceTaskId = sourceTaskId
         self.payload = payload
+        self.producedBy = producedBy
+    }
+
+    // `Codable` was fully synthesised before this field — no `CodingKeys` existed, so every
+    // JSON key was the property name verbatim. Lenient decoding of `producedBy` (an unknown
+    // provider string degrades to nil rather than throwing) needs a custom `init(from:)`,
+    // which needs this enum. The first seven cases are the seven pre-existing property names,
+    // copied verbatim — get one wrong and every stored deliverable fails to decode.
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, body, createdAt, sourceTaskId, payload, producedBy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = try c.decode(DeliverableKind.self, forKey: .kind)
+        title = try c.decode(String.self, forKey: .title)
+        body = try c.decode(String.self, forKey: .body)
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        sourceTaskId = try c.decodeIfPresent(String.self, forKey: .sourceTaskId)
+        payload = try c.decodeIfPresent(DeliverablePayload.self, forKey: .payload)
+        // Lenient on purpose: a plain `decodeIfPresent(AIProvider.self, …)` throws on an
+        // unrecognised rawValue and takes the whole deliverable down with it. Decode the raw
+        // String first, then map it through `AIProvider(rawValue:)` so an unknown provider
+        // (a future id an older build doesn't know) degrades to nil instead.
+        producedBy = (try? c.decodeIfPresent(String.self, forKey: .producedBy))
+            .flatMap { $0 }
+            .flatMap(AIProvider.init(rawValue:))
+    }
+
+    // Written explicitly to match the custom decoder above — a custom `init(from:)` suppresses
+    // only the synthesised DECODER; without this the synthesised encoder disappears too and
+    // the round-trip test fails.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(title, forKey: .title)
+        try c.encode(body, forKey: .body)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(sourceTaskId, forKey: .sourceTaskId)
+        try c.encodeIfPresent(payload, forKey: .payload)
+        // `AIProvider` is not itself `Codable` (only `Equatable`) — encode its rawValue String,
+        // matching the manual rawValue decode above.
+        try c.encodeIfPresent(producedBy?.rawValue, forKey: .producedBy)
     }
 }

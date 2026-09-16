@@ -731,13 +731,25 @@ final class CompanyStoreChatTests: XCTestCase {
         }
     }
 
-    /// Pins `CompanyStore.swift`'s `.stop(reason:)` case (~line 1873) to `reason.founderText`
-    /// when the founder's language is English. `chatSender` must never be consulted here —
-    /// `.stop` exists specifically so a blocked turn is NOT retried on the other transport
-    /// (see `ChatTailAction.stop`'s doc comment) — so it is wired to `XCTFail` to catch a
-    /// regression that reintroduces the retry as well as one that drops the copy.
+    /// A `CLIStatus` good enough for `InstalledProviders.apply` to read as "installed" —
+    /// none of the auth fields matter to `apply`, only `install != .missing`.
+    private static func installedStatus(_ provider: AIProvider) -> CLIStatus {
+        CLIStatus(provider: provider, install: .present(version: "1.0"), auth: .loggedOut, authorised: false)
+    }
+
+    /// Pins `CompanyStore.swift`'s `.stop(reason:)` case to `BlockedOffer.resolve(...)
+    /// .founderText` when the founder's language is English AND Claude Code is the CLI on
+    /// this Mac. `chatSender` must never be consulted here — `.stop` exists specifically so a
+    /// blocked turn is NOT retried on the other transport (see `ChatTailAction.stop`'s doc
+    /// comment) — so it is wired to `XCTFail` to catch a regression that reintroduces the
+    /// retry as well as one that drops the copy.
     ///
-    /// **Mutation check:** hardcoding line 1873 to an English literal (e.g. `"Turn on Claude
+    /// **Task 9:** `hydrate`'s own install-cache refresh is skipped under XCTest (it would
+    /// otherwise race a REAL subprocess probe of whatever happens to be on the machine running
+    /// the suite), so `installedProviders.apply(_:)` seeds a deterministic Claude-installed
+    /// state here instead.
+    ///
+    /// **Mutation check:** hardcoding the site to an English literal (e.g. `"Turn on Claude
     /// Code access in Settings."`) leaves this test green (the literal can be made to match)
     /// but turns `testStopReasonWritesTheVietnameseCopyWhenLanguageIsVi` red, because a fixed
     /// English literal cannot also equal the Vietnamese string — see that test for the
@@ -747,8 +759,9 @@ final class CompanyStoreChatTests: XCTestCase {
                              chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
                              chatStreamer: Self.blockedStreamer(.notGranted))
         await s.hydrate(companyId: "u")
+        s.installedProviders.apply([.claudeCode: Self.installedStatus(.claudeCode)])
         await s.sendChat("hi", language: .en)
-        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderText)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGrantedProvider(.claudeCode).founderText)
     }
 
     /// The `.vi` half of the same line: this codebase has a recorded defect shaped exactly
@@ -757,18 +770,41 @@ final class CompanyStoreChatTests: XCTestCase {
     /// catch that shape (English matches either branch of such a ternary); asserting the
     /// Vietnamese string here, and that it differs from the English one, is what would go
     /// red on that defect.
-    ///
-    /// **Mutation check:** hardcoding line 1873 to an English literal turns this test red —
-    /// `s.chatMessages.last?.text` is the hardcoded English string, which is neither equal
-    /// to `founderTextVi` nor even a match for the "not the English string" assertion.
-    /// Verified: see the fix-pass report for the actual run.
     func testStopReasonWritesTheVietnameseCopyWhenLanguageIsVi() async {
         let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
                              chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
                              chatStreamer: Self.blockedStreamer(.notGranted))
         await s.hydrate(companyId: "u")
+        s.installedProviders.apply([.claudeCode: Self.installedStatus(.claudeCode)])
         await s.sendChat("hi", language: .vi)
-        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderTextVi)
-        XCTAssertNotEqual(s.chatMessages.last?.text, BlockReason.notGranted.founderText)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.notGrantedProvider(.claudeCode).founderTextVi)
+        XCTAssertNotEqual(s.chatMessages.last?.text, BlockReason.notGrantedProvider(.claudeCode).founderText)
+    }
+
+    /// **Task 9's whole reason for existing.** Chat is Claude-only (`ChatTransportRouter`
+    /// never reads `prefer`), so a founder with only Codex installed must be told her surface
+    /// needs Claude Code specifically — NOT sent to grant a Claude plan she does not have.
+    /// Before this task, every founder here saw `BlockReason.notGranted`'s generic "grant your
+    /// Claude plan" regardless of what she actually has installed.
+    func testStopReasonTellsACodexOnlyFounderSheNeedsClaudeCode() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        s.installedProviders.apply([.codex: Self.installedStatus(.codex)])
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.needsClaudeCode.founderText)
+    }
+
+    /// Nothing installed at all is the same story as Codex-only for THIS surface — there is
+    /// still no Claude Code to grant, so the founder is told what the surface needs rather
+    /// than being offered an install with no name attached.
+    func testStopReasonWithNothingInstalledAlsoNamesNeedsClaudeCode() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.text, BlockReason.needsClaudeCode.founderText)
     }
 }

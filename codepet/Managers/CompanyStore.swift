@@ -523,7 +523,16 @@ final class CompanyStore: ObservableObject {
         // Fire-and-forget: a cache refill, not part of hydrate's critical path. It touches a
         // subprocess, which a render must never do (`InstalledProviders`'s own doc comment),
         // and hydrate is not a render — but it still shouldn't make company data wait on it.
-        Task { await installedProviders.refresh() }
+        //
+        // Skipped under XCTest (Task 9): once `BlockedOffer.resolve` started reading
+        // `installedProviders.installed`, this real subprocess probe became an unbounded race
+        // against every test that calls `hydrate` and then asserts blocked-copy text — whether
+        // the founder's REAL machine has `claude`/`codex` on PATH is not a fact any suite
+        // should depend on. A test that wants a specific installed set now calls
+        // `installedProviders.apply(_:)` itself, deterministically, after `hydrate` returns.
+        if !AppEnvironment.isRunningTests {
+            Task { await installedProviders.refresh() }
+        }
         claudeModel = modelPreference.model(companyId)
         claudeEffort = modelPreference.effort(companyId)
         // The moment an identity exists, and therefore the first moment a
@@ -1107,12 +1116,14 @@ final class CompanyStore: ObservableObject {
             startCodeRun(ask: ask)
         } else {
             // `engStartRun` 401s (the key deleted 26 Aug 2026) rather than answering, so the
-            // founder gets a silent stall unless something on screen says why. `BlockReason
-            // .notGranted` already names the fix — grant Codepet permission to use her Claude
-            // plan, in Settings — so this reuses its copy rather than writing a new sentence.
-            // This does not change the branch itself: Task 7's onboarding gate is what stops
+            // founder gets a silent stall unless something on screen says why. A bare
+            // `.notGranted` said "grant your Claude plan" to every founder alike, including one
+            // who has only Codex installed — `BlockedOffer` names the CLI she can actually
+            // grant, or tells her to install one when neither is on this Mac (Task 9). This
+            // does not change the branch itself: Task 7's onboarding gate is what stops
             // `startEngineeringRun` from firing, not this notice.
-            let why = language == .vi ? BlockReason.notGranted.founderTextVi : BlockReason.notGranted.founderText
+            let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed)
+                .founderText(lang: language)
             chatMessages.append(CopilotMessage(role: .companion, text: why))
             startEngineeringRun(ask: ask)
         }
@@ -1993,8 +2004,19 @@ final class CompanyStore: ObservableObject {
             // No second generation, and no other transport. The founder granted their own
             // Claude plan; answering from the Cloud Function instead would spend the key
             // that grant exists to stop — so the turn ends here, saying why.
+            //
+            // `.claudeOnly`: this reason can only ever reach here from `ChatTransportRouter`,
+            // which checks `.claudeCode` alone and never reads `prefer` — chat streaming is
+            // Claude or nothing (Task 9). A Codex-only founder is told THAT (`needsClaudeCode`)
+            // rather than being sent to grant a plan she does not have; a Claude-installed,
+            // ungranted founder gets an actual grant button instead of a bare sentence.
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = language == .vi ? reason.founderTextVi : reason.founderText
+                let offer = BlockedOffer.resolve(reason: reason, installed: installedProviders.installed,
+                                                 surface: .claudeOnly)
+                chatMessages[i].text = offer.founderText(lang: language)
+                if case .grant = offer {
+                    chatMessages[i].blockedOffer = offer
+                }
             }
         case .none:
             break

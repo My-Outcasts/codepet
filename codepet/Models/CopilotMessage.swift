@@ -96,6 +96,12 @@ struct CopilotMessage: Identifiable, Equatable {
     var runProposal: RunProposal?
     /// A roadmap change offered for confirmation — see `RoadmapProposal`.
     var roadmapProposal: RoadmapProposal?
+    /// The grant this blocked turn is actually asking for — see `BlockedOffer` (Task 9). Set
+    /// only for the `.grant` case, never for `.install`/`.explain`: those have nothing a
+    /// button here could do, so there is nothing to render. Not in the initializer, like
+    /// `supersededByRoom` — `CompanyStore` writes it onto an already-appended message once
+    /// the offer is resolved, the same way it writes `text` in place.
+    var blockedOffer: BlockedOffer?
     /// Messages the companion wrote for the founder to send — see `MessageDraftDTO`.
     ///
     /// Unlike every other payload here there is nothing to confirm and nothing to consume: a

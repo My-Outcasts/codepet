@@ -1393,6 +1393,10 @@ struct CopilotBubble: View {
     @State private var copied = false
     @State private var copiedMarkdown = false
     @State private var interviewDraft = ""
+    /// The consent ask for `grantButton` — same flow `ProvenanceRowView` uses, not a second
+    /// consent path (Task 9).
+    @State private var grantFlow: ProviderConsentFlow?
+    @State private var grantAsking: AIProvider?
     private var isMe: Bool { message.role == .me }
 
     private var companionAccent: Color {
@@ -1558,6 +1562,12 @@ struct CopilotBubble: View {
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
                 actionButton(action)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if case .grant(let provider) = message.blockedOffer {
+            VStack(alignment: .leading, spacing: 8) {
+                textBubble
+                grantButton(provider)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let offer = message.chainOffer {
@@ -1946,6 +1956,47 @@ struct CopilotBubble: View {
                 .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    /// The button `BlockedOffer.grant(provider)` asks for (Task 9). Tapping it is the SAME
+    /// consent prompt `ProvenanceRowView`'s re-run offer uses — `ProviderConsentFlow` — not a
+    /// second path that could grant without asking, or ask twice for an already-granted
+    /// provider. On Allow, `retryReply` re-sends the founder's own ask on the transport that
+    /// grant just unblocked; it also deletes this message (and the ask before it),
+    /// so there is no separate "consumed" flag to retire the button with.
+    private func grantButton(_ provider: AIProvider) -> some View {
+        Button {
+            requestGrant(provider)
+        } label: {
+            Text(lang == .vi ? "Cấp quyền \(provider.displayName)" : "Grant \(provider.displayName)")
+                .font(.pixelSystem(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+        }
+        .buttonStyle(.plain)
+        .providerConsentAlert(
+            isPresented: Binding(
+                get: { grantAsking != nil },
+                set: { if !$0 { grantAsking = nil } }
+            ),
+            provider: grantAsking,
+            lang: lang,
+            onAllow: { grantFlow?.allow(); grantAsking = nil },
+            onDecline: { grantFlow?.decline(); grantAsking = nil }
+        )
+    }
+
+    /// No `companyId` — no consent to key a grant against, so this fails closed (nothing
+    /// runs), matching `ProvenanceRowView.requestReRun`.
+    private func requestGrant(_ provider: AIProvider) {
+        guard let companyId = companyStore.companyId else { return }
+        let f = ProviderConsentFlow(authorisation: companyStore.claudeAuthorisation)
+        grantFlow = f
+        f.requestReRun(provider: provider, companyId: companyId, run: {
+            Task { await companyStore.retryReply(messageId: message.id, language: lang) }
+        })
+        grantAsking = f.isAsking ? provider : nil
     }
 
     /// A tappable "go here" chip from byte's `nav` action — NOT auto-navigated

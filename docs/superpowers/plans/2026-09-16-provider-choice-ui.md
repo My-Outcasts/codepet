@@ -69,7 +69,7 @@ Append to `codepetTests/CLIEnvironmentTests.swift`. `FakeShell` already exists i
 
 func testCodexVersionIsReadFromItsOwnBinary() async {
     let shell = FakeShell()
-    shell.on("codex --version", stdout: "codex-cli 0.154.0")
+    shell.stub("codex --version", stdout: "codex-cli 0.154.0")
     let install = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
     XCTAssertEqual(install, .present(version: "0.154.0"))
 }
@@ -78,7 +78,7 @@ func testCodexVersionIsReadFromItsOwnBinary() async {
 /// every screen in the provider-choice UI branches on.
 func testProvidersAreProbedIndependently() async {
     let shell = FakeShell()
-    shell.on("claude --version", stdout: "2.1.241 (Claude Code)")
+    shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
     // No `codex` response: FakeShell falls back to exit 127, i.e. not found.
     let claude = await CLIEnvironment.probeInstall(provider: .claudeCode, shell: shell)
     let codex  = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
@@ -89,7 +89,7 @@ func testProvidersAreProbedIndependently() async {
 /// Verified on the real binary: exit 0 with "Logged in using ChatGPT".
 func testCodexSignedInIsReadFromExitCode() async {
     let shell = FakeShell()
-    shell.on("codex login status", stdout: "Logged in using ChatGPT", exit: 0)
+    shell.stub("codex login status", stdout: "Logged in using ChatGPT", exit: 0)
     let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
     // Codex reports no account detail at all — an empty Account, never `.unknown`.
     XCTAssertEqual(auth, .loggedIn(CLIStatus.Account(email: nil, authMethod: nil,
@@ -100,7 +100,7 @@ func testCodexSignedInIsReadFromExitCode() async {
 /// Verified with CODEX_HOME pointed at an empty dir: exit 1, "Not logged in".
 func testCodexSignedOutIsNotReportedAsUnknown() async {
     let shell = FakeShell()
-    shell.on("codex login status", stdout: "Not logged in", exit: 1)
+    shell.stub("codex login status", stdout: "Not logged in", exit: 1)
     let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
     XCTAssertEqual(auth, .loggedOut)
 }
@@ -109,14 +109,14 @@ func testCodexSignedOutIsNotReportedAsUnknown() async {
 /// whose probe returns something unparseable is `.unknown` — never a false signed-out.
 func testCodexGibberishIsUnknownNotSignedOut() async {
     let shell = FakeShell()
-    shell.on("codex login status", stdout: "�garbage�", exit: 3)
+    shell.stub("codex login status", stdout: "�garbage�", exit: 3)
     let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
     XCTAssertEqual(auth, .unknown)
 }
 
 func testClaudeAuthStillParsesItsJSON() async {
     let shell = FakeShell()
-    shell.on("claude auth status --json",
+    shell.stub("claude auth status --json",
              stdout: #"{"loggedIn":true,"email":"f@x.com","authMethod":"claude.ai"}"#)
     let auth = await CLIEnvironment.probeAuth(provider: .claudeCode, shell: shell)
     guard case .loggedIn(let account) = auth else { return XCTFail("expected loggedIn") }
@@ -125,8 +125,8 @@ func testClaudeAuthStillParsesItsJSON() async {
 }
 ```
 
-If `FakeShell.on` does not already accept an `exit:` argument, add the parameter with a
-default of `0` rather than writing a second fake.
+`FakeShell.stub(...)` already accepts `exit:` with a default of `0`. Use it; do not write a
+second fake.
 
 - [ ] **Step 2: Run the tests and watch them fail**
 
@@ -886,7 +886,7 @@ func testRevokingOneGrantLeavesTheOther() {
 /// while Claude reports present — the fact the grant rows render from.
 func testThePanelHoldsAStatusPerProvider() async {
     let shell = FakeShell()
-    shell.on("claude --version", stdout: "2.1.241 (Claude Code)")
+    shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
     let claude = await CLIEnvironment.probe(provider: .claudeCode, shell: shell, authorised: true)
     let codex  = await CLIEnvironment.probe(provider: .codex, shell: shell, authorised: false)
     XCTAssertEqual(claude.blocker, nil)

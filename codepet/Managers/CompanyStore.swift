@@ -1422,6 +1422,13 @@ final class CompanyStore: ObservableObject {
         // say over the model", which is true of any local turn regardless of which CLI runs
         // it. Comparing against `.local(.claudeCode)` would silently hide the control the
         // day a second provider answers here.
+        //
+        // **The gate is provider-agnostic; the control behind it is not — yet.** What this
+        // unlocks is `claudeModel` / `claudeEffort` (`CopilotChatView`), which are Claude-typed.
+        // Chat has no second provider today, so the two cannot disagree. The day it does, this
+        // is a decision to REVISIT rather than a site that is already right: does Codex get the
+        // same picker, its own, or none? Nothing here answers that, and nothing should pretend
+        // it does.
         if case .local = ChatTransportRouter.transport(companyId: companyId) { return true }
         return false
     }

@@ -599,7 +599,7 @@ func testProvenanceSurvivesARoundTrip() throws {
 /// An unrecognised provider string must not throw and take the whole deliverable with
 /// it — a future provider id read by an older build degrades to "unknown", not a crash.
 func testAnUnknownProviderStringDegradesToNil() throws {
-    let json = #"{"id":"d1","kind":"doc","title":"T","body":"B","produced_by":"gemini"}"#
+    let json = #"{"id":"d1","kind":"doc","title":"T","body":"B","producedBy":"gemini"}"#
     let d = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
     XCTAssertNil(d.producedBy)
 }
@@ -628,8 +628,14 @@ On `Deliverable`:
     var producedBy: AIProvider? = nil
 ```
 
-If `Deliverable` has an explicit `CodingKeys`/`init(from:)`, add `case producedBy = "produced_by"`
-and decode it **leniently** so an unknown string degrades rather than throws:
+`Deliverable` uses the SYNTHESISED `Codable` today — no `CodingKeys` block exists, so every key
+is the property name (`createdAt`, `sourceTaskId`). Lenient decoding needs a custom
+`init(from:)`, which needs an explicit `CodingKeys`.
+
+**Danger: once you write that block you own every key string.** Get one of the seven existing
+names wrong and every stored deliverable fails to decode. Copy them EXACTLY, and add
+`producedBy` in the same camelCase style — do not give the new field a snake_case key of its
+own. Decode it **leniently** so an unknown string degrades rather than throws:
 
 ```swift
         producedBy = (try? c.decodeIfPresent(String.self, forKey: .producedBy))
@@ -637,9 +643,12 @@ and decode it **leniently** so an unknown string degrades rather than throws:
             .flatMap(AIProvider.init(rawValue:))
 ```
 
-If it uses the synthesised `Codable`, add the key to the synthesised set the same way — a
-`decodeIfPresent` of `AIProvider` would throw on an unknown value, which is the failure the
-third test exists to prevent.
+A plain `decodeIfPresent(AIProvider.self, …)` would THROW on an unknown rawValue and take the
+whole deliverable with it — that is the failure the third test exists to prevent. Decode the
+raw `String` first, then map it through `AIProvider(rawValue:)`.
+
+You must also write `encode(to:)` to match, or the synthesised encoder disappears with the
+synthesised decoder and the round-trip test fails.
 
 At `CompanyStore.swift:2933`, stamp the provider that actually ran. `buildDeliverable` has no
 provider argument today; add one and pass it from each of the five call sites (2468, 2875, 2894,

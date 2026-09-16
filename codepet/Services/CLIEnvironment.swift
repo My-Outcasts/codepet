@@ -191,9 +191,7 @@ extension CLIEnvironment {
         case .claudeCode:
             return CLISpec(
                 binary: "claude",
-                knownInstallPaths: ["~/.local/bin/claude",
-                                    "/opt/homebrew/bin/claude",
-                                    "/usr/local/bin/claude"],
+                knownInstallPaths: knownInstallPaths,
                 authCommand: "claude auth status --json",
                 readAuth: readClaudeAuth
             )
@@ -247,20 +245,30 @@ extension CLIEnvironment {
         ))
     }
 
-    /// Codex answers in one prose line and reports NOTHING about the account — no email,
-    /// no plan type. Verified on the real binary: exit 0 "Logged in using ChatGPT",
-    /// exit 1 "Not logged in". Keyed on the exit code with the string as corroboration,
-    /// because an exit code cannot be reworded by a release note.
+    /// Codex answers in one prose line and reports NOTHING about the account -- no
+    /// email, no plan type. Verified on the real binary: exit 0 "Logged in using
+    /// ChatGPT", exit 1 "Not logged in". Keyed on the exit code with the string as
+    /// corroboration, because an exit code cannot be reworded by a release note.
     ///
-    /// An empty `Account` is the honest answer for signed-in-but-anonymous. Anything that
-    /// matches neither shape is `.unknown`, never `.loggedOut`.
+    /// The signed-OUT shape is checked FIRST, because "not logged in" contains
+    /// "logged in" as a substring -- checking the signed-IN shape first would let an
+    /// exit-0 response worded "Not logged in" match it and misreport `.loggedIn`. Once
+    /// that shape is matched, the exit code corroborates: exit 1 confirms `.loggedOut`,
+    /// while a mismatched exit code (never seen against the real CLI) means the text
+    /// and the exit status disagree -- exactly what `.unknown` is for.
+    ///
+    /// An empty `Account` is the honest answer for signed-in-but-anonymous. Anything
+    /// that matches neither shape -- or whose exit code contradicts the shape it
+    /// matched -- is `.unknown`, never `.loggedOut`.
     static func readCodexAuth(_ result: ShellResult) -> CLIStatus.Auth {
         let out = result.trimmedOut.lowercased()
+        if out.contains("not logged in") {
+            return result.succeeded ? .unknown : .loggedOut
+        }
         if result.succeeded, out.contains("logged in") {
             return .loggedIn(.init(email: nil, authMethod: nil, apiProvider: nil,
                                    subscriptionType: nil, orgName: nil))
         }
-        if out.contains("not logged in") { return .loggedOut }
         return .unknown
     }
 

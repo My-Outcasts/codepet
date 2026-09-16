@@ -40,9 +40,9 @@ final class ClaudeCodeReadinessTests: XCTestCase {
 
     func testNotSignedInOutranksNotAuthorised() {
         let status = CLIStatus(provider: .claudeCode,
-                                     install: .present(version: "2.1.241"),
-                                     auth: .loggedOut,
-                                     authorised: false)
+                               install: .present(version: "2.1.241"),
+                               auth: .loggedOut,
+                               authorised: false)
         XCTAssertEqual(status.blocker, .notSignedIn)
     }
 
@@ -50,9 +50,9 @@ final class ClaudeCodeReadinessTests: XCTestCase {
     /// are shown must be the CLI — not their grant, which is fine.
     func testVersionUnknownOutranksNotAuthorised() {
         let status = CLIStatus(provider: .claudeCode,
-                                     install: .present(version: "2.1.241"),
-                                     auth: .unknown,
-                                     authorised: false)
+                               install: .present(version: "2.1.241"),
+                               auth: .unknown,
+                               authorised: false)
         XCTAssertEqual(status.blocker, .versionUnknown)
     }
 

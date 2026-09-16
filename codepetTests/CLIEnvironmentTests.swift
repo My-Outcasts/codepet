@@ -320,6 +320,22 @@ extension CLIEnvironmentTests {
         XCTAssertEqual(auth, .loggedOut)
     }
 
+    /// Regression: "not logged in" contains "logged in" as a substring. An exit-0
+    /// response worded "Not logged in" -- unverified against the real CLI, but not
+    /// ruled out -- must not be misread as signed in just because the signed-in check
+    /// used to run first and matched the substring.
+    func testCodexExitZeroWordedNotLoggedInIsNotReadAsLoggedIn() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Not logged in", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertNotEqual(auth, .loggedIn(CLIStatus.Account(email: nil, authMethod: nil,
+                                                            apiProvider: nil, subscriptionType: nil,
+                                                            orgName: nil)))
+        // The exit code and the wording disagree, so this is unresolvable -- never a
+        // false signed-out either.
+        XCTAssertEqual(auth, .unknown)
+    }
+
     /// The Claude JSON parser must not be pointed at Codex, and vice versa. A provider
     /// whose probe returns something unparseable is `.unknown` — never a false signed-out.
     func testCodexGibberishIsUnknownNotSignedOut() async {

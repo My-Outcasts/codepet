@@ -223,4 +223,49 @@ final class LocalTransportRouterTests: XCTestCase {
                                                sidecarAvailable: { true })
         XCTAssertEqual(t, .blocked(.notGranted))
     }
+
+    // MARK: - `forVirtualCompany` is genuinely Claude-only (Critical 2)
+
+    /// THE case that was broken: `forVirtualCompany` carried a doc comment saying meetings
+    /// stay Claude-only, but — because it forwarded into the shared `transport(...)` helper,
+    /// which picks freely via `chooseProvider` — a founder who granted only Codex resolved
+    /// `.local(.codex)` here, and `vcSidecar.js` has no Codex adapter at all: it would have
+    /// spawned `claude` anyway while silently crediting Codex's plan. This must now BLOCK.
+    func testACodexOnlyFounderIsBlockedFromAMeeting() {
+        codexGranted.insert("c1")
+        XCTAssertTrue(granted.isEmpty, "setup sanity: no Claude grant exists")
+        XCTAssertEqual(
+            LocalTransportRouter.forVirtualCompany(companyId: "c1", authorisation: authorisation,
+                                                    sidecarAvailable: { true }),
+            .blocked(.notGranted))
+    }
+
+    /// The mirror: a founder who granted Claude Code must still be able to hold meetings
+    /// exactly as before — this fix must not regress the working path.
+    func testAClaudeGrantedFounderStillGetsAMeeting() {
+        granted.insert("c1")
+        XCTAssertEqual(
+            LocalTransportRouter.forVirtualCompany(companyId: "c1", authorisation: authorisation,
+                                                    sidecarAvailable: { true }),
+            .local(.claudeCode))
+    }
+
+    /// Both granted: Claude still runs the meeting. Holding both plans must not make the
+    /// meeting eligible for Codex, since `vcSidecar.js` cannot run it.
+    func testBothGrantedStillRunsTheMeetingOnClaude() {
+        granted.insert("c1")
+        codexGranted.insert("c1")
+        XCTAssertEqual(
+            LocalTransportRouter.forVirtualCompany(companyId: "c1", authorisation: authorisation,
+                                                    sidecarAvailable: { true }),
+            .local(.claudeCode))
+    }
+
+    /// No grant at all blocks, same reason as the one-shot ops.
+    func testNoGrantAtAllBlocksAMeeting() {
+        XCTAssertEqual(
+            LocalTransportRouter.forVirtualCompany(companyId: "c1", authorisation: authorisation,
+                                                    sidecarAvailable: { true }),
+            .blocked(.notGranted))
+    }
 }

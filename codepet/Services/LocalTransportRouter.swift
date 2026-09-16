@@ -74,14 +74,34 @@ enum LocalTransportRouter {
     /// same script but fail independently, and a founder whose meeting bundle is missing
     /// should still get their roadmap rather than being told everything local is unavailable.
     ///
-    /// **Deliberately no `prefer:` parameter.** Meetings stay Claude-only per the spec — a
-    /// parameter nobody may pass is an invitation to pass it.
+    /// **Deliberately does NOT call the shared `transport(...)` helper.** That helper routes
+    /// through `chooseProvider`, which picks freely between whichever of Claude/Codex the
+    /// founder granted — exactly right for the one-shot ops, and exactly wrong here: `vcSidecar`
+    /// has no Codex adapter at all (`grep -c codex codepet/Resources/vcSidecar.js` is 0) and
+    /// always spawns `claude`. Omitting a `prefer:` parameter from `transport(...)` does NOT
+    /// make it Claude-only — a founder who granted only Codex still resolves `.local(.codex)`
+    /// there, and the meeting would run on Claude while claiming to run on the plan she
+    /// withheld. So this checks `.claudeCode` authorisation directly, the same shape
+    /// `ChatTransportRouter.transport` already uses for the same reason.
     static func forVirtualCompany(
         companyId: String? = activeCompanyId,
-        authorisation: ProviderAuthorisation = ProviderAuthorisation()
+        authorisation: ProviderAuthorisation = ProviderAuthorisation(),
+        sidecarAvailable: () -> Bool = { LocalVirtualCompanyStreamer.isAvailable() }
     ) -> Transport {
-        transport(companyId: companyId, authorisation: authorisation,
-                  sidecarAvailable: { LocalVirtualCompanyStreamer.isAvailable() })
+        guard let companyId, !companyId.isEmpty else {
+            log.error("forVirtualCompany: blocked — no companyId (mirror unset)")
+            return .blocked(.notGranted)
+        }
+        guard authorisation.isAuthorised(.claudeCode, companyId) else {
+            log.error("forVirtualCompany: blocked — companyId=\(companyId, privacy: .public) not granted for Claude Code")
+            return .blocked(.notGranted)
+        }
+        guard sidecarAvailable() else {
+            log.error("forVirtualCompany: blocked — companyId=\(companyId, privacy: .public) granted but sidecar missing")
+            return .blocked(.sidecarMissing)
+        }
+        log.error("forVirtualCompany: local — companyId=\(companyId, privacy: .public) provider=claudeCode")
+        return .local(.claudeCode)
     }
 
     /// Runs a meeting, or fails it with a reason.

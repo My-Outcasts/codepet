@@ -211,7 +211,7 @@ enum RunTaskClient {
         #endif
         do {
             let body = try JSONEncoder().encode(req)
-            let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
+            let out = try await LocalOneShotRunner.run(op: "runTask", body: body, provider: provider)
             let decoded = try JSONDecoder().decode(RunTaskResponse.self, from: out)
             LocalTransportRouter.log.error(
                 "local runTask succeeded: kind=\(decoded.kind, privacy: .public) title=\(decoded.title, privacy: .public) bodyLen=\(decoded.body.count, privacy: .public) provider=\(provider.rawValue, privacy: .public)")

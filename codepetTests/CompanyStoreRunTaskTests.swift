@@ -327,6 +327,84 @@ final class CompanyStoreRunTaskTests: XCTestCase {
                           codexStore.company.tasks[0].draft?.producedBy)
     }
 
+    // MARK: - reRunDeliverable end-to-end (Critical 3, final-review pass)
+
+    /// A filed library deliverable behind a `done` task — the shape `reRunDeliverable`
+    /// re-runs. `producedBy: .claudeCode` is the ORIGINAL run's stamp; the re-run below taps
+    /// a different provider deliberately, so a passing test cannot be explained by the stamp
+    /// just being copied forward.
+    private func filedDeliverable() -> (task: RoadmapTask, seed: CompanyState) {
+        let filedTask = RoadmapTask(id: "t1", title: "Survey users", detail: "wtp",
+                                    phase: .find, who: .does, done: true)
+        let filed = Deliverable(kind: .doc, title: "D", body: "original body",
+                                sourceTaskId: "t1", producedBy: .claudeCode)
+        let seed = CompanyState(brief: .init(), departments: [], library: [filed], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [filedTask])
+        return (filedTask, seed)
+    }
+
+    /// The headline claim under test: the provider that ACTUALLY RUNS is the one the founder
+    /// tapped, not `chooseProvider`'s precedence winner. Both providers are granted here —
+    /// under plain precedence Claude would win — and the founder taps Codex anyway. A revert
+    /// of `preferredTaskRunner(…, resolved)` back to `taskRunner(…)` (the unpreferred runner)
+    /// would still pass every OTHER test in this file, which is exactly the gap review found:
+    /// "Re-run on Codex" did not actually run on Codex, caught only by reading code.
+    func testReRunDeliverableRunsOnTheTappedProviderNotThePrecedenceWinner() async {
+        let (_, seed) = filedDeliverable()
+        var receivedProvider: AIProvider?
+        let auth = ProviderAuthorisation(isAuthorised: { _, _ in true })  // both granted
+        let s = CompanyStore(
+            loader: { _ in seed },
+            preferredTaskRunner: { _, provider in
+                receivedProvider = provider
+                return RunTaskResponse(kind: "doc", title: "D2", body: "codex body")
+            },
+            librarySaver: { _, _ in true },
+            // `fileApproval` (what `reRunDeliverable` ends on) also fires `firstApprovalSaver`
+            // and a fire-and-forget `decisionExtractor` — both default to real Firestore/Auth
+            // calls that TRAP under an unconfigured `FirebaseApp` in the test host (landmine 3
+            // in CLAUDE.md). Stubbed here for the same reason
+            // `testApproveTaskMovesDraftToLibraryOnceAndMarksDone` above stubs them.
+            firstApprovalSaver: { _, _ in true },
+            decisionExtractor: { _, _ in [] },
+            claudeAuthorisation: auth)
+        await s.hydrate(companyId: "u")
+        let deliverable = s.company.library[0]
+        await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)
+
+        // 1. The provider HANDED TO THE RUNNER is the tapped one, not the precedence winner.
+        XCTAssertEqual(receivedProvider, .codex)
+        // 2. The resulting deliverable's stamp equals that same provider.
+        XCTAssertEqual(s.company.library.count, 2, "the re-run files a NEW entry; the original stays")
+        XCTAssertEqual(s.company.library.last?.producedBy, .codex)
+        XCTAssertEqual(s.company.library.last?.body, "codex body")
+        // The original stays untouched.
+        XCTAssertEqual(s.company.library.first?.producedBy, .claudeCode)
+    }
+
+    /// A preference is not consent: tapping a provider the founder never granted must not
+    /// run at all — not on the tapped provider, and not by silently falling back to the one
+    /// that IS granted.
+    func testReRunDeliverableDoesNotRunAnUngrantedProvider() async {
+        let (_, seed) = filedDeliverable()
+        var runnerCalls = 0
+        let auth = ProviderAuthorisation(isAuthorised: { provider, _ in provider == .claudeCode })
+        let s = CompanyStore(
+            loader: { _ in seed },
+            preferredTaskRunner: { _, provider in
+                runnerCalls += 1
+                return RunTaskResponse(kind: "doc", title: "D2", body: "should not happen")
+            },
+            librarySaver: { _, _ in true },
+            claudeAuthorisation: auth)
+        await s.hydrate(companyId: "u")
+        let deliverable = s.company.library[0]
+        await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)
+
+        XCTAssertEqual(runnerCalls, 0, "an ungranted preference must not run at all")
+        XCTAssertEqual(s.company.library.count, 1, "nothing new was filed")
+    }
+
     func testApproveFailOpenWhenExtractorReturnsEmpty() async {
         let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
                                   drafted: true, draft: Deliverable(kind: .doc, title: "X", body: "y", sourceTaskId: "t1"))

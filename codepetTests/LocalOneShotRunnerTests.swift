@@ -146,4 +146,41 @@ final class LocalOneShotRunnerTests: XCTestCase {
         XCTAssertNil(scrubbed["ANTHROPIC_AUTH_TOKEN"])
         XCTAssertEqual(scrubbed["PATH"], "/usr/bin")
     }
+
+    // MARK: - CODEPET_CLI_PROVIDER reaches the child environment (Critical 1)
+
+    /// `oneShotSidecar.js:176` reads `process.env.CODEPET_CLI_PROVIDER` and THROWS on any
+    /// value it does not recognise (`adapterFor` — see that file's `:57`), so the value here
+    /// must be exactly `AIProvider.rawValue`, never a display name or a guess.
+    ///
+    /// Pure and process-free by construction — `buildEnvironment` was extracted from `run`
+    /// for exactly this reason: this is what proves the resolved provider reaches the child
+    /// without spawning a real `claude` or `codex`.
+    func testBuildEnvironmentCarriesCodexProvider() {
+        let env = LocalOneShotRunner.buildEnvironment(
+            provider: .codex, companyId: "c1", modelPreference: ClaudeCodeModelPreference(),
+            baseEnvironment: ["PATH": "/usr/bin"])
+        XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "codex")
+    }
+
+    /// The other half of the same guard: a Claude resolution must carry Claude's raw value,
+    /// not merely "not codex" — a bug that swapped the two would still pass a test that only
+    /// checked Codex.
+    func testBuildEnvironmentCarriesClaudeCodeProvider() {
+        let env = LocalOneShotRunner.buildEnvironment(
+            provider: .claudeCode, companyId: "c1", modelPreference: ClaudeCodeModelPreference(),
+            baseEnvironment: ["PATH": "/usr/bin"])
+        XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "claudeCode")
+    }
+
+    /// The provider tag must survive alongside the existing credential scrub — one must not
+    /// come at the cost of the other.
+    func testBuildEnvironmentStillScrubsCredentialsAlongsideTheProviderTag() {
+        let env = LocalOneShotRunner.buildEnvironment(
+            provider: .codex, companyId: nil, modelPreference: ClaudeCodeModelPreference(),
+            baseEnvironment: ["PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant-x"])
+        XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "codex")
+        XCTAssertNil(env["ANTHROPIC_API_KEY"])
+        XCTAssertEqual(env["PATH"], "/usr/bin")
+    }
 }

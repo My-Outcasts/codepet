@@ -740,9 +740,9 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
             // and no further. `.blocked` is what carries a reason the whole way out, which
             // is why `failClosed` below already throws it for the streaming ops.
             throw ReflectionAPIError.blocked(reason)
-        case .local:
+        case .local(let provider):
             let out = try await LocalOneShotRunner.run(
-                op: op, body: try JSONEncoder().encode(request))
+                op: op, body: try JSONEncoder().encode(request), provider: provider)
             do {
                 return try JSONDecoder().decode(Response.self, from: out)
             } catch {
@@ -796,13 +796,13 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
     /// synthetic drip would be the fake typing the contract forbids, so the stream opens
     /// (`.started`, which is what shows "generating…") and then lands the whole narrative.
     private func localNarrativeStream(
-        _ request: SummarizeTurnRequest
+        _ request: SummarizeTurnRequest, provider: AIProvider
     ) -> AsyncThrowingStream<NarrativeStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
                     let body = try await LocalOneShotRunner.run(
-                        op: "summarizeTurn", body: try JSONEncoder().encode(request))
+                        op: "summarizeTurn", body: try JSONEncoder().encode(request), provider: provider)
                     let decoded = try JSONDecoder().decode(SummarizeTurnResponse.self, from: body)
                     continuation.yield(.started)
                     continuation.yield(.done(narrative: decoded.narrative,
@@ -852,8 +852,8 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         switch localStreamOp() {
         case .blocked(let reason):
             return Self.failClosed(op: "summarizeTurn", reason: reason)
-        case .local:
-            return localNarrativeStream(request)
+        case .local(let provider):
+            return localNarrativeStream(request, provider: provider)
         }
     }
 
@@ -887,12 +887,12 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         switch localStreamOp() {
         case .blocked(let reason):
             return Self.failClosed(op: "summarizeSession", reason: reason)
-        case .local:
+        case .local(let provider):
             return AsyncThrowingStream { continuation in
                 Task {
                     do {
                         let body = try await LocalOneShotRunner.run(
-                            op: "summarizeSession", body: try JSONEncoder().encode(request))
+                            op: "summarizeSession", body: try JSONEncoder().encode(request), provider: provider)
                         let decoded = try JSONDecoder().decode(SummarizeSessionResponse.self, from: body)
                         continuation.yield(.started)
                         continuation.yield(.done(summary: decoded.summary, model: decoded.model,
@@ -911,12 +911,12 @@ final class ReflectionAPIClient: ReflectionAPIClientProtocol {
         switch localStreamOp() {
         case .blocked(let reason):
             return Self.failClosed(op: "chatSession", reason: reason)
-        case .local:
+        case .local(let provider):
             return AsyncThrowingStream { continuation in
                 Task {
                     do {
                         let body = try await LocalOneShotRunner.run(
-                            op: "chatSession", body: try JSONEncoder().encode(request))
+                            op: "chatSession", body: try JSONEncoder().encode(request), provider: provider)
                         let decoded = try JSONDecoder().decode(LocalChatSessionBody.self, from: body)
                         // One delta carrying the whole reply: the view builds its text from
                         // deltas, and `.done` carries none. Splitting it into fake chunks

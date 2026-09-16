@@ -26,11 +26,11 @@ enum DecisionsClient {
         // Fail-open stays fail-open — `[]` costs a Second Brain entry, never the approval that
         // already happened — but the reason is logged.
         switch LocalTransportRouter.forOneShot() {
-        case .local:
+        case .local(let provider):
             do {
                 let body = try JSONEncoder().encode(
                     Request(deliverable: deliverable, existing_decisions: onRecord))
-                let out = try await LocalOneShotRunner.run(op: "extractDecisions", body: body)
+                let out = try await LocalOneShotRunner.run(op: "extractDecisions", body: body, provider: provider)
                 return try JSONDecoder().decode(Response.self, from: out).decisions
             } catch {
                 LocalTransportRouter.log.error(

@@ -327,6 +327,18 @@ func testTransportIsOnlyEverLocalOrBlocked() {
 
 - [ ] **Step 2: Run, watch fail** (`.local` takes no argument yet).
 - [ ] **Step 3: Add `AIProvider` and thread it through `transport()`.**
+**`ChatTransportRouter` gets the provider too, and always `.claudeCode`.** The plan named only
+`LocalTransportRouter`; that was a gap. There are TWO `Transport` enums and ten `case .local`
+sites across six files.
+
+Chat has no second provider this phase — but leaving its enum as bare `.local` while the
+one-shot enum carries a provider makes the two drift, and `ChatTransportRouter`'s own doc comment
+points at `LocalTransportRouter` as the shape to hold, saying drift "costs a lie in prose". So
+chat becomes `.local(AIProvider)` and always answers `.claudeCode`, with a comment saying exactly
+that: it does not vary yet, and the day chat runs on a second CLI the shape is already right.
+
+Do NOT make chat selectable. Its router must return `.claudeCode` unconditionally.
+
 - [ ] **Step 4: Update every `case .local` site.** Find them: `grep -rn "case .local" codepet | grep -v Tests`. Each becomes `case .local(let provider)`; a site that ignores the provider uses `.local`. **Do not change what any of them DO** — this task records the provider, it does not act on it.
 - [ ] **Step 5: Run the affected suites green; commit.**
 

@@ -38,12 +38,30 @@ final class ProviderAuthorisationLiveAIScopeTests: XCTestCase {
         // clear explicitly rather than trust that.
         UserDefaults.standard.removeObject(forKey: ProviderAuthorisation.key(.claudeCode, ungranted))
         UserDefaults.standard.removeObject(forKey: ProviderAuthorisation.key(.claudeCode, storedGrant))
+        // **And the prototype id, which is NOT a fresh UUID — it is the literal "prototype".**
+        //
+        // This file's exposure was reviewed as "bounded, because the ids are freshly minted
+        // UUIDs and cannot collide with a real company". That bound never covered
+        // `ContentView.prototypeCompanyId`: it is a fixed string, so granting the fixture
+        // company in a running app writes the very key these tests assert is absent, and both
+        // of them fail on a developer machine where anyone has ever used prototype mode.
+        // Found by granting it in the app during a manual test, not by the suite.
+        //
+        // Cleared for both providers, since either grant would do it.
+        for provider in AIProvider.allCases {
+            UserDefaults.standard.removeObject(
+                forKey: ProviderAuthorisation.key(provider, ContentView.prototypeCompanyId))
+        }
     }
 
     override func tearDown() {
         clearPrototypeState()
         UserDefaults.standard.removeObject(forKey: ProviderAuthorisation.key(.claudeCode, ungranted))
         UserDefaults.standard.removeObject(forKey: ProviderAuthorisation.key(.claudeCode, storedGrant))
+        for provider in AIProvider.allCases {
+            UserDefaults.standard.removeObject(
+                forKey: ProviderAuthorisation.key(provider, ContentView.prototypeCompanyId))
+        }
         super.tearDown()
     }
 

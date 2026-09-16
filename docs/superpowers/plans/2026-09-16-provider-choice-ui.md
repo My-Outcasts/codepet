@@ -785,7 +785,22 @@ Tapping "Re-run on Codex" while Codex is ungranted **is** the consent prompt.
 **Files:**
 - Create: `codepet/Views/Library/ProviderConsentPrompt.swift`
 - Modify: the deliverable card's re-run handler (the `onReRun` added in Task 5)
+- Modify: every `DeliverableFrame` call site that renders a run-produced deliverable
 - Test: `codepetTests/ProviderConsentTests.swift` (create)
+
+**This task also wires Task 5's slots, which are currently connected to nothing.**
+Task 5 added `provenance` and `onReRun` to `DeliverableFrame` and left all 11 call sites
+passing neither — so the line renders nowhere and the offer is unreachable. A slot no caller
+fills is the same defect as a stamp no test observes, which Task 4's review caught; the plan
+simply never scheduled the wiring, and this is where it belongs, because the consent flow and
+the display attach at the same call sites.
+
+At each call site that renders a `Deliverable`, pass `provenance: deliverable.producedBy`.
+Passing it universally is safe: `producedBy` is `nil` for anything not produced by a run, and a
+nil provenance renders nothing. Do NOT try to guess a provider for cards that have none.
+
+Add a test that a call site given a deliverable with `producedBy == .codex` renders the Codex
+line, and one given `nil` renders no provenance row at all.
 
 - [ ] **Step 1: Write the failing tests**
 

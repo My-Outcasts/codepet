@@ -96,7 +96,7 @@ describe("schemaInstruction", () => {
    * builder, so the instruction has to actually say so.
    */
   it("cancels the tool call the shared prompts ask for", () => {
-    expect(schemaInstruction({}).toLowerCase()).toContain("no tools available");
+    expect(schemaInstruction({}).toLowerCase()).toContain("do not use any tools");
   });
 
   it("asks for the object alone, with no fence and no prose", () => {

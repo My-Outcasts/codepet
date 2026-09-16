@@ -171,7 +171,7 @@ export class OneShotUnusableAnswer extends Error {}
  */
 export function schemaInstruction(schema: unknown): string {
   return [
-    "There are no tools available in this run. If anything above asks you to call a tool,",
+    "Do not use any tools in this run. If anything above asks you to call a tool,",
     "do not attempt it — put exactly the arguments you would have passed to that tool in",
     "the JSON object described below instead.",
     "",

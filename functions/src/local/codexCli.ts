@@ -33,11 +33,13 @@ import type { CliAdapter } from "./cliAdapter";
  *   is not a git repo and is not meant to be.
  * - `--ephemeral` writes no session file for work that is one prompt long.
  * - `-s read-only` is the sandbox. It is NOT the equivalent of Claude's `--tools ""`: Codex
- *   has no way to grant nothing, so its shell tooling stays reachable and the schema
- *   instruction's "There are no tools available in this run" is not literally true here.
- *   Both real op runs in the spike made zero tool calls, so compliance held — but it rests on
- *   the model rather than a capability gate, and `read-only` is what bounds the blast radius
- *   meanwhile.
+ *   has no way to grant nothing, so its shell tooling stays reachable regardless of what the
+ *   schema instruction tells the model to do. The instruction itself was reworded from a
+ *   factual claim ("there are no tools available") to a directive ("do not use any tools"),
+ *   because the old wording was true under Claude — which really does run with `--tools ""`
+ *   — but false here, where the tools exist and are merely told not to be used. Both real op
+ *   runs in the spike made zero tool calls, so compliance held — but it rests on the model
+ *   rather than a capability gate, and `read-only` is what bounds the blast radius meanwhile.
  * - `-c developer_instructions=` is the system prompt. There is no `--system-prompt` flag;
  *   this is a config override, and the system prompt therefore travels in ARGV rather than on
  *   stdin. Op systems are short and op-authored (the `runTask` one is 118 bytes), so this is

@@ -125,7 +125,8 @@ Do this WHILE Task 1 runs; it depends only on the Claude side.
   export interface CliAdapter {
     binary: string;
     args(opts: { systemPrompt: string; model?: string; effort?: string }): string[];
-    resultFrom(stdout: string): unknown;
+    /** The model's text, plus whatever token counts this CLI reports (zeros if none). */
+    resultFrom(stdout: string): { text: string; usage: { input: number; output: number; cache_read: number } };
   }
   export const claudeAdapter: CliAdapter;
   export async function runCli(adapter: CliAdapter, opts: {
@@ -169,7 +170,18 @@ describe("the Claude adapter", () => {
   });
 
   test("pulls the answer out of the envelope", () => {
-    expect(claudeAdapter.resultFrom('{"result":"hello"}')).toBe("hello");
+    expect(claudeAdapter.resultFrom('{"result":"hello"}').text).toBe("hello");
+  });
+
+  /** **Usage rides with the text, and this is why.** `usageFrom` is consumed by `vcSidecar`
+   *  alone — the meeting's run ceiling, the only guard against a runaway loop on the founder's
+   *  own plan. Returning bare text would strand it. Cache WRITES count as input: a real meeting
+   *  reported `input_tokens: 2` for a prompt of thousands, because the prefix was cached and
+   *  billed as `cache_creation_input_tokens`. */
+  test("carries the token counts the meeting's ceiling depends on", () => {
+    const r = claudeAdapter.resultFrom(
+      '{"result":"hi","usage":{"input_tokens":2,"cache_creation_input_tokens":3000,"output_tokens":7}}');
+    expect(r.usage).toEqual({ input: 3002, output: 7, cache_read: 0 });
   });
 
   test("is the claude binary", () => {
@@ -185,6 +197,15 @@ cd ~/Developer/codepet-dept-outputs/functions && npx jest src/__tests__/cliAdapt
 ```
 
 Expected: FAIL — `Cannot find module '../local/cliAdapter'`.
+
+**The constraint that shapes `resultFrom`.** `usageFrom` has exactly one consumer: `vcSidecar`,
+which is Claude-only and stays that way — but the refactor still touches it and it must keep
+working identically. A `resultFrom` returning bare text would silently drop the meeting's token
+accounting, and that ceiling is the only guard against a runaway loop on the founder's own plan.
+So the adapter returns text AND usage; Codex reports none on its default path and returns zeros,
+which is honest rather than invented.
+
+`oneShotSidecar` uses only the text. `vcSidecar` uses both.
 
 - [ ] **Step 3: Create the interface and move the Claude implementation behind it**
 

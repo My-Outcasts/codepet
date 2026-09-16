@@ -231,6 +231,45 @@ git commit -m "One adapter interface, with Claude as its first implementation"
 
 ---
 
+### Task 3 precondition, found while reviewing Task 2
+
+Two things Task 2 surfaced that Task 3 must handle rather than discover.
+
+**1. `runCli` is currently dead, and Task 3 is what makes the seam load-bearing.**
+Task 2 kept `runClaudeJson` over an internal envelope-returning helper, because both callers read
+fields `resultFrom` does not carry. `runCli` compiles and is tree-shaken out. **Task 3 must route
+`oneShotSidecar` through the adapter for real** — otherwise this phase ships an interface nothing
+uses, and the second provider is wired to nothing.
+
+**2. `OneShotMeta.model` means different things on the two providers, and that must be visible.**
+`oneShotSidecar.ts:116` sets `model: pickModel(envelope)`, whose doc says "what actually answered,
+as Claude Code reported it" — read off `modelUsage` in Claude's envelope. **Codex's default stdout
+has no envelope**, so nothing reports what answered.
+
+Do NOT paper over this by reporting the requested model as though it were the answering one. The
+field is consumed by ops that put it in front of the founder. Options, in order of preference:
+
+- report what Codex *does* tell us, if `--json` (JSONL, text at `.item.text`) carries a model id
+  cheaply enough — verify against the binary, do not assume;
+- otherwise report the model Codepet asked for, **clearly marked as requested rather than
+  answering**, and say so in the field's doc comment;
+- never report a Claude model id for a Codex run.
+
+So the adapter contract gains a third value:
+
+```ts
+resultFrom(stdout: string): {
+  text: string;
+  usage: { input: number; output: number; cache_read: number };
+  /** What answered, when the CLI says. `undefined` when it does not — never a guess. */
+  model?: string;
+};
+```
+
+Claude fills it from `modelUsage` via the existing `pickModel`. Codex fills it only if verified.
+
+---
+
 ### Task 3: `codexCli.ts` — BLOCKED on Task 1
 
 **Do not start this until `.superpowers/sdd/codex-cli-findings.md` exists and says GO.**

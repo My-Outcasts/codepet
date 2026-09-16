@@ -58,8 +58,17 @@ enum BlockedOffer: Equatable {
             let reason = BlockReason.notGrantedFor(provider)
             return lang == .vi ? reason.founderTextVi : reason.founderText
         case .install:
-            return lang == .vi ? BlockReason.claudeCodeMissing.founderTextVi
-                               : BlockReason.claudeCodeMissing.founderText
+            // Reached only on `.anyProvider` with neither CLI present — Claude Code would
+            // serve equally well as Codex here, so naming just one is the specific wrong
+            // answer the spec calls out ("she has a plan, just not that one"). Deliberately
+            // its own copy, not `BlockReason.claudeCodeMissing` (which is Claude-specific and
+            // used nowhere else): reusing it would say "install Claude Code" to a founder who
+            // has never touched Anthropic and pays for ChatGPT instead. Framing matches
+            // `OnboardingProviderStep`'s gate ("Install either one") so the product speaks
+            // with one voice at both surfaces.
+            return lang == .vi
+                ? "Codepet chạy trên Claude Code hoặc Codex. Cài đặt một trong hai rồi thử lại."
+                : "Codepet runs on Claude Code, or Codex. Install either one, then try again."
         case .explain(let reason):
             return lang == .vi ? reason.founderTextVi : reason.founderText
         }

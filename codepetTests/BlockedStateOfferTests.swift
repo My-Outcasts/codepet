@@ -62,9 +62,21 @@ final class BlockedStateOfferTests: XCTestCase {
 
     /// `.install`'s copy must actually tell the founder to install something — this is the
     /// one case whose text is NOT drawn from the reason it wraps, so it needs its own check.
-    func testInstallOfferNamesInstalling() {
-        let text = BlockedOffer.install.founderText(lang: .en).lowercased()
-        XCTAssertTrue(text.contains("install"), "expected an install instruction, got: \(text)")
+    ///
+    /// **Must name BOTH providers, in both languages.** `.install` is reached only on
+    /// `.anyProvider` with neither CLI present — exactly the case where Codex would serve
+    /// this founder equally well. A copy naming only Claude Code is the specific wrong answer
+    /// the spec calls out ("she has a plan, just not that one"); a bare `contains("install")`
+    /// check let that regression through once and would let it back in.
+    func testInstallOfferNamesBothProvidersInBothLanguages() {
+        let en = BlockedOffer.install.founderText(lang: .en).lowercased()
+        XCTAssertTrue(en.contains("install"), "expected an install instruction, got: \(en)")
+        XCTAssertTrue(en.contains("claude"), "must name Claude Code, got: \(en)")
+        XCTAssertTrue(en.contains("codex"), "must name Codex too, got: \(en)")
+
+        let vi = BlockedOffer.install.founderText(lang: .vi).lowercased()
+        XCTAssertTrue(vi.contains("claude"), "Vietnamese copy must name Claude Code, got: \(vi)")
+        XCTAssertTrue(vi.contains("codex"), "Vietnamese copy must name Codex too, got: \(vi)")
     }
 
     /// Every offer has to speak Vietnamese too — this is founder-facing copy, not a debug log.

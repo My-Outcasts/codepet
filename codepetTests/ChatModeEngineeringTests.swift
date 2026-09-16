@@ -227,10 +227,13 @@ final class BuildDestinationTests: XCTestCase {
     /// founder has NOT granted her Claude plan. `engStartRun` 401s today, so before that
     /// dispatch fires the founder must see why the build cannot run and how to fix it.
     ///
-    /// **Task 9:** `makeStore()` never hydrates, so `installedProviders.installed` stays
-    /// empty — `BlockedOffer.resolve` has no CLI to name here and falls to `.install`, whose
-    /// copy is `BlockReason.claudeCodeMissing`'s (a bare `.notGranted` would have wrongly told
-    /// a founder with nothing installed to "turn on" a plan she has no CLI to run at all).
+    /// **Fix pass:** this call site resolves `surface: .claudeOnly`, not `.anyProvider` — the
+    /// gate that actually decides this branch (`buildRunsOnFoundersAgent`) reads
+    /// `isAuthorised(.claudeCode, …)` alone, so a Codex grant here would never unstick her.
+    /// With nothing installed, `BlockedOffer.resolve` for `.claudeOnly` returns
+    /// `.explain(.needsClaudeCode)` — told she needs Claude Code specifically, not sent to
+    /// "install" some CLI with no name attached, and not told to grant a plan that changes
+    /// nothing here.
     func testBuildWithAFolderButNoGrantNoticesTheFounderBeforeTheCloudRun() {
         let store = makeStore()
         _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
@@ -238,7 +241,7 @@ final class BuildDestinationTests: XCTestCase {
         store.startBuild(ask: "add stripe checkout")
 
         XCTAssertTrue(
-            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.claudeCodeMissing.founderText },
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.needsClaudeCode.founderText },
             "an ungranted, folder-linked Build did not tell the founder why it cannot run"
         )
         // The branch itself is unchanged: it still reaches the cloud agent (Task 7's onboarding
@@ -257,20 +260,23 @@ final class BuildDestinationTests: XCTestCase {
         store.startBuild(ask: "add stripe checkout", language: .vi)
 
         XCTAssertTrue(
-            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.claudeCodeMissing.founderTextVi },
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.needsClaudeCode.founderTextVi },
             "the Vietnamese founder was not shown the Vietnamese notice"
         )
         XCTAssertFalse(
-            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.claudeCodeMissing.founderText },
+            store.chatMessages.contains { $0.role == .companion && $0.text == BlockReason.needsClaudeCode.founderText },
             "the Vietnamese founder was shown the English notice instead"
         )
     }
 
-    /// A founder with Codex (but not Claude Code) installed gets THAT grant named — Build is
-    /// a one-shot op (`prefer` reaches `LocalTransportRouter.forOneShot`), so either CLI may
-    /// run it, unlike chat/meetings. Before Task 9 this founder saw "grant your Claude plan"
-    /// regardless of what she actually has.
-    func testBuildWithAFolderButNoGrantNamesCodexWhenOnlyCodexIsInstalled() {
+    /// **Fix pass — this test's OLD premise was the bug.** Before the fix, a Codex-only
+    /// founder here was offered the Codex grant: she could turn it on, and it changed
+    /// nothing, because `buildRunsOnFoundersAgent` only ever reads the Claude grant. This
+    /// surface is Claude-only IN FACT (Build is a one-shot op that could in principle run on
+    /// either CLI, but this particular branch's gate cannot), so a Codex-only founder must be
+    /// told she needs Claude Code specifically — not offered a grant for the plan she already
+    /// has, which would do nothing for her.
+    func testBuildWithAFolderButNoGrantTellsACodexOnlyFounderSheNeedsClaudeCode() {
         let store = makeStore()
         _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
         store.installedProviders.apply([.codex: CLIStatus(provider: .codex, install: .present(version: "1.0"),
@@ -280,8 +286,31 @@ final class BuildDestinationTests: XCTestCase {
 
         XCTAssertTrue(
             store.chatMessages.contains { $0.role == .companion
+                && $0.text == BlockReason.needsClaudeCode.founderText },
+            "a Codex-only founder was offered a grant that cannot unblock this surface"
+        )
+        XCTAssertFalse(
+            store.chatMessages.contains { $0.role == .companion
                 && $0.text == BlockReason.notGrantedProvider(.codex).founderText },
-            "a Codex-only founder was not offered the Codex grant"
+            "must not offer the Codex grant here — granting it changes nothing for this surface"
+        )
+    }
+
+    /// The Claude-installed-but-ungranted case still gets a real, working grant button — this
+    /// surface's gate reads exactly that grant, so `.claudeOnly` resolves to `.grant(.claudeCode)`
+    /// here, not `.explain`.
+    func testBuildWithAFolderButNoGrantOffersTheClaudeGrantWhenClaudeIsInstalled() {
+        let store = makeStore()
+        _ = store.linkProject(path: NSTemporaryDirectory(), bootstrapClaudeMd: false)
+        store.installedProviders.apply([.claudeCode: CLIStatus(provider: .claudeCode, install: .present(version: "1.0"),
+                                                                 auth: .loggedOut, authorised: false)])
+
+        store.startBuild(ask: "add stripe checkout")
+
+        XCTAssertTrue(
+            store.chatMessages.contains { $0.role == .companion
+                && $0.text == BlockReason.notGrantedProvider(.claudeCode).founderText },
+            "a Claude-installed founder was not offered the Claude grant"
         )
     }
 

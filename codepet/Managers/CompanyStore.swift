@@ -1116,13 +1116,19 @@ final class CompanyStore: ObservableObject {
             startCodeRun(ask: ask)
         } else {
             // `engStartRun` 401s (the key deleted 26 Aug 2026) rather than answering, so the
-            // founder gets a silent stall unless something on screen says why. A bare
-            // `.notGranted` said "grant your Claude plan" to every founder alike, including one
-            // who has only Codex installed — `BlockedOffer` names the CLI she can actually
-            // grant, or tells her to install one when neither is on this Mac (Task 9). This
-            // does not change the branch itself: Task 7's onboarding gate is what stops
-            // `startEngineeringRun` from firing, not this notice.
-            let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed)
+            // founder gets a silent stall unless something on screen says why.
+            //
+            // **`.claudeOnly`, not `.anyProvider`.** `buildRunsOnFoundersAgent` — the gate that
+            // decides which branch this `if` takes — reads `isAuthorised(.claudeCode, …)`
+            // alone, so THIS surface can only ever be unstuck by a Claude Code grant. Offering
+            // `.anyProvider` told a Codex-only founder to "turn on your ChatGPT plan"; she
+            // could, and it changed nothing, because the gate never reads that grant — she'd
+            // do exactly what she was told and stay stuck, having complied. `.claudeOnly` gets
+            // this right for all three cases: Claude installed (ungranted) → the real grant
+            // button; Codex-only or neither installed → told she needs Claude Code specifically
+            // (`needsClaudeCode`), not sent to grant or install a CLI that cannot help here.
+            let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed,
+                                           surface: .claudeOnly)
                 .founderText(lang: language)
             chatMessages.append(CopilotMessage(role: .companion, text: why))
             startEngineeringRun(ask: ask)

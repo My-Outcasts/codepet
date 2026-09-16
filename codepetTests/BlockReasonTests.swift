@@ -48,12 +48,18 @@ final class BlockReasonTests: XCTestCase {
         XCTAssertTrue(reason.founderText.lowercased().contains("claude"))
     }
 
-    /// Chat and meetings are Claude-only. The copy must name an action, because every other
-    /// BlockReason names one — a case that only states a fact would be the odd one out.
-    func testNeedsClaudeCodeNamesAnAction() {
+    /// Chat and meetings are Claude-only. The copy must name a REAL action — `resolve` only
+    /// ever returns this reason when Claude Code is not installed, so "install" is the one
+    /// true move. It must NOT point at a company-level provider switch: no such control
+    /// exists anywhere in this app, so "switch" passing here is exactly what let a founder go
+    /// hunting Settings for a button that was never built.
+    func testNeedsClaudeCodeNamesARealAction() {
         let text = BlockReason.needsClaudeCode.founderText.lowercased()
-        XCTAssertTrue(text.contains("install") || text.contains("switch"),
-                      "expected an action, got: \(BlockReason.needsClaudeCode.founderText)")
+        XCTAssertTrue(text.contains("install"),
+                      "expected an install instruction, got: \(BlockReason.needsClaudeCode.founderText)")
+        XCTAssertFalse(text.contains("switch"),
+                       "must not point at a company-level provider switch, which does not exist: "
+                       + BlockReason.needsClaudeCode.founderText)
     }
 
     /// Every case carries both languages. A missing Vietnamese string renders English to a

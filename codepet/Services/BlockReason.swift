@@ -50,7 +50,12 @@ enum BlockReason: Equatable {
         case .notGrantedProvider(.codex):
             return "Codepet needs permission to use your ChatGPT plan. Turn it on to continue."
         case .needsClaudeCode:
-            return "Chat and meetings run on Claude Code. Install it, or switch this company to it."
+            // `BlockedOffer.resolve` only ever returns `.explain(.needsClaudeCode)` when
+            // Claude Code is NOT installed (installed-but-ungranted resolves to `.grant`
+            // instead) — so installing it is the one real move here. There is no per-company
+            // provider switch anywhere in this app; naming one sent a founder hunting Settings
+            // for a control that does not exist.
+            return "Chat and meetings run on Claude Code. Install it to continue."
         }
     }
 
@@ -69,7 +74,7 @@ enum BlockReason: Equatable {
         case .notGrantedProvider(.codex):
             return "Codepet cần quyền dùng gói ChatGPT của bạn. Hãy bật để tiếp tục."
         case .needsClaudeCode:
-            return "Trò chuyện và cuộc họp chạy trên Claude Code. Hãy cài đặt, hoặc chuyển công ty này sang đó."
+            return "Trò chuyện và cuộc họp chạy trên Claude Code. Hãy cài đặt để tiếp tục."
         }
     }
 }

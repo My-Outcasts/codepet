@@ -67,6 +67,61 @@ final class SessionChatControllerTests: XCTestCase {
         XCTAssertEqual(store.messages(for: "s1").map(\.role), [.user])
     }
 
+    /// **Finding 6 regression guard.** A blocked reason must reach the panel as founder-
+    /// authored copy — `.blocked`, rendered verbatim — never folded into `.networkOrServer`,
+    /// which the panel deliberately never shows raw. `installedProviders` is empty under
+    /// XCTest (the probe is skipped in `init`), so a Claude-only surface with nothing
+    /// installed resolves to `.needsClaudeCode` — a real, actionable sentence, not a debug
+    /// dump.
+    @MainActor
+    func testBlockedReasonReachesThePanelVerbatim() async {
+        let store = SessionChatStore(
+            fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json"),
+            saveDebounce: 0
+        )
+        let api = StubAPI(events: [.error(ReflectionAPIError.blocked(.notGranted))])
+        let controller = SessionChatController(api: api, store: store)
+
+        await controller.send(userText: "x", sessionId: "s1", request: makeRequest())
+
+        guard case .blocked(let message) = controller.error else {
+            return XCTFail("expected .blocked, got \(String(describing: controller.error))")
+        }
+        // Founder-facing prose, not a diagnostic label.
+        XCTAssertFalse(message.isEmpty)
+        XCTAssertFalse(message.contains("networkOrServer"))
+        // The panel's rendering renders `.blocked` verbatim — no fallback substitution.
+        XCTAssertEqual(SessionChatPanel.errorText(controller.error!), message)
+    }
+
+    /// **Finding 6 regression guard, the other half.** A `String(describing:)` diagnostic
+    /// (what a genuinely dropped connection produces) must NOT reach the founder verbatim —
+    /// this is the exact regression: an `NSURLErrorDomain` dump rendered in the chat panel
+    /// where "Could not reach your pet — try again." used to be. The controller may still
+    /// carry the diagnostic string internally (for logging); the panel's copy must not show it.
+    @MainActor
+    func testDiagnosticErrorNeverReachesThePanelVerbatim() async {
+        let store = SessionChatStore(
+            fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json"),
+            saveDebounce: 0
+        )
+        let api = StubAPI(events: [.error(URLError(.networkConnectionLost))])
+        let controller = SessionChatController(api: api, store: store)
+
+        await controller.send(userText: "x", sessionId: "s1", request: makeRequest())
+
+        guard case .networkOrServer(let message) = controller.error else {
+            return XCTFail("expected .networkOrServer, got \(String(describing: controller.error))")
+        }
+        // The raw diagnostic is whatever `String(describing:)` produces for a `URLError` —
+        // not founder prose, and specifically not the friendly fallback sentence.
+        XCTAssertNotEqual(message, "Could not reach your pet — try again.")
+        // The panel must show the generic fallback instead, never this diagnostic string.
+        let rendered = SessionChatPanel.errorText(controller.error!)
+        XCTAssertEqual(rendered, "Could not reach your pet — try again.")
+        XCTAssertNotEqual(rendered, message)
+    }
+
     // Helpers
 
     private func makeRequest() -> ChatSessionRequest {

@@ -11,6 +11,16 @@ final class SessionChatController: ObservableObject {
     enum ChatError: Equatable {
         case notSignedIn
         case rateLimited(resetAt: Date?, limit: Int?)
+        /// Founder-authored copy, already in her language — a `BlockedOffer`/`BlockReason`
+        /// sentence. Structurally separate from `networkOrServer` so the panel can render it
+        /// VERBATIM without a fallback ever swallowing it, and so a diagnostic string can
+        /// never end up here by accident.
+        case blocked(message: String)
+        /// Diagnostic text only — an HTTP status, `"malformed response"`, or
+        /// `String(describing:)` on a thrown error. Never founder-authored prose, so the panel
+        /// must never render this verbatim (regression: it once did, showing raw
+        /// `NSURLErrorDomain` dumps in English on an ordinary dropped connection) — it always
+        /// falls back to a generic sentence instead.
         case networkOrServer(message: String)
     }
 
@@ -130,8 +140,12 @@ final class SessionChatController: ObservableObject {
             // `ReflectionAPIClient.localOneShot`) — either CLI may pick it up, so the surface
             // is `.anyProvider`: a Codex-only founder gets the Codex grant named, not sent to
             // grant a Claude plan she does not have (Task 9).
+            //
+            // `.blocked`, not `.networkOrServer` — this text is founder-authored prose and
+            // must render verbatim. `.networkOrServer` is reserved for diagnostic strings
+            // (HTTP status, `String(describing:)`) that the panel deliberately never shows.
             let offer = BlockedOffer.resolve(reason: reason, installed: installed)
-            return .networkOrServer(message: offer.founderText(lang: lang))
+            return .blocked(message: offer.founderText(lang: lang))
         }
     }
 }

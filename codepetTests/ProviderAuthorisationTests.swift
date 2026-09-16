@@ -78,6 +78,16 @@ final class ProviderAuthorisationTests: XCTestCase {
         XCTAssertFalse(auth.isAuthorised(.codex, "c1"))
     }
 
+    /// The founder turning the Settings toggle OFF must actually withdraw the Claude
+    /// grant, not merely leave a sibling provider's grant standing (that is the test
+    /// above). Without this, Codepet keeps spending her Claude plan after she said stop.
+    func testClaudeGrantCanBeWithdrawn() {
+        let auth = authorisation()
+        auth.setAuthorised(.claudeCode, "c1", true)
+        auth.setAuthorised(.claudeCode, "c1", false)
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, "c1"), "withdrawing the Claude grant did not stick")
+    }
+
     // MARK: - The stored key must not move
 
     /// **The existing key must not move**, or every founder who already granted Claude Code
@@ -117,6 +127,16 @@ final class ProviderAuthorisationTests: XCTestCase {
         auth.setAuthorised(.codex, "company-a", true)
         XCTAssertFalse(auth.isAuthorised(.codex, "company-b"))
         XCTAssertFalse(auth.isAuthorised(.claudeCode, "company-b"))
+    }
+
+    /// The mirror of the test above, with Claude as the granted provider rather than
+    /// merely the one left unchecked. One Mac has ONE Claude Code login, so a
+    /// device-global grant would mean founder A's consent silently lets founder B
+    /// spend the plan A signed in with — and B is the one who would never be asked.
+    func testOneFoundersClaudeGrantDoesNotAuthoriseAnother() {
+        let auth = authorisation()
+        auth.setAuthorised(.claudeCode, "company-a", true)
+        XCTAssertFalse(auth.isAuthorised(.claudeCode, "company-b"), "a Claude grant crossed companies")
     }
 
     /// Absent means NOT granted, for every provider. A founder who has never seen a toggle

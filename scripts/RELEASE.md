@@ -1,11 +1,11 @@
 # Codepet — macOS direct-download release runbook
 
 How to cut a notarized `Codepet.dmg` for the **"Download for macOS"** button on
-code-pet.com. This is direct distribution (Developer ID + notarization), **not**
+murror.app. This is direct distribution (Developer ID + notarization), **not**
 the Mac App Store.
 
 Current version: **1.0 (build 2)** — bump `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
-in `codepet.xcodeproj` for each new build.
+in `CodePet.xcodeproj` for each new build.
 
 ---
 
@@ -34,8 +34,16 @@ in `codepet.xcodeproj` for each new build.
 ./scripts/package-macos.sh
 ```
 
-This archives → exports with Developer ID (Hardened Runtime) → builds the `.dmg`
-→ notarizes → staples → verifies. Output: `build/Codepet.dmg`.
+This bundles the sidecars → archives → exports with Developer ID (Hardened
+Runtime) → **verifies the sidecars are inside the .app** → builds the `.dmg` →
+notarizes → staples → verifies. Output: `build/Codepet.dmg`.
+
+The sidecar steps are not optional and not cosmetic. The three bundles are
+gitignored build output, so a clean checkout has none, and an app shipped
+without them launches perfectly and then reports `localUnavailable` on every AI
+feature in the product. `scripts/verify-sidecars-bundled.sh` fails the build
+rather than letting that reach a download page; `scripts/test-verify-sidecars.sh`
+is its test and runs on every PR.
 
 Override defaults inline if needed:
 ```sh
@@ -62,15 +70,28 @@ creates/updates the release, attaches `build/Codepet.dmg`, and marks it
 https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg
 ```
 
-The website button already points at **`code-pet.com/download/Codepet.dmg`**,
-which 307-redirects to that permalink (see `next.config.ts` in devpet-landing).
-So the button URL never changes — only run `release-github.sh` per build.
-
 > Note: this creates a release/tag on the *remote* repo's default branch and
 > uploads an asset. It does not push from the local app repo (which has separate
 > git lineage), so it's safe to run from here.
 
----
+### The website button
+
+Two pages can carry it, and they are in different repos:
+
+| Where | Repo | Status |
+|---|---|---|
+| `murror.app/download` | `Murror/devpet-landing` (Next.js on Vercel) | the public button |
+| `my-outcasts.github.io/codepet` | this repo, `index.html` via `.github/workflows/pages.yml` | already live |
+
+Both point at the `releases/latest/download/Codepet.dmg` permalink above, so
+**the URLs never change** — shipping a new version is `package-macos.sh` then
+`release-github.sh`, and nothing on either website is touched.
+
+> An earlier version of this file claimed `code-pet.com/download/Codepet.dmg`
+> 307-redirected to that permalink "see `next.config.ts` in devpet-landing".
+> That redirect did not exist; the only rule in that file was `/v2` → `/`. If the
+> button ever 404s, check the redirect is actually there before assuming the
+> release is missing — and check `gh release list` too.
 
 ## What users see (Gatekeeper first-open)
 

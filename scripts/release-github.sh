@@ -2,12 +2,12 @@
 #
 # Publish (or update) the GitHub Release that hosts Codepet.dmg.
 #
-# Host: My-Outcasts/codepet (PUBLIC → unauthenticated downloads work). The
-# website button points at code-pet.com/download/Codepet.dmg, which redirects
-# (see devpet-landing next.config.ts) to:
+# Host: My-Outcasts/codepet (PUBLIC → unauthenticated downloads work). Both download
+# pages — murror.app/download (repo Murror/devpet-landing) and the GitHub Pages one in
+# this repo — point at the `latest` permalink:
 #     https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg
-# So this script just publishes the latest release with the .dmg attached;
-# the website URL never changes.
+# So this script just publishes the latest release with the .dmg attached; neither
+# website is touched when a new version ships.
 #
 # NOTE: this only creates a release + uploads an asset on the REMOTE repo (a tag
 # on its default branch). It does NOT push from / depend on the local app repo's
@@ -54,5 +54,5 @@ else
 fi
 
 echo ""
-echo "✅ Published. code-pet.com/download/Codepet.dmg now resolves to:"
+echo "✅ Published. murror.app/download/Codepet.dmg now resolves to:"
 echo "   https://github.com/$REPO/releases/latest/download/Codepet.dmg"

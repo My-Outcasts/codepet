@@ -59,13 +59,21 @@ enum LocalTransportRouter {
     /// `prefer` is the seam a caller uses to name a provider explicitly — the run card's
     /// future "Re-run on Codex". It is honoured only when the founder has actually granted
     /// that provider; see `chooseProvider`.
+    ///
+    /// `sidecarAvailable` is injectable for the same reason `forVirtualCompany`'s is: the real
+    /// one reads the filesystem for a GITIGNORED build artifact, so a test that does not
+    /// inject it is asserting something about the machine it runs on. That is not theoretical —
+    /// the provenance-stamp tests passed on a developer's checkout and failed on CI, whose
+    /// macOS job never bundles the sidecars, and the failure read as a nil stamp rather than
+    /// as a missing file.
     static func forOneShot(
         companyId: String? = activeCompanyId,
         authorisation: ProviderAuthorisation = ProviderAuthorisation(),
-        prefer: AIProvider? = nil
+        prefer: AIProvider? = nil,
+        sidecarAvailable: () -> Bool = { LocalOneShotRunner.isAvailable() }
     ) -> Transport {
         transport(companyId: companyId, authorisation: authorisation, prefer: prefer,
-                  sidecarAvailable: { LocalOneShotRunner.isAvailable() })
+                  sidecarAvailable: sidecarAvailable)
     }
 
     /// The virtual company meeting, which needs the `vcSidecar` bundle.

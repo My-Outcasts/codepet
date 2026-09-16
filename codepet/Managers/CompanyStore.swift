@@ -403,6 +403,13 @@ final class CompanyStore: ObservableObject {
          // writing to the real defaults domain — a leaked grant would route another suite's
          // Build onto a machine it never asked for.
          claudeAuthorisation: ProviderAuthorisation? = nil,
+         // Whether this build can reach the one-shot sidecar. Injected for the same reason as
+         // `claudeAuthorisation` directly above — the real one reads the filesystem, so a test
+         // that leaves it alone is asserting something about the machine it runs on. The
+         // bundles are GITIGNORED, so "present" is true on a developer's checkout and false on
+         // a fresh clone and on CI; the provenance-stamp tests below were green locally and red
+         // on CI for exactly that reason, reported as a nil stamp rather than a missing file.
+         sidecarAvailable: @escaping () -> Bool = { LocalOneShotRunner.isAvailable() },
          // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
          // has a second defaulted parameter (an injectable runner, added so its exit-code
          // gate is testable), and Swift does not apply defaults when forming a function
@@ -454,6 +461,7 @@ final class CompanyStore: ObservableObject {
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
         self.claudeAuthorisation = claudeAuthorisation ?? ProviderAuthorisation()
+        self.sidecarAvailable = sidecarAvailable
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
@@ -1496,6 +1504,10 @@ final class CompanyStore: ObservableObject {
 
     let claudeAuthorisation: ProviderAuthorisation
 
+    /// Whether the one-shot sidecar bundle is reachable from this build. See the init
+    /// parameter for why this is injected rather than read at the call site.
+    let sidecarAvailable: () -> Bool
+
     /// Which CLIs are on this Mac — cached, refreshed once per hydrate (see `hydrate`), and
     /// read by every deliverable card's provenance row to decide whether the OTHER provider is
     /// worth offering. Never probed from a render path.
@@ -1545,7 +1557,8 @@ final class CompanyStore: ObservableObject {
         guard let taskId = deliverable.sourceTaskId,
               let task = company.tasks.first(where: { $0.id == taskId }) else { return }
         guard case .local(let resolved) = LocalTransportRouter.forOneShot(
-            companyId: cid, authorisation: claudeAuthorisation, prefer: provider) else { return }
+            companyId: cid, authorisation: claudeAuthorisation, prefer: provider,
+            sidecarAvailable: sidecarAvailable) else { return }
         let result = await preferredTaskRunner(runRequest(for: task, language: language), resolved)
         guard companyId == cid,
               let fresh = buildDeliverable(from: result, task: task, producedBy: resolved) else { return }
@@ -3105,7 +3118,8 @@ final class CompanyStore: ObservableObject {
     /// resolution shared by both stamp and execution — is the real fix, and remains out of
     /// scope for the ordinary path.
     private func currentProvider(for cid: String?) -> AIProvider? {
-        switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation) {
+        switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation,
+                                               sidecarAvailable: sidecarAvailable) {
         case .local(let provider): return provider
         case .blocked: return nil
         }

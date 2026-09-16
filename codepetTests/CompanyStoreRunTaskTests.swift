@@ -276,7 +276,8 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "body") },
-                             claudeAuthorisation: auth)
+                             claudeAuthorisation: auth,
+            sidecarAvailable: { true })
         await s.hydrate(companyId: "u")
         await s.runTask(s.company.tasks[0], language: .en)
         XCTAssertEqual(s.company.tasks[0].draft?.producedBy, .claudeCode)
@@ -292,7 +293,8 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         let s = CompanyStore(loader: { _ in seed },
                              tasksSaver: { _, _ in true },
                              taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "body") },
-                             claudeAuthorisation: auth)
+                             claudeAuthorisation: auth,
+            sidecarAvailable: { true })
         await s.hydrate(companyId: "u")
         await s.runTask(s.company.tasks[0], language: .en)
         XCTAssertEqual(s.company.tasks[0].draft?.producedBy, .codex)
@@ -311,7 +313,8 @@ final class CompanyStoreRunTaskTests: XCTestCase {
             return CompanyStore(loader: { _ in seed },
                                 tasksSaver: { _, _ in true },
                                 taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "b") },
-                                claudeAuthorisation: auth)
+                                claudeAuthorisation: auth,
+            sidecarAvailable: { true })
         }
         let claudeStore = makeStore(granting: .claudeCode)
         await claudeStore.hydrate(companyId: "u")
@@ -367,7 +370,8 @@ final class CompanyStoreRunTaskTests: XCTestCase {
             // `testApproveTaskMovesDraftToLibraryOnceAndMarksDone` above stubs them.
             firstApprovalSaver: { _, _ in true },
             decisionExtractor: { _, _ in [] },
-            claudeAuthorisation: auth)
+            claudeAuthorisation: auth,
+            sidecarAvailable: { true })
         await s.hydrate(companyId: "u")
         let deliverable = s.company.library[0]
         await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)
@@ -396,7 +400,8 @@ final class CompanyStoreRunTaskTests: XCTestCase {
                 return RunTaskResponse(kind: "doc", title: "D2", body: "should not happen")
             },
             librarySaver: { _, _ in true },
-            claudeAuthorisation: auth)
+            claudeAuthorisation: auth,
+            sidecarAvailable: { true })
         await s.hydrate(companyId: "u")
         let deliverable = s.company.library[0]
         await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)

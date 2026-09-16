@@ -261,14 +261,29 @@ extension CLIEnvironment {
     /// that matches neither shape -- or whose exit code contradicts the shape it
     /// matched -- is `.unknown`, never `.loggedOut`.
     static func readCodexAuth(_ result: ShellResult) -> CLIStatus.Auth {
-        let out = result.trimmedOut.lowercased()
-        if out.contains("not logged in") {
-            return result.succeeded ? .unknown : .loggedOut
-        }
+        // **Read BOTH streams.** `codex login status` writes its answer to STDERR and leaves
+        // stdout EMPTY — verified on codex-cli 0.154.0:
+        //     $ codex login status 2>/dev/null   -> ""
+        //     $ codex login status 2>&1 >/dev/null -> "Logged in using ChatGPT"
+        // Reading `trimmedOut` alone therefore saw "" for a signed-in founder, matched neither
+        // shape, and returned `.unknown` — which made `account` nil and silently removed her
+        // Codex grant row from Settings entirely. That shipped, and was found by running the
+        // app, not by any test: every test fed the string through stdout, because the finding
+        // it was written from recorded terminal output without noting which stream carried it.
+        //
+        // The exit code is the primary signal for exactly this reason — it cannot be moved to
+        // another stream by a release. The text only corroborates. Codex's own one-shot runs
+        // already had this lesson recorded ("stderr emits ERROR lines on SUCCESSFUL runs,
+        // branch on exit code only"); this is the same CLI teaching it a second time.
+        let out = (result.trimmedOut + " " + result.stderr).lowercased()
+        if out.contains("not logged in") { return result.succeeded ? .unknown : .loggedOut }
         if result.succeeded, out.contains("logged in") {
             return .loggedIn(.init(email: nil, authMethod: nil, apiProvider: nil,
                                    subscriptionType: nil, orgName: nil))
         }
+        // Exit 0 with nothing recognisable either stream: it answered, and we cannot read it.
+        // Never `.loggedOut` — a false signed-out claim sends a founder to fix a login that
+        // is not broken.
         return .unknown
     }
 

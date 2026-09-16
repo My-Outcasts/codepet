@@ -313,6 +313,33 @@ extension CLIEnvironmentTests {
     }
 
     /// Verified with CODEX_HOME pointed at an empty dir: exit 1, "Not logged in".
+    /// **The bug that shipped, and that only running the app found.**
+    ///
+    /// `codex login status` puts its answer on STDERR and leaves stdout EMPTY. Every earlier
+    /// test in this file fed the string through `stdout:`, so all of them passed while a
+    /// signed-in founder's Codex probe returned `.unknown` — which made `CLIStatus.account`
+    /// nil, which removed her Codex grant row from Settings entirely. She could not grant
+    /// Codex at all, and nothing in 2653 tests noticed.
+    ///
+    /// Note the stub: `stdout` is deliberately left empty. A version of this test that also
+    /// passed `stdout:` would pass against the broken code and prove nothing.
+    func testCodexReportsSignedInWhenTheAnswerIsOnStderr() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "", stderr: "Logged in using ChatGPT", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        guard case .loggedIn = auth else {
+            return XCTFail("stderr-carried answer must read as signed in, got \(auth)")
+        }
+    }
+
+    /// The signed-out direction, also on stderr, also with empty stdout.
+    func testCodexReportsSignedOutWhenThatAnswerIsOnStderr() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "", stderr: "Not logged in", exit: 1)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .loggedOut)
+    }
+
     func testCodexSignedOutIsNotReportedAsUnknown() async {
         let shell = FakeShell()
         shell.stub("codex login status", stdout: "Not logged in", exit: 1)

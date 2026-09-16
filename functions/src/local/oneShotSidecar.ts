@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 /**
- * Runs one NON-STREAMING Cloud Function on the founder's OWN Claude Code, and prints the
- * byte-for-byte body that function's HTTP 200 would have carried — so the app's existing
- * decoders read it unchanged.
+ * Runs one NON-STREAMING Cloud Function on the founder's OWN CLI — Claude Code by default,
+ * OpenAI's Codex when `CODEPET_CLI_PROVIDER=codex` — and prints the byte-for-byte body that
+ * function's HTTP 200 would have carried, so the app's existing decoders read it unchanged.
+ *
+ * WHICH CLI is the only thing that differs between the two: the op's prompt, the prose
+ * schema instruction, `extractJson` and the op's own coercion are one shared path, and
+ * `CliAdapter` is the single seam holding the binary, its flags and its output handling.
+ * Forking the prompt per provider would fork the cost model with it.
  *
  * Reads `{"op": "<name>", "body": {...}}` on stdin, where `body` is the exact JSON the
  * Cloud Function takes. Writes ONE JSON object on stdout: either that function's response
@@ -19,19 +24,66 @@
  * only, which is why the parsing and planning live next door where tests can reach them.
  */
 
-import { ClaudeCliError, runClaudeJson } from "./claudeCli";
+import { ClaudeCliError, claudeAdapter, runCli, type CliAdapter } from "./cliAdapter";
+import { codexAdapter } from "./codexCli";
 import {
   ONE_SHOT_OPS,
   OneShotBadRequest,
   OneShotUnusableAnswer,
   extractJson,
-  pickModel,
   schemaInstruction,
 } from "./oneShotOps";
 
 // Re-exported: this is the module whose contract the sidecar tests describe, and the flags
 // are part of that contract even though the implementation is now shared with `vcSidecar`.
 export { claudeArgs } from "./claudeCli";
+
+/**
+ * WHICH CLI runs the op.
+ *
+ * Read from the environment (`CODEPET_CLI_PROVIDER`) rather than from the request body, for
+ * two reasons. The body is documented as "the exact JSON the Cloud Function takes" — one
+ * wire shape shared with the HTTP path — and a provider is not part of any function's
+ * contract; it is a property of the machine the sidecar was spawned on. And the two things
+ * already chosen per spawn, the model and the effort, travel exactly this way
+ * (`CODEPET_CHAT_MODEL`, `CODEPET_CHAT_EFFORT`), so the Swift side sets one more variable on
+ * a process it already configures rather than learning a new key.
+ *
+ * **An unknown name FAILS.** Falling back to Claude would run the founder's work on a plan
+ * she did not pick and report success, because both providers answer with the same JSON —
+ * the same silent-degradation shape `--strict-config` exists to close on the Codex side.
+ * Absent means Claude, which is what every shipped build does today.
+ */
+export function adapterFor(provider: string | undefined): CliAdapter {
+  if (!provider || provider === "claude") return claudeAdapter;
+  if (provider === "codex") return codexAdapter;
+  throw new Error(`no local runner for provider '${provider}'`);
+}
+
+/**
+ * What goes in `OneShotMeta.model` — and what goes there when NOTHING said what answered.
+ *
+ * Claude Code reports the models a run actually billed, so `resultFrom` reads the answering
+ * one off `modelUsage` and it is reported as-is. Codex's default stdout is bare model text
+ * with no envelope, and a `--json` run was checked too: none of its four line types carries
+ * a model id. So on that provider nothing can answer the question.
+ *
+ * The requested model is then reported **marked as requested**, never as the answering one.
+ * This field is written into the narrative card, the guidance body, the plan and the
+ * overview — a founder reads it — so "we asked for this and the CLI never confirmed" has to
+ * read differently from "this answered". A Claude id on a Codex run would be a lie in the
+ * other direction and cannot happen: the label is built from the adapter's own binary name.
+ */
+export function reportedModel(
+  answered: string | undefined,
+  adapter: CliAdapter,
+  requested: string | undefined,
+): string {
+  if (answered) return answered;
+  return requested
+    ? `${adapter.binary}-local (requested ${requested}, not confirmed)`
+    : `${adapter.binary}-local (model not reported)`;
+}
 
 /**
  * The prompt as the model receives it: the shared builder's text, then the shape asked for.
@@ -92,12 +144,22 @@ async function main(): Promise<void> {
     return;
   }
 
-  let envelope: any;
+  const requested = process.env.CODEPET_CHAT_MODEL;
+  let adapter: CliAdapter;
   try {
-    envelope = await runClaudeJson({
+    adapter = adapterFor(process.env.CODEPET_CLI_PROVIDER);
+  } catch (err) {
+    emit({ error: "sidecar_failure", detail: String((err as Error).message) });
+    process.exitCode = 1;
+    return;
+  }
+
+  let answer: { text: string; model?: string };
+  try {
+    answer = await runCli(adapter, {
       systemPrompt: plan.system ?? "",
       prompt: renderPrompt(plan.prompt ?? "", plan.schema, plan.freeText === true),
-      model: process.env.CODEPET_CHAT_MODEL,
+      model: requested,
       effort: process.env.CODEPET_CHAT_EFFORT,
     });
   } catch (err) {
@@ -111,9 +173,9 @@ async function main(): Promise<void> {
 
   try {
     // A free-text op is handed the reply itself; everything else gets the object out of it.
-    const parsed = plan.freeText === true ? envelope.result : extractJson(envelope.result);
+    const parsed = plan.freeText === true ? answer.text : extractJson(answer.text);
     emit(op.respond(body, parsed, {
-      model: pickModel(envelope),
+      model: reportedModel(answer.model, adapter, requested),
       nowISO: new Date().toISOString(),
     }));
   } catch (err) {

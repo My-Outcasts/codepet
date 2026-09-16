@@ -1,9 +1,10 @@
 /**
  * One `claude -p` call, and the flags every local non-streaming run makes it under.
  *
- * Shared by `oneShotSidecar` (one prompt, one JSON body) and `vcSidecar` (one prompt per
- * agent, many times in one run). Both need the identical isolation, and a second copy of
- * these flags is how one of the two silently starts reading the founder's hooks.
+ * `vcSidecar` (one prompt per agent, many times in one run) is what still runs through here:
+ * meetings are Claude-only, because the frame order they stream is read off the envelope's
+ * `stop_reason`, which is Claude's shape and not something `CliAdapter` promises.
+ * `oneShotSidecar` now goes through `runCli` and can run on either CLI.
  *
  * The implementation moved down to `cliAdapter.ts`, where the three provider-specific
  * decisions — binary, flags, envelope unwrap — became `claudeAdapter` and everything else
@@ -25,11 +26,10 @@ import { claudeAdapter, runCliEnvelope } from "./cliAdapter";
 /**
  * Run one prompt and return the parsed `--output-format json` envelope.
  *
- * Still the envelope, not `runCli`'s `{ text, usage }`, and deliberately: both callers read a
- * field off it that the adapter interface does not promise — `oneShotSidecar` takes
- * `modelUsage` through `pickModel`, `vcSidecar` takes `stop_reason` to tell a truncated
- * object from a model that ignored the schema. Moving them onto `runCli` would drop those
- * silently, which is a behaviour change this refactor is not allowed to make. The spawn
+ * Still the envelope, not `runCli`'s `{ text, usage, model }`, and deliberately: `vcSidecar`
+ * reads `stop_reason` off it to tell a truncated object from a model that ignored the schema,
+ * which the adapter interface does not promise and Codex could not answer. Moving the meeting
+ * onto `runCli` would drop it silently, and meetings stay Claude-only either way. The spawn
  * itself is shared, so there is still exactly one copy of it.
  */
 export async function runClaudeJson(opts: {

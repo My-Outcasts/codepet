@@ -67,9 +67,13 @@ export function codexArgs(opts: {
     "-s", "read-only",
     "-c", `developer_instructions=${opts.systemPrompt}`,
     ...(opts.model ? ["-m", opts.model] : []),
-    // Codex has no `--effort`; reasoning effort is a config key, and it is a REAL one —
-    // verified under `--strict-config` (an invented key next to it was rejected) and
-    // observed taking effect in the run banner as `reasoning effort: low`.
+    // Codex has no `--effort`; reasoning effort is a config key. It is a REAL one, and the
+    // proof is FINDINGS Q8 rather than this comment: an invented key beside it is rejected
+    // under `--strict-config`, and the same prompt measured `reasoning_output_tokens` 0 at
+    // `low` against 21 at `high`. That second half is the one that matters — `base_instructions`
+    // was also "accepted", and did nothing. The five values `ClaudeCodeEffort` can emit
+    // (`low`…`max`) were each run through the binary and each exited 0, which is why effort
+    // stays a SHARED variable while the model does not.
     ...(opts.effort ? ["-c", `model_reasoning_effort=${opts.effort}`] : []),
     "-",
   ];
@@ -78,6 +82,16 @@ export function codexArgs(opts: {
 /** The founder's own Codex CLI: the second implementation, and the proof the seam is real. */
 export const codexAdapter: CliAdapter = {
   binary: "codex",
+  /**
+   * Codex's OWN model variable, and the reason it is not `CODEPET_CHAT_MODEL`: that one is
+   * filled from `ClaudeCodeModelPreference`, so it carries Claude aliases (`opus`,
+   * `sonnet`). Findings Q7: an unknown model is exit 1 with an `invalid_request_error` on
+   * stderr — so the wrong variable does not corrupt an answer, it breaks every op the
+   * founder runs. Nothing sets this variable yet; unset means no `-m`, which findings Q6
+   * recorded as "inherit Codex's default", and that is the right behaviour until the client
+   * grows a Codex model picker of its own.
+   */
+  modelEnv: "CODEPET_CODEX_MODEL",
   args: codexArgs,
 
   /**

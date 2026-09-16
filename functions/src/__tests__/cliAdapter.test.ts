@@ -81,6 +81,9 @@ describe("runCli", () => {
     fs.writeFileSync(file, `#!/bin/sh\ncat > /dev/null\n${script}\n`, { mode: 0o755 });
     return {
       binary: file,
+      // Named, not omitted: `modelEnv` is part of the interface, and a stub that skipped it
+      // would stop this fixture noticing a provider that forgot to name its own variable.
+      modelEnv: "CODEPET_FAKE_MODEL",
       args: () => [],
       resultFrom: (stdout: string) => ({
         text: stdout.trim(),

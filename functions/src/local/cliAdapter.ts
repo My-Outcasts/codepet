@@ -19,6 +19,18 @@ import * as path from "path";
 export interface CliAdapter {
   /** The command name, resolved from the founder's own `PATH` by the login shell. */
   binary: string;
+  /**
+   * WHICH environment variable names the model for THIS provider — and it is per provider
+   * on purpose, not a shared `CODEPET_CHAT_MODEL`.
+   *
+   * The Swift runner fills that shared variable from `ClaudeCodeModelPreference`, so a
+   * founder who picked "Opus" in Settings has the bare alias `opus` in it. Handing that to
+   * Codex sends `-m opus`, which findings Q7 measured as exit 1 on an unknown model — loud,
+   * but loud on EVERY op she runs. A model id is not portable between providers, so the
+   * variable it travels in must not be either: an unset one means "inherit that CLI's own
+   * default", which is already the documented behaviour on both.
+   */
+  modelEnv: string;
   args(opts: { systemPrompt: string; model?: string; effort?: string }): string[];
   /** The model's text, plus whatever token counts this CLI reports (zeros if none). */
   resultFrom(stdout: string): {
@@ -130,6 +142,8 @@ export function pickModel(envelope: any): string {
 /** The founder's own Claude Code: the first implementation, and the one the app ships on. */
 export const claudeAdapter: CliAdapter = {
   binary: "claude",
+  // The variable every shipped build already sets, and the one chat uses. Unchanged.
+  modelEnv: "CODEPET_CHAT_MODEL",
   args: claudeArgs,
   /**
    * The envelope's checks live here rather than in `runCli`, because "was this answer

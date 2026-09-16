@@ -86,6 +86,33 @@ export function reportedModel(
 }
 
 /**
+ * WHICH model this provider was asked for — read from THAT provider's own variable.
+ *
+ * It was `process.env.CODEPET_CHAT_MODEL` for both, and that was a real bug rather than a
+ * tidiness point. `LocalOneShotRunner` fills that variable from `ClaudeCodeModelPreference`,
+ * so a founder who picked "Opus" in Settings has the bare alias `opus` in it — and the Codex
+ * adapter would turn that into `-m opus`. Findings Q7 measured Codex's response to an unknown
+ * model: exit 1 with an `invalid_request_error`. Loud, which is the good half; the bad half is
+ * that it is EVERY op, for as long as that preference is set.
+ *
+ * A model id is not portable between providers, so neither is the variable carrying it. Each
+ * adapter names its own (`CliAdapter.modelEnv`), and an unset one means what it already means
+ * on both CLIs: pass no model flag and inherit that CLI's own default (findings Q6).
+ *
+ * EFFORT is deliberately NOT scoped this way, and that was verified rather than assumed: every
+ * value `ClaudeCodeEffort.flag` can emit — `low`, `medium`, `high`, `xhigh`, `max` — was run
+ * through `codex exec --strict-config -c model_reasoning_effort=<v>` on this machine and all
+ * five exited 0, with the banner echoing the value back. The ladder is shared; the model ids
+ * are not.
+ */
+export function requestedModel(
+  adapter: CliAdapter,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  return env[adapter.modelEnv];
+}
+
+/**
  * The prompt as the model receives it: the shared builder's text, then the shape asked for.
  *
  * A free-text op gets the builder's text ALONE. Appending "reply with only a JSON object" to a
@@ -144,7 +171,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  const requested = process.env.CODEPET_CHAT_MODEL;
   let adapter: CliAdapter;
   try {
     adapter = adapterFor(process.env.CODEPET_CLI_PROVIDER);
@@ -153,6 +179,9 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  // AFTER the adapter is known, because which variable holds the model depends on which
+  // provider is answering. Reading it first is what let a Claude alias reach Codex.
+  const requested = requestedModel(adapter, process.env);
 
   let answer: { text: string; model?: string };
   try {

@@ -1,6 +1,10 @@
+import { spawn } from "child_process";
 import { codexAdapter } from "../local/codexCli";
-import { claudeAdapter } from "../local/cliAdapter";
+import { claudeAdapter, runCli, type CliAdapter } from "../local/cliAdapter";
 import { ONE_SHOT_OPS, extractJson } from "../local/oneShotOps";
+import { renderPrompt, requestedModel } from "../local/oneShotSidecar";
+
+jest.mock("child_process", () => ({ spawn: jest.fn() }));
 
 /**
  * The SECOND implementation of `CliAdapter`, and the test that keeps it honest.
@@ -29,6 +33,13 @@ describe("the Codex adapter", () => {
     ]);
   });
 
+  /**
+   * The effort key is pinned here because FINDINGS Q8 verified it against the binary — not
+   * the other way round. It was the reverse for one commit: the flag's only record was a task
+   * report, and this literal was what made it look confirmed. Q8 now carries the control (an
+   * invented key rejected under `--strict-config`) and the behaviour measurement (0 reasoning
+   * tokens at `low`, 21 at `high`, same prompt).
+   */
   test("puts the model and the reasoning effort in, still ending on the stdin marker", () => {
     expect(codexAdapter.args({ systemPrompt: "SYS", model: "gpt-5.6-terra", effort: "low" }))
       .toEqual([
@@ -150,12 +161,140 @@ describe("the Codex adapter", () => {
   });
 });
 
-/** The claim this design rests on: one op, two adapters, ONE prompt. If this ever fails, a
- *  second prompt path has been forked and the cost model changed. */
-test("the same op produces the same prompt whichever adapter runs it", () => {
-  const plan = ONE_SHOT_OPS.runTask.plan({ task_title: "X", dept_key: "fin" });
-  expect(plan.prompt).toContain("This function produces sheet, doc.");
-  // the adapters differ in argv and envelope ONLY
-  expect(claudeAdapter.args({ systemPrompt: "S" }))
-    .not.toEqual(codexAdapter.args({ systemPrompt: "S" }));
+/**
+ * A Claude model preference must never reach Codex.
+ *
+ * `LocalOneShotRunner` fills `CODEPET_CHAT_MODEL` from `ClaudeCodeModelPreference`, so a
+ * founder who picked "Opus" in Settings has `opus` in that variable. Passing it to Codex
+ * sends `-m opus`, and findings Q7 says an unknown model exits 1 — loudly, but on EVERY op
+ * that founder runs. The model variable is therefore provider-scoped: Codex reads its own.
+ *
+ * PINNED argv, not a contains-check, and deliberately not `not.toMatch(/claude/i)` — the
+ * aliases the preference actually emits are bare words like `opus` and `sonnet`, which that
+ * regex would wave straight through.
+ */
+describe("a Claude model preference and the Codex adapter", () => {
+  /** Exactly what `ClaudeCodeModel.flag` can produce, plus the full ids they alias to. */
+  const CLAUDE_MODELS = [
+    "opus", "sonnet", "haiku",
+    "claude-opus-5", "claude-sonnet-4-5", "claude-3-5-haiku-latest",
+  ];
+
+  it.each(CLAUDE_MODELS)("never puts %s in Codex's argv", (model) => {
+    const env = { CODEPET_CHAT_MODEL: model, CODEPET_CHAT_EFFORT: "low" };
+    expect(requestedModel(codexAdapter, env)).toBeUndefined();
+    expect(codexAdapter.args({
+      systemPrompt: "SYS",
+      model: requestedModel(codexAdapter, env),
+      effort: env.CODEPET_CHAT_EFFORT,
+    })).toEqual([
+      "exec",
+      "--ignore-user-config",
+      "--strict-config",
+      "--skip-git-repo-check",
+      "--ephemeral",
+      "-s", "read-only",
+      "-c", "developer_instructions=SYS",
+      "-c", "model_reasoning_effort=low",
+      "-",
+    ]);
+  });
+
+  /** The founder's Claude choice still reaches Claude — the fix scopes it, not drops it. */
+  it("still hands the Claude adapter the founder's Claude choice", () => {
+    expect(requestedModel(claudeAdapter, { CODEPET_CHAT_MODEL: "opus" })).toBe("opus");
+    expect(requestedModel(claudeAdapter, {})).toBeUndefined();
+  });
+
+  /** And Codex gets a model when one was chosen FOR CODEX, whatever Claude's says. */
+  it("reads Codex's own variable, even with a Claude preference set beside it", () => {
+    expect(requestedModel(codexAdapter, {
+      CODEPET_CODEX_MODEL: "gpt-5.6-terra",
+      CODEPET_CHAT_MODEL: "opus",
+    })).toBe("gpt-5.6-terra");
+  });
+});
+
+/**
+ * THE claim this whole design rests on: one op, two adapters, ONE prompt — byte for byte.
+ *
+ * The previous version of this test asserted a substring of one prompt and that the two
+ * argv arrays differ. Both are true of a design that forked the prompt per provider
+ * tomorrow, so it proved nothing it claimed. This drives the REAL send path instead:
+ * `runCli` for each adapter over a stubbed `spawn`, capturing the exact bytes written to
+ * the child's stdin. If a provider-specific prompt fork ever appears — in `plan`, in
+ * `renderPrompt`, in an adapter, or in the transport — these bytes diverge and this fails.
+ */
+describe("one op, two adapters, one prompt", () => {
+  /** What the stubbed child said back; both adapters can read this shape. */
+  const STDOUT = '{"result":"ok"}';
+
+  function stubChild() {
+    const written: Buffer[] = [];
+    const child: any = {
+      stdin: {
+        write: (chunk: string) => { written.push(Buffer.from(chunk, "utf8")); },
+        end: () => undefined,
+      },
+      stdout: {
+        setEncoding: () => undefined,
+        on: (ev: string, cb: (c: string) => void) => { if (ev === "data") cb(STDOUT); },
+      },
+      stderr: { setEncoding: () => undefined, on: () => undefined },
+      on: (ev: string, cb: (code: number) => void) => {
+        if (ev === "close") setImmediate(() => cb(0));
+      },
+    };
+    return { child, written };
+  }
+
+  /** Run one prompt through one adapter and report exactly what went down the pipe. */
+  async function sent(adapter: CliAdapter, opts: { systemPrompt: string; prompt: string }) {
+    const { child, written } = stubChild();
+    (spawn as unknown as jest.Mock).mockReturnValueOnce(child);
+    await runCli(adapter, opts);
+    const call = (spawn as unknown as jest.Mock).mock.calls.at(-1)!;
+    return { stdin: Buffer.concat(written), commandLine: call[1][1] as string };
+  }
+
+  beforeEach(() => (spawn as unknown as jest.Mock).mockReset());
+
+  /** Three structurally different ops: a schema'd sheet, an array-of-tasks, and the one
+   *  free-text op — whose prompt must NOT carry the schema instruction on either provider. */
+  const CASES: Array<[string, Record<string, unknown>]> = [
+    ["runTask", {
+      language: "en", companion_id: "nova", context: "ACME sells widgets.",
+      task_title: "Write the launch email", task_detail: "Announce the beta", dept_key: "mkt",
+    }],
+    ["generateRoadmap", {
+      language: "en", brief: { projectName: "Codepet", oneLiner: "an app for founders" },
+    }],
+    ["chatSession", {
+      session_id: "s1", language: "en", user_message: "why did that work?",
+      history: [{ role: "user", text: "hello" }],
+      session_context: { turns: [{ prompt: "add a login screen", events: [] }], summary: "s", lesson: "l" },
+    }],
+  ];
+
+  it.each(CASES)("sends %s byte-identically to both binaries", async (op, body) => {
+    const plan = ONE_SHOT_OPS[op].plan(body);
+    // Rendered ONCE, by the provider-blind builder, exactly as the sidecar renders it.
+    const prompt = renderPrompt(plan.prompt ?? "", plan.schema, plan.freeText === true);
+    const systemPrompt = plan.system ?? "";
+
+    const viaClaude = await sent(claudeAdapter, { systemPrompt, prompt });
+    const viaCodex = await sent(codexAdapter, { systemPrompt, prompt });
+
+    // THE assertion: the same bytes, not the same substring.
+    expect(Buffer.compare(viaCodex.stdin, viaClaude.stdin)).toBe(0);
+    expect(Buffer.compare(viaCodex.stdin, Buffer.from(prompt, "utf8"))).toBe(0);
+
+    // ...and the ONLY thing that differs is the command line, which is the seam's whole job.
+    expect(viaCodex.commandLine).not.toBe(viaClaude.commandLine);
+    expect(viaCodex.commandLine.startsWith("codex 'exec' ")).toBe(true);
+    expect(viaClaude.commandLine.startsWith("claude '-p' ")).toBe(true);
+    // The prompt travels on STDIN on both, never in argv where a flag could swallow it.
+    expect(viaCodex.commandLine).not.toContain(prompt);
+    expect(viaClaude.commandLine).not.toContain(prompt);
+  });
 });

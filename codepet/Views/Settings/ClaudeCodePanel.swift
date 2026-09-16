@@ -21,7 +21,11 @@ struct ClaudeCodePanel: View {
     @Environment(\.uiLanguage) private var lang
 
     @StateObject private var login = CLILogin()
-    @State private var status: CLIStatus = .unprobed()
+    /// One probe per provider — the install-and-auth half of this panel is no longer
+    /// Claude-only. Row one (machine facts) and the login flow below still read only
+    /// `claudeStatus`, since `CLILogin` itself is Claude's own login flow; the grant
+    /// rows in `grantGroup` are what read every entry.
+    @State private var status: [AIProvider: CLIStatus] = [:]
     @State private var probing = true
     @State private var pastedCode = ""
     @State private var copied = false
@@ -34,7 +38,12 @@ struct ClaudeCodePanel: View {
     /// It only appears to work today because `setAuthorised` is followed by `refresh()`,
     /// whose `@State` writes re-render the view by accident — an accident this removes
     /// rather than relies on.
-    @State private var granted = false
+    ///
+    /// A `Set<AIProvider>`, not a `Bool`, now that a Mac can hold a grant for Claude, for
+    /// Codex, for both, or for neither — the same reasoning, one bit per provider instead
+    /// of one bit total. `ProviderAuthorisation.setAuthorised` is still called with a single
+    /// `AIProvider` at a time, so revoking one never touches the other's membership here.
+    @State private var granted: Set<AIProvider> = []
 
     /// Injected so a test or preview never touches the real defaults domain.
     var authorisation = ProviderAuthorisation()
@@ -44,6 +53,20 @@ struct ClaudeCodePanel: View {
     private static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
 
     private var companyId: String? { companyStore.companyId }
+
+    /// Row one, the login flow, and the billing warning below are all about Claude's own
+    /// login on this Mac — `CLILogin` only knows how to sign into Claude Code — so they
+    /// keep reading this single entry rather than every provider's status.
+    private var claudeStatus: CLIStatus { status[.claudeCode] ?? .unprobed(.claudeCode) }
+
+    /// Which providers this Mac can actually be asked to authorise: installed AND signed
+    /// in. The same rule as before, generalised — "asking before that is a decision about
+    /// nothing" now applies per provider, not just to Claude, which is exactly why a
+    /// founder with no Codex on her Mac sees no Codex row at all rather than a toggle she
+    /// cannot act on.
+    private var signedInProviders: [AIProvider] {
+        AIProvider.allCases.filter { status[$0]?.account != nil }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -56,7 +79,7 @@ struct ClaudeCodePanel: View {
 
             // Only offered once there is a login to authorise. Asking before that is a
             // decision about nothing.
-            if status.account != nil, let companyId {
+            if let companyId, !signedInProviders.isEmpty {
                 grantGroup(companyId: companyId)
             }
 
@@ -64,7 +87,7 @@ struct ClaudeCodePanel: View {
                 codeGroup
             }
 
-            if status.blocker == .notInstalled && !probing {
+            if claudeStatus.blocker == .notInstalled && !probing {
                 installGroup
             }
 
@@ -72,7 +95,7 @@ struct ClaudeCodePanel: View {
                 urlGroup(url)
             }
 
-            if let warning = status.billingWarning {
+            if let warning = claudeStatus.billingWarning {
                 noteLine(warningText(warning), colour: CodepetTheme.accentOrange)
             }
 
@@ -95,7 +118,7 @@ struct ClaudeCodePanel: View {
 
     private var machineDescription: String {
         if probing { return lang == .vi ? "Đang kiểm tra…" : "Checking…" }
-        switch status.blocker {
+        switch claudeStatus.blocker {
         case .notInstalled:
             return lang == .vi ? "Chưa tìm thấy Claude Code trên máy này."
                                : "Claude Code isn't installed on this Mac."
@@ -115,7 +138,7 @@ struct ClaudeCodePanel: View {
     /// States who is signed in, and says nothing about Codepet. The plan name is the
     /// useful half: it decides which models are reachable.
     private var accountLine: String {
-        guard let account = status.account else { return "" }
+        guard let account = claudeStatus.account else { return "" }
         var parts: [String] = []
         if let email = account.email { parts.append(email) }
         if let plan = account.subscriptionType {
@@ -138,14 +161,14 @@ struct ClaudeCodePanel: View {
                     .foregroundColor(CodepetTheme.mutedText)
                 quietButton(lang == .vi ? "Huỷ" : "Cancel") { login.cancel() }
             }
-        } else if status.account != nil {
+        } else if claudeStatus.account != nil {
             HStack(spacing: 10) {
                 Text(lang == .vi ? "Đã đăng nhập" : "Signed in")
                     .font(CodepetTheme.inter(12, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentTeal)
                 quietButton(lang == .vi ? "Kiểm tra lại" : "Re-check") { Task { await refresh() } }
             }
-        } else if status.blocker == .notInstalled {
+        } else if claudeStatus.blocker == .notInstalled {
             // Nothing to sign into yet. A sign-in button here is an instruction the
             // founder cannot follow.
             quietButton(lang == .vi ? "Kiểm tra lại" : "Re-check") { Task { await refresh() } }
@@ -156,31 +179,58 @@ struct ClaudeCodePanel: View {
 
     // MARK: - Row two: what the founder allows
 
+    /// One row per provider this Mac is actually signed into — see `signedInProviders`.
+    /// Consent is never transitive: each row's `Toggle` writes only its own provider, so
+    /// revoking Codex here can never touch Claude's stored grant, or the reverse.
     @ViewBuilder private func grantGroup(companyId: String) -> some View {
         SettingsGroupLabel(lang == .vi ? "Quyền" : "Permission")
         SettingsGroup {
-            SettingsRow(
-                label: lang == .vi ? "Cho Codepet dùng gói này" : "Let Codepet use this plan",
-                // Names the actual cost, because that is what the founder is agreeing to —
-                // "uses your quota" is the honest version of "connected". And names WHAT it
-                // reaches, because the switch silently pulled chat over the moment it
-                // existed, and a permission whose scope is invisible is not informed
-                // consent. Every feature moved onto this path gets added to this line.
-                description: lang == .vi
-                    ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
-                    : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
-            ) {
-                Toggle("", isOn: Binding(
-                    get: { granted },
-                    set: { on in
-                        granted = on
-                        authorisation.setAuthorised(.claudeCode, companyId, on)
-                        Task { await refresh() }
-                    }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
+            ForEach(signedInProviders, id: \.self) { provider in
+                grantRow(provider: provider, companyId: companyId)
+                if provider != signedInProviders.last {
+                    SettingsDivider()
+                }
             }
+        }
+    }
+
+    @ViewBuilder private func grantRow(provider: AIProvider, companyId: String) -> some View {
+        SettingsRow(
+            label: lang == .vi ? "Cho Codepet dùng gói \(provider.displayName)"
+                                : "Let Codepet use your \(provider.displayName) plan",
+            // Names the actual cost, because that is what the founder is agreeing to —
+            // "uses your quota" is the honest version of "connected". And names WHAT it
+            // reaches, because the switch silently pulled chat over the moment it
+            // existed, and a permission whose scope is invisible is not informed
+            // consent. Every feature moved onto this path gets added to this line.
+            description: grantDescription(for: provider)
+        ) {
+            Toggle("", isOn: Binding(
+                get: { granted.contains(provider) },
+                set: { on in
+                    if on { granted.insert(provider) } else { granted.remove(provider) }
+                    authorisation.setAuthorised(provider, companyId, on)
+                    Task { await refresh() }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
+    }
+
+    /// Written out per case, like `ProviderAuthorisation.key` — the plan name and the
+    /// "your terminal's X is unaffected" reassurance are both provider-specific facts,
+    /// not a template to fill in.
+    private func grantDescription(for provider: AIProvider) -> String {
+        switch provider {
+        case .claudeCode:
+            return lang == .vi
+                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
+                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
+        case .codex:
+            return lang == .vi
+                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Codex của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Codex trong terminal không bị ảnh hưởng."
+                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Codex plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Codex is unaffected."
         }
     }
 
@@ -294,18 +344,23 @@ struct ClaudeCodePanel: View {
     }
 
     private func refresh() async {
-        // Reload the switch from storage, so the rendered position is always what was
-        // actually persisted — including after an account switch.
-        if let companyId {
-            granted = authorisation.isAuthorised(.claudeCode, companyId)
-        } else {
-            granted = false
-        }
+        // Reload every provider's switch from storage, so the rendered position is
+        // always what was actually persisted — including after an account switch. No
+        // company id means no grant can exist yet, so every provider reads `false`
+        // rather than guessing — the panel then shows the machine facts and offers no
+        // toggle for any provider.
+        granted = companyId.map { id in
+            Set(AIProvider.allCases.filter { authorisation.isAuthorised($0, id) })
+        } ?? []
         probing = true
-        // No company id means no grant can exist yet, so the probe is told `false` rather
-        // than guessing — the panel then shows the machine facts and offers no toggle.
-        let granted = companyId.map { authorisation.isAuthorised(.claudeCode, $0) } ?? false
-        status = await CLIEnvironment.probe(authorised: granted)
+        // Probed independently per provider — an uninstalled Codex must never affect
+        // what Claude reports, or the reverse.
+        var next: [AIProvider: CLIStatus] = [:]
+        for provider in AIProvider.allCases {
+            next[provider] = await CLIEnvironment.probe(provider: provider,
+                                                        authorised: granted.contains(provider))
+        }
+        status = next
         probing = false
         copied = false
     }

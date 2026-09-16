@@ -49,6 +49,7 @@ struct MessageDraftViewer: View {
     /// hand `DeliverableFrame`. Library call sites (`.email`, payload-less `.dms`) pass one.
     var export: Deliverable? = nil
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     var body: some View {
         DeliverableFrame(
@@ -56,7 +57,15 @@ struct MessageDraftViewer: View {
             heading: heading,
             action: .copy(text),
             export: export,
-            footer: deliverableBlanksFooter(text, verb: .send, lang: lang)
+            footer: deliverableBlanksFooter(text, verb: .send, lang: lang),
+            // `export` is nil for the chat draft card — nothing approved yet, nothing to
+            // credit a run to — and non-nil for the two Library call sites (`.email`,
+            // payload-less `.dms`). A nil `export` therefore correctly draws no provenance
+            // row and offers no re-run, same discipline as a nil `producedBy` anywhere else.
+            provenance: export?.producedBy,
+            lang: lang,
+            otherProviderInstalled: export.map { companyStore.otherProviderInstalled(for: $0) } ?? false,
+            onReRun: export.flatMap { companyStore.reRunHandler(for: $0, language: lang) }
         ) {
             DeliverableProse(text: text)
         }

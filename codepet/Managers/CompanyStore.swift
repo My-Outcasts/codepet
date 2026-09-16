@@ -503,6 +503,10 @@ final class CompanyStore: ObservableObject {
         // plan must not find it silently ungranted because the mirror was still pointing at
         // nobody.
         applyCloudAIBlock()
+        // Fire-and-forget: a cache refill, not part of hydrate's critical path. It touches a
+        // subprocess, which a render must never do (`InstalledProviders`'s own doc comment),
+        // and hydrate is not a render — but it still shouldn't make company data wait on it.
+        Task { await installedProviders.refresh() }
         claudeModel = modelPreference.model(companyId)
         claudeEffort = modelPreference.effort(companyId)
         // The moment an identity exists, and therefore the first moment a
@@ -1457,6 +1461,53 @@ final class CompanyStore: ObservableObject {
     }
 
     let claudeAuthorisation: ProviderAuthorisation
+
+    /// Which CLIs are on this Mac — cached, refreshed once per hydrate (see `hydrate`), and
+    /// read by every deliverable card's provenance row to decide whether the OTHER provider is
+    /// worth offering. Never probed from a render path.
+    let installedProviders = InstalledProviders()
+
+    /// Whether the OTHER provider (relative to what produced `deliverable`) is installed —
+    /// what a card's "Re-run on the other one" offer needs. `nil` `producedBy` (nothing was
+    /// ever recorded) never offers anything.
+    func otherProviderInstalled(for deliverable: Deliverable) -> Bool {
+        guard let producedBy = deliverable.producedBy else { return false }
+        let other: AIProvider = producedBy == .claudeCode ? .codex : .claudeCode
+        return installedProviders.installed.contains(other)
+    }
+
+    /// The re-run action a card's provenance row offers, or nil for a deliverable with no
+    /// stamp — there is nothing to credit a re-run against. `ProvenanceRowView` gates the
+    /// ACTUAL call behind `ProviderConsentFlow`; by the time this closure runs, consent for
+    /// the tapped provider is already settled.
+    func reRunHandler(for deliverable: Deliverable, language: AppLanguage) -> ((AIProvider) -> Void)? {
+        guard deliverable.producedBy != nil else { return nil }
+        return { [weak self] _ in
+            Task { await self?.reRunDeliverable(deliverable, language: language) }
+        }
+    }
+
+    /// Re-runs the task behind a FILED library deliverable and files the result as a NEW
+    /// library entry — the original stays, exactly as `runTask` never overwrites a task's
+    /// prior draft in place.
+    ///
+    /// **Stamped with whatever ACTUALLY ran, never with the tapped target.** The card offers
+    /// "Re-run on Codex", but `currentProvider(for:)` is what decides the stamp — and today it
+    /// can never resolve to `.codex`, because no one-shot op is wired to the `codex` CLI yet
+    /// (see `AIProvider.codex`'s own doc comment). Crediting the tapped target instead of the
+    /// resolved one would be exactly the fabrication this whole phase exists to rule out, so a
+    /// re-run that cannot actually reach the requested provider produces nothing — same
+    /// fail-open shape as `runTask` — rather than a card that lies about what ran.
+    func reRunDeliverable(_ deliverable: Deliverable, language: AppLanguage) async {
+        let cid = companyId
+        guard let taskId = deliverable.sourceTaskId,
+              let task = company.tasks.first(where: { $0.id == taskId }) else { return }
+        let provider = currentProvider(for: cid)
+        let result = await taskRunner(runRequest(for: task, language: language))
+        guard companyId == cid,
+              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+        await fileApproval(fresh, taskId: taskId)
+    }
 
     // MARK: - The two doors
 

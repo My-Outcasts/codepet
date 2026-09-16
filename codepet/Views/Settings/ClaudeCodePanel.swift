@@ -21,7 +21,7 @@ struct ClaudeCodePanel: View {
     @Environment(\.uiLanguage) private var lang
 
     @StateObject private var login = CLILogin()
-    @State private var status: CLIStatus = .unprobed
+    @State private var status: CLIStatus = .unprobed()
     @State private var probing = true
     @State private var pastedCode = ""
     @State private var copied = false

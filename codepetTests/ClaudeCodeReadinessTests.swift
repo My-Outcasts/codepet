@@ -7,6 +7,7 @@ final class ClaudeCodeReadinessTests: XCTestCase {
 
     private func signedIn(authorised: Bool) -> CLIStatus {
         CLIStatus(
+            provider: .claudeCode,
             install: .present(version: "2.1.241"),
             auth: .loggedIn(.init(email: "founder@example.com",
                                   authMethod: "claude.ai",
@@ -33,12 +34,13 @@ final class ClaudeCodeReadinessTests: XCTestCase {
     /// software that is not installed is an instruction they cannot follow, so the
     /// install problem must surface first — even when the grant is also missing.
     func testNotInstalledOutranksNotAuthorised() {
-        let status = CLIStatus(install: .missing, auth: .unknown, authorised: false)
+        let status = CLIStatus(provider: .claudeCode, install: .missing, auth: .unknown, authorised: false)
         XCTAssertEqual(status.blocker, .notInstalled)
     }
 
     func testNotSignedInOutranksNotAuthorised() {
-        let status = CLIStatus(install: .present(version: "2.1.241"),
+        let status = CLIStatus(provider: .claudeCode,
+                                     install: .present(version: "2.1.241"),
                                      auth: .loggedOut,
                                      authorised: false)
         XCTAssertEqual(status.blocker, .notSignedIn)
@@ -47,7 +49,8 @@ final class ClaudeCodeReadinessTests: XCTestCase {
     /// A granted founder whose CLI is too old still cannot run, and the reason they
     /// are shown must be the CLI — not their grant, which is fine.
     func testVersionUnknownOutranksNotAuthorised() {
-        let status = CLIStatus(install: .present(version: "2.1.241"),
+        let status = CLIStatus(provider: .claudeCode,
+                                     install: .present(version: "2.1.241"),
                                      auth: .unknown,
                                      authorised: false)
         XCTAssertEqual(status.blocker, .versionUnknown)

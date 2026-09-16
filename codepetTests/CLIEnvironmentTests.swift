@@ -277,3 +277,85 @@ final class ClaudeLoginCueTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Per-provider probe
+
+extension CLIEnvironmentTests {
+
+    func testCodexVersionIsReadFromItsOwnBinary() async {
+        let shell = FakeShell()
+        shell.stub("codex --version", stdout: "codex-cli 0.154.0")
+        let install = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
+        XCTAssertEqual(install, .present(version: "0.154.0"))
+    }
+
+    /// Claude installed and Codex absent must not read as both present. This is the fact
+    /// every screen in the provider-choice UI branches on.
+    func testProvidersAreProbedIndependently() async {
+        let shell = FakeShell()
+        shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
+        // No `codex` response: FakeShell falls back to exit 127, i.e. not found.
+        let claude = await CLIEnvironment.probeInstall(provider: .claudeCode, shell: shell)
+        let codex  = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
+        XCTAssertEqual(claude, .present(version: "2.1.241"))
+        XCTAssertEqual(codex, .missing)
+    }
+
+    /// Verified on the real binary: exit 0 with "Logged in using ChatGPT".
+    func testCodexSignedInIsReadFromExitCode() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Logged in using ChatGPT", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        // Codex reports no account detail at all — an empty Account, never `.unknown`.
+        XCTAssertEqual(auth, .loggedIn(CLIStatus.Account(email: nil, authMethod: nil,
+                                                        apiProvider: nil, subscriptionType: nil,
+                                                        orgName: nil)))
+    }
+
+    /// Verified with CODEX_HOME pointed at an empty dir: exit 1, "Not logged in".
+    func testCodexSignedOutIsNotReportedAsUnknown() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Not logged in", exit: 1)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .loggedOut)
+    }
+
+    /// The Claude JSON parser must not be pointed at Codex, and vice versa. A provider
+    /// whose probe returns something unparseable is `.unknown` — never a false signed-out.
+    func testCodexGibberishIsUnknownNotSignedOut() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "\u{FFFD}garbage\u{FFFD}", exit: 3)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .unknown)
+    }
+
+    func testClaudeAuthStillParsesItsJSON() async {
+        let shell = FakeShell()
+        shell.stub("claude auth status --json",
+                 stdout: #"{"loggedIn":true,"email":"f@x.com","authMethod":"claude.ai"}"#)
+        let auth = await CLIEnvironment.probeAuth(provider: .claudeCode, shell: shell)
+        guard case .loggedIn(let account) = auth else { return XCTFail("expected loggedIn") }
+        XCTAssertEqual(account.email, "f@x.com")
+        XCTAssertEqual(account.authMethod, "claude.ai")
+    }
+}
+
+// MARK: - InstalledProviders cache
+
+@MainActor
+final class InstalledProvidersTests: XCTestCase {
+
+    func testUnrefreshedCacheReportsNothingInstalled() {
+        let cache = InstalledProviders()
+        XCTAssertEqual(cache.installed, [])
+    }
+
+    func testRefreshFindsOnlyTheProviderThatAnswers() async {
+        let shell = FakeShell()
+        shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
+        // No `codex` response: falls back to exit 127, i.e. not found.
+        let cache = InstalledProviders()
+        await cache.refresh(shell: shell)
+        XCTAssertEqual(cache.installed, [.claudeCode])
+    }
+}

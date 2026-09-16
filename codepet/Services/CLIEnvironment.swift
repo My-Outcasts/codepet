@@ -60,6 +60,7 @@ struct CLIStatus: Equatable {
         case consoleAccount
     }
 
+    let provider: AIProvider
     let install: Install
     let auth: Auth
     /// Whether the founder has agreed to let Codepet spend this plan. NOT a fact about
@@ -92,7 +93,25 @@ struct CLIStatus: Equatable {
     }
 
     /// Nothing probed yet. Distinct from a probe that ran and found nothing.
-    static let unprobed = CLIStatus(install: .missing, auth: .unknown, authorised: false)
+    static func unprobed(_ provider: AIProvider = .claudeCode) -> CLIStatus {
+        CLIStatus(provider: provider, install: .missing, auth: .unknown, authorised: false)
+    }
+}
+
+/// What differs between one CLI and another. Everything else about probing is shared.
+///
+/// A struct of values rather than a protocol: the two providers differ only in strings and
+/// in how one line of output is read, and a protocol would be a ceremony around a table.
+/// This mirrors `CliAdapter` on the TypeScript side deliberately — same seam, same reason.
+struct CLISpec {
+    let binary: String
+    /// Tried by absolute path only when PATH resolution fails. A founder whose shell
+    /// profile the installer never touched has the binary installed and invisible, and
+    /// telling them to install software they already have is the specific wrong answer.
+    let knownInstallPaths: [String]
+    /// The sub-command that answers "is this signed in", and how to read its answer.
+    let authCommand: String
+    let readAuth: (ShellResult) -> CLIStatus.Auth
 }
 
 /// Probes the founder's Claude Code installation. A namespace, not an instance: it holds
@@ -114,19 +133,11 @@ enum CLIEnvironment {
     /// Reads the leading semver out of `claude --version`, whose current shape is
     /// "2.1.241 (Claude Code)". Only when PATH resolution AND every known install path
     /// fail do we conclude `.missing`.
+    ///
+    /// Delegates to the per-provider probe so this and `probeInstall(provider:shell:)`
+    /// cannot drift into two different notions of "installed".
     static func probeInstall(shell: ShellRunning) async -> CLIStatus.Install {
-        let onPath = await shell.run("claude --version")
-        if onPath.succeeded {
-            return .present(version: parseVersion(onPath.trimmedOut))
-        }
-        for path in knownInstallPaths {
-            let expanded = (path as NSString).expandingTildeInPath
-            let direct = await shell.run("\"\(expanded)\" --version")
-            if direct.succeeded {
-                return .present(version: parseVersion(direct.trimmedOut))
-            }
-        }
-        return .missing
+        await probeInstall(provider: .claudeCode, shell: shell)
     }
 
     /// Leading dotted-numeric run of a version line, or "" when there is none.
@@ -153,18 +164,80 @@ enum CLIEnvironment {
     /// handing us prose. Three outcomes, and the difference between the last two is the
     /// point: signed-out is something the founder can act on, unknown is not their fault
     /// and needs a different message.
+    ///
+    /// Delegates to the per-provider probe, same reason as `probeInstall(shell:)` above.
     static func probeAuth(shell: ShellRunning) async -> CLIStatus.Auth {
-        let result = await shell.run("claude auth status --json")
-        // A non-zero exit is an older CLI without the subcommand, or a broken install.
-        // Either way we do not know — and must not claim signed-out.
+        await probeAuth(provider: .claudeCode, shell: shell)
+    }
+
+    /// Full preflight. Skips the auth probe when nothing is installed: asking a binary
+    /// that is not there costs a spawn and yields a second, confusing not-found.
+    ///
+    /// `authorised` is passed in rather than read here, because it is not a fact about
+    /// the machine — it is the founder's grant, which lives per company id and is the
+    /// caller's to supply.
+    ///
+    /// Delegates to `probe(provider:shell:authorised:)`, same reason as the two probes above.
+    static func probe(shell: ShellRunning = LoginShellRunner(),
+                      authorised: Bool) async -> CLIStatus {
+        await probe(provider: .claudeCode, shell: shell, authorised: authorised)
+    }
+}
+
+extension CLIEnvironment {
+
+    static func spec(for provider: AIProvider) -> CLISpec {
+        switch provider {
+        case .claudeCode:
+            return CLISpec(
+                binary: "claude",
+                knownInstallPaths: ["~/.local/bin/claude",
+                                    "/opt/homebrew/bin/claude",
+                                    "/usr/local/bin/claude"],
+                authCommand: "claude auth status --json",
+                readAuth: readClaudeAuth
+            )
+        case .codex:
+            // Homebrew ships Codex as a CASK, linked to /opt/homebrew/bin on Apple
+            // silicon — verified on a real install, where the npm global route failed
+            // with EACCES. /usr/local/bin is kept for Intel and a writable npm prefix.
+            return CLISpec(
+                binary: "codex",
+                knownInstallPaths: ["/opt/homebrew/bin/codex",
+                                    "/usr/local/bin/codex",
+                                    "~/.local/bin/codex"],
+                authCommand: "codex login status",
+                readAuth: readCodexAuth
+            )
+        }
+    }
+
+    static func probeInstall(provider: AIProvider, shell: ShellRunning) async -> CLIStatus.Install {
+        let spec = spec(for: provider)
+        let onPath = await shell.run("\(spec.binary) --version")
+        if onPath.succeeded { return .present(version: parseVersion(onPath.trimmedOut)) }
+        for path in spec.knownInstallPaths {
+            let expanded = (path as NSString).expandingTildeInPath
+            let direct = await shell.run("\"\(expanded)\" --version")
+            if direct.succeeded { return .present(version: parseVersion(direct.trimmedOut)) }
+        }
+        return .missing
+    }
+
+    static func probeAuth(provider: AIProvider, shell: ShellRunning) async -> CLIStatus.Auth {
+        let spec = spec(for: provider)
+        return spec.readAuth(await shell.run(spec.authCommand))
+    }
+
+    /// Claude answers in JSON, by design — `--json` is passed explicitly so a future
+    /// default flip cannot silently start handing us prose.
+    static func readClaudeAuth(_ result: ShellResult) -> CLIStatus.Auth {
         guard result.succeeded,
               let data = result.trimmedOut.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let loggedIn = obj["loggedIn"] as? Bool
         else { return .unknown }
-
         guard loggedIn else { return .loggedOut }
-
         return .loggedIn(.init(
             email: obj["email"] as? String,
             authMethod: obj["authMethod"] as? String,
@@ -174,20 +247,33 @@ enum CLIEnvironment {
         ))
     }
 
-    /// Full preflight. Skips the auth probe when nothing is installed: asking a binary
-    /// that is not there costs a spawn and yields a second, confusing not-found.
+    /// Codex answers in one prose line and reports NOTHING about the account — no email,
+    /// no plan type. Verified on the real binary: exit 0 "Logged in using ChatGPT",
+    /// exit 1 "Not logged in". Keyed on the exit code with the string as corroboration,
+    /// because an exit code cannot be reworded by a release note.
     ///
-    /// `authorised` is passed in rather than read here, because it is not a fact about
-    /// the machine — it is the founder's grant, which lives per company id and is the
-    /// caller's to supply.
-    static func probe(shell: ShellRunning = LoginShellRunner(),
-                      authorised: Bool) async -> CLIStatus {
-        let install = await probeInstall(shell: shell)
-        guard install != .missing else {
-            return CLIStatus(install: install, auth: .unknown, authorised: authorised)
+    /// An empty `Account` is the honest answer for signed-in-but-anonymous. Anything that
+    /// matches neither shape is `.unknown`, never `.loggedOut`.
+    static func readCodexAuth(_ result: ShellResult) -> CLIStatus.Auth {
+        let out = result.trimmedOut.lowercased()
+        if result.succeeded, out.contains("logged in") {
+            return .loggedIn(.init(email: nil, authMethod: nil, apiProvider: nil,
+                                   subscriptionType: nil, orgName: nil))
         }
-        return CLIStatus(install: install,
-                                auth: await probeAuth(shell: shell),
-                                authorised: authorised)
+        if out.contains("not logged in") { return .loggedOut }
+        return .unknown
+    }
+
+    static func probe(provider: AIProvider,
+                      shell: ShellRunning = LoginShellRunner(),
+                      authorised: Bool) async -> CLIStatus {
+        let install = await probeInstall(provider: provider, shell: shell)
+        guard install != .missing else {
+            return CLIStatus(provider: provider, install: install,
+                             auth: .unknown, authorised: authorised)
+        }
+        return CLIStatus(provider: provider, install: install,
+                         auth: await probeAuth(provider: provider, shell: shell),
+                         authorised: authorised)
     }
 }

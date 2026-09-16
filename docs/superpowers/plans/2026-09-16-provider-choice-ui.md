@@ -1055,6 +1055,37 @@ func testOtherBlockReasonsAreLeftAlone() {
 Run: `xcodebuild test -scheme codepet -only-testing:codepetTests/BlockedStateOfferTests 2>&1 | tail -30`
 Expected: FAIL — no `BlockedOffer`.
 
+**Task 3's `needsClaudeCode` gets its producer here too.** The spec says chat and meetings
+"stay Claude-only **and say so**" — and the review of Task 3 caught that no task in this plan
+produced that case, which would have left it speculative vocabulary. A Codex-only founder who
+opens chat today gets `.notGranted` ("grant your Claude plan"), which is not the most useful
+thing to tell someone whose problem is that Claude Code is a different product she does not have.
+When the blocked surface is chat or a meeting AND Claude is not installed, say `needsClaudeCode`
+instead. Add this test:
+
+```swift
+/// Chat and meetings run on Claude and nothing else. A founder with only Codex installed
+/// needs to be told THAT, not sent to grant a plan she does not have.
+func testAClaudeOnlySurfaceTellsACodexFounderWhatItNeeds() {
+    let offer = BlockedOffer.resolve(reason: .notGranted,
+                                     installed: [.codex],
+                                     surface: .claudeOnly)
+    XCTAssertEqual(offer, .explain(.needsClaudeCode))
+}
+
+/// The same surface for a founder who HAS Claude installed but has not granted it is an
+/// ordinary consent problem, not a missing-product problem.
+func testAClaudeOnlySurfaceStillOffersTheGrantWhenClaudeIsInstalled() {
+    let offer = BlockedOffer.resolve(reason: .notGranted,
+                                     installed: [.claudeCode],
+                                     surface: .claudeOnly)
+    XCTAssertEqual(offer, .grant(.claudeCode))
+}
+```
+
+`surface` is a two-case enum — `.anyProvider` (the one-shot ops) and `.claudeOnly` (chat and
+meetings) — defaulting to `.anyProvider` so the existing call sites read unchanged.
+
 - [ ] **Step 3: Implement**
 
 ```swift

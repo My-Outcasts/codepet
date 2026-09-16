@@ -802,6 +802,14 @@ nil provenance renders nothing. Do NOT try to guess a provider for cards that ha
 Add a test that a call site given a deliverable with `producedBy == .codex` renders the Codex
 line, and one given `nil` renders no provenance row at all.
 
+**And the real "never inferred" guard lands here**, because this is the first place the two
+facts coexist. Task 5's version of it was decorative — `ProvenanceRow` has nothing to infer
+FROM — and a review caught it claiming a guard it did not provide. The genuine test: a card
+whose deliverable is stamped `.codex`, rendered while `InstalledProviders` reports only
+`.claudeCode` installed and the company's active provider is Claude, must STILL read "Ran on
+Codex". That is the case where an implementation that re-derived from current state would
+relabel old work, and it is the founder-facing half of the guard Task 4 built structurally.
+
 - [ ] **Step 1: Write the failing tests**
 
 Use a fake `ProviderAuthorisation` store — never real `UserDefaults`; four test files once wrote

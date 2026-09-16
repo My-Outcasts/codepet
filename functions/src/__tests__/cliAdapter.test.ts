@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-import { ClaudeCliError, claudeAdapter, runCli, type CliAdapter } from "../local/cliAdapter";
+import { ClaudeCliError, claudeAdapter, runCli, setCliShell, type CliAdapter } from "../local/cliAdapter";
 
 /**
  * The adapter is the ONLY provider-specific thing in the one-shot path. Everything above it —
@@ -69,10 +69,32 @@ describe("the Claude adapter", () => {
 });
 
 /**
- * The transport under both adapters. These spawn a real child through the real login shell,
- * because the property being tested is exactly the one a mock would assume away.
+ * The transport under both adapters. These spawn a REAL child, because the property being
+ * tested is exactly the one a mock would assume away.
+ *
+ * They run through whatever shell THIS platform has rather than through production's
+ * `/bin/zsh`, and that is the only thing they relax. The `functions` job runs on ubuntu,
+ * which has no zsh: pinned to production's shell these two die with `spawn /bin/zsh ENOENT`
+ * before they reach the thing they measure, and the suite is green on every Mac while it is
+ * red in CI. Nothing under test is zsh-specific — the child is spawned by absolute path, and
+ * exit code versus stderr reads the same under `/bin/sh`. So they are made to RUN on Linux
+ * rather than skipped there; a guard that skips is a guard that is not guarding.
+ *
+ * `CODEPET_CLI_SHELL` overrides the choice, which is how the Linux path is exercised from a
+ * Mac: `CODEPET_CLI_SHELL=/bin/sh npx jest cliAdapter`. Production reads no such variable.
  */
 describe("runCli", () => {
+  const shellPath = process.env.CODEPET_CLI_SHELL
+    ?? (fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/sh");
+  // `-l` only where a login shell exists to ask for one: ubuntu's `/bin/sh` is dash, which
+  // rejects it outright. The flag buys nothing here anyway — the fake CLI is an absolute path,
+  // so no profile has to resolve it.
+  const shellFlags = /(zsh|bash)$/.test(shellPath) ? ["-lc"] : ["-c"];
+
+  let restoreShell: ReturnType<typeof setCliShell>;
+  beforeAll(() => { restoreShell = setCliShell({ path: shellPath, flags: shellFlags }); });
+  afterAll(() => { setCliShell(restoreShell); });
+
   function fakeCli(script: string): CliAdapter {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codepet-fakecli-"));
     const file = path.join(dir, "fake-cli");

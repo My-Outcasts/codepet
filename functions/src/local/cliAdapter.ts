@@ -173,6 +173,39 @@ export const claudeAdapter: CliAdapter = {
 };
 
 /**
+ * The shell one call is spawned through: the command, then the flags that precede the single
+ * command string.
+ *
+ * **Production is `/bin/zsh -lc` and stays that way.** A LOGIN shell is the whole point — it
+ * reads the founder's own profile, which is what resolves `claude` and the brew cask's
+ * `/opt/homebrew/bin/codex` off her `PATH` rather than off whatever environment the app was
+ * launched with. Codepet ships on macOS only, where `/bin/zsh` is always present, so there is
+ * no fallback to pick and nothing here reads an environment variable: production has exactly
+ * one shell.
+ *
+ * It is a seam for ONE reason. The transport tests below spawn a REAL child — that is their
+ * value, since the property they measure (exit code decides, stderr never does) is precisely
+ * what a stubbed `spawn` would assume away — and the `functions` CI job runs on ubuntu, which
+ * has no `/bin/zsh`. There the child dies with `spawn /bin/zsh ENOENT` before the property is
+ * ever reached. Nothing under test is zsh-specific: `/bin/sh -c` exercises the exit code and
+ * the stderr it carries identically. So the tests point this at a shell the platform actually
+ * has, and run everywhere instead of being skipped on the one machine that runs them for real.
+ */
+const PRODUCTION_SHELL = { path: "/bin/zsh", flags: ["-lc"] } as const;
+
+let cliShell: { path: string; flags: readonly string[] } = PRODUCTION_SHELL;
+
+/**
+ * Point the transport at a different shell and hand back the one it was using, so a caller can
+ * put it back. **Tests only** — see `PRODUCTION_SHELL` for why production never calls this.
+ */
+export function setCliShell(shell: { path: string; flags: readonly string[] }) {
+  const previous = cliShell;
+  cliShell = shell;
+  return previous;
+}
+
+/**
  * Spawn the CLI the adapter names and collect everything it said.
  *
  * Every call gets its OWN temp cwd, deliberately: discovery of `CLAUDE.md` walks UP from
@@ -205,7 +238,7 @@ function spawnCli(adapter: CliAdapter, opts: {
   delete env.ANTHROPIC_AUTH_TOKEN;
 
   return new Promise((resolve, reject) => {
-    const child = spawn("/bin/zsh", ["-lc", `${adapter.binary} ${args.map(quote).join(" ")}`], {
+    const child = spawn(cliShell.path, [...cliShell.flags, `${adapter.binary} ${args.map(quote).join(" ")}`], {
       cwd: dir,
       env,
     });

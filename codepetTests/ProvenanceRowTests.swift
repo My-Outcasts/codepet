@@ -36,67 +36,84 @@ final class ProvenanceRowTests: XCTestCase {
         XCTAssertEqual(ProvenanceRow.text(for: d.producedBy!, lang: .en), "Ran on Codex")
     }
 
-    /// A `DeliverableFrame` call site given a deliverable stamped `.codex` passes that stamp
-    /// straight through — the contract every one of the eleven call sites follows
-    /// (`provenance: deliverable.producedBy`).
-    func testACallSiteWithACodexDeliverableRendersTheCodexLine() {
-        var d = Deliverable(kind: .doc, title: "T", body: "B")
-        d.producedBy = .codex
-        XCTAssertEqual(d.producedBy, .codex)
-        XCTAssertEqual(ProvenanceRow.text(for: d.producedBy!, lang: .en), "Ran on Codex")
+    // MARK: - Finding 3 (review, Task 6 fix pass): a guard that can actually fail
+
+    /// **Replaces three tests that could never go red** —
+    /// `testProvenanceIsReadFromTheStampNeverFromGrantedOrInstalledProvider`,
+    /// `testACallSiteWithACodexDeliverableRendersTheCodexLine`, and
+    /// `testACallSiteWithNoProvenanceRendersNoRow`, all deleted from this file.
+    ///
+    /// The first stood up a real hydrated `CompanyStore` granted Claude-only and a real
+    /// `InstalledProviders` refreshed against a `FakeShell` reporting only Claude — then
+    /// never routed anything through either. Its assertion was `d.producedBy == .codex`, a
+    /// bare local-field read taken three lines after `d.producedBy = .codex` was set. No
+    /// mutation to any of the eleven `DeliverableFrame(` call sites, to `ProvenanceRowView`,
+    /// or to any viewer struct could ever turn it red — the store and the
+    /// installed-providers cache were inert set-dressing. The other two were the same shape:
+    /// assert a property immediately after setting it, which no code change can falsify.
+    ///
+    /// This asserts over the SOURCE instead — the only way to check "never a current-state
+    /// lookup" against a call site that, by construction, has no state to look up in a unit
+    /// test. Same shape as the `ONE_SHOT_OPS` registry key-list pin
+    /// (`functions/src/__tests__/oneShotSidecar.test.ts`): a literal expectation a rename, or
+    /// a re-derivation, has to fail here rather than slip past onto a founder's screen.
+
+    /// The three files that hold all eleven `DeliverableFrame(` call sites, read from disk.
+    /// `#filePath` is THIS file's own location at compile time, so it resolves in any
+    /// checkout, CI included — same technique as `EngineeringReachabilityTests`.
+    private static func source(_ fileName: String) -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // codepetTests/
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("codepet/Views/Library")
+            .appendingPathComponent(fileName)
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
-    /// A deliverable nobody stamped renders no row at all — `DeliverableFrame` draws nothing
-    /// for a `nil` provenance (see `DeliverableStyle.swift`), never a guess.
-    func testACallSiteWithNoProvenanceRendersNoRow() {
-        let d = Deliverable(kind: .doc, title: "T", body: "B")
-        XCTAssertNil(d.producedBy)
+    /// Every `provenance:` argument across the three files, in source order — the value each
+    /// `DeliverableFrame(` call actually passes, trimmed of the label and trailing comma.
+    private static func provenanceArguments() -> [String] {
+        let files = ["MessageDraftCard.swift", "LibraryView.swift", "DeliverableViewers.swift"]
+        var out: [String] = []
+        for file in files {
+            for line in source(file).split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("provenance:") else { continue }
+                var value = trimmed.dropFirst("provenance:".count)
+                    .trimmingCharacters(in: .whitespaces)
+                if value.hasSuffix(",") { value.removeLast() }
+                out.append(value)
+            }
+        }
+        return out
     }
 
-    // MARK: - The real "never inferred" guard (Task 6)
+    func testTheSourcesWereFoundAtAll() {
+        // Without this, both assertions below pass vacuously on an empty array — exactly
+        // when the suite stops being able to check anything at all.
+        XCTAssertFalse(Self.source("DeliverableViewers.swift").isEmpty,
+                       "DeliverableViewers.swift was not found — the path derived from #filePath is wrong")
+    }
 
-    /// **This is the guard Task 5's version only claimed to be.** That version had nothing to
-    /// infer FROM — `ProvenanceRow` takes only a provider and a language. This one stands up
-    /// the two facts that could tempt a re-derivation and proves they never reach the label:
-    ///
-    /// - A genuine `CompanyStore`, hydrated, whose granted/active provider is Claude (Codex is
-    ///   NOT authorised at all).
-    /// - A genuine `InstalledProviders` cache, refreshed against a fake shell that reports
-    ///   ONLY `claude` on disk — Codex is not installed either.
-    /// - A `Deliverable` stamped `.codex` — produced, presumably, before the founder switched
-    ///   back to Claude, or on a machine that later lost the Codex CLI.
-    ///
-    /// An implementation that read the "current" provider (granted or installed) instead of
-    /// the deliverable's own stamp would relabel this card "Ran on Claude Code" — exactly the
-    /// history-rewrite the whole phase exists to rule out. The real call sites pass
-    /// `provenance: deliverable.producedBy` verbatim (never `companyStore.something`), so what
-    /// reaches `ProvenanceRow.text` is the value asserted below, unmoved by either fact above.
-    @MainActor
-    func testProvenanceIsReadFromTheStampNeverFromGrantedOrInstalledProvider() async {
-        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
-                                companionId: "byte", onboardedAt: Date())
-        // The company's active/granted provider is Claude — and ONLY Claude.
-        let auth = ProviderAuthorisation(isAuthorised: { provider, _ in provider == .claudeCode },
-                                          setAuthorised: { _, _, _ in })
-        let store = CompanyStore(loader: { _ in seed }, claudeAuthorisation: auth)
-        await store.hydrate(companyId: "c1")
+    /// **The count is pinned too**, so a new call site that forgets `provenance:` entirely
+    /// (or reads it from somewhere `DeliverableFrame` doesn't surface as a plain
+    /// `provenance:` argument) fails this test rather than silently joining the eleven that
+    /// already behave.
+    func testElevenCallSitesPassAProvenanceArgument() {
+        XCTAssertEqual(Self.provenanceArguments().count, 11)
+    }
 
-        // InstalledProviders reports only Claude on this Mac — Codex is not installed.
-        let shell = FakeShell()
-        shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
-        await store.installedProviders.refresh(shell: shell)
-        XCTAssertEqual(store.installedProviders.installed, [.claudeCode],
-                        "the scenario requires Codex to be genuinely absent, not just unchecked")
-
-        // The deliverable itself is stamped Codex.
-        var d = Deliverable(kind: .doc, title: "T", body: "B")
-        d.producedBy = .codex
-
-        // What every real call site passes to `DeliverableFrame`:
-        let provenance = d.producedBy
-
-        XCTAssertEqual(provenance, .codex,
-                       "must still read Codex — active=Claude and installed={Claude} never enter this value")
-        XCTAssertEqual(ProvenanceRow.text(for: provenance!, lang: .en), "Ran on Codex")
+    /// **The actual guard.** Every `provenance:` argument is the deliverable's OWN stamp —
+    /// `deliverable.producedBy`, or (the chat draft card, which may have nothing approved yet)
+    /// `export?.producedBy` — never anything re-derived from what is currently granted or
+    /// installed. A call site that starts passing `companyStore.something` or
+    /// `installedProviders.something` fails here immediately, which is the actual regression
+    /// this suite exists to catch.
+    func testEveryCallSitePassesTheDeliverablesOwnStamp() {
+        let allowed: Set<String> = ["deliverable.producedBy", "export?.producedBy"]
+        for value in Self.provenanceArguments() {
+            XCTAssertTrue(allowed.contains(value),
+                         "provenance: \(value) is not the deliverable's own stamp")
+        }
     }
 }

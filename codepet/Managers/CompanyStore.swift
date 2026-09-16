@@ -234,6 +234,14 @@ final class CompanyStore: ObservableObject {
     /// swapped out from under it.
     private let injectedVCRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
+    /// The re-run path's ONLY entry point into execution — see `reRunDeliverable`. Kept
+    /// separate from `taskRunner` rather than widening that closure's signature: `taskRunner`
+    /// is injected by dozens of test files against its existing `(RunTaskRequest) ->
+    /// RunTaskResponse?` shape, and none of them has a stake in a preferred provider. This
+    /// closure's default forwards straight to `RunTaskClient.runResolved`, which does NO
+    /// transport resolution of its own — `reRunDeliverable` resolves once and hands the
+    /// answer to both this and the stamp, which is what makes them unable to disagree.
+    private let preferredTaskRunner: (RunTaskRequest, AIProvider) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let capabilitiesFetcher: () async -> Set<String>?
@@ -347,7 +355,15 @@ final class CompanyStore: ObservableObject {
          // branch any more. Every test that injects its own streamer is untouched.
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { ChatTransportRouter.sendStream($0) },
          vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
-         taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
+         // A closure, not the function reference `RunTaskClient.run`: that function grew an
+         // optional `prefer` parameter for Finding 1, and Swift does not apply a function's
+         // default arguments when forming a value from its name (same reason `remoteURLReader`
+         // below is a closure and not `GitRunner.remoteURL(in:)` directly) — `RunTaskClient.run`
+         // by itself no longer matches this closure's `(RunTaskRequest) -> RunTaskResponse?`
+         // shape.
+         taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = { await RunTaskClient.run($0) },
+         preferredTaskRunner: @escaping (RunTaskRequest, AIProvider) async -> RunTaskResponse? =
+            { req, provider in await RunTaskClient.runResolved(req, provider: provider) },
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          capabilitiesFetcher: @escaping () async -> Set<String>? = CapabilitiesClient.fetch,
@@ -422,6 +438,7 @@ final class CompanyStore: ObservableObject {
         self.vcRunner = vcRunner ?? { LocalTransportRouter.runVirtualCompany($0) }
         #endif
         self.taskRunner = taskRunner
+        self.preferredTaskRunner = preferredTaskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.capabilitiesFetcher = capabilitiesFetcher
@@ -1479,11 +1496,12 @@ final class CompanyStore: ObservableObject {
     /// The re-run action a card's provenance row offers, or nil for a deliverable with no
     /// stamp — there is nothing to credit a re-run against. `ProvenanceRowView` gates the
     /// ACTUAL call behind `ProviderConsentFlow`; by the time this closure runs, consent for
-    /// the tapped provider is already settled.
+    /// the tapped provider is already settled. The tapped `AIProvider` is forwarded, not
+    /// dropped — see `reRunDeliverable`, which is what actually spends it.
     func reRunHandler(for deliverable: Deliverable, language: AppLanguage) -> ((AIProvider) -> Void)? {
         guard deliverable.producedBy != nil else { return nil }
-        return { [weak self] _ in
-            Task { await self?.reRunDeliverable(deliverable, language: language) }
+        return { [weak self] provider in
+            Task { await self?.reRunDeliverable(deliverable, preferring: provider, language: language) }
         }
     }
 
@@ -1491,21 +1509,29 @@ final class CompanyStore: ObservableObject {
     /// library entry — the original stays, exactly as `runTask` never overwrites a task's
     /// prior draft in place.
     ///
-    /// **Stamped with whatever ACTUALLY ran, never with the tapped target.** The card offers
-    /// "Re-run on Codex", but `currentProvider(for:)` is what decides the stamp — and today it
-    /// can never resolve to `.codex`, because no one-shot op is wired to the `codex` CLI yet
-    /// (see `AIProvider.codex`'s own doc comment). Crediting the tapped target instead of the
-    /// resolved one would be exactly the fabrication this whole phase exists to rule out, so a
-    /// re-run that cannot actually reach the requested provider produces nothing — same
-    /// fail-open shape as `runTask` — rather than a card that lies about what ran.
-    func reRunDeliverable(_ deliverable: Deliverable, language: AppLanguage) async {
+    /// **The stamp is a READ-BACK of what ran, not a second resolution.** This is the fix for
+    /// review Findings 1 and 2 together: `LocalTransportRouter.forOneShot` is asked EXACTLY
+    /// ONCE, right here, with the tapped `provider` as `prefer:`. Its answer is threaded to
+    /// BOTH the executor (`preferredTaskRunner`, which does no resolution of its own — see
+    /// `RunTaskClient.runResolved`) and `buildDeliverable`'s `producedBy:`. There is no second
+    /// call to `forOneShot` anywhere in this path, so the stamp and the execution cannot name
+    /// different providers by construction — unlike `currentProvider(for:)` below, which
+    /// `runTask` and its siblings still use and which remains a SEPARATE resolution from
+    /// whatever `taskRunner` actually spends (see that function's own doc comment).
+    ///
+    /// A tap that cannot actually reach the requested provider — not granted, or the sidecar
+    /// is missing — produces nothing, same fail-open shape as `runTask`, rather than crediting
+    /// a provider that never ran.
+    func reRunDeliverable(_ deliverable: Deliverable, preferring provider: AIProvider,
+                          language: AppLanguage) async {
         let cid = companyId
         guard let taskId = deliverable.sourceTaskId,
               let task = company.tasks.first(where: { $0.id == taskId }) else { return }
-        let provider = currentProvider(for: cid)
-        let result = await taskRunner(runRequest(for: task, language: language))
+        guard case .local(let resolved) = LocalTransportRouter.forOneShot(
+            companyId: cid, authorisation: claudeAuthorisation, prefer: provider) else { return }
+        let result = await preferredTaskRunner(runRequest(for: task, language: language), resolved)
         guard companyId == cid,
-              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+              let fresh = buildDeliverable(from: result, task: task, producedBy: resolved) else { return }
         await fileApproval(fresh, taskId: taskId)
     }
 
@@ -3008,9 +3034,18 @@ final class CompanyStore: ObservableObject {
     /// `buildDeliverable` anyway (its `taskRunner` result is nil), so this only matters for
     /// the `.local` case in practice.
     ///
+    /// **Still used by `runTask` and its siblings (chained runs, fan-out) — NOT by the re-run
+    /// path any more.** `reRunDeliverable` used to call this function too, which is exactly
+    /// what review Finding 2 flagged: adding `prefer` to only one of the two independent
+    /// resolutions below would let the stamp and the execution name different providers for
+    /// the same run. The fix was not to patch this function — it was to give the re-run path
+    /// its OWN single resolution (see `reRunDeliverable`) and stop routing it through
+    /// `currentProvider`/`taskRunner` at all. Everything below is therefore still true, but
+    /// now describes only `runTask`'s ordinary path, where nothing ever passes `prefer`.
+    ///
     /// **This is a SECOND, INDEPENDENT resolution — not a read-back of the first.**
-    /// `RunTaskClient.run` is the code that actually spends a plan, and it calls
-    /// `LocalTransportRouter.forOneShot()` with NO arguments: that resolves the GLOBAL
+    /// `RunTaskClient.run` is the code that actually spends a plan, and (on the ordinary path)
+    /// it calls `LocalTransportRouter.forOneShot()` with no `prefer`: that resolves the GLOBAL
     /// `LocalTransportRouter.activeCompanyId` mirror against a FRESH `ProviderAuthorisation()`
     /// it constructs itself. This function resolves a SEPARATE answer, from this store's own
     /// `cid` and its own `claudeAuthorisation`. Nothing compares the two; the stamp is only
@@ -3029,18 +3064,18 @@ final class CompanyStore: ObservableObject {
     ///    this file that injects a `claudeAuthorisation` stand-in (as Finding 1's tests do,
     ///    deliberately) — those tests pin this function's INPUT, not agreement with
     ///    `RunTaskClient.run`, which they never call.
-    /// 3. **No `prefer:` reaches one call path and not the other.** Neither this function nor
-    ///    `RunTaskClient.run` passes `prefer` today. The day a "re-run on Codex" feature adds it
-    ///    to only one of the two — the natural place to add it first — the two sites can name
-    ///    different providers for the SAME run: this function stamps its own answer while
-    ///    `RunTaskClient.run` spends the preferred one. Whoever adds `prefer` anywhere near
-    ///    `forOneShot` must add it to BOTH call sites in the same change, or remove this
-    ///    doc comment's claim along with it.
+    /// 3. **No `prefer:` reaches this function's call path.** `RunTaskClient.run` grew a
+    ///    `prefer` parameter (Finding 1), and `taskRunner`'s default forwards to it — but
+    ///    nothing on the `runTask` path ever supplies one, so it is always `nil` there and
+    ///    the two resolutions still ask the same question. The one caller that DOES want a
+    ///    preferred provider (`reRunDeliverable`) was rerouted around this function entirely
+    ///    rather than being allowed to violate this invariant — see that function's own
+    ///    comment.
     ///
-    /// What is NOT proven by anything in this file: that the two resolutions actually agreed
-    /// on a given run. Unifying them — having `RunTaskClient.run` report back which provider it
-    /// used, rather than this function guessing in parallel — is the real fix, and is out of
-    /// scope for the change that added this comment.
+    /// What is NOT proven by anything in this file: that the two `runTask`-path resolutions
+    /// actually agreed on a given run. Unifying them the way `reRunDeliverable` now does — one
+    /// resolution shared by both stamp and execution — is the real fix, and remains out of
+    /// scope for the ordinary path.
     private func currentProvider(for cid: String?) -> AIProvider? {
         switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation) {
         case .local(let provider): return provider

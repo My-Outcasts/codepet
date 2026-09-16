@@ -807,4 +807,58 @@ final class CompanyStoreChatTests: XCTestCase {
         await s.sendChat("hi", language: .en)
         XCTAssertEqual(s.chatMessages.last?.text, BlockReason.needsClaudeCode.founderText)
     }
+
+    // MARK: - `.blockedOffer` — the field the grant BUTTON actually reads
+
+    /// `CompanyStore.swift`'s `.stop(reason:)` case only writes `blockedOffer` under
+    /// `if case .grant = offer`. Every test above this line asserts `.text` and would stay
+    /// green whether that `if` fires, always fires, or never fires — a regression that
+    /// permanently hides the grant button (always nil) or renders it somewhere nonsensical
+    /// (`.install`/`.explain`, which the source comment next to the assignment says have
+    /// "nothing a button here could do") would pass unnoticed. This is the one place that
+    /// reads the field the button is actually keyed on.
+    ///
+    /// **Mutation check performed by hand:** with the guard in `CompanyStore.swift` changed
+    /// to the unconditional `chatMessages[i].blockedOffer = offer` (no `if case .grant`),
+    /// `testStopReasonWithSidecarMissingLeavesNoBlockedOffer` went RED — that reason resolves
+    /// to `.explain(.sidecarMissing)`, which the unconditional assignment would now attach a
+    /// (non-functional) offer to. Restoring the guard turned it GREEN again. The other two
+    /// tests below stayed green either way, which is expected: an installed-provider grant and
+    /// an everything-missing block both still assign under the real guard, so only the
+    /// "must stay nil" case can distinguish "always assigns" from "assigns only for `.grant`".
+    func testStopReasonWithInstalledProviderSetsBlockedOfferToGrant() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        s.installedProviders.apply([.claudeCode: Self.installedStatus(.claudeCode)])
+        await s.sendChat("hi", language: .en)
+        XCTAssertEqual(s.chatMessages.last?.blockedOffer, .grant(.claudeCode))
+    }
+
+    /// Nothing installed: `BlockedOffer.resolve` for this Claude-only surface returns
+    /// `.explain(.needsClaudeCode)`, not `.grant` — there is no CLI on this Mac to grant, so
+    /// no button should render. Telling her to authorise software she does not have is an
+    /// instruction nobody can follow.
+    func testStopReasonWithNothingInstalledLeavesNoBlockedOffer() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.notGranted))
+        await s.hydrate(companyId: "u")
+        await s.sendChat("hi", language: .en)
+        XCTAssertNil(s.chatMessages.last?.blockedOffer)
+    }
+
+    /// A non-consent block (`.sidecarMissing`) never becomes an offer at all — `resolve`
+    /// returns `.explain(reason)` unchanged, since a missing sidecar is a build problem no
+    /// grant fixes. `blockedOffer` must stay nil even though a provider is installed.
+    func testStopReasonWithSidecarMissingLeavesNoBlockedOffer() async {
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in XCTFail("a .stop reason must not be retried on the other transport"); return nil },
+                             chatStreamer: Self.blockedStreamer(.sidecarMissing))
+        await s.hydrate(companyId: "u")
+        s.installedProviders.apply([.claudeCode: Self.installedStatus(.claudeCode)])
+        await s.sendChat("hi", language: .en)
+        XCTAssertNil(s.chatMessages.last?.blockedOffer)
+    }
 }

@@ -257,8 +257,17 @@ struct SessionChatPanel: View {
                 return "Daily limit reached. Comes back at \(f.string(from: r))."
             }
             return "You've reached today's limit."
-        case .networkOrServer:
-            return "Could not reach your pet — try again."
+        case .networkOrServer(let message):
+            // `message` already carries the real reason — including a `BlockedOffer` /
+            // `BlockReason` string in the founder's own language (Task 9's fix at
+            // `SessionChatController.map`, `.blocked` case). Hardcoding this to the generic
+            // network sentence made that copy unreachable at this surface: a Codex-only
+            // founder blocked on `.notGranted` saw "Could not reach your pet" instead of
+            // being told what she actually needed to do, in Vietnamese or English. A genuine
+            // network failure still carries a message (`String(describing:)` on the
+            // underlying error is never empty in practice) — but an empty string is a
+            // conceivable edge the generic line below exists to cover, not deleted.
+            return message.isEmpty ? "Could not reach your pet — try again." : message
         }
     }
 

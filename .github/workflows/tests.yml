@@ -127,6 +127,45 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('CodePet.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Bundle the sidecars into the app's resources
+        # **Without this the app under test is missing its own resources**, and the tests that
+        # notice do not say so. The bundles are gitignored build artifacts, so a checkout has
+        # none: `LocalOneShotRunner.isAvailable()` reads false, `LocalTransportRouter.transport`
+        # returns `.blocked(.sidecarMissing)`, and every test that reaches the real one-shot
+        # path silently takes the blocked branch. It passed on developers' machines, where the
+        # files are simply lying around from the last `build-sidecar.sh`.
+        #
+        # That is not hypothetical either: it is how the provenance-stamp tests went green
+        # locally and red here, reporting a nil `producedBy` rather than a missing file. The
+        # four tests now inject their own availability, but the gap was never only theirs —
+        # any future test through that path would inherit it.
+        #
+        # `scripts/build-sidecar.sh` is deliberately NOT reused: it also EXECUTES each bundle
+        # to verify both modes are reachable, and those runtime checks want the `claude` CLI,
+        # which no runner has. The flags below mirror its bundling half, and the `--outfile`
+        # paths are where `Bundle.main` looks (`codepet/Resources/`), not the /tmp the
+        # functions job uses — that job is on a different runner and proves only that the
+        # import graph still compiles.
+        # The `(cd functions && …)` subshell is how `build-sidecar.sh` invokes esbuild, and it
+        # is not decoration: the bundler resolves `src/local/…` and every transitive import
+        # against the directory it runs in, and `functions/` is where the dependencies live.
+        run: |
+          set -euo pipefail
+          (cd functions && npm ci)
+          for entry in chatSidecar oneShotSidecar vcSidecar; do
+            echo "▸ bundling $entry"
+            (cd functions && npx esbuild "src/local/$entry.ts" \
+              --bundle --platform=node --target=node20 --format=cjs \
+              --outfile="../codepet/Resources/$entry.js") || exit 1
+          done
+          ls -l codepet/Resources/*.js
+
       - name: Run tests
         run: ./scripts/ci-test.sh
 

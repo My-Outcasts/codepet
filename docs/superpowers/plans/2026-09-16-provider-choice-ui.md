@@ -56,7 +56,8 @@ paths. Every screen in this plan branches on "which provider is installed", so t
 
 **Interfaces:**
 - Consumes: `AIProvider` (`codepet/Models/AIProvider.swift`), `ShellRunning`.
-- Produces: `CLIEnvironment.spec(for: AIProvider) -> CLISpec`; `CLIEnvironment.probe(provider:shell:authorised:) async -> CLIStatus`; `CLIStatus.provider: AIProvider`.
+- Produces: `CLIEnvironment.spec(for: AIProvider) -> CLISpec`; `CLIEnvironment.probe(provider:shell:authorised:) async -> CLIStatus`; `CLIStatus.provider: AIProvider`; `InstalledProviders` (below).
+- **`InstalledProviders` lands here, not later.** Tasks 5, 8 and 9 all branch on "which CLI is installed", and a cache created in the last of them would leave the earlier two half-wired.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -272,9 +273,42 @@ Expected: PASS, including the pre-existing tests in this file.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codepet/Services/CLIEnvironment.swift codepetTests/CLIEnvironmentTests.swift
+git add codepet/Services/CLIEnvironment.swift codepet/Managers/InstalledProviders.swift codepetTests/CLIEnvironmentTests.swift
 git commit -m "feat: probe each CLI provider independently"
 ```
+
+- [ ] **Step 6: Add the install cache the UI reads**
+
+Create `codepet/Managers/InstalledProviders.swift`. No render path may spawn a subprocess, and
+`transport()`'s comment gives the reason it refuses to probe: "that costs a subprocess per call".
+
+```swift
+/// Which CLIs are on this Mac, probed once rather than per render.
+///
+/// A stale-but-cheap answer is the right trade here: a founder who installs a CLI
+/// mid-session sees the offer after the next refresh, and the alternative is a subprocess
+/// every time a card draws. Settings and onboarding call `refresh()`; everything else reads
+/// the cache.
+@MainActor
+final class InstalledProviders {
+    private(set) var installed: Set<AIProvider> = []
+
+    func refresh(shell: ShellRunning = LoginShellRunner()) async {
+        var found: Set<AIProvider> = []
+        for provider in AIProvider.allCases
+        where await CLIEnvironment.probeInstall(provider: provider, shell: shell) != .missing {
+            found.insert(provider)
+        }
+        installed = found
+    }
+}
+```
+
+Add a test that an un-refreshed cache reports nothing installed rather than guessing, and that
+`refresh` against a `FakeShell` answering only `claude --version` yields exactly `[.claudeCode]`.
+
+Run: `xcodebuild test -scheme codepet -only-testing:codepetTests/CLIEnvironmentTests 2>&1 | tail -30`
+Expected: PASS.
 
 ---
 
@@ -977,12 +1011,11 @@ provider is installed, and must keep returning the plain `.notGranted`. The **vi
 from a status probed once rather than per call.
 
 **Files:**
-- Create: `codepet/Managers/InstalledProviders.swift`
 - Modify: the blocked-copy sites — `codepet/Managers/CompanyStore.swift:1094`, `:1920`; `codepet/Views/Reflection/SessionChatController.swift:102`
 - Test: `codepetTests/BlockedStateOfferTests.swift` (create)
 
 **Interfaces:**
-- Consumes: `CLIEnvironment.probeInstall(provider:shell:)` (Task 1), `BlockReason.notGrantedFor` (Task 3), `ProviderConsentFlow` (Task 6).
+- Consumes: `InstalledProviders` (Task 1), `BlockReason.notGrantedFor` (Task 3), `ProviderConsentFlow` (Task 6).
 - Produces: `InstalledProviders.cached() -> Set<AIProvider>`, `BlockedOffer.resolve(reason:installed:) -> BlockedOffer`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1063,10 +1096,8 @@ enum BlockedOffer: Equatable {
 }
 ```
 
-`InstalledProviders` caches the probe so no render path spawns a subprocess: probe both providers
-once when the app reaches a signed-in company, store the `Set`, and re-probe only when Settings
-or onboarding refreshes. A stale-but-cheap answer is correct here — a founder who installs a CLI
-mid-session sees the offer after the next refresh, and the alternative is a subprocess per frame.
+`InstalledProviders` already exists from Task 1. Refresh it when the app reaches a signed-in
+company; do not add a second cache.
 
 At the three blocked-copy sites, replace the direct `reason.founderText` read with
 `BlockedOffer.resolve(reason:installed:).founderText(lang:)`, and render a grant button for the
@@ -1082,7 +1113,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codepet/Managers/InstalledProviders.swift codepet/Managers/CompanyStore.swift codepet/Views/Reflection/SessionChatController.swift codepetTests/BlockedStateOfferTests.swift
+git add codepet/Services/BlockReason.swift codepet/Managers/CompanyStore.swift codepet/Views/Reflection/SessionChatController.swift codepetTests/BlockedStateOfferTests.swift
 git commit -m "feat: the blocked state offers the grant for the installed CLI"
 ```
 

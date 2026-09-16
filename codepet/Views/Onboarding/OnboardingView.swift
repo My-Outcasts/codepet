@@ -31,6 +31,23 @@ struct OnboardingView: View {
     @State private var timeoutTask: Task<Void, Never>?
     @State private var skipHover = false
 
+    /// True while the reveal's "Start building" is blocked on `OnboardingProviderStep`.
+    ///
+    /// Deliberately NOT a new numbered `step` case. `OnboardingView` drives 8 steps
+    /// (0…7, `OnboardingContent.total`) through a `switch` with literal `step = n`
+    /// assignments — inserting a step would renumber every case and assignment after it,
+    /// a large diff for a gate that does not care where it sits, and would also bump
+    /// `total`, which `OnboardingContentTests` pins at 8. So the gate is layered on top
+    /// of the existing final step (7, the reveal — `default` in `stepBody`) as an
+    /// orthogonal flag: reaching it never advances `step`, it swaps what step 7 renders
+    /// and what its footer button does, using the SAME art panel, progress bar (still
+    /// correctly "Step 8 of 8"), and chrome the reveal already has. `finish()` runs only
+    /// once `OnboardingProviderStep.passes` is true — never before, and never gated on
+    /// anything this flag itself writes, since it writes nothing.
+    @State private var awaitingProvider = false
+    @State private var providerStatus: [AIProvider: CLIStatus] = [:]
+    @State private var providerProbing = false
+
     private func brief() -> CompanyBrief {
         CompanyBrief(
             founderName: d.name.isEmpty ? nil : d.name,
@@ -69,7 +86,13 @@ struct OnboardingView: View {
                     // web `.ob-top` — Back only; Skip is pinned to the card's corner.
                     HStack {
                         if step != 6 {
-                            Button(action: { step = max(0, step - 1) }) {
+                            // `awaitingProvider` sits on top of step 7 (the reveal), not a
+                            // step of its own — Back must undo THAT flag first, or it
+                            // would decrement `step` straight past the reveal to step 6.
+                            Button(action: {
+                                if awaitingProvider { awaitingProvider = false }
+                                else { step = max(0, step - 1) }
+                            }) {
                                 Text("← Back")
                                     .font(CodepetTheme.body(12.5))
                                     .foregroundColor(CodepetTheme.mutedText)
@@ -81,7 +104,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: 600, minHeight: 22, alignment: .leading)
 
                     Group {
-                        if step == 4 {   // tall: the project form → top-align + scroll
+                        if step == 4 || awaitingProvider {   // tall: top-align + scroll
                             ScrollView {
                                 bodyColumn.padding(.top, 8).padding(.bottom, 24)
                             }
@@ -134,6 +157,9 @@ struct OnboardingView: View {
     }
 
     @ViewBuilder private var stepBody: some View {
+        if awaitingProvider {
+            OnboardingProviderGateView(status: providerStatus, probing: providerProbing)
+        } else {
         switch step {
         case 1:
             heading("First — what should I call you?", "I'll use it when I walk you through your company.")
@@ -177,6 +203,7 @@ struct OnboardingView: View {
         default:
             OnboardingRevealView(name: d.name, roleLabel: d.roleLabel, stageIndex: d.stageIndex, reveal: reveal ?? .empty)
         }
+        }
     }
 
     // Progress + primary action.
@@ -212,6 +239,11 @@ struct OnboardingView: View {
     }
 
     @ViewBuilder private var primaryButton: some View {
+        if awaitingProvider {
+            bigButton(providerProbing ? "Checking…" : "Check again", enabled: !providerProbing) {
+                Task { await recheckProviderAndFinishIfReady() }
+            }
+        } else {
         switch step {
         case 1: bigButton("Continue", enabled: !d.name.trimmed.isEmpty) { step = 2 }
         case 2: bigButton("Continue", enabled: !d.role.isEmpty) { step = 3 }
@@ -219,7 +251,8 @@ struct OnboardingView: View {
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
         case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
-        default: bigButton("Start building", enabled: true) { finish() }
+        default: bigButton("Start building", enabled: true) { attemptFinish() }
+        }
         }
     }
 
@@ -267,6 +300,41 @@ struct OnboardingView: View {
     /// The call stays because `appState.activeChar` has to agree with the
     /// store, and the store's default (`byte`) is what every later surface
     /// reads. Dropping it would leave the two out of step on first run.
+    /// The reveal's "Start building" button. Reads `companyStore.installedProviders` —
+    /// the same cache `CompanyStore.hydrate` already refreshed, per its own doc comment,
+    /// rather than spawning a second probe here — and only ever ADDS a step (the gate);
+    /// a founder with a CLI installed already sees exactly what she saw before this task.
+    private func attemptFinish() {
+        if OnboardingProviderStep.passes(installed: companyStore.installedProviders.installed) {
+            finish()
+        } else {
+            awaitingProvider = true
+            Task { await refreshProviderStatus() }
+        }
+    }
+
+    /// The gate's own button. Probes fresh — she just came back from a Terminal install —
+    /// then proceeds only if that now passes. No grant is read or written anywhere in
+    /// this path: `CLIEnvironment.probe` is called with `authorised: false` unconditionally,
+    /// never with `ProviderAuthorisation`, because onboarding has no grant to check.
+    private func recheckProviderAndFinishIfReady() async {
+        await refreshProviderStatus()
+        if OnboardingProviderStep.passes(installed: companyStore.installedProviders.installed) {
+            finish()
+        }
+    }
+
+    private func refreshProviderStatus() async {
+        providerProbing = true
+        await companyStore.installedProviders.refresh()
+        var next: [AIProvider: CLIStatus] = [:]
+        for provider in AIProvider.allCases {
+            next[provider] = await CLIEnvironment.probe(provider: provider, authorised: false)
+        }
+        providerStatus = next
+        providerProbing = false
+    }
+
     private func finish() {
         streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
         let token = companyStore.onboardingToken

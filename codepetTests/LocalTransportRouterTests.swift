@@ -45,7 +45,35 @@ final class LocalTransportRouterTests: XCTestCase {
 
     func testAGrantedFounderGoesLocal() {
         granted.insert("c1")
-        XCTAssertEqual(transport(companyId: "c1"), .local)
+        XCTAssertEqual(transport(companyId: "c1"), .local(.claudeCode))
+    }
+
+    /// **The transport now says WHICH of the founder's plans pays for the run.** It could not
+    /// before: `.local` carried nothing, so a run that had already happened could not be
+    /// credited to anything. The value is DERIVED here, never chosen — `ClaudeCodeAuthorisation`
+    /// is the only grant that exists, and it grants Claude Code.
+    func testAGrantedFoundersRunIsCreditedToClaudeCode() {
+        granted.insert("c1")
+        guard case .local(let provider) = transport(companyId: "c1") else {
+            return XCTFail("expected local, got \(transport(companyId: "c1"))")
+        }
+        XCTAssertEqual(provider, .claudeCode)
+        XCTAssertEqual(provider.displayName, "Claude Code")
+    }
+
+    /// **`.codex` is not reachable from this router yet, and that is the point of this test.**
+    /// The enum can carry it; nothing derives it, because the second provider's grant does not
+    /// exist until per-provider consent lands. Without this, the payload reads as a selectable
+    /// choice and a caller could reasonably assume a Codex-granted founder already routes here.
+    ///
+    /// This test SHOULD go red the day selection arrives — that is the reminder to re-read the
+    /// derivation below, not a reason to weaken it now.
+    func testNoGrantedCompanyRoutesToCodexThisPhase() {
+        for id in ["c1", "c2", "another-company"] {
+            granted.insert(id)
+            XCTAssertEqual(transport(companyId: id), .local(.claudeCode),
+                           "\(id) routed to something other than the one grant that exists")
+        }
     }
 
     /// One Mac has one Claude Code login, so a grant that was not keyed per company would
@@ -95,7 +123,7 @@ final class LocalTransportRouterTests: XCTestCase {
         XCTAssertEqual(
             LocalTransportRouter.transport(
                 authorisation: authorisation, sidecarAvailable: { true }),
-            .local)
+            .local(.claudeCode))
     }
 
     /// Sign-out passes nil. Leaving the previous founder's id in place would route the next
@@ -119,7 +147,7 @@ final class LocalTransportRouterTests: XCTestCase {
     /// behaviour one: it fails to compile the day someone adds a case that reaches a Cloud
     /// Function, which is the only moment the mistake is cheap to fix.
     func testTransportIsOnlyEverLocalOrBlocked() {
-        let cases: [LocalTransportRouter.Transport] = [.local, .blocked(.notGranted)]
+        let cases: [LocalTransportRouter.Transport] = [.local(.claudeCode), .blocked(.notGranted)]
         for c in cases {
             switch c {
             case .local, .blocked: continue   // exhaustive: adding a case breaks the build

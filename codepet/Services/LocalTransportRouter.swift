@@ -28,7 +28,13 @@ enum LocalTransportRouter {
     static let log = Logger(subsystem: "app.murror.codepet", category: "LocalTransport")
 
     enum Transport: Equatable {
-        case local
+        /// Runs on the founder's own machine, on the named provider's plan.
+        ///
+        /// **The provider is carried so a run can say what paid for it.** `.local` alone
+        /// could not: with a second CLI behind the same seam, "it ran locally" stopped being
+        /// an answer to "whose plan did that spend". Nothing here ACTS on the value yet —
+        /// every `case .local` site behaves exactly as it did when the case was bare.
+        case local(AIProvider)
         /// Cannot run here, and why. **There is deliberately no hosted case**: Codepet holds
         /// no Anthropic key, so "fall back to the Cloud Function" is not a slower success, it
         /// is a 401 the founder cannot act on.
@@ -118,7 +124,13 @@ enum LocalTransportRouter {
             log.error("transport: blocked — companyId=\(companyId, privacy: .public) granted but sidecar missing")
             return .blocked(.sidecarMissing)
         }
-        log.error("transport: local — companyId=\(companyId, privacy: .public) granted, sidecar available")
-        return .local
+        // **Derived, never chosen.** `ClaudeCodeAuthorisation` is the only grant that
+        // exists, and what it grants is Claude Code — so a company that passed the guard
+        // above is by construction a Claude Code company. This is the line per-provider
+        // consent replaces when a second grant exists to read; until then `.codex` is
+        // nameable (`AIProvider`) but unreachable from here, and a test pins that.
+        let provider = AIProvider.claudeCode
+        log.error("transport: local — companyId=\(companyId, privacy: .public) granted, sidecar available, provider=\(provider.rawValue, privacy: .public)")
+        return .local(provider)
     }
 }

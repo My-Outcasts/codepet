@@ -129,7 +129,7 @@ final class VirtualCompanyTransportTests: XCTestCase {
         XCTAssertEqual(
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
-            .local)
+            .local(.claudeCode))
     }
 
     /// THE case that matters here. A silent fallback would spend the API key the grant exists
@@ -152,7 +152,7 @@ final class VirtualCompanyTransportTests: XCTestCase {
         XCTAssertEqual(
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
-            .local)
+            .local(.claudeCode))
         guard case .blocked(.sidecarMissing) = LocalTransportRouter.transport(
             companyId: "c1", authorisation: authorisation, sidecarAvailable: { false }) else {
             return XCTFail("a missing bundle must not read as available")

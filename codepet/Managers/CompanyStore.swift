@@ -1417,7 +1417,13 @@ final class CompanyStore: ObservableObject {
     /// founder has no say over the model, and offering a picker that changes nothing is
     /// worse than offering none.
     var localChatActive: Bool {
-        ChatTransportRouter.transport(companyId: companyId) == .local
+        // A PATTERN match, not an equality, and deliberately provider-agnostic: `.local`
+        // gained an `AIProvider` payload, and the question here is "does the founder have a
+        // say over the model", which is true of any local turn regardless of which CLI runs
+        // it. Comparing against `.local(.claudeCode)` would silently hide the control the
+        // day a second provider answers here.
+        if case .local = ChatTransportRouter.transport(companyId: companyId) { return true }
+        return false
     }
 
     /// Whether a Build should go to the founder's OWN coding agent rather than the cloud one.

@@ -39,7 +39,23 @@ final class ChatTransportRouterTests: XCTestCase {
 
     func testAGrantedFounderGoesLocal() {
         granted.insert("c1")
-        XCTAssertEqual(transport(companyId: "c1"), .local)
+        XCTAssertEqual(transport(companyId: "c1"), .local(.claudeCode))
+    }
+
+    /// **Chat carries a provider it cannot vary, on purpose.** The payload exists so this enum
+    /// and `LocalTransportRouter.Transport` stay the same shape — this file's router is
+    /// documented as holding that shape, and drift between them costs a lie in prose. But no
+    /// chat path can run a second CLI this phase, so the answer is `.claudeCode` for every
+    /// company, unconditionally.
+    ///
+    /// This is the guard against the opposite mistake: a router that could answer `.codex`
+    /// here would promise a founder something chat cannot honour.
+    func testChatAlwaysCreditsClaudeCodeAndNeverVaries() {
+        for id in ["c1", "c2", "another-company"] {
+            granted.insert(id)
+            XCTAssertEqual(transport(companyId: id), .local(.claudeCode),
+                           "chat has no second provider; \(id) must not get one")
+        }
     }
 
     /// The grant is per company id, so one founder's consent must not route another
@@ -67,7 +83,7 @@ final class ChatTransportRouterTests: XCTestCase {
     func testAGrantedFounderWithNoSidecarIsBlockedWithTheSidecarReason() {
         granted.insert("c1")
         let t = transport(companyId: "c1", sidecar: false)
-        XCTAssertNotEqual(t, .local, "a missing runner is not a local turn")
+        XCTAssertNotEqual(t, .local(.claudeCode), "a missing runner is not a local turn")
         guard case .blocked(let reason) = t else {
             return XCTFail("expected blocked, got \(t)")
         }
@@ -196,7 +212,7 @@ final class ChatTransportRouterTests: XCTestCase {
     /// The load-bearing totality test: it fails to COMPILE the day someone adds a case that
     /// reaches a hosted endpoint, which is the only moment that mistake is cheap.
     func testChatTransportIsOnlyEverLocalOrBlocked() {
-        let cases: [ChatTransportRouter.Transport] = [.local, .blocked(.notGranted)]
+        let cases: [ChatTransportRouter.Transport] = [.local(.claudeCode), .blocked(.notGranted)]
         for c in cases {
             switch c {
             case .local, .blocked: continue   // exhaustive: adding a case breaks the build

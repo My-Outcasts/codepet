@@ -53,12 +53,12 @@ enum ChatTransportRouter {
     /// Which transport a turn should use.
     ///
     /// Deliberately does NOT probe for `claude` — that costs two subprocesses and would
-    /// run on every message. `ClaudeCodeEnvironment` answers that question in Settings,
+    /// run on every message. `CLIEnvironment` answers that question in Settings,
     /// where the founder is looking at the answer. A `claude` that is missing at run time
     /// surfaces through the run's own stderr instead, which is where the real reason is.
     static func transport(
         companyId: String?,
-        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
+        authorisation: ProviderAuthorisation = ProviderAuthorisation(),
         sidecarAvailable: () -> Bool = { LocalChatStreamer.isAvailable() }
     ) -> Transport {
         // No company id means no grant can exist. That used to route to the Cloud Function;

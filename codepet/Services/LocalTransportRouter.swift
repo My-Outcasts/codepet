@@ -11,7 +11,7 @@ import os
 /// rather than "whose machine": a second provider extends that question, it does not
 /// replace it.
 ///
-/// **The same switch chat follows, deliberately.** `ClaudeCodeAuthorisation` means "Codepet
+/// **The same switch chat follows, deliberately.** `ProviderAuthorisation` means "Codepet
 /// may spend my Claude plan". A founder who granted that did not grant it for chat; they
 /// granted it. So `enrichBrief`, `synthesizeBrief` and the ops that follow read the same
 /// grant, and there is no second knob to learn. `ChatTransportRouter` records the reasoning
@@ -57,7 +57,7 @@ enum LocalTransportRouter {
     /// The one-shot ops, which need the `oneShotSidecar` bundle.
     static func forOneShot(
         companyId: String? = activeCompanyId,
-        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation()
+        authorisation: ProviderAuthorisation = ProviderAuthorisation()
     ) -> Transport {
         transport(companyId: companyId, authorisation: authorisation,
                   sidecarAvailable: { LocalOneShotRunner.isAvailable() })
@@ -70,7 +70,7 @@ enum LocalTransportRouter {
     /// should still get their roadmap rather than being told everything local is unavailable.
     static func forVirtualCompany(
         companyId: String? = activeCompanyId,
-        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation()
+        authorisation: ProviderAuthorisation = ProviderAuthorisation()
     ) -> Transport {
         transport(companyId: companyId, authorisation: authorisation,
                   sidecarAvailable: { LocalVirtualCompanyStreamer.isAvailable() })
@@ -104,12 +104,12 @@ enum LocalTransportRouter {
     /// Whether a call can run here, given what its own transport needs on disk.
     ///
     /// Deliberately does NOT probe for `claude` — that costs a subprocess per call and
-    /// `ClaudeCodeEnvironment` already answers it in Settings, where the founder is looking
+    /// `CLIEnvironment` already answers it in Settings, where the founder is looking
     /// at the answer. A `claude` missing at run time surfaces through the sidecar's own
     /// stderr, which carries the real reason.
     static func transport(
         companyId: String? = activeCompanyId,
-        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
+        authorisation: ProviderAuthorisation = ProviderAuthorisation(),
         sidecarAvailable: () -> Bool
     ) -> Transport {
         guard let companyId, !companyId.isEmpty else {
@@ -124,7 +124,7 @@ enum LocalTransportRouter {
             log.error("transport: blocked — companyId=\(companyId, privacy: .public) granted but sidecar missing")
             return .blocked(.sidecarMissing)
         }
-        // **Derived, never chosen.** `ClaudeCodeAuthorisation` is the only grant that
+        // **Derived, never chosen.** `ProviderAuthorisation` is the only grant that
         // exists, and what it grants is Claude Code — so a company that passed the guard
         // above is by construction a Claude Code company. This is the line per-provider
         // consent replaces when a second grant exists to read; until then `.codex` is

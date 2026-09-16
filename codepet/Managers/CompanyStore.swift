@@ -146,9 +146,9 @@ final class CompanyStore: ObservableObject {
         #endif
         // The web-research skill reaches the coding run from here, as a closure so it is read
         // when a run STARTS rather than when this coordinator is first built (see
-        // `ClaudeCodeRunAdapter.allowsWebSearch`). `[weak self]` because the adapter outlives
+        // `CLIRunAdapter.allowsWebSearch`). `[weak self]` because the adapter outlives
         // nothing here but the store owns this graph, and a strong capture would be a cycle.
-        let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter(
+        let runner: CodeRunning = mock ? MockCodeRunner() : CLIRunAdapter(
             allowsWebSearch: { [weak self] in
                 self?.company.enabledTools.contains(Toolkit.webResearchId) ?? false
             })
@@ -386,7 +386,7 @@ final class CompanyStore: ObservableObject {
          // closes over `UserDefaults.standard`. Injected so a test can grant the plan without
          // writing to the real defaults domain — a leaked grant would route another suite's
          // Build onto a machine it never asked for.
-         claudeAuthorisation: ClaudeCodeAuthorisation? = nil,
+         claudeAuthorisation: ProviderAuthorisation? = nil,
          // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
          // has a second defaulted parameter (an injectable runner, added so its exit-code
          // gate is testable), and Swift does not apply defaults when forming a function
@@ -436,7 +436,7 @@ final class CompanyStore: ObservableObject {
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
-        self.claudeAuthorisation = claudeAuthorisation ?? ClaudeCodeAuthorisation()
+        self.claudeAuthorisation = claudeAuthorisation ?? ProviderAuthorisation()
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
@@ -1030,7 +1030,7 @@ final class CompanyStore: ObservableObject {
     /// Build: change the founder's code. The one code mode, since 14 Aug.
     ///
     /// **Cloud by default, and not because it is better.** The local runner
-    /// shells out to the `claude` CLI (`ClaudeCodeRunner`), so it works for
+    /// shells out to the `claude` CLI (`CLIRunner`), so it works for
     /// someone who already has Claude Code installed and authenticated — which
     /// is Mona, and nobody who downloads Codepet in August. Defaulting to the
     /// path that works for a customer is the whole reason this is the default;
@@ -1079,7 +1079,7 @@ final class CompanyStore: ObservableObject {
         }
         // One state still reaches the cloud agent: a folder IS linked and the founder has not
         // granted their Claude plan. Sending that founder to the local runner would spend the
-        // plan they were never asked about — `ClaudeCodeAuthorisation` is the one switch — so
+        // plan they were never asked about — `ProviderAuthorisation` is the one switch — so
         // this arm is deliberately left alone here and belongs with the grant work, not with
         // the folder gate.
         if buildRunsOnFoundersAgent || activeProjectLink == nil {
@@ -1445,7 +1445,7 @@ final class CompanyStore: ObservableObject {
     ///
     /// **Reads the grant directly, not `LocalTransportRouter`.** That router also requires
     /// the bundled one-shot sidecar, which a coding run does not use at all: it drives the
-    /// `claude` binary through `ClaudeCodeRunner`. Gating on a resource this path never
+    /// `claude` binary through `CLIRunner`. Gating on a resource this path never
     /// touches would send a granted founder to the cloud for the wrong reason.
     ///
     /// A linked folder stays necessary: without one the local run lands in `.noProject`, and
@@ -1456,7 +1456,7 @@ final class CompanyStore: ObservableObject {
         return localBuildAvailable && claudeAuthorisation.isAuthorised(.claudeCode, companyId)
     }
 
-    let claudeAuthorisation: ClaudeCodeAuthorisation
+    let claudeAuthorisation: ProviderAuthorisation
 
     // MARK: - The two doors
 

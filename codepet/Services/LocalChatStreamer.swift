@@ -47,7 +47,7 @@ enum LocalChatStreamer {
     }
 
     /// Whether a local turn can even be attempted. Deliberately does NOT check for
-    /// `claude` itself — that is `ClaudeCodeEnvironment`'s job and it costs a subprocess,
+    /// `claude` itself — that is `CLIEnvironment`'s job and it costs a subprocess,
     /// so the two questions stay separate and the caller asks both.
     static func isAvailable(defaults: UserDefaults = .standard, bundle: Bundle = .main) -> Bool {
         resolveSidecarPath(defaults: defaults, bundle: bundle) != nil

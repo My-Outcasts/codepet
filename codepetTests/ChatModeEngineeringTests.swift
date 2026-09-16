@@ -219,7 +219,7 @@ final class BuildDestinationTests: XCTestCase {
         return CompanyStore(
             loader: { _ in state }, saver: { _, _ in true },
             identityMap: ProjectIdentityMap(defaults: suite, key: "cp_project_ids_test"),
-            claudeAuthorisation: ClaudeCodeAuthorisation(
+            claudeAuthorisation: ProviderAuthorisation(
                 isAuthorised: { $1 == granted }, setAuthorised: { _, _, _ in }))
     }
 

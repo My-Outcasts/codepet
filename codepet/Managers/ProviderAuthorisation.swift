@@ -78,9 +78,9 @@ import Foundation
 /// founders' disks — stays byte-for-byte what it was. Renaming it would silently withdraw
 /// every grant ever given and ask again for something already agreed to.
 ///
-/// The type keeps its name for now; a later task renames it to `ProviderAuthorisation`.
-/// Doing both at once would hide a consent change inside a rename.
-struct ClaudeCodeAuthorisation {
+/// The type was renamed to `ProviderAuthorisation` in a follow-up task, kept separate from
+/// this consent change so a rename could never hide a behaviour change inside it.
+struct ProviderAuthorisation {
     /// **Written out per case, deliberately — never derived from `rawValue`.** These strings
     /// are PERSISTED on founders' machines. Deriving them would mean a future rename of an
     /// enum case silently relocates a stored grant, and the founder who gave it quietly

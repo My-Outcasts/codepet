@@ -14,8 +14,8 @@ final class ChatTransportRouterTests: XCTestCase {
 
     /// A grant table in memory, so no case touches the real defaults domain or leaks a
     /// grant into the next one.
-    private var authorisation: ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
+    private var authorisation: ProviderAuthorisation {
+        ProviderAuthorisation(
             isAuthorised: { [self] provider, id in
                 switch provider {
                 case .claudeCode: return granted.contains(id)

@@ -5,7 +5,7 @@ import Foundation
 /// A struct and not an `ObservableObject`: landmine 3 in CLAUDE.md — the XCTest host on
 /// Xcode 26.2 crashes when a `@MainActor ObservableObject` deallocates, and this type
 /// exists to be built and thrown away in tests.
-struct ClaudeCodeStatus: Equatable {
+struct CLIStatus: Equatable {
 
     enum Install: Equatable {
         case missing
@@ -92,12 +92,12 @@ struct ClaudeCodeStatus: Equatable {
     }
 
     /// Nothing probed yet. Distinct from a probe that ran and found nothing.
-    static let unprobed = ClaudeCodeStatus(install: .missing, auth: .unknown, authorised: false)
+    static let unprobed = CLIStatus(install: .missing, auth: .unknown, authorised: false)
 }
 
 /// Probes the founder's Claude Code installation. A namespace, not an instance: it holds
 /// no state, and every function takes the shell it should use.
-enum ClaudeCodeEnvironment {
+enum CLIEnvironment {
 
     /// Where the documented installers put `claude`, tried by absolute path when PATH
     /// resolution fails. A founder whose shell profile the installer never touched has
@@ -114,7 +114,7 @@ enum ClaudeCodeEnvironment {
     /// Reads the leading semver out of `claude --version`, whose current shape is
     /// "2.1.241 (Claude Code)". Only when PATH resolution AND every known install path
     /// fail do we conclude `.missing`.
-    static func probeInstall(shell: ShellRunning) async -> ClaudeCodeStatus.Install {
+    static func probeInstall(shell: ShellRunning) async -> CLIStatus.Install {
         let onPath = await shell.run("claude --version")
         if onPath.succeeded {
             return .present(version: parseVersion(onPath.trimmedOut))
@@ -153,7 +153,7 @@ enum ClaudeCodeEnvironment {
     /// handing us prose. Three outcomes, and the difference between the last two is the
     /// point: signed-out is something the founder can act on, unknown is not their fault
     /// and needs a different message.
-    static func probeAuth(shell: ShellRunning) async -> ClaudeCodeStatus.Auth {
+    static func probeAuth(shell: ShellRunning) async -> CLIStatus.Auth {
         let result = await shell.run("claude auth status --json")
         // A non-zero exit is an older CLI without the subcommand, or a broken install.
         // Either way we do not know — and must not claim signed-out.
@@ -181,12 +181,12 @@ enum ClaudeCodeEnvironment {
     /// the machine — it is the founder's grant, which lives per company id and is the
     /// caller's to supply.
     static func probe(shell: ShellRunning = LoginShellRunner(),
-                      authorised: Bool) async -> ClaudeCodeStatus {
+                      authorised: Bool) async -> CLIStatus {
         let install = await probeInstall(shell: shell)
         guard install != .missing else {
-            return ClaudeCodeStatus(install: install, auth: .unknown, authorised: authorised)
+            return CLIStatus(install: install, auth: .unknown, authorised: authorised)
         }
-        return ClaudeCodeStatus(install: install,
+        return CLIStatus(install: install,
                                 auth: await probeAuth(shell: shell),
                                 authorised: authorised)
     }

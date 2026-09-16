@@ -20,8 +20,8 @@ struct ClaudeCodePanel: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
 
-    @StateObject private var login = ClaudeCodeLogin()
-    @State private var status: ClaudeCodeStatus = .unprobed
+    @StateObject private var login = CLILogin()
+    @State private var status: CLIStatus = .unprobed
     @State private var probing = true
     @State private var pastedCode = ""
     @State private var copied = false
@@ -37,7 +37,7 @@ struct ClaudeCodePanel: View {
     @State private var granted = false
 
     /// Injected so a test or preview never touches the real defaults domain.
-    var authorisation = ClaudeCodeAuthorisation()
+    var authorisation = ProviderAuthorisation()
 
     /// The documented native installer. Shown for copying, never run on the founder's
     /// behalf: they should see what is about to be put on their machine.
@@ -248,7 +248,7 @@ struct ClaudeCodePanel: View {
 
     /// A warning, never a block: both cases run fine, and refusing to run would be
     /// Codepet overruling the founder about their own billing.
-    private func warningText(_ warning: ClaudeCodeStatus.BillingWarning) -> String {
+    private func warningText(_ warning: CLIStatus.BillingWarning) -> String {
         switch warning {
         case .consoleAccount:
             return lang == .vi
@@ -305,7 +305,7 @@ struct ClaudeCodePanel: View {
         // No company id means no grant can exist yet, so the probe is told `false` rather
         // than guessing — the panel then shows the machine facts and offers no toggle.
         let granted = companyId.map { authorisation.isAuthorised(.claudeCode, $0) } ?? false
-        status = await ClaudeCodeEnvironment.probe(authorised: granted)
+        status = await CLIEnvironment.probe(authorised: granted)
         probing = false
         copied = false
     }

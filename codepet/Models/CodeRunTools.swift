@@ -3,7 +3,7 @@ import Foundation
 /// Which tools a coding run may use — the one place the list lives, and pure so it is
 /// testable without spawning `claude`.
 ///
-/// **Why this type exists.** The list was a default argument on `ClaudeCodeRunner.run`, and
+/// **Why this type exists.** The list was a default argument on `CLIRunner.run`, and
 /// the comma-join that turns it into a shell argument sat next to the invocation. Neither was
 /// reachable from a test, and the list had no way to grow with a founder's toolkit: a coding
 /// run could not search the web no matter what Environment said.

@@ -14,7 +14,7 @@ import Foundation
 /// 1. No fabricated specifics. The web's build script prints `editing Analytics.swift +11 −4`
 ///    (derived from the task title's length), `218 tests passed` (a constant) and
 ///    `localhost:3001` (hardcoded). Native's coding run has REAL file paths and real added and
-///    removed line counts from `ClaudeCodeRunner.FileDiff`, so its terminal rows are built from
+///    removed line counts from `CLIRunner.FileDiff`, so its terminal rows are built from
 ///    those — see `CodingRunCoordinator`. A company task that produces a doc has no tool
 ///    activity to report, so it gets no terminal rows at all rather than invented ones.
 /// 2. The kind is INFERRED, because native cannot know it yet. The web's task model carries a

@@ -12,7 +12,7 @@ import Combine
 ///
 /// The app is not sandboxed (com.apple.security.app-sandbox = false), so spawning
 /// a subprocess is permitted. This is the first process Codepet spawns.
-final class ClaudeCodeRunner: ObservableObject {
+final class CLIRunner: ObservableObject {
 
     // MARK: - Types
 

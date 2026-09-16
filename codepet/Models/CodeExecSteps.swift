@@ -5,7 +5,7 @@ import Foundation
 /// plain assistant prose, tool results, and the final summary are not shown as
 /// checklist rows. Each surfaced step is already `done` (the tool call completed).
 enum CodeExecSteps {
-    static func step(for event: ClaudeCodeRunner.StreamEvent) -> ExecStep? {
+    static func step(for event: CLIRunner.StreamEvent) -> ExecStep? {
         switch event.kind {
         case .toolUse:
             let label = event.text.trimmingCharacters(in: .whitespacesAndNewlines)

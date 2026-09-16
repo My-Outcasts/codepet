@@ -100,8 +100,8 @@ final class VirtualCompanyTransportTests: XCTestCase {
     /// would make "a Codex grant does not route to Claude Code" unprovable here.
     private var codexGranted: Set<String> = []
 
-    private var authorisation: ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
+    private var authorisation: ProviderAuthorisation {
+        ProviderAuthorisation(
             isAuthorised: { [self] provider, id in
                 switch provider {
                 case .claudeCode: return granted.contains(id)

@@ -18,8 +18,8 @@ final class LocalTransportRouterTests: XCTestCase {
 
     /// A grant table in memory, so no case touches the real defaults domain or leaks a
     /// grant into the next one.
-    private var authorisation: ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
+    private var authorisation: ProviderAuthorisation {
+        ProviderAuthorisation(
             isAuthorised: { [self] provider, id in
                 switch provider {
                 case .claudeCode: return granted.contains(id)
@@ -64,7 +64,7 @@ final class LocalTransportRouterTests: XCTestCase {
 
     /// **The transport now says WHICH of the founder's plans pays for the run.** It could not
     /// before: `.local` carried nothing, so a run that had already happened could not be
-    /// credited to anything. The value is DERIVED here, never chosen — `ClaudeCodeAuthorisation`
+    /// credited to anything. The value is DERIVED here, never chosen — `ProviderAuthorisation`
     /// is the only grant that exists, and it grants Claude Code.
     func testAGrantedFoundersRunIsCreditedToClaudeCode() {
         granted.insert("c1")
@@ -189,7 +189,7 @@ final class LocalTransportRouterTests: XCTestCase {
     }
 
     func testAnUngrantedCompanyIsBlockedRatherThanSentToTheCloud() {
-        var auth = ClaudeCodeAuthorisation()
+        var auth = ProviderAuthorisation()
         auth.isAuthorised = { _, _ in false }
         let t = LocalTransportRouter.transport(companyId: "c1", authorisation: auth,
                                                sidecarAvailable: { true })
@@ -197,7 +197,7 @@ final class LocalTransportRouterTests: XCTestCase {
     }
 
     func testAGrantedCompanyWithNoSidecarSaysSo() {
-        var auth = ClaudeCodeAuthorisation()
+        var auth = ProviderAuthorisation()
         auth.isAuthorised = { _, _ in true }
         let t = LocalTransportRouter.transport(companyId: "c1", authorisation: auth,
                                                sidecarAvailable: { false })
@@ -206,7 +206,7 @@ final class LocalTransportRouterTests: XCTestCase {
 
     /// No company id used to mean "cloud". It now means the same thing an ungranted one does.
     func testNoCompanyIdIsBlockedNotCloud() {
-        let t = LocalTransportRouter.transport(companyId: nil, authorisation: ClaudeCodeAuthorisation(),
+        let t = LocalTransportRouter.transport(companyId: nil, authorisation: ProviderAuthorisation(),
                                                sidecarAvailable: { true })
         XCTAssertEqual(t, .blocked(.notGranted))
     }

@@ -10,9 +10,10 @@ import XCTest
 /// spend the other, and the founder who granted Claude Code before this change was never
 /// asked about Codex — so she must be ASKED, not migrated.
 ///
-/// The type is still named `ClaudeCodeAuthorisation`; a later task renames it to
-/// `ProviderAuthorisation`. Doing both at once would hide a consent change inside a rename,
-/// so this file carries the eventual name and the type keeps the current one.
+/// The type carried its old Claude-specific name when this file was written, and was renamed
+/// to `ProviderAuthorisation` in a follow-up task kept separate from this consent change —
+/// doing both at once would have hidden a consent change inside a rename, so this file
+/// carried the eventual name before the type did.
 final class ProviderAuthorisationTests: XCTestCase {
 
     private var suiteName = ""
@@ -34,13 +35,13 @@ final class ProviderAuthorisationTests: XCTestCase {
     /// Reads and writes the REAL key function against a scratch suite, so a collapsed key
     /// shows up here rather than being papered over by a fake that keys on the provider
     /// anyway. This is what makes the mutation in step 4 of the task actually bite.
-    private func authorisation() -> ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
+    private func authorisation() -> ProviderAuthorisation {
+        ProviderAuthorisation(
             isAuthorised: { [defaults] provider, companyId in
-                defaults!.bool(forKey: ClaudeCodeAuthorisation.key(provider, companyId))
+                defaults!.bool(forKey: ProviderAuthorisation.key(provider, companyId))
             },
             setAuthorised: { [defaults] provider, companyId, on in
-                defaults!.set(on, forKey: ClaudeCodeAuthorisation.key(provider, companyId))
+                defaults!.set(on, forKey: ProviderAuthorisation.key(provider, companyId))
             }
         )
     }
@@ -83,17 +84,17 @@ final class ProviderAuthorisationTests: XCTestCase {
     /// silently loses the grant she gave and is asked again for something she agreed to.
     /// This string is on founders' disks right now.
     func testTheClaudeKeyIsUnchanged() {
-        XCTAssertEqual(ClaudeCodeAuthorisation.key(.claudeCode, "c1"), "cp_claude_authorised_c1")
+        XCTAssertEqual(ProviderAuthorisation.key(.claudeCode, "c1"), "cp_claude_authorised_c1")
     }
 
     func testTheCodexKeyIsItsOwn() {
-        XCTAssertEqual(ClaudeCodeAuthorisation.key(.codex, "c1"), "cp_codex_authorised_c1")
+        XCTAssertEqual(ProviderAuthorisation.key(.codex, "c1"), "cp_codex_authorised_c1")
     }
 
     /// Every provider's key is distinct, so adding a third CLI cannot quietly re-use a
     /// grant given for a different plan. `CaseIterable` is on `AIProvider` for this.
     func testEveryProviderHasADistinctKey() {
-        let keys = AIProvider.allCases.map { ClaudeCodeAuthorisation.key($0, "c1") }
+        let keys = AIProvider.allCases.map { ProviderAuthorisation.key($0, "c1") }
         XCTAssertEqual(Set(keys).count, AIProvider.allCases.count, "two providers share one key")
     }
 
@@ -102,7 +103,7 @@ final class ProviderAuthorisationTests: XCTestCase {
     /// path forgets to go through that vault.
     func testEveryProviderKeyIsPrefixedAndScopedToTheCompany() {
         for provider in AIProvider.allCases {
-            let key = ClaudeCodeAuthorisation.key(provider, "company-a")
+            let key = ProviderAuthorisation.key(provider, "company-a")
             XCTAssertTrue(key.hasPrefix("cp_"), "\(provider.rawValue) must be swept by AccountDataStore")
             XCTAssertTrue(key.contains("company-a"), "\(provider.rawValue) must not be device-global")
         }
@@ -140,7 +141,7 @@ final class ProviderAuthorisationTests: XCTestCase {
             PrototypeMode.store.removeObject(forKey: PrototypeMode.key)
             PrototypeMode.store.removeObject(forKey: "CODEPET_LIVE_AI")
         }
-        let auth = ClaudeCodeAuthorisation()
+        let auth = ProviderAuthorisation()
         XCTAssertTrue(auth.isAuthorised(.claudeCode, ContentView.prototypeCompanyId))
         XCTAssertFalse(auth.isAuthorised(.codex, ContentView.prototypeCompanyId),
                        "the live-AI Claude grant leaked into Codex")

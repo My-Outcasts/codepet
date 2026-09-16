@@ -24,11 +24,11 @@ struct EditCodeRun: Equatable {
     let ask: String
     let backend: CodeBackend
     var phase: EditCodePhase
-    var diffs: [ClaudeCodeRunner.FileDiff]
+    var diffs: [CLIRunner.FileDiff]
     var acceptedPaths: Set<String>
 
     init(ask: String, backend: CodeBackend, phase: EditCodePhase,
-         diffs: [ClaudeCodeRunner.FileDiff] = [], acceptedPaths: Set<String> = []) {
+         diffs: [CLIRunner.FileDiff] = [], acceptedPaths: Set<String> = []) {
         self.ask = ask; self.backend = backend; self.phase = phase
         self.diffs = diffs; self.acceptedPaths = acceptedPaths
     }

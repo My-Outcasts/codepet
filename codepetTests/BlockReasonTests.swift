@@ -32,4 +32,38 @@ final class BlockReasonTests: XCTestCase {
         // What she can do is reinstall, so the copy has to say so.
         XCTAssertTrue(BlockReason.sidecarMissing.founderText.lowercased().contains("reinstall"))
     }
+
+    /// The grant a Codex-only founder is asked for must be the Codex one. Naming Claude
+    /// here is the specific wrong answer: she has a plan, just not that one.
+    func testTheCodexBlockAsksForTheCodexGrant() {
+        let reason = BlockReason.notGrantedFor(.codex)
+        XCTAssertTrue(reason.founderText.lowercased().contains("chatgpt"),
+                      "expected the ChatGPT plan named, got: \(reason.founderText)")
+        XCTAssertFalse(reason.founderText.lowercased().contains("claude"),
+                       "must not name Claude to a Codex founder: \(reason.founderText)")
+    }
+
+    func testTheClaudeBlockStillAsksForTheClaudeGrant() {
+        let reason = BlockReason.notGrantedFor(.claudeCode)
+        XCTAssertTrue(reason.founderText.lowercased().contains("claude"))
+    }
+
+    /// Chat and meetings are Claude-only. The copy must name an action, because every other
+    /// BlockReason names one — a case that only states a fact would be the odd one out.
+    func testNeedsClaudeCodeNamesAnAction() {
+        let text = BlockReason.needsClaudeCode.founderText.lowercased()
+        XCTAssertTrue(text.contains("install") || text.contains("switch"),
+                      "expected an action, got: \(BlockReason.needsClaudeCode.founderText)")
+    }
+
+    /// Every case carries both languages. A missing Vietnamese string renders English to a
+    /// Vietnamese founder, which reads as a bug rather than a fallback.
+    func testEveryNewCaseHasVietnamese() {
+        for reason in [BlockReason.notGrantedFor(.codex),
+                       .notGrantedFor(.claudeCode),
+                       .needsClaudeCode] {
+            XCTAssertFalse(reason.founderTextVi.isEmpty)
+            XCTAssertNotEqual(reason.founderTextVi, reason.founderText)
+        }
+    }
 }

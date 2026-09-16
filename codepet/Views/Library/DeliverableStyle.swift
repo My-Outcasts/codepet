@@ -86,6 +86,12 @@ struct DeliverableFrame<Content: View>: View {
     /// of one. Keeping it separate also leaves all seven existing `action:` call sites alone.
     var export: Deliverable? = nil
     var footer: String? = nil
+    /// Which plan paid for this, and the offer to ask the other one. Absent — and drawn
+    /// as nothing — for every deliverable made before provenance was recorded.
+    var provenance: AIProvider? = nil
+    var lang: AppLanguage = .en
+    var otherProviderInstalled: Bool = false
+    var onReRun: ((AIProvider) -> Void)? = nil
     var measured: Bool = true
     @ViewBuilder var content: Content
 
@@ -112,9 +118,23 @@ struct DeliverableFrame<Content: View>: View {
 
             // The footer earns its rule only when there is something to say. A card that always
             // carries a status line teaches you to stop reading it — the Aug 10 rule, kept.
-            if let footer, !footer.isEmpty {
+            // Provenance follows the same discipline: a `nil` producedBy — every deliverable
+            // made before Task 4 — draws nothing, never a guess and never a default to Claude.
+            let hasFooter = footer.map { !$0.isEmpty } ?? false
+            if hasFooter || provenance != nil {
                 DeliverableRule().padding(.vertical, 14)
-                DeliverableFootnote(text: footer)
+                if hasFooter, let footer {
+                    DeliverableFootnote(text: footer)
+                }
+                if let provenance {
+                    ProvenanceRowView(
+                        producedBy: provenance,
+                        lang: lang,
+                        otherInstalled: otherProviderInstalled,
+                        onReRun: onReRun
+                    )
+                    .padding(.top, hasFooter ? 8 : 0)
+                }
             }
         }
         .deliverableCardChrome(measured: measured)

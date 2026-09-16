@@ -2956,6 +2956,40 @@ final class CompanyStore: ObservableObject {
     /// `.blocked` reads as "don't know" (nil): a run that was blocked never reaches
     /// `buildDeliverable` anyway (its `taskRunner` result is nil), so this only matters for
     /// the `.local` case in practice.
+    ///
+    /// **This is a SECOND, INDEPENDENT resolution — not a read-back of the first.**
+    /// `RunTaskClient.run` is the code that actually spends a plan, and it calls
+    /// `LocalTransportRouter.forOneShot()` with NO arguments: that resolves the GLOBAL
+    /// `LocalTransportRouter.activeCompanyId` mirror against a FRESH `ProviderAuthorisation()`
+    /// it constructs itself. This function resolves a SEPARATE answer, from this store's own
+    /// `cid` and its own `claudeAuthorisation`. Nothing compares the two; the stamp is only
+    /// correct because, today, both computations happen to agree. That holds only while ALL
+    /// of the following stay true — an invariant, not a reassurance, and the next edit that
+    /// breaks one of them reintroduces the exact lie this field exists to prevent (a card
+    /// reading "Ran on Claude Code" when Codex, or nothing, actually ran):
+    ///
+    /// 1. **The mirror tracks this store's id.** `LocalTransportRouter.apply(companyId:)` is
+    ///    called only from `CompanyStore.hydrate`, with the same id this function receives as
+    ///    `cid`. A second `CompanyStore` instance, or a call site that passes a `cid` other
+    ///    than its own `companyId` at the moment of the run, breaks this silently — both
+    ///    resolutions still run, they just stop being about the same account.
+    /// 2. **`claudeAuthorisation` here answers exactly what a fresh `ProviderAuthorisation()`
+    ///    would.** True in production, where neither side is injected. FALSE for every test in
+    ///    this file that injects a `claudeAuthorisation` stand-in (as Finding 1's tests do,
+    ///    deliberately) — those tests pin this function's INPUT, not agreement with
+    ///    `RunTaskClient.run`, which they never call.
+    /// 3. **No `prefer:` reaches one call path and not the other.** Neither this function nor
+    ///    `RunTaskClient.run` passes `prefer` today. The day a "re-run on Codex" feature adds it
+    ///    to only one of the two — the natural place to add it first — the two sites can name
+    ///    different providers for the SAME run: this function stamps its own answer while
+    ///    `RunTaskClient.run` spends the preferred one. Whoever adds `prefer` anywhere near
+    ///    `forOneShot` must add it to BOTH call sites in the same change, or remove this
+    ///    doc comment's claim along with it.
+    ///
+    /// What is NOT proven by anything in this file: that the two resolutions actually agreed
+    /// on a given run. Unifying them — having `RunTaskClient.run` report back which provider it
+    /// used, rather than this function guessing in parallel — is the real fix, and is out of
+    /// scope for the change that added this comment.
     private func currentProvider(for cid: String?) -> AIProvider? {
         switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation) {
         case .local(let provider): return provider

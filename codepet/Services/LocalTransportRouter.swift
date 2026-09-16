@@ -55,11 +55,16 @@ enum LocalTransportRouter {
     }
 
     /// The one-shot ops, which need the `oneShotSidecar` bundle.
+    ///
+    /// `prefer` is the seam a caller uses to name a provider explicitly — the run card's
+    /// future "Re-run on Codex". It is honoured only when the founder has actually granted
+    /// that provider; see `chooseProvider`.
     static func forOneShot(
         companyId: String? = activeCompanyId,
-        authorisation: ProviderAuthorisation = ProviderAuthorisation()
+        authorisation: ProviderAuthorisation = ProviderAuthorisation(),
+        prefer: AIProvider? = nil
     ) -> Transport {
-        transport(companyId: companyId, authorisation: authorisation,
+        transport(companyId: companyId, authorisation: authorisation, prefer: prefer,
                   sidecarAvailable: { LocalOneShotRunner.isAvailable() })
     }
 
@@ -68,6 +73,9 @@ enum LocalTransportRouter {
     /// A SEPARATE availability question, not a tidier one: the two bundles are built by the
     /// same script but fail independently, and a founder whose meeting bundle is missing
     /// should still get their roadmap rather than being told everything local is unavailable.
+    ///
+    /// **Deliberately no `prefer:` parameter.** Meetings stay Claude-only per the spec — a
+    /// parameter nobody may pass is an invitation to pass it.
     static func forVirtualCompany(
         companyId: String? = activeCompanyId,
         authorisation: ProviderAuthorisation = ProviderAuthorisation()
@@ -101,6 +109,29 @@ enum LocalTransportRouter {
         }
     }
 
+    /// Which provider runs this call.
+    ///
+    /// **Precedence, not preference-by-default.** Claude wins a tie because it is the
+    /// incumbent and because the spec deliberately ships NO per-company default — the run
+    /// card's offer is how a founder deviates, and shipping the card first is how we learn
+    /// whether a stored default is wanted at all.
+    ///
+    /// `prefer` is that deviation. It is honoured only when the founder has actually
+    /// granted it: a preference is not consent, and substituting the other provider would
+    /// spend a plan she did not pick.
+    static func chooseProvider(companyId: String,
+                               authorisation: ProviderAuthorisation,
+                               prefer: AIProvider?) -> AIProvider? {
+        if let prefer {
+            return authorisation.isAuthorised(prefer, companyId) ? prefer : nil
+        }
+        for candidate in [AIProvider.claudeCode, .codex]
+        where authorisation.isAuthorised(candidate, companyId) {
+            return candidate
+        }
+        return nil
+    }
+
     /// Whether a call can run here, given what its own transport needs on disk.
     ///
     /// Deliberately does NOT probe for `claude` — that costs a subprocess per call and
@@ -110,13 +141,16 @@ enum LocalTransportRouter {
     static func transport(
         companyId: String? = activeCompanyId,
         authorisation: ProviderAuthorisation = ProviderAuthorisation(),
+        prefer: AIProvider? = nil,
         sidecarAvailable: () -> Bool
     ) -> Transport {
         guard let companyId, !companyId.isEmpty else {
             log.error("transport: blocked — no companyId (mirror unset)")
             return .blocked(.notGranted)
         }
-        guard authorisation.isAuthorised(.claudeCode, companyId) else {
+        guard let provider = chooseProvider(companyId: companyId,
+                                            authorisation: authorisation,
+                                            prefer: prefer) else {
             log.error("transport: blocked — companyId=\(companyId, privacy: .public) not granted")
             return .blocked(.notGranted)
         }
@@ -124,13 +158,7 @@ enum LocalTransportRouter {
             log.error("transport: blocked — companyId=\(companyId, privacy: .public) granted but sidecar missing")
             return .blocked(.sidecarMissing)
         }
-        // **Derived, never chosen.** `ProviderAuthorisation` is the only grant that
-        // exists, and what it grants is Claude Code — so a company that passed the guard
-        // above is by construction a Claude Code company. This is the line per-provider
-        // consent replaces when a second grant exists to read; until then `.codex` is
-        // nameable (`AIProvider`) but unreachable from here, and a test pins that.
-        let provider = AIProvider.claudeCode
-        log.error("transport: local — companyId=\(companyId, privacy: .public) granted, sidecar available, provider=\(provider.rawValue, privacy: .public)")
+        log.error("transport: local — companyId=\(companyId, privacy: .public) provider=\(provider.rawValue, privacy: .public)")
         return .local(provider)
     }
 }

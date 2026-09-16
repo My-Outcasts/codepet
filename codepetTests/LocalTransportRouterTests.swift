@@ -49,10 +49,12 @@ final class LocalTransportRouterTests: XCTestCase {
 
     private func transport(
         companyId: String?,
+        prefer: AIProvider? = nil,
         sidecar: Bool = true
     ) -> LocalTransportRouter.Transport {
         LocalTransportRouter.transport(
-            companyId: companyId, authorisation: authorisation, sidecarAvailable: { sidecar })
+            companyId: companyId, authorisation: authorisation, prefer: prefer,
+            sidecarAvailable: { sidecar })
     }
 
     // MARK: - The grant decides
@@ -75,30 +77,41 @@ final class LocalTransportRouterTests: XCTestCase {
         XCTAssertEqual(provider.displayName, "Claude Code")
     }
 
-    /// **`.codex` is not reachable from this router yet, and that is the point of this test.**
-    /// The enum can carry it; nothing derives it, because the second provider's grant does not
-    /// exist until per-provider consent lands. Without this, the payload reads as a selectable
-    /// choice and a caller could reasonably assume a Codex-granted founder already routes here.
-    ///
-    /// This test SHOULD go red the day selection arrives — that is the reminder to re-read the
-    /// derivation below, not a reason to weaken it now.
-    func testNoGrantedCompanyRoutesToCodexThisPhase() {
-        for id in ["c1", "c2", "another-company"] {
-            granted.insert(id)
-            XCTAssertEqual(transport(companyId: id), .local(.claudeCode),
-                           "\(id) routed to something other than the one grant that exists")
-        }
+    /// A founder who granted only Codex is a first-class founder. This is the case that was
+    /// impossible before, and the whole reason this phase exists.
+    func testACodexOnlyFounderRoutesToCodex() {
+        codexGranted.insert("c1")
+        XCTAssertTrue(granted.isEmpty, "setup sanity: no Claude grant exists")
+        XCTAssertEqual(transport(companyId: "c1"), .local(.codex))
     }
 
-    /// **A Codex grant alone changes no routing, and that is deliberate.** Per-provider
-    /// consent now EXISTS, but provider SELECTION does not: this router still derives
-    /// `.claudeCode` from the Claude grant and nothing else. A founder who granted only
-    /// Codex has said nothing about her Claude plan, so she is `.notGranted` here — the
-    /// same answer she got before the split, for the same reason.
-    func testACodexGrantAloneDoesNotRouteLocal() {
+    /// Claude wins when both are granted — today's behaviour, preserved. The spec ships the
+    /// run card's offer INSTEAD of a per-company default, so this precedence is the default.
+    func testClaudeWinsWhenBothAreGranted() {
+        granted.insert("c1")
         codexGranted.insert("c1")
-        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted),
-                       "a Codex grant was read as permission to spend the Claude plan")
+        XCTAssertEqual(transport(companyId: "c1"), .local(.claudeCode))
+    }
+
+    /// "Re-run on Codex" is this: the caller names the provider, and it is honoured even
+    /// though Claude would otherwise win.
+    func testAnExplicitPreferenceOverridesThePrecedence() {
+        granted.insert("c1")
+        codexGranted.insert("c1")
+        XCTAssertEqual(transport(companyId: "c1", prefer: .codex), .local(.codex))
+    }
+
+    /// A preference is not a grant. Asking for a provider the founder never authorised must
+    /// block, not silently spend the other plan — a silent fallback makes "which plan paid
+    /// for this" unanswerable, which is the question this whole phase exists to answer.
+    func testAPreferenceForAnUngrantedProviderIsBlockedNotSubstituted() {
+        granted.insert("c1")
+        XCTAssertTrue(codexGranted.isEmpty, "setup sanity: no Codex grant")
+        XCTAssertEqual(transport(companyId: "c1", prefer: .codex), .blocked(.notGranted))
+    }
+
+    func testNoGrantAtAllIsStillBlocked() {
+        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted))
     }
 
     /// The mirror: the Claude grant still routes exactly as it did, with no Codex grant

@@ -59,13 +59,24 @@ struct ClaudeCodePanel: View {
     /// keep reading this single entry rather than every provider's status.
     private var claudeStatus: CLIStatus { status[.claudeCode] ?? .unprobed(.claudeCode) }
 
-    /// Which providers this Mac can actually be asked to authorise: installed AND signed
-    /// in. The same rule as before, generalised — "asking before that is a decision about
-    /// nothing" now applies per provider, not just to Claude, which is exactly why a
-    /// founder with no Codex on her Mac sees no Codex row at all rather than a toggle she
-    /// cannot act on.
-    private var signedInProviders: [AIProvider] {
-        AIProvider.allCases.filter { status[$0]?.account != nil }
+    /// Which providers get a row at all: signed in now, OR already granted.
+    ///
+    /// The original rule was "installed AND signed in" alone — asking before that is a
+    /// decision about nothing, so a founder with no Codex on her Mac saw no Codex row.
+    /// True as far as it went, but it also meant a STORED grant vanished the moment its
+    /// CLI went unreachable: sign out of Codex (no uninstall needed) and its row simply
+    /// stops rendering, taking the only toggle that could revoke it with it. The grant
+    /// sits on disk, unreviewable, and comes back ON — unattended, no fresh consent —
+    /// the moment she signs back in. Settings exists to review and revoke a grant; a
+    /// grant a founder cannot even see fails that on its own terms.
+    ///
+    /// `ProviderGrantRow.rowsToShow` is the fix: OR in `granted`, so a stored grant
+    /// always gets a row even while its CLI is unreachable. `grantRow` renders that case
+    /// with the toggle already on and an honest "not reachable right now" line, so
+    /// switching it off is still obviously possible — probing never grants, and it must
+    /// never silently revoke either.
+    private var rowsToShow: [AIProvider] {
+        ProviderGrantRow.rowsToShow(status: status, granted: granted)
     }
 
     var body: some View {
@@ -79,7 +90,7 @@ struct ClaudeCodePanel: View {
 
             // Only offered once there is a login to authorise. Asking before that is a
             // decision about nothing.
-            if let companyId, !signedInProviders.isEmpty {
+            if let companyId, !rowsToShow.isEmpty {
                 grantGroup(companyId: companyId)
             }
 
@@ -179,15 +190,15 @@ struct ClaudeCodePanel: View {
 
     // MARK: - Row two: what the founder allows
 
-    /// One row per provider this Mac is actually signed into — see `signedInProviders`.
+    /// One row per provider from `rowsToShow` — signed in now, or already granted.
     /// Consent is never transitive: each row's `Toggle` writes only its own provider, so
     /// revoking Codex here can never touch Claude's stored grant, or the reverse.
     @ViewBuilder private func grantGroup(companyId: String) -> some View {
         SettingsGroupLabel(lang == .vi ? "Quyền" : "Permission")
         SettingsGroup {
-            ForEach(signedInProviders, id: \.self) { provider in
+            ForEach(rowsToShow, id: \.self) { provider in
                 grantRow(provider: provider, companyId: companyId)
-                if provider != signedInProviders.last {
+                if provider != rowsToShow.last {
                     SettingsDivider()
                 }
             }
@@ -195,6 +206,12 @@ struct ClaudeCodePanel: View {
     }
 
     @ViewBuilder private func grantRow(provider: AIProvider, companyId: String) -> some View {
+        // Reachable right now, i.e. this row would also have qualified under the old
+        // "signed in" rule. When it did not — a stored grant with a signed-out or
+        // uninstalled CLI — the row is here only because of the grant, and the toggle
+        // reads as already on. The founder must be told why in that case, so switching
+        // it off reads as obviously possible rather than as a bug.
+        let reachable = status[provider]?.account != nil
         SettingsRow(
             label: lang == .vi ? "Cho Codepet dùng gói \(provider.displayName)"
                                 : "Let Codepet use your \(provider.displayName) plan",
@@ -203,7 +220,9 @@ struct ClaudeCodePanel: View {
             // reaches, because the switch silently pulled chat over the moment it
             // existed, and a permission whose scope is invisible is not informed
             // consent. Every feature moved onto this path gets added to this line.
-            description: grantDescription(for: provider)
+            description: reachable
+                ? grantDescription(for: provider)
+                : grantDescription(for: provider) + "\n\n" + unreachableNote(for: provider)
         ) {
             Toggle("", isOn: Binding(
                 get: { granted.contains(provider) },
@@ -216,6 +235,15 @@ struct ClaudeCodePanel: View {
             .labelsHidden()
             .toggleStyle(.switch)
         }
+    }
+
+    /// Shown only on a row that exists solely because of a stored grant — never a
+    /// silent revoke, just an honest reason the toggle is on with nothing running. The
+    /// founder decides whether to switch it off; this line never does it for her.
+    private func unreachableNote(for provider: AIProvider) -> String {
+        lang == .vi
+            ? "\(provider.displayName) hiện không sẵn sàng trên máy này — có thể đã đăng xuất hoặc chưa cài. Quyền vẫn còn ở đây; bạn có thể tắt bất cứ lúc nào."
+            : "\(provider.displayName) isn't reachable on this Mac right now — signed out, or not installed. The grant is still here, and you can turn it off any time."
     }
 
     /// Written out per case, like `ProviderAuthorisation.key` — the plan name and the

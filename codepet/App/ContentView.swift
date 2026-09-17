@@ -69,6 +69,32 @@ struct ContentView: View {
                          prototypeOn: PrototypeMode.isOn)
     }
 
+    /// **Whether signing out returns to the brand splash.**
+    ///
+    /// `showSplash` is the FIRST branch of `body`, above `needsSignIn` — so setting it on
+    /// sign-out outranks the bypass directly below it and re-creates the exact state that
+    /// bypass exists to prevent: a founder in prototype mode, with no account and no need of
+    /// one, looking at an auth-driven screen. The fixtures are still there and still correct;
+    /// the only way back to them is to click through a splash that looks like a dead end.
+    ///
+    /// That is the same failure `needsSignIn` was written for on 2026-09-03 — *"I cannot press
+    /// the button"* — arriving through the one gate that sits above it. Fixing it there rather
+    /// than reordering `body`: the splash-before-sign-in sequence is deliberate for a real
+    /// founder (it mirrors web Gate's `wasAuthed`/`splashSeen`), and reordering would change
+    /// what THEY see to fix what the demo sees.
+    ///
+    /// Same shape as `needsSignIn` on purpose — DEBUG-only exemption, release builds
+    /// unchanged, and pure so the decision is testable without a Firebase session or a
+    /// rendered view.
+    static func showsSplashOnSignOut(hadPriorSession: Bool, prototypeOn: Bool) -> Bool {
+        guard hadPriorSession else { return false }
+        #if DEBUG
+        return !prototypeOn
+        #else
+        return true
+        #endif
+    }
+
     /// The id the hydrated company must carry before the shell may render — the signed-in
     /// founder's uid, or the fixture id when prototype mode is standing in for an account.
     ///
@@ -192,7 +218,12 @@ struct ContentView: View {
                 // account signing in next still trips the UID comparison below.
                 // Real sign-out (a prior sign-in exists): return to the brand splash
                 // before the sign-in screen, mirroring web Gate's wasAuthed/splashSeen.
-                if PersistenceManager.shared.currentUserId != nil {
+                // NOT while prototype mode is standing in for the account — see
+                // `showsSplashOnSignOut`. The splash outranks the bypass below it, so a demo
+                // that needs no account would otherwise dead-end on an auth screen.
+                if Self.showsSplashOnSignOut(
+                    hadPriorSession: PersistenceManager.shared.currentUserId != nil,
+                    prototypeOn: PrototypeMode.isOn) {
                     withAnimation { showSplash = true }
                 }
                 return

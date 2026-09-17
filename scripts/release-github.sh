@@ -30,6 +30,32 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 
 [ -f "$DMG" ] || { echo "✗ $DMG not found — run ./scripts/package-macos.sh first."; exit 1; }
 
+# ── The asset name is part of the public URL, so it is NOT free to change ─────
+# `releases/latest/download/<name>` resolves `latest` to the newest tag and then looks for
+# an asset by EXACT name — measured against a third-party repo: a real name answers 200, and
+# a name that is not in the current release 404s even though `latest` resolved correctly.
+#
+# So every release must attach the asset under the same name or every printed link dies at
+# once: the button on code-pet.com/download, the GitHub Pages page, RELEASE.md, and anything
+# anyone has pasted into a chat. `gh`'s own releases show the failure mode — their assets
+# embed the version (gh_2.101.0_macOS_amd64.zip), so their `latest/download/` permalink is
+# broken by design for anyone who hardcodes a filename.
+#
+# $DMG is overridable, which is useful for pointing at a build elsewhere on disk and
+# dangerous for renaming the asset. This allows the first and refuses the second.
+ASSET_NAME="Codepet.dmg"
+if [ "$(basename "$DMG")" != "$ASSET_NAME" ]; then
+  echo "✗ Refusing to publish: the asset must be named $ASSET_NAME, got $(basename "$DMG")."
+  echo ""
+  echo "  The download URL is releases/latest/download/$ASSET_NAME and it matches by exact"
+  echo "  filename. Publishing under another name breaks every link already printed —"
+  echo "  the website button, the Pages site, the runbook, and any pasted into a chat."
+  echo ""
+  echo "  To publish a build from elsewhere on disk, keep the name:"
+  echo "    DMG=/some/path/$ASSET_NAME ./scripts/release-github.sh"
+  exit 1
+fi
+
 # Derive a tag from the Xcode version unless TAG is provided: v<marketing>-build<build>.
 MKT="$(xcodebuild -showBuildSettings -scheme codepet 2>/dev/null | awk -F' = ' '/ MARKETING_VERSION /{gsub(/ /,"",$2);print $2; exit}')"
 BUILD="$(xcodebuild -showBuildSettings -scheme codepet 2>/dev/null | awk -F' = ' '/ CURRENT_PROJECT_VERSION /{gsub(/ /,"",$2);print $2; exit}')"

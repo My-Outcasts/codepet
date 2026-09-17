@@ -69,6 +69,23 @@ struct SettingsModal: View {
                     VStack(alignment: .leading, spacing: 22) {
                         SettingsPanelHeader(title: selection.title(lang),
                                             subtitle: selection.subtitle(lang))
+                        // On EVERY panel, not just Billing and Usage: the founder arrives at
+                        // whichever section they clicked, and a note that appears on some
+                        // sections teaches nothing about the ones it does not.
+                        if PrototypeSettingsCopy.showsAccountIsRealNote(
+                            prototypeOn: PrototypeMode.isOn) {
+                            Text(PrototypeSettingsCopy.accountIsRealNote(lang: lang))
+                                .font(CodepetTheme.body(12))
+                                .foregroundColor(CodepetTheme.bodyText)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .pixelBox(fill: CodepetTheme.accentPurple.opacity(0.12),
+                                          borderColor: CodepetTheme.accentPurple,
+                                          shadowOffset: 0, blockSize: 3, steps: 2,
+                                          borderWidth: 2)
+                        }
                         sectionBody(for: selection)
                     }
                     .padding(.horizontal, 28)

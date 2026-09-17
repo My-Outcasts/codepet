@@ -23,8 +23,10 @@ struct AdvancedPanel: View {
             SettingsGroup {
                 SettingsDestructiveRow(
                     label: lang == .vi ? "Đăng xuất" : "Sign out",
-                    description: lang == .vi ? "Tiến trình của bạn vẫn được lưu trên đám mây."
-                                             : "Your progress stays saved in the cloud.",
+                    // Prototype mode makes the old sentence false about what is on screen:
+                    // no fixture run is saved anywhere. See `PrototypeSettingsCopy`.
+                    description: PrototypeSettingsCopy.signOutDescription(
+                        prototypeOn: PrototypeMode.isOn, lang: lang),
                     actionTitle: lang == .vi ? "Đăng xuất" : "Sign out"
                 ) { confirmSignOut = true }
             }

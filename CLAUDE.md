@@ -330,6 +330,58 @@ This section is the one most likely to go stale. Treat it as a pointer, not a fa
 - Every model call runs on the founder's own Claude Code when they grant it — see the section
   above. Nothing is left that only the API key can answer
 
+## Shipping the app from the website
+
+The pipeline is finished and has never produced a release. `gh release list` is EMPTY, so
+`releases/latest/download/Codepet.dmg` 404s and both download pages know it and say so.
+
+- **The one blocker is a Developer ID Application certificate.** This machine has only
+  *Apple Development* certs, which sign nothing a stranger can open — an app signed with one
+  runs only on Macs registered in the team's provisioning profile. Verified against the real
+  Xcode dialog: on the My Murror Inc account (`YL72VTKBR7`) the `+` menu offers Apple
+  Development, Apple Distribution and Mac Installer Distribution, and nothing else. **Only
+  the Account Holder can create a Developer ID cert**, and the signed-in Apple ID is an
+  Admin. `docs/developer-id-request.md` is that request, written out to send
+- **The Mac App Store is not the escape hatch.** The account already holds the App Store
+  cert pair, and it is unusable here: the App Store requires App Sandbox, while the app sets
+  `ENABLE_APP_SANDBOX = NO` and spawns `/bin/sh`, `node` and `claude` as its core loop.
+  Sandboxing it turns off every AI feature. Developer ID is the only route
+- **An unsigned build is not a stopgap either.** `codepet/codepet.entitlements` declares
+  `keychain-access-groups` under `$(AppIdentifierPrefix)`, which only resolves for a
+  team-signed binary — so an ad-hoc build cannot reach its keychain group and Firebase auth
+  fails at runtime (landmine 4's neighbour). The founder would download an app and get stuck
+  on the sign-in screen. Since macOS 15 the right-click ▸ Open bypass is gone too
+- `./scripts/preflight-release.sh` checks both credentials in a second and refuses to start,
+  because `package-macos.sh` otherwise archives for minutes before `-exportArchive` reports
+  the missing certificate
+- Once the cert lands the whole thing is two commands — `package-macos.sh` then
+  `release-github.sh`. Neither website needs a deploy: both buttons point at the `latest`
+  permalink
+- **The live download page is `code-pet.com/download`, not `murror.app`.** It is served from
+  `Murror/devpet-landing`'s `main` and already carries the `/download/Codepet.dmg` → GitHub
+  307 (`1e37a2b`). `murror.app` answers `/` but 404s `/download`, `/v2` and `/academy`, so it
+  is a different deployment
+- **Verified 17 Sep:** a `-configuration Release` archive carries all three sidecars. The
+  only build ever checked before was Debug
+
+**There IS a working internal route while that cert is missing.** `./scripts/package-internal.sh`
+builds an Apple-Development-signed, development-provisioned `.dmg` that runs on the Macs
+registered to the team — 4 of them as of 17 Sep, and the profile now runs to 2027-09-17.
+
+- It works where an unsigned build does not for one reason: the profile grants
+  `YL72VTKBR7.*`, so the `keychain-access-groups` entitlement resolves and Firebase auth
+  works. Ad-hoc signing is what breaks sign-in, not the lack of notarization
+- **Adding a tester does NOT need the Account Holder.** An Admin registers the Mac's
+  Provisioning UDID at developer.apple.com ▸ Devices, then re-runs the script;
+  `-allowProvisioningUpdates` bakes the new device in. That is the one part of distribution
+  that is not blocked
+- Anything arriving by download, AirDrop or chat is quarantined, and a dev-signed app is not
+  notarized, so `spctl` rejects it — measured. The tester runs
+  `xattr -dr com.apple.quarantine` once. A README inside the `.dmg` says so, because
+  "damaged or incomplete" reads as a broken download rather than an unregistered Mac
+- Verified end to end 17 Sep: exported, launched from the exported path, stayed up, quit
+  cleanly, and the `.dmg` re-verified after mounting
+
 # Working agreements
 
 - **Verify, do not infer.** Several expensive detours here came from reading fallback code and concluding a Cloud Function was undeployed. `curl` the endpoint (401 means alive, 404 means absent) and read `firebase functions:log`

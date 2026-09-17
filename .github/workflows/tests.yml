@@ -45,6 +45,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Packaging guard tests
+        # `scripts/verify-sidecars-bundled.sh` is what stops a Codepet.app with no local
+        # runner reaching the public .dmg. It is pure bash over directories named `*.app`,
+        # so it needs neither Xcode nor a signing identity and rides the 1x ubuntu job
+        # rather than the 10x macOS one.
+        #
+        # It is tested here rather than only run at release time because release time is
+        # once a version and by hand — a guard that is only exercised when someone
+        # remembers to cut a build is a guard nobody notices has stopped working.
+        working-directory: .
+        run: |
+          ./scripts/test-verify-sidecars.sh
+          ./scripts/test-preflight-release.sh
+
       - uses: actions/setup-node@v4
         with:
           # Matches `engines.node` in functions/package.json, which matches the deployed

@@ -3,6 +3,23 @@ import Combine
 import FirebaseAuth
 import FirebaseCore
 import GoogleSignIn
+import os
+
+/// **`print` is invisible here, and that cost a diagnosis.**
+///
+/// The app is normally started with `open`, which discards stdout, and running the binary
+/// directly gives nothing either — so every `[Auth]` line below went nowhere. On 17 Sep a
+/// founder hit "Google Sign-In configuration error" on a live build; the one line that
+/// explains it ("no Firebase clientID") had already been printed into the void, two log
+/// captures returned zero lines, and the cause could not be established at all.
+///
+/// **Privacy is split deliberately, not blanket-`.public`.** os_log redacts interpolations by
+/// default, so a diagnostic that is `<private>` is as useless as a `print` — but the opposite
+/// mistake writes a founder's email address into the unified log, where anything on the
+/// machine can read it. So the BRANCH TAKEN and the error domain/code are public, because
+/// those are what a diagnosis needs; emails and display names stay private. Uids follow the
+/// house precedent in `LocalTransportRouter`, which logs company ids publicly.
+private let log = Logger(subsystem: "app.murror.codepet", category: "Auth")
 
 
 class AuthManager: ObservableObject {
@@ -41,9 +58,9 @@ class AuthManager: ObservableObject {
                     if let name = user.displayName, !name.isEmpty {
                         self?.latestDisplayName = name
                     }
-                    print("[Auth] User signed in: \(user.uid), anonymous: \(user.isAnonymous), name: \(user.displayName ?? "nil")")
+                    log.error("signed in: uid=\(user.uid, privacy: .public) anonymous=\(user.isAnonymous, privacy: .public) hasName=\(user.displayName?.isEmpty == false, privacy: .public)")
                 } else {
-                    print("[Auth] User signed out")
+                    log.error("signed out")
                 }
             }
         }
@@ -62,8 +79,8 @@ class AuthManager: ObservableObject {
         let code = nsError.code
         let domain = nsError.domain
 
-        print("[Auth] \(context) error — domain: \(domain), code: \(code), description: \(error.localizedDescription)")
-        print("[Auth] Full error: \(nsError)")
+        log.error("\(context, privacy: .public) failed — domain=\(domain, privacy: .public) code=\(code, privacy: .public) description=\(error.localizedDescription, privacy: .public)")
+        log.debug("full error: \(nsError, privacy: .private)")
 
         switch code {
         case 17004, 17009:
@@ -89,14 +106,14 @@ class AuthManager: ObservableObject {
 
     func signInWithEmail(email: String, password: String) {
         authError = nil
-        print("[Auth] Attempting email sign-in for: \(email)")
+        log.error("email sign-in attempt for \(email, privacy: .private)")
         Auth.auth().signIn(withEmail: email, password: password) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
                     self?.authError = self?.friendlyError(error, context: "Email sign-in")
                 } else {
                     self?.authMethod = "email"
-                    print("[Auth] Email sign-in success: \(result?.user.uid ?? "")")
+                    log.error("email sign-in success: uid=\(result?.user.uid ?? "", privacy: .public)")
                 }
             }
         }
@@ -104,7 +121,7 @@ class AuthManager: ObservableObject {
 
     func signUpWithEmail(email: String, password: String, name: String) {
         authError = nil
-        print("[Auth] Attempting email sign-up for: \(email)")
+        log.error("email sign-up attempt for \(email, privacy: .private)")
         Auth.auth().createUser(withEmail: email, password: password) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -114,11 +131,11 @@ class AuthManager: ObservableObject {
                     changeRequest.displayName = name
                     changeRequest.commitChanges { error in
                         if let error = error {
-                            print("[Auth] Failed to set display name: \(error.localizedDescription)")
+                            log.error("failed to set display name — \(error.localizedDescription, privacy: .public)")
                         }
                     }
                     self?.authMethod = "email"
-                    print("[Auth] Email sign-up success: \(user.uid)")
+                    log.error("email sign-up success: uid=\(user.uid, privacy: .public)")
                 }
             }
         }
@@ -128,7 +145,7 @@ class AuthManager: ObservableObject {
 
     func signInAnonymously(name: String, pin: String) {
         authError = nil
-        print("[Auth] Attempting anonymous sign-in for: \(name)")
+        log.error("anonymous sign-in attempt for \(name, privacy: .private)")
         Auth.auth().signInAnonymously { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -138,11 +155,11 @@ class AuthManager: ObservableObject {
                     changeRequest.displayName = name
                     changeRequest.commitChanges { error in
                         if let error = error {
-                            print("[Auth] Failed to set display name: \(error.localizedDescription)")
+                            log.error("failed to set display name — \(error.localizedDescription, privacy: .public)")
                         }
                     }
                     self?.authMethod = "pin"
-                    print("[Auth] Anonymous sign-in success: \(user.uid)")
+                    log.error("anonymous sign-in success: uid=\(user.uid, privacy: .public)")
                 }
             }
         }
@@ -152,11 +169,11 @@ class AuthManager: ObservableObject {
 
     func signInWithGoogle() {
         authError = nil
-        print("[Auth] Starting Google Sign-In...")
+        log.error("Google Sign-In: starting")
 
         guard let clientID = FirebaseApp.app()?.options.clientID else {
             authError = "Google Sign-In configuration error."
-            print("[Auth] No Firebase clientID found")
+            log.error("Google Sign-In: BLOCKED — no Firebase clientID. FirebaseApp configured=\(FirebaseApp.app() != nil, privacy: .public); this is the line that was invisible on 17 Sep")
             return
         }
 
@@ -166,7 +183,7 @@ class AuthManager: ObservableObject {
         // On macOS, we need to get the presenting window
         guard let window = NSApplication.shared.keyWindow else {
             authError = "Could not find app window for Google Sign-In."
-            print("[Auth] No key window found")
+            log.error("Google Sign-In: BLOCKED — no key window")
             return
         }
 
@@ -176,7 +193,7 @@ class AuthManager: ObservableObject {
                     let nsError = error as NSError
                     // Don't show error for user cancellation
                     if nsError.code == GIDSignInError.canceled.rawValue {
-                        print("[Auth] Google Sign-In cancelled by user")
+                        log.error("Google Sign-In: cancelled by the founder")
                         return
                     }
                     self?.authError = self?.friendlyError(error, context: "Google Sign-In")
@@ -185,7 +202,7 @@ class AuthManager: ObservableObject {
 
                 guard let user = result?.user, let idToken = user.idToken?.tokenString else {
                     self?.authError = "Google Sign-In failed. Could not get credentials."
-                    print("[Auth] No user or idToken from Google Sign-In")
+                    log.error("Google Sign-In: BLOCKED — no user or idToken returned")
                     return
                 }
 
@@ -200,7 +217,7 @@ class AuthManager: ObservableObject {
                             self?.authError = self?.friendlyError(error, context: "Google Sign-In Firebase")
                         } else if let firebaseUser = authResult?.user {
                             self?.authMethod = "google"
-                            print("[Auth] Google Sign-In success: \(firebaseUser.uid)")
+                            log.error("Google Sign-In success: uid=\(firebaseUser.uid, privacy: .public)")
                         }
                     }
                 }
@@ -216,10 +233,10 @@ class AuthManager: ObservableObject {
             authMethod = nil
             authError = nil
             isGuestMode = false
-            print("[Auth] Sign out success")
+            log.error("sign out success")
         } catch {
             authError = error.localizedDescription
-            print("[Auth] Sign out error: \(error.localizedDescription)")
+            log.error("sign out FAILED — \(error.localizedDescription, privacy: .public)")
         }
     }
 

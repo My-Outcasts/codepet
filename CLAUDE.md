@@ -356,8 +356,11 @@ The pipeline is finished and has never produced a release. `gh release list` is 
   the missing certificate
 - Once the cert lands the whole thing is two commands — `package-macos.sh` then
   `release-github.sh`. Neither website needs a deploy: both buttons point at the `latest`
-  permalink, and the Next.js page flips itself out of its "not released yet" state as soon
-  as the releases API stops answering 404
+  permalink
+- **The live download page is `code-pet.com/download`, not `murror.app`.** It is served from
+  `Murror/devpet-landing`'s `main` and already carries the `/download/Codepet.dmg` → GitHub
+  307 (`1e37a2b`). `murror.app` answers `/` but 404s `/download`, `/v2` and `/academy`, so it
+  is a different deployment
 - **Verified 17 Sep:** a `-configuration Release` archive carries all three sidecars. The
   only build ever checked before was Debug
 

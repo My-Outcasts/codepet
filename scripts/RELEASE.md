@@ -76,22 +76,25 @@ https://github.com/My-Outcasts/codepet/releases/latest/download/Codepet.dmg
 
 ### The website button
 
-Two pages can carry it, and they are in different repos:
+The live site for this button is **`code-pet.com`**, served from `Murror/devpet-landing`
+(Next.js on Vercel, deployed from its `main`). `murror.app` is a DIFFERENT site — it answers
+`/` but 404s `/download`, `/v2` and `/academy`, so it is not this deployment.
 
 | Where | Repo | Status |
 |---|---|---|
-| `murror.app/download` | `Murror/devpet-landing` (Next.js on Vercel) | the public button |
-| `my-outcasts.github.io/codepet` | this repo, `index.html` via `.github/workflows/pages.yml` | already live |
+| `code-pet.com/download` | `Murror/devpet-landing` | live |
+| `code-pet.com/download/Codepet.dmg` | same, `next.config.ts` | live, 307 → the permalink |
+| `my-outcasts.github.io/codepet` | this repo, `index.html` via `.github/workflows/pages.yml` | live |
 
-Both point at the `releases/latest/download/Codepet.dmg` permalink above, so
-**the URLs never change** — shipping a new version is `package-macos.sh` then
-`release-github.sh`, and nothing on either website is touched.
+Both point at the `releases/latest/download/Codepet.dmg` permalink, so **the URLs never
+change** — shipping a new version is `package-macos.sh` then `release-github.sh`, and
+nothing on either website is touched.
 
-> An earlier version of this file claimed `code-pet.com/download/Codepet.dmg`
-> 307-redirected to that permalink "see `next.config.ts` in devpet-landing".
-> That redirect did not exist; the only rule in that file was `/v2` → `/`. If the
-> button ever 404s, check the redirect is actually there before assuming the
-> release is missing — and check `gh release list` too.
+> An earlier revision of this file claimed the `code-pet.com` redirect did not exist. It
+> does — `1e37a2b feat(download): add direct macOS download route + CTAs` on devpet-landing's
+> `main`. That claim came from reading a LOCAL checkout whose `main` was months behind
+> `origin/main`; the file was read, the redirect genuinely was not in it, and the checkout
+> was stale. Fetch before concluding a remote does not have something.
 
 ## What users see (Gatekeeper first-open)
 

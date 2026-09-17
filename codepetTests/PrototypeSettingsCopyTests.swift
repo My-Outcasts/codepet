@@ -70,4 +70,45 @@ final class PrototypeSettingsCopyTests: XCTestCase {
         XCTAssertNotEqual(vi, PrototypeSettingsCopy.accountIsRealNote(lang: .en),
                           "an untranslated note is a note half the founders cannot read")
     }
+
+    // MARK: - The Email row (F3)
+
+    /// A real address always wins. Blanking a founder's own email to keep the demo tidy would
+    /// be the same species of lie in the other direction — and signing in during prototype
+    /// mode is a legitimate state, not one to paper over.
+    func testARealEmailIsShownInBothModes() {
+        for proto in [true, false] {
+            XCTAssertEqual(
+                PrototypeSettingsCopy.emailValue(realEmail: "f@x.com", prototypeOn: proto, lang: .en),
+                "f@x.com")
+        }
+    }
+
+    /// The fix: with no account, prototype mode says so instead of rendering a bare em-dash
+    /// that reads as missing data.
+    func testNoAccountInPrototypeModeIsNamedNotDashed() {
+        let v = PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: true, lang: .en)
+        XCTAssertNotEqual(v, "—", "an em-dash reads as a bug, not as a demo")
+        XCTAssertFalse(v.isEmpty)
+    }
+
+    /// Outside prototype mode the em-dash stays. A signed-out real founder seeing "demo" would
+    /// be a new wrong claim, and this is the row's original behaviour.
+    func testTheEmDashSurvivesOutsidePrototypeMode() {
+        XCTAssertEqual(PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: false, lang: .en), "—")
+        XCTAssertEqual(PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: false, lang: .vi), "—")
+    }
+
+    /// An empty string is the same fact as nil — a founder whose email is "" has no address to
+    /// show either, and treating the two differently is how one of them ends up rendering blank.
+    func testAnEmptyEmailIsTreatedAsNoEmail() {
+        XCTAssertEqual(PrototypeSettingsCopy.emailValue(realEmail: "", prototypeOn: true, lang: .en),
+                       PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: true, lang: .en))
+    }
+
+    /// Both languages, same rule as the sentences above.
+    func testTheNoAccountStringIsTranslated() {
+        XCTAssertNotEqual(PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: true, lang: .en),
+                          PrototypeSettingsCopy.emailValue(realEmail: nil, prototypeOn: true, lang: .vi))
+    }
 }

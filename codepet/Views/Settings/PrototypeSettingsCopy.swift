@@ -49,6 +49,23 @@ enum PrototypeSettingsCopy {
             : "Prototype mode — the company is a fixture. Your account, billing and usage below are real."
     }
 
+    /// What the Email row shows.
+    ///
+    /// It is the ONE real-account field in an otherwise fixture profile — the name beside it
+    /// comes from `brief.founderName`, which both fixtures hardcode — so while prototype mode
+    /// stands in for an account it rendered a bare em-dash. That reads as missing data ("why
+    /// is my email blank?") when the truthful statement is that there is no account here and
+    /// the demo does not need one.
+    ///
+    /// A real address still wins whenever there is one: signing in during prototype mode is a
+    /// legitimate state, and blanking a founder's own email to keep the demo tidy would be the
+    /// same species of lie in the other direction.
+    static func emailValue(realEmail: String?, prototypeOn: Bool, lang: AppLanguage) -> String {
+        if let realEmail, !realEmail.isEmpty { return realEmail }
+        guard prototypeOn else { return "—" }
+        return lang == .vi ? "Không có tài khoản — bản demo" : "No account — demo"
+    }
+
     /// Whether that note belongs on screen at all.
     ///
     /// Separate from the string so the RULE is what the test pins. A test asserting the

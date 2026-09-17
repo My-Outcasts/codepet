@@ -52,7 +52,11 @@ struct PreferencesPanel: View {
                 }
                 SettingsDivider()
                 SettingsRow(label: "Email") {
-                    Text(email ?? "—")
+                    // The one real-account field in a fixture profile — an em-dash here reads
+                    // as missing data rather than "the demo has no account".
+                    Text(PrototypeSettingsCopy.emailValue(realEmail: email,
+                                                          prototypeOn: PrototypeMode.isOn,
+                                                          lang: lang))
                         .font(CodepetTheme.inter(12))
                         .foregroundColor(CodepetTheme.mutedText)
                 }

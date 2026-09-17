@@ -21,8 +21,38 @@ on:
 # and hardest to attribute. A PR's superseded run is worth cancelling because its commit no
 # longer exists; a `main` commit is permanent and stays in the history whether it was checked
 # or not.
+#
+# `cancel-in-progress` was not enough, and the gap is not where the paragraph above looks.
+# It governs the RUNNING run only; it says nothing about a PENDING one, and GitHub's rule is
+# that "at most one job or workflow run can be pending in the concurrency group. When a new
+# job or workflow run is queued, any existing pending job or workflow run in the same group is
+# canceled and replaced."
+#
+# So on 17 Sep, with every `main` push sharing the group `tests-refs/heads/main`:
+#
+#   02:52:54  #143 merges, its run starts and holds the group for ~9 minutes
+#   02:58:12  #144 merges, its run goes PENDING behind it — correctly, nothing cancelled
+#   02:59:58  #145 merges, its run queues
+#   02:59:59  #144's PENDING run is evicted, having never started a single job
+#
+# `cf3dbca` — 46 commits of provider-choice work — therefore has no test run against it. The
+# August guard held perfectly: #143's in-progress run was untouched and went green. This is a
+# second, different way for a `main` commit to go unverified, and merging two PRs inside ten
+# minutes is all it takes.
+#
+# The fix is to stop `main` pushes sharing a group at all: each commit gets its own, so it can
+# neither queue behind another nor be evicted by the next one. Pull requests keep the per-ref
+# group, because there the superseding behaviour is exactly what is wanted — that commit no
+# longer exists. The cost is that two quick merges now run two macOS jobs at once rather than
+# in sequence; at this repo's merge rate that is a handful of minutes a day, against a `main`
+# commit nobody can say was tested.
+#
+# `queue: max` (up to 100 pending, FIFO, no eviction) was the alternative. It keeps the
+# serialization and the same total minutes, but a commit's verification can then sit behind
+# several queued runs — and "was main green at that commit" is a question worth answering
+# promptly, not eventually.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

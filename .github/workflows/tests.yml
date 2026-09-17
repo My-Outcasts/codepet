@@ -55,7 +55,9 @@ jobs:
         # once a version and by hand — a guard that is only exercised when someone
         # remembers to cut a build is a guard nobody notices has stopped working.
         working-directory: .
-        run: ./scripts/test-verify-sidecars.sh
+        run: |
+          ./scripts/test-verify-sidecars.sh
+          ./scripts/test-preflight-release.sh
 
       - uses: actions/setup-node@v4
         with:

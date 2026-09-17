@@ -40,6 +40,19 @@ EXPORT_OPTS="scripts/ExportOptions.plist"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# ── 0. Preflight ──────────────────────────────────────────────────────────────
+# Both credentials this needs are local and cost a second to check, and without either one
+# the run dies at step 3 or step 6 — several minutes of Release build later. Measured: the
+# archive succeeds, then `-exportArchive` prints "No signing certificate \"Developer ID
+# Application\" found" and stops. Checking first also lets the message name the FIX, which
+# for the certificate is a request to the Account Holder rather than a command to run.
+#
+# SKIP_PREFLIGHT=1 for the case where the checks themselves are what is broken.
+if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+  echo "▶︎ Preflight…"
+  ./scripts/preflight-release.sh
+fi
+
 echo "▶︎ Cleaning $BUILD_DIR"
 rm -rf "$BUILD_DIR"; mkdir -p "$BUILD_DIR"
 

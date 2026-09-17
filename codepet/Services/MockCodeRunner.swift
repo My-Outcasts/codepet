@@ -1,6 +1,6 @@
 import Foundation
 
-/// Dev-only stand-in for `ClaudeCodeRunAdapter` used when the offline flag
+/// Dev-only stand-in for `CLIRunAdapter` used when the offline flag
 /// `CODEPET_MOCK_CHAT` is set. It fakes ONLY the AI brain — it never spawns
 /// `claude`, so it costs no Claude subscription usage — while keeping the rest of
 /// the flow real: it streams canned tool-use steps and makes a genuine on-disk
@@ -25,8 +25,8 @@ final class MockCodeRunner: CodeRunning {
         try? after.write(toFile: target, atomically: true, encoding: .utf8)
         try? await Task.sleep(nanoseconds: 300_000_000)
 
-        let lines = ClaudeCodeRunner.unifiedDiff(before: before, after: after)
-        let diff = ClaudeCodeRunner.FileDiff(path: target, isNewFile: isNew, lines: lines)
+        let lines = CLIRunner.unifiedDiff(before: before, after: after)
+        let diff = CLIRunner.FileDiff(path: target, isNewFile: isNew, lines: lines)
         return CodeRunOutcome(diffs: [diff], failure: nil)
     }
 

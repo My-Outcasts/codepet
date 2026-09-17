@@ -32,4 +32,44 @@ final class BlockReasonTests: XCTestCase {
         // What she can do is reinstall, so the copy has to say so.
         XCTAssertTrue(BlockReason.sidecarMissing.founderText.lowercased().contains("reinstall"))
     }
+
+    /// The grant a Codex-only founder is asked for must be the Codex one. Naming Claude
+    /// here is the specific wrong answer: she has a plan, just not that one.
+    func testTheCodexBlockAsksForTheCodexGrant() {
+        let reason = BlockReason.notGrantedFor(.codex)
+        XCTAssertTrue(reason.founderText.lowercased().contains("chatgpt"),
+                      "expected the ChatGPT plan named, got: \(reason.founderText)")
+        XCTAssertFalse(reason.founderText.lowercased().contains("claude"),
+                       "must not name Claude to a Codex founder: \(reason.founderText)")
+    }
+
+    func testTheClaudeBlockStillAsksForTheClaudeGrant() {
+        let reason = BlockReason.notGrantedFor(.claudeCode)
+        XCTAssertTrue(reason.founderText.lowercased().contains("claude"))
+    }
+
+    /// Chat and meetings are Claude-only. The copy must name a REAL action — `resolve` only
+    /// ever returns this reason when Claude Code is not installed, so "install" is the one
+    /// true move. It must NOT point at a company-level provider switch: no such control
+    /// exists anywhere in this app, so "switch" passing here is exactly what let a founder go
+    /// hunting Settings for a button that was never built.
+    func testNeedsClaudeCodeNamesARealAction() {
+        let text = BlockReason.needsClaudeCode.founderText.lowercased()
+        XCTAssertTrue(text.contains("install"),
+                      "expected an install instruction, got: \(BlockReason.needsClaudeCode.founderText)")
+        XCTAssertFalse(text.contains("switch"),
+                       "must not point at a company-level provider switch, which does not exist: "
+                       + BlockReason.needsClaudeCode.founderText)
+    }
+
+    /// Every case carries both languages. A missing Vietnamese string renders English to a
+    /// Vietnamese founder, which reads as a bug rather than a fallback.
+    func testEveryNewCaseHasVietnamese() {
+        for reason in [BlockReason.notGrantedFor(.codex),
+                       .notGrantedFor(.claudeCode),
+                       .needsClaudeCode] {
+            XCTAssertFalse(reason.founderTextVi.isEmpty)
+            XCTAssertNotEqual(reason.founderTextVi, reason.founderText)
+        }
+    }
 }

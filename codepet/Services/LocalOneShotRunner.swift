@@ -89,32 +89,29 @@ enum LocalOneShotRunner {
         return .refused(error: error, detail: object["detail"] as? String ?? "")
     }
 
-    /// Run one op. Returns the Cloud Function's response body, or throws.
+    /// The child environment for one run, built as a pure function so a test can assert its
+    /// contents without spawning a real process.
     ///
-    /// - Parameters:
-    ///   - op: a key in the sidecar's `ONE_SHOT_OPS` registry.
-    ///   - body: the JSON body the matching Cloud Function takes.
-    static func run(
-        op: String,
-        body: Data,
-        companyId: String? = LocalTransportRouter.activeCompanyId,
-        modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
-    ) async throws -> Data {
-        guard let sidecar = resolveSidecarPath() else {
-            log.error("no one-shot sidecar on disk — \(op, privacy: .public) cannot run locally")
-            throw Failure.unavailable
-        }
-
-        let payload = try encodeRequest(op: op, body: body)
-
+    /// **`CODEPET_CLI_PROVIDER` is the whole point of Critical 1.** `oneShotSidecar.js`
+    /// reads it at `adapterFor(process.env.CODEPET_CLI_PROVIDER)` and picks the Claude or
+    /// Codex adapter accordingly, falling back to Claude when the variable is absent and
+    /// THROWING on anything it does not recognise — so this must be exactly
+    /// `provider.cliName` — the CLI's word, NOT `rawValue` — and it is a required parameter
+    /// here (no default)
+    /// so a caller cannot forget it and silently fall back to Claude again.
+    static func buildEnvironment(
+        provider: AIProvider,
+        companyId: String?,
+        modelPreference: ClaudeCodeModelPreference,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
         // A login shell so the founder's PATH resolves `node`, and the credential variables
         // stripped for the reason `LoginShellRunner` records: under `-p` a present key
         // outranks the subscription, so a key exported in their profile would bill the API
         // account this whole design exists to stop using. The sidecar strips them again on
         // its own child.
-        let shell = LoginShellRunner.loginShells
-            .first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
-        var env = LoginShellRunner.scrubbedEnvironment(ProcessInfo.processInfo.environment)
+        var env = LoginShellRunner.scrubbedEnvironment(baseEnvironment)
+        env["CODEPET_CLI_PROVIDER"] = provider.cliName
         // The founder's model choice, as an alias so it tracks the latest of that tier.
         // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at all and
         // leave the decision to their own Claude Code. Same variables chat uses: the pick is
@@ -127,6 +124,36 @@ enum LocalOneShotRunner {
                 env["CODEPET_CHAT_EFFORT"] = effort
             }
         }
+        return env
+    }
+
+    /// Run one op. Returns the Cloud Function's response body, or throws.
+    ///
+    /// - Parameters:
+    ///   - op: a key in the sidecar's `ONE_SHOT_OPS` registry.
+    ///   - body: the JSON body the matching Cloud Function takes.
+    ///   - provider: which CLI actually runs this — no default, deliberately (see
+    ///     `buildEnvironment`'s doc comment). Every caller has already resolved this through
+    ///     `LocalTransportRouter`; passing it through is what makes the resolved provider
+    ///     reach the child process instead of stopping at the log line.
+    static func run(
+        op: String,
+        body: Data,
+        provider: AIProvider,
+        companyId: String? = LocalTransportRouter.activeCompanyId,
+        modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
+    ) async throws -> Data {
+        guard let sidecar = resolveSidecarPath() else {
+            log.error("no one-shot sidecar on disk — \(op, privacy: .public) cannot run locally")
+            throw Failure.unavailable
+        }
+
+        let payload = try encodeRequest(op: op, body: body)
+
+        let shell = LoginShellRunner.loginShells
+            .first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
+        let env = buildEnvironment(provider: provider, companyId: companyId,
+                                    modelPreference: modelPreference)
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)

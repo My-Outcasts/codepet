@@ -65,19 +65,54 @@ import Foundation
 /// is which TRANSPORT a call takes, never what gets persisted. A real company's stored
 /// grant is untouched either way: with prototype mode off, this branch never runs, full
 /// stop, and the stored check below is the only answer, exactly as before this amendment.
-struct ClaudeCodeAuthorisation {
-    static func key(_ companyId: String) -> String { "cp_claude_authorised_\(companyId)" }
+///
+/// **Amendment 16 Sep — the grant is per PROVIDER, and it is never inherited.**
+/// A second CLI arrived (`codex`, spending the founder's ChatGPT plan), and one switch for
+/// two plans is the consent gap this file's opening paragraph describes, one level up:
+/// "Codepet may spend my Claude plan" says nothing about an OpenAI account. A founder who
+/// granted Claude Code before this change was never asked about Codex, so she must be
+/// ASKED — migrating her stored `true` into a second provider would spend money on an
+/// account she never put on the table.
+///
+/// So the key gains the provider, and `cp_claude_authorised_<id>` — the string already on
+/// founders' disks — stays byte-for-byte what it was. Renaming it would silently withdraw
+/// every grant ever given and ask again for something already agreed to.
+///
+/// The type was renamed to `ProviderAuthorisation` in a follow-up task, kept separate from
+/// this consent change so a rename could never hide a behaviour change inside it.
+struct ProviderAuthorisation {
+    /// **Written out per case, deliberately — never derived from `rawValue`.** These strings
+    /// are PERSISTED on founders' machines. Deriving them would mean a future rename of an
+    /// enum case silently relocates a stored grant, and the founder who gave it quietly
+    /// loses it. The explicit switch also makes a new provider a COMPILE error rather than
+    /// a case that quietly shares somebody else's key.
+    static func key(_ provider: AIProvider, _ companyId: String) -> String {
+        switch provider {
+        case .claudeCode: return "cp_claude_authorised_\(companyId)"
+        case .codex:      return "cp_codex_authorised_\(companyId)"
+        }
+    }
 
     /// Absent means NOT granted. `bool(forKey:)` returning false for a missing key is
     /// the behaviour we want, not an accident to work around: a founder who has never
-    /// seen the toggle has never agreed.
+    /// seen the toggle has never agreed. That now holds PER PROVIDER: a stored Claude
+    /// grant reads `false` for `.codex`, because she was asked one question, not two.
     ///
     /// The `liveAI` check runs first and only ever ADDS an authorisation while prototype
     /// mode is on — it can never take one away, and it never runs at all with prototype
     /// mode off, so a real company's stored grant (or lack of one) is untouched either way.
-    var isAuthorised: (String) -> Bool = { companyId in
-        if PrototypeMode.isOn, PrototypeMode.liveAI { return true }
-        return UserDefaults.standard.bool(forKey: key(companyId))
+    ///
+    /// **It is scoped to `.claudeCode`, and that is the same rule, not a new one.**
+    /// `-CODEPET_LIVE_AI` is the founder typing "spend my Claude plan on the demo" on the
+    /// command line — that is the plan the flag has always meant and the only one she named.
+    /// Letting it answer true for `.codex` would be exactly the inheritance the stored keys
+    /// were just split to prevent, reached through the branch that bypasses storage.
+    var isAuthorised: (AIProvider, String) -> Bool = { provider, companyId in
+        if provider == .claudeCode, PrototypeMode.isOn, PrototypeMode.liveAI { return true }
+        return UserDefaults.standard.bool(forKey: key(provider, companyId))
     }
-    var setAuthorised: (String, Bool) -> Void = { UserDefaults.standard.set($1, forKey: key($0)) }
+
+    var setAuthorised: (AIProvider, String, Bool) -> Void = { provider, companyId, on in
+        UserDefaults.standard.set(on, forKey: key(provider, companyId))
+    }
 }

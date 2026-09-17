@@ -33,6 +33,7 @@ struct ChecklistViewer: View {
     @State private var items: [ChecklistItem]
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     init(items: [ChecklistItem], deliverable: Deliverable) {
         _items = State(initialValue: items)
@@ -66,7 +67,11 @@ struct ChecklistViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
                          action: .copy(copyText),
-                         export: Self.exportSubject(deliverable, items: items)) {
+                         export: Self.exportSubject(deliverable, items: items),
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -131,6 +136,7 @@ struct DocViewer: View {
     let next: [String]
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     /// A document, set to be read.
     ///
@@ -165,7 +171,11 @@ struct DocViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Tài liệu" : "Document",
                          action: .copy(copyText),
-                         export: deliverable) {
+                         export: deliverable,
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
             VStack(alignment: .leading, spacing: Doc.betweenSections) {
                 Text(call)
                     .font(.pixelSystem(size: Doc.lead, weight: .medium))
@@ -226,6 +236,7 @@ struct PlanViewer: View {
     let payload: DeliverablePayload
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     /// A section name. An eyebrow, not a same-size grey label — the point of a heading is that
     /// it does not look like the body. The SECOND rank, so it does not compete with the card's
@@ -261,7 +272,11 @@ struct PlanViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Kế hoạch" : "Plan",
                          action: .copy(copyText),
-                         export: deliverable) {
+                         export: deliverable,
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
             VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
                 if let goal = payload.goal, !goal.isEmpty {
                     VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
@@ -478,6 +493,7 @@ struct DmsViewer: View {
 struct LegalViewer: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     var body: some View {
         DeliverableFrame(
@@ -485,7 +501,11 @@ struct LegalViewer: View {
             action: .copy(deliverable.body),
             export: deliverable,
             footer: lang == .vi ? "Bản nháp — không phải tư vấn pháp lý."
-                                : "Draft — not legal advice."
+                                : "Draft — not legal advice.",
+            provenance: deliverable.producedBy,
+            lang: lang,
+            otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+            onReRun: companyStore.reRunHandler(for: deliverable, language: lang)
         ) {
             MarkdownView(markdown: deliverable.body)
         }
@@ -516,13 +536,18 @@ struct LegalViewer: View {
 struct PostViewer: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     var body: some View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bài đăng" : "Social post",
             action: .copy(deliverable.body),
             export: deliverable,
-            footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang)
+            footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang),
+            provenance: deliverable.producedBy,
+            lang: lang,
+            otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+            onReRun: companyStore.reRunHandler(for: deliverable, language: lang)
         ) {
             MarkdownView(markdown: deliverable.body)
         }
@@ -539,6 +564,7 @@ struct CalendarViewer: View {
     let payload: CalendarPayload
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     /// Widened from 150. A post's `body` is a sentence, and at reading size a 150pt column broke
     /// it across four or five lines — the grid was sized for the 11pt setting it used to be in.
@@ -556,6 +582,10 @@ struct CalendarViewer: View {
         DeliverableFrame(eyebrow: lang == .vi ? "Lịch nội dung" : "Content calendar",
                          action: payload.weeks.isEmpty ? .none : .copy(copyText),
                          export: deliverable,
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
                          measured: false) {
             if payload.weeks.isEmpty {
                 // An empty state is a sentence addressed to the founder, not a caption. It was
@@ -647,6 +677,7 @@ struct SheetViewer: View {
     let deliverable: Deliverable
 
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     init(payload: SheetPayload, deliverable: Deliverable) {
         _price = State(initialValue: payload.price.val)
@@ -724,6 +755,10 @@ struct SheetViewer: View {
                          export: Self.exportSubject(deliverable, price: price, waitlist: waitlist,
                                                      conversion: conversion, churn: churn),
                          footer: disclaimer,
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
                          measured: false) {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -856,6 +891,7 @@ struct SiteViewer: View {
     /// Set when the write fails, so the button says why instead of doing nothing.
     @State private var openFailed = false
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     /// **"Open in browser", not "Open".** The chat draft card already carries an "Open the live
     /// page" cue routing to THIS viewer; a second, differently-destined "Open" on one path is
@@ -882,6 +918,10 @@ struct SiteViewer: View {
                                   label: lang == .vi ? "Sao chép HTML" : "Copy HTML",
                                   done: lang == .vi ? "Đã sao chép" : "Copied"),
             export: deliverable,
+            provenance: deliverable.producedBy,
+            lang: lang,
+            otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+            onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
             measured: false
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1138,6 +1178,7 @@ struct ScreensViewer: View {
     let deliverable: Deliverable
     @State private var idx: Int = 0
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     private var screens: [Screen] { payload.screens }
 
@@ -1152,6 +1193,10 @@ struct ScreensViewer: View {
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Màn hình" : "Screens",
                          export: deliverable,
+                         provenance: deliverable.producedBy,
+                         lang: lang,
+                         otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                         onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
                          measured: false) {
             if screens.isEmpty {
                 DeliverableProse(text: lang == .vi ? "Không có màn hình nào" : "No screens",

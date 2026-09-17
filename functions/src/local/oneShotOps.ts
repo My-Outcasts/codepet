@@ -128,7 +128,16 @@ export interface OneShotPlan {
 }
 
 export interface OneShotMeta {
-  /** What actually answered, as Claude Code reported it. */
+  /**
+   * What answered — when the CLI says so, and a marked stand-in when it does not.
+   *
+   * Claude Code reports the models a run billed, so on that provider this is the answering
+   * model, read off `modelUsage`. Codex reports nothing of the kind on stdout (checked on
+   * the `--json` path too), so on that provider the sidecar reports the model Codepet ASKED
+   * for, labelled as requested rather than answering — see `reportedModel` in
+   * `oneShotSidecar.ts`. It is never a guess dressed up as a fact, and never the other
+   * provider's model id.
+   */
   model: string;
   /** Passed in rather than read here so the pure parts stay testable without a clock. */
   nowISO: string;
@@ -162,7 +171,7 @@ export class OneShotUnusableAnswer extends Error {}
  */
 export function schemaInstruction(schema: unknown): string {
   return [
-    "There are no tools available in this run. If anything above asks you to call a tool,",
+    "Do not use any tools in this run. If anything above asks you to call a tool,",
     "do not attempt it — put exactly the arguments you would have passed to that tool in",
     "the JSON object described below instead.",
     "",
@@ -218,30 +227,16 @@ export function extractJson(text: string): any {
 }
 
 /**
- * Which model to report, read out of `claude -p --output-format json`.
+ * Which model to report. It MOVED to `cliAdapter.ts` and is re-exported here so every
+ * existing import still resolves.
  *
- * `modelUsage` is keyed by model id and can hold more than one — a run also bills small
- * side calls (measured: a Haiku entry alongside the answering model). The one that produced
- * the answer is the one that emitted the most output tokens, so that is what is reported.
- * Reporting a guess would be worse than the honest fallback: the `model` field reaches the
- * client and is shown.
+ * It moved because it reads the shape of CLAUDE's envelope — `modelUsage` — and that is
+ * adapter knowledge, not op knowledge. This file is the provider-blind half of the path:
+ * the same prompt, the same schema instruction and the same coercion whichever CLI answers.
+ * A second provider that reports nothing about what answered (Codex does not) is handled in
+ * the adapter and in the sidecar's meta, not here.
  */
-export function pickModel(envelope: any): string {
-  const usage = envelope?.modelUsage;
-  if (usage && typeof usage === "object") {
-    let best: string | null = null;
-    let bestTokens = -1;
-    for (const [id, u] of Object.entries(usage as Record<string, any>)) {
-      const tokens = typeof u?.outputTokens === "number" ? u.outputTokens : 0;
-      if (tokens > bestTokens) {
-        best = id;
-        bestTokens = tokens;
-      }
-    }
-    if (best) return best;
-  }
-  return "claude-code-local";
-}
+export { pickModel } from "./cliAdapter";
 
 export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
   /**

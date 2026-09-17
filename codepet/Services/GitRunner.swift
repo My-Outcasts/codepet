@@ -11,7 +11,7 @@ struct GitResult: Equatable {
 /// Minimal synchronous `git` wrapper. Runs `/usr/bin/git <args>` in `dir`,
 /// captures stdout/stderr/exit. Never throws — a launch failure returns a
 /// non-zero `GitResult`. (App is non-sandboxed; spawning git is permitted, same
-/// as ClaudeCodeRunner spawning claude.)
+/// as CLIRunner spawning claude.)
 enum GitRunner {
     private static let gitPath = "/usr/bin/git"
 

@@ -146,9 +146,9 @@ final class CompanyStore: ObservableObject {
         #endif
         // The web-research skill reaches the coding run from here, as a closure so it is read
         // when a run STARTS rather than when this coordinator is first built (see
-        // `ClaudeCodeRunAdapter.allowsWebSearch`). `[weak self]` because the adapter outlives
+        // `CLIRunAdapter.allowsWebSearch`). `[weak self]` because the adapter outlives
         // nothing here but the store owns this graph, and a strong capture would be a cycle.
-        let runner: CodeRunning = mock ? MockCodeRunner() : ClaudeCodeRunAdapter(
+        let runner: CodeRunning = mock ? MockCodeRunner() : CLIRunAdapter(
             allowsWebSearch: { [weak self] in
                 self?.company.enabledTools.contains(Toolkit.webResearchId) ?? false
             })
@@ -234,6 +234,14 @@ final class CompanyStore: ObservableObject {
     /// swapped out from under it.
     private let injectedVCRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)?
     private let taskRunner: (RunTaskRequest) async -> RunTaskResponse?
+    /// The re-run path's ONLY entry point into execution — see `reRunDeliverable`. Kept
+    /// separate from `taskRunner` rather than widening that closure's signature: `taskRunner`
+    /// is injected by dozens of test files against its existing `(RunTaskRequest) ->
+    /// RunTaskResponse?` shape, and none of them has a stake in a preferred provider. This
+    /// closure's default forwards straight to `RunTaskClient.runResolved`, which does NO
+    /// transport resolution of its own — `reRunDeliverable` resolves once and hands the
+    /// answer to both this and the stamp, which is what makes them unable to disagree.
+    private let preferredTaskRunner: (RunTaskRequest, AIProvider) async -> RunTaskResponse?
     private let librarySaver: (String, [Deliverable]) async -> Bool
     private let toolsSaver: (String, [String]) async -> Bool
     private let capabilitiesFetcher: () async -> Set<String>?
@@ -347,7 +355,15 @@ final class CompanyStore: ObservableObject {
          // branch any more. Every test that injects its own streamer is untouched.
          chatStreamer: @escaping (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { ChatTransportRouter.sendStream($0) },
          vcRunner: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
-         taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = RunTaskClient.run,
+         // A closure, not the function reference `RunTaskClient.run`: that function grew an
+         // optional `prefer` parameter for Finding 1, and Swift does not apply a function's
+         // default arguments when forming a value from its name (same reason `remoteURLReader`
+         // below is a closure and not `GitRunner.remoteURL(in:)` directly) — `RunTaskClient.run`
+         // by itself no longer matches this closure's `(RunTaskRequest) -> RunTaskResponse?`
+         // shape.
+         taskRunner: @escaping (RunTaskRequest) async -> RunTaskResponse? = { await RunTaskClient.run($0) },
+         preferredTaskRunner: @escaping (RunTaskRequest, AIProvider) async -> RunTaskResponse? =
+            { req, provider in await RunTaskClient.runResolved(req, provider: provider) },
          librarySaver: @escaping (String, [Deliverable]) async -> Bool = CompanyData.saveLibrary,
          toolsSaver: @escaping (String, [String]) async -> Bool = CompanyData.saveEnabledTools,
          capabilitiesFetcher: @escaping () async -> Set<String>? = CapabilitiesClient.fetch,
@@ -386,7 +402,14 @@ final class CompanyStore: ObservableObject {
          // closes over `UserDefaults.standard`. Injected so a test can grant the plan without
          // writing to the real defaults domain — a leaked grant would route another suite's
          // Build onto a machine it never asked for.
-         claudeAuthorisation: ClaudeCodeAuthorisation? = nil,
+         claudeAuthorisation: ProviderAuthorisation? = nil,
+         // Whether this build can reach the one-shot sidecar. Injected for the same reason as
+         // `claudeAuthorisation` directly above — the real one reads the filesystem, so a test
+         // that leaves it alone is asserting something about the machine it runs on. The
+         // bundles are GITIGNORED, so "present" is true on a developer's checkout and false on
+         // a fresh clone and on CI; the provenance-stamp tests below were green locally and red
+         // on CI for exactly that reason, reported as a nil stamp rather than a missing file.
+         sidecarAvailable: @escaping () -> Bool = { LocalOneShotRunner.isAvailable() },
          // A closure, not the function reference `GitRunner.remoteURL(in:)`: that function
          // has a second defaulted parameter (an injectable runner, added so its exit-code
          // gate is testable), and Swift does not apply defaults when forming a function
@@ -422,6 +445,7 @@ final class CompanyStore: ObservableObject {
         self.vcRunner = vcRunner ?? { LocalTransportRouter.runVirtualCompany($0) }
         #endif
         self.taskRunner = taskRunner
+        self.preferredTaskRunner = preferredTaskRunner
         self.librarySaver = librarySaver
         self.toolsSaver = toolsSaver
         self.capabilitiesFetcher = capabilitiesFetcher
@@ -436,7 +460,8 @@ final class CompanyStore: ObservableObject {
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
         self.identityMap = identityMap ?? ProjectIdentityMap()
-        self.claudeAuthorisation = claudeAuthorisation ?? ClaudeCodeAuthorisation()
+        self.claudeAuthorisation = claudeAuthorisation ?? ProviderAuthorisation()
+        self.sidecarAvailable = sidecarAvailable
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
@@ -503,6 +528,19 @@ final class CompanyStore: ObservableObject {
         // plan must not find it silently ungranted because the mirror was still pointing at
         // nobody.
         applyCloudAIBlock()
+        // Fire-and-forget: a cache refill, not part of hydrate's critical path. It touches a
+        // subprocess, which a render must never do (`InstalledProviders`'s own doc comment),
+        // and hydrate is not a render — but it still shouldn't make company data wait on it.
+        //
+        // Skipped under XCTest (Task 9): once `BlockedOffer.resolve` started reading
+        // `installedProviders.installed`, this real subprocess probe became an unbounded race
+        // against every test that calls `hydrate` and then asserts blocked-copy text — whether
+        // the founder's REAL machine has `claude`/`codex` on PATH is not a fact any suite
+        // should depend on. A test that wants a specific installed set now calls
+        // `installedProviders.apply(_:)` itself, deterministically, after `hydrate` returns.
+        if !AppEnvironment.isRunningTests {
+            Task { await installedProviders.refresh() }
+        }
         claudeModel = modelPreference.model(companyId)
         claudeEffort = modelPreference.effort(companyId)
         // The moment an identity exists, and therefore the first moment a
@@ -1030,7 +1068,7 @@ final class CompanyStore: ObservableObject {
     /// Build: change the founder's code. The one code mode, since 14 Aug.
     ///
     /// **Cloud by default, and not because it is better.** The local runner
-    /// shells out to the `claude` CLI (`ClaudeCodeRunner`), so it works for
+    /// shells out to the `claude` CLI (`CLIRunner`), so it works for
     /// someone who already has Claude Code installed and authenticated — which
     /// is Mona, and nobody who downloads Codepet in August. Defaulting to the
     /// path that works for a customer is the whole reason this is the default;
@@ -1079,19 +1117,27 @@ final class CompanyStore: ObservableObject {
         }
         // One state still reaches the cloud agent: a folder IS linked and the founder has not
         // granted their Claude plan. Sending that founder to the local runner would spend the
-        // plan they were never asked about — `ClaudeCodeAuthorisation` is the one switch — so
+        // plan they were never asked about — `ProviderAuthorisation` is the one switch — so
         // this arm is deliberately left alone here and belongs with the grant work, not with
         // the folder gate.
         if buildRunsOnFoundersAgent || activeProjectLink == nil {
             startCodeRun(ask: ask)
         } else {
             // `engStartRun` 401s (the key deleted 26 Aug 2026) rather than answering, so the
-            // founder gets a silent stall unless something on screen says why. `BlockReason
-            // .notGranted` already names the fix — grant Codepet permission to use her Claude
-            // plan, in Settings — so this reuses its copy rather than writing a new sentence.
-            // This does not change the branch itself: Task 7's onboarding gate is what stops
-            // `startEngineeringRun` from firing, not this notice.
-            let why = language == .vi ? BlockReason.notGranted.founderTextVi : BlockReason.notGranted.founderText
+            // founder gets a silent stall unless something on screen says why.
+            //
+            // **`.claudeOnly`, not `.anyProvider`.** `buildRunsOnFoundersAgent` — the gate that
+            // decides which branch this `if` takes — reads `isAuthorised(.claudeCode, …)`
+            // alone, so THIS surface can only ever be unstuck by a Claude Code grant. Offering
+            // `.anyProvider` told a Codex-only founder to "turn on your ChatGPT plan"; she
+            // could, and it changed nothing, because the gate never reads that grant — she'd
+            // do exactly what she was told and stay stuck, having complied. `.claudeOnly` gets
+            // this right for all three cases: Claude installed (ungranted) → the real grant
+            // button; Codex-only or neither installed → told she needs Claude Code specifically
+            // (`needsClaudeCode`), not sent to grant or install a CLI that cannot help here.
+            let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed,
+                                           surface: .claudeOnly)
+                .founderText(lang: language)
             chatMessages.append(CopilotMessage(role: .companion, text: why))
             startEngineeringRun(ask: ask)
         }
@@ -1417,7 +1463,20 @@ final class CompanyStore: ObservableObject {
     /// founder has no say over the model, and offering a picker that changes nothing is
     /// worse than offering none.
     var localChatActive: Bool {
-        ChatTransportRouter.transport(companyId: companyId) == .local
+        // A PATTERN match, not an equality, and deliberately provider-agnostic: `.local`
+        // gained an `AIProvider` payload, and the question here is "does the founder have a
+        // say over the model", which is true of any local turn regardless of which CLI runs
+        // it. Comparing against `.local(.claudeCode)` would silently hide the control the
+        // day a second provider answers here.
+        //
+        // **The gate is provider-agnostic; the control behind it is not — yet.** What this
+        // unlocks is `claudeModel` / `claudeEffort` (`CopilotChatView`), which are Claude-typed.
+        // Chat has no second provider today, so the two cannot disagree. The day it does, this
+        // is a decision to REVISIT rather than a site that is already right: does Codex get the
+        // same picker, its own, or none? Nothing here answers that, and nothing should pretend
+        // it does.
+        if case .local = ChatTransportRouter.transport(companyId: companyId) { return true }
+        return false
     }
 
     /// Whether a Build should go to the founder's OWN coding agent rather than the cloud one.
@@ -1432,7 +1491,7 @@ final class CompanyStore: ObservableObject {
     ///
     /// **Reads the grant directly, not `LocalTransportRouter`.** That router also requires
     /// the bundled one-shot sidecar, which a coding run does not use at all: it drives the
-    /// `claude` binary through `ClaudeCodeRunner`. Gating on a resource this path never
+    /// `claude` binary through `CLIRunner`. Gating on a resource this path never
     /// touches would send a granted founder to the cloud for the wrong reason.
     ///
     /// A linked folder stays necessary: without one the local run lands in `.noProject`, and
@@ -1440,10 +1499,71 @@ final class CompanyStore: ObservableObject {
     /// `startBuild` is documented to avoid.
     var buildRunsOnFoundersAgent: Bool {
         guard let companyId else { return false }
-        return localBuildAvailable && claudeAuthorisation.isAuthorised(companyId)
+        return localBuildAvailable && claudeAuthorisation.isAuthorised(.claudeCode, companyId)
     }
 
-    let claudeAuthorisation: ClaudeCodeAuthorisation
+    let claudeAuthorisation: ProviderAuthorisation
+
+    /// Whether the one-shot sidecar bundle is reachable from this build. See the init
+    /// parameter for why this is injected rather than read at the call site.
+    let sidecarAvailable: () -> Bool
+
+    /// Which CLIs are on this Mac — cached, refreshed once per hydrate (see `hydrate`), and
+    /// read by every deliverable card's provenance row to decide whether the OTHER provider is
+    /// worth offering. Never probed from a render path.
+    let installedProviders = InstalledProviders()
+
+    /// Whether the OTHER provider (relative to what produced `deliverable`) is installed —
+    /// what a card's "Re-run on the other one" offer needs. `nil` `producedBy` (nothing was
+    /// ever recorded) never offers anything.
+    func otherProviderInstalled(for deliverable: Deliverable) -> Bool {
+        guard let producedBy = deliverable.producedBy else { return false }
+        let other: AIProvider = producedBy == .claudeCode ? .codex : .claudeCode
+        return installedProviders.installed.contains(other)
+    }
+
+    /// The re-run action a card's provenance row offers, or nil for a deliverable with no
+    /// stamp — there is nothing to credit a re-run against. `ProvenanceRowView` gates the
+    /// ACTUAL call behind `ProviderConsentFlow`; by the time this closure runs, consent for
+    /// the tapped provider is already settled. The tapped `AIProvider` is forwarded, not
+    /// dropped — see `reRunDeliverable`, which is what actually spends it.
+    func reRunHandler(for deliverable: Deliverable, language: AppLanguage) -> ((AIProvider) -> Void)? {
+        guard deliverable.producedBy != nil else { return nil }
+        return { [weak self] provider in
+            Task { await self?.reRunDeliverable(deliverable, preferring: provider, language: language) }
+        }
+    }
+
+    /// Re-runs the task behind a FILED library deliverable and files the result as a NEW
+    /// library entry — the original stays, exactly as `runTask` never overwrites a task's
+    /// prior draft in place.
+    ///
+    /// **The stamp is a READ-BACK of what ran, not a second resolution.** This is the fix for
+    /// review Findings 1 and 2 together: `LocalTransportRouter.forOneShot` is asked EXACTLY
+    /// ONCE, right here, with the tapped `provider` as `prefer:`. Its answer is threaded to
+    /// BOTH the executor (`preferredTaskRunner`, which does no resolution of its own — see
+    /// `RunTaskClient.runResolved`) and `buildDeliverable`'s `producedBy:`. There is no second
+    /// call to `forOneShot` anywhere in this path, so the stamp and the execution cannot name
+    /// different providers by construction — unlike `currentProvider(for:)` below, which
+    /// `runTask` and its siblings still use and which remains a SEPARATE resolution from
+    /// whatever `taskRunner` actually spends (see that function's own doc comment).
+    ///
+    /// A tap that cannot actually reach the requested provider — not granted, or the sidecar
+    /// is missing — produces nothing, same fail-open shape as `runTask`, rather than crediting
+    /// a provider that never ran.
+    func reRunDeliverable(_ deliverable: Deliverable, preferring provider: AIProvider,
+                          language: AppLanguage) async {
+        let cid = companyId
+        guard let taskId = deliverable.sourceTaskId,
+              let task = company.tasks.first(where: { $0.id == taskId }) else { return }
+        guard case .local(let resolved) = LocalTransportRouter.forOneShot(
+            companyId: cid, authorisation: claudeAuthorisation, prefer: provider,
+            sidecarAvailable: sidecarAvailable) else { return }
+        let result = await preferredTaskRunner(runRequest(for: task, language: language), resolved)
+        guard companyId == cid,
+              let fresh = buildDeliverable(from: result, task: task, producedBy: resolved) else { return }
+        await fileApproval(fresh, taskId: taskId)
+    }
 
     // MARK: - The two doors
 
@@ -1903,8 +2023,19 @@ final class CompanyStore: ObservableObject {
             // No second generation, and no other transport. The founder granted their own
             // Claude plan; answering from the Cloud Function instead would spend the key
             // that grant exists to stop — so the turn ends here, saying why.
+            //
+            // `.claudeOnly`: this reason can only ever reach here from `ChatTransportRouter`,
+            // which checks `.claudeCode` alone and never reads `prefer` — chat streaming is
+            // Claude or nothing (Task 9). A Codex-only founder is told THAT (`needsClaudeCode`)
+            // rather than being sent to grant a plan she does not have; a Claude-installed,
+            // ungranted founder gets an actual grant button instead of a bare sentence.
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
-                chatMessages[i].text = language == .vi ? reason.founderTextVi : reason.founderText
+                let offer = BlockedOffer.resolve(reason: reason, installed: installedProviders.installed,
+                                                 surface: .claudeOnly)
+                chatMessages[i].text = offer.founderText(lang: language)
+                if case .grant = offer {
+                    chatMessages[i].blockedOffer = offer
+                }
             }
         case .none:
             break
@@ -2435,6 +2566,7 @@ final class CompanyStore: ObservableObject {
         // re-derived for the view, so what the founder is told the run built on is exactly
         // what the prompt was given.
         let request = runRequest(for: task, language: language, extraUpstream: extraUpstream)
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(request)
         _ = await reveal.value   // let every revealed step land before finishing
         guard companyId == cid else { return nil }
@@ -2452,7 +2584,7 @@ final class CompanyStore: ObservableObject {
         // rather than from `steps`, so it reflects the completed state that was on screen.
         let finishedSteps = chatMessages.first { $0.id == producingId }?.execSteps
         chatMessages.removeAll { $0.id == producingId }
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName,
                                                execSteps: finishedSteps, upstream: request.upstream))
@@ -2851,6 +2983,7 @@ final class CompanyStore: ObservableObject {
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
               let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
                                                   reviseNote: reviseNote,
                                                   current: reviseNote != nil ? draft.body : nil))
@@ -2859,7 +2992,7 @@ final class CompanyStore: ObservableObject {
         guard companyId == cid,
               let j = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[j].draftApproved,
-              let fresh = buildDeliverable(from: result, task: task) else { return }
+              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
         chatMessages[j].draft = fresh
     }
 
@@ -2873,12 +3006,13 @@ final class CompanyStore: ObservableObject {
         guard let task = company.tasks.first(where: { $0.id == taskId }),
               let draft = task.draft, !task.done, task.drafted else { return }
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
                                                  reviseNote: reviseNote, current: draft.body))
         guard companyId == cid,
               let j = company.tasks.firstIndex(where: { $0.id == taskId }),
               !company.tasks[j].done, company.tasks[j].drafted,
-              let fresh = buildDeliverable(from: result, task: task) else { return }
+              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
         company.tasks[j].draft = fresh
         if let cid { _ = await tasksSaver(cid, company.tasks) }
     }
@@ -2917,14 +3051,78 @@ final class CompanyStore: ObservableObject {
     /// Build a Deliverable from a run result — the 6A gates in one place: unique id,
     /// canonical createdAt, non-empty title (fallback task.title) + body. Returns nil
     /// on a nil result or empty body — never a malformed deliverable.
-    private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask) -> Deliverable? {
+    ///
+    /// `producedBy` is NOT defaulted, deliberately: a defaulted provenance is exactly how a
+    /// Codex run would get silently stamped "Claude", which is the one lie this field exists
+    /// to prevent. Every caller must say which provider actually ran, or `nil` if it
+    /// genuinely doesn't know.
+    private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask,
+                                  producedBy: AIProvider?) -> Deliverable? {
         let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard let result, !body.isEmpty else { return nil }
         let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return Deliverable(
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
             title: title.isEmpty ? task.title : title, body: body,
-            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload)
+            createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload,
+            producedBy: producedBy)
+    }
+
+    /// Which provider will actually run a one-shot op for `cid`, right now — the same
+    /// question `RunTaskClient.run` answers internally via `LocalTransportRouter.forOneShot`,
+    /// asked again here so the deliverable it produces can be stamped with the answer.
+    /// `.blocked` reads as "don't know" (nil): a run that was blocked never reaches
+    /// `buildDeliverable` anyway (its `taskRunner` result is nil), so this only matters for
+    /// the `.local` case in practice.
+    ///
+    /// **Still used by `runTask` and its siblings (chained runs, fan-out) — NOT by the re-run
+    /// path any more.** `reRunDeliverable` used to call this function too, which is exactly
+    /// what review Finding 2 flagged: adding `prefer` to only one of the two independent
+    /// resolutions below would let the stamp and the execution name different providers for
+    /// the same run. The fix was not to patch this function — it was to give the re-run path
+    /// its OWN single resolution (see `reRunDeliverable`) and stop routing it through
+    /// `currentProvider`/`taskRunner` at all. Everything below is therefore still true, but
+    /// now describes only `runTask`'s ordinary path, where nothing ever passes `prefer`.
+    ///
+    /// **This is a SECOND, INDEPENDENT resolution — not a read-back of the first.**
+    /// `RunTaskClient.run` is the code that actually spends a plan, and (on the ordinary path)
+    /// it calls `LocalTransportRouter.forOneShot()` with no `prefer`: that resolves the GLOBAL
+    /// `LocalTransportRouter.activeCompanyId` mirror against a FRESH `ProviderAuthorisation()`
+    /// it constructs itself. This function resolves a SEPARATE answer, from this store's own
+    /// `cid` and its own `claudeAuthorisation`. Nothing compares the two; the stamp is only
+    /// correct because, today, both computations happen to agree. That holds only while ALL
+    /// of the following stay true — an invariant, not a reassurance, and the next edit that
+    /// breaks one of them reintroduces the exact lie this field exists to prevent (a card
+    /// reading "Ran on Claude Code" when Codex, or nothing, actually ran):
+    ///
+    /// 1. **The mirror tracks this store's id.** `LocalTransportRouter.apply(companyId:)` is
+    ///    called only from `CompanyStore.hydrate`, with the same id this function receives as
+    ///    `cid`. A second `CompanyStore` instance, or a call site that passes a `cid` other
+    ///    than its own `companyId` at the moment of the run, breaks this silently — both
+    ///    resolutions still run, they just stop being about the same account.
+    /// 2. **`claudeAuthorisation` here answers exactly what a fresh `ProviderAuthorisation()`
+    ///    would.** True in production, where neither side is injected. FALSE for every test in
+    ///    this file that injects a `claudeAuthorisation` stand-in (as Finding 1's tests do,
+    ///    deliberately) — those tests pin this function's INPUT, not agreement with
+    ///    `RunTaskClient.run`, which they never call.
+    /// 3. **No `prefer:` reaches this function's call path.** `RunTaskClient.run` grew a
+    ///    `prefer` parameter (Finding 1), and `taskRunner`'s default forwards to it — but
+    ///    nothing on the `runTask` path ever supplies one, so it is always `nil` there and
+    ///    the two resolutions still ask the same question. The one caller that DOES want a
+    ///    preferred provider (`reRunDeliverable`) was rerouted around this function entirely
+    ///    rather than being allowed to violate this invariant — see that function's own
+    ///    comment.
+    ///
+    /// What is NOT proven by anything in this file: that the two `runTask`-path resolutions
+    /// actually agreed on a given run. Unifying them the way `reRunDeliverable` now does — one
+    /// resolution shared by both stamp and execution — is the real fix, and remains out of
+    /// scope for the ordinary path.
+    private func currentProvider(for cid: String?) -> AIProvider? {
+        switch LocalTransportRouter.forOneShot(companyId: cid, authorisation: claudeAuthorisation,
+                                               sidecarAvailable: sidecarAvailable) {
+        case .local(let provider): return provider
+        case .blocked: return nil
+        }
     }
 
     /// Execute-log pacing (tunable; tests set to 0 to stay instant). `execStepNanos`
@@ -3023,6 +3221,7 @@ final class CompanyStore: ObservableObject {
                 activeAgentRuns[ri].steps[idx].done = true
             }
         }
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language))
         _ = await reveal.value
         guard companyId == cid else { return }
@@ -3032,7 +3231,7 @@ final class CompanyStore: ObservableObject {
         }
         let companionId = activeAgentRuns.first(where: { $0.id == runId })?.companionId
         let deptName = activeAgentRuns.first(where: { $0.id == runId })?.deptName
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             if let ri = activeAgentRuns.firstIndex(where: { $0.id == runId }) {
                 activeAgentRuns[ri].status = .done
             }
@@ -3297,10 +3496,11 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].actionConsumed = true
         runningTaskIds.insert(task.id)
         let cid = companyId
+        let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language))
         runningTaskIds.remove(task.id)
         guard companyId == cid else { return }
-        if let draft = buildDeliverable(from: result, task: task) {
+        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft))
         } else {
             // Restore the one-tap action so the "try again" copy stays honest (the task

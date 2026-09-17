@@ -258,6 +258,158 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertEqual(tasksSaverCalls, 1)                // only toggleTaskDone's own save fired
     }
 
+    // MARK: - Provenance wiring (review Finding 1 + Finding 2)
+
+    /// FINDING 1: every test above omits `claudeAuthorisation:`, so `currentProvider(for:)`
+    /// falls back to a real, ungranted `UserDefaults` read and `producedBy` is nil on every
+    /// draft they produce — including the five `buildDeliverable` call sites this file
+    /// otherwise exercises directly (`runTask` → `produceDraftInline`). None of them would
+    /// notice `producedBy: currentProvider(for: cid)` being deleted and replaced with `nil`.
+    ///
+    /// This test drives the real call site — `runTask`, not `buildDeliverable` in isolation —
+    /// with an INJECTED, granted `ProviderAuthorisation` so it never touches the founder's
+    /// real defaults domain.
+    func testRunTaskStampsDraftWithTheGrantedProvider_claudeCode() async {
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [task()])
+        let auth = ProviderAuthorisation(isAuthorised: { provider, _ in provider == .claudeCode })
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "body") },
+                             claudeAuthorisation: auth,
+            sidecarAvailable: { true })
+        await s.hydrate(companyId: "u")
+        await s.runTask(s.company.tasks[0], language: .en)
+        XCTAssertEqual(s.company.tasks[0].draft?.producedBy, .claudeCode)
+    }
+
+    /// The one that proves the feature is genuinely PER-PROVIDER rather than a constant:
+    /// only Codex is granted here (Claude is not), and the stamp must follow the grant, not
+    /// default to the incumbent.
+    func testRunTaskStampsDraftWithTheGrantedProvider_codexOnly() async {
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [task()])
+        let auth = ProviderAuthorisation(isAuthorised: { provider, _ in provider == .codex })
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "body") },
+                             claudeAuthorisation: auth,
+            sidecarAvailable: { true })
+        await s.hydrate(companyId: "u")
+        await s.runTask(s.company.tasks[0], language: .en)
+        XCTAssertEqual(s.company.tasks[0].draft?.producedBy, .codex)
+    }
+
+    /// FINDING 2 (the provable half): the stamp's INPUT is this store's own authorisation,
+    /// not a hardcoded value — flipping the grant on an otherwise-identical store flips the
+    /// stamped provider. This does NOT prove the stamp matches what `RunTaskClient.run` would
+    /// actually spend in production — see the invariant documented on `currentProvider` for
+    /// what remains unproven and why.
+    func testStampFollowsAuthorisationChange_notAConstant() async {
+        func makeStore(granting provider: AIProvider) -> CompanyStore {
+            let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                    companionId: "byte", onboardedAt: Date(), tasks: [task()])
+            let auth = ProviderAuthorisation(isAuthorised: { p, _ in p == provider })
+            return CompanyStore(loader: { _ in seed },
+                                tasksSaver: { _, _ in true },
+                                taskRunner: { _ in RunTaskResponse(kind: "doc", title: "T", body: "b") },
+                                claudeAuthorisation: auth,
+            sidecarAvailable: { true })
+        }
+        let claudeStore = makeStore(granting: .claudeCode)
+        await claudeStore.hydrate(companyId: "u")
+        await claudeStore.runTask(claudeStore.company.tasks[0], language: .en)
+
+        let codexStore = makeStore(granting: .codex)
+        await codexStore.hydrate(companyId: "u")
+        await codexStore.runTask(codexStore.company.tasks[0], language: .en)
+
+        XCTAssertEqual(claudeStore.company.tasks[0].draft?.producedBy, .claudeCode)
+        XCTAssertEqual(codexStore.company.tasks[0].draft?.producedBy, .codex)
+        XCTAssertNotEqual(claudeStore.company.tasks[0].draft?.producedBy,
+                          codexStore.company.tasks[0].draft?.producedBy)
+    }
+
+    // MARK: - reRunDeliverable end-to-end (Critical 3, final-review pass)
+
+    /// A filed library deliverable behind a `done` task — the shape `reRunDeliverable`
+    /// re-runs. `producedBy: .claudeCode` is the ORIGINAL run's stamp; the re-run below taps
+    /// a different provider deliberately, so a passing test cannot be explained by the stamp
+    /// just being copied forward.
+    private func filedDeliverable() -> (task: RoadmapTask, seed: CompanyState) {
+        let filedTask = RoadmapTask(id: "t1", title: "Survey users", detail: "wtp",
+                                    phase: .find, who: .does, done: true)
+        let filed = Deliverable(kind: .doc, title: "D", body: "original body",
+                                sourceTaskId: "t1", producedBy: .claudeCode)
+        let seed = CompanyState(brief: .init(), departments: [], library: [filed], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [filedTask])
+        return (filedTask, seed)
+    }
+
+    /// The headline claim under test: the provider that ACTUALLY RUNS is the one the founder
+    /// tapped, not `chooseProvider`'s precedence winner. Both providers are granted here —
+    /// under plain precedence Claude would win — and the founder taps Codex anyway. A revert
+    /// of `preferredTaskRunner(…, resolved)` back to `taskRunner(…)` (the unpreferred runner)
+    /// would still pass every OTHER test in this file, which is exactly the gap review found:
+    /// "Re-run on Codex" did not actually run on Codex, caught only by reading code.
+    func testReRunDeliverableRunsOnTheTappedProviderNotThePrecedenceWinner() async {
+        let (_, seed) = filedDeliverable()
+        var receivedProvider: AIProvider?
+        let auth = ProviderAuthorisation(isAuthorised: { _, _ in true })  // both granted
+        let s = CompanyStore(
+            loader: { _ in seed },
+            preferredTaskRunner: { _, provider in
+                receivedProvider = provider
+                return RunTaskResponse(kind: "doc", title: "D2", body: "codex body")
+            },
+            librarySaver: { _, _ in true },
+            // `fileApproval` (what `reRunDeliverable` ends on) also fires `firstApprovalSaver`
+            // and a fire-and-forget `decisionExtractor` — both default to real Firestore/Auth
+            // calls that TRAP under an unconfigured `FirebaseApp` in the test host (landmine 3
+            // in CLAUDE.md). Stubbed here for the same reason
+            // `testApproveTaskMovesDraftToLibraryOnceAndMarksDone` above stubs them.
+            firstApprovalSaver: { _, _ in true },
+            decisionExtractor: { _, _ in [] },
+            claudeAuthorisation: auth,
+            sidecarAvailable: { true })
+        await s.hydrate(companyId: "u")
+        let deliverable = s.company.library[0]
+        await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)
+
+        // 1. The provider HANDED TO THE RUNNER is the tapped one, not the precedence winner.
+        XCTAssertEqual(receivedProvider, .codex)
+        // 2. The resulting deliverable's stamp equals that same provider.
+        XCTAssertEqual(s.company.library.count, 2, "the re-run files a NEW entry; the original stays")
+        XCTAssertEqual(s.company.library.last?.producedBy, .codex)
+        XCTAssertEqual(s.company.library.last?.body, "codex body")
+        // The original stays untouched.
+        XCTAssertEqual(s.company.library.first?.producedBy, .claudeCode)
+    }
+
+    /// A preference is not consent: tapping a provider the founder never granted must not
+    /// run at all — not on the tapped provider, and not by silently falling back to the one
+    /// that IS granted.
+    func testReRunDeliverableDoesNotRunAnUngrantedProvider() async {
+        let (_, seed) = filedDeliverable()
+        var runnerCalls = 0
+        let auth = ProviderAuthorisation(isAuthorised: { provider, _ in provider == .claudeCode })
+        let s = CompanyStore(
+            loader: { _ in seed },
+            preferredTaskRunner: { _, provider in
+                runnerCalls += 1
+                return RunTaskResponse(kind: "doc", title: "D2", body: "should not happen")
+            },
+            librarySaver: { _, _ in true },
+            claudeAuthorisation: auth,
+            sidecarAvailable: { true })
+        await s.hydrate(companyId: "u")
+        let deliverable = s.company.library[0]
+        await s.reRunDeliverable(deliverable, preferring: .codex, language: .en)
+
+        XCTAssertEqual(runnerCalls, 0, "an ungranted preference must not run at all")
+        XCTAssertEqual(s.company.library.count, 1, "nothing new was filed")
+    }
+
     func testApproveFailOpenWhenExtractorReturnsEmpty() async {
         let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does,
                                   drafted: true, draft: Deliverable(kind: .doc, title: "X", body: "y", sourceTaskId: "t1"))

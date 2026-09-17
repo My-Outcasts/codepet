@@ -5,20 +5,33 @@ import XCTest
 /// here is a guard on that, not on a rendering detail.
 final class ChatTransportRouterTests: XCTestCase {
 
+    /// Claude Code grants. Named for the plan it spends, because the grant is now per
+    /// PROVIDER — a founder who granted this one was never asked about Codex.
     private var granted: Set<String> = []
+    /// Codex grants, kept separate so a case can hold one WITHOUT the other. A single table
+    /// would make "a Codex grant does not route to Claude Code" unprovable here.
+    private var codexGranted: Set<String> = []
 
     /// A grant table in memory, so no case touches the real defaults domain or leaks a
     /// grant into the next one.
-    private var authorisation: ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
-            isAuthorised: { [self] in granted.contains($0) },
-            setAuthorised: { [self] id, on in
-                if on { granted.insert(id) } else { granted.remove(id) }
+    private var authorisation: ProviderAuthorisation {
+        ProviderAuthorisation(
+            isAuthorised: { [self] provider, id in
+                switch provider {
+                case .claudeCode: return granted.contains(id)
+                case .codex:      return codexGranted.contains(id)
+                }
+            },
+            setAuthorised: { [self] provider, id, on in
+                switch provider {
+                case .claudeCode: if on { granted.insert(id) } else { granted.remove(id) }
+                case .codex:      if on { codexGranted.insert(id) } else { codexGranted.remove(id) }
+                }
             }
         )
     }
 
-    override func setUp() { super.setUp(); granted = [] }
+    override func setUp() { super.setUp(); granted = []; codexGranted = [] }
 
     private func transport(
         companyId: String?,
@@ -33,13 +46,38 @@ final class ChatTransportRouterTests: XCTestCase {
     /// A founder who has never opened the Claude Code panel used to get the Cloud Function.
     /// There is nothing behind it now, so she is told what to turn on instead of being sent
     /// somewhere that answers 401.
+    /// **A Codex grant is not a Claude grant.** Chat still pins `.claudeCode`; per-provider
+    /// consent exists now, provider selection does not. A founder who granted only Codex has
+    /// said nothing about her Claude plan, so chat blocks exactly as it did before the split.
+    func testACodexGrantAloneDoesNotUnblockChat() {
+        codexGranted.insert("c1")
+        XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted),
+                       "a Codex grant was read as permission to spend the Claude plan")
+    }
+
     func testAnUngrantedFounderIsBlockedRatherThanSentToTheCloud() {
         XCTAssertEqual(transport(companyId: "c1"), .blocked(.notGranted))
     }
 
     func testAGrantedFounderGoesLocal() {
         granted.insert("c1")
-        XCTAssertEqual(transport(companyId: "c1"), .local)
+        XCTAssertEqual(transport(companyId: "c1"), .local(.claudeCode))
+    }
+
+    /// **Chat carries a provider it cannot vary, on purpose.** The payload exists so this enum
+    /// and `LocalTransportRouter.Transport` stay the same shape — this file's router is
+    /// documented as holding that shape, and drift between them costs a lie in prose. But no
+    /// chat path can run a second CLI this phase, so the answer is `.claudeCode` for every
+    /// company, unconditionally.
+    ///
+    /// This is the guard against the opposite mistake: a router that could answer `.codex`
+    /// here would promise a founder something chat cannot honour.
+    func testChatAlwaysCreditsClaudeCodeAndNeverVaries() {
+        for id in ["c1", "c2", "another-company"] {
+            granted.insert(id)
+            XCTAssertEqual(transport(companyId: id), .local(.claudeCode),
+                           "chat has no second provider; \(id) must not get one")
+        }
     }
 
     /// The grant is per company id, so one founder's consent must not route another
@@ -67,7 +105,7 @@ final class ChatTransportRouterTests: XCTestCase {
     func testAGrantedFounderWithNoSidecarIsBlockedWithTheSidecarReason() {
         granted.insert("c1")
         let t = transport(companyId: "c1", sidecar: false)
-        XCTAssertNotEqual(t, .local, "a missing runner is not a local turn")
+        XCTAssertNotEqual(t, .local(.claudeCode), "a missing runner is not a local turn")
         guard case .blocked(let reason) = t else {
             return XCTFail("expected blocked, got \(t)")
         }
@@ -196,7 +234,7 @@ final class ChatTransportRouterTests: XCTestCase {
     /// The load-bearing totality test: it fails to COMPILE the day someone adds a case that
     /// reaches a hosted endpoint, which is the only moment that mistake is cheap.
     func testChatTransportIsOnlyEverLocalOrBlocked() {
-        let cases: [ChatTransportRouter.Transport] = [.local, .blocked(.notGranted)]
+        let cases: [ChatTransportRouter.Transport] = [.local(.claudeCode), .blocked(.notGranted)]
         for c in cases {
             switch c {
             case .local, .blocked: continue   // exhaustive: adding a case breaks the build

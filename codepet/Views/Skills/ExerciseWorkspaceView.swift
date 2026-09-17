@@ -18,7 +18,7 @@ struct ExerciseWorkspaceView: View {
     @EnvironmentObject private var challengeProgress: ChallengeProgress
     @EnvironmentObject private var appState: AppState
 
-    @StateObject private var runner = ClaudeCodeRunner()
+    @StateObject private var runner = CLIRunner()
     @State private var promptText = ""
     @State private var sandboxPath = ""
     @State private var sandboxError: String? = nil

@@ -169,7 +169,18 @@ struct RunTaskResponse: Codable {
 /// Codepet no longer holds.
 enum RunTaskClient {
 
-    static func run(_ req: RunTaskRequest) async -> RunTaskResponse? {
+    /// `prefer` is forwarded straight to `LocalTransportRouter.forOneShot` — the seam that
+    /// was ALWAYS there and never wired to anything (review Finding 1, Task 6): a caller
+    /// naming a provider it wants (the re-run button) can now actually reach it, honoured
+    /// only when the founder has granted that provider (see `chooseProvider`).
+    ///
+    /// This still resolves its OWN transport — the global `activeCompanyId` mirror and a
+    /// fresh `ProviderAuthorisation()` — which is exactly right for the ordinary run path
+    /// (nobody else has an opinion to reconcile it against) and exactly WRONG for a caller
+    /// that must stamp a deliverable with the provider that ran: that caller needs a single
+    /// resolution shared by both the stamp and the execution, not two separate ones that
+    /// happen to agree. `runResolved` below is that caller's entry point instead.
+    static func run(_ req: RunTaskRequest, prefer: AIProvider? = nil) async -> RunTaskResponse? {
         #if DEBUG
         // `usesMockTransport`, not `enabled`: under `CODEPET_LIVE_AI` the fixture board and
         // tasks stay exactly as they are, but the run itself falls through to the founder's
@@ -178,23 +189,36 @@ enum RunTaskClient {
         #endif
         // Fail-open is preserved, but the reason is LOGGED — a run that silently produced
         // nothing is the hardest failure here to diagnose.
-        switch LocalTransportRouter.forOneShot() {
-        case .local:
-            do {
-                let body = try JSONEncoder().encode(req)
-                let out = try await LocalOneShotRunner.run(op: "runTask", body: body)
-                let decoded = try JSONDecoder().decode(RunTaskResponse.self, from: out)
-                LocalTransportRouter.log.error(
-                    "local runTask succeeded: kind=\(decoded.kind, privacy: .public) title=\(decoded.title, privacy: .public) bodyLen=\(decoded.body.count, privacy: .public)")
-                return decoded
-            } catch {
-                LocalTransportRouter.log.error(
-                    "local runTask failed: \(error.localizedDescription, privacy: .public)")
-                return nil
-            }
+        switch LocalTransportRouter.forOneShot(prefer: prefer) {
+        case .local(let provider):
+            return await runResolved(req, provider: provider)
         case .blocked(let reason):
             LocalTransportRouter.log.error(
                 "runTask blocked: \(String(describing: reason), privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Executes against an ALREADY-DECIDED provider — no transport resolution happens here,
+    /// deliberately. `run(_:prefer:)` above still asks `LocalTransportRouter` its own
+    /// question and then delegates here with the answer; a caller that already asked that
+    /// question itself (to stamp a deliverable with what is about to run) calls straight in
+    /// here instead, so the stamp and the execution can never name different providers — see
+    /// `CompanyStore.reRunDeliverable`, the only such caller today.
+    static func runResolved(_ req: RunTaskRequest, provider: AIProvider) async -> RunTaskResponse? {
+        #if DEBUG
+        if MockChat.usesMockTransport { return await MockChat.runResult(req) }
+        #endif
+        do {
+            let body = try JSONEncoder().encode(req)
+            let out = try await LocalOneShotRunner.run(op: "runTask", body: body, provider: provider)
+            let decoded = try JSONDecoder().decode(RunTaskResponse.self, from: out)
+            LocalTransportRouter.log.error(
+                "local runTask succeeded: kind=\(decoded.kind, privacy: .public) title=\(decoded.title, privacy: .public) bodyLen=\(decoded.body.count, privacy: .public) provider=\(provider.rawValue, privacy: .public)")
+            return decoded
+        } catch {
+            LocalTransportRouter.log.error(
+                "local runTask failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

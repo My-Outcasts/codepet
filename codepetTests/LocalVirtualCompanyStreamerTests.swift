@@ -93,19 +93,34 @@ final class LocalVirtualCompanyStreamerTests: XCTestCase {
 /// buys — the measured ~$0.20 against ~$0.005 for an ordinary turn.
 final class VirtualCompanyTransportTests: XCTestCase {
 
+    /// Claude Code grants. Named for the plan it spends, because the grant is now per
+    /// PROVIDER — a founder who granted this one was never asked about Codex.
     private var granted: Set<String> = []
+    /// Codex grants, kept separate so a case can hold one WITHOUT the other. A single table
+    /// would make "a Codex grant does not route to Claude Code" unprovable here.
+    private var codexGranted: Set<String> = []
 
-    private var authorisation: ClaudeCodeAuthorisation {
-        ClaudeCodeAuthorisation(
-            isAuthorised: { [self] in granted.contains($0) },
-            setAuthorised: { [self] id, on in
-                if on { granted.insert(id) } else { granted.remove(id) }
-            })
+    private var authorisation: ProviderAuthorisation {
+        ProviderAuthorisation(
+            isAuthorised: { [self] provider, id in
+                switch provider {
+                case .claudeCode: return granted.contains(id)
+                case .codex:      return codexGranted.contains(id)
+                }
+            },
+            setAuthorised: { [self] provider, id, on in
+                switch provider {
+                case .claudeCode: if on { granted.insert(id) } else { granted.remove(id) }
+                case .codex:      if on { codexGranted.insert(id) } else { codexGranted.remove(id) }
+                }
+            }
+        )
     }
 
     override func setUp() {
         super.setUp()
         granted = []
+        codexGranted = []
         LocalTransportRouter.apply(companyId: nil)
     }
 
@@ -129,7 +144,7 @@ final class VirtualCompanyTransportTests: XCTestCase {
         XCTAssertEqual(
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
-            .local)
+            .local(.claudeCode))
     }
 
     /// THE case that matters here. A silent fallback would spend the API key the grant exists
@@ -152,7 +167,7 @@ final class VirtualCompanyTransportTests: XCTestCase {
         XCTAssertEqual(
             LocalTransportRouter.transport(companyId: "c1", authorisation: authorisation,
                                            sidecarAvailable: { true }),
-            .local)
+            .local(.claudeCode))
         guard case .blocked(.sidecarMissing) = LocalTransportRouter.transport(
             companyId: "c1", authorisation: authorisation, sidecarAvailable: { false }) else {
             return XCTFail("a missing bundle must not read as available")

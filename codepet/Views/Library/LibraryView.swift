@@ -451,6 +451,7 @@ struct DeliverableDetailView: View {
 struct DeliverableBodyView: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
+    @EnvironmentObject private var companyStore: CompanyStore
 
     /// Both hosts of this dispatch are SHEETS — the Library's detail sheet and the Tasks draft
     /// preview — and a sheet already frames what is inside it. So the card is switched off here,
@@ -505,7 +506,11 @@ struct DeliverableBodyView: View {
             default:
                 DeliverableFrame(eyebrow: deliverable.kind.label(lang),
                                  action: .copy(deliverable.body),
-                                 export: deliverable) {
+                                 export: deliverable,
+                                 provenance: deliverable.producedBy,
+                                 lang: lang,
+                                 otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
+                                 onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
                     MarkdownView(markdown: deliverable.body)
                 }
             }

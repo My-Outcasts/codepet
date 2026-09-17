@@ -25,7 +25,7 @@ protocol ShellRunning {
 /// The login shell is not a stylistic choice: an app launched from Finder does not
 /// inherit the PATH set by the founder's profile, and `claude` commonly lives at
 /// `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, or an npm global.
-/// `ClaudeCodeRunner` already spawns this way; this is that convention extracted so
+/// `CLIRunner` already spawns this way; this is that convention extracted so
 /// more than one caller can share it rather than inventing a second one.
 ///
 /// The app is not sandboxed (`com.apple.security.app-sandbox = false`), so spawning is

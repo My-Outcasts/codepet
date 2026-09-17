@@ -254,7 +254,7 @@ struct CodeRunCardView: View {
 
     // MARK: - Diff card
 
-    @ViewBuilder private func diffCard(_ diff: ClaudeCodeRunner.FileDiff, run: EditCodeRun) -> some View {
+    @ViewBuilder private func diffCard(_ diff: CLIRunner.FileDiff, run: EditCodeRun) -> some View {
         let key = relKey(for: diff, in: run)
         let isOn = accepted.contains(key)
         VStack(alignment: .leading, spacing: 0) {
@@ -289,7 +289,7 @@ struct CodeRunCardView: View {
         .opacity(isOn ? 1 : 0.55)   // a deselected file dims — it won't be committed
     }
 
-    @ViewBuilder private func diffLines(_ diff: ClaudeCodeRunner.FileDiff) -> some View {
+    @ViewBuilder private func diffLines(_ diff: CLIRunner.FileDiff) -> some View {
         let shown = Array(diff.lines.prefix(maxLinesPerFile))
         let overflow = diff.lines.count - shown.count
         VStack(alignment: .leading, spacing: 0) {
@@ -307,7 +307,7 @@ struct CodeRunCardView: View {
     }
 
     /// One diff line — shared by the inline (capped) card and the full-diff sheet.
-    private func diffLineRow(_ line: ClaudeCodeRunner.FileDiff.Line) -> some View {
+    private func diffLineRow(_ line: CLIRunner.FileDiff.Line) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(marker(line.kind)).frame(width: 8, alignment: .leading)
             Text(line.text.isEmpty ? " " : line.text)
@@ -444,7 +444,7 @@ struct CodeRunCardView: View {
     /// The relative path (in `run.acceptedPaths`) that identifies this diff. The
     /// coordinator derived acceptedPaths 1:1 from the diffs, so each diff's absolute
     /// path ends with exactly one accepted relative path; fall back to the filename.
-    private func relKey(for diff: ClaudeCodeRunner.FileDiff, in run: EditCodeRun) -> String {
+    private func relKey(for diff: CLIRunner.FileDiff, in run: EditCodeRun) -> String {
         run.acceptedPaths.first { diff.path == $0 || diff.path.hasSuffix("/" + $0) } ?? diff.fileName
     }
 
@@ -464,17 +464,17 @@ struct CodeRunCardView: View {
         return s.contains("install") || s.contains("path") || s.contains("sign in") || s.contains("log in")
     }
 
-    private func marker(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> String {
+    private func marker(_ kind: CLIRunner.FileDiff.LineKind) -> String {
         switch kind { case .added: return "+"; case .removed: return "-"; case .context: return " " }
     }
-    private func lineFg(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> Color {
+    private func lineFg(_ kind: CLIRunner.FileDiff.LineKind) -> Color {
         switch kind {
         case .added:   return CodepetTheme.primaryText
         case .removed: return CodepetTheme.mutedText
         case .context: return CodepetTheme.mutedText
         }
     }
-    private func lineBg(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> Color {
+    private func lineBg(_ kind: CLIRunner.FileDiff.LineKind) -> Color {
         switch kind {
         case .added:   return Color.green.opacity(0.14)
         case .removed: return Color.red.opacity(0.12)
@@ -484,8 +484,8 @@ struct CodeRunCardView: View {
 }
 
 #if DEBUG
-private func _demoDiff() -> ClaudeCodeRunner.FileDiff {
-    ClaudeCodeRunner.FileDiff(path: "/proj/hello.js", isNewFile: false, lines: [
+private func _demoDiff() -> CLIRunner.FileDiff {
+    CLIRunner.FileDiff(path: "/proj/hello.js", isNewFile: false, lines: [
         .init(kind: .context, text: "function greet(name) {"),
         .init(kind: .removed, text: "  return \"Hi \" + name;"),
         .init(kind: .added,   text: "  return \"Hello, \" + name + \"!\";"),

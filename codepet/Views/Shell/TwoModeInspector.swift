@@ -15,7 +15,7 @@ import SwiftUI
 ///   seen two ways, not two objects.
 struct TwoModeInspector: View {
     @Binding var tabs: InspectorTabs
-    let diffs: [ClaudeCodeRunner.FileDiff]
+    let diffs: [CLIRunner.FileDiff]
     /// The branch the change is committed to, when there is one. Shown in the
     /// breadcrumb because "which branch" is half of what makes a diff safe to read.
     let branch: String?
@@ -155,21 +155,21 @@ struct TwoModeInspector: View {
         }
     }
 
-    private func prefix(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> String {
+    private func prefix(_ kind: CLIRunner.FileDiff.LineKind) -> String {
         switch kind {
         case .added: return "+ "
         case .removed: return "− "
         case .context: return "  "
         }
     }
-    private func ink(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> Color {
+    private func ink(_ kind: CLIRunner.FileDiff.LineKind) -> Color {
         switch kind {
         case .added: return CodepetTheme.accentGreen
         case .removed: return CodepetTheme.accentOrange
         case .context: return CodepetTheme.mutedText
         }
     }
-    private func tint(_ kind: ClaudeCodeRunner.FileDiff.LineKind) -> Color {
+    private func tint(_ kind: CLIRunner.FileDiff.LineKind) -> Color {
         switch kind {
         case .added: return CodepetTheme.accentGreen.opacity(0.10)
         case .removed: return CodepetTheme.accentOrange.opacity(0.10)

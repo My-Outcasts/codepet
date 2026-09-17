@@ -236,7 +236,7 @@ struct SessionChatPanel: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.pixelSystem(size: 11))
                 .foregroundColor(CodepetTheme.accentOrange)
-            Text(errorText(error))
+            Text(Self.errorText(error))
                 .font(CodepetTheme.body(11))
                 .foregroundColor(CodepetTheme.mutedText)
         }
@@ -248,7 +248,20 @@ struct SessionChatPanel: View {
         )
     }
 
-    private func errorText(_ error: SessionChatController.ChatError) -> String {
+    /// `static` and free of `self` on purpose — same reasoning as `BlockedOffer.resolve` and
+    /// `DraftCardCopy.shouldShowNotFiledNote`: a pure function a test can call directly, no
+    /// view, no `@EnvironmentObject`.
+    ///
+    /// **Structural split, not a string check.** `.blocked` and `.networkOrServer` used to be
+    /// one case (`.networkOrServer`), and rendering `message` for both is exactly what let a
+    /// raw `NSURLErrorDomain` dump reach a founder's chat panel on an ordinary dropped
+    /// connection — the fix that made `.blocked` copy visible made every OTHER producer of
+    /// that case visible too. `.blocked` is founder-authored prose (`BlockedOffer`/
+    /// `BlockReason`, already in her language) and renders verbatim; `.networkOrServer` is
+    /// diagnostic-only (an HTTP status, `"malformed response"`, `String(describing:)` on a
+    /// thrown error) and NEVER renders verbatim — the generic fallback covers it every time,
+    /// not deleted, so a real network failure still says something useful.
+    static func errorText(_ error: SessionChatController.ChatError) -> String {
         switch error {
         case .notSignedIn: return "Sign in to chat with your pet."
         case .rateLimited(let resetAt, _):
@@ -257,6 +270,8 @@ struct SessionChatPanel: View {
                 return "Daily limit reached. Comes back at \(f.string(from: r))."
             }
             return "You've reached today's limit."
+        case .blocked(let message):
+            return message
         case .networkOrServer:
             return "Could not reach your pet — try again."
         }

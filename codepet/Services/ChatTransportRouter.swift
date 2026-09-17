@@ -31,7 +31,18 @@ enum ChatTransportRouter {
     static let log = Logger(subsystem: "app.murror.codepet", category: "ChatTransport")
 
     enum Transport: Equatable {
-        case local
+        /// Runs on the founder's own machine, on the named provider's plan.
+        ///
+        /// **It does not vary yet, and carrying it anyway is deliberate.** No chat path can
+        /// run a second CLI this phase, so `transport` below answers `.claudeCode`
+        /// unconditionally. The payload is here because this enum is documented (just below)
+        /// as holding `LocalTransportRouter.Transport`'s shape, and leaving one of them bare
+        /// while the other carried a provider is exactly the drift that comment forbids.
+        ///
+        /// **Do not read this as a selectable choice.** A router that could answer `.codex`
+        /// here would promise the founder something no chat path can honour. The day chat
+        /// runs on a second CLI, the shape is already right and only the derivation changes.
+        case local(AIProvider)
         /// Cannot run here, and why. **There is deliberately no hosted case**: Codepet holds
         /// no Anthropic key, so "fall back to the Cloud Function" is not a slower success, it
         /// is a 401 the founder cannot act on. Shaped exactly like
@@ -42,20 +53,22 @@ enum ChatTransportRouter {
     /// Which transport a turn should use.
     ///
     /// Deliberately does NOT probe for `claude` — that costs two subprocesses and would
-    /// run on every message. `ClaudeCodeEnvironment` answers that question in Settings,
+    /// run on every message. `CLIEnvironment` answers that question in Settings,
     /// where the founder is looking at the answer. A `claude` that is missing at run time
     /// surfaces through the run's own stderr instead, which is where the real reason is.
     static func transport(
         companyId: String?,
-        authorisation: ClaudeCodeAuthorisation = ClaudeCodeAuthorisation(),
+        authorisation: ProviderAuthorisation = ProviderAuthorisation(),
         sidecarAvailable: () -> Bool = { LocalChatStreamer.isAvailable() }
     ) -> Transport {
         // No company id means no grant can exist. That used to route to the Cloud Function;
         // there is nothing there to route to now, so it blocks on the grant it lacks.
         guard let companyId, !companyId.isEmpty else { return .blocked(.notGranted) }
-        guard authorisation.isAuthorised(companyId) else { return .blocked(.notGranted) }
+        guard authorisation.isAuthorised(.claudeCode, companyId) else { return .blocked(.notGranted) }
         guard sidecarAvailable() else { return .blocked(.sidecarMissing) }
-        return .local
+        // Unconditional, and it is the whole of chat's provider story: chat has one runner.
+        // See `Transport.local` above for why the value is carried at all.
+        return .local(.claudeCode)
     }
 
     /// Drop-in for `CompanyChatClient.send`: the NON-STREAMING retry, routed the same way.
@@ -125,8 +138,8 @@ enum ChatTransportRouter {
     /// Drop-in for `CompanyChatClient.sendStream`: same signature, routes per turn.
     static func sendStream(_ req: CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> {
         switch transport(companyId: req.companyId) {
-        case .local:
-            log.info("chat turn routed to the founder's Claude Code")
+        case .local(let provider):
+            log.info("chat turn routed to the founder's \(provider.displayName, privacy: .public)")
             return LocalChatStreamer.sendStream(req)
         case .blocked(let reason):
             log.error("blocked: \(String(describing: reason), privacy: .public)")

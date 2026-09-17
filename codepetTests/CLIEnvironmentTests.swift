@@ -24,21 +24,21 @@ final class FakeShell: ShellRunning {
 
 // MARK: - Install detection
 
-final class ClaudeCodeEnvironmentTests: XCTestCase {
+final class CLIEnvironmentTests: XCTestCase {
 
     func testInstallIsMissingOnlyWhenEveryKnownPathFails() async {
         let shell = FakeShell()   // everything falls through to 127
-        let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
+        let install = await CLIEnvironment.probeInstall(shell: shell)
         XCTAssertEqual(install, .missing)
         // PATH first, then every documented install location. Concluding `.missing`
         // without checking them would tell a founder to install software they have.
-        XCTAssertEqual(shell.commandsRun.count, 1 + ClaudeCodeEnvironment.knownInstallPaths.count)
+        XCTAssertEqual(shell.commandsRun.count, 1 + CLIEnvironment.knownInstallPaths.count)
     }
 
     func testInstallReadsVersionFromPath() async {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)\n")
-        let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
+        let install = await CLIEnvironment.probeInstall(shell: shell)
         XCTAssertEqual(install, .present(version: "2.1.241"))
         // One command: found on PATH, so no absolute-path fallbacks were needed.
         XCTAssertEqual(shell.commandsRun.count, 1)
@@ -48,7 +48,7 @@ final class ClaudeCodeEnvironmentTests: XCTestCase {
         let shell = FakeShell()
         // Bare `claude` is not found, but the native installer's location answers.
         shell.stub(".local/bin/claude", stdout: "2.1.241 (Claude Code)")
-        let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
+        let install = await CLIEnvironment.probeInstall(shell: shell)
         XCTAssertEqual(install, .present(version: "2.1.241"))
     }
 
@@ -58,14 +58,14 @@ final class ClaudeCodeEnvironmentTests: XCTestCase {
     func testUnparseableVersionStillCountsAsPresent() async {
         let shell = FakeShell()
         shell.stub("--version", stdout: "some future format\n")
-        let install = await ClaudeCodeEnvironment.probeInstall(shell: shell)
+        let install = await CLIEnvironment.probeInstall(shell: shell)
         XCTAssertEqual(install, .present(version: ""))
     }
 }
 
 // MARK: - Auth detection
 
-extension ClaudeCodeEnvironmentTests {
+extension CLIEnvironmentTests {
 
     func testAuthReadsLoggedInAccount() async {
         let shell = FakeShell()
@@ -80,7 +80,7 @@ extension ClaudeCodeEnvironmentTests {
           "subscriptionType": "team"
         }
         """)
-        let auth = await ClaudeCodeEnvironment.probeAuth(shell: shell)
+        let auth = await CLIEnvironment.probeAuth(shell: shell)
         XCTAssertEqual(auth, .loggedIn(.init(
             email: "founder@example.com",
             authMethod: "claude.ai",
@@ -93,7 +93,7 @@ extension ClaudeCodeEnvironmentTests {
     func testAuthReadsLoggedOut() async {
         let shell = FakeShell()
         shell.stub("auth status", stdout: #"{"loggedIn": false}"#)
-        let auth = await ClaudeCodeEnvironment.probeAuth(shell: shell)
+        let auth = await CLIEnvironment.probeAuth(shell: shell)
         XCTAssertEqual(auth, .loggedOut)
     }
 
@@ -103,14 +103,14 @@ extension ClaudeCodeEnvironmentTests {
     func testAuthIsUnknownWhenSubcommandIsAbsent() async {
         let shell = FakeShell()
         shell.stub("auth status", stderr: "error: unknown command 'auth'", exit: 1)
-        let auth = await ClaudeCodeEnvironment.probeAuth(shell: shell)
+        let auth = await CLIEnvironment.probeAuth(shell: shell)
         XCTAssertEqual(auth, .unknown)
     }
 
     func testAuthIsUnknownWhenJSONDoesNotParse() async {
         let shell = FakeShell()
         shell.stub("auth status", stdout: "Logged in as someone")
-        let auth = await ClaudeCodeEnvironment.probeAuth(shell: shell)
+        let auth = await CLIEnvironment.probeAuth(shell: shell)
         XCTAssertEqual(auth, .unknown)
     }
 
@@ -120,7 +120,7 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stdout: #"{"loggedIn": false}"#)
-        _ = await ClaudeCodeEnvironment.probe(shell: shell, authorised: false)
+        _ = await CLIEnvironment.probe(shell: shell, authorised: false)
         for command in shell.commandsRun {
             XCTAssertFalse(command.contains("setup-token"), "must not mint a token")
             XCTAssertFalse(command.contains("print-credentials"), "must not read credentials")
@@ -131,11 +131,11 @@ extension ClaudeCodeEnvironmentTests {
 
 // MARK: - Combined probe and blockers
 
-extension ClaudeCodeEnvironmentTests {
+extension CLIEnvironmentTests {
 
     func testProbeSkipsAuthWhenNotInstalled() async {
         let shell = FakeShell()
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: false)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: false)
         XCTAssertEqual(status.install, .missing)
         XCTAssertEqual(status.auth, .unknown)
         // A second command-not-found tells the founder nothing the first did not.
@@ -146,7 +146,7 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stdout: #"{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "team"}"#)
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         XCTAssertTrue(status.isReady)
         XCTAssertNil(status.blocker)
     }
@@ -155,7 +155,7 @@ extension ClaudeCodeEnvironmentTests {
     /// an instruction they cannot follow.
     func testBlockerIsNotInstalledBeforeNotSignedIn() async {
         let shell = FakeShell()
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         XCTAssertFalse(status.isReady)
         XCTAssertEqual(status.blocker, .notInstalled)
     }
@@ -164,7 +164,7 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stdout: #"{"loggedIn": false}"#)
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         XCTAssertEqual(status.blocker, .notSignedIn)
     }
 
@@ -172,7 +172,7 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stderr: "unknown command", exit: 1)
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         // The fix is updating Claude Code, not signing in.
         XCTAssertEqual(status.blocker, .versionUnknown)
     }
@@ -180,7 +180,7 @@ extension ClaudeCodeEnvironmentTests {
 
 // MARK: - Credential environment scrubbing
 
-extension ClaudeCodeEnvironmentTests {
+extension CLIEnvironmentTests {
 
     /// The list is the contract: credential precedence puts both of these ABOVE the
     /// founder's subscription, and under `-p` a present key is always used.
@@ -210,7 +210,7 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stdout: #"{"loggedIn": true, "authMethod": "console", "apiProvider": "firstParty"}"#)
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         XCTAssertTrue(status.isReady, "a Console account works — this is a warning, not a blocker")
         XCTAssertEqual(status.billingWarning, .consoleAccount)
     }
@@ -219,13 +219,13 @@ extension ClaudeCodeEnvironmentTests {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")
         shell.stub("auth status", stdout: #"{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}"#)
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         XCTAssertNil(status.billingWarning)
     }
 
     func testNoBillingWarningWhenNotSignedIn() async {
         let shell = FakeShell()
-        let status = await ClaudeCodeEnvironment.probe(shell: shell, authorised: true)
+        let status = await CLIEnvironment.probe(shell: shell, authorised: true)
         // Nothing to warn about yet; the blocker already says what is wrong.
         XCTAssertNil(status.billingWarning)
         XCTAssertEqual(status.blocker, .notInstalled)
@@ -275,5 +275,130 @@ final class ClaudeLoginCueTests: XCTestCase {
             XCTAssertNil(ClaudeLoginCue.cue(for: line),
                          "cue parsing must not reach a verdict from prose: \(line)")
         }
+    }
+}
+
+// MARK: - Per-provider probe
+
+extension CLIEnvironmentTests {
+
+    func testCodexVersionIsReadFromItsOwnBinary() async {
+        let shell = FakeShell()
+        shell.stub("codex --version", stdout: "codex-cli 0.154.0")
+        let install = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
+        XCTAssertEqual(install, .present(version: "0.154.0"))
+    }
+
+    /// Claude installed and Codex absent must not read as both present. This is the fact
+    /// every screen in the provider-choice UI branches on.
+    func testProvidersAreProbedIndependently() async {
+        let shell = FakeShell()
+        shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
+        // No `codex` response: FakeShell falls back to exit 127, i.e. not found.
+        let claude = await CLIEnvironment.probeInstall(provider: .claudeCode, shell: shell)
+        let codex  = await CLIEnvironment.probeInstall(provider: .codex, shell: shell)
+        XCTAssertEqual(claude, .present(version: "2.1.241"))
+        XCTAssertEqual(codex, .missing)
+    }
+
+    /// Verified on the real binary: exit 0 with "Logged in using ChatGPT".
+    func testCodexSignedInIsReadFromExitCode() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Logged in using ChatGPT", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        // Codex reports no account detail at all — an empty Account, never `.unknown`.
+        XCTAssertEqual(auth, .loggedIn(CLIStatus.Account(email: nil, authMethod: nil,
+                                                        apiProvider: nil, subscriptionType: nil,
+                                                        orgName: nil)))
+    }
+
+    /// Verified with CODEX_HOME pointed at an empty dir: exit 1, "Not logged in".
+    /// **The bug that shipped, and that only running the app found.**
+    ///
+    /// `codex login status` puts its answer on STDERR and leaves stdout EMPTY. Every earlier
+    /// test in this file fed the string through `stdout:`, so all of them passed while a
+    /// signed-in founder's Codex probe returned `.unknown` — which made `CLIStatus.account`
+    /// nil, which removed her Codex grant row from Settings entirely. She could not grant
+    /// Codex at all, and nothing in 2653 tests noticed.
+    ///
+    /// Note the stub: `stdout` is deliberately left empty. A version of this test that also
+    /// passed `stdout:` would pass against the broken code and prove nothing.
+    func testCodexReportsSignedInWhenTheAnswerIsOnStderr() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "", stderr: "Logged in using ChatGPT", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        guard case .loggedIn = auth else {
+            return XCTFail("stderr-carried answer must read as signed in, got \(auth)")
+        }
+    }
+
+    /// The signed-out direction, also on stderr, also with empty stdout.
+    func testCodexReportsSignedOutWhenThatAnswerIsOnStderr() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "", stderr: "Not logged in", exit: 1)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .loggedOut)
+    }
+
+    func testCodexSignedOutIsNotReportedAsUnknown() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Not logged in", exit: 1)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .loggedOut)
+    }
+
+    /// Regression: "not logged in" contains "logged in" as a substring. An exit-0
+    /// response worded "Not logged in" -- unverified against the real CLI, but not
+    /// ruled out -- must not be misread as signed in just because the signed-in check
+    /// used to run first and matched the substring.
+    func testCodexExitZeroWordedNotLoggedInIsNotReadAsLoggedIn() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "Not logged in", exit: 0)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertNotEqual(auth, .loggedIn(CLIStatus.Account(email: nil, authMethod: nil,
+                                                            apiProvider: nil, subscriptionType: nil,
+                                                            orgName: nil)))
+        // The exit code and the wording disagree, so this is unresolvable -- never a
+        // false signed-out either.
+        XCTAssertEqual(auth, .unknown)
+    }
+
+    /// The Claude JSON parser must not be pointed at Codex, and vice versa. A provider
+    /// whose probe returns something unparseable is `.unknown` — never a false signed-out.
+    func testCodexGibberishIsUnknownNotSignedOut() async {
+        let shell = FakeShell()
+        shell.stub("codex login status", stdout: "\u{FFFD}garbage\u{FFFD}", exit: 3)
+        let auth = await CLIEnvironment.probeAuth(provider: .codex, shell: shell)
+        XCTAssertEqual(auth, .unknown)
+    }
+
+    func testClaudeAuthStillParsesItsJSON() async {
+        let shell = FakeShell()
+        shell.stub("claude auth status --json",
+                 stdout: #"{"loggedIn":true,"email":"f@x.com","authMethod":"claude.ai"}"#)
+        let auth = await CLIEnvironment.probeAuth(provider: .claudeCode, shell: shell)
+        guard case .loggedIn(let account) = auth else { return XCTFail("expected loggedIn") }
+        XCTAssertEqual(account.email, "f@x.com")
+        XCTAssertEqual(account.authMethod, "claude.ai")
+    }
+}
+
+// MARK: - InstalledProviders cache
+
+@MainActor
+final class InstalledProvidersTests: XCTestCase {
+
+    func testUnrefreshedCacheReportsNothingInstalled() {
+        let cache = InstalledProviders()
+        XCTAssertEqual(cache.installed, [])
+    }
+
+    func testRefreshFindsOnlyTheProviderThatAnswers() async {
+        let shell = FakeShell()
+        shell.stub("claude --version", stdout: "2.1.241 (Claude Code)")
+        // No `codex` response: falls back to exit 127, i.e. not found.
+        let cache = InstalledProviders()
+        await cache.refresh(shell: shell)
+        XCTAssertEqual(cache.installed, [.claudeCode])
     }
 }

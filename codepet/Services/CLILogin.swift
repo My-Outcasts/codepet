@@ -61,7 +61,7 @@ enum ClaudeLoginCue: Equatable {
 /// `@MainActor ObservableObject` because a view observes it. Per landmine 3 no test
 /// constructs this type — the tested part is `ClaudeLoginCue`.
 @MainActor
-final class ClaudeCodeLogin: ObservableObject {
+final class CLILogin: ObservableObject {
 
     enum Phase: Equatable {
         case idle
@@ -69,7 +69,7 @@ final class ClaudeCodeLogin: ObservableObject {
         case waitingForBrowser
         /// The callback could not be reached, so the founder has a code to paste.
         case needsCode
-        case signedIn(ClaudeCodeStatus.Account?)
+        case signedIn(CLIStatus.Account?)
         case failed(String)
     }
 
@@ -196,7 +196,7 @@ final class ClaudeCodeLogin: ObservableObject {
     private func confirmWithProbe() async {
         // Already resolved by whichever of the two paths got here first.
         if case .signedIn = phase { return }
-        switch await ClaudeCodeEnvironment.probeAuth(shell: LoginShellRunner()) {
+        switch await CLIEnvironment.probeAuth(shell: LoginShellRunner()) {
         case .loggedIn(let account):
             phase = .signedIn(account)
         case .loggedOut:

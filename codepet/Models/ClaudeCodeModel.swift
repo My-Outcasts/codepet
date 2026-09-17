@@ -110,7 +110,7 @@ enum ClaudeCodeEffort: String, CaseIterable, Identifiable, Equatable {
 
 /// The founder's model and effort choice, persisted per company id.
 ///
-/// Per company for the reason `ClaudeCodeAuthorisation` records: one Mac can hold two
+/// Per company for the reason `ProviderAuthorisation` records: one Mac can hold two
 /// accounts, and A's taste is not B's. Closures rather than direct `UserDefaults` reads so
 /// tests never touch the real domain.
 struct ClaudeCodeModelPreference {

@@ -359,11 +359,11 @@ enum CompanyData {
         // reason is LOGGED rather than swallowed, because a founder staring at an empty board
         // otherwise has nothing to act on.
         switch LocalTransportRouter.forOneShot() {
-        case .local:
+        case .local(let provider):
             do {
                 let body = try JSONEncoder().encode(
                     RoadmapRequest(language: language.rawValue, brief: brief))
-                let out = try await LocalOneShotRunner.run(op: "generateRoadmap", body: body)
+                let out = try await LocalOneShotRunner.run(op: "generateRoadmap", body: body, provider: provider)
                 return try JSONDecoder().decode(RoadmapResponse.self, from: out).tasks
             } catch {
                 LocalTransportRouter.log.error(

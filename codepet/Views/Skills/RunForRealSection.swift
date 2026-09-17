@@ -15,7 +15,7 @@ struct RunForRealSection: View {
     let scenario: PlaygroundScenario
     let teacher: PetCharacter?
 
-    @StateObject private var runner = ClaudeCodeRunner()
+    @StateObject private var runner = CLIRunner()
     @State private var expanded = false
     @State private var sandboxPath = ""
     @State private var sandboxError: String? = nil
@@ -218,7 +218,7 @@ struct RunForRealSection: View {
 // =============================================================================
 
 struct CodeExecutionView: View {
-    let events: [ClaudeCodeRunner.StreamEvent]
+    let events: [CLIRunner.StreamEvent]
     let accent: Color
 
     var body: some View {
@@ -238,7 +238,7 @@ struct CodeExecutionView: View {
     }
 
     @ViewBuilder
-    private func row(for event: ClaudeCodeRunner.StreamEvent) -> some View {
+    private func row(for event: CLIRunner.StreamEvent) -> some View {
         switch event.kind {
         case .assistantText:
             Text(event.text)
@@ -288,9 +288,9 @@ struct CodeExecutionView: View {
 
 /// Shows the actual line-level changes Claude made to each file this run, built
 /// from a pre-run snapshot diffed against what's now on disk (see
-/// ClaudeCodeRunner.computeDiffs). One collapsible block per file.
+/// CLIRunner.computeDiffs). One collapsible block per file.
 struct FileDiffView: View {
-    let diffs: [ClaudeCodeRunner.FileDiff]
+    let diffs: [CLIRunner.FileDiff]
     let accent: Color
 
     /// Files start expanded so the change is visible without an extra tap.
@@ -308,7 +308,7 @@ struct FileDiffView: View {
     }
 
     @ViewBuilder
-    private func diffBlock(_ diff: ClaudeCodeRunner.FileDiff) -> some View {
+    private func diffBlock(_ diff: CLIRunner.FileDiff) -> some View {
         let isOpen = !collapsed.contains(diff.id)
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
@@ -358,7 +358,7 @@ struct FileDiffView: View {
     }
 
     @ViewBuilder
-    private func diffLine(_ line: ClaudeCodeRunner.FileDiff.Line) -> some View {
+    private func diffLine(_ line: CLIRunner.FileDiff.Line) -> some View {
         let (bg, fg, gutter): (Color, Color, String) = {
             switch line.kind {
             case .added:   return (Color(hex: "#3FA66A").opacity(0.16), Color(hex: "#1E6B40"), "+")
@@ -382,7 +382,7 @@ struct FileDiffView: View {
         .background(bg)
     }
 
-    private func changeSummary(_ diff: ClaudeCodeRunner.FileDiff) -> String {
+    private func changeSummary(_ diff: CLIRunner.FileDiff) -> String {
         let added = diff.lines.filter { $0.kind == .added }.count
         let removed = diff.lines.filter { $0.kind == .removed }.count
         return "+\(added) −\(removed)"

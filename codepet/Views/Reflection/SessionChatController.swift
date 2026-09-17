@@ -11,6 +11,16 @@ final class SessionChatController: ObservableObject {
     enum ChatError: Equatable {
         case notSignedIn
         case rateLimited(resetAt: Date?, limit: Int?)
+        /// Founder-authored copy, already in her language — a `BlockedOffer`/`BlockReason`
+        /// sentence. Structurally separate from `networkOrServer` so the panel can render it
+        /// VERBATIM without a fallback ever swallowing it, and so a diagnostic string can
+        /// never end up here by accident.
+        case blocked(message: String)
+        /// Diagnostic text only — an HTTP status, `"malformed response"`, or
+        /// `String(describing:)` on a thrown error. Never founder-authored prose, so the panel
+        /// must never render this verbatim (regression: it once did, showing raw
+        /// `NSURLErrorDomain` dumps in English on an ordinary dropped connection) — it always
+        /// falls back to a generic sentence instead.
         case networkOrServer(message: String)
     }
 
@@ -18,9 +28,25 @@ final class SessionChatController: ObservableObject {
     private let store: SessionChatStore
     private var currentTask: Task<Void, Never>?
 
+    /// Probed once at construction, not per send — same reasoning as `CompanyStore`'s own
+    /// instance (`InstalledProviders`'s doc comment: a subprocess per render/call is the
+    /// thing this cache exists to avoid). This chat runs through `LocalTransportRouter
+    /// .forOneShot()` (Task 9's context note: no `prefer`, so either CLI may pick it up), which
+    /// is why a `.blocked(.notGranted)` reaching this controller needs to know what is
+    /// actually installed before naming a fix.
+    let installedProviders = InstalledProviders()
+
     init(api: ReflectionAPIClientProtocol, store: SessionChatStore) {
         self.api = api
         self.store = store
+        // Skipped under XCTest — same reasoning as `CompanyStore.hydrate` (Task 9): a real
+        // subprocess probe racing every test that constructs this controller would make
+        // `.blocked` mapping depend on whatever CLIs happen to be on the machine running the
+        // suite. A test that wants a specific installed set calls `installedProviders.apply(_:)`
+        // itself.
+        if !AppEnvironment.isRunningTests {
+            Task { await installedProviders.refresh() }
+        }
     }
 
     /// Send a user message and stream the pet reply for the given session.
@@ -61,7 +87,14 @@ final class SessionChatController: ObservableObject {
             } catch let apiError as ReflectionAPIError {
                 streamingText = ""
                 inFlightSessionId = nil
-                error = Self.map(apiError)
+                // `request.language` (a wire `String`, "en"/"vi") is the founder's language for
+                // THIS turn — reachable here because `request` is this method's own parameter,
+                // captured by the closure like everything else in this `do` block. Task 9: the
+                // pre-existing gap was that `map` had no Vietnamese branch at all and answered
+                // English unconditionally, which this closes now that the call site actually has
+                // somewhere to read the language from.
+                let lang = AppLanguage(rawValue: request.language) ?? .en
+                error = Self.map(apiError, installed: installedProviders.installed, lang: lang)
             } catch is CancellationError {
                 streamingText = ""
                 inFlightSessionId = nil
@@ -82,7 +115,11 @@ final class SessionChatController: ObservableObject {
         inFlightSessionId = nil
     }
 
-    private static func map(_ apiError: ReflectionAPIError) -> ChatError {
+    /// `installed`/`lang` are only read by `.blocked` — every other case's message is
+    /// language-agnostic (an HTTP status, a describing-error string), so they stay as they
+    /// were rather than gaining a Vietnamese branch that has nothing to translate.
+    private static func map(_ apiError: ReflectionAPIError, installed: Set<AIProvider>,
+                           lang: AppLanguage) -> ChatError {
         switch apiError {
         case .notSignedIn, .optedOut:
             return .notSignedIn
@@ -98,8 +135,17 @@ final class SessionChatController: ObservableObject {
             return .networkOrServer(message: String(describing: err))
         case .blocked(let reason):
             // The reason already names the founder's next move; wrapping it in "network or
-            // server" wording would be a lie about whose problem it is.
-            return .networkOrServer(message: reason.founderText)
+            // server" wording would be a lie about whose problem it is. This chat runs
+            // through `LocalTransportRouter.forOneShot()` with no `prefer` (see
+            // `ReflectionAPIClient.localOneShot`) — either CLI may pick it up, so the surface
+            // is `.anyProvider`: a Codex-only founder gets the Codex grant named, not sent to
+            // grant a Claude plan she does not have (Task 9).
+            //
+            // `.blocked`, not `.networkOrServer` — this text is founder-authored prose and
+            // must render verbatim. `.networkOrServer` is reserved for diagnostic strings
+            // (HTTP status, `String(describing:)`) that the panel deliberately never shows.
+            let offer = BlockedOffer.resolve(reason: reason, installed: installed)
+            return .blocked(message: offer.founderText(lang: lang))
         }
     }
 }

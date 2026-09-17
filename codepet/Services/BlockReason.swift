@@ -23,6 +23,17 @@ enum BlockReason: Equatable {
     case sidecarMissing
     /// A build was asked for with no project folder linked to this session.
     case noFolderLinked
+    /// Granted nothing, and we know which plan to ask about. Separate from `notGranted`
+    /// because the founder who has a ChatGPT plan and no Claude one is told to grant the
+    /// thing she actually owns, rather than being sent to install a competitor.
+    case notGrantedProvider(AIProvider)
+    /// This surface runs on Claude Code and no other. Chat streaming and the virtual
+    /// company meeting are the two: different protocol risk entirely — event framing, and
+    /// an MCP tool story Codex's CLI may not have.
+    case needsClaudeCode
+
+    /// Convenience so call sites read as prose.
+    static func notGrantedFor(_ p: AIProvider) -> BlockReason { .notGrantedProvider(p) }
 
     var founderText: String {
         switch self {
@@ -34,6 +45,17 @@ enum BlockReason: Equatable {
             return "Codepet can't reach its local runner on this Mac. Reinstalling Codepet should restore it."
         case .noFolderLinked:
             return "Link a project folder to this session before building."
+        case .notGrantedProvider(.claudeCode):
+            return "Codepet needs permission to use your Claude plan. Turn it on to continue."
+        case .notGrantedProvider(.codex):
+            return "Codepet needs permission to use your ChatGPT plan. Turn it on to continue."
+        case .needsClaudeCode:
+            // `BlockedOffer.resolve` only ever returns `.explain(.needsClaudeCode)` when
+            // Claude Code is NOT installed (installed-but-ungranted resolves to `.grant`
+            // instead) — so installing it is the one real move here. There is no per-company
+            // provider switch anywhere in this app; naming one sent a founder hunting Settings
+            // for a control that does not exist.
+            return "Chat and meetings run on Claude Code. Install it to continue."
         }
     }
 
@@ -47,6 +69,12 @@ enum BlockReason: Equatable {
             return "Codepet không tìm thấy trình chạy cục bộ trên máy này. Cài đặt lại Codepet sẽ khôi phục nó."
         case .noFolderLinked:
             return "Hãy liên kết thư mục dự án cho phiên này trước khi build."
+        case .notGrantedProvider(.claudeCode):
+            return "Codepet cần quyền dùng gói Claude của bạn. Hãy bật để tiếp tục."
+        case .notGrantedProvider(.codex):
+            return "Codepet cần quyền dùng gói ChatGPT của bạn. Hãy bật để tiếp tục."
+        case .needsClaudeCode:
+            return "Trò chuyện và cuộc họp chạy trên Claude Code. Hãy cài đặt để tiếp tục."
         }
     }
 }

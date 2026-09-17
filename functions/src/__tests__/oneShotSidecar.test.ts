@@ -6,7 +6,9 @@ import {
   pickModel,
   schemaInstruction,
 } from "../local/oneShotOps";
-import { claudeArgs, renderPrompt } from "../local/oneShotSidecar";
+import { adapterFor, claudeArgs, renderPrompt, reportedModel } from "../local/oneShotSidecar";
+import { claudeAdapter } from "../local/cliAdapter";
+import { codexAdapter } from "../local/codexCli";
 import { ENRICH_TOOL, buildEnrichPrompt } from "../enrichBriefCore";
 import { OVERVIEW_TOOL, synthesizeSystemPrompt } from "../synthesizeBriefCore";
 import { ROADMAP_TOOL, buildRoadmapPrompt } from "../generateRoadmapCore";
@@ -94,7 +96,7 @@ describe("schemaInstruction", () => {
    * builder, so the instruction has to actually say so.
    */
   it("cancels the tool call the shared prompts ask for", () => {
-    expect(schemaInstruction({}).toLowerCase()).toContain("no tools available");
+    expect(schemaInstruction({}).toLowerCase()).toContain("do not use any tools");
   });
 
   it("asks for the object alone, with no fence and no prose", () => {
@@ -573,5 +575,84 @@ describe("the learning-layer ops", () => {
       "generateDictionary", "generateGuidance", "generatePlan", "generateRoadmap",
       "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
     ]);
+  });
+});
+
+/**
+ * WHICH CLI runs the op — the seam Phase 2 exists to open, and the two places it can lie.
+ */
+describe("choosing the provider", () => {
+  /**
+   * The default has to stay Claude. Every shipped build of the app spawns this sidecar with
+   * no provider set at all, and a default that drifted would move a founder's work onto a
+   * CLI she never granted — silently, since both answer with the same JSON.
+   */
+  it("runs on Claude Code when nothing asks for anything else", () => {
+    expect(adapterFor(undefined)).toBe(claudeAdapter);
+    expect(adapterFor("")).toBe(claudeAdapter);
+    expect(adapterFor("claude")).toBe(claudeAdapter);
+  });
+
+  it("runs on Codex when asked for", () => {
+    expect(adapterFor("codex")).toBe(codexAdapter);
+  });
+
+  /**
+   * The other half of a contract that spans two languages.
+   *
+   * Swift sets `CODEPET_CLI_PROVIDER` from `AIProvider.cliName`. For one commit it sent
+   * `rawValue` instead — `"claudeCode"` — which is not in the set above, so `adapterFor` threw
+   * and EVERY Claude one-shot op failed outright: runTask, generateRoadmap, extractDecisions,
+   * summarizeTurn, summarizeSession, chatSession, enrichBrief. A wrong-provider bug became a
+   * total-failure bug, and the Swift test asserted `"claudeCode" == "claudeCode"`, so it passed.
+   *
+   * Neither side could catch that alone. This pins the exact literals Swift is allowed to send;
+   * `LocalOneShotRunnerTests` pins that Swift sends these and not its own raw values. Changing
+   * `AIProvider.cliName` without changing this test is the mistake this exists to make loud.
+   */
+  it("accepts exactly the strings the Swift app sends, and rejects its rawValues", () => {
+    expect(adapterFor("claude")).toBe(claudeAdapter);
+    expect(adapterFor("codex")).toBe(codexAdapter);
+    // `AIProvider.rawValue` — the PERSISTED form. Never the wire word.
+    expect(() => adapterFor("claudeCode")).toThrow(/no local runner/);
+  });
+
+  /**
+   * THE guard. A name this build does not have must FAIL, not fall back: falling back would
+   * run the founder's work on the other provider's plan and report success, which is the
+   * same silent-degradation shape `--strict-config` exists to close on the Codex side.
+   * Delete the throw and this goes red.
+   */
+  it("refuses a provider it does not have rather than quietly using Claude", () => {
+    expect(() => adapterFor("gemini")).toThrow(/gemini/);
+    expect(() => adapterFor("Codex")).toThrow();
+  });
+});
+
+/**
+ * `OneShotMeta.model` reaches the founder's screen — it is written into the narrative card,
+ * the guidance body, the plan and the overview. It must never claim something answered that
+ * did not.
+ */
+describe("what goes in OneShotMeta.model", () => {
+  it("reports what answered when the CLI said", () => {
+    expect(reportedModel("claude-opus-5", claudeAdapter, "sonnet")).toBe("claude-opus-5");
+  });
+
+  /**
+   * Codex says nothing about what answered (verified: none of the four `--json` line types
+   * carries a model id). So the requested model is reported AS REQUESTED — never dressed up
+   * as the answering one — and never, on a Codex run, a Claude id.
+   */
+  it("marks the requested model as requested when nothing answered", () => {
+    const m = reportedModel(undefined, codexAdapter, "gpt-5.6-terra");
+    expect(m).toBe("codex-local (requested gpt-5.6-terra, not confirmed)");
+    expect(m).not.toMatch(/claude/i);
+  });
+
+  it("says so plainly when there was not even a request to report", () => {
+    const m = reportedModel(undefined, codexAdapter, undefined);
+    expect(m).toBe("codex-local (model not reported)");
+    expect(m).not.toMatch(/claude/i);
   });
 });

@@ -150,3 +150,38 @@ struct OnboardingStageSlider: View {
         }
     }
 }
+
+// MARK: - Previews
+//
+// This control is otherwise only reachable through onboarding, which a machine whose
+// account is already onboarded cannot get back to — prototype mode loads a fixture with
+// `onboardedAt` set, and signing out lands in the shell either way. So the canvas is the
+// only practical way to look at it.
+//
+// Both schemes, deliberately: the unfilled ticks resolve through `Color.dyn`, and their
+// dark values are the half nobody could see when they were hardcoded to the web's cream.
+
+#Preview("Stage slider — light") {
+    @Previewable @State var stage = 2
+    OnboardingStageSlider(stageIndex: $stage)
+        .padding(24)
+        .frame(width: 560)
+}
+
+#Preview("Stage slider — dark") {
+    @Previewable @State var stage = 2
+    OnboardingStageSlider(stageIndex: $stage)
+        .padding(24)
+        .frame(width: 560)
+        .preferredColorScheme(.dark)
+}
+
+/// The end labels are the ones that cannot be centred on their tick without hanging off
+/// the container, so they stay edge-aligned — this is the case that proves it.
+#Preview("Stage slider — last stage") {
+    @Previewable @State var stage = 5
+    OnboardingStageSlider(stageIndex: $stage)
+        .padding(24)
+        .frame(width: 560)
+        .preferredColorScheme(.dark)
+}

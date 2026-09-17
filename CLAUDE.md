@@ -361,6 +361,24 @@ The pipeline is finished and has never produced a release. `gh release list` is 
 - **Verified 17 Sep:** a `-configuration Release` archive carries all three sidecars. The
   only build ever checked before was Debug
 
+**There IS a working internal route while that cert is missing.** `./scripts/package-internal.sh`
+builds an Apple-Development-signed, development-provisioned `.dmg` that runs on the Macs
+registered to the team — 4 of them as of 17 Sep, and the profile now runs to 2027-09-17.
+
+- It works where an unsigned build does not for one reason: the profile grants
+  `YL72VTKBR7.*`, so the `keychain-access-groups` entitlement resolves and Firebase auth
+  works. Ad-hoc signing is what breaks sign-in, not the lack of notarization
+- **Adding a tester does NOT need the Account Holder.** An Admin registers the Mac's
+  Provisioning UDID at developer.apple.com ▸ Devices, then re-runs the script;
+  `-allowProvisioningUpdates` bakes the new device in. That is the one part of distribution
+  that is not blocked
+- Anything arriving by download, AirDrop or chat is quarantined, and a dev-signed app is not
+  notarized, so `spctl` rejects it — measured. The tester runs
+  `xattr -dr com.apple.quarantine` once. A README inside the `.dmg` says so, because
+  "damaged or incomplete" reads as a broken download rather than an unregistered Mac
+- Verified end to end 17 Sep: exported, launched from the exported path, stayed up, quit
+  cleanly, and the `.dmg` re-verified after mounting
+
 # Working agreements
 
 - **Verify, do not infer.** Several expensive detours here came from reading fallback code and concluding a Cloud Function was undeployed. `curl` the endpoint (401 means alive, 404 means absent) and read `firebase functions:log`

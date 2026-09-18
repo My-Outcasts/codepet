@@ -223,8 +223,8 @@ struct ClaudeCodePanel: View {
             // existed, and a permission whose scope is invisible is not informed
             // consent. Every feature moved onto this path gets added to this line.
             description: reachable
-                ? grantDescription(for: provider)
-                : grantDescription(for: provider) + "\n\n" + unreachableNote(for: provider)
+                ? GrantCopy.description(for: provider, lang: lang)
+                : GrantCopy.description(for: provider, lang: lang) + "\n\n" + unreachableNote(for: provider)
         ) {
             Toggle("", isOn: Binding(
                 get: { granted.contains(provider) },
@@ -246,22 +246,6 @@ struct ClaudeCodePanel: View {
         lang == .vi
             ? "\(provider.displayName) hiện không sẵn sàng trên máy này — có thể đã đăng xuất hoặc chưa cài. Quyền vẫn còn ở đây; bạn có thể tắt bất cứ lúc nào."
             : "\(provider.displayName) isn't reachable on this Mac right now — signed out, or not installed. The grant is still here, and you can turn it off any time."
-    }
-
-    /// Written out per case, like `ProviderAuthorisation.key` — the plan name and the
-    /// "your terminal's X is unaffected" reassurance are both provider-specific facts,
-    /// not a template to fill in.
-    private func grantDescription(for provider: AIProvider) -> String {
-        switch provider {
-        case .claudeCode:
-            return lang == .vi
-                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
-                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
-        case .codex:
-            return lang == .vi
-                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Codex của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Codex trong terminal không bị ảnh hưởng."
-                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Codex plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Codex is unaffected."
-        }
     }
 
     // MARK: - Conditional groups

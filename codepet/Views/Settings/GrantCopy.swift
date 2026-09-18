@@ -62,4 +62,37 @@ enum GrantCopy {
                   """
         }
     }
+
+    // MARK: - Turning it off
+
+    /// Whether switching this provider OFF costs enough to ask about first.
+    ///
+    /// **Claude only, and that asymmetry is the whole point.** Claude off stops the product:
+    /// `ChatTransportRouter.transport` blocks on the grant and `LocalTransportRouter` has no
+    /// other provider to fall through to. Codex off sends the one-shot ops back to Claude, so
+    /// a confirm there would be ceremony for a consequence that does not happen.
+    ///
+    /// Written as a switch rather than `provider == .claudeCode` so a third provider has to
+    /// state its own answer instead of silently inheriting Codex's.
+    static func needsRevokeConfirm(_ provider: AIProvider) -> Bool {
+        switch provider {
+        case .claudeCode: return true
+        case .codex:      return false
+        }
+    }
+
+    static func revokeTitle(lang: AppLanguage) -> String {
+        lang == .vi ? "Tắt quyền dùng gói Claude?" : "Turn off Claude plan access?"
+    }
+
+    /// Names the consequence in full rather than asking "are you sure?". A confirm that does
+    /// not say what happens is a speed bump, not information.
+    static func revokeBody(lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Codepet sẽ dừng hoạt động cho tới khi bạn bật lại — chat, lộ trình, nhiệm vụ, brief, quyết định và Build. Claude Code trong terminal của bạn không bị ảnh hưởng dù bật hay tắt."
+            : "Codepet stops working until you turn this back on — chat, roadmap, tasks, briefs, decisions and Build. Your terminal's Claude Code is unaffected either way."
+    }
+
+    static func revokeConfirm(lang: AppLanguage) -> String { lang == .vi ? "Tắt" : "Turn off" }
+    static func revokeCancel(lang: AppLanguage) -> String { lang == .vi ? "Huỷ" : "Cancel" }
 }

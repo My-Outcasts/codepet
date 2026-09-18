@@ -37,6 +37,21 @@ enum OnboardingProviderStep {
     /// `finish()`): none of them holds a `ProviderAuthorisation`, and `CLIEnvironment.probe`
     /// is called there with `authorised: false` hardcoded, never read from a store.
     static func passes(installed: Set<AIProvider>) -> Bool { !installed.isEmpty }
+
+    /// The gate's subtitle.
+    ///
+    /// It used to end "you'll choose whether to use it later", which is not true — without a
+    /// grant nothing in the product runs, so the later moment is a delay rather than a choice.
+    /// What IS true is that nothing is spent until she is asked, which is the promise this
+    /// screen can actually keep (`ProviderConsentFlow`, and the grant button on a blocked card).
+    ///
+    /// Moved off the view for the same reason `passes` lives here: a string inside a SwiftUI
+    /// `body` can only be asserted by building the view.
+    static func gateSubtitle(lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Codepet chạy mọi việc trên CLI bạn đã có — Claude Code hoặc Codex. Hãy cài một trong hai; Codepet sẽ hỏi bạn trước khi dùng tới hạn mức của bạn."
+            : "Codepet runs every task on a CLI you already have — Claude Code, or Codex. Install either one; Codepet will ask before it spends your plan."
+    }
 }
 
 /// The gate screen. Rendered inside the onboarding card's existing chrome (art panel,
@@ -51,12 +66,14 @@ struct OnboardingProviderGateView: View {
     let status: [AIProvider: CLIStatus]
     let probing: Bool
 
+    @Environment(\.uiLanguage) private var lang
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("One more thing before you start")
                 .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
-            Text("Codepet runs every task on a CLI you already have — Claude Code, or Codex. Install either one; you'll choose whether to use it later.")
+            Text(OnboardingProviderStep.gateSubtitle(lang: lang))
                 .font(CodepetTheme.body(14)).foregroundColor(CodepetTheme.bodyText)
                 .padding(.top, 9)
 

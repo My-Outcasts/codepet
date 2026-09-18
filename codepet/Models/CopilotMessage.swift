@@ -25,6 +25,20 @@ struct CopilotMessage: Identifiable, Equatable {
     var firstRunAction: FirstRunAction?
     /// True once the action has been tapped — hides the button.
     var actionConsumed: Bool
+
+    /// True when this message offers the first-run tour (the greeting only).
+    ///
+    /// **Its own pair of flags, not `actionConsumed`.** That Bool is already shared by
+    /// `firstRunAction`, `runProposal`, `chainOffer` and `vcRun`, so reusing it would make
+    /// "Do it with me" retire the tour chip and the reverse — two unrelated offers, one
+    /// switch. A test pins both directions.
+    ///
+    /// Declared outside the memberwise initialiser, like `supersededByRoom` and
+    /// `blockedOffer`: the store writes them onto an already-appended message, and adding
+    /// them to `init` would churn every existing call site for nothing.
+    var tourOffer: Bool = false
+    /// True once the tour has been asked for — hides the chip.
+    var tourConsumed: Bool = false
     /// First-run enrichment interview: the gap this message asks about; nil otherwise.
     var interview: InterviewGap?
     /// True once the founder has answered or skipped — collapses the card to a plain bubble.

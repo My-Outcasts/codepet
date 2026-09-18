@@ -50,7 +50,16 @@ The Codex description lists "Chat … the department room". `BlockedOffer.Surfac
 chat streaming and the virtual company meeting are `.claudeOnly`, and `ChatTransportRouter`
 answers `.claudeCode` unconditionally. Those two surfaces have never run on Codex.
 
-### 5. Onboarding promises a choice that does not exist
+### 5. `brief.summary` is empty for every account created since 26 August
+
+Onboarding's enrich step fails open onto the same dead key (full chain in A1). Nothing errors and
+nothing logs; the field is simply never written. This matters beyond the greeting: the summary
+paragraph of `OverviewIntroSheet` — the briefing finding (2) is about — is **also blank** for
+these founders, so the one screen that explains the product is currently running without its
+opening paragraph. Neither surface will say so, because both omit the paragraph rather than
+render it empty.
+
+### 6. Onboarding promises a choice that does not exist
 
 `OnboardingProviderStep.swift:61` — "Install either one; **you'll choose whether to use it
 later**." Without a grant, nothing runs. There is no choice, only a delay.
@@ -59,7 +68,7 @@ later**." Without a grant, nothing runs. There is no choice, only a delay.
 
 | Question | Decision |
 | --- | --- |
-| Where does the welcome's project read come from? | **`brief.summary ?? brief.oneLiner`**, composed locally. No model call. |
+| Where does the welcome's project read come from? | **Founder-typed brief fields**, composed locally, with `brief.summary` preferred when present. No model call. |
 | How does the feature tour reach the founder? | **Chat-native and on demand** — offered by a chip, never pushed. |
 | Does the tour call a model? | **No.** A pure builder, for the same reason the greeting is one. |
 | Is the Claude toggle still revocable? | **Yes** — with a confirm on turn-off. |
@@ -87,14 +96,35 @@ call to action:
 | Paragraph | Source | Status |
 | --- | --- | --- |
 | Lead — "{Name}, your company for {Project} is ready." | `brief.founderName`, `brief.projectName` | ships today |
-| **The read** — what Codepet understood | `brief.summary ?? brief.oneLiner` | new |
+| **The read** — what Codepet understood | founder-typed brief fields; `brief.summary` preferred when present | new |
 | **The shape** — task and phase counts | pure function over `[RoadmapTask]` | new |
 | The move — "The best first move is …" | `RoadmapEngine.nextStep` | ships today |
 
-The read reuses `brief.summary` — already written during onboarding's enrich step
-(`CompanyStoreOnboardingTests.swift:98,120`) and already rendered by `RoadmapView` and
-`OverviewIntroSheet`. Reusing it means the welcome cannot contradict the rest of the app, and
-costs nothing: it is on the brief before the greeting is built.
+**The read cannot be built on `brief.summary` alone.** An earlier draft of this spec did exactly
+that, on the grounds that onboarding's enrich step writes it. It does not, for anyone onboarding
+today:
+
+- `CompanyStore.swift:385` enriches via `ReflectionAPIClient().enrichBrief`
+- that is a Cloud Function (`ReflectionAPIClient.swift:685`) whose handler reads
+  `ANTHROPIC_API_KEY` (`functions/src/enrichBrief.ts:74-76`)
+- that key has been invalid since 26 Aug 2026
+- `CompanyStore.swift:807` is `(try? await enricher(brief)) ?? brief` — **fail-open**
+
+So `brief.summary` is silently nil for every account created after 26 Aug, which is precisely the
+population this greeting exists for. The enrich function is still deployed (`firebase
+functions:list` confirms `enrichBrief`, `companyChat`, `runTask`), so nothing errors — the field
+is just never filled. The tests that appear to prove otherwise
+(`CompanyStoreOnboardingTests.swift:98,120`) inject a stub enricher and assert on the stub.
+
+The read is therefore composed from what the **founder typed**, which is always present:
+`oneLiner`, `audience`, `stage`, `goal`. `brief.summary` is used in preference when it is
+non-nil — pre-26-Aug accounts, and any future where the enrich path is restored — so the welcome
+still cannot contradict `RoadmapView` and `OverviewIntroSheet`, which render the same field.
+
+Every read of an optional brief field goes through **`MeaningfulText.clean`**, not a bare `??`.
+That helper rejects placeholder-y values (under two characters, all digits, an email address) and
+is already the convention for this exact field at `RoadmapView.swift:62`. A bare `??` would let a
+founder who typed `x` into the one-liner see "Here's what I understood: x".
 
 **Why local, not a model call.** Chat is `.claudeOnly` and blocked without a grant. A
 model-written welcome on a fresh account is either blocked on arrival or forces the permission
@@ -106,7 +136,13 @@ ask to the front of onboarding — the trade `OnboardingProviderStep` exists to 
 that is **hand-traced and watched to fail before it passes**:
 
 - no `founderName` → lead drops the name, keeps the sentence
-- no `summary` **and** no `oneLiner` → the read paragraph is omitted entirely, never rendered empty
+- **every** read field placeholder-y or absent → the read paragraph is omitted entirely, never
+  rendered as a bare "Here's what I understood:" with nothing after it
+- `summary` nil but `oneLiner` present (**the default case today** — see A1) → the read composes
+  from typed fields and reads as a sentence, not a field dump
+- `summary` present → it wins over the composed version; the two never both render
+- a field that is placeholder-y rather than absent (`oneLiner` = "x", `stage` = "1") → dropped by
+  `MeaningfulText.clean`, indistinguishable from absent
 - no tasks → `shouldGreet` is already false; nothing is seeded
 - one task in one phase → the shape line must not read "1 tasks across 1 phases"
 
@@ -121,10 +157,17 @@ is. `environment` is omitted: it is tooling, not part of understanding what Code
 Naming a destination the router cannot resolve would render a chip that silently does nothing
 (`activateNav` returns early on an unknown destination).
 
-That chip does double duty: landing on Roadmap fires the existing `OverviewIntroSheet`, which
-already holds "How to read this map". The tour hands off to shipped work rather than duplicating
-it, and finding (2) — a briefing that never fires for chat-first founders — is closed as a
-consequence rather than as separate work.
+That chip does double duty: landing on Roadmap fires the existing `OverviewIntroSheet` (gated by
+`showMapIntro` / `markIntroSeen`, once per account), which already holds "How to read this map".
+The tour hands off to shipped work rather than duplicating it, and finding (2) — a briefing that
+never fires for chat-first founders — is closed as a consequence rather than as separate work.
+
+**The sheet arrives one paragraph short**, per finding (5): its summary line reads
+`brief.summary`, which is nil today. This spec does not fix that — the greeting's own read is
+composed locally and is unaffected — but the handoff is to a slightly thinner screen than the
+code suggests. Pointing `OverviewIntroSheet` at the same composed read is the obvious follow-up
+and is deliberately left out of scope, because it changes a screen this spec is otherwise only
+navigating to.
 
 No stepper, no coachmarks, no per-surface state.
 
@@ -215,7 +258,7 @@ landmine 3 in CLAUDE.md (the XCTest host crash on `@MainActor ObservableObject` 
 
 | Unit | Asserts |
 | --- | --- |
-| `FirstRunGreetingBuilder` | each A2 degradation path; summary preferred over oneLiner; singular/plural |
+| `FirstRunGreetingBuilder` | each A2 degradation path; `summary` wins when present; composed read when it is nil; `MeaningfulText.clean` drops "x" and "1"; singular/plural |
 | tour script builder | names every surface; is reachable with no grant |
 | `grantDescription` | Codex copy names no `.claudeOnly` surface; neither row says "old route" |
 | turn-off confirm | fires for Claude, not for Codex; Cancel leaves the grant intact |
@@ -230,3 +273,9 @@ drifted from behaviour**, and only a test that reads the string keeps them from 
 - A paused-state banner on home. Considered; it adds an app-wide state for a case the confirm
   in B3 mostly prevents. Revisit if founders still arrive at a blocked app.
 - Per-surface progressive tour reveals.
+- **Repairing or removing the dead `enrichBrief` path** (finding 5). It is a hosted AI function
+  and therefore belongs to `2026-09-15-claude-code-only-design.md`'s deletion sweep, not here.
+  This spec only stops depending on it.
+- **Pointing `OverviewIntroSheet` at the composed read** so its blank paragraph fills too. Worth
+  doing, and small once the builder exists — but it edits a screen this spec otherwise only
+  navigates to.

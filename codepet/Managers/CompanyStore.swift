@@ -643,7 +643,8 @@ final class CompanyStore: ObservableObject {
     private func seedFirstRunGreeting(language: AppLanguage) {
         guard companyId != nil else { return }
         let next = RoadmapEngine.nextStep(company.tasks)
-        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
+        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next,
+                                              tasks: company.tasks, language: language)
         chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
     }
 

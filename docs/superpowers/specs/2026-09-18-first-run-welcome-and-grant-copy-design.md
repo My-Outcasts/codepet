@@ -50,14 +50,17 @@ The Codex description lists "Chat … the department room". `BlockedOffer.Surfac
 chat streaming and the virtual company meeting are `.claudeOnly`, and `ChatTransportRouter`
 answers `.claudeCode` unconditionally. Those two surfaces have never run on Codex.
 
-### 5. `brief.summary` is empty for every account created since 26 August
+### 5. `brief.summary` is empty at the moment the greeting is built
 
-Onboarding's enrich step fails open onto the same dead key (full chain in A1). Nothing errors and
-nothing logs; the field is simply never written. This matters beyond the greeting: the summary
-paragraph of `OverviewIntroSheet` — the briefing finding (2) is about — is **also blank** for
-these founders, so the one screen that explains the product is currently running without its
-opening paragraph. Neither surface will say so, because both omit the paragraph rather than
-render it empty.
+Onboarding's enrich step runs on the founder's own Claude, which she has not granted yet —
+consent is asked at first use, and onboarding comes first. The call throws `.blocked(.notGranted)`
+and `CompanyStore:807` fails open (full chain in A1). Nothing errors on screen and the field is
+simply never written.
+
+This matters beyond the greeting: the summary paragraph of `OverviewIntroSheet` — the briefing
+finding (2) is about — is **also blank** on first run, so the one screen that explains the product
+currently opens without its opening paragraph. Neither surface says so, because both omit the
+paragraph rather than render it empty.
 
 ### 6. Onboarding promises a choice that does not exist
 
@@ -105,21 +108,56 @@ that, on the grounds that onboarding's enrich step writes it. It does not, for a
 today:
 
 - `CompanyStore.swift:385` enriches via `ReflectionAPIClient().enrichBrief`
-- that is a Cloud Function (`ReflectionAPIClient.swift:685`) whose handler reads
-  `ANTHROPIC_API_KEY` (`functions/src/enrichBrief.ts:74-76`)
-- that key has been invalid since 26 Aug 2026
-- `CompanyStore.swift:807` is `(try? await enricher(brief)) ?? brief` — **fail-open**
+- that calls `localOneShot(op: "enrichBrief", …)` (`ReflectionAPIClient.swift:1098`), which runs
+  on the founder's own Claude — **and which never returns nil**: it either returns a decoded
+  response or throws `ReflectionAPIError.blocked` (`:727-752`). The cloud `POST` written below it
+  is unreachable, and would be refused by `CloudAIBlock.blockedPaths` anyway, which lists
+  `enrichBrief` (`CloudAIBlock.swift:35`)
+- a founder in onboarding has **not granted yet** — consent is asked at first use — so
+  `LocalTransportRouter.forOneShot()` answers `.blocked(.notGranted)` and the call throws
+- `CompanyStore.swift:807` is `(try? await enricher(brief)) ?? brief` — **fail-open**, so the
+  throw is swallowed and the unenriched brief is saved
 
-So `brief.summary` is silently nil for every account created after 26 Aug, which is precisely the
-population this greeting exists for. The enrich function is still deployed (`firebase
-functions:list` confirms `enrichBrief`, `companyChat`, `runTask`), so nothing errors — the field
-is just never filled. The tests that appear to prove otherwise
+So `brief.summary` is nil for every founder at the moment the greeting is built, because
+onboarding necessarily precedes the grant. It is not nil forever: `CompanyOnboardingView` doubles
+as the brief editor, so a founder who returns and edits their brief **after** granting does get an
+enriched summary. That is exactly why the read prefers `summary` when present rather than ignoring
+it.
+
+The tests that appear to prove enrichment works
 (`CompanyStoreOnboardingTests.swift:98,120`) inject a stub enricher and assert on the stub.
 
-The read is therefore composed from what the **founder typed**, which is always present:
-`oneLiner`, `audience`, `stage`, `goal`. `brief.summary` is used in preference when it is
-non-nil — pre-26-Aug accounts, and any future where the enrich path is restored — so the welcome
-still cannot contradict `RoadmapView` and `OverviewIntroSheet`, which render the same field.
+*(An earlier revision of this spec blamed the deleted `ANTHROPIC_API_KEY`. That is the wrong
+mechanism — `enrichBrief` has a local path, per CLAUDE.md's "every one of them now has a local
+path". The conclusion is unchanged; the reason is the missing grant, not the dead key.)*
+
+The read is therefore composed from what the **founder typed**. `CompanyOnboardingModel.brief`
+(`:26-28`) shows exactly which fields that is, and it is the only list this spec may draw on:
+
+| Field | Availability |
+| --- | --- |
+| `projectName`, `oneLiner`, `audience`, `role`, `founderName` | typed in onboarding; may be blank |
+| `stage` | **always non-nil** — `stages[stageIndex]`, defaulting to "Building" |
+| `summary`, `categories` | enrich-only, so nil on first run (above) |
+| `goal`, `traction`, `problem`, `runway`, `constraints` | **never populated** — see below |
+
+**`goal` is not available and must not be used.** It is written at exactly two places:
+`CompanyStore.swift:694`, the enrich-interview answer handler, and the Murror demo fixture.
+That interview is started by `startEnrichInterviewIfNeeded` (`CompanyStore.swift:660`), which
+**has no caller in the app** — only `VirtualCompanyInterviewTests:370`. CLAUDE.md records the
+same fact from the other direction ("five brief fields … are collected by interviews and
+displayed nowhere"). A read paragraph built on `goal` would be blank for every real founder and
+correct only in the demo, which is the worst possible place for it to look right.
+
+So the read is `oneLiner` (the anchor), `audience`, and `stage`. `brief.summary` is used in
+preference when non-nil — a founder who edits her brief after granting — so the welcome still
+cannot contradict `RoadmapView` and `OverviewIntroSheet`, which render the same field.
+
+**`stage` alone is not a read.** It is the one field that is always present, so a naive
+composition would emit "Codepet is at Building stage." for a founder who typed nothing else —
+a sentence that tells her only what she picked from a slider. The paragraph therefore requires
+`oneLiner` **or** `summary` to render at all; `audience` and `stage` are trimmings on that
+anchor, never the whole sentence.
 
 Every read of an optional brief field goes through **`MeaningfulText.clean`**, not a bare `??`.
 That helper rejects placeholder-y values (under two characters, all digits, an email address) and
@@ -136,8 +174,9 @@ ask to the front of onboarding — the trade `OnboardingProviderStep` exists to 
 that is **hand-traced and watched to fail before it passes**:
 
 - no `founderName` → lead drops the name, keeps the sentence
-- **every** read field placeholder-y or absent → the read paragraph is omitted entirely, never
-  rendered as a bare "Here's what I understood:" with nothing after it
+- no `oneLiner` **and** no `summary` → the read paragraph is omitted entirely, even though
+  `stage` is non-nil, per the anchor rule in A1. Never rendered as a bare "Here's what I
+  understood:" with nothing after it, and never as a bare stage label
 - `summary` nil but `oneLiner` present (**the default case today** — see A1) → the read composes
   from typed fields and reads as a sentence, not a field dump
 - `summary` present → it wins over the composed version; the two never both render
@@ -258,7 +297,8 @@ landmine 3 in CLAUDE.md (the XCTest host crash on `@MainActor ObservableObject` 
 
 | Unit | Asserts |
 | --- | --- |
-| `FirstRunGreetingBuilder` | each A2 degradation path; `summary` wins when present; composed read when it is nil; `MeaningfulText.clean` drops "x" and "1"; singular/plural |
+| `FirstRunGreetingBuilder` | each A2 degradation path; `summary` wins when present; composed read when it is nil; anchor rule (stage alone renders nothing); `MeaningfulText.clean` drops "x" and "1"; singular/plural |
+| brief-field availability | a guard test that fails if `goal` is ever read by the builder — it is nil for every real founder and non-nil only in the Murror fixture |
 | tour script builder | names every surface; is reachable with no grant |
 | `grantDescription` | Codex copy names no `.claudeOnly` surface; neither row says "old route" |
 | turn-off confirm | fires for Claude, not for Codex; Cancel leaves the grant intact |

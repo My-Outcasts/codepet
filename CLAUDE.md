@@ -334,14 +334,41 @@ This section is the one most likely to go stale. Treat it as a pointer, not a fa
 
 The pipeline is finished and has never produced a release. `gh release list` is EMPTY, so
 `releases/latest/download/Codepet.dmg` 404s and both download pages know it and say so.
+**Nothing is blocking it any more.** As of 2026-09-22 this machine passes
+`./scripts/preflight-release.sh` on both credentials, for the first time:
 
-- **The one blocker is a Developer ID Application certificate.** This machine has only
-  *Apple Development* certs, which sign nothing a stranger can open — an app signed with one
-  runs only on Macs registered in the team's provisioning profile. Verified against the real
-  Xcode dialog: on the My Murror Inc account (`YL72VTKBR7`) the `+` menu offers Apple
-  Development, Apple Distribution and Mac Installer Distribution, and nothing else. **Only
-  the Account Holder can create a Developer ID cert**, and the signed-in Apple ID is an
-  Admin. `docs/developer-id-request.md` is that request, written out to send
+```
+✓ Developer ID Application certificate present
+✓ Notarization profile "codepet-notary" answers
+```
+
+- **The Developer ID Application certificate landed 2026-09-22.** It came by the CSR route,
+  NOT the `.p12` route `docs/developer-id-request.md` originally asked for: the private key
+  was generated on this Mac and has never left it, the Account Holder signed the
+  `.certSigningRequest` and sent back a `.cer`. The Account Holder limit is about who clicks
+  *Create*; whose key it is was never the constraint, and the CSR flow is the portal's own
+  ("Choose File… select the certificate request file"). Issuer **OU=G2**,
+  valid to **2031-09-17**, serial `6A3F310C8D1F25E123D309F78F8AF176`. Verified by
+  `security find-identity -v -p codesigning`, which lists exactly one Developer ID
+  Application line — proof the cert pairs with the local private key, which `security import`
+  reporting success does NOT prove
+- **Creating a cert asks which intermediate to chain to, and DEFAULTS to the wrong one.**
+  *Previous Sub-CA* expires 2027-02-01; *G2* runs to 2031-09-16. "Previous" reads as the
+  conservative choice and is the trap — accepting the default yields a cert with a few months
+  of life. Whoever creates the next one has to switch it by hand
+- **A Developer ID cert cannot be self-revoked.** Apple's console does not offer it; it takes
+  an email to `product-security@apple.com` and an unknown wait. Two consequences: the 5-cert
+  cap is effectively permanent, so **never create one to test the flow**; and a revocation,
+  once granted, stops already-installed copies from launching. That is revoke, not expiry —
+  an app signed while the cert was valid keeps running forever after the cert expires
+- **Still owed: a `.p12` backup in the company password vault.** The key exists on exactly one
+  Mac and no slot can be reclaimed, so a dead disk costs the company 1 of its 5 certs
+  permanently. This is the CSR route's one weakness and the `.p12` route's accidental strength
+- **Notarization is a separate credential and never touches the signing key.** Stored as
+  keychain profile `codepet-notary`, currently from an app-specific password on an individual
+  Apple ID. An App Store Connect API key (`--key` / `--key-id` / `--issuer`) is the better
+  long-term form because it is not tied to one person's Apple ID — switch by re-running
+  `notarytool store-credentials` under the same profile name
 - **The Mac App Store is not the escape hatch.** The account already holds the App Store
   cert pair, and it is unusable here: the App Store requires App Sandbox, while the app sets
   `ENABLE_APP_SANDBOX = NO` and spawns `/bin/sh`, `node` and `claude` as its core loop.
@@ -354,9 +381,10 @@ The pipeline is finished and has never produced a release. `gh release list` is 
 - `./scripts/preflight-release.sh` checks both credentials in a second and refuses to start,
   because `package-macos.sh` otherwise archives for minutes before `-exportArchive` reports
   the missing certificate
-- Once the cert lands the whole thing is two commands — `package-macos.sh` then
-  `release-github.sh`. Neither website needs a deploy: both buttons point at the `latest`
-  permalink
+- The whole thing is two commands — `package-macos.sh` then `release-github.sh`. Neither
+  website needs a deploy: both buttons point at the `latest` permalink, which means
+  `release-github.sh` **publishes publicly** and the download page goes live the moment it
+  runs
 - **The live download page is `code-pet.com/download`, not `murror.app`.** It is served from
   `Murror/devpet-landing`'s `main` and already carries the `/download/Codepet.dmg` → GitHub
   307 (`1e37a2b`). `murror.app` answers `/` but 404s `/download`, `/v2` and `/academy`, so it
@@ -364,17 +392,18 @@ The pipeline is finished and has never produced a release. `gh release list` is 
 - **Verified 17 Sep:** a `-configuration Release` archive carries all three sidecars. The
   only build ever checked before was Debug
 
-**There IS a working internal route while that cert is missing.** `./scripts/package-internal.sh`
-builds an Apple-Development-signed, development-provisioned `.dmg` that runs on the Macs
-registered to the team — 4 of them as of 17 Sep, and the profile now runs to 2027-09-17.
+**`./scripts/package-internal.sh` is still the fast internal route**, and was the ONLY route
+before 2026-09-22. It builds an Apple-Development-signed, development-provisioned `.dmg` that
+runs on the Macs registered to the team — 4 of them as of 17 Sep, and the profile now runs to
+2027-09-17. It skips notarization, so it stays the quicker way to hand a build to a registered
+teammate; anyone outside the team needs the Developer ID route above.
 
 - It works where an unsigned build does not for one reason: the profile grants
   `YL72VTKBR7.*`, so the `keychain-access-groups` entitlement resolves and Firebase auth
   works. Ad-hoc signing is what breaks sign-in, not the lack of notarization
 - **Adding a tester does NOT need the Account Holder.** An Admin registers the Mac's
   Provisioning UDID at developer.apple.com ▸ Devices, then re-runs the script;
-  `-allowProvisioningUpdates` bakes the new device in. That is the one part of distribution
-  that is not blocked
+  `-allowProvisioningUpdates` bakes the new device in
 - Anything arriving by download, AirDrop or chat is quarantined, and a dev-signed app is not
   notarized, so `spctl` rejects it — measured. The tester runs
   `xattr -dr com.apple.quarantine` once. A README inside the `.dmg` says so, because

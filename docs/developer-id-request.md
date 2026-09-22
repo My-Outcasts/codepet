@@ -6,13 +6,37 @@
 
 ---
 
+> **STATUS — fulfilled 2026-09-22.** The certificate exists. It was created by the Account
+> Holder from a **CSR generated on Giang's Mac**, so the private key never left that machine
+> and Option 1's `.p12` hand-off below was never used. **Prefer the CSR route next time** —
+> it is the Apple portal's own flow ("Choose File… select the certificate request file"), and
+> the Account Holder limit is about who clicks *Create*, not about whose key it is.
+>
+> | | |
+> |---|---|
+> | Subject | `Developer ID Application: My Murror Inc (YL72VTKBR7)` |
+> | Issuer | `Developer ID Certification Authority`, **OU=G2** |
+> | Valid | 2026-09-22 → **2031-09-17** |
+> | Serial | `6A3F310C8D1F25E123D309F78F8AF176` |
+> | Public key SHA-256 | `6fd308e9…2befd3b` — matches the CSR, so it pairs with the private key already in the login keychain |
+>
+> Two things are still owed, and neither needs the Account Holder:
+> 1. **Export a `.p12` backup** under a strong password into the company password vault. The
+>    CSR route's one weakness is that the key exists on exactly one Mac, and a dead Mac cannot
+>    be recovered from — there is no self-revoke to reclaim the slot (see Security notes).
+> 2. **Notarization credentials**, which are a separate App Store Connect Team API key (role
+>    Developer) and do **not** involve this signing key at all.
+
+---
+
 ## Summary
 
 Codepet (a macOS app, bundle ID `app.murror.codepet`) is about to ship as a direct download
 from murror.app. For macOS to let people open it, the build has to be signed with a
 **Developer ID Application** certificate and then submitted to Apple for notarization.
 
-The *My Murror Inc* account does not have one yet. Creating it takes about **5 minutes**.
+The *My Murror Inc* account did not have one until 2026-09-22 (see STATUS above). Creating
+it takes about **5 minutes**; everything below is the record of how, kept for the next time.
 
 ---
 
@@ -48,8 +72,22 @@ only technically viable route.
 After a few seconds the certificate appears in the list, already installed in your keychain.
 
 > **On limits:** Apple allows 5 Developer ID Application certificates per account, each valid
-> for 5 years. If the menu says you have reached the limit, review the list at
-> developer.apple.com/account/resources/certificates and revoke any that are no longer in use.
+> for 5 years. Treat the cap as permanent: you **cannot** self-revoke a Developer ID
+> certificate to free a slot (see Security notes below), so **never create one just to test
+> the flow** — every attempt spends a slot until Apple's security team releases it.
+
+> **⚠️ Choose the G2 Sub-CA.** Creating the certificate asks which intermediate to chain to,
+> and **defaults to *Previous Sub-CA*** — which expires **2027-02-01**. *G2* runs to
+> **2031-09-16**. "Previous" reads as the conservative option and is the trap: accepting the
+> default yields a certificate with a few months of life that cannot be revoked to get the
+> slot back. Whoever creates it has to switch this by hand.
+>
+> Verify it after importing — the expiry must read ~2031, not 2027:
+>
+> ```sh
+> security find-certificate -c "Developer ID Application" -p \
+>   | openssl x509 -noout -subject -issuer -dates
+> ```
 
 ### Step 2. Export it as a `.p12`
 
@@ -83,9 +121,19 @@ and its password can sign software as *My Murror Inc*. So:
 
 - Use a strong password and send it separately, as above
 - Delete the file from Downloads and empty the Trash once it has been sent
-- If you ever suspect it has leaked, you can **revoke** the certificate at any time at
-  developer.apple.com/account/resources/certificates. After revoking, a new one can simply be
-  created — apps that were already notarized keep working
+- **Revocation is not a quick undo, and this doc used to say otherwise.** Apple: *"You can't
+  revoke Developer ID or Pass Type ID certificates using your developer account. Instead, send
+  a request to Apple at product-security@apple.com to revoke these types of certificates."* So
+  a leak means emailing Apple and waiting an unknown length of time, and for the whole wait
+  whoever holds the key can sign software that macOS trusts as *My Murror Inc*. **That is the
+  real reason not to move a private key between machines** — there is no undo button
+- **And a revocation, once granted, breaks installed copies.** Apple: *"Any Developer ID app
+  signed with a certificate that has been revoked can no longer be installed nor launch if
+  it's already installed."* Do not confuse this with **expiry**, which is harmless: an app
+  built while the certificate was valid keeps launching forever after the certificate expires.
+  An earlier version of this doc claimed notarized apps survive a *revocation*. They do not.
+  (Apple's pages genuinely disagree here — two of three say only that users can no longer
+  *install*. The Developer ID-specific page is the strict one, so plan for the strict reading)
 
 ---
 

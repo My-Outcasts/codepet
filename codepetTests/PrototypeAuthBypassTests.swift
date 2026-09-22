@@ -137,4 +137,59 @@ final class PrototypeAuthBypassTests: XCTestCase {
         XCTAssertFalse(splash)
         XCTAssertFalse(signIn, "the branch below the splash must agree the demo needs no account")
     }
+
+    // MARK: - A restored real session must still hydrate
+
+    /// **The bug: every release build ever produced sat on "Loading…" forever.**
+    ///
+    /// `ContentView`'s `currentUser` handler read `guard !PrototypeMode.isLocked`, and outside
+    /// DEBUG `isLocked` is hardcoded `true` — correct for the thing it was written for, which
+    /// is whether the in-app toggle may be offered. So the handler returned before
+    /// `hydrate`, `prototypeStandIn` is `false` outside DEBUG so the `.task` path was shut
+    /// too, and the bootstrapping branch of `body` waited for a company id nothing would
+    /// ever set.
+    ///
+    /// This is the shape of a release build, and it is the case that has to pass.
+    func testReleaseBuildShapeStillHydratesTheRealSession() {
+        XCTAssertTrue(ContentView.acceptsRealSession(locked: true, prototypeOn: false),
+                      "locked with prototype mode OFF is every release build — refusing the "
+                      + "session here is the deadlock that shipped")
+    }
+
+    /// The case the guard actually exists for: a launch argument forced the demo on, so a
+    /// stale real session must not repoint `companyStore.companyId` at the founder's company.
+    func testLaunchForcedDemoRefusesTheRealSession() {
+        XCTAssertFalse(ContentView.acceptsRealSession(locked: true, prototypeOn: true))
+    }
+
+    /// Toggling prototype mode at runtime is a different, legitimate path — the founder is
+    /// real and their own grant should keep routing their own transport — so it must keep
+    /// hydrating normally.
+    func testRuntimeToggleKeepsHydratingTheRealSession() {
+        XCTAssertTrue(ContentView.acceptsRealSession(locked: false, prototypeOn: true))
+    }
+
+    /// The ordinary case, asserted so the guard cannot regress into refusing everything.
+    func testOrdinarySessionHydrates() {
+        XCTAssertTrue(ContentView.acceptsRealSession(locked: false, prototypeOn: false))
+    }
+
+    /// **The invariant, stated once.** A lock says only that the mode cannot be CHANGED this
+    /// session; it says nothing about which way it is held. Only `isOn` decides whether a
+    /// demo is in progress, so being locked must never by itself refuse a founder's session.
+    /// Any future guard that reads `isLocked` without `isOn` fails here.
+    func testBeingLockedAloneNeverRefusesASession() {
+        for locked in [true, false] {
+            XCTAssertTrue(ContentView.acceptsRealSession(locked: locked, prototypeOn: false),
+                          "locked=\(locked) with the demo OFF must hydrate")
+        }
+    }
+
+    /// Ties the pure decision back to the real type, in the direction that matters: with the
+    /// demo off, whatever `isLocked` happens to be on this build, the session hydrates.
+    func testRealPrototypeModeWithDemoOffHydrates() {
+        XCTAssertFalse(PrototypeMode.isOn)
+        XCTAssertTrue(ContentView.acceptsRealSession(locked: PrototypeMode.isLocked,
+                                                     prototypeOn: PrototypeMode.isOn))
+    }
 }

@@ -6,8 +6,15 @@
 	<string>export</string>
 	<key>method</key>
 	<string>developer-id</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>app.murror.codepet</key>
+		<string>Codepet Developer ID</string>
+	</dict>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
 	<key>teamID</key>
 	<string>YL72VTKBR7</string>
 </dict>

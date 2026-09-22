@@ -45,6 +45,11 @@ struct ClaudeCodePanel: View {
     /// `AIProvider` at a time, so revoking one never touches the other's membership here.
     @State private var granted: Set<AIProvider> = []
 
+    /// The provider whose revoke is waiting on the founder's answer; nil when nothing is
+    /// asked. Deferring the write (rather than writing and offering an undo) is what makes
+    /// Cancel free: `granted` is never mutated, so the toggle simply stays where it was.
+    @State private var pendingRevoke: AIProvider?
+
     /// Injected so a test or preview never touches the real defaults domain.
     var authorisation = ProviderAuthorisation()
 
@@ -124,6 +129,21 @@ struct ClaudeCodePanel: View {
         .task { await refresh() }
         .onChange(of: login.phase) { _, phase in
             if case .signedIn = phase { Task { await refresh() } }
+        }
+        // Claude off stops the product, so it is worth one question. Cancel writes nothing:
+        // the toggle's `get:` reads `granted`, which the deferred path never touched.
+        .alert(GrantCopy.revokeTitle(lang: lang),
+               isPresented: Binding(get: { pendingRevoke != nil },
+                                    set: { if !$0 { pendingRevoke = nil } })) {
+            Button(GrantCopy.revokeCancel(lang: lang), role: .cancel) { pendingRevoke = nil }
+            Button(GrantCopy.revokeConfirm(lang: lang), role: .destructive) {
+                if let p = pendingRevoke, let cid = companyId {
+                    applyGrant(provider: p, companyId: cid, on: false)
+                }
+                pendingRevoke = nil
+            }
+        } message: {
+            Text(GrantCopy.revokeBody(lang: lang))
         }
     }
 
@@ -223,20 +243,33 @@ struct ClaudeCodePanel: View {
             // existed, and a permission whose scope is invisible is not informed
             // consent. Every feature moved onto this path gets added to this line.
             description: reachable
-                ? grantDescription(for: provider)
-                : grantDescription(for: provider) + "\n\n" + unreachableNote(for: provider)
+                ? GrantCopy.description(for: provider, lang: lang)
+                : GrantCopy.description(for: provider, lang: lang) + "\n\n" + unreachableNote(for: provider)
         ) {
             Toggle("", isOn: Binding(
                 get: { granted.contains(provider) },
                 set: { on in
-                    if on { granted.insert(provider) } else { granted.remove(provider) }
-                    authorisation.setAuthorised(provider, companyId, on)
-                    Task { await refresh() }
+                    // Turning OFF the kill switch asks first. Turning ON never does:
+                    // granting is the recoverable direction, and a prompt there would be
+                    // friction on the one move we want the founder to make.
+                    if !on, GrantCopy.needsRevokeConfirm(provider) {
+                        pendingRevoke = provider
+                        return
+                    }
+                    applyGrant(provider: provider, companyId: companyId, on: on)
                 }
             ))
             .labelsHidden()
             .toggleStyle(.switch)
         }
+    }
+
+    /// The one place a grant is written from this panel. Both the confirmed revoke and
+    /// every unconfirmed flip land here, so they can never disagree about what "off" does.
+    private func applyGrant(provider: AIProvider, companyId: String, on: Bool) {
+        if on { granted.insert(provider) } else { granted.remove(provider) }
+        authorisation.setAuthorised(provider, companyId, on)
+        Task { await refresh() }
     }
 
     /// Shown only on a row that exists solely because of a stored grant — never a
@@ -246,22 +279,6 @@ struct ClaudeCodePanel: View {
         lang == .vi
             ? "\(provider.displayName) hiện không sẵn sàng trên máy này — có thể đã đăng xuất hoặc chưa cài. Quyền vẫn còn ở đây; bạn có thể tắt bất cứ lúc nào."
             : "\(provider.displayName) isn't reachable on this Mac right now — signed out, or not installed. The grant is still here, and you can turn it off any time."
-    }
-
-    /// Written out per case, like `ProviderAuthorisation.key` — the plan name and the
-    /// "your terminal's X is unaffected" reassurance are both provider-specific facts,
-    /// not a template to fill in.
-    private func grantDescription(for provider: AIProvider) -> String {
-        switch provider {
-        case .claudeCode:
-            return lang == .vi
-                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Claude của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Claude Code trong terminal không bị ảnh hưởng."
-                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Claude plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Claude Code is unaffected."
-        case .codex:
-            return lang == .vi
-                ? "Chat, lộ trình, nhiệm vụ, brief, quyết định, phòng họp các bộ phận — và Build khi bạn đã liên kết thư mục — sẽ chạy trên gói Codex của bạn, mỗi lượt tiêu hạn mức của bạn. Tắt là Codepet quay lại đường cũ — Codex trong terminal không bị ảnh hưởng."
-                : "Chat, your roadmap, tasks, briefs, decisions, the department room — and Build, once a folder is linked — run on your Codex plan, and each one spends your quota. Turn it off and Codepet goes back to the old route — your terminal's Codex is unaffected."
-        }
     }
 
     // MARK: - Conditional groups

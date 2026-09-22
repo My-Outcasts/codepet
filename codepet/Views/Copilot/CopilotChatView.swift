@@ -1561,7 +1561,13 @@ struct CopilotBubble: View {
         } else if let action = message.firstRunAction, !message.actionConsumed {
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
-                actionButton(action)
+                // The primary action LEADS. `inlineActions` is composed inside `textBubble`,
+                // so a navChip-shaped tour offer would have drawn ABOVE this button — the
+                // reverse of what the greeting means.
+                HStack(spacing: 8) {
+                    actionButton(action)
+                    if message.tourOffer, !message.tourConsumed { tourButton }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if case .grant(let provider) = message.blockedOffer {
@@ -2017,6 +2023,13 @@ struct CopilotBubble: View {
     /// an offer is an object, the sentence introducing it is not.
     @ViewBuilder private var inlineActions: some View {
         if !message.drafts.isEmpty { draftedMessages }
+        // Only when there is no primary action to sit beside — a greeting with no next step
+        // never reaches the `firstRunAction` branch above, and this is the path every branch
+        // does reach. The `firstRunAction == nil` guard is what stops the chip rendering
+        // TWICE on an ordinary greeting: once here, once in that branch's HStack.
+        if message.tourOffer, !message.tourConsumed, message.firstRunAction == nil {
+            tourButton
+        }
         if let nav = message.navChip { navChipButton(nav) }
         if let setup = message.setupSuggestion {
             HStack {
@@ -2052,6 +2065,20 @@ struct CopilotBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Quiet and secondary — the tour is OFFERED, never pushed. Same capsule geometry as
+    /// `navChipButton` so the two read as one family, in the muted treatment so it cannot
+    /// compete with the primary action it sits beside.
+    private var tourButton: some View {
+        Button { companyStore.activateTour(messageId: message.id, language: lang) } label: {
+            Text(TourScript.offerLabel(lang: lang))
+                .font(.pixelSystem(size: 11, weight: .semibold))
+                .foregroundColor(CodepetTheme.bodyText)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(CodepetTheme.hairline)).hoverAffordance(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func navChipButton(_ nav: NavAction) -> some View {

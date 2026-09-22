@@ -643,8 +643,14 @@ final class CompanyStore: ObservableObject {
     private func seedFirstRunGreeting(language: AppLanguage) {
         guard companyId != nil else { return }
         let next = RoadmapEngine.nextStep(company.tasks)
-        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next, language: language)
-        chatMessages.append(CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action))
+        let g = FirstRunGreetingBuilder.build(brief: company.brief, nextStep: next,
+                                              tasks: company.tasks, language: language)
+        var msg = CopilotMessage(role: .companion, text: g.text, firstRunAction: g.action)
+        // Read off the greeting rather than hardcoded true here: the builder owns the
+        // decision, so the day a greeting should not offer the tour there is one place
+        // to change and this call site is already correct.
+        msg.tourOffer = g.offersTour
+        chatMessages.append(msg)
     }
 
     /// First-run only: after the brief is saved + stamped, ask the ≤3 plan-shaping
@@ -2866,6 +2872,27 @@ final class CompanyStore: ObservableObject {
         guard let dest = AppView.from(navDestination: nav.destination) else { return }
         selectedDeptKey = nav.destination == "department" ? Self.resolveDepartmentKey(nav.target) : nil
         select(dest)
+    }
+
+    /// "Show me around" — appends the locally-composed tour and retires the chip.
+    ///
+    /// **Guarded on `tourConsumed`**, not merely hiding the button: a stray second tap (or a
+    /// re-render racing the first) would otherwise append the tour twice. `activateSetup`
+    /// carries the same guard for the same reason.
+    ///
+    /// No `await` and no transport. `TourScript` is a pure builder, so this answers a founder
+    /// who has granted nothing — which is the whole point, since chat itself would not.
+    ///
+    /// `language` is a parameter because this store has no stored one; every caller that
+    /// needs it already passes it (`greetIfNeeded`, `seedFirstRunGreeting`), and the view
+    /// reading `@Environment(\.uiLanguage)` is the one place that knows it at tap time.
+    func activateTour(messageId: String, language: AppLanguage) {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              chatMessages[i].tourOffer, !chatMessages[i].tourConsumed else { return }
+        chatMessages[i].tourConsumed = true
+        var tour = CopilotMessage(role: .companion, text: TourScript.message(language: language))
+        tour.navChip = TourScript.chip()
+        chatMessages.append(tour)
     }
 
     /// Resolve a `nav(department)` action's `target` to a `DepartmentCatalog` key —

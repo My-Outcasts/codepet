@@ -213,6 +213,7 @@ final class VirtualCompanyInterviewTests: XCTestCase {
         // first-run welcome, is not among them.
         let greeting = FirstRunGreetingBuilder.build(brief: s.company.brief,
                                                      nextStep: RoadmapEngine.nextStep(s.company.tasks),
+                                                     tasks: s.company.tasks,
                                                      language: .en)
         XCTAssertFalse(s.chatMessages.contains { $0.text == greeting.text },
                        "the queue emptying must not welcome the founder like a new user")
@@ -391,7 +392,8 @@ final class VirtualCompanyInterviewTests: XCTestCase {
             await s.answerInterview(messageId: pending.id, gap: gap, answer: "a", language: .en)
         }
         let greeting = FirstRunGreetingBuilder.build(
-            brief: s.company.brief, nextStep: RoadmapEngine.nextStep(s.company.tasks), language: .en)
+            brief: s.company.brief, nextStep: RoadmapEngine.nextStep(s.company.tasks),
+            tasks: s.company.tasks, language: .en)
         XCTAssertFalse(greeting.text.isEmpty)
         XCTAssertEqual(s.chatMessages.last?.text, greeting.text,
                        "byte's first-run greeting was lost")

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Package Codepet for direct (non-App-Store) distribution:
-#   sidecars → archive → export (Developer ID) → .dmg → notarize → staple → verify
+#   sidecars → archive → export (Developer ID) → .dmg → SIGN the .dmg → notarize
+#   → staple → verify with spctl
 #
 # The output .dmg is signed, notarized, and stapled — ready to host on the web
 # (e.g. GitHub Releases) behind the "Download for macOS" button.
@@ -30,12 +31,20 @@ CONFIGURATION="${CONFIGURATION:-Release}"
 TEAM_ID="${TEAM_ID:-YL72VTKBR7}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-codepet-notary}"
 VOL_NAME="${VOL_NAME:-Codepet}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
 
 PROJECT="CodePet.xcodeproj"
 BUILD_DIR="build"
 ARCHIVE="$BUILD_DIR/Codepet.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
-EXPORT_OPTS="scripts/ExportOptions.plist"
+# The TRACKED file, and a per-run copy. Step 3 overrides teamID with PlistBuddy, and
+# PlistBuddy rewrites whatever it is handed — canonicalising the XML, sorting the keys and
+# DELETING every comment. Pointed at the tracked file it silently rewrote it on every run:
+# the comments explaining why this plist uses manual signing were destroyed by the very
+# next build after they were written, and `git status` showed a modification nobody made.
+# Copying first keeps the explanation alive and the working tree clean.
+EXPORT_OPTS_SRC="scripts/ExportOptions.plist"
+EXPORT_OPTS="$BUILD_DIR/ExportOptions.plist"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -74,6 +83,7 @@ xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION"
 
 # ── 3. Export with Developer ID (hardened runtime, notarization-ready) ─────────
 echo "▶︎ Exporting (Developer ID)…"
+cp "$EXPORT_OPTS_SRC" "$EXPORT_OPTS"
 /usr/libexec/PlistBuddy -c "Set :teamID $TEAM_ID" "$EXPORT_OPTS" 2>/dev/null || true
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
@@ -111,6 +121,23 @@ else
   hdiutil create -volname "$VOL_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 fi
 
+# ── 5b. Sign the .dmg ITSELF ──────────────────────────────────────────────────
+# The app inside is signed and hardened, but a disk image is a separate code object and
+# neither `create-dmg` nor `hdiutil` signs it. Nothing downstream notices: notarization
+# still returns Accepted and the ticket still staples, so this script reported success
+# while producing a file Gatekeeper refuses.
+#
+# Measured 2026-09-22, on the first .dmg this pipeline ever built:
+#     xcrun notarytool submit  →  status: Accepted
+#     xcrun stapler validate   →  The validate action worked!
+#     spctl -a -t open         →  rejected   source=no usable signature
+#
+# Order matters. Signing has to happen BEFORE notarization, because re-signing a stapled
+# image invalidates the ticket that was stapled to it.
+echo "▶︎ Signing ${DMG}…"   # braces REQUIRED: bash swallows the following "…" into the name
+codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+codesign -dv --verbose=2 "$DMG" 2>&1 | grep -E "Authority=Developer ID|Timestamp" || true
+
 # ── 6. Notarize ───────────────────────────────────────────────────────────────
 echo "▶︎ Notarizing (a few minutes)…"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
@@ -122,7 +149,12 @@ xcrun stapler staple "$DMG"
 # ── 8. Verify Gatekeeper acceptance ───────────────────────────────────────────
 echo "▶︎ Verifying…"
 xcrun stapler validate "$DMG"
-spctl -a -t open --context context:primary-signature -v "$DMG" || true
+
+# NO `|| true` HERE. This is the only check in the script that looks at the .dmg the way
+# a stranger's Mac will, and it is the only one that caught the unsigned image above —
+# every other step passed. Swallowing its exit code turns the last line of defence into a
+# decoration, which is exactly what happened on the 2026-09-22 run.
+spctl -a -t open --context context:primary-signature -vv "$DMG"
 
 echo ""
 echo "✅ Done → $DMG"

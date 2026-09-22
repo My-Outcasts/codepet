@@ -141,6 +141,34 @@ struct ContentView: View {
                               locked: PrototypeMode.isLocked)
     }
 
+    /// **Whether a restored Firebase session is allowed to hydrate its own company.**
+    ///
+    /// No, in exactly one case: a launch argument forced the demo on, so a stale real session
+    /// would repoint `companyStore.companyId` away from the fixtures (see the `currentUser`
+    /// handler below for what that costs).
+    ///
+    /// **It must test locked AND on, and testing `isLocked` alone shipped a dead app.**
+    /// In a release build `PrototypeMode.isLocked` is hardcoded `true` — correct for what it
+    /// was written for, which is whether the in-app toggle may be offered, since prototype
+    /// mode is not switchable outside DEBUG. The guard below read that as "a demo is being
+    /// forced" and returned early on EVERY release build, so `hydrate` was never called; and
+    /// `prototypeStandIn` is `false` outside DEBUG, so the `.task` path was shut too. Both
+    /// hydrate paths closed leaves the bootstrapping branch of `body` waiting for a company id
+    /// that nothing will ever set: "Loading…" forever, for any signed-in founder, in every
+    /// release build ever produced.
+    ///
+    /// Nobody saw it because nobody had signed in on a release build. Signed OUT, release
+    /// renders `ReturningSignInView` and the app looks fine — which is what "launched, stayed
+    /// up" meant when the internal .dmg was verified on 17 Sep.
+    ///
+    /// The same mistake bites DEBUG too, for `-cp_prototypeMode NO`: that locks the mode OFF,
+    /// `isLocked` is true, and a real signed-in founder deadlocked identically. The comment on
+    /// the guard always said "a launch argument forced prototype mode ON" — this is that
+    /// sentence, as code.
+    static func acceptsRealSession(locked: Bool, prototypeOn: Bool) -> Bool {
+        !(locked && prototypeOn)
+    }
+
     var body: some View {
         Group {
             if showSplash {
@@ -249,11 +277,13 @@ struct ContentView: View {
             // delay. Found by adding `os.Logger` lines to `LocalTransportRouter.apply` and
             // watching `activeCompanyId` flip within 100ms of launch.
             //
-            // Only guards the LOCKED case (a launch argument forced prototype mode on).
+            // Only guards the case where a launch argument forced prototype mode ON — see
+            // `acceptsRealSession` for what reading `isLocked` alone did to release builds.
             // Toggling prototype mode at runtime while genuinely signed in is a different,
             // legitimate path — the founder is real, and their own grant should keep
             // routing their own transport — so that case must keep hydrating normally.
-            guard !PrototypeMode.isLocked else { return }
+            guard Self.acceptsRealSession(locked: PrototypeMode.isLocked,
+                                          prototypeOn: PrototypeMode.isOn) else { return }
 
             let storedUID = PersistenceManager.shared.currentUserId
             let isDifferentUser = storedUID != nil && storedUID != user.uid

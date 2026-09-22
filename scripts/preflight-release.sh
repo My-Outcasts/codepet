@@ -23,10 +23,17 @@ set -uo pipefail
 
 NOTARY_PROFILE="${NOTARY_PROFILE:-codepet-notary}"
 TEAM_ID="${TEAM_ID:-YL72VTKBR7}"
+BUNDLE_ID="${BUNDLE_ID:-app.murror.codepet}"
 
 # Overridable seams. Default to the real thing; tests point them at fixtures.
 IDENTITY_CMD="${IDENTITY_CMD:-security find-identity -v -p codesigning}"
 NOTARY_CMD="${NOTARY_CMD:-xcrun notarytool history --keychain-profile $NOTARY_PROFILE}"
+# A DIRECTORY, not a command, unlike the two above. The check below has to reason about
+# each profile separately: a machine can hold a development profile for this bundle id AND
+# a Developer ID profile for a different one, and concatenating them would match both
+# halves of the test and report success. Pointing tests at a directory of fixture files
+# keeps that distinction testable.
+PROFILE_DIR="${PROFILE_DIR:-$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles}"
 
 fail=0
 
@@ -68,6 +75,65 @@ if printf '%s' "$notary_out" | grep -qE "No Keychain password item found|error: 
   fail=1
 else
   echo "   ✓ Notarization profile \"$NOTARY_PROFILE\" answers"
+fi
+
+# ── 3. Developer ID provisioning profile ──────────────────────────────────────
+# Added after the first real release attempt, where preflight passed both checks above and
+# the run then died in `-exportArchive` — two minutes of Release build later — on a third
+# credential nobody had thought of. Catching that is this script's entire job.
+#
+# Two things make the failure hard to read, so this names both:
+#
+#   * `signingStyle: automatic` NEVER reads this directory. It mints a profile through
+#     cloud signing instead, and on this account that answers 403. So a founder can have
+#     the right profile sitting on disk and still be told "No profiles were found".
+#     scripts/ExportOptions.plist uses `manual` for exactly this reason — do not change it
+#     back.
+#   * Double-clicking a .provisionprofile does NOT put it here. On macOS it installs into
+#     System Settings ▸ Device Management, where xcodebuild cannot see it, and the profile
+#     then shows up in the UI as installed while every build keeps failing.
+#
+# A copy lives at scripts/Codepet_Developer_ID.provisionprofile so a fresh clone needs one
+# `cp` rather than a portal round-trip. It is not a secret — a provisioning profile carries
+# the PUBLIC certificate, the team id and the entitlements, and nothing that can sign.
+#
+# `ProvisionsAllDevices` is what distinguishes a Developer ID profile from the development
+# profile that also carries this bundle id. Matching on the bundle id alone reports success
+# on a machine that can only build for registered Macs.
+profile_found=""
+if [ -d "$PROFILE_DIR" ]; then
+  for f in "$PROFILE_DIR"/*.provisionprofile; do
+    [ -f "$f" ] || continue
+    if grep -qa "$TEAM_ID\.$BUNDLE_ID" "$f" && grep -qa "ProvisionsAllDevices" "$f"; then
+      profile_found="$f"
+      break
+    fi
+  done
+fi
+
+if [ -n "$profile_found" ]; then
+  echo "   ✓ Developer ID provisioning profile for $BUNDLE_ID present"
+else
+  echo "✗ No Developer ID provisioning profile for \"$BUNDLE_ID\" where xcodebuild looks."
+  echo ""
+  echo "  The app declares keychain-access-groups, so a Developer ID build REQUIRES an"
+  echo "  embedded provisioning profile. The certificate alone is not enough."
+  echo ""
+  echo "  A copy is committed to this repo, so on a fresh clone this is one command:"
+  echo ""
+  echo "      cp scripts/Codepet_Developer_ID.provisionprofile \\"
+  echo "         \"$PROFILE_DIR/\""
+  echo ""
+  echo "  If that copy has expired, make a new one:"
+  echo "    1. developer.apple.com/account ▸ Certificates, Identifiers & Profiles ▸ Profiles"
+  echo "       ▸ + ▸ Distribution ▸ Developer ID ▸ App ID $BUNDLE_ID ▸ Download"
+  echo "    2. COPY it into $PROFILE_DIR, and commit it here so the next machine is spared"
+  echo ""
+  echo "  Do NOT just double-click the file. Double-clicking installs it into"
+  echo "  System Settings ▸ Device Management, which xcodebuild does not read. The profile"
+  echo "  then shows as installed while every build keeps failing with:"
+  echo "      No profiles for '$BUNDLE_ID' were found"
+  fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then

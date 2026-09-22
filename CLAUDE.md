@@ -112,6 +112,7 @@ Each of these cost real time to learn.
 4. **A crash that mimics that bug:** `Auth.auth()` traps rather than throwing when `FirebaseApp` is unconfigured. Rule out an unconfigured Firebase before blaming the toolchain
 5. **New `.swift` files need no project-file edit.** `PBXFileSystemSynchronizedRootGroup`: target membership follows the folder on disk
 6. **Debug builds put the code in `codepet.debug.dylib`,** not in the `codepet` executable. Grepping the executable for a string finds nothing, including strings that are definitely there
+7. **A `#if DEBUG` type can have a DIFFERENT, still-compiling meaning in Release — and `PrototypeMode` does.** Outside DEBUG, `PrototypeMode.isLocked` is hardcoded `true` (correct for the one thing it was written for: whether the in-app toggle may be *offered*, since the mode is not switchable there). `ContentView` read that as "a launch argument is forcing the demo" and returned before `hydrate`, so **every release build ever produced sat on "Loading…" forever for a signed-in founder**. Fixed 2026-09-22 (`acceptsRealSession`); the general lesson is the landmine. Before reading any `PrototypeMode` member outside a `#if DEBUG` block, open `Models/PrototypeMode.swift` and read its `#else` branch — several members are constants there, and none of them fail to compile
 
 ## Design System
 - **Background colors:** `#F5F3FA` (pale purple - splash), `#F7F5FC` (onboarding)
@@ -392,6 +393,47 @@ The pipeline is finished and has never produced a release. `gh release list` is 
 - **Verified 17 Sep:** a `-configuration Release` archive carries all three sidecars. The
   only build ever checked before was Debug
 
+### What the first real run of the pipeline found
+
+The pipeline was written long before there was a certificate to run it with, so 2026-09-22 was
+the first time it ever executed. It failed four times, in four different ways, **none of them
+the certificate**. All four are fixed; they are recorded because each one passed every check
+that existed at the time.
+
+1. **`signingStyle: automatic` can never work on this account.** It does not read the
+   provisioning profiles on disk at all — it only mints one through cloud signing, which
+   answers `403 FORBIDDEN_ERROR` here ("You haven't been given access to cloud-managed
+   distribution certificates") *even though that permission is ticked in App Store Connect*.
+   The explanation appears only in `IDEDistribution.verbose.log`, never in the terminal:
+   `Automatic signing is disabled and unable to generate a profile`. `ExportOptions.plist` now
+   uses `manual` with an explicit profile name. **Do not change it back**
+2. **A Developer ID build of this app REQUIRES a provisioning profile**, because it declares
+   `keychain-access-groups`. The certificate alone is not enough. A copy lives at
+   `scripts/Codepet_Developer_ID.provisionprofile` — not a secret, it holds the public cert,
+   the team id and the entitlements. **Double-clicking a `.provisionprofile` does NOT install
+   it where `xcodebuild` looks**; on macOS it goes to System Settings ▸ Device Management, so
+   it reads as installed while every build keeps failing. `cp` it into
+   `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`
+3. **`ENABLE_HARDENED_RUNTIME` had never been set**, in either configuration, while the export
+   step's comment claimed the build was "notarization-ready". Notarization rejects a build
+   without it
+4. **The `.dmg` was never signed, and nothing could tell.** A disk image is a separate code
+   object and neither `hdiutil` nor `create-dmg` signs it. `notarytool` still answered
+   `Accepted` and `stapler` still answered `worked`, while `spctl -a -t open` answered
+   `rejected — source=no usable signature`. The script exited 0 and printed `✅ Done` for a
+   file every user's Mac would refuse. Signing must happen BEFORE notarization; re-signing a
+   stapled image invalidates the ticket
+
+Two habits came out of it, and they generalise past this script:
+
+- **`|| true` on a verification deletes the verification.** `spctl` was the only check that
+  caught (4), and its exit code was being swallowed, so the build stayed green. It gates now
+- **Do not let a build write to a tracked file.** Step 3 ran `PlistBuddy` against
+  `scripts/ExportOptions.plist` itself, and PlistBuddy rewrites what it is handed — canonical
+  XML, sorted keys, **every comment deleted**. The comments explaining why that plist uses
+  manual signing were destroyed by the next build before they were ever committed. It copies
+  to `build/` first now
+
 **`./scripts/package-internal.sh` is still the fast internal route**, and was the ONLY route
 before 2026-09-22. It builds an Apple-Development-signed, development-provisioned `.dmg` that
 runs on the Macs registered to the team — 4 of them as of 17 Sep, and the profile now runs to
@@ -410,6 +452,11 @@ teammate; anyone outside the team needs the Developer ID route above.
   "damaged or incomplete" reads as a broken download rather than an unregistered Mac
 - Verified end to end 17 Sep: exported, launched from the exported path, stayed up, quit
   cleanly, and the `.dmg` re-verified after mounting
+- **That verification was signed OUT, and it mattered.** This script builds `Release` too, so
+  every internal `.dmg` handed to a tester carried the splash deadlock in landmine 7 below —
+  a tester who signed in and relaunched sat on "Loading…" forever. Signed out, a release build
+  renders `ReturningSignInView` and looks perfectly healthy, which is exactly what "launched,
+  stayed up" recorded. **Launching a release build is not a check until someone signs in**
 
 # Working agreements
 

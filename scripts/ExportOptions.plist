@@ -1,13 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Export options for the PUBLIC (Developer ID) release — package-macos.sh step 3.
+
+  These comments were written once before and silently destroyed. Step 3 ran PlistBuddy
+  against THIS file to override teamID, and PlistBuddy rewrites whatever it is handed:
+  canonical XML, sorted keys, no comments. It copies to build/ first now.
+-->
 <plist version="1.0">
 <dict>
 	<key>destination</key>
 	<string>export</string>
+
 	<key>method</key>
 	<string>developer-id</string>
+
+	<!--
+	  MANUAL, not automatic. This is not a preference.
+
+	  `automatic` does NOT read the provisioning profiles on disk. It only mints one
+	  through cloud signing, and this team's Apple ID gets 403 FORBIDDEN_ERROR there —
+	  "You haven't been given access to cloud-managed distribution certificates" — even
+	  with that permission ticked in App Store Connect ▸ Users and Access. So the right
+	  profile can be sitting on disk and the export still fails with
+	  "No profiles for 'app.murror.codepet' were found".
+
+	  The line that explains it appears only in IDEDistribution.verbose.log, never in the
+	  terminal:
+
+	      Automatic signing is disabled and unable to generate a profile.
+	      To enable automatic signing, pass -allowProvisioningUpdates
+
+	  Measured 2026-09-22, after four failed exports. Manual signing reads the local
+	  profile, needs no portal round-trip, and cannot be broken by someone's role
+	  changing — which is what a release pipeline wants regardless.
+	-->
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+
+	<!--
+	  The value is the profile's NAME as the portal shows it — not a path, not a UUID.
+
+	  The file itself has to sit in
+	  ~/Library/Developer/Xcode/UserData/Provisioning Profiles/ and DOUBLE-CLICKING IT
+	  DOES NOT PUT IT THERE. On macOS that installs it into
+	  System Settings ▸ Device Management, where xcodebuild cannot see it — so it reads as
+	  installed in the UI while every build keeps failing. Copy it in instead; a copy is
+	  committed to this repo:
+
+	      cp scripts/Codepet_Developer_ID.provisionprofile \
+	         ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/
+
+	  A profile is needed at all because the app declares keychain-access-groups. The
+	  certificate alone is not enough. preflight-release.sh checks for it before the build.
+	-->
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>app.murror.codepet</key>
+		<string>Codepet Developer ID</string>
+	</dict>
+
 	<key>teamID</key>
 	<string>YL72VTKBR7</string>
 </dict>

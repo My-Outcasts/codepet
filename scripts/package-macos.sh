@@ -37,7 +37,14 @@ PROJECT="CodePet.xcodeproj"
 BUILD_DIR="build"
 ARCHIVE="$BUILD_DIR/Codepet.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
-EXPORT_OPTS="scripts/ExportOptions.plist"
+# The TRACKED file, and a per-run copy. Step 3 overrides teamID with PlistBuddy, and
+# PlistBuddy rewrites whatever it is handed — canonicalising the XML, sorting the keys and
+# DELETING every comment. Pointed at the tracked file it silently rewrote it on every run:
+# the comments explaining why this plist uses manual signing were destroyed by the very
+# next build after they were written, and `git status` showed a modification nobody made.
+# Copying first keeps the explanation alive and the working tree clean.
+EXPORT_OPTS_SRC="scripts/ExportOptions.plist"
+EXPORT_OPTS="$BUILD_DIR/ExportOptions.plist"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -76,6 +83,7 @@ xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION"
 
 # ── 3. Export with Developer ID (hardened runtime, notarization-ready) ─────────
 echo "▶︎ Exporting (Developer ID)…"
+cp "$EXPORT_OPTS_SRC" "$EXPORT_OPTS"
 /usr/libexec/PlistBuddy -c "Set :teamID $TEAM_ID" "$EXPORT_OPTS" 2>/dev/null || true
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \

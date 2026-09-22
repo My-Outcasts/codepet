@@ -93,6 +93,10 @@ fi
 #     System Settings ▸ Device Management, where xcodebuild cannot see it, and the profile
 #     then shows up in the UI as installed while every build keeps failing.
 #
+# A copy lives at scripts/Codepet_Developer_ID.provisionprofile so a fresh clone needs one
+# `cp` rather than a portal round-trip. It is not a secret — a provisioning profile carries
+# the PUBLIC certificate, the team id and the entitlements, and nothing that can sign.
+#
 # `ProvisionsAllDevices` is what distinguishes a Developer ID profile from the development
 # profile that also carries this bundle id. Matching on the bundle id alone reports success
 # on a machine that can only build for registered Macs.
@@ -115,10 +119,15 @@ else
   echo "  The app declares keychain-access-groups, so a Developer ID build REQUIRES an"
   echo "  embedded provisioning profile. The certificate alone is not enough."
   echo ""
-  echo "  1. developer.apple.com/account ▸ Certificates, Identifiers & Profiles ▸ Profiles"
-  echo "     ▸ + ▸ Distribution ▸ Developer ID ▸ App ID $BUNDLE_ID ▸ Download"
-  echo "  2. COPY the file into:"
-  echo "       $PROFILE_DIR"
+  echo "  A copy is committed to this repo, so on a fresh clone this is one command:"
+  echo ""
+  echo "      cp scripts/Codepet_Developer_ID.provisionprofile \\"
+  echo "         \"$PROFILE_DIR/\""
+  echo ""
+  echo "  If that copy has expired, make a new one:"
+  echo "    1. developer.apple.com/account ▸ Certificates, Identifiers & Profiles ▸ Profiles"
+  echo "       ▸ + ▸ Distribution ▸ Developer ID ▸ App ID $BUNDLE_ID ▸ Download"
+  echo "    2. COPY it into $PROFILE_DIR, and commit it here so the next machine is spared"
   echo ""
   echo "  Do NOT just double-click the file. Double-clicking installs it into"
   echo "  System Settings ▸ Device Management, which xcodebuild does not read. The profile"

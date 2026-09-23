@@ -36,6 +36,58 @@ final class TourOfferWiringTests: XCTestCase {
         XCTAssertFalse(m.tourConsumed)
     }
 
+    // MARK: - WHICH SITE draws the chip
+
+    /// Build a greeting-shaped message: text, a primary action, tour offered.
+    private func greeting(actionConsumed: Bool = false,
+                          tourConsumed: Bool = false,
+                          withTask: Bool = true) -> CopilotMessage {
+        var m = CopilotMessage(role: .companion, text: "hi",
+                               firstRunAction: withTask
+                                   ? FirstRunAction(taskId: "t1", taskTitle: "T") : nil)
+        m.tourOffer = true
+        m.actionConsumed = actionConsumed
+        m.tourConsumed = tourConsumed
+        return m
+    }
+
+    /// CP-013, the regression this suite exists for. Seen on screen 22 Sep: the founder
+    /// tapped "Do it with me" and "Show me around" vanished with it.
+    ///
+    /// The site must move to `.inline`, because `CopilotChatView`'s primary branch is gated
+    /// on `!actionConsumed` and stops rendering the moment the action is taken. Asserting
+    /// merely that the offer is still LIVE is what the flag tests below already do, and it
+    /// stays true while the chip is invisible — which is precisely how this shipped.
+    func testTheSiteMovesInlineOnceThePrimaryActionIsTapped() {
+        XCTAssertEqual(greeting(actionConsumed: true).tourChipSite, .inline,
+                       "the primary's branch has stopped rendering, so the chip must fall "
+                       + "through to inlineActions rather than stay claimed by a dead site")
+    }
+
+    /// While the primary is on screen the chip rides beside it, so it reads as the second
+    /// option rather than jumping to its own row.
+    func testTheChipRidesBesideThePrimaryActionUntilItIsTapped() {
+        XCTAssertEqual(greeting().tourChipSite, .besidePrimary)
+    }
+
+    /// A greeting with no task has no primary branch to sit in.
+    func testAGreetingWithNoTaskDrawsTheChipInline() {
+        XCTAssertEqual(greeting(withTask: false).tourChipSite, .inline)
+    }
+
+    /// Once taken, it draws nowhere — whatever the primary did.
+    func testAConsumedTourDrawsNowhere() {
+        XCTAssertEqual(greeting(tourConsumed: true).tourChipSite, .nowhere)
+        XCTAssertEqual(greeting(actionConsumed: true, tourConsumed: true).tourChipSite, .nowhere)
+    }
+
+    /// Never offered means never drawn, so an ordinary reply cannot sprout a tour chip.
+    func testAMessageThatNeverOfferedTheTourDrawsNowhere() {
+        var m = CopilotMessage(role: .companion, text: "hi")
+        m.actionConsumed = true
+        XCTAssertEqual(m.tourChipSite, .nowhere)
+    }
+
     // MARK: - The seeded greeting carries it
 
     func testTheSeededGreetingOffersTheTour() async throws {

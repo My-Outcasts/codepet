@@ -213,3 +213,43 @@ struct CopilotMessage: Identifiable, Equatable {
         self.attachments = attachments
     }
 }
+
+// MARK: - Where the tour chip draws
+
+extension CopilotMessage {
+
+    /// Which site draws the greeting's tour chip, if any.
+    ///
+    /// ONE decision with one owner, rather than a boolean per site. CP-013 was two
+    /// guards spelled out separately in `CopilotChatView` — `!actionConsumed` on the
+    /// primary's branch and `firstRunAction == nil` on the inline path — which did not
+    /// partition the cases: a greeting that HAS a task keeps a non-nil `firstRunAction`
+    /// after `actionConsumed`, so both sites declined and a live offer was drawn nowhere.
+    /// An enum cannot fail that way, because "nowhere" has to be said out loud.
+    ///
+    /// **This names the site, not a guarantee that pixels appear.** `.inline` is drawn by
+    /// `inlineActions`, which is reached only through `textBubble`; branches that render a
+    /// card instead (`draft`, `chainOffer`, `runProposal`, `roadmapProposal`, `interview`,
+    /// and the `textIsBlank` chips) never get there, and `.besidePrimary` likewise loses to
+    /// `vcRun` and `draft` earlier in the same chain. That is sound today only because
+    /// `tourOffer` is written at exactly one site — `CompanyStore.seedFirstRunGreeting`,
+    /// on a message carrying none of those payloads. Set `tourOffer` on a message that
+    /// carries one and the chip goes invisible again, with this property still reading
+    /// correctly. Widen it to take the payloads into account before that day.
+    enum TourChipSite: Equatable {
+        /// Beside the primary action, inside the `firstRunAction` branch.
+        case besidePrimary
+        /// On its own row, drawn by `inlineActions`.
+        case inline
+        /// Not offered, or already taken.
+        case nowhere
+    }
+
+    var tourChipSite: TourChipSite {
+        guard tourOffer, !tourConsumed else { return .nowhere }
+        // Exactly the condition `CopilotChatView`'s primary branch is gated on, so the
+        // chip is offered there only while that branch is actually on screen.
+        if firstRunAction != nil, !actionConsumed { return .besidePrimary }
+        return .inline
+    }
+}

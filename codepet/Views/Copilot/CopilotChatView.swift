@@ -1566,7 +1566,7 @@ struct CopilotBubble: View {
                 // reverse of what the greeting means.
                 HStack(spacing: 8) {
                     actionButton(action)
-                    if message.tourOffer, !message.tourConsumed { tourButton }
+                    if message.drawsTourChipBesidePrimary { tourButton }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2023,11 +2023,13 @@ struct CopilotBubble: View {
     /// an offer is an object, the sentence introducing it is not.
     @ViewBuilder private var inlineActions: some View {
         if !message.drafts.isEmpty { draftedMessages }
-        // Only when there is no primary action to sit beside — a greeting with no next step
-        // never reaches the `firstRunAction` branch above, and this is the path every branch
-        // does reach. The `firstRunAction == nil` guard is what stops the chip rendering
-        // TWICE on an ordinary greeting: once here, once in that branch's HStack.
-        if message.tourOffer, !message.tourConsumed, message.firstRunAction == nil {
+        // Only when the branch above is not already drawing it — a greeting with no next step
+        // never reaches the `firstRunAction` branch, and this is the path every branch does
+        // reach. `drawsTourChipInline` is the complement of `drawsTourChipBesidePrimary`, so
+        // the chip renders exactly once: it cannot double up on an ordinary greeting, and it
+        // cannot vanish once the primary is tapped (CP-013) the way `firstRunAction == nil`
+        // let it, since that stays non-nil after `actionConsumed`.
+        if message.drawsTourChipInline {
             tourButton
         }
         if let nav = message.navChip { navChipButton(nav) }

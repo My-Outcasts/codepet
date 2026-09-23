@@ -36,6 +36,69 @@ final class TourOfferWiringTests: XCTestCase {
         XCTAssertFalse(m.tourConsumed)
     }
 
+    // MARK: - WHERE the chip draws, not just whether the flag survives
+
+    /// CP-013. The flag tests above pass while the chip is INVISIBLE: its only two render
+    /// sites are `CopilotChatView`'s `firstRunAction` branch, gated on `!actionConsumed`,
+    /// and `inlineActions`, gated on `firstRunAction == nil`. A greeting that HAS a task
+    /// satisfies neither once the primary is tapped, so "Do it with me" silently destroys
+    /// "Show me around" -- the exact pairing the separate flags exist to prevent.
+    ///
+    /// Seen on screen 22 Sep before it was described here.
+    func testTheTourChipStillDrawsAfterThePrimaryActionIsTapped() {
+        var m = CopilotMessage(role: .companion, text: "hi",
+                               firstRunAction: FirstRunAction(taskId: "t1", taskTitle: "T"))
+        m.tourOffer = true
+        m.actionConsumed = true
+
+        XCTAssertTrue(m.drawsTourChipSomewhere,
+                      "the tour offer is live but no render site claims it")
+    }
+
+    /// The offer must be drawn by exactly ONE site, never both -- the duplicate the
+    /// `firstRunAction == nil` guard was written to stop.
+    func testTheChipIsClaimedByExactlyOneSiteWhileOffered() {
+        for consumed in [false, true] {
+            var m = CopilotMessage(role: .companion, text: "hi",
+                                   firstRunAction: FirstRunAction(taskId: "t1", taskTitle: "T"))
+            m.tourOffer = true
+            m.actionConsumed = consumed
+
+            XCTAssertNotEqual(m.drawsTourChipBesidePrimary, m.drawsTourChipInline,
+                              "actionConsumed=\(consumed) drew the chip twice or not at all")
+        }
+    }
+
+    /// While the primary is still on screen the chip rides beside it, so it keeps reading
+    /// as the second option rather than jumping to its own row.
+    func testTheChipRidesBesideThePrimaryActionUntilItIsTapped() {
+        var m = CopilotMessage(role: .companion, text: "hi",
+                               firstRunAction: FirstRunAction(taskId: "t1", taskTitle: "T"))
+        m.tourOffer = true
+
+        XCTAssertTrue(m.drawsTourChipBesidePrimary)
+        XCTAssertFalse(m.drawsTourChipInline)
+    }
+
+    /// A greeting with no task has no primary branch to sit in, so it draws inline.
+    func testAGreetingWithNoTaskDrawsTheChipInline() {
+        var m = CopilotMessage(role: .companion, text: "hi")
+        m.tourOffer = true
+
+        XCTAssertTrue(m.drawsTourChipInline)
+        XCTAssertFalse(m.drawsTourChipBesidePrimary)
+    }
+
+    /// Once taken, it draws nowhere.
+    func testAConsumedTourDrawsNowhere() {
+        var m = CopilotMessage(role: .companion, text: "hi",
+                               firstRunAction: FirstRunAction(taskId: "t1", taskTitle: "T"))
+        m.tourOffer = true
+        m.tourConsumed = true
+
+        XCTAssertFalse(m.drawsTourChipSomewhere)
+    }
+
     // MARK: - The seeded greeting carries it
 
     func testTheSeededGreetingOffersTheTour() async throws {

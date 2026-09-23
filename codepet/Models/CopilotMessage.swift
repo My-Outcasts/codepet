@@ -213,3 +213,30 @@ struct CopilotMessage: Identifiable, Equatable {
         self.attachments = attachments
     }
 }
+
+// MARK: - Where the tour chip draws
+
+extension CopilotMessage {
+
+    /// The tour offer is live: made, and not yet taken.
+    private var tourIsOffered: Bool { tourOffer && !tourConsumed }
+
+    /// Drawn beside the primary action, inside `CopilotChatView`'s `firstRunAction` branch.
+    var drawsTourChipBesidePrimary: Bool {
+        tourIsOffered && firstRunAction != nil && !actionConsumed
+    }
+
+    /// Drawn by `inlineActions`, the path every other branch reaches — whenever the branch
+    /// above is not drawing it. Guarding this on `firstRunAction == nil` instead was CP-013:
+    /// a greeting that HAS a task keeps a non-nil `firstRunAction` after `actionConsumed`,
+    /// so the branch above stopped drawing the chip and this refused to pick it up.
+    var drawsTourChipInline: Bool {
+        tourIsOffered && !drawsTourChipBesidePrimary
+    }
+
+    /// Some site claims it. A live offer that no site claims is invisible on screen while
+    /// every flag still reads correctly, which is CP-013.
+    var drawsTourChipSomewhere: Bool {
+        drawsTourChipBesidePrimary || drawsTourChipInline
+    }
+}

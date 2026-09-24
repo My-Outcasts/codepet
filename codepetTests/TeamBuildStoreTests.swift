@@ -206,6 +206,27 @@ final class TeamBuildStoreTests: XCTestCase {
         }
     }
 
+    /// Spec §3: the run request carries the step's kind. `RunTaskRequest` has no kind field, so
+    /// it rides in the task detail as an instruction to the model.
+    func testEachStepsKindReachesTheRunner() async throws {
+        let probe = F.Probe()
+        var plan = F.plan
+        plan.steps[1] = WorkStep(id: "s2", dept: "design", title: "Design the page", instruction: "Layout and palette",
+                                 kind: "checklist", dependsOn: ["s1"])
+        let s = F.store(probe: probe, root: root, planner: { plan })
+        let planned = await F.planned(s)
+        XCTAssertTrue(planned, "the plan card never appeared")
+        await s.confirmTeamPlan()
+        let runId = try XCTUnwrap(s.teamRun?.run?.id)
+
+        let s1 = try XCTUnwrap(probe.runs.first { $0.taskTitle == "Write the message" })
+        let s2 = try XCTUnwrap(probe.runs.first { $0.taskTitle == "Design the page" })
+        XCTAssertTrue(s1.taskDetail.hasPrefix("Headline and copy"), s1.taskDetail)
+        XCTAssertTrue(s1.taskDetail.contains("Deliver it as a doc."), s1.taskDetail)
+        XCTAssertTrue(s2.taskDetail.contains("Deliver it as a checklist."), s2.taskDetail)
+        XCTAssertEqual(s1.taskId, "team-\(runId)-s1")
+    }
+
     /// Drafts filed before ids were namespaced by run still resolve, best effort.
     func testALegacyTeamIdStillResolves() async throws {
         var run = TeamRun(request: "r", createdAt: Date(), brief: nil, plan: F.plan)

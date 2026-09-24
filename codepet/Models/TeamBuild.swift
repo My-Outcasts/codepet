@@ -17,8 +17,12 @@ struct WorkStep: Codable, Hashable, Identifiable {
     /// The id carries the RUN as well as the step (`team-<runId>-<stepId>`): every plan numbers
     /// its steps s1, s2…, so a step id alone collides across runs and an older run's draft would
     /// resolve to the newest run's department. `CompanyStore.deptKey` resolves it exactly.
+    ///
+    /// The step's `kind` rides in the detail ("Deliver it as a <kind>."): spec §3 has the request
+    /// carry it, and `RunTaskRequest` has no field for it. English only — it is read by the model.
     func asRoadmapTask(runId: String) -> RoadmapTask {
-        RoadmapTask(id: Self.sourceTaskId(runId: runId, stepId: id), title: title, detail: instruction,
+        RoadmapTask(id: Self.sourceTaskId(runId: runId, stepId: id), title: title,
+                    detail: "\(instruction)\n\nDeliver it as a \(kind).",
                     phase: .build, who: .draft, dependsOn: [], dept: dept)
     }
 

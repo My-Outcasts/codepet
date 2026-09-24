@@ -24,7 +24,9 @@
  * only, which is why the parsing and planning live next door where tests can reach them.
  */
 
-import { ClaudeCliError, claudeAdapter, runCli, type CliAdapter } from "./cliAdapter";
+import {
+  ClaudeCliError, claudeAdapter, installSigtermHandler, runCli, type CliAdapter,
+} from "./cliAdapter";
 import { codexAdapter } from "./codexCli";
 import {
   ONE_SHOT_OPS,
@@ -218,6 +220,8 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
+  // Stop and the 180 s timeout SIGTERM this process; end the CLI child with it.
+  installSigtermHandler();
   main().catch((err) => {
     emit({ error: "sidecar_failure", detail: String(err) });
     process.exitCode = 1;

@@ -167,7 +167,7 @@ enum LocalOneShotRunner {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-lc", "node \"\(sidecar)\""]
+        proc.arguments = ["-lc", "exec node \"\(sidecar)\""]
         proc.environment = env
 
         let out = try await runProcess(proc, stdin: payload, timeout: timeout, label: op)
@@ -185,14 +185,23 @@ enum LocalOneShotRunner {
     /// A reply larger than the pipe buffer would otherwise deadlock the child against a parent
     /// that is only waiting for it to exit, so both pipes are read on background queues before
     /// the process is awaited — unchanged from `run`'s previous inline version.
+    ///
+    /// **Cancelling the calling Task ends the process** and throws `CancellationError`. Before
+    /// that, Stop on a Team Build only discarded the result, and the node -> claude pair ran on
+    /// for up to 180 s on the founder's plan. The sidecar ends its own `claude` child on the
+    /// SIGTERM this sends (`installSigtermHandler` in `cliAdapter.ts`), which is why the shell
+    /// `exec`s node rather than forking it: the signal has to reach node, not only the shell.
     static func runProcess(_ proc: Process, stdin: Data, timeout: TimeInterval, label: String) async throws -> Data {
+        try Task.checkCancellation()
         let outPipe = Pipe(), errPipe = Pipe(), inPipe = Pipe()
         proc.standardOutput = outPipe
         proc.standardError = errPipe
         proc.standardInput = inPipe
         let timedOut = TimeoutFlag()
+        let gate = LaunchGate()
 
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+        return try await withTaskCancellationHandler {
+          try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let collector = OutputCollector()
             outPipe.fileHandleForReading.readabilityHandler = { handle in
                 let chunk = handle.availableData
@@ -214,6 +223,11 @@ enum LocalOneShotRunner {
             proc.terminationHandler = { p in
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil
+                if gate.isCancelled {
+                    log.error("one-shot \(label, privacy: .public) cancelled")
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 if timedOut.isSet {
                     log.error("one-shot \(label, privacy: .public) timed out after \(Int(timeout), privacy: .public)s")
                     continuation.resume(throwing: Failure.timedOut(seconds: Int(timeout)))
@@ -235,7 +249,12 @@ enum LocalOneShotRunner {
             }
 
             do {
-                try proc.run()
+                // Launch under the gate, so a cancel cannot slip in between "not cancelled"
+                // and "running" and leave a process nobody will ever terminate.
+                guard try gate.launch({ try proc.run() }) else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 inPipe.fileHandleForWriting.write(stdin)
                 inPipe.fileHandleForWriting.closeFile()
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
@@ -253,7 +272,40 @@ enum LocalOneShotRunner {
                 log.error("could not launch one-shot sidecar: \(String(describing: error), privacy: .public)")
                 continuation.resume(throwing: error)
             }
+          }
+        } onCancel: {
+            gate.cancel {
+                guard proc.isRunning else { return }
+                kill(-proc.processIdentifier, SIGTERM)
+                proc.terminate()
+            }
         }
+    }
+}
+
+/// Serialises "launch the process" against "cancel the run": whichever comes second sees the
+/// first. A cancel before launch means launch never happens; a cancel after launch terminates.
+private final class LaunchGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var launched = false
+
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+
+    /// Runs `body` unless already cancelled. Returns false (and runs nothing) if cancelled.
+    func launch(_ body: () throws -> Void) throws -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if cancelled { return false }
+        try body()
+        launched = true
+        return true
+    }
+
+    /// Marks the run cancelled, and runs `terminate` if the process was already launched.
+    func cancel(_ terminate: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true
+        if launched { terminate() }
     }
 }
 

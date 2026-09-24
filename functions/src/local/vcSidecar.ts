@@ -34,6 +34,7 @@ import { AgentCaller } from "../company/router";
 import { RunPayload, runVirtualCompany, validateRunPayload } from "../company/orchestrate";
 import { ClaudeCliError, runClaudeJson, usageFrom } from "./claudeCli";
 import { extractJson, schemaInstruction } from "./oneShotOps";
+import { installSigtermHandler } from "./cliAdapter";
 
 function frame(event: string, payload: unknown): void {
   process.stdout.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -131,6 +132,8 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
+  // A terminated meeting must not leave its `claude` calls running on the founder's plan.
+  installSigtermHandler();
   main().catch((err) => {
     frame("error", { error: "sidecar_failure", detail: String(err) });
     process.exitCode = 1;

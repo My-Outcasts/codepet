@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-import { ClaudeCliError, claudeAdapter, runCli, setCliShell, type CliAdapter } from "../local/cliAdapter";
+import {
+  ClaudeCliError, claudeAdapter, installSigtermHandler, runCli, setCliShell, terminateLiveChildren,
+  type CliAdapter,
+} from "../local/cliAdapter";
 
 /**
  * The adapter is the ONLY provider-specific thing in the one-shot path. Everything above it —
@@ -136,5 +139,60 @@ describe("runCli", () => {
       .rejects.toThrow(ClaudeCliError);
     await expect(runCli(adapter, { systemPrompt: "S", prompt: "P" }))
       .rejects.toThrow(/unexpected argument/);
+  }, 20000);
+
+  /** Is `pid` still a live process? `kill(pid, 0)` signals nothing and throws if it is gone. */
+  function alive(pid: number): boolean {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  }
+
+  async function waitFor(file: string): Promise<number> {
+    for (let i = 0; i < 100; i++) {
+      if (fs.existsSync(file) && fs.readFileSync(file, "utf8").trim()) {
+        return Number(fs.readFileSync(file, "utf8").trim());
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("the fake CLI never started");
+  }
+
+  /**
+   * Stop and the 180 s timeout SIGTERM the sidecar. The fake CLI here stands in for `claude`:
+   * it runs UNDER the login shell, so ending only the shell would orphan it — which is what
+   * happened before, and `claude` then ran to completion on the founder's plan. It records its
+   * own pid so the test can check it is actually gone, not merely detached from us.
+   */
+  test("terminating live children ends the CLI under the shell, not just the shell", async () => {
+    const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "codepet-pid-")), "pid");
+    const adapter = fakeCli(`echo $$ > '${pidFile}'; sleep 30`);
+    const started = Date.now();
+    const run = runCli(adapter, { systemPrompt: "S", prompt: "P" });
+    const pid = await waitFor(pidFile);
+    expect(alive(pid)).toBe(true);
+
+    expect(terminateLiveChildren()).toBe(1);
+    await expect(run).rejects.toThrow(ClaudeCliError);
+    expect(Date.now() - started).toBeLessThan(10000);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(alive(pid)).toBe(false);
+  }, 20000);
+
+  /** The handler a sidecar installs: end the children, then exit 143 (128 + SIGTERM). */
+  test("the SIGTERM handler ends the CLI child and exits 143", async () => {
+    const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "codepet-pid-")), "pid");
+    const adapter = fakeCli(`echo $$ > '${pidFile}'; sleep 30`);
+    const exits: number[] = [];
+    const uninstall = installSigtermHandler((code) => exits.push(code));
+    try {
+      const run = runCli(adapter, { systemPrompt: "S", prompt: "P" });
+      const pid = await waitFor(pidFile);
+      process.emit("SIGTERM", "SIGTERM");
+      expect(exits).toEqual([143]);
+      await expect(run).rejects.toThrow(ClaudeCliError);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(alive(pid)).toBe(false);
+    } finally {
+      uninstall();
+    }
   }, 20000);
 });

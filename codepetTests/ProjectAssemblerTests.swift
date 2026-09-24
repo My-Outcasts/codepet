@@ -105,4 +105,72 @@ final class ProjectAssemblerTests: XCTestCase {
         _ = await assembler(FakeCoder()).assemble(teamRun()) { lines.append($0) }
         XCTAssertTrue(lines.contains("wrote index.html"))
     }
+
+    // MARK: - Review round 1 fixes
+
+    /// Finding 4: a slug reloaded off a `TeamRun` (e.g. from Firestore) is not trustworthy —
+    /// `"../evil"` must not let the project folder escape `root`. Verified empirically before
+    /// writing this test that unsanitized `root.appendingPathComponent("../evil")` really does
+    /// create a SIBLING of `root` (not something under it): `withIntermediateDirectories: false`
+    /// still succeeds because that sibling's parent already exists.
+    func testMakeFolderSanitizesAPathEscapingSlug() async throws {
+        let a = assembler(FakeCoder())
+        let url = try a.makeFolder(slug: "../evil")
+        XCTAssertEqual(url.lastPathComponent, "evil")
+        XCTAssertEqual(url.deletingLastPathComponent().standardizedFileURL.path, tmp.standardizedFileURL.path)
+    }
+
+    /// Finding 3, part 1 (smoke/regression): `runGit` is now `async` and off the main actor,
+    /// driven by `terminationHandler` instead of `waitUntilExit()`. Exercises the real
+    /// `/usr/bin/git` end to end, so a broken continuation or a broken signature would show up
+    /// as `false`/a hang here — the strongest available proof this went RED without the fix is
+    /// that the OLD synchronous, non-`async` `runGit` signature does not compile against these
+    /// `await` call sites at all. This also runs a real `commit` with `-c commit.gpgsign=false`
+    /// auto-injected; it does not independently prove the injection took effect (this machine
+    /// has no global `commit.gpgsign` to trigger a hang either way), only that injecting it
+    /// doesn't break an ordinary commit.
+    func testRunGitReallyInitsAddsAndCommits() async throws {
+        let repo = tmp.appendingPathComponent("realgit")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let initOk = await ProjectAssembler.runGit(["init"], repo)
+        XCTAssertTrue(initOk)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repo.appendingPathComponent(".git").path))
+
+        _ = await ProjectAssembler.runGit(["config", "user.email", "test@example.com"], repo)
+        _ = await ProjectAssembler.runGit(["config", "user.name", "Codepet Test"], repo)
+        try "hello".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let addOk = await ProjectAssembler.runGit(["add", "-A"], repo)
+        XCTAssertTrue(addOk)
+        let commitOk = await ProjectAssembler.runGit(["commit", "-m", "Initial"], repo)
+        XCTAssertTrue(commitOk)
+    }
+
+    /// Finding 3, part 2: a stuck `commit` (a slow hook, standing in for the gpg-passphrase-
+    /// prompt case the finding names — both just make the process not exit) must be killed
+    /// after the timeout instead of hanging. `timeout:` is overridden short so this doesn't
+    /// need a real 30s wait; the hook itself sleeps far longer than that override, so a pass
+    /// here only happens if the process was actually terminated early, not if it happened to
+    /// finish on its own.
+    func testRunGitKillsAStuckCommitAfterTimeout() async throws {
+        let repo = tmp.appendingPathComponent("stuckgit")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        _ = await ProjectAssembler.runGit(["init"], repo)
+        _ = await ProjectAssembler.runGit(["config", "user.email", "test@example.com"], repo)
+        _ = await ProjectAssembler.runGit(["config", "user.name", "Codepet Test"], repo)
+
+        let hooksDir = tmp.appendingPathComponent("hooks")
+        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
+        let hook = hooksDir.appendingPathComponent("pre-commit")
+        try "#!/bin/sh\nsleep 5\nexit 0\n".write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+
+        let start = Date()
+        let ok = await ProjectAssembler.runGit(
+            ["-c", "core.hooksPath=\(hooksDir.path)", "commit", "--allow-empty", "-m", "x"],
+            repo, timeout: 0.3)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertFalse(ok)
+        XCTAssertLessThan(elapsed, 3.0)   // killed well before the hook's 5s sleep would finish
+    }
 }

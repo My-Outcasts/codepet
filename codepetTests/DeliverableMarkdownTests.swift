@@ -113,27 +113,59 @@ final class DeliverableMarkdownTests: XCTestCase {
         XCTAssertTrue(md.contains("At these defaults the model clears break-even in month two."))
     }
 
+    /// Every copy field `SitePayload` has (`Models/Deliverable.swift:57-84`), each given a
+    /// distinct value, so a field the renderer drops shows up as a missing assert rather than
+    /// hiding behind another field's coincidentally-matching text. `accent` is excluded — it is
+    /// a colour, not copy, and `DeliverableMarkdown` never reads it.
     func testSitePayloadRendersEveryCopyField() throws {
         let p = try payload(json: """
         {
           "title": "Acme Landing",
           "brand": "Acme",
+          "kicker": "Now in beta",
           "headline": "Ship faster",
+          "headlineHi": "than ever",
           "sub": "Acme helps you ship faster than ever.",
           "ctaPrimary": "Get started",
+          "ctaSecondary": "See a demo",
+          "howEyebrow": "The process",
+          "howTitle": "How it works",
+          "steps": [{"h": "Connect your repo", "p": "Point Acme at your codebase."}],
+          "featEyebrow": "Why Acme",
+          "featTitle": "Built for speed",
+          "features": [{"h": "Fast setup", "p": "Up and running in minutes."}],
+          "quote": "Acme cut our release cycle in half.",
+          "quoteBy": "Jordan, CTO at Beta Co",
           "finalTitle": "Ready?",
+          "finalSub": "Start shipping today.",
           "finalCta": "Join now",
-          "features": [{"h": "Fast setup", "p": "Up and running in minutes."}]
+          "footNote": "No credit card required."
         }
         """)
         let d = Deliverable(kind: .site, title: "Landing page", body: "ignored for site", payload: p)
         let md = DeliverableMarkdown.render(d, dept: "Design", instruction: "Write the landing page copy")
+        XCTAssertTrue(md.contains("Acme Landing"))
+        XCTAssertTrue(md.contains("Acme"))
+        XCTAssertTrue(md.contains("Now in beta"))
         XCTAssertTrue(md.contains("Ship faster"))
+        XCTAssertTrue(md.contains("than ever"))
         XCTAssertTrue(md.contains("Acme helps you ship faster than ever."))
         XCTAssertTrue(md.contains("Get started"))
+        XCTAssertTrue(md.contains("See a demo"))
+        XCTAssertTrue(md.contains("The process"))
+        XCTAssertTrue(md.contains("How it works"))
+        XCTAssertTrue(md.contains("Connect your repo"))
+        XCTAssertTrue(md.contains("Point Acme at your codebase."))
+        XCTAssertTrue(md.contains("Why Acme"))
+        XCTAssertTrue(md.contains("Built for speed"))
         XCTAssertTrue(md.contains("Fast setup"))
         XCTAssertTrue(md.contains("Up and running in minutes."))
+        XCTAssertTrue(md.contains("Acme cut our release cycle in half."))
+        XCTAssertTrue(md.contains("Jordan, CTO at Beta Co"))
+        XCTAssertTrue(md.contains("Ready?"))
+        XCTAssertTrue(md.contains("Start shipping today."))
         XCTAssertTrue(md.contains("Join now"))
+        XCTAssertTrue(md.contains("No credit card required."))
     }
 
     func testScreensPayloadRendersEveryScreenWithItsCopy() throws {

@@ -145,7 +145,7 @@ enum DeliverableMarkdown {
         guard let s = p.site else { return "" }
         var parts: [String] = []
 
-        var hero = "**Brand:** \(s.brand)"
+        var hero = "**Page title:** \(s.title)  \n**Brand:** \(s.brand)"
         if !s.kicker.isEmpty { hero += "  \n_\(s.kicker)_" }
         hero += "\n\n## \(s.headline)" + (s.headlineHi.isEmpty ? "" : " \(s.headlineHi)")
         if !s.sub.isEmpty { hero += "\n\n\(s.sub)" }
@@ -156,13 +156,15 @@ enum DeliverableMarkdown {
 
         if !s.steps.isEmpty {
             let title = s.howTitle.isEmpty ? "How it works" : s.howTitle
-            parts.append("### \(title)\n\n" + s.steps.enumerated()
+            let eyebrow = s.howEyebrow.isEmpty ? "" : "_\(s.howEyebrow)_\n\n"
+            parts.append("\(eyebrow)### \(title)\n\n" + s.steps.enumerated()
                 .map { "\($0.offset + 1). **\($0.element.h)** — \($0.element.p)" }.joined(separator: "\n"))
         }
 
         if !s.features.isEmpty {
             let title = s.featTitle.isEmpty ? "Features" : s.featTitle
-            parts.append("### \(title)\n\n" + s.features
+            let eyebrow = s.featEyebrow.isEmpty ? "" : "_\(s.featEyebrow)_\n\n"
+            parts.append("\(eyebrow)### \(title)\n\n" + s.features
                 .map { "- **\($0.h):** \($0.p)" }.joined(separator: "\n"))
         }
 

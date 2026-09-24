@@ -64,10 +64,26 @@ real multi-file project instead of a decision.
   `ProjectAssembler` writes `docs/` and runs `claude -p` with file-only tools (`Read`, `Write`,
   `Edit`, `Glob`, `Grep`) for ≤15 min → a guaranteed `CLAUDE.md` → `git commit` → Approve files
   the project plus every department draft (`CompanyStore.approveTeamRun`)
-- Projects land in `~/Codepet Projects/<slug>/`. Runs persist as `teamRuns` on `companies/{uid}`
+- **File-only is enforced, not just granted.** `--allowedTools` denies nothing on its own (the
+  founder's `~/.claude/settings.json` allow rules still apply under `-p`), so the build also
+  passes `--disallowedTools "Bash,WebFetch,WebSearch,NotebookEdit,Task"` and
+  `--permission-mode acceptEdits` (`TeamBuildPrompt`, via `CLIRunner.claudeCommand`). The
+  existing Build path's command is unchanged and pinned by `CLIRunnerCommandTests`
+- Projects land in `~/Codepet Projects/<slug>/`. The commit falls back to the identity
+  `Codepet <team-build@codepet.local>` for whatever of user.name/user.email the Mac lacks
+- Runs persist as `teamRuns` on `companies/{uid}` — **bounded**: a filed or cancelled run drops
+  its drafts and at most 10 runs are kept (`TeamRun.retained`), because the array lives inside
+  the company doc (1 MiB limit). It decodes per element, so one bad run cannot empty the company
+- A draft's `sourceTaskId` is `team-<runId>-<stepId>`, never `team-<stepId>`: every plan
+  numbers its steps s1, s2…, and the bare form resolved older runs' drafts to the newest run's
+  department. The project entry is sourced to the `build` step, so it groups under Engineering
 - **The build prompt lives in Swift** (`TeamBuildPrompt.swift`), on purpose — it has no cloud
   path, unlike every other prompt in this project
-- `LocalOneShotRunner` now bounds every one-shot call, including `planTeamWork`, at 180 s
+- `LocalOneShotRunner` now bounds every one-shot call, including `planTeamWork`, at 180 s, and
+  **cancelling the calling Task terminates the process** (Stop). The shell `exec`s node, and
+  the one-shot and meeting sidecars end their own `claude` children on SIGTERM
+  (`installSigtermHandler` in `cliAdapter.ts`, children spawned detached and killed by process
+  group) — without that, `claude` was orphaned and ran on to completion on the founder's plan
 - Hidden in prototype mode — no Team build button when `PrototypeMode.isOn`
 
 ## Running on the founder's Claude plan, not the API key

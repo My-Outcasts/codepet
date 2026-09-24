@@ -301,15 +301,27 @@ This section is the one most likely to go stale. Treat it as a pointer, not a fa
 
 ## Shipping the app from the website
 
-The pipeline is finished and has never produced a release. `gh release list` is EMPTY, so
-`releases/latest/download/Codepet.dmg` 404s and both download pages know it and say so.
-**Nothing is blocking it any more.** As of 2026-09-22 this machine passes
-`./scripts/preflight-release.sh` on both credentials, for the first time:
+**Codepet ships. `v1.0-build2`, published 2026-09-22 — the first public release this
+project has ever had**, and the end of a long stretch where this section described a
+pipeline nobody could run. Verified after publishing, not before:
 
 ```
-✓ Developer ID Application certificate present
-✓ Notarization profile "codepet-notary" answers
+releases/latest/download/Codepet.dmg   200   (404 for as long as it had existed)
+code-pet.com/download/Codepet.dmg      200
+sha256 of the downloaded file          identical to the locally verified build
+spctl -a -t open on it                 accepted / source=Notarized Developer ID
 ```
+
+- **`gh release list` is not empty, and was not empty before this either.** An earlier
+  version of this section said it was, and that claim was repeated twice in one day without
+  anyone running the command. `v1.0-build2-internal` (17 Sep) is a **pre-release** carrying
+  `Codepet-internal.dmg`; the download page 404ed anyway, because GitHub resolves `latest`
+  PAST pre-releases and the asset name has to match exactly. Two different reasons for the
+  same 404, and only one of them was written down
+- **That internal pre-release carries the landmine 7 deadlock.** It is a `Release` build from
+  17 Sep, so any tester who signed in and relaunched has been stuck on "Loading…" since. It
+  wants re-cutting from `main`
+- `./scripts/preflight-release.sh` passes all three credentials on this machine
 
 - **The Developer ID Application certificate landed 2026-09-22.** It came by the CSR route,
   NOT the `.p12` route `docs/developer-id-request.md` originally asked for: the private key

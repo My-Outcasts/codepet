@@ -62,6 +62,24 @@ BUILD="$(xcodebuild -showBuildSettings -scheme codepet 2>/dev/null | awk -F' = '
 TAG="${TAG:-v${MKT:-1.0}-build${BUILD:-1}}"
 TITLE="Codepet ${MKT:-1.0} (build ${BUILD:-1})"
 
+# ── Release notes ─────────────────────────────────────────────────────────────
+# These used to end "on first launch right-click → Open", which is the instruction for an
+# app Gatekeeper REFUSES. This build is signed with Developer ID, notarized, and stapled —
+# `spctl -a -t open` answers `accepted / source=Notarized Developer ID` — so it opens by
+# double-click like anything else. Worse, that bypass was removed in macOS 15: the reader
+# would have followed a step that no longer exists, on an app that never needed it, and
+# concluded it was untrusted.
+#
+# The deployment target belongs here for the opposite reason — it is the one thing that
+# WILL stop someone, and nothing else tells them. `SwiftExplicitDependency` in the archive
+# log resolves `-target-triple arm64-apple-macos26.2`.
+MIN_MACOS="${MIN_MACOS:-26.2}"
+NOTES="Direct download for macOS. Signed with a Developer ID certificate and notarized by Apple, so it opens like any other app — no right-click, no security warning.
+
+**Requires macOS ${MIN_MACOS} or later.**
+
+Install: open the .dmg and drag Codepet to Applications."
+
 echo "▶︎ Repo:  $REPO"
 echo "▶︎ Tag:   $TAG"
 echo "▶︎ Asset: $DMG"
@@ -71,11 +89,11 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "$DMG" --repo "$REPO" --clobber
   gh release edit "$TAG" --repo "$REPO" --latest
 else
-  echo "▶︎ Creating release $TAG…"
+  echo "▶︎ Creating release ${TAG}…"
   gh release create "$TAG" "$DMG" \
     --repo "$REPO" \
     --title "$TITLE" \
-    --notes "Direct macOS download (notarized). Install: open the .dmg, drag Codepet to Applications; on first launch right-click → Open." \
+    --notes "$NOTES" \
     --latest
 fi
 

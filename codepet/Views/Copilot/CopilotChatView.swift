@@ -21,6 +21,13 @@ struct CopilotChatView: View {
     /// Toggles the "History" thread switcher over the message list. Session-only
     /// UI state — the History stub (see the header) now activates this.
     @State private var showHistory = false
+    /// The Team Build step whose detail is open — a side column in the pane, a sheet in the dock.
+    @State private var teamDetailStepId: String?
+    /// The team run last drawn at the transcript's bottom (see `unanchoredTeamRun`). Keeps a
+    /// restored run's card on screen through Stop and Approve, which move it out of the
+    /// "active or ready" set that put it there — otherwise the card would vanish at the
+    /// moment it says Cancelled or "Added to Library".
+    @State private var stickyTeamRunId: String?
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
@@ -164,7 +171,8 @@ struct CopilotChatView: View {
         // each site would be asking two different questions and getting two different
         // answers — and these two must line up exactly.
         GeometryReader { geo in
-            let column = ChatColumn.textWidth(forBox: geo.size.width, surface: surface)
+            let column = ChatColumn.textWidth(forBox: geo.size.width - (showsTeamSideColumn ? Self.teamSideWidth : 0),
+                                              surface: surface)
             VStack(spacing: 0) {
                 // Two-mode has no dock to collapse and no history icon: the rail's
                 // Recent list IS the thread switcher, so the row would be two
@@ -211,19 +219,36 @@ struct CopilotChatView: View {
                         composerDock(column: column)
                     }
                 } else {
-                    messageList(column: column)
-                    // No rule above the composer — it carries its own bordered container,
-                    // so the seam was redundant chrome. Matches the header's no-divider
-                    // direction. It shares the transcript's reading column, so the composer
-                    // and the words above it start and end on the same two vertical lines.
-                    if surface == .twoMode {
-                        composerDock(column: column)
-                    } else {
-                        composer.readingColumn(column).padding(.bottom, 12)
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            messageList(column: column)
+                            // No rule above the composer — it carries its own bordered container,
+                            // so the seam was redundant chrome. Matches the header's no-divider
+                            // direction. It shares the transcript's reading column, so the composer
+                            // and the words above it start and end on the same two vertical lines.
+                            if surface == .twoMode {
+                                composerDock(column: column)
+                            } else {
+                                composer.readingColumn(column).padding(.bottom, 12)
+                            }
+                        }
+                        // The pane opens a Team Build step side by side with the transcript;
+                        // the dock is too narrow for that and uses the sheet below.
+                        if showsTeamSideColumn, let c = companyStore.teamRun, let id = teamDetailStepId {
+                            Divider().overlay(CodepetTheme.hairline)
+                            TeamStepDetailPanel(coordinator: c, stepId: id) { teamDetailStepId = nil }
+                                .frame(width: Self.teamSideWidth)
+                        }
                     }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .sheet(item: teamDetailSheet) { sel in
+            if let c = companyStore.teamRun {
+                TeamStepDetailPanel(coordinator: c, stepId: sel.id) { teamDetailStepId = nil }
+                    .frame(minWidth: 360, idealWidth: 420, minHeight: 420, idealHeight: 560)
+            }
         }
         // Release the pair the moment voice mode collapses (`VoiceComposer.close()`
         // already called `stopImmediately()`/`stop()`) — nothing here needs to hold a
@@ -424,6 +449,7 @@ struct CopilotChatView: View {
     /// the two cannot describe different screens.
     private var isEmptyState: Bool {
         companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty
+            && unanchoredTeamRun == nil
     }
 
     /// **Whether the composer, when it is what the slot renders, gives the tentative chip a
@@ -552,6 +578,9 @@ struct CopilotChatView: View {
             onSend: { send() },
             onQuickAction: handleQuickAction,
             onConveneRoom: conveneRoom,
+            onTeamBuild: teamBuild,
+            teamBuildEnabled: TeamBuildButton.isEnabled(draft: companyStore.chatDraft, busy: isChatBusy,
+                                                        available: companyStore.teamBuildAvailable),
             onVoiceMode: startVoiceMode,
             voiceAvailability: voiceAvailability,
             onRecord: RecordControl(press: startRecord,
@@ -814,6 +843,47 @@ struct CopilotChatView: View {
         Task { await companyStore.sendChat(ask, language: lang, convenesRoom: true) }
     }
 
+    /// Start a Team Build on what is in the composer: the room, then a plan card the founder
+    /// confirms. Cleared like `conveneRoom` clears it — the words are committed to the room.
+    private func teamBuild() {
+        let ask = companyStore.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard TeamBuildButton.isEnabled(draft: ask, busy: isChatBusy,
+                                        available: companyStore.teamBuildAvailable) else { return }
+        showHistory = false
+        companyStore.chatDraft = ""
+        Task { await companyStore.startTeamBuild(ask, language: lang) }
+    }
+
+    static let teamSideWidth: CGFloat = 320
+
+    /// The side column shows only in the pane, only on the transcript (not History, not the
+    /// empty hero), and only while there is a run to resolve the step against.
+    private var showsTeamSideColumn: Bool {
+        surface == .twoMode && teamDetailStepId != nil && companyStore.teamRun != nil
+            && !showHistory && !isEmptyState
+    }
+
+    /// The dock's presentation of the same selection. The pane never presents the sheet.
+    private var teamDetailSheet: Binding<TeamStepSelection?> {
+        Binding(get: { surface == .dock ? teamDetailStepId.map(TeamStepSelection.init) : nil },
+                set: { teamDetailStepId = $0?.id })
+    }
+
+    /// The store's team run when no message in this thread carries its id. Chat threads are
+    /// in-memory only, so a run restored on relaunch has no message to render under — without
+    /// this its card (and its Continue / Approve) would be unreachable. A run a message DOES
+    /// carry renders inline through `CopilotBubble` instead, never both.
+    ///
+    /// Only a run the founder can still act on (active, or ready for Approve) — or the one this
+    /// view already drew here (`stickyTeamRunId`). A finished run from earlier in the session
+    /// would otherwise sit at the bottom of every new conversation.
+    private var unanchoredTeamRun: TeamRunCoordinator? {
+        guard let c = companyStore.teamRun, let run = c.run,
+              run.isActive || run.phase == .ready || run.id == stickyTeamRunId,
+              !companyStore.chatMessages.contains(where: { $0.teamRunId == run.id }) else { return nil }
+        return c
+    }
+
     /// The pane's composer and the line under it.
     ///
     /// The composer was sitting ~6pt off the window's bottom edge, which is most of why
@@ -1000,7 +1070,8 @@ struct CopilotChatView: View {
                         let previousRole = idx > 0 ? companyStore.chatMessages[idx - 1].role : nil
                         CopilotBubble(message: m,
                                       isLast: idx == companyStore.chatMessages.count - 1,
-                                      scrollGeneration: scrollGeneration)
+                                      scrollGeneration: scrollGeneration,
+                                      onTeamStepSelect: { teamDetailStepId = $0 })
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
                         if surface.showsCodingRunCard,
@@ -1041,6 +1112,12 @@ struct CopilotChatView: View {
                     // Parallel department agents (a "Run my next moves" fan-out).
                     if !companyStore.activeAgentRuns.isEmpty {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
+                    }
+                    // A Team Build with no message in this thread (restored on relaunch).
+                    if let team = unanchoredTeamRun {
+                        TeamRunCard(coordinator: team, onSelect: { teamDetailStepId = $0 })
+                            .id("team-run")
+                            .onAppear { stickyTeamRunId = team.run?.id }
                     }
                     // The streaming/typing affordance (Task 11) — replaces main's
                     // static typingRow. Generic label (no single-run step source here) —
@@ -1371,6 +1448,8 @@ struct CopilotBubble: View {
     /// Bumped by `messageList` on every one of its six autoscroll triggers. Watched only to
     /// reset a stranded `hovering` — see the comment on `body`'s `.onChange` below.
     let scrollGeneration: Int
+    /// A row of a Team Build card was clicked — the owner opens that step's detail.
+    var onTeamStepSelect: (String) -> Void = { _ in }
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
@@ -1546,6 +1625,12 @@ struct CopilotBubble: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let teamRunId = message.teamRunId {
+            // Only the store's current run is live; a message whose run was replaced by a
+            // newer one draws nothing rather than a stale copy.
+            if let c = companyStore.teamRun, c.run?.id == teamRunId {
+                TeamRunCard(coordinator: c, onSelect: onTeamStepSelect)
+            }
         } else if let draft = message.draft {
             draftCard(draft)
         // An action now rides on the reply it belongs to and is drawn inside that

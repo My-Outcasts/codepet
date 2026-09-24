@@ -1,5 +1,6 @@
 // codepet/Views/Library/LibraryView.swift
 import SwiftUI
+import AppKit
 
 // MARK: - Library metadata (web parity)
 //
@@ -413,6 +414,7 @@ struct LibraryRowView: View {
 struct DeliverableDetailView: View {
     let deliverable: Deliverable
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.uiLanguage) private var lang
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -421,6 +423,19 @@ struct DeliverableDetailView: View {
                     .font(.pixelSystem(size: 15, weight: .bold))
                     .foregroundColor(CodepetTheme.primaryText)
                 Spacer()
+                // A Team Build's project entry points at a folder on disk (`projectPath`),
+                // which is the actual deliverable; the body is only its CLAUDE.md summary.
+                if let path = deliverable.projectPath {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    } label: {
+                        Label(lang == .vi ? "Mở trong Finder" : "Open in Finder", systemImage: "folder")
+                            .font(CodepetTheme.inter(12, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .help(path)
+                }
                 Button { dismiss() } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
             }

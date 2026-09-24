@@ -421,7 +421,7 @@ git commit -m "Capture and parse the app's os.Logger output as run evidence"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `DEFAULT_DB` (str); `data_files(db_dir) -> list[str]`; `contains(db_dir, needle: bytes, chunk=CHUNK) -> bool`; `count(db_dir, needle: bytes) -> int`; `StoreMissing(Exception)`.
+- Produces: `DEFAULT_DB` (str); `data_files(db_dir) -> list[str]`; `contains(db_dir, needle: bytes, chunk=CHUNK) -> bool`; `count(db_dir, needle: bytes) -> int`; `wait_for(db_dir, needle, timeout, interval=2.0, sleep=time.sleep, now=time.monotonic) -> bool`; `StoreMissing(Exception)`.
 
 **Verified, not assumed:** on 24 September a scan of the live database found `nguyen@murror.app` 3 times and `projects/` 217 times across 2,774,671 bytes, instantly. The approach works and the auth needle exists.
 
@@ -434,7 +434,7 @@ import os
 import tempfile
 import unittest
 
-from smoke.lib.store import StoreMissing, contains, count, data_files
+from smoke.lib.store import StoreMissing, contains, count, data_files, wait_for
 
 
 class DataFiles(unittest.TestCase):
@@ -492,6 +492,38 @@ class Count(unittest.TestCase):
             self.assertEqual(count(d, b"X"), 3)
 
 
+class WaitFor(unittest.TestCase):
+    def test_it_returns_as_soon_as_the_needle_lands(self):
+        # Raw byte reads do not take LevelDB's lock, so we can poll while the
+        # app is still running instead of paying a fixed 90s sleep.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "001.ldb")
+            open(path, "wb").close()
+            slept = []
+
+            def fake_sleep(seconds):
+                slept.append(seconds)
+                if len(slept) == 2:
+                    with open(path, "wb") as f:
+                        f.write(b"smoke-f3a91c")
+
+            ticks = iter([0.0, 2.0, 4.0, 6.0, 8.0])
+            self.assertTrue(
+                wait_for(d, b"smoke-f3a91c", timeout=30, interval=2.0,
+                         sleep=fake_sleep, now=lambda: next(ticks))
+            )
+            self.assertEqual(len(slept), 2)
+
+    def test_it_gives_up_at_the_deadline(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "001.ldb"), "wb").close()
+            ticks = iter([0.0, 5.0, 11.0])
+            self.assertFalse(
+                wait_for(d, b"never", timeout=10, interval=1.0,
+                         sleep=lambda s: None, now=lambda: next(ticks))
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
 ```
@@ -523,6 +555,7 @@ the seam to replace, and plyvel becomes the honest answer at that point.
 
 import glob
 import os
+import time
 
 DEFAULT_DB = os.path.expanduser(
     "~/Library/Application Support/firestore/__FIRAPP_DEFAULT/devpet-8f4b1/main"
@@ -572,12 +605,31 @@ def count(db_dir, needle):
         with open(path, "rb") as f:
             total += f.read().count(needle)
     return total
+
+
+def wait_for(db_dir, needle, timeout, interval=2.0, sleep=time.sleep, now=time.monotonic):
+    """Poll until the needle appears, or the deadline passes.
+
+    Reading the raw .ldb/.log bytes does NOT take LevelDB's lock -- that lock
+    guards opening the database, not reading its files -- so this can run
+    while the app is still up. What a live read can be is STALE: a write
+    still sitting in the memtable is not on disk yet. So a True here is
+    trustworthy and a False is not, which is why callers quit the app and
+    read once more before calling it a failure.
+    """
+    deadline = now() + timeout
+    while True:
+        if contains(db_dir, needle):
+            return True
+        if now() >= deadline:
+            return False
+        sleep(interval)
 ```
 
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `python3 -m unittest smoke.tests.test_store -v`
-Expected: `Ran 7 tests` / `OK`
+Expected: `Ran 9 tests` / `OK`
 
 - [ ] **Step 5: Prove it against the real database**
 
@@ -1392,13 +1444,15 @@ def run(token, capture, db_dir=store.DEFAULT_DB, timeout=90):
         result.duration = time.time() - started
         return result
 
-    # Give the turn time to complete, then quit so the LevelDB lock is released.
-    time.sleep(min(timeout, 90))
-    drive.quit_app()
-
+    # Poll the raw files while the app runs -- a hit is trustworthy and
+    # returns in seconds. Then quit and read ONCE more, because a miss may
+    # only mean the write is still in the memtable.
     try:
+        reply_persisted = store.wait_for(db_dir, reply_needle(token), timeout=timeout)
+        drive.quit_app()
+        if not reply_persisted:
+            reply_persisted = store.contains(db_dir, reply_needle(token))
         probe_persisted = store.contains(db_dir, token.encode("utf-8"))
-        reply_persisted = store.contains(db_dir, reply_needle(token))
     except store.StoreMissing:
         result = Result(NAME, ERROR, time.time() - started, "no database at %s" % db_dir)
         return result
@@ -1442,8 +1496,18 @@ Create `smoke/tests/test_check_task.py`:
 ```python
 import unittest
 
-from smoke.checks.task import evaluate
+from smoke.checks.task import deliverable_needle, evaluate, probe_text
 from smoke.lib.result import ERROR, FAIL, PASS, SKIP
+
+
+class Needle(unittest.TestCase):
+    def test_it_is_token_scoped_not_the_bare_word(self):
+        # "deliverable" alone had 15 hits in the live store before any run.
+        self.assertEqual(deliverable_needle("abc123"), b"smoke-deliverable-321cba")
+
+    def test_the_needle_does_not_appear_in_the_probe_we_type(self):
+        token = "abc123"
+        self.assertNotIn(deliverable_needle(token).decode(), probe_text(token))
 
 
 class Evaluate(unittest.TestCase):
@@ -1498,11 +1562,24 @@ from smoke.lib.result import ERROR, FAIL, PASS, SKIP, Result
 
 NAME = "task"
 
-DELIVERABLE_MARKER = b"deliverable"
-
 
 def probe_text(token):
-    return "smoke test %s -- run a small task and produce one deliverable" % token
+    return (
+        "smoke test %s -- run a small task and title its deliverable "
+        "'smoke-deliverable-' followed by this code written backwards: %s"
+        % (token, token)
+    )
+
+
+def deliverable_needle(token):
+    """Token-scoped, and reversed so the probe we type cannot contain it.
+
+    The first draft of this check searched for the bare word "deliverable".
+    A scan of the live store on 24 September found it 15 times ALREADY, so
+    the check would have reported PASS against a completely broken task
+    pipeline -- green, forever, and believed.
+    """
+    return ("smoke-deliverable-" + token[::-1]).encode("utf-8")
 
 
 def evaluate(requested, sent, deliverable_persisted, token, log_error):
@@ -1533,13 +1610,11 @@ def run(token, capture, requested, db_dir=store.DEFAULT_DB, timeout=300):
         result.duration = time.time() - started
         return result
 
-    time.sleep(min(timeout, 300))
-    drive.quit_app()
-
     try:
-        persisted = store.contains(db_dir, token.encode("utf-8")) and store.contains(
-            db_dir, DELIVERABLE_MARKER
-        )
+        persisted = store.wait_for(db_dir, deliverable_needle(token), timeout=timeout)
+        drive.quit_app()
+        if not persisted:
+            persisted = store.contains(db_dir, deliverable_needle(token))
     except store.StoreMissing:
         return Result(NAME, ERROR, time.time() - started, "no database at %s" % db_dir)
 
@@ -1551,7 +1626,7 @@ def run(token, capture, requested, db_dir=store.DEFAULT_DB, timeout=300):
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `python3 -m unittest smoke.tests.test_check_task -v`
-Expected: `Ran 4 tests` / `OK`
+Expected: `Ran 6 tests` / `OK`
 
 - [ ] **Step 5: Commit**
 
@@ -2085,11 +2160,15 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
                     results.append(task_check.evaluate(
                         with_task, False, False, token, None))
                     results[-1].detail = "skipped (chat %s)" % chat.status
-                else:
+                elif with_task:
+                    # Only pay for a relaunch when the task check will really run.
                     drive.launch(app_path)
                     drive.wait_until(drive.is_running, timeout=45)
                     results.append(task_check.run(
-                        chat_check.mint_token(), capture, with_task, db_dir=db_dir))
+                        chat_check.mint_token(), capture, True, db_dir=db_dir))
+                else:
+                    results.append(task_check.evaluate(
+                        False, False, False, "", None))
         finally:
             drive.quit_app()
 

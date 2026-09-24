@@ -206,6 +206,36 @@ extension CLIEnvironmentTests {
         XCTAssertEqual(scrubbed["HOME"], "/Users/someone")
     }
 
+    // MARK: - PATH for a Finder launch
+
+    /// The 2026-09-22 release, opened from Finder, got exactly this PATH — and the native
+    /// installer's `~/.local/bin` is not on it. Delete the augmentation and this goes red.
+    func testFinderLaunchPathGainsTheNativeInstallerDir() {
+        let finderPath = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        let env = LoginShellRunner.pathAugmented(
+            ["PATH": finderPath], home: "/Users/f",
+            fileExists: { $0 == "/Users/f/.local/bin" })
+        XCTAssertEqual(env["PATH"], finderPath + ":/Users/f/.local/bin")
+    }
+
+    /// Appended, never prepended — the founder's own ordering still decides which
+    /// `claude` runs — and never duplicated.
+    func testPathAugmentationKeepsOrderAndSkipsDuplicatesAndMissingDirs() {
+        let env = LoginShellRunner.pathAugmented(
+            ["PATH": "/Users/f/.local/bin:/usr/bin"], home: "/Users/f",
+            fileExists: { $0 != "/Users/f/.volta/bin" })
+        let dirs = env["PATH"]!.split(separator: ":").map(String.init)
+        XCTAssertEqual(Array(dirs.prefix(2)), ["/Users/f/.local/bin", "/usr/bin"])
+        XCTAssertEqual(dirs.filter { $0 == "/Users/f/.local/bin" }.count, 1)
+        XCTAssertFalse(dirs.contains("/Users/f/.volta/bin"), "a dir that is not on disk is not added")
+    }
+
+    func testSpawnEnvironmentScrubsCredentialsToo() {
+        let env = LoginShellRunner.spawnEnvironment(["PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant-x"])
+        XCTAssertNil(env["ANTHROPIC_API_KEY"])
+        XCTAssertEqual(env["PATH"]?.split(separator: ":").first, "/usr/bin")
+    }
+
     func testConsoleAccountRaisesABillingWarningButStillRuns() async {
         let shell = FakeShell()
         shell.stub("--version", stdout: "2.1.241 (Claude Code)")

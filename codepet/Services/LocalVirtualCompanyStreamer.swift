@@ -76,7 +76,7 @@ enum LocalVirtualCompanyStreamer {
             // strips them again on each `claude` it spawns.
             let shell = LoginShellRunner.loginShells
                 .first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
-            var env = LoginShellRunner.scrubbedEnvironment(ProcessInfo.processInfo.environment)
+            var env = LoginShellRunner.spawnEnvironment()
             // Reaches the blackboard's owner field only, and the blackboard is never written
             // locally — but a run that recorded the wrong founder would be worse than one
             // that records nothing.

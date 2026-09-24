@@ -190,6 +190,7 @@ final class LocalOneShotRunnerTests: XCTestCase {
             baseEnvironment: ["PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant-x"])
         XCTAssertEqual(env["CODEPET_CLI_PROVIDER"], "codex")
         XCTAssertNil(env["ANTHROPIC_API_KEY"])
-        XCTAssertEqual(env["PATH"], "/usr/bin")
+        // The founder's PATH comes first; fallback dirs may only be appended after it.
+        XCTAssertEqual(env["PATH"]?.split(separator: ":").first, "/usr/bin")
     }
 }

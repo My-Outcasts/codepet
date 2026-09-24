@@ -59,6 +59,57 @@ struct LoginShellRunner: ShellRunning {
         return scrubbed
     }
 
+    /// Where the documented installers put `claude`, `codex` and `node`, relative to
+    /// `$HOME` unless absolute.
+    ///
+    /// **`-l` does not load `~/.zshrc`, and that is where the installers write PATH.**
+    /// The native Claude Code installer, fnm and nvm all edit `.zshrc`; a login shell
+    /// that is not interactive reads only `.zprofile` and `.zshenv`. So an app launched
+    /// from Finder — PATH `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+    /// measured on the 2026-09-22 release — ran `claude auth status` and got
+    /// `command not found`, exit 127, which the panel reported as "too old to report its
+    /// sign-in state". `probeInstall` never saw it because it falls back to absolute
+    /// paths; every other spawn used the bare name. Launching from a terminal hides the
+    /// bug completely, because the app then inherits the terminal's PATH.
+    ///
+    /// Appended, never prepended: whatever the founder's own profile puts first still
+    /// wins. These only fill the gap a GUI launch leaves.
+    static let fallbackPathDirs = [
+        "~/.local/bin",                             // native Claude Code installer
+        "~/.claude/local",                          // older Claude Code local install
+        "/opt/homebrew/bin",                        // Homebrew, Apple silicon
+        "/usr/local/bin",                           // Homebrew on Intel, npm global
+        "~/.volta/bin",
+        "~/.bun/bin",
+        "~/.local/share/fnm/aliases/default/bin",   // fnm, XDG layout
+        "~/Library/Application Support/fnm/aliases/default/bin"
+    ]
+
+    /// `environment` with each existing `fallbackPathDirs` entry appended to PATH once.
+    /// `fileExists` is injected so this stays pure under test.
+    static func pathAugmented(
+        _ environment: [String: String],
+        home: String = NSHomeDirectory(),
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> [String: String] {
+        var env = environment
+        var dirs = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        for raw in fallbackPathDirs {
+            let dir = raw.hasPrefix("~/") ? home + raw.dropFirst(1) : raw
+            if !dirs.contains(dir), fileExists(dir) { dirs.append(dir) }
+        }
+        env["PATH"] = dirs.joined(separator: ":")
+        return env
+    }
+
+    /// What every spawn of the founder's CLI should run with: credentials scrubbed, PATH
+    /// able to find `claude` and `node` however the app was launched.
+    static func spawnEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        pathAugmented(scrubbedEnvironment(environment))
+    }
+
     /// Hard ceiling on one command, in nanoseconds. A hung shell must not leave a caller
     /// awaiting forever — preflight runs on a screen the founder is looking at.
     let timeoutNanos: UInt64
@@ -74,7 +125,7 @@ struct LoginShellRunner: ShellRunning {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)
         proc.arguments = ["-lc", command]
-        proc.environment = Self.scrubbedEnvironment(ProcessInfo.processInfo.environment)
+        proc.environment = Self.spawnEnvironment()
 
         let outPipe = Pipe()
         let errPipe = Pipe()

@@ -54,6 +54,22 @@ The feature that convenes departments to argue a decision. Backend in `functions
 - **The ~$0.20 figure predates the effort change.** The position and negotiation phases now run at `POSITION_EFFORT` (`medium`) instead of the API default (`high`), which cuts thinking tokens on the two phases that fan out. Nobody has re-measured since; treat $0.20 as an upper bound until someone does
 - Test procedure and every measured number: `docs/superpowers/virtual-company-test-runbook.md`. Read it before re-measuring anything
 
+### Team Build
+
+Spec: `docs/superpowers/specs/2026-09-24-team-build-design.md`. Convenes the room to produce a
+real multi-file project instead of a decision.
+
+- Flow: Team build button → room → `planTeamWork` (`ONE_SHOT_OPS`) → one approval →
+  `TeamRunCoordinator` runs department steps, ≤3 at once, each fed its direct deps' drafts →
+  `ProjectAssembler` writes `docs/` and runs `claude -p` with file-only tools (`Read`, `Write`,
+  `Edit`, `Glob`, `Grep`) for ≤15 min → a guaranteed `CLAUDE.md` → `git commit` → Approve files
+  the project plus every department draft (`CompanyStore.approveTeamRun`)
+- Projects land in `~/Codepet Projects/<slug>/`. Runs persist as `teamRuns` on `companies/{uid}`
+- **The build prompt lives in Swift** (`TeamBuildPrompt.swift`), on purpose — it has no cloud
+  path, unlike every other prompt in this project
+- `LocalOneShotRunner` now bounds every one-shot call, including `planTeamWork`, at 180 s
+- Hidden in prototype mode — no Team build button when `PrototypeMode.isOn`
+
 ## Running on the founder's Claude plan, not the API key
 
 The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function

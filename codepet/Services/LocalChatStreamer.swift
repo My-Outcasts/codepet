@@ -91,8 +91,7 @@ enum LocalChatStreamer {
             // sidecar strips them again on its own child.
             let shell = LoginShellRunner.loginShells
                 .first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
-            var env = ProcessInfo.processInfo.environment
-            for key in LoginShellRunner.strippedEnvironmentKeys { env.removeValue(forKey: key) }
+            var env = LoginShellRunner.spawnEnvironment()
             // The founder's model choice, as an alias so it tracks the latest of that tier.
             // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at
             // all and leave the decision to their own Claude Code.

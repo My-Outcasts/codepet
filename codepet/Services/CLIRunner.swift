@@ -146,6 +146,9 @@ final class CLIRunner: ObservableObject {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)
         proc.arguments = ["-lc", claudeCmd]
+        // Scrubbed and PATH-augmented like every other spawn: from Finder, `-l` alone
+        // cannot find a `claude` whose installer wrote PATH into `.zshrc`.
+        proc.environment = LoginShellRunner.spawnEnvironment()
         proc.currentDirectoryURL = URL(fileURLWithPath: dir)
 
         let stdoutPipe = Pipe()

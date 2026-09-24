@@ -107,7 +107,7 @@ final class CLILogin: ObservableObject {
         // founder's SUBSCRIPTION. If a future release flips the default to Console, an
         // unstated flag would quietly start billing them per token.
         proc.arguments = ["-lc", "claude auth login --claudeai"]
-        proc.environment = LoginShellRunner.scrubbedEnvironment(ProcessInfo.processInfo.environment)
+        proc.environment = LoginShellRunner.spawnEnvironment()
 
         let outPipe = Pipe()
         let inPipe = Pipe()

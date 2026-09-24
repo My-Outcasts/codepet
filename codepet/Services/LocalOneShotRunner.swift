@@ -110,7 +110,7 @@ enum LocalOneShotRunner {
         // outranks the subscription, so a key exported in their profile would bill the API
         // account this whole design exists to stop using. The sidecar strips them again on
         // its own child.
-        var env = LoginShellRunner.scrubbedEnvironment(baseEnvironment)
+        var env = LoginShellRunner.spawnEnvironment(baseEnvironment)
         env["CODEPET_CLI_PROVIDER"] = provider.cliName
         // The founder's model choice, as an alias so it tracks the latest of that tier.
         // Absent for `.inherit`, which is what makes the sidecar pass no `--model` at all and

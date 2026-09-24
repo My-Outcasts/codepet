@@ -227,6 +227,34 @@ final class TeamBuildStoreTests: XCTestCase {
         XCTAssertEqual(s1.taskId, "team-\(runId)-s1")
     }
 
+    /// The saver is what reaches `companies/{uid}`: once approved, the run is persisted without its
+    /// drafts (they are in the Library), and never more than ten runs are written.
+    func testAFiledRunIsPersistedWithoutDraftsAndRunsAreCapped() async throws {
+        var initial = CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                                   stage: .idea, companionId: "byte", onboardedAt: Date())
+        initial.teamRuns = (0..<10).map { i -> TeamRun in
+            var r = TeamRun(request: "old\(i)", createdAt: Date(timeIntervalSince1970: TimeInterval(i)),
+                            brief: nil, plan: F.plan)
+            r.phase = .filed
+            return r
+        }
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, initial: initial)
+        let planned = await F.planned(s)
+        XCTAssertTrue(planned, "the plan card never appeared")
+        await s.confirmTeamPlan()
+        XCTAssertNotNil(s.teamRun?.run?.state("s1")?.draft, "precondition: the ready run holds drafts")
+        await s.approveTeamRun()
+
+        let saved = try XCTUnwrap(probe.saves.last?.runs)
+        XCTAssertLessThanOrEqual(saved.count, 10)
+        XCTAssertFalse(saved.contains { $0.request == "old0" }, "the oldest filed run is dropped first")
+        let filed = try XCTUnwrap(saved.first { $0.id == s.teamRun?.run?.id })
+        XCTAssertEqual(filed.phase, .filed)
+        XCTAssertTrue(filed.steps.allSatisfy { $0.draft == nil }, "a filed run persists without drafts")
+        XCTAssertEqual(s.company.teamRuns, saved, "memory and Firestore hold the same list")
+    }
+
     /// Drafts filed before ids were namespaced by run still resolve, best effort.
     func testALegacyTeamIdStillResolves() async throws {
         var run = TeamRun(request: "r", createdAt: Date(), brief: nil, plan: F.plan)

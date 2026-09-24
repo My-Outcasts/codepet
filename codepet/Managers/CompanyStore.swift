@@ -2266,6 +2266,9 @@ final class CompanyStore: ObservableObject {
                 guard let self, self.companyId == cid else { return }
                 var runs = self.company.teamRuns.filter { $0.id != snapshot.id }
                 runs.append(snapshot)
+                // Bounded: the list lives inside the company doc and is rewritten whole, so a
+                // filed run drops its drafts and at most ten runs are kept (`TeamRun.retained`).
+                runs = TeamRun.retained(runs)
                 self.company.teamRuns = runs
                 _ = await self.teamRunsSaver(cid, runs)
             })

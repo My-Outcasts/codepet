@@ -22,6 +22,29 @@ struct CompanyDoc: Codable {
     var teamRuns: [TeamRun]?  // JSON-safe; nil → empty (every doc written before Team Build)
 }
 
+extension CompanyDoc {
+    /// Synthesised decoding for every field (each is optional, so `decodeIfPresent`, exactly as
+    /// the synthesised init did) except `teamRuns`, which decodes per element: one run that no
+    /// longer decodes would otherwise fail this whole decode, and `CompanyData.load` returns
+    /// `.empty` on failure — the founder's whole company, gone. Encoding stays synthesised.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        brief = try c.decodeIfPresent(CompanyBrief.self, forKey: .brief)
+        stage = try c.decodeIfPresent(String.self, forKey: .stage)
+        companionId = try c.decodeIfPresent(String.self, forKey: .companionId)
+        onboardedAt = try c.decodeIfPresent(String.self, forKey: .onboardedAt)
+        introSeenAt = try c.decodeIfPresent(Double.self, forKey: .introSeenAt)
+        firstApprovalAt = try c.decodeIfPresent(Double.self, forKey: .firstApprovalAt)
+        greetedAt = try c.decodeIfPresent(Double.self, forKey: .greetedAt)
+        tasks = try c.decodeIfPresent([RoadmapTask].self, forKey: .tasks)
+        library = try c.decodeIfPresent([Deliverable].self, forKey: .library)
+        enabledTools = try c.decodeIfPresent([String].self, forKey: .enabledTools)
+        decisions = try c.decodeIfPresent([DecisionEntry].self, forKey: .decisions)
+        founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs)
+        teamRuns = TeamRun.decodeLeniently(c, forKey: .teamRuns)
+    }
+}
+
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
 /// lib/firebase/companyData.ts. Fail-soft: missing doc / error → .empty.
 enum CompanyData {

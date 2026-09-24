@@ -103,7 +103,8 @@ struct CompanyState: Codable, Hashable {
             ?? Toolkit.defaultEnabledIds
         decisions = try c.decodeIfPresent([DecisionEntry].self, forKey: .decisions) ?? []
         founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs) ?? .init()
-        teamRuns = try c.decodeIfPresent([TeamRun].self, forKey: .teamRuns) ?? []
+        // Per element: one run that no longer decodes must not lose the whole company.
+        teamRuns = TeamRun.decodeLeniently(c, forKey: .teamRuns) ?? []
     }
 
     static let empty = CompanyState(

@@ -75,6 +75,50 @@ struct TeamRun: Codable, Hashable, Identifiable {
     /// Planned, running, assembling or stalled on a failure — anything the founder can still act on
     /// before approval. Gates "one TeamRun per company".
     var isActive: Bool { [.planned, .running, .assembling, .failed].contains(phase) }
+
+    /// What is persisted into `companies/{uid}.teamRuns`, which lives inside the company doc and
+    /// is rewritten whole on every step change — so it must stay far from Firestore's 1 MiB limit,
+    /// past which EVERY company write fails.
+    ///
+    /// - A filed or cancelled run loses its step drafts: a filed run's drafts are in the Library
+    ///   already, and its plan (kept) is what the Library resolves departments from.
+    /// - At most `max` runs, dropping the oldest that is neither active nor `.ready` (a ready run
+    ///   still waits for Approve). Order is preserved.
+    static func retained(_ runs: [TeamRun], max: Int = 10) -> [TeamRun] {
+        var out = runs.map { r -> TeamRun in
+            guard r.phase == .filed || r.phase == .cancelled else { return r }
+            var stripped = r
+            for i in stripped.steps.indices { stripped.steps[i].draft = nil }
+            return stripped
+        }
+        while out.count > max,
+              let oldest = out.indices
+                .filter({ !out[$0].isActive && out[$0].phase != .ready })
+                .min(by: { out[$0].createdAt < out[$1].createdAt }) {
+            out.remove(at: oldest)
+        }
+        return out
+    }
+
+    /// Decodes `teamRuns` one element at a time, skipping any that no longer decode. Decoding is
+    /// otherwise all-or-nothing: one bad run would fail the whole company document, and
+    /// `CompanyData.load` turns that into `.empty` — the founder's whole company, gone.
+    static func decodeLeniently<K: CodingKey>(_ c: KeyedDecodingContainer<K>, forKey key: K) -> [TeamRun]? {
+        guard c.contains(key), (try? c.decodeNil(forKey: key)) != true,
+              var list = try? c.nestedUnkeyedContainer(forKey: key) else { return nil }
+        var runs: [TeamRun] = []
+        while !list.isAtEnd {
+            if let r = try? list.decode(TeamRun.self) {
+                runs.append(r)
+            } else if (try? list.decode(Skip.self)) == nil {
+                break   // cannot advance past it; keep what decoded
+            }
+        }
+        return runs
+    }
+
+    /// Decodes from any value, so an unkeyed container can step past an element it cannot read.
+    private struct Skip: Decodable { init(from decoder: Decoder) throws {} }
 }
 
 enum WorkPlanValidation {

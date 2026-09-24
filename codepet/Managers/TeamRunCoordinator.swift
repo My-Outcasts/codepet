@@ -170,7 +170,7 @@ final class TeamRunCoordinator: ObservableObject {
         step.dependsOn.prefix(UpstreamWork.cap).compactMap { depId in
             guard let dep = r.plan.steps.first(where: { $0.id == depId }),
                   let d = r.state(depId)?.draft else { return nil }
-            return UpstreamWork.fromDraft(d, task: dep.asRoadmapTask(), unapproved: true)
+            return UpstreamWork.fromDraft(d, task: dep.asRoadmapTask(runId: r.id), unapproved: true)
         }
     }
 

@@ -93,6 +93,7 @@ enum TeamBuildFixture {
     static func store(probe: Probe, root: URL, decision: String = "multi_agent", briefs: Bool = true,
                       grant: Bool = true, runnerDelayNanos: UInt64 = 0, plannerDelayNanos: UInt64 = 0,
                       librarySaverDelayNanos: UInt64 = 5_000_000,
+                      planner: (() -> WorkPlan)? = nil,
                       initial: CompanyState = CompanyState(brief: CompanyBrief(), departments: [], library: [],
                                                            stage: .idea, companionId: "byte", onboardedAt: Date()))
     -> CompanyStore {
@@ -120,7 +121,7 @@ enum TeamBuildFixture {
             teamPlanner: { req in
                 probe.plans.append(req)
                 if plannerDelayNanos > 0 { try? await Task.sleep(nanoseconds: plannerDelayNanos) }
-                return plan
+                return planner?() ?? plan
             },
             teamRunsSaver: { cid, runs in probe.saves.append((cid, runs)); return true },
             assemblerFactory: { ProjectAssembler(root: root, coder: FakeCoder(), git: { _, _ in true }) })
@@ -160,6 +161,63 @@ final class TeamBuildStoreTests: XCTestCase {
     override func tearDown() {
         try? FileManager.default.removeItem(at: root)
         super.tearDown()
+    }
+
+    // MARK: - Library grouping across runs
+
+    /// Every plan numbers its steps s1, s2…, so a synthetic id of just `team-<stepId>` collided
+    /// across runs: the resolver took the NEWEST run's "s1", and the first build's Marketing work
+    /// was grouped under the second build's Sales — the "Sales showing Engineering's work" bug
+    /// class. Two real builds, both with an "s1" in different departments.
+    func testTwoRunsWithTheSameStepIdEachFileUnderTheirOwnDepartment() async throws {
+        let probe = F.Probe()
+        func plan(_ dept: String, _ title: String) -> WorkPlan {
+            WorkPlan(title: title, slug: title, summary: "s", projectType: "static landing page",
+                     steps: [WorkStep(id: "s1", dept: dept, title: "\(title) step", instruction: "i",
+                                      kind: "doc", dependsOn: []),
+                             WorkStep(id: "build", dept: "eng", title: "Build", instruction: "b",
+                                      kind: "other", dependsOn: ["s1"])])
+        }
+        var plans = [plan("mkt", "first"), plan("sales", "second")]
+        let s = F.store(probe: probe, root: root, planner: { plans.removeFirst() })
+        await s.hydrate(companyId: "u")
+
+        for _ in 0..<2 {
+            await s.startTeamBuild("a page", language: .en)
+            let planned = await F.waitFor { s.teamRun?.run?.phase == .planned }
+            XCTAssertTrue(planned, "the plan card never appeared")
+            await s.confirmTeamPlan()
+            XCTAssertEqual(s.teamRun?.run?.phase, .ready)
+            await s.approveTeamRun()
+            XCTAssertEqual(s.teamRun?.run?.phase, .filed)
+        }
+
+        let drafts = s.company.library.filter { $0.projectPath == nil }
+        XCTAssertEqual(drafts.count, 2)
+        let firstDraft = try XCTUnwrap(drafts.first { $0.title == "first step" })
+        let secondDraft = try XCTUnwrap(drafts.first { $0.title == "second step" })
+        XCTAssertEqual(s.deptKey(forSourceTaskId: firstDraft.sourceTaskId), "mkt")
+        XCTAssertEqual(s.deptKey(forSourceTaskId: secondDraft.sourceTaskId), "sales")
+
+        let projects = s.company.library.filter { $0.projectPath != nil }
+        XCTAssertEqual(projects.count, 2)
+        for p in projects {
+            XCTAssertEqual(s.deptKey(forSourceTaskId: p.sourceTaskId), "eng", "the project is the build step's work")
+        }
+    }
+
+    /// Drafts filed before ids were namespaced by run still resolve, best effort.
+    func testALegacyTeamIdStillResolves() async throws {
+        var run = TeamRun(request: "r", createdAt: Date(), brief: nil, plan: F.plan)
+        run.phase = .filed
+        var initial = CompanyState(brief: CompanyBrief(), departments: [], library: [],
+                                   stage: .idea, companionId: "byte", onboardedAt: Date())
+        initial.teamRuns = [run]
+        let s = F.store(probe: F.Probe(), root: root, initial: initial)
+        await s.hydrate(companyId: "u")
+        XCTAssertEqual(s.deptKey(forSourceTaskId: "team-s2"), "design")
+        XCTAssertEqual(s.deptKey(forSourceTaskId: "team-\(run.id)-s2"), "design")
+        XCTAssertNil(s.deptKey(forSourceTaskId: "team-nope"))
     }
 
     // MARK: - Room → plan

@@ -2250,7 +2250,7 @@ final class CompanyStore: ObservableObject {
         let c = TeamRunCoordinator(
             runStep: { [weak self] step, upstream in
                 guard let self, self.companyId == cid else { return .failure("Account changed") }
-                let task = step.asRoadmapTask()
+                let task = step.asRoadmapTask(runId: run.id)
                 let req = self.runRequest(for: task, language: language, extraUpstream: upstream)
                 let result = await self.taskRunner(req)
                 guard self.companyId == cid else { return .failure("Account changed") }
@@ -2326,23 +2326,35 @@ final class CompanyStore: ObservableObject {
             guard companyId == cid else { return }
             if let d = run.state(step.id)?.draft { await fileApproval(d, taskId: nil) }
         }
+        // Sourced to the build step, so the Library groups the project under Engineering.
         let project = Deliverable(kind: .other, title: run.plan.title,
                                   body: Self.whatThisIs(inClaudeMdAt: path) ?? run.plan.summary,
-                                  createdAt: ISOTime.utc(Date()), projectPath: path)
+                                  createdAt: ISOTime.utc(Date()),
+                                  sourceTaskId: WorkStep.sourceTaskId(runId: run.id, stepId: WorkPlan.buildStepId),
+                                  projectPath: path)
         guard companyId == cid else { return }
         await fileApproval(project, taskId: nil)
     }
 
     /// The department behind a deliverable's `sourceTaskId` — the ONE resolver, used by the
     /// Library's grouping and by decision extraction. A roadmap task answers first; a Team Build
-    /// draft's id is `team-<stepId>` (`WorkStep.asRoadmapTask`), which no roadmap task owns, so it
-    /// is resolved through the team runs' plans instead. Without the second branch every team
-    /// draft lands in the Library's "Other" group and reaches extraction with no department.
+    /// draft's id is `team-<runId>-<stepId>` (`WorkStep.asRoadmapTask(runId:)`), which no roadmap
+    /// task owns, so it is resolved through the team runs' plans instead — by exact run AND step,
+    /// since every plan reuses s1, s2…. Without this branch every team draft lands in the Library's
+    /// "Other" group and reaches extraction with no department.
+    ///
+    /// Ids filed before the run was part of them (`team-<stepId>`) resolve best-effort against the
+    /// newest run holding that step id — which can be the wrong run, the bug the namespacing fixed.
     func deptKey(forSourceTaskId id: String?) -> String? {
         guard let id else { return nil }
         if let task = company.tasks.first(where: { $0.id == id }) { return task.dept }
         let prefix = "team-"
         guard id.hasPrefix(prefix) else { return nil }
+        for run in company.teamRuns {
+            if let step = run.plan.steps.first(where: { WorkStep.sourceTaskId(runId: run.id, stepId: $0.id) == id }) {
+                return step.dept
+            }
+        }
         let stepId = String(id.dropFirst(prefix.count))
         for run in company.teamRuns.reversed() {
             if let step = run.plan.steps.first(where: { $0.id == stepId }) { return step.dept }

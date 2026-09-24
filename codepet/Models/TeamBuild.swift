@@ -13,10 +13,16 @@ struct WorkStep: Codable, Hashable, Identifiable {
 
     /// A synthetic roadmap task, so the existing run machinery (`runRequest`, `UpstreamWork.fromDraft`)
     /// can be reused unchanged. Never added to `company.tasks`.
-    func asRoadmapTask() -> RoadmapTask {
-        RoadmapTask(id: "team-\(id)", title: title, detail: instruction, phase: .build, who: .draft,
-                    dependsOn: [], dept: dept)
+    ///
+    /// The id carries the RUN as well as the step (`team-<runId>-<stepId>`): every plan numbers
+    /// its steps s1, s2…, so a step id alone collides across runs and an older run's draft would
+    /// resolve to the newest run's department. `CompanyStore.deptKey` resolves it exactly.
+    func asRoadmapTask(runId: String) -> RoadmapTask {
+        RoadmapTask(id: Self.sourceTaskId(runId: runId, stepId: id), title: title, detail: instruction,
+                    phase: .build, who: .draft, dependsOn: [], dept: dept)
     }
+
+    static func sourceTaskId(runId: String, stepId: String) -> String { "team-\(runId)-\(stepId)" }
 }
 
 struct WorkPlan: Codable, Hashable {

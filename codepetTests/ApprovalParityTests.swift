@@ -149,8 +149,8 @@ final class ApprovalParityTests: XCTestCase {
                         .map { s.deptKey(forSourceTaskId: $0.sourceTaskId) }, ["mkt", "design"])
         let extracted = await TeamBuildFixture.waitFor { probe.extractedDepts.count == 3 }
         XCTAssertTrue(extracted)
-        XCTAssertEqual(Set(probe.extractedDepts), ["mkt", "design", ""],
-                       "decision extraction must receive each draft's department")
+        XCTAssertEqual(Set(probe.extractedDepts), ["mkt", "design", "eng"],
+                       "decision extraction must receive each draft's department; the project is the build step's (eng)")
     }
 
     /// A double tap must not file the team twice — the same suspension hazard `fileApproval`'s own

@@ -39,13 +39,13 @@ final class ProjectAssemblerTests: XCTestCase {
         ProjectAssembler(root: tmp, coder: coder, git: { args, _ in gitCalls(args); return true })
     }
 
-    func testCreatesRootAndFallsBackToProject() throws {
+    func testCreatesRootAndFallsBackToProject() async throws {
         let a = assembler(FakeCoder())
         let url = try a.makeFolder(slug: "")
         XCTAssertEqual(url.lastPathComponent, "project")
         XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.path))
     }
-    func testCollisionAppendsASuffix() throws {
+    func testCollisionAppendsASuffix() async throws {
         let a = assembler(FakeCoder())
         XCTAssertEqual(try a.makeFolder(slug: "pants").lastPathComponent, "pants")
         XCTAssertEqual(try a.makeFolder(slug: "pants").lastPathComponent, "pants-2")

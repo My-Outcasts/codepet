@@ -132,4 +132,74 @@ final class TeamRunCoordinatorTests: XCTestCase {
         // start, a running, a done, build running, build done/ready — at least 5.
         XCTAssertGreaterThanOrEqual(saves, 5)
     }
+
+    // MARK: - Review round 1 fixes
+
+    /// Fix 1: `commit` used to fire an independent `Task { await save(snapshot) }` per call.
+    /// If a real saver suspends (Firestore write), an earlier snapshot's save can finish AFTER
+    /// a later one's, so the stale snapshot wins and overwrites the fresher state on disk — on
+    /// relaunch that either re-runs finished work or leaves a finished run looking active and
+    /// blocking "one active TeamRun per company". Reproduces by making the FIRST save sleep much
+    /// longer than the rest: without serialization the first (stalest) snapshot's write lands
+    /// last; with it, every save is forced to wait for the one before it, so writes always land
+    /// in commit order no matter how long any individual save takes.
+    func testSavesAreSerializedSoStaleSnapshotCannotWinRace() async {
+        actor Recorder {
+            private(set) var lastWritten: TeamRunPhase?
+            func write(_ phase: TeamRunPhase) { lastWritten = phase }
+        }
+        let recorder = Recorder()
+        var callCount = 0
+        let c = TeamRunCoordinator(
+            runStep: { step, _ in .success(self.draft(step.id)) },
+            assemble: { _, _ in .success(path: "/tmp/p") },
+            save: { r in
+                callCount += 1
+                let nanos: UInt64 = callCount == 1 ? 60_000_000 : 1_000_000
+                try? await Task.sleep(nanoseconds: nanos)
+                await recorder.write(r.phase)
+            })
+        c.load(run([step("a")]))
+        await c.start()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let last = await recorder.lastWritten
+        XCTAssertEqual(last, c.run?.phase,
+                        "the last write to land must be the final state, not an earlier stale snapshot")
+    }
+
+    /// Fix 2a: `continueInterrupted` had no phase guard, so calling it on a run with nothing
+    /// `.interrupted` (`.ready`, `.filed`, `.cancelled`, ...) unconditionally set `.running`.
+    /// Nothing is runnable in that state, so the old `settlePhase` (which only ever moved to
+    /// `.failed`, never on an all-`.done` board) left it stuck at `.running` and saved it —
+    /// silently reopening a finished run.
+    func testContinueInterruptedIsANoOpWithoutInterruptedSteps() async {
+        let c = coordinator(log: Log())
+        c.load(run([step("a")]))
+        await c.start()
+        XCTAssertEqual(c.run?.phase, .ready)
+        await c.continueInterrupted()
+        XCTAssertEqual(c.run?.phase, .ready, "continueInterrupted must not touch a run with nothing interrupted")
+    }
+
+    /// Fix 2b: a crash mid-run can leave one step `.failed` and a sibling `.running`. `load`
+    /// turns the sibling `.interrupted`. Retrying the failed step succeeds, but `retry` only
+    /// unblocks `.blocked` steps, never `.interrupted` ones, and `propagateBlocks` doesn't treat
+    /// `.interrupted` as dead either — so the build step (which depends on both) is left
+    /// `.waiting` forever with nothing in flight and nothing runnable. Without a terminal
+    /// fallback in `settlePhase`, the phase stays `.running` forever with no way for the founder
+    /// to act on it.
+    func testStuckInterruptedStepSettlesRunToFailedNotForeverRunning() async {
+        let log = Log()
+        var persisted = run([step("a"), step("b")])
+        persisted.phase = .running
+        persisted.steps[0].status = .failed("boom")
+        persisted.steps[1].status = .running
+        let c = coordinator(log: log)
+        c.load(persisted)
+        XCTAssertEqual(c.run?.state("b")?.status, .interrupted)
+        await c.retry(stepId: "a")
+        XCTAssertEqual(c.run?.state("a")?.status, .done)
+        XCTAssertEqual(c.run?.state("b")?.status, .interrupted, "an interrupted step is never silently re-run by retry")
+        XCTAssertEqual(c.run?.phase, .failed, "nothing in flight, nothing runnable, build not done — must not stay .running forever")
+    }
 }

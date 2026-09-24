@@ -25,6 +25,9 @@ final class TeamRunCoordinator: ObservableObject {
     private let now: () -> Date
     private var inFlight: [String: Task<Void, Never>] = [:]
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// Chains every `save` after the one before it, so a slow earlier save can never land after
+    /// (and overwrite) a faster later one — see `commit(_:)`.
+    private var saveChain: Task<Void, Never>?
 
     init(runStep: @escaping StepRunner, assemble: @escaping Assembler, save: @escaping Saver,
          now: @escaping () -> Date = Date.init) {
@@ -55,7 +58,7 @@ final class TeamRunCoordinator: ObservableObject {
     }
 
     func continueInterrupted() async {
-        guard var r = run else { return }
+        guard var r = run, r.steps.contains(where: { $0.status == .interrupted }) else { return }
         for i in r.steps.indices where r.steps[i].status == .interrupted { r.steps[i].status = .waiting }
         r.phase = .running
         commit(r)
@@ -189,15 +192,31 @@ final class TeamRunCoordinator: ObservableObject {
         guard inFlight.isEmpty, r.phase == .running || r.phase == .assembling else { return }
         let anyRunnable = r.steps.contains { $0.status == .waiting && depsDone($0.stepId, in: r) }
         if anyRunnable { return }
-        if r.steps.contains(where: { if case .failed = $0.status { return true }; return $0.status == .blocked }) {
+        // Terminal fallback: nothing in flight, nothing runnable, and the build step hasn't
+        // finished. Whatever stalled it — failed/blocked steps, or a step stuck `.interrupted`
+        // after a relaunch (`propagateBlocks` never marks `.interrupted` as dead, so a retried
+        // sibling can leave the build waiting on it forever with no path to `.ready`) — there is
+        // no way forward from here, so this must not stay `.running`/`.assembling`. `.failed` is
+        // the correct resting phase: the UI already offers Retry for failed steps and Continue
+        // for interrupted ones from that state. Do NOT introduce a new `TeamRunPhase` case —
+        // later tasks switch over it exhaustively.
+        if r.state(WorkPlan.buildStepId)?.status != .done {
             r.phase = .failed
         }
     }
 
+    /// `save` is fire-and-forget from the caller's point of view, but the calls themselves must
+    /// land in commit order — two independent `Task { await save(snapshot) }`s race if the
+    /// saver suspends (e.g. a real Firestore write), and an older snapshot finishing last would
+    /// overwrite a newer one (e.g. `.ready` clobbered back to `.running`), which on relaunch
+    /// either re-runs finished work or leaves a finished run looking active and blocking "one
+    /// active TeamRun per company". Chaining each save behind the previous one's `Task` forces
+    /// commit order without making `save` itself synchronous on the main path.
     private func commit(_ r: TeamRun) {
         run = r
         let snapshot = r
-        Task { await save(snapshot) }
+        let previous = saveChain
+        saveChain = Task { await previous?.value; await save(snapshot) }
     }
 
     private func resumeIfSettled() { if isSettled { resumeWaiters() } }

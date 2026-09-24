@@ -25,6 +25,8 @@ enum LocalOneShotRunner {
         case refused(error: String, detail: String)
         /// It produced something that is not a response body at all.
         case malformedOutput
+        /// The child was still running past its deadline and was killed.
+        case timedOut(seconds: Int)
 
         var errorDescription: String? {
             switch self {
@@ -34,6 +36,8 @@ enum LocalOneShotRunner {
                 return detail.isEmpty ? error : "\(error): \(detail)"
             case .malformedOutput:
                 return "The local runner answered with something Codepet couldn't read."
+            case .timedOut(let seconds):
+                return "Timed out after \(seconds)s"
             }
         }
     }
@@ -127,6 +131,10 @@ enum LocalOneShotRunner {
         return env
     }
 
+    /// The default bound on a single local op — see `runProcess`. A Team Build chains several
+    /// ops, so this is what stops one hung child from freezing the whole chain forever.
+    static let defaultTimeout: TimeInterval = 180
+
     /// Run one op. Returns the Cloud Function's response body, or throws.
     ///
     /// - Parameters:
@@ -136,12 +144,14 @@ enum LocalOneShotRunner {
     ///     `buildEnvironment`'s doc comment). Every caller has already resolved this through
     ///     `LocalTransportRouter`; passing it through is what makes the resolved provider
     ///     reach the child process instead of stopping at the log line.
+    ///   - timeout: bounds the child process — see `runProcess`. Defaults to `defaultTimeout`.
     static func run(
         op: String,
         body: Data,
         provider: AIProvider,
         companyId: String? = LocalTransportRouter.activeCompanyId,
-        modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
+        modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference(),
+        timeout: TimeInterval = defaultTimeout
     ) async throws -> Data {
         guard let sidecar = resolveSidecarPath() else {
             log.error("no one-shot sidecar on disk — \(op, privacy: .public) cannot run locally")
@@ -160,15 +170,29 @@ enum LocalOneShotRunner {
         proc.arguments = ["-lc", "node \"\(sidecar)\""]
         proc.environment = env
 
+        let out = try await runProcess(proc, stdin: payload, timeout: timeout, label: op)
+
+        if let failure = failure(in: out) {
+            log.error("one-shot \(op, privacy: .public) refused: \(failure.localizedDescription, privacy: .public)")
+            throw failure
+        }
+        log.error("one-shot \(op, privacy: .public) succeeded: \(out.count, privacy: .public) bytes")
+        return out
+    }
+
+    /// The process half of `run`, extracted so the timeout is testable with any executable.
+    ///
+    /// A reply larger than the pipe buffer would otherwise deadlock the child against a parent
+    /// that is only waiting for it to exit, so both pipes are read on background queues before
+    /// the process is awaited — unchanged from `run`'s previous inline version.
+    static func runProcess(_ proc: Process, stdin: Data, timeout: TimeInterval, label: String) async throws -> Data {
         let outPipe = Pipe(), errPipe = Pipe(), inPipe = Pipe()
         proc.standardOutput = outPipe
         proc.standardError = errPipe
         proc.standardInput = inPipe
+        let timedOut = TimeoutFlag()
 
-        let out = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            // Read both pipes on background queues BEFORE waiting: a reply larger than the
-            // pipe buffer would otherwise deadlock the child against a parent that is only
-            // waiting for it to exit.
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let collector = OutputCollector()
             outPipe.fileHandleForReading.readabilityHandler = { handle in
                 let chunk = handle.availableData
@@ -190,13 +214,18 @@ enum LocalOneShotRunner {
             proc.terminationHandler = { p in
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil
+                if timedOut.isSet {
+                    log.error("one-shot \(label, privacy: .public) timed out after \(Int(timeout), privacy: .public)s")
+                    continuation.resume(throwing: Failure.timedOut(seconds: Int(timeout)))
+                    return
+                }
                 let (stdout, stderr) = collector.drain()
                 if stdout.isEmpty {
                     // Nothing on stdout at all: `node` itself never ran, or died before the
                     // sidecar could report. Its stderr is the only real reason available.
                     let reason = String(data: stderr, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    log.error("one-shot \(op, privacy: .public) exited \(p.terminationStatus, privacy: .public): \(reason, privacy: .public)")
+                    log.error("one-shot \(label, privacy: .public) exited \(p.terminationStatus, privacy: .public): \(reason, privacy: .public)")
                     continuation.resume(throwing: Failure.refused(
                         error: "local_runner_failed",
                         detail: reason.isEmpty ? "the local runner exited \(p.terminationStatus)" : reason))
@@ -207,21 +236,34 @@ enum LocalOneShotRunner {
 
             do {
                 try proc.run()
-                inPipe.fileHandleForWriting.write(payload)
+                inPipe.fileHandleForWriting.write(stdin)
                 inPipe.fileHandleForWriting.closeFile()
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    guard proc.isRunning else { return }
+                    timedOut.set()
+                    // The login shell's children (node → claude) would outlive a plain
+                    // terminate(); kill the whole group the shell leads. Best-effort — this
+                    // only reaches the group when the child is a group leader, which is why
+                    // `proc.terminate()` below is what actually unblocks the caller: it always
+                    // ends the shell and closes the pipes.
+                    kill(-proc.processIdentifier, SIGTERM)
+                    proc.terminate()
+                }
             } catch {
                 log.error("could not launch one-shot sidecar: \(String(describing: error), privacy: .public)")
                 continuation.resume(throwing: error)
             }
         }
-
-        if let failure = failure(in: out) {
-            log.error("one-shot \(op, privacy: .public) refused: \(failure.localizedDescription, privacy: .public)")
-            throw failure
-        }
-        log.error("one-shot \(op, privacy: .public) succeeded: \(out.count, privacy: .public) bytes")
-        return out
     }
+}
+
+/// A thread-safe flag the termination handler and the timeout timer both touch, since they
+/// run on different queues.
+private final class TimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set() { lock.lock(); value = true; lock.unlock() }
 }
 
 /// Accumulates two pipes' bytes under a lock, because the readability handlers fire on

@@ -473,7 +473,7 @@ struct TeamStepDetail: View {
 }
 
 /// Resolves a selected step against the live coordinator, so the side column and the sheet
-/// both update as the step runs, and closes itself if the step is gone (a new run replaced it).
+/// both update as the step runs, and calls `onClose` if the step is gone.
 struct TeamStepDetailPanel: View {
     @ObservedObject var coordinator: TeamRunCoordinator
     let stepId: String
@@ -498,6 +498,10 @@ struct TeamStepDetailPanel: View {
                 if let run = coordinator.run, let step = run.plan.steps.first(where: { $0.id == stepId }) {
                     TeamStepDetail(step: step, state: run.state(stepId), run: run, buildLog: coordinator.buildLog)
                         .padding(16)
+                } else {
+                    // The step is gone (a newer run replaced this one): close rather than
+                    // leave an empty column or sheet behind.
+                    Color.clear.frame(height: 1).onAppear(perform: onClose)
                 }
             }
         }
@@ -508,4 +512,30 @@ struct TeamStepDetailPanel: View {
 /// `.sheet(item:)` needs an `Identifiable`; a step id is a `String`.
 struct TeamStepSelection: Identifiable, Equatable {
     let id: String
+}
+
+// MARK: - Placement
+
+/// Whether the store's team run is drawn at the transcript's bottom rather than inline under
+/// its message. Chat threads are in-memory only, so a run restored on relaunch has no message
+/// to sit under; without the bottom card its Continue / Approve would be unreachable.
+///
+/// Pure so `TeamRunPlacementTests` can pin it — the decision is where the bugs were.
+enum TeamRunPlacement {
+    /// - `messageRunIds`: the `teamRunId`s carried by the current transcript. A run in it renders
+    ///   inline, so it is never drawn here too.
+    /// - A run the founder can still act on (active, or ready for Approve) is always shown.
+    /// - A finished run (filed, cancelled) is shown only where it was already being drawn —
+    ///   `stickyRunId` stamped in the conversation `stickyKey` — so the card does not vanish the
+    ///   moment it says Cancelled or "Added to Library". Scoped to that conversation: before
+    ///   the scope, a card drawn once followed the founder into every later conversation.
+    /// - `transcriptKey` identifies the conversation on screen (see
+    ///   `CopilotChatView.transcriptKey`); pass `stickyRunId: nil` to ask "is there something
+    ///   the founder must act on", which is what the empty-state check wants.
+    static func showsUnanchored(run: TeamRun?, messageRunIds: Set<String>, stickyRunId: String?,
+                                stickyKey: String?, transcriptKey: String?) -> Bool {
+        guard let run, !messageRunIds.contains(run.id) else { return false }
+        if run.isActive || run.phase == .ready { return true }
+        return run.id == stickyRunId && stickyKey == transcriptKey
+    }
 }

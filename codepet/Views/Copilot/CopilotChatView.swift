@@ -23,11 +23,12 @@ struct CopilotChatView: View {
     @State private var showHistory = false
     /// The Team Build step whose detail is open — a side column in the pane, a sheet in the dock.
     @State private var teamDetailStepId: String?
-    /// The team run last drawn at the transcript's bottom (see `unanchoredTeamRun`). Keeps a
-    /// restored run's card on screen through Stop and Approve, which move it out of the
-    /// "active or ready" set that put it there — otherwise the card would vanish at the
-    /// moment it says Cancelled or "Added to Library".
+    /// The team run last drawn at the transcript's bottom, and the conversation it was drawn in
+    /// (`transcriptKey`). Keeps a restored run's card on screen through Stop and Approve, which
+    /// move it out of the "active or ready" set that put it there — in THAT conversation only
+    /// (`TeamRunPlacement`).
     @State private var stickyTeamRunId: String?
+    @State private var stickyTranscriptKey: String?
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
@@ -244,6 +245,8 @@ struct CopilotChatView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        // A newer run replaces the old one: its step ids mean nothing any more.
+        .onChange(of: companyStore.teamRun?.run?.id) { _, _ in teamDetailStepId = nil }
         .sheet(item: teamDetailSheet) { sel in
             if let c = companyStore.teamRun {
                 TeamStepDetailPanel(coordinator: c, stepId: sel.id) { teamDetailStepId = nil }
@@ -448,8 +451,13 @@ struct CopilotChatView: View {
     /// branch on exactly this, and `showsDeptChips` below reads it too — one predicate, so
     /// the two cannot describe different screens.
     private var isEmptyState: Bool {
+        // Sticky deliberately ignored: only a run the founder can still act on keeps a new,
+        // empty conversation off the empty screen.
         companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty
-            && unanchoredTeamRun == nil
+            && !TeamRunPlacement.showsUnanchored(run: companyStore.teamRun?.run,
+                                                 messageRunIds: messageTeamRunIds,
+                                                 stickyRunId: nil, stickyKey: nil,
+                                                 transcriptKey: transcriptKey)
     }
 
     /// **Whether the composer, when it is what the slot renders, gives the tentative chip a
@@ -878,10 +886,29 @@ struct CopilotChatView: View {
     /// view already drew here (`stickyTeamRunId`). A finished run from earlier in the session
     /// would otherwise sit at the bottom of every new conversation.
     private var unanchoredTeamRun: TeamRunCoordinator? {
-        guard let c = companyStore.teamRun, let run = c.run,
-              run.isActive || run.phase == .ready || run.id == stickyTeamRunId,
-              !companyStore.chatMessages.contains(where: { $0.teamRunId == run.id }) else { return nil }
+        guard let c = companyStore.teamRun,
+              TeamRunPlacement.showsUnanchored(run: c.run, messageRunIds: messageTeamRunIds,
+                                               stickyRunId: stickyTeamRunId, stickyKey: stickyTranscriptKey,
+                                               transcriptKey: transcriptKey) else { return nil }
         return c
+    }
+
+    private var messageTeamRunIds: Set<String> {
+        Set(companyStore.chatMessages.compactMap(\.teamRunId))
+    }
+
+    /// Which conversation is on screen, for scoping `stickyTeamRunId`: the first message's id.
+    /// Not `activeThreadId`, which is assigned lazily on the first flush (nil → id inside one
+    /// conversation) and changes in one step on `newChat` — the two look alike from here.
+    /// A first message id never changes within a conversation and differs across them.
+    private var transcriptKey: String? { companyStore.chatMessages.first?.id }
+
+    /// Stamp the bottom card's run to this conversation — only while the founder can still act
+    /// on it, so a finished card is never re-stamped into a conversation it was not drawn in.
+    private func stampStickyTeamRun(_ run: TeamRun?) {
+        guard let run, run.isActive || run.phase == .ready else { return }
+        stickyTeamRunId = run.id
+        stickyTranscriptKey = transcriptKey
     }
 
     /// The pane's composer and the line under it.
@@ -1117,7 +1144,9 @@ struct CopilotChatView: View {
                     if let team = unanchoredTeamRun {
                         TeamRunCard(coordinator: team, onSelect: { teamDetailStepId = $0 })
                             .id("team-run")
-                            .onAppear { stickyTeamRunId = team.run?.id }
+                            .onAppear { stampStickyTeamRun(team.run) }
+                            // The conversation's first message arriving changes its key.
+                            .onChange(of: transcriptKey) { _, _ in stampStickyTeamRun(team.run) }
                     }
                     // The streaming/typing affordance (Task 11) — replaces main's
                     // static typingRow. Generic label (no single-run step source here) —

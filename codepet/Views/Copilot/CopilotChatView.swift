@@ -1140,6 +1140,10 @@ struct CopilotChatView: View {
                     if !companyStore.activeAgentRuns.isEmpty {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
+                    // A Team Build's planner is working (the room has ended, no plan yet).
+                    if companyStore.isPlanningTeamBuild {
+                        TeamPlanningRow().id("team-planning")
+                    }
                     // A Team Build with no message in this thread (restored on relaunch).
                     if let team = unanchoredTeamRun {
                         TeamRunCard(coordinator: team, onSelect: { teamDetailStepId = $0 })
@@ -1170,6 +1174,10 @@ struct CopilotChatView: View {
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 scrollGeneration &+= 1
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            .onChange(of: companyStore.isPlanningTeamBuild) { _, planning in
+                scrollGeneration &+= 1
+                if planning { withAnimation { proxy.scrollTo("team-planning", anchor: .bottom) } }
             }
             .onChange(of: companyStore.activeAgentRuns.count) { _, count in
                 scrollGeneration &+= 1

@@ -357,6 +357,10 @@ final class CompanyStore: ObservableObject {
     /// clears it — see `endTeamPlanning`). Refuses a second press in that window, when `teamRun`
     /// is still nil and a second press would otherwise convene a second paid room.
     @Published private var planningTeamBuildId: UUID?
+    /// True while a Team Build's room has ended and the planner is working (up to 180 s) — what
+    /// the transcript's "Planning the work…" row reads. Deliberately NOT `planningTeamBuildId !=
+    /// nil`: that also covers the room itself, which has its own card.
+    @Published private(set) var isPlanningTeamBuild = false
     private let teamPlanner: (TeamPlanRequest) async -> WorkPlan?
     private let teamRunsSaver: (String, [TeamRun]) async -> Bool
     private let assemblerFactory: () -> ProjectAssembler
@@ -553,6 +557,7 @@ final class CompanyStore: ObservableObject {
             teamRunBag = nil
             pendingTeamBuild = nil
             planningTeamBuildId = nil
+            isPlanningTeamBuild = false
         }
         self.companyId = companyId
         // The identity map is keyed by account: a project id only means something inside one
@@ -2180,7 +2185,7 @@ final class CompanyStore: ObservableObject {
     }
 
     private func endTeamPlanning(_ id: UUID) {
-        if planningTeamBuildId == id { planningTeamBuildId = nil }
+        if planningTeamBuildId == id { planningTeamBuildId = nil; isPlanningTeamBuild = false }
     }
 
     /// Called once when a Team build's room ends. Synchronous on purpose: planning is launched
@@ -2206,6 +2211,8 @@ final class CompanyStore: ObservableObject {
                 : "The team couldn't finish meeting. Tap Team build to try again."))
             return
         }
+        // Before the task starts, so the row has no gap between the room's card and the plan's.
+        if planningTeamBuildId == pending.id { isPlanningTeamBuild = true }
         Task { [weak self] in await self?.planTeamBuild(pending, brief: brief) }
     }
 
@@ -2214,6 +2221,7 @@ final class CompanyStore: ObservableObject {
     /// can hold open deterministically. Nothing outside this type calls it.
     func planTeamBuild(_ pending: PendingTeamBuild, brief: VCBrief?) async {
         defer { endTeamPlanning(pending.id) }
+        if planningTeamBuildId == pending.id { isPlanningTeamBuild = true }
         // First, before `company` is read: this runs in its own task, so an account switch can
         // land between the room ending and here, and the brief below would be the next founder's.
         guard companyId == pending.cid else { return }
@@ -4109,6 +4117,7 @@ final class CompanyStore: ObservableObject {
         teamRunBag = nil
         pendingTeamBuild = nil
         planningTeamBuildId = nil
+        isPlanningTeamBuild = false
         // Session state about the OUTGOING founder. Leaving it true would mean the
         // next account — empty brief, nothing on record — is never asked at all,
         // because `hydrate` only ever sets it from the incoming company's flag and a

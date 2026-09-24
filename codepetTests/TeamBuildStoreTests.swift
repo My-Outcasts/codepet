@@ -255,6 +255,39 @@ final class TeamBuildStoreTests: XCTestCase {
         XCTAssertEqual(s.company.teamRuns, saved, "memory and Firestore hold the same list")
     }
 
+    /// Planning can take up to 180 s, and a greyed button was the only sign anything was happening.
+    /// `isPlanningTeamBuild` drives the "Planning the work…" row: on once the room has ended and
+    /// the planner is working, off once the plan lands. Not on during the room itself — the room
+    /// has its own card.
+    func testIsPlanningTeamBuildIsTrueOnlyWhileThePlannerWorks() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, plannerDelayNanos: 400_000_000)
+        await s.hydrate(companyId: "u")
+        XCTAssertFalse(s.isPlanningTeamBuild)
+        await s.startTeamBuild("pants page", language: .en)
+        let planning = await F.waitFor { probe.plans.count == 1 }
+        XCTAssertTrue(planning, "the planner was never asked")
+        XCTAssertTrue(s.isPlanningTeamBuild, "the room ended with a brief and the planner is working")
+        XCTAssertNil(s.teamRun, "no plan yet")
+
+        let planned = await F.waitFor { s.teamRun?.run?.phase == .planned }
+        XCTAssertTrue(planned, "the plan card never appeared")
+        XCTAssertFalse(s.isPlanningTeamBuild, "the plan landed")
+    }
+
+    func testIsPlanningTeamBuildIsFalseWhileTheRoomIsStillMeeting() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root)
+        await s.hydrate(companyId: "u")
+        let press = Task { await s.startTeamBuild("pants page", language: .en) }
+        let roomStarted = await F.waitFor { probe.vcCalls == 1 }
+        XCTAssertTrue(roomStarted)
+        XCTAssertTrue(probe.plans.isEmpty, "precondition: the room has not ended")
+        XCTAssertFalse(s.isPlanningTeamBuild, "the room has its own card; this row is for planning")
+        await press.value
+        _ = await F.waitFor { s.teamRun?.run?.phase == .planned }
+    }
+
     /// Drafts filed before ids were namespaced by run still resolve, best effort.
     func testALegacyTeamIdStillResolves() async throws {
         var run = TeamRun(request: "r", createdAt: Date(), brief: nil, plan: F.plan)

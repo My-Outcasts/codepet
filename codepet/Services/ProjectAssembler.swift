@@ -193,36 +193,73 @@ struct ProjectAssembler {
     /// `false` instead. `-c commit.gpgsign=false` and a null stdin close the two ways a
     /// `commit` specifically could still ask for input; the gpgsign flag is added here, not at
     /// call sites, so the `git` closure's argument list callers see/assert on is unchanged.
-    nonisolated static func runGit(_ args: [String], _ dir: URL, timeout: TimeInterval = 30) async -> Bool {
+    nonisolated static func runGit(_ args: [String], _ dir: URL, timeout: TimeInterval = 30,
+                                   environment: [String: String]? = nil) async -> Bool {
         var procArgs = args
         if procArgs.first == "commit" {
             procArgs = ["-c", "commit.gpgsign=false"] + procArgs
+            // A Mac with no git identity fails the commit, and non-technical founders are the
+            // ones without one. Fill only what is missing, so a real identity is kept.
+            procArgs = await fallbackIdentity(dir, environment: environment) + procArgs
         }
-        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        return await capture(procArgs, dir, timeout: timeout, environment: environment).ok
+    }
+
+    /// `-c` flags for whichever of user.name / user.email this repo cannot resolve (empty when
+    /// both resolve). The fallback is "Codepet <team-build@codepet.local>".
+    private nonisolated static func fallbackIdentity(_ dir: URL, environment: [String: String]?) async -> [String] {
+        var flags: [String] = []
+        for (key, value) in [("user.name", "Codepet"), ("user.email", "team-build@codepet.local")] {
+            let current = await gitOutput(["config", key], dir, timeout: 5, environment: environment)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if current.isEmpty { flags += ["-c", "\(key)=\(value)"] }
+        }
+        return flags
+    }
+
+    /// stdout of a git command that exited 0, else nil. For reads such as `git log`.
+    nonisolated static func gitOutput(_ args: [String], _ dir: URL, timeout: TimeInterval = 30,
+                                      environment: [String: String]? = nil) async -> String? {
+        let r = await capture(args, dir, timeout: timeout, environment: environment)
+        return r.ok ? r.out : nil
+    }
+
+    /// `environment` is a test seam: nil means the founder's login-shell environment.
+    private nonisolated static func capture(_ procArgs: [String], _ dir: URL, timeout: TimeInterval,
+                                            environment: [String: String]?) async -> (ok: Bool, out: String) {
+        return await withCheckedContinuation { (cont: CheckedContinuation<(ok: Bool, out: String), Never>) in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             p.arguments = procArgs
             p.currentDirectoryURL = dir
-            p.environment = LoginShellRunner.spawnEnvironment()
+            p.environment = environment ?? LoginShellRunner.spawnEnvironment()
             p.standardInput = FileHandle.nullDevice
+            // stdout is read after exit, so only small outputs belong here (a config value, a
+            // one-line log): anything past the pipe buffer would block the child from exiting.
+            let outPipe = Pipe()
+            p.standardOutput = outPipe
+            p.standardError = FileHandle.nullDevice
 
             let lock = NSLock()
             var resumed = false
-            @Sendable func finish(_ ok: Bool) {
+            @Sendable func finish(_ ok: Bool, _ out: String) {
                 lock.lock()
                 let already = resumed
                 resumed = true
                 lock.unlock()
                 guard !already else { return }
-                cont.resume(returning: ok)
+                cont.resume(returning: (ok, out))
             }
 
-            p.terminationHandler = { proc in finish(proc.terminationStatus == 0) }
+            p.terminationHandler = { proc in
+                let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+                finish(proc.terminationStatus == 0, String(data: data, encoding: .utf8) ?? "")
+            }
 
             do {
                 try p.run()
             } catch {
-                finish(false)
+                finish(false, "")
                 return
             }
 
@@ -233,7 +270,7 @@ struct ProjectAssembler {
                 guard !already else { return }
                 p.terminationHandler = nil
                 p.terminate()
-                finish(false)
+                finish(false, "")
             }
         }
     }

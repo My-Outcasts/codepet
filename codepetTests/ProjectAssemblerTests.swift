@@ -173,4 +173,49 @@ final class ProjectAssemblerTests: XCTestCase {
         XCTAssertFalse(ok)
         XCTAssertLessThan(elapsed, 3.0)   // killed well before the hook's 5s sleep would finish
     }
+
+    /// A Mac with no git identity (no global user.name/user.email) used to fail the commit
+    /// silently, and non-technical founders are exactly the people without one. The environment
+    /// is isolated from the developer's own config: HOME and GIT_CONFIG_GLOBAL point at an empty
+    /// temp config, system config is off, and `user.useConfigOnly` stops git guessing an
+    /// identity from the hostname — so this is "no identity" on every machine.
+    func testCommitSucceedsWithNoGitIdentityAndIsAuthoredCodepet() async throws {
+        let home = tmp.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let globalConfig = home.appendingPathComponent(".gitconfig")
+        try "[user]\n\tuseConfigOnly = true\n".write(to: globalConfig, atomically: true, encoding: .utf8)
+        let env = ["HOME": home.path, "GIT_CONFIG_GLOBAL": globalConfig.path, "GIT_CONFIG_NOSYSTEM": "1",
+                   "PATH": "/usr/bin:/bin"]
+
+        let repo = tmp.appendingPathComponent("noident")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        _ = await ProjectAssembler.runGit(["init"], repo, environment: env)
+        try "hello".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        _ = await ProjectAssembler.runGit(["add", "-A"], repo, environment: env)
+        let ok = await ProjectAssembler.runGit(["commit", "-m", "Initial"], repo, environment: env)
+        XCTAssertTrue(ok, "the commit must succeed without a git identity")
+
+        let log = await ProjectAssembler.gitOutput(["log", "--format=%an <%ae>"], repo, environment: env)
+        XCTAssertEqual(log?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "Codepet <team-build@codepet.local>", "exactly one commit, authored Codepet")
+    }
+
+    /// A founder who HAS an identity keeps it: the fallback only fills what is missing.
+    func testCommitKeepsARealIdentity() async throws {
+        let home = tmp.appendingPathComponent("home2")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let globalConfig = home.appendingPathComponent(".gitconfig")
+        try "[user]\n\tname = Ada\n\temail = ada@example.com\n".write(to: globalConfig, atomically: true, encoding: .utf8)
+        let env = ["HOME": home.path, "GIT_CONFIG_GLOBAL": globalConfig.path, "GIT_CONFIG_NOSYSTEM": "1",
+                   "PATH": "/usr/bin:/bin"]
+        let repo = tmp.appendingPathComponent("ident")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        _ = await ProjectAssembler.runGit(["init"], repo, environment: env)
+        try "hello".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        _ = await ProjectAssembler.runGit(["add", "-A"], repo, environment: env)
+        let ok = await ProjectAssembler.runGit(["commit", "-m", "Initial"], repo, environment: env)
+        XCTAssertTrue(ok)
+        let log = await ProjectAssembler.gitOutput(["log", "--format=%an <%ae>"], repo, environment: env)
+        XCTAssertEqual(log?.trimmingCharacters(in: .whitespacesAndNewlines), "Ada <ada@example.com>")
+    }
 }

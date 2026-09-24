@@ -147,7 +147,7 @@ struct VCVerdict: Codable, Equatable {
     }
 }
 
-struct VCNextAction: Codable, Equatable {
+struct VCNextAction: Codable, Hashable {
     let action: String
     let owner: String
 
@@ -156,7 +156,7 @@ struct VCNextAction: Codable, Equatable {
     }
 }
 
-struct VCBrief: Codable, Equatable {
+struct VCBrief: Codable, Hashable {
     let recommendation: String
     let confidence: Int
     let confidenceReason: String

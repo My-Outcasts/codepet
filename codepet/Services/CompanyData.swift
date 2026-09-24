@@ -19,6 +19,7 @@ struct CompanyDoc: Codable {
     var enabledTools: [String]?  // JSON-safe; nil → first-run defaults, [] → all-off
     var decisions: [DecisionEntry]?  // JSON-safe; nil → empty
     var founderPrefs: FounderPrefs?  // JSON-safe; nil → defaults (every older doc lacks it)
+    var teamRuns: [TeamRun]?  // JSON-safe; nil → empty (every doc written before Team Build)
 }
 
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
@@ -40,7 +41,8 @@ enum CompanyData {
             tasks: doc.tasks ?? [],
             enabledTools: doc.enabledTools.map(Set.init) ?? Toolkit.defaultEnabledIds,
             decisions: Decisions.normalizeDecisions(doc.decisions ?? []),
-            founderPrefs: doc.founderPrefs ?? FounderPrefs()
+            founderPrefs: doc.founderPrefs ?? FounderPrefs(),
+            teamRuns: doc.teamRuns ?? []
         )
     }
 
@@ -324,6 +326,34 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(decisionsPayload(decisions), merge: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for a Team Build runs write — testable without Firestore.
+    /// Same JSONEncoder → JSONSerialization route as `decisionsPayload`, so Dates encode
+    /// identically (default `JSONEncoder`, no explicit date strategy — matching the
+    /// encoder `decisionsPayload` uses, since `DecisionEntry` carries no `Date` field
+    /// either and neither payload sets `.dateEncodingStrategy`).
+    static func teamRunsPayload(_ runs: [TeamRun]) -> [String: Any] {
+        guard let data = try? JSONEncoder().encode(runs),
+              let arr = try? JSONSerialization.jsonObject(with: data) else { return [:] }
+        return ["teamRuns": arr]
+    }
+
+    /// Write companies/{uid}.teamRuns, merge. Fail-soft: false on error.
+    static func saveTeamRuns(companyId: String, runs: [TeamRun]) async -> Bool {
+        // Prototype mode keeps the whole company in memory and rebuilds it from
+        // fixtures on every load, so a write here would put demo data in a real
+        // founder's document. Reported as done rather than failed: nothing was
+        // attempted, so there is no error to show and `persistWithRetry` has
+        // nothing to retry. See `PrototypeMode.allowsCloudWrites`.
+        guard PrototypeMode.allowsCloudWrites else { return true }
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(teamRunsPayload(runs), merge: true)
             return true
         } catch {
             return false

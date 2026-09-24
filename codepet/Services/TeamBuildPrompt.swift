@@ -7,6 +7,11 @@ enum TeamBuildPrompt {
     static let requiredHeadings = ["## What this is", "## What the team decided", "## Who did what",
                                    "## How to run", "## Next steps"]
     static let allowedTools = ["Read", "Write", "Edit", "Glob", "Grep"]
+    /// Denied outright (deny wins over any allow rule in the founder's own settings), so the
+    /// build cannot run shell commands, reach the web, or spawn sub-agents.
+    static let disallowedTools = ["Bash", "WebFetch", "WebSearch", "NotebookEdit", "Task"]
+    /// Edits are accepted without a prompt, and only inside the working and added directories.
+    static let permissionMode = "acceptEdits"
 
     static func isComplete(_ md: String) -> Bool { requiredHeadings.allSatisfy { md.contains($0) } }
 

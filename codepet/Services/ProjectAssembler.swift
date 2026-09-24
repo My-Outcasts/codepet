@@ -78,7 +78,9 @@ final class CLIProjectRunner: ProjectCodeRunning {
                     resolver.finish("Timed out after \(Int(timeout / 60)) min")
                     runner.cancel()
                 }
-                runner.run(prompt: prompt, projectDir: dir, allowedTools: allowedTools, maxTurns: maxTurns)
+                runner.run(prompt: prompt, projectDir: dir, allowedTools: allowedTools, maxTurns: maxTurns,
+                           disallowedTools: TeamBuildPrompt.disallowedTools,
+                           permissionMode: TeamBuildPrompt.permissionMode)
             }
         } onCancel: {
             // Without this handler, `TeamRunCoordinator.stop()` cancelling the build `Task`

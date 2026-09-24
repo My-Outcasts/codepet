@@ -93,6 +93,36 @@ final class CLIRunner: ObservableObject {
 
     // MARK: - API
 
+    /// The `claude` invocation, pure so it can be pinned. Prompt comes from stdin (no arg quoting).
+    /// See `CodeRunTools.argument`: comma-joined, no spaces, because each list is interpolated
+    /// into one quoted shell argument.
+    ///
+    /// With the defaults (no deny list, no permission mode) this is exactly the command the
+    /// existing Build path has always run. The Team Build passes both: `--allowedTools` alone
+    /// denies nothing — the founder's own settings' allow rules and defaultMode still apply under
+    /// `-p` — so `--disallowedTools` (deny wins over allow) and `--permission-mode acceptEdits`
+    /// (edits scoped to the working and added directories) are what make "read and write files
+    /// only" true.
+    static func claudeCommand(dir: String, maxTurns: Int, allowedTools: [String],
+                              disallowedTools: [String] = [],
+                              permissionMode: String? = nil) -> String {
+        var cmd = """
+        claude -p \
+        --output-format stream-json \
+        --verbose \
+        --max-turns \(maxTurns) \
+        --allowedTools "\(CodeRunTools.argument(allowedTools))" \
+        --add-dir "\(dir)"
+        """
+        if !disallowedTools.isEmpty {
+            cmd += " --disallowedTools \"\(CodeRunTools.argument(disallowedTools))\""
+        }
+        if let permissionMode {
+            cmd += " --permission-mode \(permissionMode)"
+        }
+        return cmd
+    }
+
     /// Spawn `claude` in print mode against `projectDir`, streaming events.
     /// - Parameters:
     ///   - prompt: the exercise prompt (passed via stdin to avoid quoting issues).
@@ -102,7 +132,9 @@ final class CLIRunner: ObservableObject {
     func run(prompt: String,
              projectDir: String,
              allowedTools: [String] = CodeRunTools.base,
-             maxTurns: Int = 8) {
+             maxTurns: Int = 8,
+             disallowedTools: [String] = [],
+             permissionMode: String? = nil) {
 
         guard !isRunning else { return }
 
@@ -130,18 +162,8 @@ final class CLIRunner: ObservableObject {
 
         let shell = Self.loginShells.first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
 
-        // Build the claude invocation. Prompt comes from stdin (no arg quoting).
-        // See `CodeRunTools.argument`: comma-joined, no spaces, because this is interpolated
-        // into one quoted shell argument.
-        let toolsArg = CodeRunTools.argument(allowedTools)
-        let claudeCmd = """
-        claude -p \
-        --output-format stream-json \
-        --verbose \
-        --max-turns \(maxTurns) \
-        --allowedTools "\(toolsArg)" \
-        --add-dir "\(dir)"
-        """
+        let claudeCmd = Self.claudeCommand(dir: dir, maxTurns: maxTurns, allowedTools: allowedTools,
+                                           disallowedTools: disallowedTools, permissionMode: permissionMode)
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)

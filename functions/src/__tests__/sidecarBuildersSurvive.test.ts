@@ -19,7 +19,7 @@ describe("the sidecar's builders survive the deletion", () => {
     expect(names).toEqual([
       "chatSession", "distillReference", "enrichBrief", "extractDecisions",
       "generateDictionary", "generateGuidance", "generatePlan", "generateRoadmap",
-      "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
+      "planTeamWork", "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
     ]);
     for (const n of names) {
       expect(typeof ONE_SHOT_OPS[n].plan).toBe("function");

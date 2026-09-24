@@ -99,3 +99,27 @@ describe("buildTeamPlanPrompt", () => {
     expect(buildTeamPlanPrompt(input)).not.toMatch(/Vietnamese/);
   });
 });
+
+import { ONE_SHOT_OPS, OneShotBadRequest, OneShotUnusableAnswer } from "../local/oneShotOps";
+
+describe("planTeamWork op", () => {
+  const op = ONE_SHOT_OPS.planTeamWork;
+  const body = { language: "en", request: "pants page", brief: null, company: {}, roster: ["mkt", "eng"] };
+  it("plans with the shared prompt and schema", () => {
+    const p = op.plan(body);
+    expect(p.prompt).toContain("pants page");
+    expect(p.schema).toBeDefined();
+  });
+  it("refuses a body with no request", () => {
+    expect(() => op.plan({ ...body, request: "  " })).toThrow(OneShotBadRequest);
+  });
+  it("coerces the reply against the body's roster", () => {
+    const out: any = op.respond(body, { title: "x", slug: "x", summary: "", projectType: "",
+      steps: [{ id: "s1", dept: "legal", title: "t", instruction: "i", kind: "doc", dependsOn: [] }] },
+      { model: "m", nowISO: "" });
+    expect(out.steps.map((s: any) => s.id)).toEqual(["build"]);
+  });
+  it("throws unusable for a non-object reply", () => {
+    expect(() => op.respond(body, "nope", { model: "m", nowISO: "" })).toThrow(OneShotUnusableAnswer);
+  });
+});

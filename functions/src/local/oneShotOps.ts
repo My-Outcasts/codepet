@@ -104,6 +104,12 @@ import {
   synthesizeSystemPrompt,
   validateSynthesizeBriefPayload,
 } from "../synthesizeBriefCore";
+import {
+  TEAM_PLAN_SYSTEM,
+  TEAM_PLAN_TOOL,
+  buildTeamPlanPrompt,
+  coerceWorkPlan,
+} from "../planTeamWorkCore";
 
 /** What the sidecar has to do next for one request. */
 export interface OneShotPlan {
@@ -299,6 +305,38 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
     respond(body, parsed) {
       const language = body?.language === "vi" ? "vi" : "en";
       return coerceRoadmap(parsed, { language });
+    },
+  },
+
+  /**
+   * `planTeamWork` — the team's work plan for a Team Build operation.
+   *
+   * Takes a founder request and optionally a room decision, and produces a step plan for
+   * departments to follow. Every field is narrowed to reject malformed input, exactly as
+   * the HTTP handler would, and `coerceWorkPlan` narrows the reply before returning it.
+   */
+  planTeamWork: {
+    plan(body) {
+      const request = typeof body?.request === "string" ? body.request.trim() : "";
+      if (!request) throw new OneShotBadRequest("request required");
+      const roster: string[] = Array.isArray(body?.roster) ? body.roster.filter((k: unknown) => typeof k === "string") : [];
+      return {
+        system: TEAM_PLAN_SYSTEM,
+        prompt: buildTeamPlanPrompt({
+          language: body?.language === "vi" ? "vi" : "en",
+          request,
+          brief: body?.brief && typeof body.brief === "object" ? body.brief : null,
+          company: body?.company && typeof body.company === "object" ? body.company : {},
+          roster,
+        }),
+        schema: TEAM_PLAN_TOOL.input_schema,
+      };
+    },
+    respond(body, parsed) {
+      const roster: string[] = Array.isArray(body?.roster) ? body.roster : [];
+      const plan = coerceWorkPlan(parsed, roster);
+      if (!plan) throw new OneShotUnusableAnswer("no work plan in the reply");
+      return plan;
     },
   },
 

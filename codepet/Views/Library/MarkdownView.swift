@@ -52,6 +52,15 @@ struct MarkdownView: View {
                 .font(.pixelSystem(size: DeliverableStyle.body))
                 .lineSpacing(DeliverableStyle.leading)
                 .foregroundColor(CodepetTheme.bodyText)
+        case let .table(header, alignments, rows):
+            // Scrolls sideways rather than squeezing: a five-column cost table in a 460pt
+            // sheet would otherwise wrap every cell to a word per line — the run-on problem
+            // again in a different shape.
+            ScrollView(.horizontal, showsIndicators: false) {
+                MarkdownTableView(header: header, alignments: alignments, rows: rows,
+                                  inline: inline)
+                    .padding(.vertical, 2)
+            }
         }
     }
 
@@ -66,5 +75,67 @@ struct MarkdownView: View {
         Text(MessagePlaceholders.attributed(text,
                                             tint: DeliverableStyle.blankTint,
                                             ink: DeliverableStyle.blankInk))
+    }
+}
+
+/// A pipe table as a grid: a semibold header row over a hairline, a fainter hairline between
+/// rows, and each column aligned the way its separator row asked (`---:` for money columns).
+/// Cells wrap past `maxCell`, so one long label cannot make the whole table a screen wide.
+///
+/// Its own view, not a `MarkdownView` method, so it can be rendered without the horizontal
+/// `ScrollView` around it — `ImageRenderer` draws a macOS scroll view's content as blank.
+struct MarkdownTableView: View {
+    let header: [String]
+    let alignments: [MarkdownTableAlignment]
+    let rows: [[String]]
+    /// `MarkdownView`'s inline renderer, so cells get the same emphasis and blank tinting.
+    let inline: (String) -> Text
+    var maxCell: CGFloat = 240
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+            GridRow {
+                ForEach(Array(header.enumerated()), id: \.offset) { c, text in
+                    cell(text, column: c, isHeader: true)
+                }
+            }
+            rule(CodepetTheme.hairline)
+            ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
+                if r > 0 { rule(CodepetTheme.hairline.opacity(0.6)) }
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { c, text in
+                        cell(text, column: c, isHeader: false)
+                    }
+                }
+            }
+        }
+    }
+
+    private func cell(_ text: String, column: Int, isHeader: Bool) -> some View {
+        let alignment = alignments.indices.contains(column) ? alignments[column] : .leading
+        return inline(text)
+            .font(.pixelSystem(size: DeliverableStyle.body - 1, weight: isHeader ? .semibold : .regular))
+            .lineSpacing(3)
+            .foregroundColor(isHeader ? CodepetTheme.primaryText : CodepetTheme.bodyText)
+            .multilineTextAlignment(alignment.text)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: maxCell, alignment: alignment.frame)
+            .gridColumnAlignment(alignment.horizontal)
+    }
+
+    private func rule(_ color: Color) -> some View {
+        Rectangle().fill(color).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+    }
+}
+
+private extension MarkdownTableAlignment {
+    var horizontal: HorizontalAlignment {
+        switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing }
+    }
+    var frame: Alignment {
+        switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing }
+    }
+    var text: TextAlignment {
+        switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing }
     }
 }

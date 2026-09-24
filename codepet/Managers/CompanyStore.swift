@@ -340,6 +340,23 @@ final class CompanyStore: ObservableObject {
     /// which turns it into a visible `stream_lost`.
     static let vcRunDeadlineNanos: UInt64 = 240 * 1_000_000_000
 
+    // MARK: Team Build state
+
+    /// The active Team Build's coordinator (plan → department steps → assembly), or nil. One per
+    /// company at a time — see `teamBuildAvailable`. Replaced, never mutated, and its own
+    /// `objectWillChange` is forwarded through `teamRunBag` the same way `codingRunBag` forwards
+    /// the coding run's, so a view observing only this store re-renders as the run moves.
+    @Published private(set) var teamRun: TeamRunCoordinator?
+    private var teamRunBag: AnyCancellable?
+    /// The Team build press waiting for its room. Set by `startTeamBuild` immediately before it
+    /// convenes, TAKEN (read and cleared) by `startVirtualCompanyRun` when that room starts, and
+    /// cleared again after `sendChat` returns — so a press whose room never started (a busy
+    /// composer, an engineering route) can never be picked up by some later, unrelated Plan room.
+    private var pendingTeamBuild: (ask: String, language: AppLanguage, cid: String)?
+    private let teamPlanner: (TeamPlanRequest) async -> WorkPlan?
+    private let teamRunsSaver: (String, [TeamRun]) async -> Bool
+    private let assemblerFactory: () -> ProjectAssembler
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
@@ -419,7 +436,16 @@ final class CompanyStore: ObservableObject {
          // own defaulted, injectable runner parameter, so a closure is what exposes the
          // `(String) -> String?` shape here.
          repoRootReader: @escaping (String) -> String? = { GitRunner.repoRoot(in: $0) },
-         knownCloudProjects: [CloudProject] = []) {
+         knownCloudProjects: [CloudProject] = [],
+         // Team Build's three seams. Every one is injected for the reason every saver is: the
+         // real saver calls `Firestore.firestore()`, which traps under an unconfigured
+         // `FirebaseApp`, and the real assembler writes a folder under the founder's home and
+         // spawns `claude`.
+         teamPlanner: @escaping (TeamPlanRequest) async -> WorkPlan? = { await TeamPlanClient.plan($0) },
+         teamRunsSaver: @escaping (String, [TeamRun]) async -> Bool = CompanyData.saveTeamRuns,
+         // Defaulted in the init BODY, same reason as `vcRunner`: `CLIProjectRunner` is
+         // `@MainActor`, which a nonisolated default-argument context cannot construct.
+         assemblerFactory: (() -> ProjectAssembler)? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -465,6 +491,9 @@ final class CompanyStore: ObservableObject {
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
+        self.teamPlanner = teamPlanner
+        self.teamRunsSaver = teamRunsSaver
+        self.assemblerFactory = assemblerFactory ?? { ProjectAssembler(coder: CLIProjectRunner()) }
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -512,6 +541,13 @@ final class CompanyStore: ObservableObject {
             activeAgentRuns = []
             isFanningOut = false
             runError = nil
+            // Dropped, NOT stopped: `stop()` commits a cancelled snapshot through the save
+            // closure, and by the time it ran here the store would be pointing at the incoming
+            // account. The coordinator's closures compare their captured company id with
+            // `companyId` and refuse on mismatch, so a result that lands late is discarded.
+            teamRun = nil
+            teamRunBag = nil
+            pendingTeamBuild = nil
         }
         self.companyId = companyId
         // The identity map is keyed by account: a project id only means something inside one
@@ -567,6 +603,7 @@ final class CompanyStore: ObservableObject {
         // drops its commit); leaving its intent here would compose the previous founder's
         // half-written preferences onto this one's next settings change.
         pendingFounderPrefs = nil
+        restoreActiveTeamRun(cid: companyId)
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
@@ -2077,6 +2114,175 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    // MARK: - Team Build
+
+    /// Whether the Team build button may start a run: the founder granted their Claude plan, the
+    /// demo is off (a Team Build writes a real folder and spends the real plan), and no other run
+    /// is active for this company.
+    var teamBuildAvailable: Bool {
+        guard let companyId, !PrototypeMode.isOn else { return false }
+        return claudeAuthorisation.isAuthorised(.claudeCode, companyId) && !(teamRun?.run?.isActive ?? false)
+    }
+
+    /// The Team build button: convene the room on `ask`, then plan from how the room ended (see
+    /// `teamBuildRoomEnded`). Convenes through `sendChat(..., convenesRoom: true)`, exactly as the
+    /// `+` menu does — there is no second way to convene.
+    ///
+    /// Without a grant it says why and stops. It never falls back to a Cloud Function: every AI
+    /// path is local since the key was deleted, and the grant is the one switch.
+    func startTeamBuild(_ ask: String, language: AppLanguage) async {
+        let text = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let cid = companyId else { return }
+        guard claudeAuthorisation.isAuthorised(.claudeCode, cid) else {
+            let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed,
+                                           surface: .claudeOnly)
+                .founderText(lang: language)
+            chatMessages.append(CopilotMessage(role: .companion, text: why))
+            return
+        }
+        guard !(teamRun?.run?.isActive ?? false) else { return }
+        pendingTeamBuild = (text, language, cid)
+        await sendChat(text, language: language, convenesRoom: true)
+        // The room, if one started, took the press already (`startVirtualCompanyRun`). If none
+        // did, this keeps a stale press from attaching itself to some later Plan-mode room.
+        pendingTeamBuild = nil
+    }
+
+    /// Called once when a Team build's room ends. Synchronous on purpose: planning is launched
+    /// in its own task so the room's `vcTasks` entry — and with it the 240 s room deadline —
+    /// ends with the room. Planning awaited inside that task could be cancelled by the room's
+    /// watchdog part-way through a 180 s plan.
+    private func teamBuildRoomEnded(_ state: VirtualCompanyRunState,
+                                    pending: (ask: String, language: AppLanguage, cid: String)) {
+        guard pending.cid == companyId else { return }
+        let lang = pending.language
+        let brief: VCBrief?
+        switch TeamBuildRoomOutcome.from(phase: state.phase, routingDecision: state.routing?.decision,
+                                         brief: state.brief) {
+        case .brief(let b): brief = b
+        case .requestOnly: brief = nil
+        case .clarify: return   // the router's question is already on screen; the founder answers and presses again
+        case .failed:
+            chatMessages.append(CopilotMessage(role: .companion, text: lang == .vi
+                ? "Cả đội chưa họp xong được. Bấm Cả đội làm để thử lại."
+                : "The team couldn't finish meeting. Tap Team build to try again."))
+            return
+        }
+        Task { [weak self] in await self?.planTeamBuild(pending, brief: brief) }
+    }
+
+    private func planTeamBuild(_ pending: (ask: String, language: AppLanguage, cid: String),
+                               brief: VCBrief?) async {
+        let roster = company.departments.map(\.key)
+        let req = TeamPlanRequest(
+            language: pending.language.rawValue, request: pending.ask, brief: brief,
+            company: ["projectName": company.brief.projectName ?? "",
+                      "oneLiner": company.brief.oneLiner ?? "",
+                      "audience": company.brief.audience ?? ""],
+            roster: roster.isEmpty ? Array(WorkPlanValidation.routable).sorted() : roster)
+        let raw = await teamPlanner(req)
+        guard companyId == pending.cid else { return }
+        guard let raw, let plan = WorkPlanValidation.validate(raw, roster: Set(req.roster)) else {
+            chatMessages.append(CopilotMessage(role: .companion, text: pending.language == .vi
+                ? "Chưa lập được kế hoạch. Bấm Cả đội làm để thử lại."
+                : "I couldn't put a plan together. Tap Team build to try again."))
+            return
+        }
+        // A second press can only have got this far if it raced the first through the room;
+        // one active run per company is the rule, so the later plan is dropped.
+        guard !(teamRun?.run?.isActive ?? false) else { return }
+        let run = TeamRun(request: pending.ask, createdAt: Date(), brief: brief, plan: plan)
+        installTeamCoordinator(for: run, cid: pending.cid, language: pending.language)
+        chatMessages.append(CopilotMessage(role: .companion, text: "", teamRunId: run.id))
+    }
+
+    /// Builds the coordinator for `run`. Each department step is a synthetic roadmap task run
+    /// through the SAME `runRequest` → `taskRunner` → `buildDeliverable` path every task run
+    /// uses, fed its direct dependencies' drafts as `extraUpstream`.
+    ///
+    /// Account safety is the `cid` captured here: the step runner and the saver both compare it
+    /// with `companyId` and refuse on mismatch, so a result that lands after an account switch
+    /// neither reaches the new account's state nor its Firestore document.
+    private func installTeamCoordinator(for run: TeamRun, cid: String, language: AppLanguage) {
+        let factory = assemblerFactory
+        let c = TeamRunCoordinator(
+            runStep: { [weak self] step, upstream in
+                guard let self, self.companyId == cid else { return .failure("Account changed") }
+                let task = step.asRoadmapTask()
+                let req = self.runRequest(for: task, language: language, extraUpstream: upstream)
+                let result = await self.taskRunner(req)
+                guard self.companyId == cid else { return .failure("Account changed") }
+                guard let d = self.buildDeliverable(from: result, task: task,
+                                                    producedBy: self.currentProvider(for: cid)) else {
+                    return .failure(language == .vi ? "Không có kết quả — lượt chạy lỗi hoặc hết thời gian"
+                                                    : "No result — the run failed or timed out")
+                }
+                return .success(d)
+            },
+            assemble: { run, onLog in await factory().assemble(run, onLog: onLog) },
+            save: { [weak self] snapshot in
+                guard let self, self.companyId == cid else { return }
+                var runs = self.company.teamRuns.filter { $0.id != snapshot.id }
+                runs.append(snapshot)
+                self.company.teamRuns = runs
+                _ = await self.teamRunsSaver(cid, runs)
+            })
+        c.load(run)
+        teamRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        teamRun = c
+    }
+
+    /// On hydrate: bring back this company's active run, if any. `load` turns any step that was
+    /// `.running` when the app went away into `.interrupted`, and nothing resumes until the
+    /// founder presses Continue.
+    ///
+    /// Only when no coordinator is installed — a same-account re-hydrate (token refresh) keeps
+    /// the live one rather than replacing it with a possibly older Firestore copy. The UI
+    /// language is not reachable from `hydrate` (it lives on `AppState`), so a restored run's
+    /// steps are generated in English.
+    private func restoreActiveTeamRun(cid: String) {
+        guard teamRun == nil, let run = company.teamRuns.last(where: \.isActive) else { return }
+        installTeamCoordinator(for: run, cid: cid, language: .en)
+    }
+
+    /// [Go] on the plan card — the founder's only approval before work.
+    func confirmTeamPlan() async { await teamRun?.start() }
+    /// [Cancel] on the plan card.
+    func cancelTeamPlan() { teamRun?.stop() }
+    /// [Retry <dept>] on a failed row.
+    func retryTeamStep(_ stepId: String) async { await teamRun?.retry(stepId: stepId) }
+    /// [Stop] on the team card. Says nothing in chat: the card shows Cancelled, and a deliberate
+    /// stop is not a failure.
+    func stopTeamRun() { teamRun?.stop() }
+    /// [Continue] on a run restored with interrupted steps.
+    func continueTeamRun() async { await teamRun?.continueInterrupted() }
+
+    /// [Approve] on the result card. Files every department draft and one entry for the project,
+    /// all through `fileApproval` — the one approval path (`ApprovalParityTests`).
+    ///
+    /// Marked filed FIRST, before any await: `fileApproval` suspends, and a double tap would
+    /// otherwise pass the `.ready` guard a second time and file the whole team twice.
+    func approveTeamRun() async {
+        guard let c = teamRun, let run = c.run, run.phase == .ready, let path = run.projectPath else { return }
+        c.markFiled()
+        for step in run.plan.departmentSteps {
+            if let d = run.state(step.id)?.draft { await fileApproval(d, taskId: nil) }
+        }
+        let project = Deliverable(kind: .other, title: run.plan.title,
+                                  body: Self.whatThisIs(inClaudeMdAt: path) ?? run.plan.summary,
+                                  createdAt: ISOTime.utc(Date()), projectPath: path)
+        await fileApproval(project, taskId: nil)
+    }
+
+    /// The body of the project's `CLAUDE.md` "What this is" section, or nil if it has none.
+    private static func whatThisIs(inClaudeMdAt path: String) -> String? {
+        guard let md = try? String(contentsOfFile: path + "/CLAUDE.md", encoding: .utf8),
+              let after = md.components(separatedBy: "## What this is").dropFirst().first else { return nil }
+        let section = after.components(separatedBy: "\n## ").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return section.isEmpty ? nil : section
+    }
+
     // MARK: - Virtual Company fan-out
 
     /// Start a Virtual Company run for `ask`, anchored to byte's message for this turn.
@@ -2099,6 +2305,9 @@ final class CompanyStore: ObservableObject {
         // The room's OWN message, minted here so every frame addresses the same
         // appended message. Nothing is appended until the router says `multi_agent`.
         let roomMessageId = UUID().uuidString
+        // Taken here, synchronously, so the Team build press belongs to THIS room and no other.
+        let teamBuild = pendingTeamBuild
+        pendingTeamBuild = nil
         let vcTask = Task { [weak self] () -> Void in
             var state = VirtualCompanyRunState()
             do {
@@ -2131,6 +2340,7 @@ final class CompanyStore: ObservableObject {
                 await self?.publishRunProgress(state, roomMessageId: roomMessageId,
                                                anchorId: anchorId, cid: cid, language: language)
             }
+            if let teamBuild { self?.teamBuildRoomEnded(state, pending: teamBuild) }
             self?.vcTasks[roomMessageId] = nil
         }
         vcTasks[roomMessageId] = vcTask
@@ -3803,6 +4013,10 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        // Same as `hydrate`'s account switch: dropped, never stopped (see there).
+        teamRun = nil
+        teamRunBag = nil
+        pendingTeamBuild = nil
         // Session state about the OUTGOING founder. Leaving it true would mean the
         // next account — empty brief, nothing on record — is never asked at all,
         // because `hydrate` only ever sets it from the incoming company's flag and a

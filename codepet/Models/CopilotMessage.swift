@@ -160,6 +160,12 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `MessageActionRules.canRetry` can refuse retry on a reply that isn't answering anything.
     var founderAsk: String?
 
+    /// The Team Build this message renders, by id — the plan card, then the live team card, then
+    /// the result card, all read off `CompanyStore.teamRun` rather than copied here. An id, not a
+    /// snapshot, because the run changes for minutes after the message is appended and the
+    /// coordinator is the one place that state lives.
+    var teamRunId: String? = nil
+
     /// `createdAt` is injectable and defaults to now.
     ///
     /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
@@ -182,7 +188,8 @@ struct CopilotMessage: Identifiable, Equatable {
          vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
          drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil,
-         founderAsk: String? = nil, attachments: [ChatAttachment] = []) {
+         founderAsk: String? = nil, attachments: [ChatAttachment] = [],
+         teamRunId: String? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -211,6 +218,7 @@ struct CopilotMessage: Identifiable, Equatable {
         self.vote = vote
         self.founderAsk = founderAsk
         self.attachments = attachments
+        self.teamRunId = teamRunId
     }
 }
 

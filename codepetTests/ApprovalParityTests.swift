@@ -120,7 +120,8 @@ final class ApprovalParityTests: XCTestCase {
         CompanyStore.execStepNanos = 0
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("apt-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        let s = TeamBuildFixture.store(probe: TeamBuildFixture.Probe(), root: root)
+        let probe = TeamBuildFixture.Probe()
+        let s = TeamBuildFixture.store(probe: probe, root: root)
         let planned = await TeamBuildFixture.planned(s)
         XCTAssertTrue(planned, "the plan card never appeared")
         await s.confirmTeamPlan()
@@ -142,6 +143,14 @@ final class ApprovalParityTests: XCTestCase {
         XCTAssertFalse(project.body.contains("## "), "the body is the What-this-is section, not the whole CLAUDE.md")
         XCTAssertNotNil(s.company.firstApprovalAt)
         XCTAssertEqual(s.teamRun?.run?.phase, .filed)
+        // §5: the Library groups by department, so each team draft must resolve to its step's
+        // department — through the same resolver `LibraryView` and decision extraction use.
+        XCTAssertEqual(s.company.library.filter { $0.projectPath == nil }
+                        .map { s.deptKey(forSourceTaskId: $0.sourceTaskId) }, ["mkt", "design"])
+        let extracted = await TeamBuildFixture.waitFor { probe.extractedDepts.count == 3 }
+        XCTAssertTrue(extracted)
+        XCTAssertEqual(Set(probe.extractedDepts), ["mkt", "design", ""],
+                       "decision extraction must receive each draft's department")
     }
 
     /// A double tap must not file the team twice — the same suspension hazard `fileApproval`'s own

@@ -121,10 +121,10 @@ struct LibraryView: View {
         items.filter { activeFilter == "all" || Lib.bucket($0.kind) == activeFilter }
     }
 
-    /// Resolve a deliverable's department key via its source task (web groups by `x.k`).
+    /// Resolve a deliverable's department key via its source task (web groups by `x.k`) — through
+    /// the store's one resolver, which also knows a Team Build draft's `team-<stepId>` ids.
     private func deptKey(_ d: Deliverable) -> String? {
-        guard let tid = d.sourceTaskId else { return nil }
-        return companyStore.company.tasks.first { $0.id == tid }?.dept
+        companyStore.deptKey(forSourceTaskId: d.sourceTaskId)
     }
 
     /// Grouped by department in catalog order; unknown / unresolved → one "Other" group last.

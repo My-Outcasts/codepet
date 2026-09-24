@@ -16,6 +16,10 @@ enum TeamBuildFixture {
         var plans: [TeamPlanRequest] = []
         var runs: [RunTaskRequest] = []
         var saves: [(cid: String, runs: [TeamRun])] = []
+        /// Flipped mid-test to model a founder revoking the grant.
+        var granted = true
+        /// The department each approval reached decision extraction with.
+        var extractedDepts: [String] = []
     }
 
     /// The build step's coder: writes nothing and succeeds, so the assembler's fallback
@@ -87,7 +91,8 @@ enum TeamBuildFixture {
     }
 
     static func store(probe: Probe, root: URL, decision: String = "multi_agent", briefs: Bool = true,
-                      grant: Bool = true, runnerDelayNanos: UInt64 = 0,
+                      grant: Bool = true, runnerDelayNanos: UInt64 = 0, plannerDelayNanos: UInt64 = 0,
+                      librarySaverDelayNanos: UInt64 = 5_000_000,
                       initial: CompanyState = CompanyState(brief: CompanyBrief(), departments: [], library: [],
                                                            stage: .idea, companionId: "byte", onboardedAt: Date()))
     -> CompanyStore {
@@ -106,12 +111,17 @@ enum TeamBuildFixture {
             // A real suspension, like the Firestore write it stands in for. Without it
             // `fileApproval` never yields, so two overlapping approvals cannot interleave and
             // `testApprovingATeamRunTwiceFilesOnce` would pass with or without its guard.
-            librarySaver: { _, _ in try? await Task.sleep(nanoseconds: 5_000_000); return true },
+            librarySaver: { _, _ in try? await Task.sleep(nanoseconds: librarySaverDelayNanos); return true },
             firstApprovalSaver: { _, _ in true },
             decisionsSaver: { _, _ in true },
-            decisionExtractor: { _, _ in [] },
-            claudeAuthorisation: ProviderAuthorisation(isAuthorised: { _, _ in grant }, setAuthorised: { _, _, _ in }),
-            teamPlanner: { req in probe.plans.append(req); return plan },
+            decisionExtractor: { dto, _ in probe.extractedDepts.append(dto.dept); return [] },
+            claudeAuthorisation: ProviderAuthorisation(isAuthorised: { _, _ in grant && probe.granted },
+                                                       setAuthorised: { _, _, _ in }),
+            teamPlanner: { req in
+                probe.plans.append(req)
+                if plannerDelayNanos > 0 { try? await Task.sleep(nanoseconds: plannerDelayNanos) }
+                return plan
+            },
             teamRunsSaver: { cid, runs in probe.saves.append((cid, runs)); return true },
             assemblerFactory: { ProjectAssembler(root: root, coder: FakeCoder(), git: { _, _ in true }) })
     }
@@ -332,5 +342,181 @@ final class TeamBuildStoreTests: XCTestCase {
         await s.hydrate(companyId: "u")
         XCTAssertNil(s.teamRun)
         XCTAssertTrue(s.teamBuildAvailable)
+    }
+
+    // MARK: - Review round 1
+
+    /// A fixture company whose one Team Build is in `phase`, loaded by `hydrate`.
+    private func storeWithRun(_ probe: F.Probe, _ mutate: (inout TeamRun) -> Void) -> CompanyStore {
+        var run = TeamRun(request: "pants page", createdAt: Date(), brief: nil, plan: F.plan)
+        mutate(&run)
+        return F.store(probe: probe, root: root,
+                       initial: CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                                             companionId: "byte", onboardedAt: Date(), teamRuns: [run]))
+    }
+
+    private func notGrantedText(_ s: CompanyStore) -> String {
+        BlockedOffer.resolve(reason: .notGranted, installed: s.installedProviders.installed,
+                             surface: .claudeOnly).founderText(lang: .en)
+    }
+
+    /// Go, Retry and Continue each spend the plan (the build step spawns `claude`), and the grant
+    /// can be revoked between the press and any of them.
+    func testGoRetryAndContinueRefuseOnceTheGrantIsRevoked() async throws {
+        // Go on a planned run.
+        let p1 = F.Probe()
+        let s1 = F.store(probe: p1, root: root)
+        let planned = await F.planned(s1)
+        XCTAssertTrue(planned)
+        p1.granted = false
+        await s1.confirmTeamPlan()
+        XCTAssertEqual(s1.teamRun?.run?.phase, .planned, "Go ran without a grant")
+        XCTAssertTrue(p1.runs.isEmpty)
+        XCTAssertEqual(s1.chatMessages.last?.text, notGrantedText(s1))
+
+        // Continue on a run restored with an interrupted step.
+        let p2 = F.Probe()
+        let s2 = storeWithRun(p2) { $0.phase = .running; $0.steps[0].status = .running }
+        await s2.hydrate(companyId: "u")
+        p2.granted = false
+        await s2.continueTeamRun()
+        XCTAssertEqual(s2.teamRun?.run?.state("s1")?.status, .interrupted, "Continue ran without a grant")
+        XCTAssertTrue(p2.runs.isEmpty)
+        XCTAssertEqual(s2.chatMessages.last?.text, notGrantedText(s2))
+
+        // Retry on a failed step.
+        let p3 = F.Probe()
+        let s3 = storeWithRun(p3) { $0.phase = .failed; $0.steps[0].status = .failed("x") }
+        await s3.hydrate(companyId: "u")
+        p3.granted = false
+        await s3.retryTeamStep("s1")
+        XCTAssertEqual(s3.teamRun?.run?.state("s1")?.status, .failed("x"), "Retry ran without a grant")
+        XCTAssertTrue(p3.runs.isEmpty)
+        XCTAssertEqual(s3.chatMessages.last?.text, notGrantedText(s3))
+    }
+
+    /// A finished project waiting for Approve survives a relaunch, can still be approved, and
+    /// does not hold the one-run slot.
+    func testHydrateRestoresAReadyRunAndItCanBeApproved() async throws {
+        let dir = root.appendingPathComponent("pants-page")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let probe = F.Probe()
+        let s = storeWithRun(probe) { r in
+            r.phase = .ready
+            r.projectPath = dir.path
+            for (i, id) in ["s1", "s2", "build"].enumerated() {
+                r.steps[i].status = .done
+                if id != "build" {
+                    r.steps[i].draft = Deliverable(kind: .doc, title: "Draft \(id)", body: "# \(id)",
+                                                   sourceTaskId: "team-\(id)")
+                }
+            }
+        }
+        await s.hydrate(companyId: "u")
+        XCTAssertEqual(s.teamRun?.run?.phase, .ready, "a ready run was lost on relaunch")
+        XCTAssertTrue(s.teamBuildAvailable, "a ready run must not hold the one-run slot")
+
+        await s.approveTeamRun()
+        XCTAssertEqual(s.company.library.count, 3)
+        XCTAssertEqual(s.company.library.last?.projectPath, dir.path)
+        XCTAssertEqual(s.company.library.last?.body, "A landing page selling office pants.",
+                       "with no CLAUDE.md the body falls back to the plan summary")
+        XCTAssertEqual(s.teamRun?.run?.phase, .filed)
+    }
+
+    /// An account switch mid-approval must not file the outgoing founder's work into the next.
+    func testAccountSwitchMidApprovalFilesNothingIntoTheNewAccount() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, librarySaverDelayNanos: 200_000_000)
+        let planned = await F.planned(s)
+        XCTAssertTrue(planned)
+        await s.confirmTeamPlan()
+        XCTAssertEqual(s.teamRun?.run?.phase, .ready)
+
+        let approve = Task { await s.approveTeamRun() }
+        // The first draft is appended before `fileApproval`'s first suspension (the library
+        // saver sleeps), so this is the loop parked mid-way.
+        let parked = await F.waitFor { s.company.library.count == 1 }
+        XCTAssertTrue(parked)
+        await s.hydrate(companyId: "other")
+        await approve.value
+
+        XCTAssertEqual(s.companyId, "other")
+        XCTAssertTrue(s.company.library.isEmpty, "account A's work was filed into account B")
+    }
+
+    func testStartTeamBuildDoesNothingInPrototypeMode() async throws {
+        let restore = PrototypeMode.isOn
+        defer { PrototypeMode.set(restore) }
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root)
+        await s.hydrate(companyId: "u")
+        XCTAssertTrue(PrototypeMode.set(true), "could not enter prototype mode")
+        await s.startTeamBuild("pants page", language: .en)
+        PrototypeMode.set(restore)
+        XCTAssertEqual(probe.vcCalls, 0, "the demo convened a real room")
+        XCTAssertTrue(probe.plans.isEmpty)
+    }
+
+    /// Planning runs in its own task, so an account switch can land after the room ends and
+    /// before planning starts. It must not read the incoming account's company, or plan at all.
+    /// Driven directly: that scheduling gap cannot be held open deterministically from outside.
+    func testAnAccountSwitchBeforePlanningStartsPlansNothing() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root)
+        await s.hydrate(companyId: "other")
+        await s.planTeamBuild(CompanyStore.PendingTeamBuild(ask: "pants page", language: .en, cid: "u"), brief: nil)
+        XCTAssertTrue(probe.plans.isEmpty, "planning ran for account A after the switch to B")
+        XCTAssertNil(s.teamRun)
+    }
+
+    /// Between the room ending and the plan landing, `teamRun` is still nil — a second press there
+    /// must not convene a second paid room. The slot is released on every exit path.
+    func testASecondPressWhilePlanningIsRefused() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, plannerDelayNanos: 300_000_000)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let planning = await F.waitFor { probe.plans.count == 1 }
+        XCTAssertTrue(planning)
+        XCTAssertNil(s.teamRun)
+        XCTAssertFalse(s.teamBuildAvailable, "the button is live while a plan is in flight")
+
+        await s.startTeamBuild("another page", language: .en)
+        XCTAssertEqual(probe.vcCalls, 1, "a second room was convened while the first was planning")
+
+        let landed = await F.waitFor { s.teamRun?.run?.phase == .planned }
+        XCTAssertTrue(landed)
+        s.cancelTeamPlan()
+        XCTAssertTrue(s.teamBuildAvailable, "planning's success path must release the slot")
+    }
+
+    func testClarifyAndAFailedRoomReleaseThePlanningSlot() async throws {
+        let p1 = F.Probe()
+        let s1 = F.store(probe: p1, root: root, decision: "needs_clarification")
+        await s1.hydrate(companyId: "u")
+        await s1.startTeamBuild("pants page", language: .en)
+        let freed1 = await F.waitFor { s1.teamBuildAvailable }
+        XCTAssertTrue(freed1, "a clarifying room left the button disabled forever")
+
+        let p2 = F.Probe()
+        let s2 = F.store(probe: p2, root: root, briefs: false)
+        await s2.hydrate(companyId: "u")
+        await s2.startTeamBuild("pants page", language: .en)
+        let freed2 = await F.waitFor { s2.teamBuildAvailable }
+        XCTAssertTrue(freed2, "a failed room left the button disabled forever")
+    }
+
+    /// The incoming account never inherits the outgoing one's planning slot.
+    func testHydrateReleasesThePlanningSlot() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, plannerDelayNanos: 1_000_000_000)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let planning = await F.waitFor { probe.plans.count == 1 }
+        XCTAssertTrue(planning)
+        XCTAssertFalse(s.teamBuildAvailable)
+        await s.hydrate(companyId: "other")
+        XCTAssertTrue(s.teamBuildAvailable, "account B's button is disabled by account A's plan")
     }
 }

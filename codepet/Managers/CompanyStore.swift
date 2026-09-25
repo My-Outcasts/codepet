@@ -74,7 +74,10 @@ final class CompanyStore: ObservableObject {
         // `LocalChatStreamer.readableFolder`. Mirrored here, the one place it changes.
         didSet { LocalChatStreamer.readableFolder = activeProjectLink?.path }
     }
-    private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
+    /// Per account: a link means "this founder's project". The global key this replaced was
+    /// written on every link and never read back, so the link died with every relaunch — and
+    /// reading it as it was would have handed one account's folder to the next.
+    static func activeProjectBookmarkKey(_ uid: String) -> String { "cp_active_project_bookmark_\(uid)" }
 
     /// The open project's id — what `DecisionEntry.scope` will compare against once the
     /// repo tier lands. Nil while nothing is linked, and deliberately nil while a match is
@@ -581,6 +584,8 @@ final class CompanyStore: ObservableObject {
             // holds the rest — so a relaunch never drops the founder mid-thread with a card
             // whose live half is gone.
             threads = loadArchivedThreads(companyId)
+            // The outgoing founder's folder is theirs; this account's own comes back below.
+            activeProjectLink = nil
         }
         self.companyId = companyId
         // The identity map is keyed by account: a project id only means something inside one
@@ -593,6 +598,8 @@ final class CompanyStore: ObservableObject {
         // one decides which account's bindings resolve, and a report written while the map
         // still points at the previous founder would carry their project ids.
         identityMap.account = companyId
+        // After the identity map points at this account: restoring resolves the folder's id.
+        if activeProjectLink == nil { restoreProjectLink(companyId) }
         // Before anything can make a request for this account. A founder who granted their
         // plan must not find it silently ungranted because the mirror was still pointing at
         // nobody.
@@ -993,13 +1000,36 @@ final class CompanyStore: ObservableObject {
             try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: canonicalPath), atomically: true, encoding: .utf8)
             link = ProjectProbe.probe(path: canonicalPath)
         }
-        if let data = try? URL(fileURLWithPath: canonicalPath)
-            .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
-            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
+        // Security-scoped first; a plain bookmark when that is refused (the app is not
+        // sandboxed, and a scoped bookmark needs an entitlement it may not carry).
+        let folder = URL(fileURLWithPath: canonicalPath)
+        if let cid = companyId, !AppEnvironment.isRunningTests,
+           let data = (try? folder.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil))
+                ?? (try? folder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)) {
+            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey(cid))
         }
         activeProjectLink = link
         resolveProjectIdentity(for: link)
         return link
+    }
+
+    /// Bring back this account's linked folder on launch. Skipped under XCTest — the test host
+    /// shares the app's defaults domain (issue #117) — and in prototype mode, whose demo links
+    /// its own folder. A bookmark whose folder is gone is dropped, not kept pointing at nothing.
+    private func restoreProjectLink(_ cid: String) {
+        guard !AppEnvironment.isRunningTests, !PrototypeMode.isOn,
+              let data = UserDefaults.standard.data(forKey: Self.activeProjectBookmarkKey(cid)) else { return }
+        var stale = false
+        guard let url = (try? URL(resolvingBookmarkData: data, options: [.withSecurityScope],
+                                  relativeTo: nil, bookmarkDataIsStale: &stale))
+                ?? (try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)),
+              FileManager.default.fileExists(atPath: url.path) else {
+            UserDefaults.standard.removeObject(forKey: Self.activeProjectBookmarkKey(cid))
+            return
+        }
+        let link = ProjectProbe.probe(path: url.path)
+        activeProjectLink = link
+        resolveProjectIdentity(for: link)
     }
 
     /// Resolve a linked folder to a project id: reuse this machine's binding for this

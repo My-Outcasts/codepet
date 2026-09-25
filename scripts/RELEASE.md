@@ -4,7 +4,7 @@ How to cut a notarized `Codepet.dmg` for the **"Download for macOS"** button on
 murror.app. This is direct distribution (Developer ID + notarization), **not**
 the Mac App Store.
 
-Current version: **1.0 (build 2)** — bump `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
+Current version: **1.0 (build 4)** — bump `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
 in `CodePet.xcodeproj` for each new build.
 
 ---

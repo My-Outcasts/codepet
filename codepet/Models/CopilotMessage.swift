@@ -8,8 +8,8 @@ enum CopilotRole { case me, companion }
 /// here only keeps the chosen thumb filled while the transcript is on screen.
 enum MessageVote { case up, down }
 
-/// One Copilot chat message (session-only; not persisted this phase). Named to
-/// avoid the reflection `ChatMessage`.
+/// One Copilot chat message. Persisted in reduced form by `ChatThreadArchive`
+/// (`StoredMessage`). Named to avoid the reflection `ChatMessage`.
 struct CopilotMessage: Identifiable, Equatable {
     let id: String
     let role: CopilotRole

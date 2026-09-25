@@ -14,11 +14,11 @@ enum ChatThreadKind: String, Codable, Equatable {
     case dev
 }
 
-/// One session-only chat conversation — a named bucket of `CopilotMessage`s.
-/// Deliberately NOT Codable: Level 1 multi-thread history is in-memory only,
-/// same as `chatMessages` itself (see `CopilotMessage`'s doc comment). Native
-/// port of the web `ThreadMeta` (`lib/firebase/schema.ts`) + its message array,
-/// merged into one struct since there's no persistence layer to split them.
+/// One chat conversation — a named bucket of `CopilotMessage`s. Native port of the web
+/// `ThreadMeta` (`lib/firebase/schema.ts`) + its message array.
+///
+/// Not Codable itself: since 2026-09-25 threads persist through `ChatThreadArchive`, which
+/// stores a reduced `StoredThread` (live-only offers and room state are dropped on purpose).
 struct ChatThread: Identifiable, Equatable {
     let id: String
     /// nil until the founder's first message derives one (or a rename sets a

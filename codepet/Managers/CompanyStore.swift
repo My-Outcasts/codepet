@@ -369,6 +369,11 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var isPlanningTeamBuild = false
     private let teamPlanner: (TeamPlanRequest) async -> WorkPlan?
     private let teamRunsSaver: (String, [TeamRun]) async -> Bool
+    /// The thread list between launches — see `ChatThreadArchive`.
+    private let threadArchive: ChatThreadArchiving
+    static var defaultThreadArchive: ChatThreadArchiving {
+        AppEnvironment.isRunningTests ? NullChatThreadArchive() : FileChatThreadArchive()
+    }
     private let assemblerFactory: () -> ProjectAssembler
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
@@ -457,6 +462,8 @@ final class CompanyStore: ObservableObject {
          // spawns `claude`.
          teamPlanner: @escaping (TeamPlanRequest) async -> WorkPlan? = { await TeamPlanClient.plan($0) },
          teamRunsSaver: @escaping (String, [TeamRun]) async -> Bool = CompanyData.saveTeamRuns,
+         // nil → a file per account, or nothing under XCTest (`defaultThreadArchive`).
+         threadArchive: ChatThreadArchiving? = nil,
          // Defaulted in the init BODY, same reason as `vcRunner`: `CLIProjectRunner` is
          // `@MainActor`, which a nonisolated default-argument context cannot construct.
          assemblerFactory: (() -> ProjectAssembler)? = nil) {
@@ -507,6 +514,7 @@ final class CompanyStore: ObservableObject {
         self.knownCloudProjects = knownCloudProjects
         self.teamPlanner = teamPlanner
         self.teamRunsSaver = teamRunsSaver
+        self.threadArchive = threadArchive ?? Self.defaultThreadArchive
         self.assemblerFactory = assemblerFactory ?? { ProjectAssembler(coder: CLIProjectRunner()) }
     }
 
@@ -565,6 +573,10 @@ final class CompanyStore: ObservableObject {
             pendingTeamBuild = nil
             planningTeamBuildId = nil
             isPlanningTeamBuild = false
+            // This account's own history. The conversation on screen starts new — RECENT
+            // holds the rest — so a relaunch never drops the founder mid-thread with a card
+            // whose live half is gone.
+            threads = loadArchivedThreads(companyId)
         }
         self.companyId = companyId
         // The identity map is keyed by account: a project id only means something inside one
@@ -1398,14 +1410,26 @@ final class CompanyStore: ObservableObject {
         engineeringRepoPrompt = nil
     }
 
-    // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
+    // MARK: - Chat threads (persisted per account by `ChatThreadArchive`; no summarization)
 
     /// Flush the working buffer (`chatMessages`) into its `ChatThread` entry —
     /// creating the entry (and `activeThreadId`, if unset) lazily on its first
     /// non-empty flush, deriving a title once while still untitled, and bumping
     /// `updatedAt` so the thread list re-sorts to the top. A no-op on an empty
     /// buffer: an as-yet-unused "new chat" never appears in the thread list.
+    /// Writes the thread list for the current account. Prototype mode neither reads nor writes:
+    /// its conversations are about fixtures, and must not land in a real founder's history.
+    private func archiveThreads() {
+        guard let cid = companyId, !PrototypeMode.isOn else { return }
+        threadArchive.save(threads, uid: cid)
+    }
+
+    private func loadArchivedThreads(_ cid: String) -> [ChatThread] {
+        PrototypeMode.isOn ? [] : threadArchive.load(uid: cid)
+    }
+
     private func flushActiveThread() {
+        defer { archiveThreads() }
         guard !chatMessages.isEmpty else { return }
         let id = activeThreadId ?? UUID().uuidString
         activeThreadId = id
@@ -1713,6 +1737,7 @@ final class CompanyStore: ObservableObject {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         threads[i].title = trimmed.isEmpty ? nil : trimmed
+        archiveThreads()
     }
 
     /// Delete a thread. Deleting a non-active thread just removes it. Deleting
@@ -1728,6 +1753,7 @@ final class CompanyStore: ObservableObject {
     func deleteThread(_ id: String) {
         guard !isStreaming, !isCompanionTyping else { return }
         threads.removeAll { $0.id == id }
+        defer { archiveThreads() }
         guard id == activeThreadId else { return }
         if let fallback = pickFallbackThreadId(after: id, in: threads) {
             activeThreadId = fallback
@@ -2261,6 +2287,7 @@ final class CompanyStore: ObservableObject {
         let run = TeamRun(request: pending.ask, createdAt: Date(), brief: brief, plan: plan)
         installTeamCoordinator(for: run, cid: pending.cid, language: pending.language)
         chatMessages.append(CopilotMessage(role: .companion, text: "", teamRunId: run.id))
+        flushActiveThread()
     }
 
     /// Builds the coordinator for `run`. Each department step is a synthetic roadmap task run
@@ -2457,6 +2484,9 @@ final class CompanyStore: ObservableObject {
                                                anchorId: anchorId, cid: cid, language: language)
             }
             if let teamBuild { self?.teamBuildRoomEnded(state, pending: teamBuild) }
+            // The room lands after its turn's flush; without this its conclusion reaches the
+            // archive only if the founder sends another message.
+            if self?.companyId == cid { self?.flushActiveThread() }
             self?.vcTasks[roomMessageId] = nil
         }
         vcTasks[roomMessageId] = vcTask
@@ -3258,6 +3288,9 @@ final class CompanyStore: ObservableObject {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
         chatMessages[i].draftApproved = true
+        // Into the archive now, not at the next turn's end: a card restored as unapproved
+        // would offer Approve again, and a second approval files the draft twice.
+        flushActiveThread()
         await fileApproval(draft, taskId: draft.sourceTaskId)
     }
 

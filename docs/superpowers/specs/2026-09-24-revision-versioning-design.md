@@ -1,6 +1,6 @@
 # Revisions update the work they revise — they don't mint new tasks and Library entries
 
-**Status:** spec, not built · **Found:** 24 Sep 2026, testing prod build 3 (`v1.0-build3`) · **Owner:** Mona
+**Status:** parts 1–3 built on `docs/revision-versioning` (not pushed); part 4 (Library UI) awaits design sign-off · **Found:** 24 Sep 2026, testing prod build 3 (`v1.0-build3`) · **Owner:** Mona
 **Still true on main** at `0d73cf0` — neither `CompanyStore.swift` nor `companyChatCore.ts` changed since build 3.
 
 ## The problem
@@ -58,8 +58,15 @@ Add a `DELIVERED WORK` block beside `OPEN TASKS`: the most recent Library items,
 `- <library_id> · <kind> · <title> (from task <task_id>)`. Capped (≈15 newest) so the prompt stays
 small; it sits in the uncached tail, not the cached prefix.
 
-Tighten `add_task`'s description: do not call it for another pass, rework, redesign or revision of
-anything in `DELIVERED WORK` — call `revise_work` instead.
+~~Tighten `add_task`'s description~~ — **changed while building:** the "call `revise_work`, not
+`add_task`" instruction lives INSIDE the `DELIVERED WORK` block, and `add_task`'s description is
+untouched. An installed app that sends no `delivered` therefore gets a byte-identical prompt and
+tool list, which removes the rollout hazard below. A turn carrying both verbs resolves to the
+revision (`resolveActions`).
+
+Only Library items whose roadmap task still exists are sent: the revise pass re-runs that task, so
+an item without one (a chat ask no task owns) could be offered and never delivered. Such items keep
+today's behaviour.
 
 ### 2. A `revise_work` verb — server + native
 
@@ -73,7 +80,9 @@ revise_work { library_id: string, note: string }
 change, rework, redo or take another pass at it." `library_id` must come from `DELIVERED WORK`;
 ambiguous → ask a one-line question, same rule as `run_task`.
 
-Native (`handleDoneAction` → new `handleReviseWork`): like the existing proposals, it **attaches an
+Native: the offer is a third `RoadmapProposal` case, `.revise(libraryId:title:note:)`, so it reuses
+the proposal card, the one-unanswered-offer guard and consume-before-run confirm rather than
+parallel copies of each. Like the existing proposals, it **attaches an
 offer to the reply** ("Make a new version of *Codepet Landing Page*?") — never runs on its own,
 because a revise costs credits. On press, it runs the item's source task through the existing
 revise path (`reviseNote` = the note, `current` = the Library item's body) and shows the result as
@@ -84,8 +93,10 @@ a normal draft card, carrying `supersedes = <library_id>`.
 `Deliverable` gains two optional fields (both absent on every existing item, so no migration):
 
 - `supersedes: String?` — on a draft, the Library item it will replace.
-- `versions: [DeliverableVersion]?` — on a Library item, earlier bodies, newest first:
-  `{ body, title, createdAt }`. Capped at 20; oldest dropped.
+- `versions: [DeliverableVersion]?` — on a Library item, earlier versions, newest first:
+  `{ title, body, createdAt, kind, payload }`. Capped at 20; oldest dropped. **`kind` and
+  `payload` were added while building:** a Site, sheet or calendar is drawn from its payload, so a
+  text-only snapshot would restore the words and keep showing the newer layout.
 
 `fileApproval` branches on `draft.supersedes`:
 
@@ -130,10 +141,14 @@ a normal draft card, carrying `supersedes = <library_id>`.
    more editorial", accept, approve → Roadmap task count unchanged, Library count unchanged, item
    shows `v2`.
 
+**Also found while building:** the revise chips on a draft card rebuild the draft from the run
+result (`redoDraft`), which dropped `supersedes` — one chip tweak to a revision before approving
+would have filed a second item again. `redoDraft` now carries the link over, with a test.
+
 ## Rollout
 
-Server and native ship together: an old app receiving `revise_work` ignores the unknown action
-(the done-frame decoder skips unknown keys — verify this before shipping), so the server change is
-safe to deploy first, but the add-task tightening means an old app would get *neither* an add nor a
-revise offer on a revision. Deploy functions and release the app in the same window, or gate the
-tightening on the client's build number.
+There is no separate server deploy: chat runs through the sidecar bundled INTO the app
+(`scripts/build-sidecar.sh` → `codepet/Resources/chatSidecar.js`), so the prompt change and the
+app change ship in the same build. And because `add_task` is untouched and `revise_work` is only
+offered when the app sends `delivered`, a mismatched pair degrades to today's behaviour rather than
+to neither offer.

@@ -2941,7 +2941,9 @@ final class CompanyStore: ObservableObject {
     /// `taskId` nil (or absent from the roadmap) → library only. That is a real case: a deliverable
     /// can be produced by a chat ask that no roadmap task owns, and it should still be keepable.
     private func fileApproval(_ draft: Deliverable, taskId: String?) async {
-        company.library.append(draft)
+        // A revision (`draft.supersedes` set) replaces the item it revises; a first pass appends.
+        // Appending unconditionally is how ten revisions became ten Library items (CP-025).
+        company.library = LibraryFiling.file(draft, into: company.library)
         var wroteTasks = false
         if let taskId, let ti = company.tasks.firstIndex(where: { $0.id == taskId }),
            !company.tasks[ti].done {

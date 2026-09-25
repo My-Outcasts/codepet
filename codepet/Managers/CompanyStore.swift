@@ -69,8 +69,25 @@ final class CompanyStore: ObservableObject {
     // MARK: - Coding agent (local edit_code)
 
     /// The project folder linked for the coding agent. Client-only; reset on account switch.
-    @Published private(set) var activeProjectLink: ProjectLink?
-    private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
+    @Published private(set) var activeProjectLink: ProjectLink? {
+        // The chat reads this folder (read-only) on the local transport — see
+        // `LocalChatStreamer.readableFolder`. Mirrored here, the one place it changes.
+        didSet {
+            LocalChatStreamer.readableFolder = activeProjectLink?.path
+            if oldValue?.path != activeProjectLink?.path { refreshProductDossier() }
+        }
+    }
+
+    /// What the team knows about the linked folder's product — see `ProductDossier`. nil while
+    /// nothing is linked, while it is first being read, or when reading it failed.
+    @Published private(set) var productDossier: ProductDossier?
+    /// True while the read-only pass over the linked folder runs (up to ~4 min, once per folder).
+    @Published private(set) var isReadingProductFolder = false
+    private var dossierTask: Task<ProductDossier?, Never>?
+    /// Per account: a link means "this founder's project". The global key this replaced was
+    /// written on every link and never read back, so the link died with every relaunch — and
+    /// reading it as it was would have handed one account's folder to the next.
+    static func activeProjectBookmarkKey(_ uid: String) -> String { "cp_active_project_bookmark_\(uid)" }
 
     /// The open project's id — what `DecisionEntry.scope` will compare against once the
     /// repo tier lands. Nil while nothing is linked, and deliberately nil while a match is
@@ -179,6 +196,12 @@ final class CompanyStore: ObservableObject {
     /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
+    /// Brings the thinking row back when a reply's text stops arriving but its turn has not
+    /// ended. On the local transport `claude -p` can go quiet for 15 s or more after its last
+    /// word — finishing a tool call, deciding to run a task — and with the row cleared by the
+    /// first delta the founder saw a finished-looking answer and nothing moving.
+    private var typingResumeTask: Task<Void, Never>?
+    static var streamSilenceNanos: UInt64 = 1_500_000_000
     /// The tool running RIGHT NOW, for `ChatThinkingRow` to name literally ("Luna is
     /// reading web.murror.app…") instead of showing the rotating generic phrase. Set from
     /// the sidecar's `tool` frame; cleared at the start of every turn and by the SAME
@@ -340,6 +363,38 @@ final class CompanyStore: ObservableObject {
     /// which turns it into a visible `stream_lost`.
     static let vcRunDeadlineNanos: UInt64 = 240 * 1_000_000_000
 
+    // MARK: Team Build state
+
+    /// The active Team Build's coordinator (plan → department steps → assembly), or nil. One per
+    /// company at a time — see `teamBuildAvailable`. Replaced, never mutated, and its own
+    /// `objectWillChange` is forwarded through `teamRunBag` the same way `codingRunBag` forwards
+    /// the coding run's, so a view observing only this store re-renders as the run moves.
+    @Published private(set) var teamRun: TeamRunCoordinator?
+    private var teamRunBag: AnyCancellable?
+    /// The Team build press waiting for its room. Set by `startTeamBuild` immediately before it
+    /// convenes, TAKEN (read and cleared) by `startVirtualCompanyRun` when that room starts, and
+    /// cleared again after `sendChat` returns — so a press whose room never started (a busy
+    /// composer, an engineering route) can never be picked up by some later, unrelated Plan room.
+    private var pendingTeamBuild: PendingTeamBuild?
+    /// Set from the moment a press is accepted until its plan lands or fails (every exit path
+    /// clears it — see `endTeamPlanning`). Refuses a second press in that window, when `teamRun`
+    /// is still nil and a second press would otherwise convene a second paid room.
+    @Published private var planningTeamBuildId: UUID?
+    /// True while a Team Build's room has ended and the planner is working (up to 180 s) — what
+    /// the transcript's "Planning the work…" row reads. Deliberately NOT `planningTeamBuildId !=
+    /// nil`: that also covers the room itself, which has its own card.
+    @Published private(set) var isPlanningTeamBuild = false
+    private let teamPlanner: (TeamPlanRequest) async -> WorkPlan?
+    private let teamRunsSaver: (String, [TeamRun]) async -> Bool
+    /// The thread list between launches — see `ChatThreadArchive`.
+    private let threadArchive: ChatThreadArchiving
+    private let dossierGenerator: (String) async -> ProductDossier?
+    private let dossierCache: ProductDossierCache?
+    static var defaultThreadArchive: ChatThreadArchiving {
+        AppEnvironment.isRunningTests ? NullChatThreadArchive() : FileChatThreadArchive()
+    }
+    private let assemblerFactory: () -> ProjectAssembler
+
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
          roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
@@ -419,7 +474,22 @@ final class CompanyStore: ObservableObject {
          // own defaulted, injectable runner parameter, so a closure is what exposes the
          // `(String) -> String?` shape here.
          repoRootReader: @escaping (String) -> String? = { GitRunner.repoRoot(in: $0) },
-         knownCloudProjects: [CloudProject] = []) {
+         knownCloudProjects: [CloudProject] = [],
+         // Team Build's three seams. Every one is injected for the reason every saver is: the
+         // real saver calls `Firestore.firestore()`, which traps under an unconfigured
+         // `FirebaseApp`, and the real assembler writes a folder under the founder's home and
+         // spawns `claude`.
+         teamPlanner: @escaping (TeamPlanRequest) async -> WorkPlan? = { await TeamPlanClient.plan($0) },
+         teamRunsSaver: @escaping (String, [TeamRun]) async -> Bool = CompanyData.saveTeamRuns,
+         // nil → a file per account, or nothing under XCTest (`defaultThreadArchive`).
+         threadArchive: ChatThreadArchiving? = nil,
+         // nil → the real read-only `claude -p` pass and an on-disk cache; under XCTest, neither
+         // (a test that wants a dossier injects one — the real pass spends the founder's plan).
+         dossierGenerator: ((String) async -> ProductDossier?)? = nil,
+         dossierCache: ProductDossierCache? = nil,
+         // Defaulted in the init BODY, same reason as `vcRunner`: `CLIProjectRunner` is
+         // `@MainActor`, which a nonisolated default-argument context cannot construct.
+         assemblerFactory: (() -> ProjectAssembler)? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -465,6 +535,13 @@ final class CompanyStore: ObservableObject {
         self.remoteURLReader = remoteURLReader
         self.repoRootReader = repoRootReader
         self.knownCloudProjects = knownCloudProjects
+        self.teamPlanner = teamPlanner
+        self.teamRunsSaver = teamRunsSaver
+        self.threadArchive = threadArchive ?? Self.defaultThreadArchive
+        self.dossierGenerator = dossierGenerator
+            ?? (AppEnvironment.isRunningTests ? { _ in nil } : { await ProductDossier.generate(folder: $0) })
+        self.dossierCache = dossierCache ?? (AppEnvironment.isRunningTests ? nil : ProductDossierCache())
+        self.assemblerFactory = assemblerFactory ?? { ProjectAssembler(coder: CLIProjectRunner()) }
     }
 
     func select(_ view: AppView) { self.view = view }
@@ -505,6 +582,7 @@ final class CompanyStore: ObservableObject {
             chatMessages = []
             threads = []
             activeThreadId = nil
+            typingResumeTask?.cancel()
             isCompanionTyping = false
             isStreaming = false
             currentToolActivity = nil
@@ -512,6 +590,21 @@ final class CompanyStore: ObservableObject {
             activeAgentRuns = []
             isFanningOut = false
             runError = nil
+            // Dropped, NOT stopped: `stop()` commits a cancelled snapshot through the save
+            // closure, and by the time it ran here the store would be pointing at the incoming
+            // account. The coordinator's closures compare their captured company id with
+            // `companyId` and refuse on mismatch, so a result that lands late is discarded.
+            teamRun = nil
+            teamRunBag = nil
+            pendingTeamBuild = nil
+            planningTeamBuildId = nil
+            isPlanningTeamBuild = false
+            // This account's own history. The conversation on screen starts new — RECENT
+            // holds the rest — so a relaunch never drops the founder mid-thread with a card
+            // whose live half is gone.
+            threads = loadArchivedThreads(companyId)
+            // The outgoing founder's folder is theirs; this account's own comes back below.
+            activeProjectLink = nil
         }
         self.companyId = companyId
         // The identity map is keyed by account: a project id only means something inside one
@@ -524,6 +617,8 @@ final class CompanyStore: ObservableObject {
         // one decides which account's bindings resolve, and a report written while the map
         // still points at the previous founder would carry their project ids.
         identityMap.account = companyId
+        // After the identity map points at this account: restoring resolves the folder's id.
+        if activeProjectLink == nil { restoreProjectLink(companyId) }
         // Before anything can make a request for this account. A founder who granted their
         // plan must not find it silently ungranted because the mirror was still pointing at
         // nobody.
@@ -567,6 +662,7 @@ final class CompanyStore: ObservableObject {
         // drops its commit); leaving its intent here would compose the previous founder's
         // half-written preferences onto this one's next settings change.
         pendingFounderPrefs = nil
+        restoreActiveTeamRun(cid: companyId)
         isHydrating = false
         isOnboarding = needsOnboarding
         onboardingToken = hydrationToken
@@ -923,13 +1019,74 @@ final class CompanyStore: ObservableObject {
             try? seed.write(to: ProjectProbe.claudeMdURL(forProjectAt: canonicalPath), atomically: true, encoding: .utf8)
             link = ProjectProbe.probe(path: canonicalPath)
         }
-        if let data = try? URL(fileURLWithPath: canonicalPath)
-            .bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
-            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey)
+        // Security-scoped first; a plain bookmark when that is refused (the app is not
+        // sandboxed, and a scoped bookmark needs an entitlement it may not carry).
+        let folder = URL(fileURLWithPath: canonicalPath)
+        if let cid = companyId, !AppEnvironment.isRunningTests,
+           let data = (try? folder.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil))
+                ?? (try? folder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)) {
+            UserDefaults.standard.set(data, forKey: Self.activeProjectBookmarkKey(cid))
         }
         activeProjectLink = link
         resolveProjectIdentity(for: link)
         return link
+    }
+
+    /// Load this folder's dossier from the cache, or start the read-only pass that writes it.
+    /// Spends the founder's plan, so only with the grant held — and never in prototype mode.
+    private func refreshProductDossier() {
+        dossierTask?.cancel()
+        dossierTask = nil
+        productDossier = nil
+        isReadingProductFolder = false
+        guard let path = activeProjectLink?.path, let cid = companyId else { return }
+        if let cached = dossierCache?.load(uid: cid, folder: path) { productDossier = cached; return }
+        guard !PrototypeMode.isOn, claudeAuthorisation.isAuthorised(.claudeCode, cid) else { return }
+        isReadingProductFolder = true
+        let generate = dossierGenerator
+        let task = Task<ProductDossier?, Never> { await generate(path) }
+        dossierTask = task
+        Task { [weak self] in
+            let d = await task.value
+            guard let self, self.dossierTask == task else { return }
+            self.dossierTask = nil
+            self.isReadingProductFolder = false
+            guard self.companyId == cid, self.activeProjectLink?.path == path, let d else { return }
+            self.productDossier = d
+            self.dossierCache?.save(d, uid: cid)
+        }
+    }
+
+    /// The dossier, waiting for a pass already running or starting one. Team Build calls this
+    /// before convening: a room that does not know the product plans the smallest possible page.
+    func ensureProductDossier() async -> ProductDossier? {
+        if let productDossier { return productDossier }
+        if dossierTask == nil { refreshProductDossier() }
+        guard let task = dossierTask, let path = activeProjectLink?.path else { return productDossier }
+        let d = await task.value
+        // Published here too, not only by the watcher in `refreshProductDossier`: which of the
+        // two resumes first is the scheduler's choice, and the caller needs it now.
+        if productDossier == nil, activeProjectLink?.path == path { productDossier = d }
+        return productDossier
+    }
+
+    /// Bring back this account's linked folder on launch. Skipped under XCTest — the test host
+    /// shares the app's defaults domain (issue #117) — and in prototype mode, whose demo links
+    /// its own folder. A bookmark whose folder is gone is dropped, not kept pointing at nothing.
+    private func restoreProjectLink(_ cid: String) {
+        guard !AppEnvironment.isRunningTests, !PrototypeMode.isOn,
+              let data = UserDefaults.standard.data(forKey: Self.activeProjectBookmarkKey(cid)) else { return }
+        var stale = false
+        guard let url = (try? URL(resolvingBookmarkData: data, options: [.withSecurityScope],
+                                  relativeTo: nil, bookmarkDataIsStale: &stale))
+                ?? (try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)),
+              FileManager.default.fileExists(atPath: url.path) else {
+            UserDefaults.standard.removeObject(forKey: Self.activeProjectBookmarkKey(cid))
+            return
+        }
+        let link = ProjectProbe.probe(path: url.path)
+        activeProjectLink = link
+        resolveProjectIdentity(for: link)
     }
 
     /// Resolve a linked folder to a project id: reuse this machine's binding for this
@@ -999,7 +1156,25 @@ final class CompanyStore: ObservableObject {
     /// lifted out of `linkProject` so it is provable without a real folder, a real write, or a
     /// security-scoped bookmark. Empty while the founder has memory off.
     var claudeMdSeedDecisions: [DecisionEntry] {
-        company.founderPrefs.memoryEnabled ? company.decisions : []
+        company.founderPrefs.memoryEnabled ? applicableDecisions : []
+    }
+
+    /// The decisions every context reads — `Decisions.applicable` for the open project. The ONE
+    /// place prompts get decisions from, so no call site can hand the team another project's.
+    var applicableDecisions: [DecisionEntry] {
+        Decisions.applicable(company.decisions, project: activeProjectId)
+    }
+
+    /// Assign a decision to the open project, or to every project. The Memory panel's action for
+    /// an unassigned decision; a no-op when nothing matches.
+    func assignDecision(_ entry: DecisionEntry, everywhere: Bool) async {
+        guard let cid = companyId, !isHydrating,
+              let i = company.decisions.firstIndex(where: { Decisions.identity($0) == Decisions.identity(entry) })
+        else { return }
+        let scope = everywhere ? Decisions.everywhere : activeProjectId
+        guard let scope else { return }
+        company.decisions[i].scope = scope
+        _ = await decisionsSaver(cid, company.decisions)
     }
 
     /// The pet to bring in for this turn, if a department is in focus — from the explicit
@@ -1344,14 +1519,26 @@ final class CompanyStore: ObservableObject {
         engineeringRepoPrompt = nil
     }
 
-    // MARK: - Chat threads (session-only, Level 1 — no persistence, no summarization)
+    // MARK: - Chat threads (persisted per account by `ChatThreadArchive`; no summarization)
 
     /// Flush the working buffer (`chatMessages`) into its `ChatThread` entry —
     /// creating the entry (and `activeThreadId`, if unset) lazily on its first
     /// non-empty flush, deriving a title once while still untitled, and bumping
     /// `updatedAt` so the thread list re-sorts to the top. A no-op on an empty
     /// buffer: an as-yet-unused "new chat" never appears in the thread list.
+    /// Writes the thread list for the current account. Prototype mode neither reads nor writes:
+    /// its conversations are about fixtures, and must not land in a real founder's history.
+    private func archiveThreads() {
+        guard let cid = companyId, !PrototypeMode.isOn else { return }
+        threadArchive.save(threads, uid: cid)
+    }
+
+    private func loadArchivedThreads(_ cid: String) -> [ChatThread] {
+        PrototypeMode.isOn ? [] : threadArchive.load(uid: cid)
+    }
+
     private func flushActiveThread() {
+        defer { archiveThreads() }
         guard !chatMessages.isEmpty else { return }
         let id = activeThreadId ?? UUID().uuidString
         activeThreadId = id
@@ -1659,6 +1846,7 @@ final class CompanyStore: ObservableObject {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         threads[i].title = trimmed.isEmpty ? nil : trimmed
+        archiveThreads()
     }
 
     /// Delete a thread. Deleting a non-active thread just removes it. Deleting
@@ -1674,6 +1862,7 @@ final class CompanyStore: ObservableObject {
     func deleteThread(_ id: String) {
         guard !isStreaming, !isCompanionTyping else { return }
         threads.removeAll { $0.id == id }
+        defer { archiveThreads() }
         guard id == activeThreadId else { return }
         if let fallback = pickFallbackThreadId(after: id, in: threads) {
             activeThreadId = fallback
@@ -1852,7 +2041,8 @@ final class CompanyStore: ObservableObject {
             companionId: specialist?.companionId ?? company.companionId,
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
             // the Memory panel must not come back through grounding.
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: applicableDecisions,
+                                          product: productDossier?.contextBlock,
                                           library: company.library, query: text, focusDepartment: department,
                                           memoryEnabled: company.founderPrefs.memoryEnabled,
                                           // What the founder pinned on the `+` menu, rendered above the
@@ -1910,12 +2100,20 @@ final class CompanyStore: ObservableObject {
                 switch event {
                 case .delta(let chunk):
                     if isCompanionTyping { isCompanionTyping = false }
+                    typingResumeTask?.cancel()
+                    typingResumeTask = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: Self.streamSilenceNanos)
+                        guard !Task.isCancelled, let self, self.isStreaming, self.companyId == cid else { return }
+                        self.isCompanionTyping = true
+                    }
                     streamedText += chunk
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
                 case .tool(let activity):
                     currentToolActivity = activity
+                    // A tool running is work in progress; name it even after text has started.
+                    if !isCompanionTyping { isCompanionTyping = true }
                 case .done(_, _, let action):
                     // Streaming is now the common success path, so run_task_id
                     // (and nav/setup/remember) handling must fire here too —
@@ -2065,6 +2263,8 @@ final class CompanyStore: ObservableObject {
         // re-enable, and this tail is byte-for-byte the no-feature tail. A run that is
         // still going (or has not even routed yet) simply arrives later, which is a new
         // message rather than a rewrite of an answer the founder has already read.
+        typingResumeTask?.cancel()
+        typingResumeTask = nil
         isCompanionTyping = false
         isStreaming = false
         // Cleared unconditionally, on the SAME line as the two above — success, error, and
@@ -2079,6 +2279,279 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    // MARK: - Team Build
+
+    /// One accepted Team build press, from the button to the plan landing. `id` is what
+    /// `planningTeamBuildId` holds, so an exit path of an OLD press (a room from the previous
+    /// account ending late) can never clear the flag a newer press set.
+    struct PendingTeamBuild {
+        let id = UUID()
+        let ask: String
+        let language: AppLanguage
+        let cid: String
+    }
+
+    /// Whether the Team build button may start a run: the founder granted their Claude plan, the
+    /// demo is off (a Team Build writes a real folder and spends the real plan), no press is
+    /// between its room and its plan, and no other run is active for this company. A `.ready`
+    /// run awaiting approval does not hold the slot (`isActive` excludes it).
+    var teamBuildAvailable: Bool {
+        guard let companyId, !PrototypeMode.isOn, planningTeamBuildId == nil else { return false }
+        return claudeAuthorisation.isAuthorised(.claudeCode, companyId) && !(teamRun?.run?.isActive ?? false)
+    }
+
+    /// The Team build button: convene the room on `ask`, then plan from how the room ended (see
+    /// `teamBuildRoomEnded`). Convenes through `sendChat(..., convenesRoom: true)`, exactly as the
+    /// `+` menu does — there is no second way to convene.
+    ///
+    /// Without a grant it says why and stops. It never falls back to a Cloud Function: every AI
+    /// path is local since the key was deleted, and the grant is the one switch.
+    func startTeamBuild(_ ask: String, language: AppLanguage) async {
+        let text = ask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let cid = companyId, !PrototypeMode.isOn else { return }
+        guard teamGrantHeld(cid, language: language) else { return }
+        // Between the room ending and the plan landing `teamRun` is still nil, so the active-run
+        // check alone would let a second press convene a second paid room.
+        guard planningTeamBuildId == nil, !(teamRun?.run?.isActive ?? false) else { return }
+        let pending = PendingTeamBuild(ask: text, language: language, cid: cid)
+        planningTeamBuildId = pending.id
+        pendingTeamBuild = pending
+        // Before the room: the room, the planner and every department read the dossier, and a
+        // room that does not know the product chooses the smallest page it can. Usually a cache
+        // hit — the pass starts the moment the folder is linked.
+        _ = await ensureProductDossier()
+        guard companyId == cid, pendingTeamBuild?.id == pending.id else { return }
+        await sendChat(text, language: language, convenesRoom: true)
+        // The room, if one started, took the press already (`startVirtualCompanyRun`). If none
+        // did, this keeps a stale press from attaching itself to some later Plan-mode room —
+        // and releases the planning slot, since no plan is coming.
+        if pendingTeamBuild?.id == pending.id {
+            pendingTeamBuild = nil
+            endTeamPlanning(pending.id)
+        }
+    }
+
+    /// True when the founder has granted their Claude plan for `cid`. Otherwise says why, in
+    /// chat, and returns false. Every Team Build entry that spends the plan — the press, Go,
+    /// Retry, Continue — goes through this, because the grant can be revoked between them
+    /// (a run restored on relaunch is the obvious case) and the build step spawns `claude`.
+    private func teamGrantHeld(_ cid: String, language: AppLanguage) -> Bool {
+        if claudeAuthorisation.isAuthorised(.claudeCode, cid) { return true }
+        let why = BlockedOffer.resolve(reason: .notGranted, installed: installedProviders.installed,
+                                       surface: .claudeOnly)
+            .founderText(lang: language)
+        chatMessages.append(CopilotMessage(role: .companion, text: why))
+        return false
+    }
+
+    private func endTeamPlanning(_ id: UUID) {
+        if planningTeamBuildId == id { planningTeamBuildId = nil; isPlanningTeamBuild = false }
+    }
+
+    /// Called once when a Team build's room ends. Synchronous on purpose: planning is launched
+    /// in its own task so the room's `vcTasks` entry — and with it the 240 s room deadline —
+    /// ends with the room. Planning awaited inside that task could be cancelled by the room's
+    /// watchdog part-way through a 180 s plan.
+    private func teamBuildRoomEnded(_ state: VirtualCompanyRunState, pending: PendingTeamBuild) {
+        guard pending.cid == companyId else { endTeamPlanning(pending.id); return }
+        let lang = pending.language
+        let brief: VCBrief?
+        switch TeamBuildRoomOutcome.from(phase: state.phase, routingDecision: state.routing?.decision,
+                                         brief: state.brief) {
+        case .brief(let b): brief = b
+        case .requestOnly: brief = nil
+        case .clarify:
+            // The router's question is already on screen; the founder answers and presses again.
+            endTeamPlanning(pending.id)
+            return
+        case .failed:
+            endTeamPlanning(pending.id)
+            chatMessages.append(CopilotMessage(role: .companion, text: lang == .vi
+                ? "Cả đội chưa họp xong được. Bấm Cả đội làm để thử lại."
+                : "The team couldn't finish meeting. Tap Team build to try again."))
+            return
+        }
+        // Before the task starts, so the row has no gap between the room's card and the plan's.
+        if planningTeamBuildId == pending.id { isPlanningTeamBuild = true }
+        Task { [weak self] in await self?.planTeamBuild(pending, brief: brief) }
+    }
+
+    /// `internal`, not `private`, purely so a test can run it with the account already switched:
+    /// the real window (room ended, planning task not started yet) is a scheduling gap no test
+    /// can hold open deterministically. Nothing outside this type calls it.
+    func planTeamBuild(_ pending: PendingTeamBuild, brief: VCBrief?) async {
+        defer { endTeamPlanning(pending.id) }
+        if planningTeamBuildId == pending.id { isPlanningTeamBuild = true }
+        // First, before `company` is read: this runs in its own task, so an account switch can
+        // land between the room ending and here, and the brief below would be the next founder's.
+        guard companyId == pending.cid else { return }
+        let roster = company.departments.map(\.key)
+        let req = TeamPlanRequest(
+            language: pending.language.rawValue, request: pending.ask, brief: brief,
+            company: ["projectName": company.brief.projectName ?? "",
+                      "oneLiner": company.brief.oneLiner ?? "",
+                      "audience": company.brief.audience ?? "",
+                      // Omitted-as-empty like the three above; the planner reads every key.
+                      "product": productDossier?.summary ?? ""],
+            roster: roster.isEmpty ? Array(WorkPlanValidation.routable).sorted() : roster)
+        let raw = await teamPlanner(req)
+        guard companyId == pending.cid else { return }
+        guard let raw, let plan = WorkPlanValidation.validate(raw, roster: Set(req.roster)) else {
+            chatMessages.append(CopilotMessage(role: .companion, text: pending.language == .vi
+                ? "Chưa lập được kế hoạch. Bấm Cả đội làm để thử lại."
+                : "I couldn't put a plan together. Tap Team build to try again."))
+            return
+        }
+        guard !(teamRun?.run?.isActive ?? false) else { return }
+        let run = TeamRun(request: pending.ask, createdAt: Date(), brief: brief, plan: plan)
+        installTeamCoordinator(for: run, cid: pending.cid, language: pending.language)
+        chatMessages.append(CopilotMessage(role: .companion, text: "", teamRunId: run.id))
+        flushActiveThread()
+    }
+
+    /// Builds the coordinator for `run`. Each department step is a synthetic roadmap task run
+    /// through the SAME `runRequest` → `taskRunner` → `buildDeliverable` path every task run
+    /// uses, fed its direct dependencies' drafts as `extraUpstream`.
+    ///
+    /// Account safety is the `cid` captured here: the step runner and the saver both compare it
+    /// with `companyId` and refuse on mismatch, so a result that lands after an account switch
+    /// neither reaches the new account's state nor its Firestore document.
+    private func installTeamCoordinator(for run: TeamRun, cid: String, language: AppLanguage) {
+        let factory = assemblerFactory
+        let c = TeamRunCoordinator(
+            runStep: { [weak self] step, upstream in
+                guard let self, self.companyId == cid else { return .failure("Account changed") }
+                let task = step.asRoadmapTask(runId: run.id)
+                let req = self.runRequest(for: task, language: language, extraUpstream: upstream)
+                let result = await self.taskRunner(req)
+                guard self.companyId == cid else { return .failure("Account changed") }
+                guard let d = self.buildDeliverable(from: result, task: task,
+                                                    producedBy: self.currentProvider(for: cid)) else {
+                    return .failure(language == .vi ? "Không có kết quả — lượt chạy lỗi hoặc hết thời gian"
+                                                    : "No result — the run failed or timed out")
+                }
+                return .success(d)
+            },
+            // The linked folder is read at assembly time, not at plan time: a founder may link it
+            // while the departments are still working.
+            assemble: { [weak self] run, onLog in
+                var assembler = factory()
+                if let path = self?.activeProjectLink?.path { assembler.referenceDirs = [path] }
+                assembler.dossier = self?.productDossier
+                return await assembler.assemble(run, onLog: onLog)
+            },
+            save: { [weak self] snapshot in
+                guard let self, self.companyId == cid else { return }
+                var runs = self.company.teamRuns.filter { $0.id != snapshot.id }
+                runs.append(snapshot)
+                // Bounded: the list lives inside the company doc and is rewritten whole, so a
+                // filed run drops its drafts and at most ten runs are kept (`TeamRun.retained`).
+                runs = TeamRun.retained(runs)
+                self.company.teamRuns = runs
+                _ = await self.teamRunsSaver(cid, runs)
+            })
+        c.load(run)
+        teamRunBag = c.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        teamRun = c
+    }
+
+    /// On hydrate: bring back this company's latest run the founder can still act on — an
+    /// active one, or a `.ready` one still waiting for Approve (losing that on relaunch would
+    /// strand a finished project outside the Library). `load` turns any step that was
+    /// `.running` when the app went away into `.interrupted`, and nothing resumes until the
+    /// founder presses Continue.
+    ///
+    /// Only when no coordinator is installed — a same-account re-hydrate (token refresh) keeps
+    /// the live one rather than replacing it with a possibly older Firestore copy. The UI
+    /// language is not reachable from `hydrate` (it lives on `AppState`), so a restored run's
+    /// steps are generated in English.
+    private func restoreActiveTeamRun(cid: String) {
+        guard teamRun == nil,
+              let run = company.teamRuns.last(where: { $0.isActive || $0.phase == .ready }) else { return }
+        installTeamCoordinator(for: run, cid: cid, language: .en)
+    }
+
+    /// [Go] on the plan card — the founder's only approval before work.
+    func confirmTeamPlan(language: AppLanguage = .en) async {
+        guard let cid = companyId, teamRun != nil, teamGrantHeld(cid, language: language) else { return }
+        await teamRun?.start()
+    }
+    /// [Cancel] on the plan card.
+    func cancelTeamPlan() { teamRun?.stop() }
+    /// [Retry <dept>] on a failed row.
+    func retryTeamStep(_ stepId: String, language: AppLanguage = .en) async {
+        guard let cid = companyId, teamRun != nil, teamGrantHeld(cid, language: language) else { return }
+        await teamRun?.retry(stepId: stepId)
+    }
+    /// [Stop] on the team card. Says nothing in chat: the card shows Cancelled, and a deliberate
+    /// stop is not a failure.
+    func stopTeamRun() { teamRun?.stop() }
+    /// [Continue] on a run restored with interrupted steps.
+    func continueTeamRun(language: AppLanguage = .en) async {
+        guard let cid = companyId, teamRun != nil, teamGrantHeld(cid, language: language) else { return }
+        await teamRun?.continueInterrupted()
+    }
+
+    /// [Approve] on the result card. Files every department draft and one entry for the project,
+    /// all through `fileApproval` — the one approval path (`ApprovalParityTests`).
+    ///
+    /// Marked filed FIRST, before any await: `fileApproval` suspends, and a double tap would
+    /// otherwise pass the `.ready` guard a second time and file the whole team twice. And the
+    /// account is re-checked before EVERY filing: `fileApproval` has no account guard of its own,
+    /// and each call suspends, so a switch mid-loop would file this founder's work into the next.
+    func approveTeamRun() async {
+        guard let cid = companyId, let c = teamRun, let run = c.run, run.phase == .ready,
+              let path = run.projectPath else { return }
+        c.markFiled()
+        for step in run.plan.departmentSteps {
+            guard companyId == cid else { return }
+            if let d = run.state(step.id)?.draft { await fileApproval(d, taskId: nil) }
+        }
+        // Sourced to the build step, so the Library groups the project under Engineering.
+        let project = Deliverable(kind: .other, title: run.plan.title,
+                                  body: Self.whatThisIs(inClaudeMdAt: path) ?? run.plan.summary,
+                                  createdAt: ISOTime.utc(Date()),
+                                  sourceTaskId: WorkStep.sourceTaskId(runId: run.id, stepId: WorkPlan.buildStepId),
+                                  projectPath: path)
+        guard companyId == cid else { return }
+        await fileApproval(project, taskId: nil)
+    }
+
+    /// The department behind a deliverable's `sourceTaskId` — the ONE resolver, used by the
+    /// Library's grouping and by decision extraction. A roadmap task answers first; a Team Build
+    /// draft's id is `team-<runId>-<stepId>` (`WorkStep.asRoadmapTask(runId:)`), which no roadmap
+    /// task owns, so it is resolved through the team runs' plans instead — by exact run AND step,
+    /// since every plan reuses s1, s2…. Without this branch every team draft lands in the Library's
+    /// "Other" group and reaches extraction with no department.
+    ///
+    /// Ids filed before the run was part of them (`team-<stepId>`) resolve best-effort against the
+    /// newest run holding that step id — which can be the wrong run, the bug the namespacing fixed.
+    func deptKey(forSourceTaskId id: String?) -> String? {
+        guard let id else { return nil }
+        if let task = company.tasks.first(where: { $0.id == id }) { return task.dept }
+        let prefix = "team-"
+        guard id.hasPrefix(prefix) else { return nil }
+        for run in company.teamRuns {
+            if let step = run.plan.steps.first(where: { WorkStep.sourceTaskId(runId: run.id, stepId: $0.id) == id }) {
+                return step.dept
+            }
+        }
+        let stepId = String(id.dropFirst(prefix.count))
+        for run in company.teamRuns.reversed() {
+            if let step = run.plan.steps.first(where: { $0.id == stepId }) { return step.dept }
+        }
+        return nil
+    }
+
+    /// The body of the project's `CLAUDE.md` "What this is" section, or nil if it has none.
+    private static func whatThisIs(inClaudeMdAt path: String) -> String? {
+        guard let md = try? String(contentsOfFile: path + "/CLAUDE.md", encoding: .utf8),
+              let after = md.components(separatedBy: "## What this is").dropFirst().first else { return nil }
+        let section = after.components(separatedBy: "\n## ").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return section.isEmpty ? nil : section
+    }
+
     // MARK: - Virtual Company fan-out
 
     /// Start a Virtual Company run for `ask`, anchored to byte's message for this turn.
@@ -2089,7 +2562,7 @@ final class CompanyStore: ObservableObject {
         let vcRequest = VirtualCompanyRequest(
             request: ask,
             language: language.rawValue,
-            founder: FounderContextMapper.founder(from: company.brief),
+            founder: FounderContextMapper.founder(from: company.brief, product: productDossier?.contextBlock),
             stressTest: false)
         // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
         // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
@@ -2101,6 +2574,9 @@ final class CompanyStore: ObservableObject {
         // The room's OWN message, minted here so every frame addresses the same
         // appended message. Nothing is appended until the router says `multi_agent`.
         let roomMessageId = UUID().uuidString
+        // Taken here, synchronously, so the Team build press belongs to THIS room and no other.
+        let teamBuild = pendingTeamBuild
+        pendingTeamBuild = nil
         let vcTask = Task { [weak self] () -> Void in
             var state = VirtualCompanyRunState()
             do {
@@ -2133,6 +2609,10 @@ final class CompanyStore: ObservableObject {
                 await self?.publishRunProgress(state, roomMessageId: roomMessageId,
                                                anchorId: anchorId, cid: cid, language: language)
             }
+            if let teamBuild { self?.teamBuildRoomEnded(state, pending: teamBuild) }
+            // The room lands after its turn's flush; without this its conclusion reaches the
+            // archive only if the founder sends another message.
+            if self?.companyId == cid { self?.flushActiveThread() }
             self?.vcTasks[roomMessageId] = nil
         }
         vcTasks[roomMessageId] = vcTask
@@ -2277,7 +2757,8 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         company.decisions = Decisions.mergeDecisions(existing: company.decisions,
                                                      extracted: [extracted],
-                                                     now: Date().timeIntervalSince1970 * 1000)
+                                                     now: Date().timeIntervalSince1970 * 1000,
+                                                     scope: activeProjectId)
         chatMessages.append(CopilotMessage(
             role: .companion, text: "",
             noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
@@ -2898,7 +3379,8 @@ final class CompanyStore: ObservableObject {
         guard !facts.isEmpty, companyId == cid else { return }
         let extracted = facts.map { ExtractedDecision(topic: $0.topic, statement: $0.statement, source: "chat") }
         let now = Date().timeIntervalSince1970 * 1000
-        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
+                                                     scope: activeProjectId)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
         guard companyId == cid else { return }
         // All facts land on the one reply rather than one bare row per fact — three
@@ -2982,6 +3464,9 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].draftApproved = true
         // Decided against the Library BEFORE filing changes it — the same rule `file` applies.
         chatMessages[i].draftReplacedItem = LibraryFiling.replaces(draft, in: company.library)
+        // Into the archive now, not at the next turn's end: a card restored as unapproved
+        // would offer Approve again, and a second approval files the draft twice.
+        flushActiveThread()
         await fileApproval(draft, taskId: draft.sourceTaskId)
     }
 
@@ -3123,7 +3608,8 @@ final class CompanyStore: ObservableObject {
         return RunTaskRequest(
             companyId: companyId, language: language.rawValue,
             companionId: specialist?.companionId ?? company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: applicableDecisions,
+                                          product: productDossier?.contextBlock,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
             reviseNote: reviseNote, current: current, deptKey: task.dept,
@@ -3512,7 +3998,8 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue,
             companionId: companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks,
-                                         decisions: company.decisions, library: company.library,
+                                         decisions: applicableDecisions, product: productDossier?.contextBlock,
+                                         library: company.library,
                                          query: instruction, focusDepartment: nil,
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)
@@ -3555,14 +4042,15 @@ final class CompanyStore: ObservableObject {
     /// persisted, so the panel keeps showing it. Off stops USE, not recording.
     private func rememberFromApproval(_ deliverable: Deliverable) async {
         let cid = companyId
-        let dept = company.tasks.first { $0.id == deliverable.sourceTaskId }?.dept ?? ""
+        let dept = deptKey(forSourceTaskId: deliverable.sourceTaskId) ?? ""
         let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
                                          type: deliverable.kind.rawValue, out: deliverable.body)
-        let onRecord = company.founderPrefs.memoryEnabled ? company.decisions : []
+        let onRecord = company.founderPrefs.memoryEnabled ? applicableDecisions : []
         let extracted = await decisionExtractor(dto, onRecord)
         guard companyId == cid, !extracted.isEmpty else { return }
         let now = Date().timeIntervalSince1970 * 1000
-        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
+                                                     scope: activeProjectId)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
@@ -3722,7 +4210,8 @@ final class CompanyStore: ObservableObject {
     func forgetDecision(_ entry: DecisionEntry) async {
         let token = hydrationToken
         guard !isHydrating, let cid = companyId else { return }
-        let target = Decisions.identityKey(entry.topic)
+        // Scope is part of identity: forgetting Codepet's "pricing" must not drop the pants test's.
+        let target = Decisions.identity(entry)
         guard let attempted = Self.dropping(target, from: company.decisions) else { return }
         _ = await decisionsSaver(cid, attempted)
         guard token == hydrationToken, companyId == cid else { return }
@@ -3735,7 +4224,7 @@ final class CompanyStore: ObservableObject {
     /// `decisions` minus the first entry whose identity is `target`, or nil when that topic is
     /// not on record (the caller's no-op case, kept distinct from "removed nothing").
     private static func dropping(_ target: String, from decisions: [DecisionEntry]) -> [DecisionEntry]? {
-        guard let i = decisions.firstIndex(where: { Decisions.identityKey($0.topic) == target })
+        guard let i = decisions.firstIndex(where: { Decisions.identity($0) == target })
         else { return nil }
         var remaining = decisions
         remaining.remove(at: i)
@@ -3847,6 +4336,7 @@ final class CompanyStore: ObservableObject {
         chatDraft = ""
         threads = []
         activeThreadId = nil
+        typingResumeTask?.cancel()
         isCompanionTyping = false
         isStreaming = false
         currentToolActivity = nil
@@ -3858,6 +4348,12 @@ final class CompanyStore: ObservableObject {
         // in-flight generateRoadmap's token-guarded defer won't clear it (would stick the
         // "Re-plan" button disabled forever otherwise).
         interviewState = nil
+        // Same as `hydrate`'s account switch: dropped, never stopped (see there).
+        teamRun = nil
+        teamRunBag = nil
+        pendingTeamBuild = nil
+        planningTeamBuildId = nil
+        isPlanningTeamBuild = false
         // Session state about the OUTGOING founder. Leaving it true would mean the
         // next account — empty brief, nothing on record — is never asked at all,
         // because `hydrate` only ever sets it from the incoming company's flag and a

@@ -115,20 +115,33 @@ export function claudeArgs(opts: {
   systemPrompt: string;
   /** True only for a turn that actually wrote a file into the run dir — see `--restricted`. */
   readAttachments?: boolean;
+  /**
+   * The founder's linked project folder, READ-ONLY (2026-09-25). Without it the chat could
+   * not see the folder the + menu names — "Help me build a landing page for Codepet, I have
+   * the folder linked" was answered from an empty temp dir. Granted as Read/Glob/Grep with
+   * `--add-dir` and always under `--restricted`, which confines the file tools to the run
+   * dir plus this one folder (measured on 2.1.282: a Read outside both is refused). No
+   * Write, Edit or Bash: chat reads the project, it does not change it.
+   */
+  readDir?: string;
 }): string[] {
+  const readsFiles = !!opts.readAttachments || !!opts.readDir;
   // See the `WebSearch` note above: available and permitted are two different flags, and
   // the tool is useless with only the first. WebFetch rides the same flag as WebSearch —
   // see the note above — and Read is subject to exactly the same rule.
   const allowedWithBuiltins = [
     ...opts.allowed,
     ...(opts.webSearch ? ["WebSearch", "WebFetch"] : []),
-    ...(opts.readAttachments ? ["Read"] : []),
+    ...(readsFiles ? ["Read"] : []),
+    ...(opts.readDir ? ["Glob", "Grep"] : []),
   ];
   // "" when none are on, which the CLI accepts as "no built-ins".
   const tools = [
     opts.webSearch ? "WebSearch" : null,
     opts.webSearch ? "WebFetch" : null,
-    opts.readAttachments ? "Read" : null,
+    readsFiles ? "Read" : null,
+    opts.readDir ? "Glob" : null,
+    opts.readDir ? "Grep" : null,
   ]
     .filter(Boolean)
     .join(",");
@@ -148,7 +161,8 @@ export function claudeArgs(opts: {
     // the safety property described above.
     "--tools", tools,
     // Never granted without this: see the `Read` note above.
-    ...(opts.readAttachments ? ["--restricted"] : []),
+    ...(readsFiles ? ["--restricted"] : []),
+    ...(opts.readDir ? ["--add-dir", opts.readDir] : []),
     ...(opts.model ? ["--model", opts.model] : []),
     // Verified on 2.1.241 that --effort is accepted alongside every model Codepet offers,
     // Haiku 4.5 included: the API rejects `effort` on some models but the CLI absorbs that
@@ -338,6 +352,24 @@ export function ingestLine(
 }
 
 
+/** The env value as a usable folder: absolute, existing, a directory — else null. */
+export function linkedFolder(raw: string | undefined, isDir: (p: string) => boolean = (p) => {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}): string | null {
+  const p = (raw ?? "").trim();
+  if (!p || !path.isAbsolute(p) || !isDir(p)) return null;
+  return path.resolve(p);
+}
+
+/** Tells the model the folder exists and how it may use it. */
+export function linkedFolderNote(dir: string): string {
+  return [
+    `The founder has linked their project folder: ${dir}`,
+    `You can read it with Read, Glob and Grep — look there before asking them what the product is.`,
+    `You cannot change it; if they want files changed, say so and point them to Team build or Build.`,
+  ].join("\n");
+}
+
 /* istanbul ignore next -- process wiring; the pure parts above carry the tests */
 async function main(): Promise<void> {
   const raw = await new Promise<string>((resolve) => {
@@ -408,13 +440,18 @@ async function main(): Promise<void> {
   // `readAttachments` — and therefore whether this turn is granted Read at all.
   const prompt = flattenTranscript(built.messages, saveAttachment);
 
+  const readDir = linkedFolder(process.env.CODEPET_CHAT_READ_DIR);
+  const systemPrompt = built.systemBlocks.map((b) => b.text).join("\n\n")
+    + (readDir ? `\n\n${linkedFolderNote(readDir)}` : "");
+
   const args = claudeArgs({
+    readDir: readDir ?? undefined,
     mcpConfigPath,
     allowed,
     model: process.env.CODEPET_CHAT_MODEL,
     effort: process.env.CODEPET_CHAT_EFFORT,
     webSearch,
-    systemPrompt: built.systemBlocks.map((b) => b.text).join("\n\n"),
+    systemPrompt,
     readAttachments: saved > 0,
   });
 

@@ -48,10 +48,14 @@ struct CompanyState: Codable, Hashable {
     /// Settings the founder chose in the settings modal. Defaulted, because every company
     /// doc written before this field existed decodes without it.
     var founderPrefs: FounderPrefs
+    /// Team Build runs (one request, the whole company, a real project). Defaulted like
+    /// every field above — every company doc written before this feature existed decodes
+    /// without it.
+    var teamRuns: [TeamRun]
 
-    /// Explicit memberwise init so `tasks`/`enabledTools`/`decisions`/`founderPrefs` can
-    /// default — existing call sites that predate the roadmap/environment/settings phases
-    /// omit them and keep compiling.
+    /// Explicit memberwise init so `tasks`/`enabledTools`/`decisions`/`founderPrefs`/`teamRuns`
+    /// can default — existing call sites that predate the roadmap/environment/settings/team-build
+    /// phases omit them and keep compiling.
     init(brief: CompanyBrief, departments: [DeptRef], library: [Deliverable],
          stage: ProjectStage, companionId: String, onboardedAt: Date? = nil,
          introSeenAt: Date? = nil,
@@ -59,7 +63,8 @@ struct CompanyState: Codable, Hashable {
          greetedAt: Date? = nil,
          tasks: [RoadmapTask] = [], enabledTools: Set<String> = Toolkit.defaultEnabledIds,
          decisions: [DecisionEntry] = [],
-         founderPrefs: FounderPrefs = .init()) {
+         founderPrefs: FounderPrefs = .init(),
+         teamRuns: [TeamRun] = []) {
         self.brief = brief
         self.departments = departments
         self.library = library
@@ -73,6 +78,7 @@ struct CompanyState: Codable, Hashable {
         self.enabledTools = enabledTools
         self.decisions = decisions
         self.founderPrefs = founderPrefs
+        self.teamRuns = teamRuns
     }
 
     /// Hand-written so a company document that predates a field still decodes: Swift's
@@ -97,6 +103,8 @@ struct CompanyState: Codable, Hashable {
             ?? Toolkit.defaultEnabledIds
         decisions = try c.decodeIfPresent([DecisionEntry].self, forKey: .decisions) ?? []
         founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs) ?? .init()
+        // Per element: one run that no longer decodes must not lose the whole company.
+        teamRuns = TeamRun.decodeLeniently(c, forKey: .teamRuns) ?? []
     }
 
     static let empty = CompanyState(

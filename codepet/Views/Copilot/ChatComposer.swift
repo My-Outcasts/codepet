@@ -82,6 +82,14 @@ struct ChatComposer: View {
     /// Convene the Virtual Company on the current draft. Defaulted so main's shell,
     /// which still reaches the room through its `.plan` pill, passes nothing.
     var onConveneRoom: () -> Void = {}
+    /// Start a Team Build on the current draft. `nil` by default and the button is then absent,
+    /// the same additive rule `onVoiceMode` follows — so `DeveloperWorkPane` and the previews,
+    /// which have no Team Build, render exactly as before instead of carrying a button that
+    /// could never enable.
+    var onTeamBuild: (() -> Void)? = nil
+    /// The owner's `TeamBuildButton.isEnabled` — computed there, where the grant and the
+    /// store's run slot are readable, and handed down like `voiceAvailability`.
+    var teamBuildEnabled: Bool = false
     /// Enter voice mode. `nil` by default, so `DeveloperWorkPane` and every existing
     /// call site render exactly as they do today — the same additive rule `tier`
     /// and `pins` follow.
@@ -185,6 +193,7 @@ struct ChatComposer: View {
                 voiceButton
                 modeMenu
                 Spacer()
+                teamBuildButton
                 sendButton
             }
         }
@@ -246,6 +255,7 @@ struct ChatComposer: View {
                     modelMenu(claudeModel, claudeEffort)
                 }
                 Spacer(minLength: 8)
+                teamBuildButton
                 sendButton
             }
         }
@@ -970,6 +980,37 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
+    /// "Team build" beside send. Absent — not merely disabled — in prototype mode: a Team Build
+    /// writes a real folder and spends the real Claude plan, and the demo does neither, so a
+    /// greyed button there would only advertise something the demo cannot show.
+    ///
+    /// Icon-only in the 380pt dock, whose control row has no room for a label beside the mode
+    /// pill; the name is still on the tooltip and the accessibility label.
+    @ViewBuilder private var teamBuildButton: some View {
+        if let onTeamBuild, !PrototypeMode.isOn {
+            Button(action: onTeamBuild) {
+                Label(TeamBuildButton.label(lang), systemImage: "person.3.fill")
+                    .labelStyle(TeamBuildLabelStyle(iconOnly: surface == .dock))
+                    .font(CodepetTheme.inter(surface == .dock ? 13 : 12, weight: .medium))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .padding(.horizontal, surface == .dock ? 0 : 9)
+                    .frame(minWidth: surface == .dock ? 30 : nil)
+                    .frame(height: surface == .dock ? 30 : 26)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(CodepetTheme.hairline)
+                    )
+                    .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!teamBuildEnabled)
+            .opacity(teamBuildEnabled ? 1 : 0.5)
+            .help(TeamBuildButton.help(lang))
+            .accessibilityLabel(TeamBuildButton.label(lang))
+            .fixedSize()
+        }
+    }
+
     private var sendButton: some View {
         // 27pt in two-mode (the prototype's `.send`), 34 in the dock. The pane's
         // composer is a quiet strip at the bottom, not the hero's centrepiece.
@@ -990,6 +1031,17 @@ struct ChatComposer: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSend)
+    }
+}
+
+private struct TeamBuildLabelStyle: LabelStyle {
+    let iconOnly: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if iconOnly {
+            configuration.icon
+        } else {
+            HStack(spacing: 5) { configuration.icon; configuration.title }
+        }
     }
 }
 

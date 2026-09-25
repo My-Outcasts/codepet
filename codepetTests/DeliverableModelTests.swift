@@ -23,4 +23,14 @@ final class DeliverableModelTests: XCTestCase {
         let back = try JSONDecoder().decode(Deliverable.self, from: JSONEncoder().encode(d))
         XCTAssertEqual(back, d)
     }
+
+    /// A Team Build's project entry points at its folder. `Deliverable` has a hand-written
+    /// encoder, so a field missing from it is silently dropped on every Firestore save.
+    func testProjectPathRoundTripsAndOlderDocsDecodeWithout() throws {
+        let d = Deliverable(id: "p1", kind: .other, title: "Pants page", body: "Office pants", projectPath: "/tmp/x")
+        let back = try JSONDecoder().decode(Deliverable.self, from: JSONEncoder().encode(d))
+        XCTAssertEqual(back.projectPath, "/tmp/x")
+        let old = #"{"id":"d1","kind":"doc","title":"t","body":"b"}"#.data(using: .utf8)!
+        XCTAssertNil(try JSONDecoder().decode(Deliverable.self, from: old).projectPath)
+    }
 }

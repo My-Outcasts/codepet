@@ -11,7 +11,7 @@
  * reason the flags did: a second copy is how one of the two silently drifts.
  */
 
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -206,6 +206,49 @@ export function setCliShell(shell: { path: string; flags: readonly string[] }) {
 }
 
 /**
+ * Every CLI child still running in this process. `terminateLiveChildren` walks it on SIGTERM.
+ */
+const liveChildren = new Set<ChildProcess>();
+
+/**
+ * End every CLI child this process spawned, and everything under it.
+ *
+ * Each child is spawned `detached`, so it leads its own process group — the login shell AND the
+ * `claude` it starts. Signalling the negative pid reaches the whole group; a plain
+ * `child.kill()` would end only the shell and orphan `claude`, which then runs to completion
+ * on the founder's plan. That orphan is exactly what Stop and the 180 s timeout used to leave.
+ * Returns how many children were signalled.
+ */
+export function terminateLiveChildren(): number {
+  let n = 0;
+  for (const child of liveChildren) {
+    if (child.pid === undefined) continue;
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      try { child.kill("SIGTERM"); } catch { /* already gone */ }
+    }
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * On SIGTERM — the Swift runner sends it on Stop and on timeout — end the CLI children first,
+ * then exit 143 (128 + SIGTERM). Without it node dies alone and `claude` is left running.
+ * Called from each sidecar's entry point, never at import, so importing this module (the
+ * tests do) installs nothing. `exit` is a seam for the test.
+ */
+export function installSigtermHandler(exit: (code: number) => void = (code) => process.exit(code)) {
+  const onTerm = () => {
+    terminateLiveChildren();
+    exit(143);
+  };
+  process.once("SIGTERM", onTerm);
+  return () => { process.removeListener("SIGTERM", onTerm); };
+}
+
+/**
  * Spawn the CLI the adapter names and collect everything it said.
  *
  * Every call gets its OWN temp cwd, deliberately: discovery of `CLAUDE.md` walks UP from
@@ -241,7 +284,10 @@ function spawnCli(adapter: CliAdapter, opts: {
     const child = spawn(cliShell.path, [...cliShell.flags, `${adapter.binary} ${args.map(quote).join(" ")}`], {
       cwd: dir,
       env,
+      // Its own process group, so `terminateLiveChildren` can end the shell AND `claude`.
+      detached: true,
     });
+    liveChildren.add(child);
     child.stdin.write(opts.prompt);
     child.stdin.end();
 
@@ -253,11 +299,15 @@ function spawnCli(adapter: CliAdapter, opts: {
     child.stderr.on("data", (c: string) => (stderr += c));
 
     child.on("close", (code) => {
+      liveChildren.delete(child);
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
       resolve({ stdout, stderr, code });
     });
 
-    child.on("error", (err) => reject(new ClaudeCliError(String(err))));
+    child.on("error", (err) => {
+      liveChildren.delete(child);
+      reject(new ClaudeCliError(String(err)));
+    });
   });
 }
 

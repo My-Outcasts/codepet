@@ -54,6 +54,57 @@ The feature that convenes departments to argue a decision. Backend in `functions
 - **The ~$0.20 figure predates the effort change.** The position and negotiation phases now run at `POSITION_EFFORT` (`medium`) instead of the API default (`high`), which cuts thinking tokens on the two phases that fan out. Nobody has re-measured since; treat $0.20 as an upper bound until someone does
 - Test procedure and every measured number: `docs/superpowers/virtual-company-test-runbook.md`. Read it before re-measuring anything
 
+### Team Build
+
+Spec: `docs/superpowers/specs/2026-09-24-team-build-design.md`. Convenes the room to produce a
+real multi-file project instead of a decision.
+
+- Flow: Team build button → room → `planTeamWork` (`ONE_SHOT_OPS`) → one approval →
+  `TeamRunCoordinator` runs department steps, ≤3 at once, each fed its direct deps' drafts →
+  `ProjectAssembler` writes `docs/` and runs `claude -p` with file-only tools (`Read`, `Write`,
+  `Edit`, `Glob`, `Grep`) for ≤15 min → a guaranteed `CLAUDE.md` → `git commit` → Approve files
+  the project plus every department draft (`CompanyStore.approveTeamRun`)
+- **File-only is enforced, not just granted.** `--allowedTools` denies nothing on its own (the
+  founder's `~/.claude/settings.json` allow rules still apply under `-p`), so the build also
+  passes `--disallowedTools "Bash,WebFetch,WebSearch,NotebookEdit,Task"` and
+  `--permission-mode acceptEdits` (`TeamBuildPrompt`, via `CLIRunner.claudeCommand`). The
+  existing Build path's command is unchanged and pinned by `CLIRunnerCommandTests`
+- **The linked folder is read-only reference, in both chat and the build** (2026-09-25). Chat
+  gets `--add-dir <folder>` + Read/Glob/Grep, always under `--restricted` (file tools confined
+  to the run dir and that folder). The build gets `--add-dir` plus an `Edit(//<folder>/**)`
+  deny — `acceptEdits` otherwise auto-accepts edits in every added dir, and only an `Edit(...)`
+  rule covers all file-editing tools (`Write(...)` is reported unmatched). Both measured on
+  2.1.282 against the exact generated command. The department steps still see no folder
+- **The team knows the product through a `ProductDossier`** (2026-09-25). Linking a folder
+  starts ONE read-only `claude -p` pass (`--restricted`, Read/Glob/Grep, ~80 s on this repo)
+  that writes a product summary + up to 12 image paths, cached per account and folder under
+  `~/.codepet/accounts/<uid>/dossiers/`. The text rides `ChatContext.compose(product:)` (chat,
+  every department run, live lines), the room's founder profile, and the planner's company
+  facts; the build prompt gets it plus a quality bar, and the images are copied into
+  `public/product/`. Written by a model, not scraped, because this repo's README still
+  describes the retired learning game. A Team build press waits for it. Before it existed a
+  "landing page for Codepet" came out as one headline and an email box — the room had said
+  "Nothing is on record about what codepet is" and chose the smallest page
+- Web projects are Next.js 15 (App Router, TS, Tailwind v4, pinned versions). The build is
+  file-only; the APP runs `npm install` + `npm run build` after it, gives one file-only repair
+  pass on failure, and writes `BUILD-ERRORS.md` if it still fails (`ProjectAssembler.verifyBuild`)
+- Projects land in `~/Codepet Projects/<slug>/`. The commit falls back to the identity
+  `Codepet <team-build@codepet.local>` for whatever of user.name/user.email the Mac lacks
+- Runs persist as `teamRuns` on `companies/{uid}` — **bounded**: a filed or cancelled run drops
+  its drafts and at most 10 runs are kept (`TeamRun.retained`), because the array lives inside
+  the company doc (1 MiB limit). It decodes per element, so one bad run cannot empty the company
+- A draft's `sourceTaskId` is `team-<runId>-<stepId>`, never `team-<stepId>`: every plan
+  numbers its steps s1, s2…, and the bare form resolved older runs' drafts to the newest run's
+  department. The project entry is sourced to the `build` step, so it groups under Engineering
+- **The build prompt lives in Swift** (`TeamBuildPrompt.swift`), on purpose — it has no cloud
+  path, unlike every other prompt in this project
+- `LocalOneShotRunner` now bounds every one-shot call, including `planTeamWork`, at 180 s, and
+  **cancelling the calling Task terminates the process** (Stop). The shell `exec`s node, and
+  the one-shot and meeting sidecars end their own `claude` children on SIGTERM
+  (`installSigtermHandler` in `cliAdapter.ts`, children spawned detached and killed by process
+  group) — without that, `claude` was orphaned and ran on to completion on the founder's plan
+- Hidden in prototype mode — no Team build button when `PrototypeMode.isOn`
+
 ## Running on the founder's Claude plan, not the API key
 
 The Anthropic API key was deleted from the console on 26 Aug 2026, so every Cloud Function

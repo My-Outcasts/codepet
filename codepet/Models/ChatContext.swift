@@ -209,11 +209,14 @@ enum ChatContext {
     /// `MemoryDigest.codingMemoryPrompt`. Defaults to `true` so callers with no founder in
     /// hand keep their current grounding.
     static func compose(brief: CompanyBrief, tasks: [RoadmapTask], decisions: [DecisionEntry] = [],
+                         product: String? = nil,
                          library: [Deliverable] = [], query: String? = nil,
                          focusDepartment: Department? = nil, memoryEnabled: Bool = true,
                          pinned: [ContextPin] = []) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
+        // Directly under the brief it deepens — see `ProductDossier.contextBlock`.
+        if let product, !product.isEmpty { parts.append(product) }
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
                 + "prioritize \(dep.name) in your answer: \(dep.focus)")

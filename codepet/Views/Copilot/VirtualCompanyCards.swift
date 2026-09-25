@@ -23,6 +23,34 @@ struct VCConfidenceDots: View {
 
 /// The room, rendered inside the chat. Stacked vertically because the dock is
 /// 380pt wide — positions cannot sit in columns here, so they read as a sequence.
+/// The room's "still working" line: spinner, the stage, and a clock since the row appeared.
+/// It never disappears between stages, so the room is never still while it is running.
+struct VCProgressRow: View {
+    let stage: VCProgressStage
+    @Environment(\.uiLanguage) private var lang
+    @State private var startedAt = Date()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small).scaleEffect(0.7)
+            Text(stage.label(lang))
+                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                .foregroundColor(CodepetTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                Text(TeamBuildCopy.clock(ctx.date.timeIntervalSince(startedAt)))
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundColor(CodepetTheme.accentPurple)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(CodepetTheme.accentPurple.opacity(0.07)))
+    }
+}
+
 struct VCRunCards: View {
     let state: VirtualCompanyRunState
     /// The founder has already locked this brief in — the card says so instead of
@@ -77,7 +105,10 @@ struct VCRunCards: View {
     /// looking. Decided once, here, for every card the room draws.
     var body: some View {
         HStack(spacing: 0) {
-            cards
+            VStack(alignment: .leading, spacing: 12) {
+                cards
+                if let stage = VCProgressStage.from(state) { VCProgressRow(stage: stage) }
+            }
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

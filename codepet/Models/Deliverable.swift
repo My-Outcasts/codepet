@@ -321,6 +321,10 @@ struct Deliverable: Codable, Hashable, Identifiable {
     /// question a founder asks; the model that answered is a different, noisier fact, and
     /// on Codex it is not reported at all.
     var producedBy: AIProvider? = nil
+    /// The folder a Team Build assembled, for the one Library entry that stands for the whole
+    /// project. Client-only: nothing maps it into a `RunTaskRequest`, and `LibraryView` offers
+    /// Open in Finder for any deliverable that carries one. Nil for every other deliverable.
+    var projectPath: String? = nil
     /// On a draft: the Library item this draft is a new version of. Approving it replaces that
     /// item in place instead of filing a second one (CP-025). Nil on every first-pass draft.
     var supersedes: String? = nil
@@ -329,7 +333,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
 
     init(id: String = UUID().uuidString, kind: DeliverableKind, title: String, body: String,
          createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil,
-         producedBy: AIProvider? = nil, supersedes: String? = nil,
+         producedBy: AIProvider? = nil, projectPath: String? = nil, supersedes: String? = nil,
          versions: [DeliverableVersion]? = nil) {
         self.id = id
         self.kind = kind
@@ -339,6 +343,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
         self.sourceTaskId = sourceTaskId
         self.payload = payload
         self.producedBy = producedBy
+        self.projectPath = projectPath
         self.supersedes = supersedes
         self.versions = versions
     }
@@ -349,7 +354,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
     // which needs this enum. The first seven cases are the seven pre-existing property names,
     // copied verbatim — get one wrong and every stored deliverable fails to decode.
     enum CodingKeys: String, CodingKey {
-        case id, kind, title, body, createdAt, sourceTaskId, payload, producedBy
+        case id, kind, title, body, createdAt, sourceTaskId, payload, producedBy, projectPath
         case supersedes, versions
     }
 
@@ -369,6 +374,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
         producedBy = (try? c.decodeIfPresent(String.self, forKey: .producedBy))
             .flatMap { $0 }
             .flatMap(AIProvider.init(rawValue:))
+        projectPath = try c.decodeIfPresent(String.self, forKey: .projectPath)
         supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
         versions = try c.decodeIfPresent([DeliverableVersion].self, forKey: .versions)
     }
@@ -388,6 +394,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
         // `AIProvider` is not itself `Codable` (only `Equatable`) — encode its rawValue String,
         // matching the manual rawValue decode above.
         try c.encodeIfPresent(producedBy?.rawValue, forKey: .producedBy)
+        try c.encodeIfPresent(projectPath, forKey: .projectPath)
         try c.encodeIfPresent(supersedes, forKey: .supersedes)
         try c.encodeIfPresent(versions, forKey: .versions)
     }

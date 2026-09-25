@@ -573,7 +573,7 @@ describe("the learning-layer ops", () => {
     expect(Object.keys(ONE_SHOT_OPS).sort()).toEqual([
       "chatSession", "distillReference", "enrichBrief", "extractDecisions",
       "generateDictionary", "generateGuidance", "generatePlan", "generateRoadmap",
-      "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
+      "planTeamWork", "runTask", "summarizeSession", "summarizeTurn", "synthesizeBrief",
     ]);
   });
 });

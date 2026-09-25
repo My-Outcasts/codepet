@@ -34,6 +34,25 @@ struct MemoryPanel: View {
     /// the existing `decisionsSaver`. There is no separate "facts" collection.
     private var facts: [DecisionEntry] { companyStore.company.decisions }
 
+    /// The open project's folder name, when the identity is resolved (decisions scope by id).
+    private var projectName: String? {
+        guard companyStore.activeProjectId != nil, let path = companyStore.activeProjectLink?.path else { return nil }
+        return Project.nameFromPath(path)
+    }
+
+    /// Where a decision applies, in the founder's words.
+    private func scopeLabel(_ d: DecisionEntry) -> String {
+        let vi = lang == .vi
+        switch d.scope {
+        case Decisions.everywhere?: return vi ? "mọi dự án" : "every project"
+        case nil:
+            return projectName == nil ? (vi ? "chưa gắn dự án" : "no project")
+                                      : (vi ? "chưa gắn dự án — không dùng ở đây" : "no project — not used here")
+        case let id? where id == companyStore.activeProjectId: return projectName ?? (vi ? "dự án này" : "this project")
+        default: return vi ? "dự án khác" : "another project"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsGroup {
@@ -63,7 +82,23 @@ struct MemoryPanel: View {
                     // a duplicated ForEach id silently drops rows from a trust surface.
                     ForEach(Array(facts.enumerated()), id: \.offset) { idx, fact in
                         if idx > 0 { SettingsDivider() }
-                        SettingsRow(label: fact.statement, description: fact.topic) {
+                        SettingsRow(label: fact.statement, description: fact.topic + " · " + scopeLabel(fact)) {
+                            // Unassigned while a project is open: left out of that project's
+                            // context (`Decisions.applicable`), so offer to assign it here.
+                            if fact.scope == nil, let project = projectName {
+                                Button(lang == .vi ? "Dùng cho \(project)" : "Use for \(project)") {
+                                    Task { await companyStore.assignDecision(fact, everywhere: false) }
+                                }
+                                .buttonStyle(.plain)
+                                .font(CodepetTheme.inter(11.5, weight: .semibold))
+                                .foregroundColor(CodepetTheme.accentPurple)
+                                Button(lang == .vi ? "Mọi nơi" : "Everywhere") {
+                                    Task { await companyStore.assignDecision(fact, everywhere: true) }
+                                }
+                                .buttonStyle(.plain)
+                                .font(CodepetTheme.inter(11.5, weight: .semibold))
+                                .foregroundColor(CodepetTheme.mutedText)
+                            }
                             Button { Task { await companyStore.forgetDecision(fact) } } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10, weight: .medium))

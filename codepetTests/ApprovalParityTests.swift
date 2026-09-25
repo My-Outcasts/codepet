@@ -114,4 +114,68 @@ final class ApprovalParityTests: XCTestCase {
         XCTAssertEqual(RoadmapEngine.status(for: s.company.tasks[1], in: s.company.tasks),
                        .codepetCanDo, "approving in chat must unblock what it was holding up")
     }
+
+    // MARK: - Team Build
+
+    /// A Team Build's Approve goes through the same `fileApproval` as the other two buttons: one
+    /// Library entry per department draft (so the Library's department grouping shows the whole
+    /// team) plus one for the project itself, pointing at its folder.
+    ///
+    /// The project path is the one the real assembler produced under a temp root rather than a
+    /// hardcoded "/tmp/x": `ProjectAssembler` is a struct with no seam for the path, and driving
+    /// the real flow is this suite's rule (see the type's doc comment).
+    func testApprovingATeamRunFilesTheProjectAndEveryDepartmentDraft() async throws {
+        CompanyStore.execStepNanos = 0
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("apt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = TeamBuildFixture.Probe()
+        let s = TeamBuildFixture.store(probe: probe, root: root)
+        let planned = await TeamBuildFixture.planned(s)
+        XCTAssertTrue(planned, "the plan card never appeared")
+        await s.confirmTeamPlan()
+        let run = try XCTUnwrap(s.teamRun?.run)
+        XCTAssertEqual(run.phase, .ready)
+        let path = try XCTUnwrap(run.projectPath)
+        XCTAssertNil(s.company.firstApprovalAt)
+
+        await s.approveTeamRun()
+
+        XCTAssertEqual(s.company.library.count, 3, "2 department drafts + 1 project")
+        XCTAssertEqual(s.company.library.filter { $0.projectPath == nil }.map(\.title),
+                       ["Write the message", "Design the page"])
+        let project = try XCTUnwrap(s.company.library.first { $0.projectPath != nil })
+        XCTAssertEqual(project.projectPath, path)
+        XCTAssertEqual(project.kind, .other)
+        XCTAssertEqual(project.title, "Pants page")
+        XCTAssertFalse(project.body.isEmpty)
+        XCTAssertFalse(project.body.contains("## "), "the body is the What-this-is section, not the whole CLAUDE.md")
+        XCTAssertNotNil(s.company.firstApprovalAt)
+        XCTAssertEqual(s.teamRun?.run?.phase, .filed)
+        // §5: the Library groups by department, so each team draft must resolve to its step's
+        // department — through the same resolver `LibraryView` and decision extraction use.
+        XCTAssertEqual(s.company.library.filter { $0.projectPath == nil }
+                        .map { s.deptKey(forSourceTaskId: $0.sourceTaskId) }, ["mkt", "design"])
+        let extracted = await TeamBuildFixture.waitFor { probe.extractedDepts.count == 3 }
+        XCTAssertTrue(extracted)
+        XCTAssertEqual(Set(probe.extractedDepts), ["mkt", "design", "eng"],
+                       "decision extraction must receive each draft's department; the project is the build step's (eng)")
+    }
+
+    /// A double tap must not file the team twice — the same suspension hazard `fileApproval`'s own
+    /// comment records for `approveTask`.
+    func testApprovingATeamRunTwiceFilesOnce() async throws {
+        CompanyStore.execStepNanos = 0
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("apt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let s = TeamBuildFixture.store(probe: TeamBuildFixture.Probe(), root: root)
+        let planned = await TeamBuildFixture.planned(s)
+        XCTAssertTrue(planned)
+        await s.confirmTeamPlan()
+
+        async let first: Void = s.approveTeamRun()
+        async let second: Void = s.approveTeamRun()
+        _ = await (first, second)
+
+        XCTAssertEqual(s.company.library.count, 3)
+    }
 }

@@ -8,8 +8,8 @@ enum CopilotRole { case me, companion }
 /// here only keeps the chosen thumb filled while the transcript is on screen.
 enum MessageVote { case up, down }
 
-/// One Copilot chat message (session-only; not persisted this phase). Named to
-/// avoid the reflection `ChatMessage`.
+/// One Copilot chat message. Persisted in reduced form by `ChatThreadArchive`
+/// (`StoredMessage`). Named to avoid the reflection `ChatMessage`.
 struct CopilotMessage: Identifiable, Equatable {
     let id: String
     let role: CopilotRole
@@ -165,6 +165,12 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `MessageActionRules.canRetry` can refuse retry on a reply that isn't answering anything.
     var founderAsk: String?
 
+    /// The Team Build this message renders, by id — the plan card, then the live team card, then
+    /// the result card, all read off `CompanyStore.teamRun` rather than copied here. An id, not a
+    /// snapshot, because the run changes for minutes after the message is appended and the
+    /// coordinator is the one place that state lives.
+    var teamRunId: String? = nil
+
     /// `createdAt` is injectable and defaults to now.
     ///
     /// It was declared as a stored `var` but left OUT of this initializer, so no caller could
@@ -187,7 +193,8 @@ struct CopilotMessage: Identifiable, Equatable {
          vcRun: VirtualCompanyRunState? = nil,
          runProposal: RunProposal? = nil, roadmapProposal: RoadmapProposal? = nil,
          drafts: [MessageDraftDTO] = [], vote: MessageVote? = nil,
-         founderAsk: String? = nil, attachments: [ChatAttachment] = []) {
+         founderAsk: String? = nil, attachments: [ChatAttachment] = [],
+         teamRunId: String? = nil) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -216,6 +223,7 @@ struct CopilotMessage: Identifiable, Equatable {
         self.vote = vote
         self.founderAsk = founderAsk
         self.attachments = attachments
+        self.teamRunId = teamRunId
     }
 }
 

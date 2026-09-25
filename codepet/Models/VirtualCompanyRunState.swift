@@ -147,3 +147,46 @@ enum VirtualCompanyDecision {
                                  source: "virtual-company/\(runId)")
     }
 }
+
+
+/// What the room is doing right now, for the progress row under its cards. Before this the
+/// room went still between the last position landing and the brief — conflicts, negotiation
+/// and synthesis ran for a minute or more with nothing moving (founder, 2026-09-25). Derived
+/// from events already folded into the state; nil once the run has ended or never convened.
+enum VCProgressStage: Equatable {
+    case routing
+    case answering(done: Int, total: Int)
+    case comparing
+    case negotiating(round: Int)
+    case finishing
+
+    static func from(_ s: VirtualCompanyRunState) -> VCProgressStage? {
+        switch s.phase {
+        case .idle, .finished, .failed: return nil
+        default: break
+        }
+        if s.isEscapeHatch { return nil }
+        if s.brief != nil { return .finishing }
+        if let last = s.negotiationRounds.last { return .negotiating(round: last.round) }
+        guard !s.agents.isEmpty else { return .routing }
+        let settled = s.agents.filter { s.positions[$0.agentId] != nil || s.agentErrors[$0.agentId] != nil }.count
+        if settled < s.agents.count { return .answering(done: settled, total: s.agents.count) }
+        return .comparing
+    }
+
+    func label(_ lang: AppLanguage) -> String {
+        let vi = lang == .vi
+        switch self {
+        case .routing:
+            return vi ? "Đang chọn phòng ban…" : "Choosing who should be in the room…"
+        case .answering(let done, let total):
+            return vi ? "Các phòng ban đang trả lời · \(done)/\(total)" : "Departments are answering · \(done) of \(total)"
+        case .comparing:
+            return vi ? "Đang so sánh quan điểm và thương lượng…" : "Comparing positions and negotiating…"
+        case .negotiating(let round):
+            return vi ? "Đang thương lượng · xong vòng \(round)" : "Negotiating · round \(round) done"
+        case .finishing:
+            return vi ? "Đang viết kết luận…" : "Writing the recommendation…"
+        }
+    }
+}

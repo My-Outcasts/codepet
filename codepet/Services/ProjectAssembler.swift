@@ -99,9 +99,21 @@ struct ProjectAssembler {
     var root: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Codepet Projects")
     var coder: ProjectCodeRunning
     var git: (_ args: [String], _ dir: URL) async -> Bool = { args, dir in await ProjectAssembler.runGit(args, dir) }
+    /// Runs one shell command in the project folder: (succeeded, tail of its output). Only
+    /// reached when the build wrote a `package.json` — a seam so the suite never runs npm.
+    var shell: (_ command: String, _ dir: URL, _ timeout: TimeInterval) async -> (ok: Bool, tail: String) = {
+        cmd, dir, timeout in await ProjectAssembler.runShell(cmd, dir, timeout: timeout)
+    }
 
     static let buildTimeout: TimeInterval = 900
     static let maxTurns = 40
+    /// The repair pass after a failed `npm run build` is a narrower job than the build.
+    static let repairTurns = 20
+    static let installTimeout: TimeInterval = 600
+    static let compileTimeout: TimeInterval = 300
+    /// Written into the project when the build still fails after the repair pass, so the
+    /// founder (or Claude Code opened in the folder) sees the error instead of a green card.
+    static let buildErrorsFile = "BUILD-ERRORS.md"
 
     func makeFolder(slug: String) throws -> URL {
         let fm = FileManager.default
@@ -132,6 +144,9 @@ struct ProjectAssembler {
             return .failure(failure)
         }
 
+        ensureGitignore(dir)
+        await verifyBuild(run, dir: dir, onLog: onLog)
+
         let mdURL = dir.appendingPathComponent("CLAUDE.md")
         let existing = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
         if !TeamBuildPrompt.isComplete(existing) {
@@ -140,6 +155,59 @@ struct ProjectAssembler {
         _ = await git(["add", "-A"], dir)
         _ = await git(["commit", "-m", "Initial project from Codepet Team Build"], dir)   // failure is not fatal
         return .success(path: dir.path)
+    }
+
+    /// `node_modules` and `.next` must never reach the commit — a guarantee, not something the
+    /// prompt is trusted to remember.
+    func ensureGitignore(_ dir: URL) {
+        let url = dir.appendingPathComponent(".gitignore")
+        let existing = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .components(separatedBy: "\n").filter { !$0.isEmpty }
+        let present = Set(existing.map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 })
+        let missing = ["node_modules/", ".next/", ".env*.local", ".DS_Store"].filter { entry in
+            !present.contains(entry.hasSuffix("/") ? String(entry.dropLast()) : entry)
+        }
+        guard !missing.isEmpty else { return }
+        try? ((existing + missing).joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// The build is file-only, so it cannot run npm itself; this does, deterministically, after
+    /// it. A failed `npm run build` gets ONE file-only repair pass fed the error, then a
+    /// rebuild. Still failing is not fatal — the project exists — but it is written down in
+    /// `BUILD-ERRORS.md` and said in the log, never reported as a clean build.
+    /// No `package.json` (a docs project) skips all of it.
+    func verifyBuild(_ run: TeamRun, dir: URL, onLog: @escaping (String) -> Void) async {
+        guard FileManager.default.fileExists(atPath: dir.appendingPathComponent("package.json").path) else { return }
+        onLog("npm install")
+        let install = await shell("npm install --no-audit --no-fund", dir, Self.installTimeout)
+        guard install.ok else {
+            onLog("✗ npm install failed")
+            writeBuildErrors(dir, step: "npm install", output: install.tail)
+            return
+        }
+        guard !Task.isCancelled else { return }
+        onLog("npm run build")
+        var build = await shell("npm run build", dir, Self.compileTimeout)
+        if build.ok { onLog("✓ npm run build passed"); return }
+        guard !Task.isCancelled else { return }
+
+        onLog("✗ build failed — fixing")
+        _ = await coder.run(prompt: TeamBuildPrompt.repairPrompt(errors: build.tail), dir: dir.path,
+                            allowedTools: TeamBuildPrompt.allowedTools, maxTurns: Self.repairTurns,
+                            timeout: Self.buildTimeout, onEvent: onLog)
+        onLog("npm run build")
+        build = await shell("npm run build", dir, Self.compileTimeout)
+        if build.ok {
+            onLog("✓ npm run build passed")
+        } else {
+            onLog("✗ build still fails — see \(Self.buildErrorsFile)")
+            writeBuildErrors(dir, step: "npm run build", output: build.tail)
+        }
+    }
+
+    private func writeBuildErrors(_ dir: URL, step: String, output: String) {
+        let md = "# Build errors\n\n`\(step)` failed after the Team Build. Open this folder with Claude Code and ask it to fix the build.\n\n```\n\(output)\n```\n"
+        try? md.write(to: dir.appendingPathComponent(Self.buildErrorsFile), atomically: true, encoding: .utf8)
     }
 
     private func writeDocs(_ run: TeamRun, into dir: URL) throws -> [String] {
@@ -224,6 +292,53 @@ struct ProjectAssembler {
                                       environment: [String: String]? = nil) async -> String? {
         let r = await capture(args, dir, timeout: timeout, environment: environment)
         return r.ok ? r.out : nil
+    }
+
+    /// `command` in `dir` through a login shell (npm lives on the founder's PATH), output sent to
+    /// a temp file rather than a pipe: npm prints far past the 64 KB pipe buffer, and a child
+    /// blocked on a full pipe never exits. Returns the last 4000 characters of that output.
+    nonisolated static func runShell(_ command: String, _ dir: URL, timeout: TimeInterval) async -> (ok: Bool, tail: String) {
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent("codepet-build-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: log) }
+        // `exec` so the shell becomes npm, and a terminate (timeout or Stop) reaches npm itself.
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: LoginShellRunner.loginShells.first {
+            FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh")
+        p.arguments = ["-lc", "exec " + command]
+        p.currentDirectoryURL = dir
+        var env = LoginShellRunner.spawnEnvironment()
+        env["CI"] = "1"                       // no interactive prompts, no spinners
+        env["NEXT_TELEMETRY_DISABLED"] = "1"
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        nonisolated(unsafe) let proc = p
+        let ok = await withTaskCancellationHandler { await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let handle = try? FileHandle(forWritingTo: log)
+            p.standardOutput = handle
+            p.standardError = handle
+
+            let lock = NSLock()
+            var resumed = false
+            @Sendable func finish(_ ok: Bool) {
+                lock.lock(); let already = resumed; resumed = true; lock.unlock()
+                guard !already else { return }
+                try? handle?.close()
+                cont.resume(returning: ok)
+            }
+            p.terminationHandler = { finish($0.terminationStatus == 0) }
+            do { try p.run() } catch { finish(false); return }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                guard p.isRunning else { return }
+                p.terminate()
+                finish(false)
+            }
+        } } onCancel: {
+            // Stop on the card cancels the build Task; without this npm ran on regardless.
+            if proc.isRunning { proc.terminate() }
+        }
+        let out = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+        return (ok, String(out.suffix(4000)))
     }
 
     /// `environment` is a test seam: nil means the founder's login-shell environment.

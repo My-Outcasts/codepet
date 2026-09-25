@@ -186,11 +186,33 @@ struct TeamRunCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(run.plan.steps) { step in
                         row(step, run: run, now: context.date)
+                        if step.id == WorkPlan.buildStepId, run.phase == .assembling {
+                            buildActivity
+                        }
                     }
                 }
             }
             footer(run)
         }
+    }
+
+    /// The build step can run for 15 minutes; its last few actions are shown on the card itself
+    /// so the founder sees it moving without opening the step's detail.
+    private var buildActivity: some View {
+        let lines = Array(coordinator.buildLog.suffix(4))
+        return VStack(alignment: .leading, spacing: 2) {
+            if lines.isEmpty {
+                Text(lang == .vi ? "Đang đọc tài liệu của cả đội…" : "Reading the team's docs…")
+                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+            }
+            ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
+                Text("› " + line)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(i == lines.count - 1 ? CodepetTheme.bodyText : CodepetTheme.mutedText)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+        }
+        .padding(.leading, 28)
     }
 
     private func row(_ step: WorkStep, run: TeamRun, now: Date) -> some View {
@@ -276,9 +298,16 @@ struct TeamRunCard: View {
         case .ready:
             if let path = run.projectPath { readyFooter(path) }
         case .filed:
-            Label(vi ? "Đã thêm vào Thư viện" : "Added to Library", systemImage: "checkmark.circle.fill")
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(CodepetTheme.accentTeal)
+            // The project is the deliverable, so filing it must not take away the way into it —
+            // before this, the only route back was Library ▸ Engineering ▸ the entry ▸ Finder.
+            VStack(alignment: .leading, spacing: 8) {
+                Label(vi ? "Đã thêm vào Thư viện" : "Added to Library", systemImage: "checkmark.circle.fill")
+                    .font(CodepetTheme.inter(12, weight: .semibold))
+                    .foregroundColor(CodepetTheme.accentTeal)
+                if let path = run.projectPath, FileManager.default.fileExists(atPath: path) {
+                    WrapLayout(spacing: 8, rowSpacing: 8) { projectButtons(path) }
+                }
+            }
         case .cancelled:
             if interrupted { continueButton }
         }
@@ -292,9 +321,6 @@ struct TeamRunCard: View {
 
     private func readyFooter(_ path: String) -> some View {
         let vi = lang == .vi
-        let url = URL(fileURLWithPath: path)
-        let index = url.appendingPathComponent("index.html")
-        let hasIndex = FileManager.default.fileExists(atPath: index.path)
         return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Self.files(at: path), id: \.self) { name in
@@ -312,24 +338,32 @@ struct TeamRunCard: View {
                 TeamCardButton(title: vi ? "Duyệt" : "Approve", primary: true) {
                     Task { await companyStore.approveTeamRun() }
                 }
-                TeamCardButton(title: vi ? "Mở trong Finder" : "Open in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                TeamCardButton(title: vi ? "Mở bằng Claude Code" : "Open with Claude Code") {
-                    NSWorkspace.shared.open([url],
-                                            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                                            configuration: .init())
-                }
-                if hasIndex {
-                    TeamCardButton(title: vi ? "Xem trên trình duyệt" : "View in browser") {
-                        NSWorkspace.shared.open(index)
-                    }
-                }
+                projectButtons(path)
             }
             Text(DraftCardCopy.notFiledNote(lang))
                 .font(CodepetTheme.inter(11.5))
                 .foregroundColor(CodepetTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Open / run the project on disk — the same buttons before and after Approve.
+    @ViewBuilder private func projectButtons(_ path: String) -> some View {
+        let vi = lang == .vi
+        let url = URL(fileURLWithPath: path)
+        let index = url.appendingPathComponent("index.html")
+        if TeamProjectLauncher.isNodeProject(path) {
+            TeamCardButton(title: vi ? "Chạy thử" : "Run it") { TeamProjectLauncher.runDev(path) }
+        } else if FileManager.default.fileExists(atPath: index.path) {
+            TeamCardButton(title: vi ? "Xem trên trình duyệt" : "View in browser") { NSWorkspace.shared.open(index) }
+        }
+        TeamCardButton(title: vi ? "Mở trong Finder" : "Open in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        TeamCardButton(title: vi ? "Mở bằng Claude Code" : "Open with Claude Code") {
+            NSWorkspace.shared.open([url],
+                                    withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                    configuration: .init())
         }
     }
 
@@ -347,6 +381,46 @@ struct TeamRunCard: View {
                 return isDir.boolValue ? name + "/" : name
             }
         return docs + top
+    }
+}
+
+// MARK: - Launching the project
+
+/// "Run it" for a Node project: a Terminal window that installs if needed, starts `npm run dev`
+/// and opens the page. Terminal, not a child process of the app — the dev server should outlive
+/// the card, show its own errors, and stop with ^C like any dev server the founder has seen.
+enum TeamProjectLauncher {
+    static func isNodeProject(_ path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path + "/package.json")
+    }
+
+    /// The script, pure so a test can pin its quoting: the path is single-quoted with any `'`
+    /// escaped, because a project folder name is derived from founder-typed text.
+    ///
+    /// PATH is the app's own augmented PATH (`LoginShellRunner.spawnEnvironment`): a script
+    /// shell does not read `.zshrc`, which is where nvm/fnm put node.
+    static func script(for path: String, pathVar: String = LoginShellRunner.spawnEnvironment()["PATH"] ?? "") -> String {
+        """
+        #!/bin/zsh
+        export PATH=\(quote(pathVar)):$PATH
+        cd \(quote(path)) || exit 1
+        [ -d node_modules ] || npm install --no-audit --no-fund || exit 1
+        (sleep 4; open http://localhost:3000) &
+        exec npm run dev
+        """
+    }
+
+    static func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
+    static func runDev(_ path: String) {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codepet-run-\(UUID().uuidString.prefix(8)).command")
+        do {
+            try script(for: path).write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        } catch { return }
+        NSWorkspace.shared.open([file], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                configuration: NSWorkspace.OpenConfiguration())
     }
 }
 

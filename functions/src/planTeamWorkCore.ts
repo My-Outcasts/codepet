@@ -58,7 +58,8 @@ export function buildTeamPlanPrompt(input: TeamPlanInput): string {
     `only use departments from the list; pick a kind that department can produce;`,
     `do NOT include the final build step — it is added for you and depends on every step.`,
     `Give the project a short title, a kebab-case slug, a one-sentence summary of what the team decided,`,
-    `and a projectType naming what gets built (e.g. "static landing page", "email sequence (docs)").`,
+    `and a projectType naming what gets built (e.g. "Next.js landing page", "Next.js web app", "email sequence (docs)").`,
+    `Anything a browser shows is built as a Next.js app — never plan plain HTML files.`,
     input.language === "vi" ? `Write every title, instruction and summary in Vietnamese.` : ``,
   ].filter((l) => l !== ``).join("\n");
 }

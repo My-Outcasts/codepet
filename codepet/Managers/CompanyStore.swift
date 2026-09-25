@@ -179,6 +179,12 @@ final class CompanyStore: ObservableObject {
     /// everywhere that already clears it (hydrate's account-switch branch, `reset()`,
     /// and `sendChat`'s unconditional tail) — never stuck true.
     @Published private(set) var isStreaming = false
+    /// Brings the thinking row back when a reply's text stops arriving but its turn has not
+    /// ended. On the local transport `claude -p` can go quiet for 15 s or more after its last
+    /// word — finishing a tool call, deciding to run a task — and with the row cleared by the
+    /// first delta the founder saw a finished-looking answer and nothing moving.
+    private var typingResumeTask: Task<Void, Never>?
+    static var streamSilenceNanos: UInt64 = 1_500_000_000
     /// The tool running RIGHT NOW, for `ChatThinkingRow` to name literally ("Luna is
     /// reading web.murror.app…") instead of showing the rotating generic phrase. Set from
     /// the sidecar's `tool` frame; cleared at the start of every turn and by the SAME
@@ -542,6 +548,7 @@ final class CompanyStore: ObservableObject {
             chatMessages = []
             threads = []
             activeThreadId = nil
+            typingResumeTask?.cancel()
             isCompanionTyping = false
             isStreaming = false
             currentToolActivity = nil
@@ -1956,12 +1963,20 @@ final class CompanyStore: ObservableObject {
                 switch event {
                 case .delta(let chunk):
                     if isCompanionTyping { isCompanionTyping = false }
+                    typingResumeTask?.cancel()
+                    typingResumeTask = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: Self.streamSilenceNanos)
+                        guard !Task.isCancelled, let self, self.isStreaming, self.companyId == cid else { return }
+                        self.isCompanionTyping = true
+                    }
                     streamedText += chunk
                     if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                         chatMessages[i].text = streamedText
                     }
                 case .tool(let activity):
                     currentToolActivity = activity
+                    // A tool running is work in progress; name it even after text has started.
+                    if !isCompanionTyping { isCompanionTyping = true }
                 case .done(_, _, let action):
                     // Streaming is now the common success path, so run_task_id
                     // (and nav/setup/remember) handling must fire here too —
@@ -2110,6 +2125,8 @@ final class CompanyStore: ObservableObject {
         // re-enable, and this tail is byte-for-byte the no-feature tail. A run that is
         // still going (or has not even routed yet) simply arrives later, which is a new
         // message rather than a rewrite of an answer the founder has already read.
+        typingResumeTask?.cancel()
+        typingResumeTask = nil
         isCompanionTyping = false
         isStreaming = false
         // Cleared unconditionally, on the SAME line as the two above — success, error, and
@@ -4101,6 +4118,7 @@ final class CompanyStore: ObservableObject {
         chatDraft = ""
         threads = []
         activeThreadId = nil
+        typingResumeTask?.cancel()
         isCompanionTyping = false
         isStreaming = false
         currentToolActivity = nil

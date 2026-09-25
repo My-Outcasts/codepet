@@ -115,6 +115,26 @@ final class CompanyChatClientTests: XCTestCase {
         }
     }
 
+    /// `revise_work` (CP-025) must survive the streaming decode. The done payload is a private
+    /// struct with its own CodingKeys, so a verb the server sends and this list omits is dropped
+    /// silently — the reply still arrives, just without the offer.
+    func testSendStreamDoneCarriesReviseWork() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false,\"run_task_id\":null,\"revise_work\":{\"library_id\":\"L1\",\"note\":\"more editorial\"}}\n\n".data(using: .utf8)!
+        ]
+        var collected: [CompanyChatStreamEvent] = []
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(),
+            session: mockedCompanyChatSession(),
+            authTokenProvider: { "fake" }
+        ) {
+            collected.append(ev)
+        }
+        guard case let .done(_, _, action)? = collected.last else { return XCTFail("expected .done") }
+        XCTAssertEqual(action.reviseWork, ReviseWorkDTO(libraryId: "L1", note: "more editorial"))
+    }
+
     func testRequestEncodesRunnable() throws {
         let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
                                      context: "ctx", history: [], userMessage: "hi",

@@ -1867,7 +1867,8 @@ final class CompanyStore: ObservableObject {
             enabledSkills: enabledSkills, deptKey: deptKey,
             // nil rather than [] when nothing is attached: the key stays off the wire
             // for every request the app has ever sent, unchanged.
-            attachments: AttachmentDTO.wire(outgoing))
+            attachments: AttachmentDTO.wire(outgoing),
+            delivered: Self.deliveredRefs(library: company.library, tasks: company.tasks))
 
         // The reply bubble's identity — the same `specialist` the request above was built
         // from, so the "Name · Dept" header now names whoever actually wrote the words.
@@ -2000,6 +2001,7 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [],
                                          completeTaskId: reply?.completeTaskId,
                                          addTask: reply?.addTask,
+                                         reviseWork: reply?.reviseWork,
                                          drafts: reply?.drafts ?? [])
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
                 // The retry can itself come back wordless (it is the same model on the same
@@ -2550,9 +2552,17 @@ final class CompanyStore: ObservableObject {
     ///
     /// `extraUpstream` is work that is not in the library and cannot be: a chained run's
     /// unapproved upstream draft.
+    /// A revise pass of approved work — see `reviseDelivered`.
+    private struct RevisePass {
+        let note: String
+        let current: String
+        let supersedes: String
+    }
+
     @discardableResult
     private func produceDraftInline(for task: RoadmapTask, cid: String?, language: AppLanguage,
-                                    extraUpstream: [UpstreamWork] = []) async -> Deliverable? {
+                                    extraUpstream: [UpstreamWork] = [],
+                                    revise: RevisePass? = nil) async -> Deliverable? {
         let specialist = taskSpecialist(for: task)
         let steps = Self.execSteps(task: task, specialist: specialist,
                                    decisionCount: company.decisions.count, language: language)
@@ -2571,7 +2581,8 @@ final class CompanyStore: ObservableObject {
         // Built once and HELD: the card's credit is read back off this request rather than
         // re-derived for the view, so what the founder is told the run built on is exactly
         // what the prompt was given.
-        let request = runRequest(for: task, language: language, extraUpstream: extraUpstream)
+        let request = runRequest(for: task, language: language, reviseNote: revise?.note,
+                                 current: revise?.current, extraUpstream: extraUpstream)
         let provider = currentProvider(for: cid)
         let result = await taskRunner(request)
         _ = await reveal.value   // let every revealed step land before finishing
@@ -2590,7 +2601,8 @@ final class CompanyStore: ObservableObject {
         // rather than from `steps`, so it reflects the completed state that was on screen.
         let finishedSteps = chatMessages.first { $0.id == producingId }?.execSteps
         chatMessages.removeAll { $0.id == producingId }
-        if let draft = buildDeliverable(from: result, task: task, producedBy: provider) {
+        if var draft = buildDeliverable(from: result, task: task, producedBy: provider) {
+            draft.supersedes = revise?.supersedes
             chatMessages.append(CopilotMessage(role: .companion, text: "", draft: draft,
                                                companionId: specialist?.companionId, deptName: specialist?.deptName,
                                                execSteps: finishedSteps, upstream: request.upstream))
@@ -2732,6 +2744,13 @@ final class CompanyStore: ObservableObject {
         if let id = action.completeTaskId,
            let task = company.tasks.first(where: { $0.id == id && !$0.done }) {
             proposal = .complete(taskId: id, title: task.title)
+        } else if let revise = action.reviseWork,
+                  let item = company.library.first(where: { $0.id == revise.libraryId }),
+                  let taskId = item.sourceTaskId,
+                  company.tasks.contains(where: { $0.id == taskId }) {
+            // Only an item the Library still has, whose task still exists: the revise pass re-runs
+            // that task, so an offer without one would be a button that can never deliver.
+            proposal = .revise(libraryId: item.id, title: item.title, note: revise.note)
         } else if let add = action.addTask {
             proposal = .add(RoadmapProposal.NewTask(
                 title: add.title,
@@ -2801,7 +2820,36 @@ final class CompanyStore: ObservableObject {
                 dept: task.dept)
             company.tasks.append(new)
             if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
+        case .revise(let libraryId, _, let note):
+            await reviseDelivered(libraryId: libraryId, note: note, language: language)
         }
+    }
+
+    /// Run a revise pass of an approved Library item: its own task, with the founder's note and the
+    /// item's CURRENT body, so the run revises rather than regenerates. The draft card carries
+    /// `supersedes`, so approving it replaces the item in place (`LibraryFiling`) — no new task, no
+    /// second Library item (CP-025). The task is already done and stays done.
+    private func reviseDelivered(libraryId: String, note: String, language: AppLanguage) async {
+        guard let item = company.library.first(where: { $0.id == libraryId }),
+              let task = company.tasks.first(where: { $0.id == item.sourceTaskId }) else { return }
+        dockCollapsed = false
+        _ = await produceDraftInline(for: task, cid: companyId, language: language,
+                                     revise: RevisePass(note: note, current: item.body,
+                                                        supersedes: item.id))
+        flushActiveThread()
+    }
+
+    /// The newest approved Library items the chat model may offer to revise (CP-025): newest
+    /// first by `createdAt`, capped at 15, and only those whose task still exists — a revise pass
+    /// re-runs that task. nil (not `[]`) when there are none, so the key stays off the wire.
+    static func deliveredRefs(library: [Deliverable], tasks: [RoadmapTask]) -> [DeliveredRef]? {
+        let taskIds = Set(tasks.map(\.id))
+        let refs = library
+            .filter { $0.sourceTaskId.map(taskIds.contains) ?? false }
+            .sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+            .prefix(15)
+            .map { DeliveredRef(id: $0.id, kind: $0.kind.rawValue, title: $0.title, taskId: $0.sourceTaskId) }
+        return refs.isEmpty ? nil : Array(refs)
     }
 
     /// `nav`: append a tappable chip (NOT auto-navigate — mirrors the web, which
@@ -3021,7 +3069,10 @@ final class CompanyStore: ObservableObject {
         guard companyId == cid,
               let j = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[j].draftApproved,
-              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+              var fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+        // A rebuilt draft is a new Deliverable; without this a revision tweaked once with a chip
+        // before approving would lose its link and file a second Library item (CP-025).
+        fresh.supersedes = draft.supersedes
         chatMessages[j].draft = fresh
     }
 

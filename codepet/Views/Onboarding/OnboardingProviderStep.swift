@@ -47,6 +47,17 @@ enum OnboardingProviderStep {
     ///
     /// Moved off the view for the same reason `passes` lives here: a string inside a SwiftUI
     /// `body` can only be asserted by building the view.
+    /// The gate's heading, beside `gateSubtitle` so both follow the language. It was a literal
+    /// until CP-012, which put English above Vietnamese body copy.
+    static func gateHeading(lang: AppLanguage) -> String {
+        lang == .vi ? "Còn một bước nữa trước khi bắt đầu" : "One more thing before you start"
+    }
+
+    /// The install row's copy button — the same literal-string bug on the same screen (CP-012).
+    static func copyCommandLabel(lang: AppLanguage) -> String {
+        lang == .vi ? "Sao chép lệnh" : "Copy command"
+    }
+
     static func gateSubtitle(lang: AppLanguage) -> String {
         lang == .vi
             ? "Codepet chạy mọi việc trên CLI bạn đã có — Claude Code hoặc Codex. Hãy cài một trong hai; Codepet sẽ hỏi bạn trước khi dùng tới hạn mức của bạn."
@@ -70,7 +81,7 @@ struct OnboardingProviderGateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("One more thing before you start")
+            Text(OnboardingProviderStep.gateHeading(lang: lang))
                 .font(CodepetTheme.body(20, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
             Text(OnboardingProviderStep.gateSubtitle(lang: lang))
@@ -145,7 +156,7 @@ struct OnboardingProviderGateView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(command, forType: .string)
             } label: {
-                Text("Copy command")
+                Text(OnboardingProviderStep.copyCommandLabel(lang: lang))
                     .font(CodepetTheme.body(11.5, weight: .medium))
                     .foregroundColor(OnboardingContent.Palette.accentDeep)
             }

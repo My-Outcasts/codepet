@@ -718,10 +718,22 @@ export interface CompletableTaskRef {
   title: string;
 }
 
+/**
+ * What an OFFER verb really does, told to the model on every one of them. Measured 25 Sep 2026
+ * by replaying turns through the local sidecar: without it the model narrated every offer as
+ * done — "I added it to your roadmap" (add_task 2/2), "I've marked … as complete"
+ * (complete_task 2/2), "I've queued a warmer version" (revise_work 3/3) — while the app was
+ * only showing a button nobody had pressed. "Offer to…" named the verb; this says what it does.
+ */
+const OFFER_TRUTH =
+  " Calling this only shows the founder a button, and nothing happens until they press it. " +
+  "Word your reply as an offer they can accept (\"Want me to add that?\", \"I can mark that " +
+  "done\"), never as something already done: not \"I added\", \"I've marked\" or \"I've queued\".";
+
 export const COMPLETE_TASK_TOOL = {
   name: "complete_task",
   description:
-    "Offer to mark a roadmap task done, when the founder says they have finished it themselves — e.g. \"I did that\", \"that's done\", \"mark it complete\", \"I already talked to them\". Use the exact task_id from OPEN TASKS. This does NOT complete work for them and must never be used to claim you did something: it records that THEY finished a step they own. Do not call it for a task you drafted — that is completed by the founder approving the draft. If it is ambiguous which task they mean, ask a one-line question instead of guessing.",
+    "Offer to mark a roadmap task done, when the founder says they have finished it themselves — e.g. \"I did that\", \"that's done\", \"mark it complete\", \"I already talked to them\". Use the exact task_id from OPEN TASKS. This does NOT complete work for them and must never be used to claim you did something: it records that THEY finished a step they own. Do not call it for a task you drafted — that is completed by the founder approving the draft. If it is ambiguous which task they mean, ask a one-line question instead of guessing." + OFFER_TRUTH,
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -742,7 +754,7 @@ export const COMPLETE_TASK_TOOL = {
 export const ADD_TASK_TOOL = {
   name: "add_task",
   description:
-    "Offer to add a new task to the roadmap, when the founder describes work they want tracked that is not already on it — e.g. \"add a task to call the two bakeries\", \"we need to write a refund policy\". Write the title as an action the founder or a department can start, in their own words where possible. Do NOT call this for work already on the roadmap, for something you are about to do yourself in this chat, or to break an existing task into sub-steps.",
+    "Offer to add a new task to the roadmap, when the founder describes work they want tracked that is not already on it — e.g. \"add a task to call the two bakeries\", \"we need to write a refund policy\". Write the title as an action the founder or a department can start, in their own words where possible. Do NOT call this for work already on the roadmap, for something you are about to do yourself in this chat, or to break an existing task into sub-steps." + OFFER_TRUTH,
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -868,7 +880,7 @@ export const REVISE_WORK_TOOL = {
     "change, rework, redo, redesign or take another pass at it — e.g. \"make the landing page " +
     "more editorial\", \"can we try the pricing doc with three tiers\". Use the exact id from " +
     "DELIVERED WORK. The new version replaces that item once the founder approves it. If it is " +
-    "ambiguous which item they mean, ask a one-line question instead of guessing.",
+    "ambiguous which item they mean, ask a one-line question instead of guessing." + OFFER_TRUTH,
   input_schema: {
     type: "object",
     additionalProperties: false,

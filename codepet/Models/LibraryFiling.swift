@@ -14,9 +14,18 @@ enum LibraryFiling {
     /// Earlier versions kept per item. The oldest is dropped past this.
     static let historyCap = 20
 
+    /// Whether filing `draft` replaces an item rather than adding one — the ONE decision, read by
+    /// `file` below and by the store to label the draft card, so the label cannot disagree with
+    /// what happened to the Library.
+    static func replaces(_ draft: Deliverable, in library: [Deliverable]) -> Bool {
+        guard let target = draft.supersedes else { return false }
+        return library.contains { $0.id == target }
+    }
+
     static func file(_ draft: Deliverable, into library: [Deliverable]) -> [Deliverable] {
         guard let target = draft.supersedes else { return library + [draft] }
-        guard let i = library.firstIndex(where: { $0.id == target }) else {
+        guard replaces(draft, in: library),
+              let i = library.firstIndex(where: { $0.id == target }) else {
             // The item was deleted while the revision was being made. Never drop an approval:
             // file it as a new item, without a link that would point at nothing forever.
             var orphan = draft

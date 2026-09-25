@@ -2980,6 +2980,8 @@ final class CompanyStore: ObservableObject {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
         chatMessages[i].draftApproved = true
+        // Decided against the Library BEFORE filing changes it — the same rule `file` applies.
+        chatMessages[i].draftReplacedItem = LibraryFiling.replaces(draft, in: company.library)
         await fileApproval(draft, taskId: draft.sourceTaskId)
     }
 

@@ -96,6 +96,18 @@ final class LibraryFilingTests: XCTestCase {
         XCTAssertFalse(titles.contains("v0"), "the oldest should have been dropped")
     }
 
+    // MARK: - Whether an approval replaces (drives the card's "Updated" vs "Added" label)
+
+    /// The card must tell the truth about what Approve did. `replaces` is the one decision, used by
+    /// `file` and by the store to label the card, so the label cannot disagree with the Library.
+    func testReplacesIsTrueOnlyWhenTheSupersededItemIsStillThere() {
+        XCTAssertTrue(LibraryFiling.replaces(revision(of: "L1"), in: [pricing, landingV1]))
+        XCTAssertFalse(LibraryFiling.replaces(revision(of: "gone"), in: [pricing, landingV1]),
+                       "a revision of a deleted item is appended, so it did not update anything")
+        XCTAssertFalse(LibraryFiling.replaces(Deliverable(id: "D1", kind: .doc, title: "New", body: "n"),
+                                              in: [pricing]))
+    }
+
     // MARK: - Spec test 6: restore is itself a replace-in-place
 
     func testRestoringAVersionMakesItCurrentAndKeepsTheOneItReplaced() {

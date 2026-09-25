@@ -177,7 +177,14 @@ struct LibraryView: View {
             .pageColumn()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .sheet(item: $selected) { DeliverableDetailView(deliverable: $0) }
+        .sheet(item: $selected) { d in
+            // The Library is the one caller that passes these: it owns the item, so it is the one
+            // place a version menu and Restore make sense. Every other sheet opens without them.
+            DeliverableDetailView(
+                deliverable: d,
+                liveItem: { companyStore.company.library.first { $0.id == d.id } },
+                onRestore: { index in await companyStore.restoreVersion(itemId: d.id, historyIndex: index) })
+        }
     }
 
     // MARK: Header (title + subtitle + `NN items · NN live · NN draft`)
@@ -386,6 +393,14 @@ struct LibraryRowView: View {
                             .tracking(0.6)
                             .foregroundColor(live ? CodepetTokens.liveGreen : CodepetTokens.faint)
                     }
+                    // "V3" once the item has been revised (CP-025): the history behind it is
+                    // otherwise invisible. Same quiet 10pt label as the pip beside it.
+                    if let badge = LibraryVersions.badge(for: deliverable) {
+                        Text(badge)
+                            .font(CodepetTheme.inter(10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
                     Spacer()
                     Text((lang == .vi ? "mở →" : "open →").uppercased())
                         .font(CodepetTheme.inter(10, weight: .semibold))
@@ -413,15 +428,47 @@ struct LibraryRowView: View {
 /// Deliverable detail sheet — title + kind + the markdown body (scrolls).
 struct DeliverableDetailView: View {
     let deliverable: Deliverable
+    /// The item as the Library holds it NOW — so a Restore shows at once rather than the copy the
+    /// sheet opened with. Only the Library passes this and `onRestore`; without them there is no
+    /// version menu (a chat draft or a department's call has no history to browse).
+    var liveItem: (() -> Deliverable?)? = nil
+    var onRestore: ((Int) async -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.uiLanguage) private var lang
+    /// The older version being previewed (its index in `versions`), or nil for the current one.
+    @State private var previewIndex: Int?
+
+    private var current: Deliverable { liveItem?() ?? deliverable }
+    private var shown: Deliverable {
+        previewIndex.map { LibraryVersions.preview(of: current, historyIndex: $0) } ?? current
+    }
+    private var entries: [LibraryVersions.Entry] {
+        onRestore == nil ? [] : LibraryVersions.entries(for: current)
+    }
+    private var shownEntry: LibraryVersions.Entry? {
+        entries.first { $0.historyIndex == previewIndex }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: deliverable.kind.icon).foregroundColor(CodepetTheme.accentPurple)
-                Text(deliverable.title)
+                Image(systemName: shown.kind.icon).foregroundColor(CodepetTheme.accentPurple)
+                Text(shown.title)
                     .font(.pixelSystem(size: 15, weight: .bold))
                     .foregroundColor(CodepetTheme.primaryText)
+                if let at = shownEntry {
+                    Menu {
+                        ForEach(entries, id: \.number) { e in
+                            Button(menuLine(e)) { previewIndex = e.historyIndex }
+                        }
+                    } label: {
+                        Text("v\(at.number)")
+                            .font(CodepetTheme.inter(12, weight: .semibold))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
                 Spacer()
                 // A Team Build's project entry points at a folder on disk (`projectPath`),
                 // which is the actual deliverable; the body is only its CLAUDE.md summary.
@@ -440,11 +487,27 @@ struct DeliverableDetailView: View {
                     .buttonStyle(.plain).foregroundColor(CodepetTheme.mutedText)
             }
             .padding(16)
+            if let index = previewIndex, let at = shownEntry {
+                HStack(spacing: 10) {
+                    Text(viewingLine(at))
+                        .font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText)
+                    Spacer()
+                    Button(lang == .vi ? "Khôi phục" : "Restore") {
+                        Task {
+                            await onRestore?(index)
+                            previewIndex = nil
+                        }
+                    }
+                    Button(lang == .vi ? "Về bản hiện tại" : "Back to current") { previewIndex = nil }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
             Divider()
             ScrollView {
                 // Page margins, not padding. 16 on every side made the text start where the card's
                 // edge stopped; a document wants a margin you can see (founder, Aug 7).
-                DeliverableBodyView(deliverable: deliverable)
+                DeliverableBodyView(deliverable: shown)
                     .padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 34)
             }
         }
@@ -457,6 +520,18 @@ struct DeliverableDetailView: View {
         // The 460 floor stays: it can still be dragged small.
         .frame(minWidth: 460, idealWidth: 720, minHeight: 420, idealHeight: 700)
         .background(CodepetTheme.pageBackground)
+    }
+
+    private func menuLine(_ e: LibraryVersions.Entry) -> String {
+        let date = LibraryVersions.dateLabel(e.createdAt)
+        let now = e.isCurrent ? (lang == .vi ? "Hiện tại" : "Current") : ""
+        return ["v\(e.number)", now, date].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func viewingLine(_ e: LibraryVersions.Entry) -> String {
+        let date = LibraryVersions.dateLabel(e.createdAt)
+        let head = lang == .vi ? "Đang xem v\(e.number)" : "Viewing v\(e.number)"
+        return date.isEmpty ? head : "\(head) · \(date)"
     }
 }
 

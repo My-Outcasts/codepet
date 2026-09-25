@@ -10,6 +10,14 @@ struct DecisionEntry: Codable, Hashable {
     var statement: String
     var source: String?
     var updatedAt: Double?   // epoch milliseconds
+    /// Which project the decision belongs to (2026-09-25): a project id (`activeProjectId`),
+    /// `Decisions.everywhere`, or nil — unassigned, which is every decision made before this
+    /// field and every one made with no folder linked. See `Decisions.applicable`.
+    ///
+    /// Why: a Team Build for Codepet was handed the $35-pants experiment's brand ("quiet paper",
+    /// Lyon/Söhne, "one small collection a season") because decisions had no project at all.
+    /// Optional and omitted when nil, so every stored decision decodes and re-encodes unchanged.
+    var scope: String? = nil
 }
 
 /// A decision as returned by the extractDecisions CF (no timestamp yet).
@@ -21,6 +29,28 @@ struct ExtractedDecision: Codable, Hashable {
 
 enum Decisions {
     static let MAX_DECISIONS = 30
+    /// A decision the founder applied to every project.
+    static let everywhere = "*"
+
+    /// The decisions a context may use. With a project open: that project's and the
+    /// everywhere ones — NOT the unassigned ones, which is the point: they were made without a
+    /// project and may belong to another. With no project open: the unassigned and everywhere
+    /// ones, never another project's. Unassigned decisions are not lost — the Memory panel lists
+    /// them and assigns them in one tap.
+    static func applicable(_ all: [DecisionEntry], project: String?) -> [DecisionEntry] {
+        all.filter { d in
+            if d.scope == everywhere { return true }
+            return project == nil ? d.scope == nil : d.scope == project
+        }
+    }
+
+    /// Unassigned decisions left out while `project` is open — what the Memory panel offers to assign.
+    static func unassigned(_ all: [DecisionEntry], whileIn project: String?) -> [DecisionEntry] {
+        project == nil ? [] : all.filter { $0.scope == nil }
+    }
+
+    /// Identity including scope: "pricing" for Codepet and "pricing" for the pants test are two facts.
+    static func identity(_ d: DecisionEntry) -> String { (d.scope ?? "") + "|" + identityKey(d.topic) }
 
     private static func t(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -40,7 +70,8 @@ enum Decisions {
         for r in raw {
             let topic = t(r.topic), statement = t(r.statement)
             if topic.isEmpty || statement.isEmpty { continue }
-            entries.append(DecisionEntry(topic: topic, statement: statement, source: cleanSource(r.source), updatedAt: r.updatedAt))
+            entries.append(DecisionEntry(topic: topic, statement: statement, source: cleanSource(r.source),
+                                         updatedAt: r.updatedAt, scope: r.scope))
         }
         if entries.count <= max { return entries }
         return Array(entries.sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }.prefix(max))
@@ -49,23 +80,27 @@ enum Decisions {
     /// Merge extracted into existing, keyed by lowercased topic: an extraction on the same
     /// topic supersedes the old one and stamps updatedAt=now; untouched topics preserved
     /// (in original order, updates in place, new topics appended). Over cap → keep most-recent.
+    /// `scope` is stamped on every extracted decision, and identity includes it — the same topic
+    /// in another project is a different fact and is never superseded from here.
     static func mergeDecisions(existing: [DecisionEntry], extracted: [ExtractedDecision],
-                               now: Double, max: Int = MAX_DECISIONS) -> [DecisionEntry] {
+                               now: Double, scope: String? = nil, max: Int = MAX_DECISIONS) -> [DecisionEntry] {
         var order: [String] = []
         var byTopic: [String: DecisionEntry] = [:]
         for d in existing {
             let topic = t(d.topic), statement = t(d.statement)
             if topic.isEmpty || statement.isEmpty { continue }
-            let k = identityKey(topic)
+            let k = identity(d)
             if byTopic[k] == nil { order.append(k) }
             byTopic[k] = d
         }
         for e in extracted {
             let topic = t(e.topic), statement = t(e.statement)
             if topic.isEmpty || statement.isEmpty { continue }
-            let k = identityKey(topic)
+            let fresh = DecisionEntry(topic: topic, statement: statement, source: cleanSource(e.source),
+                                      updatedAt: now, scope: scope)
+            let k = identity(fresh)
             if byTopic[k] == nil { order.append(k) }
-            byTopic[k] = DecisionEntry(topic: topic, statement: statement, source: cleanSource(e.source), updatedAt: now)
+            byTopic[k] = fresh
         }
         let merged = order.compactMap { byTopic[$0] }
         if merged.count <= max { return merged }

@@ -1156,7 +1156,25 @@ final class CompanyStore: ObservableObject {
     /// lifted out of `linkProject` so it is provable without a real folder, a real write, or a
     /// security-scoped bookmark. Empty while the founder has memory off.
     var claudeMdSeedDecisions: [DecisionEntry] {
-        company.founderPrefs.memoryEnabled ? company.decisions : []
+        company.founderPrefs.memoryEnabled ? applicableDecisions : []
+    }
+
+    /// The decisions every context reads — `Decisions.applicable` for the open project. The ONE
+    /// place prompts get decisions from, so no call site can hand the team another project's.
+    var applicableDecisions: [DecisionEntry] {
+        Decisions.applicable(company.decisions, project: activeProjectId)
+    }
+
+    /// Assign a decision to the open project, or to every project. The Memory panel's action for
+    /// an unassigned decision; a no-op when nothing matches.
+    func assignDecision(_ entry: DecisionEntry, everywhere: Bool) async {
+        guard let cid = companyId, !isHydrating,
+              let i = company.decisions.firstIndex(where: { Decisions.identity($0) == Decisions.identity(entry) })
+        else { return }
+        let scope = everywhere ? Decisions.everywhere : activeProjectId
+        guard let scope else { return }
+        company.decisions[i].scope = scope
+        _ = await decisionsSaver(cid, company.decisions)
     }
 
     /// The pet to bring in for this turn, if a department is in focus — from the explicit
@@ -2023,7 +2041,7 @@ final class CompanyStore: ObservableObject {
             companionId: specialist?.companionId ?? company.companionId,
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
             // the Memory panel must not come back through grounding.
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: applicableDecisions,
                                           product: productDossier?.contextBlock,
                                           library: company.library, query: text, focusDepartment: department,
                                           memoryEnabled: company.founderPrefs.memoryEnabled,
@@ -2737,7 +2755,8 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         company.decisions = Decisions.mergeDecisions(existing: company.decisions,
                                                      extracted: [extracted],
-                                                     now: Date().timeIntervalSince1970 * 1000)
+                                                     now: Date().timeIntervalSince1970 * 1000,
+                                                     scope: activeProjectId)
         chatMessages.append(CopilotMessage(
             role: .companion, text: "",
             noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
@@ -3312,7 +3331,8 @@ final class CompanyStore: ObservableObject {
         guard !facts.isEmpty, companyId == cid else { return }
         let extracted = facts.map { ExtractedDecision(topic: $0.topic, statement: $0.statement, source: "chat") }
         let now = Date().timeIntervalSince1970 * 1000
-        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
+                                                     scope: activeProjectId)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
         guard companyId == cid else { return }
         // All facts land on the one reply rather than one bare row per fact — three
@@ -3533,7 +3553,7 @@ final class CompanyStore: ObservableObject {
         return RunTaskRequest(
             companyId: companyId, language: language.rawValue,
             companionId: specialist?.companionId ?? company.companionId,
-            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+            context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: applicableDecisions,
                                           product: productDossier?.contextBlock,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
@@ -3923,7 +3943,7 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue,
             companionId: companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks,
-                                         decisions: company.decisions, product: productDossier?.contextBlock,
+                                         decisions: applicableDecisions, product: productDossier?.contextBlock,
                                          library: company.library,
                                          query: instruction, focusDepartment: nil,
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
@@ -3970,11 +3990,12 @@ final class CompanyStore: ObservableObject {
         let dept = deptKey(forSourceTaskId: deliverable.sourceTaskId) ?? ""
         let dto = ApprovedDeliverableDTO(title: deliverable.title, dept: dept,
                                          type: deliverable.kind.rawValue, out: deliverable.body)
-        let onRecord = company.founderPrefs.memoryEnabled ? company.decisions : []
+        let onRecord = company.founderPrefs.memoryEnabled ? applicableDecisions : []
         let extracted = await decisionExtractor(dto, onRecord)
         guard companyId == cid, !extracted.isEmpty else { return }
         let now = Date().timeIntervalSince1970 * 1000
-        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now)
+        company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
+                                                     scope: activeProjectId)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 
@@ -4134,7 +4155,8 @@ final class CompanyStore: ObservableObject {
     func forgetDecision(_ entry: DecisionEntry) async {
         let token = hydrationToken
         guard !isHydrating, let cid = companyId else { return }
-        let target = Decisions.identityKey(entry.topic)
+        // Scope is part of identity: forgetting Codepet's "pricing" must not drop the pants test's.
+        let target = Decisions.identity(entry)
         guard let attempted = Self.dropping(target, from: company.decisions) else { return }
         _ = await decisionsSaver(cid, attempted)
         guard token == hydrationToken, companyId == cid else { return }
@@ -4147,7 +4169,7 @@ final class CompanyStore: ObservableObject {
     /// `decisions` minus the first entry whose identity is `target`, or nil when that topic is
     /// not on record (the caller's no-op case, kept distinct from "removed nothing").
     private static func dropping(_ target: String, from decisions: [DecisionEntry]) -> [DecisionEntry]? {
-        guard let i = decisions.firstIndex(where: { Decisions.identityKey($0.topic) == target })
+        guard let i = decisions.firstIndex(where: { Decisions.identity($0) == target })
         else { return nil }
         var remaining = decisions
         remaining.remove(at: i)

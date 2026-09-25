@@ -1,5 +1,5 @@
 import { toMcpTools, allowedToolNames, handleRpc } from "../local/mcpToolServer";
-import { claudeArgs, ingestLine, renderForPrompt, toolActivity, type TurnResult } from "../local/chatSidecar";
+import { claudeArgs, ingestLine, linkedFolder, renderForPrompt, toolActivity, type TurnResult } from "../local/chatSidecar";
 import { buildChatRequest } from "../companyChatCore";
 
 /**
@@ -239,6 +239,32 @@ describe("claudeArgs", () => {
     const permitted = a.slice(a.indexOf("--allowedTools") + 1);
     expect(permitted).toContain("Read");
     expect(permitted).toContain("mcp__codepet__navigate");
+  });
+});
+
+describe("claudeArgs — the linked folder", () => {
+  const base = {
+    mcpConfigPath: "/tmp/run/mcp.json", allowed: ["mcp__codepet__navigate"],
+    webSearch: false, systemPrompt: "sys",
+  };
+  it("adds the folder read-only, and only under --restricted", () => {
+    const a = claudeArgs({ ...base, readDir: "/Users/f/codepet" });
+    expect(a).toContain("--restricted");
+    expect(a[a.indexOf("--add-dir") + 1]).toBe("/Users/f/codepet");
+    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Glob,Grep");
+    const permitted = a.slice(a.indexOf("--allowedTools") + 1);
+    expect(permitted).toEqual(expect.arrayContaining(["Read", "Glob", "Grep"]));
+    for (const w of ["Write", "Edit", "Bash"]) expect(a.join(" ")).not.toContain(w);
+  });
+  it("leaves a turn with no folder exactly as it was", () => {
+    expect(claudeArgs(base)).not.toContain("--add-dir");
+  });
+  it("accepts only an absolute, existing directory", () => {
+    expect(linkedFolder("/Users/f/codepet", () => true)).toBe("/Users/f/codepet");
+    expect(linkedFolder("relative/dir", () => true)).toBeNull();
+    expect(linkedFolder("/gone", () => false)).toBeNull();
+    expect(linkedFolder(undefined)).toBeNull();
+    expect(linkedFolder("  ")).toBeNull();
   });
 });
 

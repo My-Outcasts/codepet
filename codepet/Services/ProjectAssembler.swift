@@ -6,6 +6,18 @@ protocol ProjectCodeRunning {
     /// Returns nil on success, else a founder-readable failure reason.
     func run(prompt: String, dir: String, allowedTools: [String], maxTurns: Int,
              timeout: TimeInterval, onEvent: @escaping (String) -> Void) async -> String?
+    /// The same, with folders the run may read but never change (`CLIRunner.claudeCommand`).
+    func run(prompt: String, dir: String, readOnlyDirs: [String], allowedTools: [String], maxTurns: Int,
+             timeout: TimeInterval, onEvent: @escaping (String) -> Void) async -> String?
+}
+
+extension ProjectCodeRunning {
+    /// Test doubles implement only the first form. The real runner implements both.
+    func run(prompt: String, dir: String, readOnlyDirs: [String], allowedTools: [String], maxTurns: Int,
+             timeout: TimeInterval, onEvent: @escaping (String) -> Void) async -> String? {
+        await run(prompt: prompt, dir: dir, allowedTools: allowedTools, maxTurns: maxTurns,
+                  timeout: timeout, onEvent: onEvent)
+    }
 }
 
 /// `CodeRunning`'s adapter hardcodes the default 8 turns and the base tools (which include Bash),
@@ -50,6 +62,12 @@ final class CLIProjectRunner: ProjectCodeRunning {
 
     func run(prompt: String, dir: String, allowedTools: [String], maxTurns: Int,
              timeout: TimeInterval, onEvent: @escaping (String) -> Void) async -> String? {
+        await run(prompt: prompt, dir: dir, readOnlyDirs: [], allowedTools: allowedTools, maxTurns: maxTurns,
+                  timeout: timeout, onEvent: onEvent)
+    }
+
+    func run(prompt: String, dir: String, readOnlyDirs: [String], allowedTools: [String], maxTurns: Int,
+             timeout: TimeInterval, onEvent: @escaping (String) -> Void) async -> String? {
         let runner = CLIRunner()
         let resolver = Resolver()
         var seen = 0
@@ -80,7 +98,8 @@ final class CLIProjectRunner: ProjectCodeRunning {
                 }
                 runner.run(prompt: prompt, projectDir: dir, allowedTools: allowedTools, maxTurns: maxTurns,
                            disallowedTools: TeamBuildPrompt.disallowedTools,
-                           permissionMode: TeamBuildPrompt.permissionMode)
+                           permissionMode: TeamBuildPrompt.permissionMode,
+                           readOnlyDirs: readOnlyDirs)
             }
         } onCancel: {
             // Without this handler, `TeamRunCoordinator.stop()` cancelling the build `Task`
@@ -104,6 +123,9 @@ struct ProjectAssembler {
     var shell: (_ command: String, _ dir: URL, _ timeout: TimeInterval) async -> (ok: Bool, tail: String) = {
         cmd, dir, timeout in await ProjectAssembler.runShell(cmd, dir, timeout: timeout)
     }
+
+    /// The founder's linked folder, readable as reference and never changed. Empty when none.
+    var referenceDirs: [String] = []
 
     static let buildTimeout: TimeInterval = 900
     static let maxTurns = 40
@@ -138,7 +160,9 @@ struct ProjectAssembler {
         let docs: [String]
         do { docs = try writeDocs(run, into: dir) } catch { return .failure("Could not write the team's docs") }
 
-        if let failure = await coder.run(prompt: TeamBuildPrompt.prompt(for: run, docs: docs), dir: dir.path,
+        let reference = referenceDirs.filter(CLIRunner.isShellSafePath)
+        if let failure = await coder.run(prompt: TeamBuildPrompt.prompt(for: run, docs: docs, reference: reference),
+                                         dir: dir.path, readOnlyDirs: reference,
                                          allowedTools: TeamBuildPrompt.allowedTools, maxTurns: Self.maxTurns,
                                          timeout: Self.buildTimeout, onEvent: onLog) {
             return .failure(failure)
@@ -193,6 +217,7 @@ struct ProjectAssembler {
 
         onLog("✗ build failed — fixing")
         _ = await coder.run(prompt: TeamBuildPrompt.repairPrompt(errors: build.tail), dir: dir.path,
+                            readOnlyDirs: referenceDirs.filter(CLIRunner.isShellSafePath),
                             allowedTools: TeamBuildPrompt.allowedTools, maxTurns: Self.repairTurns,
                             timeout: Self.buildTimeout, onEvent: onLog)
         onLog("npm run build")

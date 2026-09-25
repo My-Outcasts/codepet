@@ -103,9 +103,18 @@ final class CLIRunner: ObservableObject {
     /// `-p` — so `--disallowedTools` (deny wins over allow) and `--permission-mode acceptEdits`
     /// (edits scoped to the working and added directories) are what make "read and write files
     /// only" true.
+    /// `readOnlyDirs`: folders the run may read but never change — each is added with
+    /// `--add-dir` AND denied with `Edit(//<dir>/**)`. `acceptEdits` otherwise auto-accepts
+    /// edits in every added directory, and an `Edit(path)` rule is the one that covers all
+    /// file-editing tools; `Write(path)` is ignored by the file checks (both measured on
+    /// 2.1.282: the Edit rule refused a Write into the folder, the Write rule was reported
+    /// as unmatched). Empty → the command is byte-identical to before.
     static func claudeCommand(dir: String, maxTurns: Int, allowedTools: [String],
                               disallowedTools: [String] = [],
-                              permissionMode: String? = nil) -> String {
+                              permissionMode: String? = nil,
+                              readOnlyDirs: [String] = []) -> String {
+        let readOnly = readOnlyDirs.filter(isShellSafePath)
+        let disallowed = disallowedTools + readOnly.map { "Edit(/\($0)/**)" }
         var cmd = """
         claude -p \
         --output-format stream-json \
@@ -114,13 +123,21 @@ final class CLIRunner: ObservableObject {
         --allowedTools "\(CodeRunTools.argument(allowedTools))" \
         --add-dir "\(dir)"
         """
-        if !disallowedTools.isEmpty {
-            cmd += " --disallowedTools \"\(CodeRunTools.argument(disallowedTools))\""
+        for d in readOnly { cmd += " --add-dir \"\(d)\"" }
+        if !disallowed.isEmpty {
+            cmd += " --disallowedTools \"\(CodeRunTools.argument(disallowed))\""
         }
         if let permissionMode {
             cmd += " --permission-mode \(permissionMode)"
         }
         return cmd
+    }
+
+    /// A folder path that can sit inside the command's double quotes and a comma-joined tool
+    /// list: absolute, and none of `"` `$` `` ` `` `\` `,` or a newline. A path failing this is
+    /// left out entirely — never added without its deny rule.
+    static func isShellSafePath(_ p: String) -> Bool {
+        p.hasPrefix("/") && !p.contains(where: { "\"$`\\,\n".contains($0) })
     }
 
     /// Spawn `claude` in print mode against `projectDir`, streaming events.
@@ -134,7 +151,8 @@ final class CLIRunner: ObservableObject {
              allowedTools: [String] = CodeRunTools.base,
              maxTurns: Int = 8,
              disallowedTools: [String] = [],
-             permissionMode: String? = nil) {
+             permissionMode: String? = nil,
+             readOnlyDirs: [String] = []) {
 
         guard !isRunning else { return }
 
@@ -163,7 +181,8 @@ final class CLIRunner: ObservableObject {
         let shell = Self.loginShells.first { FileManager.default.fileExists(atPath: $0) } ?? "/bin/zsh"
 
         let claudeCmd = Self.claudeCommand(dir: dir, maxTurns: maxTurns, allowedTools: allowedTools,
-                                           disallowedTools: disallowedTools, permissionMode: permissionMode)
+                                           disallowedTools: disallowedTools, permissionMode: permissionMode,
+                                           readOnlyDirs: readOnlyDirs)
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)

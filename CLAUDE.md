@@ -69,6 +69,15 @@ real multi-file project instead of a decision.
   passes `--disallowedTools "Bash,WebFetch,WebSearch,NotebookEdit,Task"` and
   `--permission-mode acceptEdits` (`TeamBuildPrompt`, via `CLIRunner.claudeCommand`). The
   existing Build path's command is unchanged and pinned by `CLIRunnerCommandTests`
+- **The linked folder is read-only reference, in both chat and the build** (2026-09-25). Chat
+  gets `--add-dir <folder>` + Read/Glob/Grep, always under `--restricted` (file tools confined
+  to the run dir and that folder). The build gets `--add-dir` plus an `Edit(//<folder>/**)`
+  deny — `acceptEdits` otherwise auto-accepts edits in every added dir, and only an `Edit(...)`
+  rule covers all file-editing tools (`Write(...)` is reported unmatched). Both measured on
+  2.1.282 against the exact generated command. The department steps still see no folder
+- Web projects are Next.js 15 (App Router, TS, Tailwind v4, pinned versions). The build is
+  file-only; the APP runs `npm install` + `npm run build` after it, gives one file-only repair
+  pass on failure, and writes `BUILD-ERRORS.md` if it still fails (`ProjectAssembler.verifyBuild`)
 - Projects land in `~/Codepet Projects/<slug>/`. The commit falls back to the identity
   `Codepet <team-build@codepet.local>` for whatever of user.name/user.email the Mac lacks
 - Runs persist as `teamRuns` on `companies/{uid}` — **bounded**: a filed or cancelled run drops

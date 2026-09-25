@@ -69,7 +69,11 @@ final class CompanyStore: ObservableObject {
     // MARK: - Coding agent (local edit_code)
 
     /// The project folder linked for the coding agent. Client-only; reset on account switch.
-    @Published private(set) var activeProjectLink: ProjectLink?
+    @Published private(set) var activeProjectLink: ProjectLink? {
+        // The chat reads this folder (read-only) on the local transport — see
+        // `LocalChatStreamer.readableFolder`. Mirrored here, the one place it changes.
+        didSet { LocalChatStreamer.readableFolder = activeProjectLink?.path }
+    }
     private static let activeProjectBookmarkKey = "cp_active_project_bookmark"
 
     /// The open project's id — what `DecisionEntry.scope` will compare against once the
@@ -2313,7 +2317,13 @@ final class CompanyStore: ObservableObject {
                 }
                 return .success(d)
             },
-            assemble: { run, onLog in await factory().assemble(run, onLog: onLog) },
+            // The linked folder is read at assembly time, not at plan time: a founder may link it
+            // while the departments are still working.
+            assemble: { [weak self] run, onLog in
+                var assembler = factory()
+                if let path = self?.activeProjectLink?.path { assembler.referenceDirs = [path] }
+                return await assembler.assemble(run, onLog: onLog)
+            },
             save: { [weak self] snapshot in
                 guard let self, self.companyId == cid else { return }
                 var runs = self.company.teamRuns.filter { $0.id != snapshot.id }

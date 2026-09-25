@@ -15,7 +15,7 @@ enum TeamBuildPrompt {
 
     static func isComplete(_ md: String) -> Bool { requiredHeadings.allSatisfy { md.contains($0) } }
 
-    static func prompt(for run: TeamRun, docs: [String]) -> String {
+    static func prompt(for run: TeamRun, docs: [String], reference: [String] = []) -> String {
         let build = run.plan.buildStep?.instruction ?? ""
         return """
         You are the engineer on a small company's team. The founder asked: "\(run.request)"
@@ -23,6 +23,7 @@ enum TeamBuildPrompt {
 
         The rest of the team has already done their part. Read every file below BEFORE writing anything:
         \(docs.map { "- \($0)" }.joined(separator: "\n"))
+        \(referenceNote(reference))
 
         Build the complete project in the current directory. Use the team's work faithfully — their copy,
         their design direction, their prices. Do not invent facts they did not give you.
@@ -60,6 +61,18 @@ enum TeamBuildPrompt {
         - It must pass `next build` with no type errors: the app runs it right after you finish.
           Use next/image only for files you actually create in public/; otherwise use a styled placeholder.
         """
+
+    /// The linked folder, when there is one. It is the founder's real product — the source of
+    /// truth for what it is and does — and it is read-only: `CLIRunner` denies edits there.
+    static func referenceNote(_ dirs: [String]) -> String {
+        guard !dirs.isEmpty else { return "" }
+        return """
+
+        The founder's own product lives in \(dirs.map { "`\($0)`" }.joined(separator: ", ")) — READ-ONLY reference.
+        Read its README, docs and source to get the product right (what it is, who it is for, real feature names).
+        Never write, edit or create anything there; every file you make goes in the current directory.
+        """
+    }
 
     /// The one repair pass after `npm run build` failed. File-only, same tools as the build.
     static func repairPrompt(errors: String) -> String {

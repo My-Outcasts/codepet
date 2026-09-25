@@ -62,6 +62,11 @@ enum LocalChatStreamer {
 
     /// Run the turn. Mirrors `CompanyChatClient.sendStream`'s signature so it can be
     /// injected as `chatStreamer` without touching a call site.
+    /// The founder's linked project folder, which the chat may READ (Read/Glob/Grep, confined
+    /// by `--restricted` in the sidecar — `claudeArgs`' `readDir`). Set by `CompanyStore` when
+    /// the link changes; nil sends nothing and the turn is exactly what it was before.
+    static var readableFolder: String?
+
     static func sendStream(
         _ req: CompanyChatRequest,
         modelPreference: ClaudeCodeModelPreference = ClaudeCodeModelPreference()
@@ -103,6 +108,8 @@ enum LocalChatStreamer {
                     env["CODEPET_CHAT_EFFORT"] = effort
                 }
             }
+
+            if let folder = readableFolder { env["CODEPET_CHAT_READ_DIR"] = folder }
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: shell)

@@ -289,10 +289,16 @@ enum DeliverableKind: String, Codable, CaseIterable {
 }
 
 /// An earlier version of a Library item, kept when a revision replaces it in place.
+///
+/// Carries `kind` and `payload` as well as the text: a Site, sheet or calendar is DRAWN from its
+/// payload, so a version that kept only the body would restore the words and keep showing the
+/// newer layout.
 struct DeliverableVersion: Codable, Hashable {
     var title: String
     var body: String
     var createdAt: String?
+    var kind: DeliverableKind? = nil
+    var payload: DeliverablePayload? = nil
 }
 
 /// A delivered work product. `body` is markdown, rendered uniformly by MarkdownView.

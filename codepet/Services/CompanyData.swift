@@ -48,6 +48,29 @@ extension CompanyDoc {
 /// Reads companies/{uid} and maps it to CompanyState. Mirrors
 /// lib/firebase/companyData.ts. Fail-soft: missing doc / error → .empty.
 enum CompanyData {
+    static let log = Logger(subsystem: "app.murror.codepet", category: "CompanyData")
+
+    /// Stamped onto EVERY client write to `companies/{uid}`.
+    ///
+    /// The native app never created this document with the fields `firestore.rules` demands on
+    /// create (`ownerId == uid`, `memberIds` a list holding uid) — only the web sign-up batch
+    /// did. A `setData(merge:)` on a missing doc IS a create, so for a founder who onboarded
+    /// natively every write was denied ("Missing or insufficient permissions", measured
+    /// 2026-09-25), reads of the missing doc kept answering `.empty`, and the whole company —
+    /// brief, roadmap, library, team runs — lived in memory until the next launch.
+    ///
+    /// On an existing doc this is a no-op the rules accept: `ownerId` is the same value
+    /// (`ownershipUnchanged`), and `arrayUnion` leaves any other member where they are.
+    static let ownershipFieldNames = ["ownerId", "memberIds"]
+
+    static func ownershipFields(companyId: String) -> [String: Any] {
+        ["ownerId": companyId, "memberIds": FieldValue.arrayUnion([companyId])]
+    }
+
+    /// `payload` plus `ownershipFields`. The payload's own keys win, though none overlap.
+    static func owned(_ payload: [String: Any], companyId: String) -> [String: Any] {
+        ownershipFields(companyId: companyId).merging(payload) { _, mine in mine }
+    }
     /// Pure mapping — testable without Firestore.
     static func state(from doc: CompanyDoc?) -> CompanyState {
         guard let doc = doc else { return .empty }
@@ -91,9 +114,10 @@ enum CompanyData {
         let iso = ISO8601DateFormatter().string(from: Date())
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(briefPayload(brief, onboardedAt: iso), merge: true)
+                .setData(owned(briefPayload(brief, onboardedAt: iso), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -115,9 +139,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(introSeenPayload(at), merge: true)
+                .setData(owned(introSeenPayload(at), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -138,9 +163,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(firstApprovalPayload(at), merge: true)
+                .setData(owned(firstApprovalPayload(at), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -162,9 +188,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(greetedPayload(at), merge: true)
+                .setData(owned(greetedPayload(at), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -188,9 +215,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(tasksPayload(tasks), merge: true)
+                .setData(owned(tasksPayload(tasks), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -214,9 +242,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(deliverablesPayload(library), merge: true)
+                .setData(owned(deliverablesPayload(library), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -236,9 +265,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(companionIdPayload(companionId), merge: true)
+                .setData(owned(companionIdPayload(companionId), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -300,9 +330,11 @@ enum CompanyData {
         guard let write = founderPrefsWrite(prefs) else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(write.payload, mergeFields: write.mergeFields)
+                .setData(owned(write.payload, companyId: companyId),
+                         mergeFields: write.mergeFields + Array(ownershipFieldNames))
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -322,9 +354,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(enabledToolsPayload(tools), merge: true)
+                .setData(owned(enabledToolsPayload(tools), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -348,9 +381,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(decisionsPayload(decisions), merge: true)
+                .setData(owned(decisionsPayload(decisions), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -376,9 +410,10 @@ enum CompanyData {
         guard PrototypeMode.allowsCloudWrites else { return true }
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
-                .setData(teamRunsPayload(runs), merge: true)
+                .setData(owned(teamRunsPayload(runs), companyId: companyId), merge: true)
             return true
         } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
@@ -457,11 +492,16 @@ enum CompanyData {
         let db = Firestore.firestore()
         do {
             let snap = try await db.collection("companies").document(companyId).getDocument()
-            guard let dict = snap.data() else { return .empty }
+            guard let dict = snap.data() else { log.notice("load: no company doc"); return .empty }
+            // Presence only, never values: whether this doc can be written at all depends on
+            // `ownerId` (firestore.rules `ownershipUnchanged`), and a doc without it rejects
+            // every client write while reads keep working — the company looks fine until relaunch.
+            log.notice("load: ownerId \(dict["ownerId"] == nil ? "MISSING" : "present", privacy: .public), memberIds \(dict["memberIds"] == nil ? "MISSING" : "present", privacy: .public)")
             let data = try JSONSerialization.data(withJSONObject: dict)
             let doc = try JSONDecoder().decode(CompanyDoc.self, from: data)
             return state(from: doc)
         } catch {
+            log.error("load failed: \(error.localizedDescription, privacy: .public)")
             return .empty
         }
     }

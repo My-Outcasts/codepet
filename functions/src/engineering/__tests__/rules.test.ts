@@ -21,7 +21,7 @@ import {
   assertSucceeds,
   type RulesTestEnvironment
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { arrayUnion, doc, getDoc, setDoc } from "firebase/firestore";
 
 let env: RulesTestEnvironment;
 
@@ -63,6 +63,25 @@ describe("companies/{uid} itself", () => {
   it("lets the founder read their own company", async () => {
     await seed(`companies/${UID}`, { ownerId: UID, memberIds: [UID], brief: "x" });
     await assertSucceeds(getDoc(doc(asFounder(), `companies/${UID}`)));
+  });
+});
+
+// The native app's writes are `setData(merge: true)`, which on a missing doc is a CREATE.
+// Until 2026-09-25 they carried no ownership fields, so a founder who onboarded in the Mac
+// app had every write denied and lost the whole company on relaunch. The app now stamps
+// `CompanyData.ownershipFields` (ownerId + arrayUnion(memberIds)) onto every write.
+describe("companies/{uid} — the native app's merge writes", () => {
+  it("denies the first write when it carries no ownership (the bug)", async () => {
+    await assertFails(setDoc(doc(asFounder(), `companies/${UID}`), { library: [] }, { merge: true }));
+  });
+  it("creates the doc when the write carries ownerId and arrayUnion memberIds", async () => {
+    await assertSucceeds(setDoc(doc(asFounder(), `companies/${UID}`),
+      { library: [], ownerId: UID, memberIds: arrayUnion(UID) }, { merge: true }));
+  });
+  it("keeps accepting the same stamped write once the doc exists", async () => {
+    await seed(`companies/${UID}`, { ownerId: UID, memberIds: [UID], brief: "x" });
+    await assertSucceeds(setDoc(doc(asFounder(), `companies/${UID}`),
+      { tasks: [], ownerId: UID, memberIds: arrayUnion(UID) }, { merge: true }));
   });
 });
 

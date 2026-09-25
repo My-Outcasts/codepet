@@ -28,6 +28,17 @@ enum DraftCardCopy {
     ///
     /// "Not saved yet" rather than "Not approved yet": the founder can see it is unapproved —
     /// the Approve button is right there. What they cannot see is that unapproved means unsaved.
+    /// What the card says after Approve. A revision REPLACES a Library item (CP-025), so
+    /// "Added" would be untrue there — found in the 25 Sep in-app check. `replacedItem` is what
+    /// approval actually did (`CopilotMessage.draftReplacedItem`), not whether the draft merely
+    /// pointed at an item.
+    static func approvedLabel(_ lang: AppLanguage, replacedItem: Bool) -> String {
+        if replacedItem {
+            return lang == .vi ? "Đã cập nhật trong Thư viện" : "Updated in your Library"
+        }
+        return lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library"
+    }
+
     static func notFiledNote(_ lang: AppLanguage) -> String {
         lang == .vi
             ? "Chưa lưu — duyệt để đưa vào Thư viện."

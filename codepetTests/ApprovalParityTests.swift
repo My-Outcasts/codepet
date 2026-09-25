@@ -67,6 +67,14 @@ final class ApprovalParityTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.first { $0.id == id }?.draftApproved ?? false)
     }
 
+    /// A first pass is ADDED, and its card must keep saying so (CP-025 changed only revisions).
+    func testApprovingAFirstPassDoesNotClaimToHaveReplacedAnything() async throws {
+        let s = store(tasks: [runnable()])
+        let id = try await produceDraft(s)
+        await s.approveDraft(messageId: id)
+        XCTAssertEqual(s.chatMessages.first { $0.id == id }?.draftReplacedItem, false)
+    }
+
     /// Both buttons, one outcome — asserted against each other rather than against a copy of the
     /// expected state, because the property that matters is that they AGREE.
     func testBothApprovePathsLeaveTheSameState() async throws {

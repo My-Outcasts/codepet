@@ -288,6 +288,19 @@ enum DeliverableKind: String, Codable, CaseIterable {
     }
 }
 
+/// An earlier version of a Library item, kept when a revision replaces it in place.
+///
+/// Carries `kind` and `payload` as well as the text: a Site, sheet or calendar is DRAWN from its
+/// payload, so a version that kept only the body would restore the words and keep showing the
+/// newer layout.
+struct DeliverableVersion: Codable, Hashable {
+    var title: String
+    var body: String
+    var createdAt: String?
+    var kind: DeliverableKind? = nil
+    var payload: DeliverablePayload? = nil
+}
+
 /// A delivered work product. `body` is markdown, rendered uniformly by MarkdownView.
 struct Deliverable: Codable, Hashable, Identifiable {
     let id: String
@@ -312,10 +325,16 @@ struct Deliverable: Codable, Hashable, Identifiable {
     /// project. Client-only: nothing maps it into a `RunTaskRequest`, and `LibraryView` offers
     /// Open in Finder for any deliverable that carries one. Nil for every other deliverable.
     var projectPath: String? = nil
+    /// On a draft: the Library item this draft is a new version of. Approving it replaces that
+    /// item in place instead of filing a second one (CP-025). Nil on every first-pass draft.
+    var supersedes: String? = nil
+    /// On a Library item: its earlier versions, newest first. Nil until the item is first revised.
+    var versions: [DeliverableVersion]? = nil
 
     init(id: String = UUID().uuidString, kind: DeliverableKind, title: String, body: String,
          createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil,
-         producedBy: AIProvider? = nil, projectPath: String? = nil) {
+         producedBy: AIProvider? = nil, projectPath: String? = nil, supersedes: String? = nil,
+         versions: [DeliverableVersion]? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -325,6 +344,8 @@ struct Deliverable: Codable, Hashable, Identifiable {
         self.payload = payload
         self.producedBy = producedBy
         self.projectPath = projectPath
+        self.supersedes = supersedes
+        self.versions = versions
     }
 
     // `Codable` was fully synthesised before this field — no `CodingKeys` existed, so every
@@ -334,6 +355,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
     // copied verbatim — get one wrong and every stored deliverable fails to decode.
     enum CodingKeys: String, CodingKey {
         case id, kind, title, body, createdAt, sourceTaskId, payload, producedBy, projectPath
+        case supersedes, versions
     }
 
     init(from decoder: Decoder) throws {
@@ -353,6 +375,8 @@ struct Deliverable: Codable, Hashable, Identifiable {
             .flatMap { $0 }
             .flatMap(AIProvider.init(rawValue:))
         projectPath = try c.decodeIfPresent(String.self, forKey: .projectPath)
+        supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
+        versions = try c.decodeIfPresent([DeliverableVersion].self, forKey: .versions)
     }
 
     // Written explicitly to match the custom decoder above — a custom `init(from:)` suppresses
@@ -371,5 +395,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
         // matching the manual rawValue decode above.
         try c.encodeIfPresent(producedBy?.rawValue, forKey: .producedBy)
         try c.encodeIfPresent(projectPath, forKey: .projectPath)
+        try c.encodeIfPresent(supersedes, forKey: .supersedes)
+        try c.encodeIfPresent(versions, forKey: .versions)
     }
 }

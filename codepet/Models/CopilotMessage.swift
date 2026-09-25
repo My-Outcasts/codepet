@@ -105,6 +105,11 @@ struct CopilotMessage: Identifiable, Equatable {
     /// Aug 7). It is not wrong, it is EARLY — and the room's call is the better answer, because
     /// four departments arguing produced a cohort split the fast reply never considered.
     var supersededByRoom: Bool = false
+    /// Set when approving this card's draft REPLACED a Library item (a revision, CP-025) rather
+    /// than adding one, so the card can say "Updated" instead of "Added". Recorded at approval
+    /// from `LibraryFiling.replaces`, not derived from `draft.supersedes`: a revision whose target
+    /// was gone is appended, and must not claim to have updated anything.
+    var draftReplacedItem: Bool = false
     /// A run started from a surface and offered here before it happens — see `RunProposal`.
     /// `actionConsumed` hides the button once pressed, the same way it does for `firstRunAction`.
     var runProposal: RunProposal?

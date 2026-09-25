@@ -118,6 +118,13 @@ final class ChatTailActionRoadmapVerbTests: XCTestCase {
         XCTAssertEqual(decide(ChatDoneAction(addTask: add)), .leadIn(.roadmap))
     }
 
+    /// `revise_work` (CP-025) is a roadmap-style offer with a button. A turn carrying only that
+    /// must lead into the offer, not show the "can't reach my brain" failure line over it.
+    func testATextFreeReviseWorkIsNotAFallback() {
+        let revise = ReviseWorkDTO(libraryId: "L1", note: "more editorial")
+        XCTAssertEqual(decide(ChatDoneAction(reviseWork: revise)), .leadIn(.roadmap))
+    }
+
     /// A genuinely empty turn must STILL fall back — the guard this file exists for.
     func testATrulyEmptyTurnStillFallsBack() {
         XCTAssertEqual(decide(ChatDoneAction()), .fallback)

@@ -24,6 +24,7 @@ import * as path from "path";
 import {
   buildChatRequest,
   resolveActions,
+  type ResolvedActions,
   type ChatRequestBody,
 } from "../companyChatCore";
 import { flattenTranscript } from "./transcript";
@@ -499,24 +500,9 @@ async function main(): Promise<void> {
     }
 
     // Same resolver the HTTP path uses, against the same lists the prompt was built from.
-    const { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts } =
-      resolveActions(acc.toolUses, built.runnable, built.envSetup, built.openTasks);
-
-    // Same additive frame shape as the CF. `cache_hit` is reported false rather than
-    // omitted or guessed: prompt caching is not reachable through the CLI, so claiming a
-    // hit would be an invention and omitting the field would break older readers.
-    const done: Record<string, unknown> = {
-      model: acc.model ?? "claude-code-local",
-      cache_hit: false,
-      run_task_id: runTaskId,
-    };
-    if (completeTaskId) done.complete_task_id = completeTaskId;
-    if (addTask) done.add_task = addTask;
-    if (drafts) done.drafts = drafts;
-    if (nav) done.nav = nav;
-    if (setup) done.setup = setup;
-    if (remember.length) done.remember = remember;
-    frame("done", done);
+    const resolved = resolveActions(
+      acc.toolUses, built.runnable, built.envSetup, built.openTasks, built.delivered);
+    frame("done", doneFrame(resolved, acc.model ?? "claude-code-local"));
     cleanup();
   });
 
@@ -533,4 +519,25 @@ if (require.main === module) {
   } else {
     main().catch((err) => frame("error", { error: "sidecar_failure", detail: String(err) }));
   }
+}
+
+/**
+ * The `done` frame for a resolved turn. Pulled out of the spawn handler so the wire shape — the
+ * snake_case keys the native client decodes — is testable without spawning Claude Code.
+ *
+ * Same additive frame shape as the CF. `cache_hit` is reported false rather than omitted or
+ * guessed: prompt caching is not reachable through the CLI, so claiming a hit would be an
+ * invention and omitting the field would break older readers. Every optional verb is OMITTED
+ * when absent, so an older client never sees a key it does not know.
+ */
+export function doneFrame(r: ResolvedActions, model: string): Record<string, unknown> {
+  const done: Record<string, unknown> = { model, cache_hit: false, run_task_id: r.runTaskId };
+  if (r.completeTaskId) done.complete_task_id = r.completeTaskId;
+  if (r.addTask) done.add_task = r.addTask;
+  if (r.reviseWork) done.revise_work = { library_id: r.reviseWork.libraryId, note: r.reviseWork.note };
+  if (r.drafts) done.drafts = r.drafts;
+  if (r.nav) done.nav = r.nav;
+  if (r.setup) done.setup = r.setup;
+  if (r.remember.length) done.remember = r.remember;
+  return done;
 }

@@ -2591,6 +2591,46 @@ struct CopilotBubble: View {
     /// Deliberately quiet: it is a receipt, not the headline — the deliverable is. Named after
     /// the specialist who did the work (`headerName` carries "Nova · Marketing", so just the
     /// name here), matching the web's "What Nova did".
+    /// The answer to "what now?" under a filed draft: the roadmap's next task, who does it, and
+    /// the one button that moves it (see `DraftCardCopy.NextStep`).
+    private func nextStepRow(_ step: DraftCardCopy.NextStep) -> some View {
+        let vi = lang == .vi
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(DraftCardCopy.nextLine(step, deptName: { $0.flatMap { DepartmentCatalog.find($0)?.name } }, lang))
+                .font(.pixelSystem(size: 12.5))
+                .foregroundColor(CodepetTheme.bodyText)
+                .fixedSize(horizontal: false, vertical: true)
+            switch step {
+            case .run(let t):
+                let running = companyStore.runningTaskIds.contains(t.id)
+                Button { Task { await companyStore.runTask(t, language: lang) } } label: {
+                    Text(running ? (vi ? "Đang chạy…" : "Running…") : (vi ? "Chạy" : "Run"))
+                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(running)
+            case .yours(let t):
+                Button { Task { await companyStore.toggleTaskDone(id: t.id) } } label: {
+                    Text(vi ? "Tôi đã làm xong" : "I've done it")
+                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().stroke(CodepetTheme.hairline)).hoverAffordance(Capsule())
+                }
+                .buttonStyle(.plain)
+            case .review, .none:
+                EmptyView()
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(CodepetTheme.accentPurple.opacity(0.07)))
+    }
+
     private func whatItDid(_ steps: [ExecStep]) -> some View {
         let who = CodepetBrand.speakerName(companionId: message.companionId)
         return VStack(alignment: .leading, spacing: 6) {
@@ -2728,6 +2768,9 @@ struct CopilotBubble: View {
                         }
                         .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentTeal)
+                        if DraftCardCopy.isLatestFiled(message.id, in: companyStore.chatMessages) {
+                            nextStepRow(DraftCardCopy.nextStep(in: companyStore.company.tasks))
+                        }
                     } else {
                         // DECIDE, then adjust. Approve/Redo settle the draft; the revise chips
                         // only nudge it. They used to sit 8pt apart at 10pt and 9pt, so five

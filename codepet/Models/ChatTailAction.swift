@@ -113,6 +113,7 @@ enum ChatTailAction: Equatable {
         return action.runTaskId == nil && action.nav == nil && action.setup == nil
             && action.remember.isEmpty
             && action.completeTaskId == nil && action.addTask == nil
+            && action.reviseWork == nil
             && action.drafts.isEmpty
     }
 
@@ -128,7 +129,9 @@ enum ChatTailAction: Equatable {
         if action.runTaskId != nil { return .run }
         if action.nav != nil { return .nav }
         if action.setup != nil { return .setup }
-        if action.completeTaskId != nil || action.addTask != nil { return .roadmap }
+        if action.completeTaskId != nil || action.addTask != nil || action.reviseWork != nil {
+            return .roadmap
+        }
         // Below the roadmap verbs on purpose: those carry a button the founder must press,
         // and a pending confirmation is the more urgent thing to name. The drafts still render.
         if !action.drafts.isEmpty { return .drafted }

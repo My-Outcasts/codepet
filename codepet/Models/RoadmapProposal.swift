@@ -21,6 +21,12 @@ enum RoadmapProposal: Equatable {
     /// call, Aug 8, when asked whether chat-created tasks should be able to express dependencies:
     /// "start with no". A model guessing at a dependency graph is how a roadmap becomes unusable.
     case add(NewTask)
+    /// Make a new version of work the founder already approved (CP-025). Not a roadmap change at
+    /// all — it re-runs the item's own task with the founder's note, and approving the result
+    /// replaces the Library item in place. It rides this enum so it gets the same card, the same
+    /// one-offer guard and the same consume-before-run confirm, rather than a parallel copy of
+    /// each; before it existed, a revision could only arrive as `add`, which is the bug.
+    case revise(libraryId: String, title: String, note: String)
 
     struct NewTask: Equatable {
         let title: String
@@ -42,6 +48,10 @@ enum RoadmapProposal: Equatable {
             return lang == .vi
                 ? "Mình thêm \"\(task.title)\" vào lộ trình nhé?"
                 : "Want me to add \"\(task.title)\" to the roadmap?"
+        case .revise(_, let title, _):
+            return lang == .vi
+                ? "Mình làm phiên bản mới cho \"\(title)\" nhé?"
+                : "Want me to make a new version of \"\(title)\"?"
         }
     }
 
@@ -57,6 +67,8 @@ enum RoadmapProposal: Equatable {
             return lang == .vi ? "Ừ, đánh dấu xong" : "Yes, mark it done"
         case .add:
             return lang == .vi ? "Ừ, thêm vào" : "Yes, add it"
+        case .revise:
+            return lang == .vi ? "Ừ, làm bản mới" : "Yes, make a new version"
         }
     }
 
@@ -68,6 +80,8 @@ enum RoadmapProposal: Equatable {
             return lang == .vi ? "Đã đánh dấu xong" : "Marked done"
         case .add:
             return lang == .vi ? "Đã thêm vào lộ trình" : "Added to the roadmap"
+        case .revise:
+            return lang == .vi ? "Đang làm bản mới" : "Making a new version"
         }
     }
 }

@@ -176,6 +176,10 @@ struct CompanyChatRequest: Codable {
     /// `attachments` key with the same shape, which is what lets the backend replay
     /// one screenshot across a short conversation without the client resending it.
     let attachments: [AttachmentDTO]?
+    /// The founder's newest approved Library items, which `revise_work` may name (CP-025). nil
+    /// rather than `[]` when there are none, so the key stays off the wire (Optional + synthesised
+    /// `encodeIfPresent`) and the server builds the prompt it always did.
+    let delivered: [DeliveredRef]?
 
     enum CodingKeys: String, CodingKey {
         case companyId = "company_id"
@@ -191,6 +195,7 @@ struct CompanyChatRequest: Codable {
         case enabledSkills = "enabled_skills"
         case deptKey = "dept_key"
         case attachments
+        case delivered
     }
 
     /// `runnable`/`envSetup`/`enabledSkills` default to empty and
@@ -202,7 +207,7 @@ struct CompanyChatRequest: Codable {
          openTasks: [RunnableRef] = [],
          envSetup: [SetupItemDTO] = [], styleFragment: String? = nil,
          enabledSkills: [String] = [], deptKey: String? = nil,
-         attachments: [AttachmentDTO]? = nil) {
+         attachments: [AttachmentDTO]? = nil, delivered: [DeliveredRef]? = nil) {
         self.companyId = companyId
         self.language = language
         self.companionId = companionId
@@ -216,6 +221,33 @@ struct CompanyChatRequest: Codable {
         self.enabledSkills = enabledSkills
         self.deptKey = deptKey
         self.attachments = attachments
+        self.delivered = delivered
+    }
+}
+
+/// One approved Library item the model may offer to revise with `revise_work` (CP-025) — mirrors
+/// `DeliveredWorkRef` in companyChatCore.ts. Only items whose roadmap task still exists are sent:
+/// a revise pass re-runs that task, so an item without one could be offered and never delivered.
+struct DeliveredRef: Codable, Equatable {
+    let id: String
+    let kind: String
+    let title: String
+    let taskId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title
+        case taskId = "task_id"
+    }
+}
+
+/// The wire shape of `revise_work` — mirrors the `done` frame's `{library_id, note}`.
+struct ReviseWorkDTO: Codable, Equatable {
+    let libraryId: String
+    let note: String
+
+    enum CodingKeys: String, CodingKey {
+        case libraryId = "library_id"
+        case note
     }
 }
 
@@ -265,6 +297,7 @@ struct CompanyChatResponse: Codable {
     let remember: [RememberedFact]?
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    let reviseWork: ReviseWorkDTO?
     let drafts: [MessageDraftDTO]?
 
     enum CodingKeys: String, CodingKey {
@@ -275,6 +308,7 @@ struct CompanyChatResponse: Codable {
         case remember
         case completeTaskId = "complete_task_id"
         case addTask = "add_task"
+        case reviseWork = "revise_work"
         case drafts
     }
 }
@@ -290,12 +324,13 @@ struct CompanyChatReply: Equatable {
     let remember: [RememberedFact]
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    let reviseWork: ReviseWorkDTO?
     let drafts: [MessageDraftDTO]
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
          setup: SetupAction? = nil, remember: [RememberedFact] = [],
          completeTaskId: String? = nil, addTask: AddTaskDTO? = nil,
-         drafts: [MessageDraftDTO] = []) {
+         reviseWork: ReviseWorkDTO? = nil, drafts: [MessageDraftDTO] = []) {
         self.text = text
         self.runTaskId = runTaskId
         self.nav = nav
@@ -303,6 +338,7 @@ struct CompanyChatReply: Equatable {
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.reviseWork = reviseWork
         self.drafts = drafts
     }
 }
@@ -321,19 +357,24 @@ struct ChatDoneAction: Equatable {
     /// "I finished that, now draft the next one" is one honest turn — but exclusive of each other.
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    /// A new version of approved work, offered for the founder's press (CP-025). The server
+    /// resolves it ahead of `addTask` and drops `addTask` when both arrive, so at most one is set.
+    let reviseWork: ReviseWorkDTO?
     /// The messages the companion wrote this turn. Independent of every verb above — content,
     /// not an action — so a turn may carry drafts alongside any of them.
     let drafts: [MessageDraftDTO]
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
          remember: [RememberedFact] = [], completeTaskId: String? = nil,
-         addTask: AddTaskDTO? = nil, drafts: [MessageDraftDTO] = []) {
+         addTask: AddTaskDTO? = nil, reviseWork: ReviseWorkDTO? = nil,
+         drafts: [MessageDraftDTO] = []) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.reviseWork = reviseWork
         self.drafts = drafts
     }
 }
@@ -423,7 +464,7 @@ enum CompanyChatClient {
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
                                  setup: decoded.setup, remember: decoded.remember ?? [],
                                  completeTaskId: decoded.completeTaskId, addTask: decoded.addTask,
-                                 drafts: decoded.drafts ?? [])
+                                 reviseWork: decoded.reviseWork, drafts: decoded.drafts ?? [])
     }
 
     /// Streaming counterpart of `send(_:)` — hits the SAME companyChat endpoint
@@ -588,11 +629,13 @@ enum CompanyChatClient {
                 let remember: [RememberedFact]?
                 let completeTaskId: String?
                 let addTask: AddTaskDTO?
+                let reviseWork: ReviseWorkDTO?
                 let drafts: [MessageDraftDTO]?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
                     case completeTaskId = "complete_task_id"; case addTask = "add_task"
+                    case reviseWork = "revise_work"
                     case drafts
                 }
             }
@@ -600,7 +643,7 @@ enum CompanyChatClient {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
                                              remember: d.remember ?? [],
                                              completeTaskId: d.completeTaskId, addTask: d.addTask,
-                                             drafts: d.drafts ?? [])
+                                             reviseWork: d.reviseWork, drafts: d.drafts ?? [])
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             } else {
                 // Worse than a dropped delta: with no `done` the store falls back to the

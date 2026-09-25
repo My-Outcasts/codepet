@@ -830,6 +830,105 @@ export function buildOpenTasksBlock(open: CompletableTaskRef[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// revise_work — a new version of work the founder already approved (CP-025)
+// ---------------------------------------------------------------------------
+//
+// Found 24 Sep 2026 on prod build 3: revising an approved landing page offered a NEW roadmap
+// task every time, and each approval filed a new Library item — three landing-page tasks and
+// four landing-page Sites from one piece of work. The model was shown only OPEN and RUNNABLE
+// tasks, so it could not see the page had been delivered, and add_task's rule against work
+// already on the roadmap was impossible to follow.
+//
+// So the client sends its newest Library items as DELIVERED WORK, and revising one is its own
+// verb. Like add_task it lands as an OFFER the founder presses — a revise pass costs credits.
+//
+// Backward-compatible by construction: a client that sends no `delivered` gets no block, no
+// tool, and no change to add_task's description, so every installed build sees the prompt it
+// always did. The "revise, don't add" instruction lives INSIDE the block for that reason.
+
+export interface DeliveredWorkRef {
+  id: string;
+  kind: string;
+  title: string;
+  task_id?: string;
+}
+
+export interface ReviseWorkIntent {
+  libraryId: string;
+  note: string;
+}
+
+const MAX_DELIVERED = 15;
+const MAX_REVISE_NOTE = 500;
+
+export const REVISE_WORK_TOOL = {
+  name: "revise_work",
+  description:
+    "Offer to make a new version of something the founder already approved, when they ask to " +
+    "change, rework, redo, redesign or take another pass at it — e.g. \"make the landing page " +
+    "more editorial\", \"can we try the pricing doc with three tiers\". Use the exact id from " +
+    "DELIVERED WORK. The new version replaces that item once the founder approves it. If it is " +
+    "ambiguous which item they mean, ask a one-line question instead of guessing.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      library_id: { type: "string", description: "The exact id from DELIVERED WORK." },
+      note: {
+        type: "string",
+        description: "What to change, in one or two sentences, in the founder's own terms.",
+      },
+    },
+    required: ["library_id", "note"],
+  },
+};
+
+export function parseDelivered(raw: unknown): DeliveredWorkRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r): DeliveredWorkRef | null => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id.trim() : "";
+      if (!id) return null;
+      const ref: DeliveredWorkRef = {
+        id,
+        kind: typeof o.kind === "string" ? o.kind.trim() : "",
+        title: typeof o.title === "string" ? o.title.trim() : "",
+      };
+      if (typeof o.task_id === "string" && o.task_id.trim()) ref.task_id = o.task_id.trim();
+      return ref;
+    })
+    .filter((r): r is DeliveredWorkRef => r !== null)
+    .slice(0, MAX_DELIVERED);
+}
+
+/** The DELIVERED WORK grounding block — what `revise_work` may name. */
+export function buildDeliveredBlock(delivered: DeliveredWorkRef[]): string {
+  if (!delivered.length) return "";
+  const lines = delivered.map((d) => `- ${d.id} · ${d.kind} · ${d.title}`).join("\n");
+  return (
+    "\n\nDELIVERED WORK (already approved and in the founder's Library, newest first). When " +
+    "the founder asks to change, rework or take another pass at one of these, call revise_work " +
+    "with its exact id, not add_task — a revision is a new version of that item, not a new " +
+    "roadmap task:\n" + lines
+  );
+}
+
+/** The validated intent to revise. `null` unless the id was shown and there is a note. */
+export function validateReviseWorkToolUse(
+  input: unknown,
+  delivered: DeliveredWorkRef[]
+): ReviseWorkIntent | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { library_id?: unknown; note?: unknown };
+  const libraryId = typeof raw.library_id === "string" ? raw.library_id.trim() : "";
+  const note = typeof raw.note === "string" ? raw.note.trim() : "";
+  if (!libraryId || !note) return null;
+  if (!delivered.some((d) => d.id === libraryId)) return null;
+  return { libraryId, note: note.slice(0, MAX_REVISE_NOTE) };
+}
+
+// ---------------------------------------------------------------------------
 // draft_message — the messages the companion writes for a person, as OBJECTS
 // ---------------------------------------------------------------------------
 //
@@ -991,6 +1090,10 @@ export interface ChatRequestBody {
   // from `runnable` because they are the opposite set: runnable is what Codepet can do,
   // this is what only the founder can. Backward-compatible: omitted → [] → no tool.
   open_tasks?: CompletableTaskRef[];
+  // The founder's newest approved Library items, which `revise_work` may name (CP-025).
+  // Typed unknown because it is validated by `parseDelivered`. Backward-compatible: omitted
+  // by older clients → [] → no block, no tool, prompt byte-for-byte as before.
+  delivered?: unknown;
   // Currently-OFF toolkit items (skills/connectors/agents) byte may offer to turn on
   // via the setup_capability tool (see companyChatCore). Backward-compatible: omitted
   // entirely by older clients → treated as [] → no tool offered.
@@ -1063,6 +1166,7 @@ export interface ResolvedActions {
   remember: RememberedFact[];
   completeTaskId: string | null;
   addTask: NewTaskIntent | null;
+  reviseWork: ReviseWorkIntent | null;
   drafts: MessageDraftIntent[] | null;
 }
 
@@ -1070,7 +1174,8 @@ export function resolveActions(
   toolUses: Array<{ name: string; input: unknown }>,
   runnable: RunnableTaskRef[],
   envSetup: EnvSetupItem[],
-  openTasks: CompletableTaskRef[]
+  openTasks: CompletableTaskRef[],
+  delivered: DeliveredWorkRef[] = []
 ): ResolvedActions {
   const runTaskUse = toolUses.find((t) => t.name === "run_task");
   const navUse = toolUses.find((t) => t.name === "navigate");
@@ -1079,6 +1184,7 @@ export function resolveActions(
   const completeUse = toolUses.find((t) => t.name === "complete_task");
   const addUse = toolUses.find((t) => t.name === "add_task");
   const draftUse = toolUses.find((t) => t.name === "draft_message");
+  const reviseUse = toolUses.find((t) => t.name === "revise_work");
 
   let runTaskId: string | null = null;
   let nav: NavAction | null = null;
@@ -1100,13 +1206,16 @@ export function resolveActions(
   let completeTaskId: string | null = null;
   let addTask: NewTaskIntent | null = null;
   if (completeUse) completeTaskId = validateCompleteTaskToolUse(completeUse.input, openTasks);
-  if (!completeTaskId && addUse) addTask = validateAddTaskToolUse(addUse.input);
+  // revise_work is checked FIRST and excludes add_task: a turn carrying both is the exact
+  // CP-025 bug — a revision dressed up as a new task — so the revision wins.
+  const reviseWork = reviseUse ? validateReviseWorkToolUse(reviseUse.input, delivered) : null;
+  if (!completeTaskId && !reviseWork && addUse) addTask = validateAddTaskToolUse(addUse.input);
 
   // Independent of everything above: a drafted message is CONTENT, not an action, so it
   // neither excludes nor is excluded by a verb that mutates something.
   const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
 
-  return { runTaskId, nav, setup, remember, completeTaskId, addTask, drafts };
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask, reviseWork, drafts };
 }
 
 
@@ -1125,12 +1234,14 @@ export function buildChatRequest(
   tools: unknown[];
   runnable: RunnableTaskRef[];
   openTasks: CompletableTaskRef[];
+  delivered: DeliveredWorkRef[];
   envSetup: EnvSetupItem[];
   skills: Set<string>;
 } {
   const userMessage = typeof body.user_message === "string" ? body.user_message.trim() : "";
   const runnable = parseRunnable(body.runnable);
   const openTasks = parseOpenTasks(body.open_tasks);
+  const delivered = parseDelivered(body.delivered);
   const envSetup = parseEnvSetup(body.env_setup);
   const skills = parseEnabledSkills(body.enabled_skills);
 
@@ -1145,6 +1256,7 @@ export function buildChatRequest(
     buildContextBlock(typeof body.context === "string" ? body.context : "") +
     buildRunnableBlock(runnable) +
     buildOpenTasksBlock(openTasks) +
+    buildDeliveredBlock(delivered) +
     buildSetupBlock(envSetup) +
     buildSkillsBlock(skills);
 
@@ -1170,6 +1282,7 @@ export function buildChatRequest(
     ...(runnable.length ? [RUN_TASK_TOOL] : []),
     ...(openTasks.length ? [COMPLETE_TASK_TOOL] : []),
     ADD_TASK_TOOL,
+    ...(delivered.length ? [REVISE_WORK_TOOL] : []),
     DRAFT_MESSAGE_TOOL,
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
@@ -1178,5 +1291,5 @@ export function buildChatRequest(
     ...extraToolsets,
   ];
 
-  return { systemBlocks, messages, tools, runnable, openTasks, envSetup, skills };
+  return { systemBlocks, messages, tools, runnable, openTasks, delivered, envSetup, skills };
 }

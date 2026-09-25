@@ -132,7 +132,7 @@ enum ChatTransportRouter {
             text: text,
             runTaskId: action.runTaskId, nav: action.nav, setup: action.setup,
             remember: action.remember, completeTaskId: action.completeTaskId,
-            addTask: action.addTask, drafts: action.drafts)
+            addTask: action.addTask, reviseWork: action.reviseWork, drafts: action.drafts)
     }
 
     /// Drop-in for `CompanyChatClient.sendStream`: same signature, routes per turn.

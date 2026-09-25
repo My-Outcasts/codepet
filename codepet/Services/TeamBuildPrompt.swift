@@ -15,7 +15,8 @@ enum TeamBuildPrompt {
 
     static func isComplete(_ md: String) -> Bool { requiredHeadings.allSatisfy { md.contains($0) } }
 
-    static func prompt(for run: TeamRun, docs: [String], reference: [String] = []) -> String {
+    static func prompt(for run: TeamRun, docs: [String], reference: [String] = [],
+                       dossier: ProductDossier? = nil, assets: [String] = []) -> String {
         let build = run.plan.buildStep?.instruction ?? ""
         return """
         You are the engineer on a small company's team. The founder asked: "\(run.request)"
@@ -24,6 +25,7 @@ enum TeamBuildPrompt {
         The rest of the team has already done their part. Read every file below BEFORE writing anything:
         \(docs.map { "- \($0)" }.joined(separator: "\n"))
         \(referenceNote(reference))
+        \(dossierNote(dossier, assets: assets))
 
         Build the complete project in the current directory. Use the team's work faithfully — their copy,
         their design direction, their prices. Do not invent facts they did not give you.
@@ -71,6 +73,32 @@ enum TeamBuildPrompt {
         The founder's own product lives in \(dirs.map { "`\($0)`" }.joined(separator: ", ")) — READ-ONLY reference.
         Read its README, docs and source to get the product right (what it is, who it is for, real feature names).
         Never write, edit or create anything there; every file you make goes in the current directory.
+        """
+    }
+
+    /// The product itself, and the bar the page must clear. Before this the engineer knew only
+    /// what the departments wrote, and a room that knew nothing about the product had chosen
+    /// "one headline, one email box" — so that is what got built (2026-09-25).
+    static func dossierNote(_ d: ProductDossier?, assets: [String]) -> String {
+        guard let d else { return "" }
+        let images = assets.isEmpty ? "" : """
+
+        Real product images are already in the project — use them (next/image, with width/height; pixel-art
+        sprites need `style={{ imageRendering: "pixelated" }}` so they stay crisp):
+        \(assets.map { "- \($0)" }.joined(separator: "\n"))
+        """
+        return """
+
+        \(d.contextBlock)
+        \(images)
+
+        Quality bar for a web page: build the page a strong product marketer would ship for THIS product —
+        a hero with the product's real name and value, the real capabilities above (named as the product names
+        them), how it works, visuals from the images above, and a clear call to action; add an FAQ and a proper
+        footer. If a team doc limited the scope only because nobody knew the product, the facts above now
+        supply it: build the complete page. If a doc's copy or style clearly belongs to a different product,
+        ignore it and follow the facts above and the product's own brand. Never invent customers, numbers,
+        quotes, logos of other companies, or pricing.
         """
     }
 

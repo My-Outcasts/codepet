@@ -72,8 +72,18 @@ final class CompanyStore: ObservableObject {
     @Published private(set) var activeProjectLink: ProjectLink? {
         // The chat reads this folder (read-only) on the local transport — see
         // `LocalChatStreamer.readableFolder`. Mirrored here, the one place it changes.
-        didSet { LocalChatStreamer.readableFolder = activeProjectLink?.path }
+        didSet {
+            LocalChatStreamer.readableFolder = activeProjectLink?.path
+            if oldValue?.path != activeProjectLink?.path { refreshProductDossier() }
+        }
     }
+
+    /// What the team knows about the linked folder's product — see `ProductDossier`. nil while
+    /// nothing is linked, while it is first being read, or when reading it failed.
+    @Published private(set) var productDossier: ProductDossier?
+    /// True while the read-only pass over the linked folder runs (up to ~4 min, once per folder).
+    @Published private(set) var isReadingProductFolder = false
+    private var dossierTask: Task<ProductDossier?, Never>?
     /// Per account: a link means "this founder's project". The global key this replaced was
     /// written on every link and never read back, so the link died with every relaunch — and
     /// reading it as it was would have handed one account's folder to the next.
@@ -378,6 +388,8 @@ final class CompanyStore: ObservableObject {
     private let teamRunsSaver: (String, [TeamRun]) async -> Bool
     /// The thread list between launches — see `ChatThreadArchive`.
     private let threadArchive: ChatThreadArchiving
+    private let dossierGenerator: (String) async -> ProductDossier?
+    private let dossierCache: ProductDossierCache?
     static var defaultThreadArchive: ChatThreadArchiving {
         AppEnvironment.isRunningTests ? NullChatThreadArchive() : FileChatThreadArchive()
     }
@@ -471,6 +483,10 @@ final class CompanyStore: ObservableObject {
          teamRunsSaver: @escaping (String, [TeamRun]) async -> Bool = CompanyData.saveTeamRuns,
          // nil → a file per account, or nothing under XCTest (`defaultThreadArchive`).
          threadArchive: ChatThreadArchiving? = nil,
+         // nil → the real read-only `claude -p` pass and an on-disk cache; under XCTest, neither
+         // (a test that wants a dossier injects one — the real pass spends the founder's plan).
+         dossierGenerator: ((String) async -> ProductDossier?)? = nil,
+         dossierCache: ProductDossierCache? = nil,
          // Defaulted in the init BODY, same reason as `vcRunner`: `CLIProjectRunner` is
          // `@MainActor`, which a nonisolated default-argument context cannot construct.
          assemblerFactory: (() -> ProjectAssembler)? = nil) {
@@ -522,6 +538,9 @@ final class CompanyStore: ObservableObject {
         self.teamPlanner = teamPlanner
         self.teamRunsSaver = teamRunsSaver
         self.threadArchive = threadArchive ?? Self.defaultThreadArchive
+        self.dossierGenerator = dossierGenerator
+            ?? (AppEnvironment.isRunningTests ? { _ in nil } : { await ProductDossier.generate(folder: $0) })
+        self.dossierCache = dossierCache ?? (AppEnvironment.isRunningTests ? nil : ProductDossierCache())
         self.assemblerFactory = assemblerFactory ?? { ProjectAssembler(coder: CLIProjectRunner()) }
     }
 
@@ -1011,6 +1030,44 @@ final class CompanyStore: ObservableObject {
         activeProjectLink = link
         resolveProjectIdentity(for: link)
         return link
+    }
+
+    /// Load this folder's dossier from the cache, or start the read-only pass that writes it.
+    /// Spends the founder's plan, so only with the grant held — and never in prototype mode.
+    private func refreshProductDossier() {
+        dossierTask?.cancel()
+        dossierTask = nil
+        productDossier = nil
+        isReadingProductFolder = false
+        guard let path = activeProjectLink?.path, let cid = companyId else { return }
+        if let cached = dossierCache?.load(uid: cid, folder: path) { productDossier = cached; return }
+        guard !PrototypeMode.isOn, claudeAuthorisation.isAuthorised(.claudeCode, cid) else { return }
+        isReadingProductFolder = true
+        let generate = dossierGenerator
+        let task = Task<ProductDossier?, Never> { await generate(path) }
+        dossierTask = task
+        Task { [weak self] in
+            let d = await task.value
+            guard let self, self.dossierTask == task else { return }
+            self.dossierTask = nil
+            self.isReadingProductFolder = false
+            guard self.companyId == cid, self.activeProjectLink?.path == path, let d else { return }
+            self.productDossier = d
+            self.dossierCache?.save(d, uid: cid)
+        }
+    }
+
+    /// The dossier, waiting for a pass already running or starting one. Team Build calls this
+    /// before convening: a room that does not know the product plans the smallest possible page.
+    func ensureProductDossier() async -> ProductDossier? {
+        if let productDossier { return productDossier }
+        if dossierTask == nil { refreshProductDossier() }
+        guard let task = dossierTask, let path = activeProjectLink?.path else { return productDossier }
+        let d = await task.value
+        // Published here too, not only by the watcher in `refreshProductDossier`: which of the
+        // two resumes first is the scheduler's choice, and the caller needs it now.
+        if productDossier == nil, activeProjectLink?.path == path { productDossier = d }
+        return productDossier
     }
 
     /// Bring back this account's linked folder on launch. Skipped under XCTest — the test host
@@ -1967,6 +2024,7 @@ final class CompanyStore: ObservableObject {
             // `memoryEnabled` off drops the decisions block: a fact the founder forgot in
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+                                          product: productDossier?.contextBlock,
                                           library: company.library, query: text, focusDepartment: department,
                                           memoryEnabled: company.founderPrefs.memoryEnabled,
                                           // What the founder pinned on the `+` menu, rendered above the
@@ -2238,6 +2296,11 @@ final class CompanyStore: ObservableObject {
         let pending = PendingTeamBuild(ask: text, language: language, cid: cid)
         planningTeamBuildId = pending.id
         pendingTeamBuild = pending
+        // Before the room: the room, the planner and every department read the dossier, and a
+        // room that does not know the product chooses the smallest page it can. Usually a cache
+        // hit — the pass starts the moment the folder is linked.
+        _ = await ensureProductDossier()
+        guard companyId == cid, pendingTeamBuild?.id == pending.id else { return }
         await sendChat(text, language: language, convenesRoom: true)
         // The room, if one started, took the press already (`startVirtualCompanyRun`). If none
         // did, this keeps a stale press from attaching itself to some later Plan-mode room —
@@ -2307,7 +2370,9 @@ final class CompanyStore: ObservableObject {
             language: pending.language.rawValue, request: pending.ask, brief: brief,
             company: ["projectName": company.brief.projectName ?? "",
                       "oneLiner": company.brief.oneLiner ?? "",
-                      "audience": company.brief.audience ?? ""],
+                      "audience": company.brief.audience ?? "",
+                      // Omitted-as-empty like the three above; the planner reads every key.
+                      "product": productDossier?.summary ?? ""],
             roster: roster.isEmpty ? Array(WorkPlanValidation.routable).sorted() : roster)
         let raw = await teamPlanner(req)
         guard companyId == pending.cid else { return }
@@ -2352,6 +2417,7 @@ final class CompanyStore: ObservableObject {
             assemble: { [weak self] run, onLog in
                 var assembler = factory()
                 if let path = self?.activeProjectLink?.path { assembler.referenceDirs = [path] }
+                assembler.dossier = self?.productDossier
                 return await assembler.assemble(run, onLog: onLog)
             },
             save: { [weak self] snapshot in
@@ -2476,7 +2542,7 @@ final class CompanyStore: ObservableObject {
         let vcRequest = VirtualCompanyRequest(
             request: ask,
             language: language.rawValue,
-            founder: FounderContextMapper.founder(from: company.brief),
+            founder: FounderContextMapper.founder(from: company.brief, product: productDossier?.contextBlock),
             stressTest: false)
         // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
         // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
@@ -3468,6 +3534,7 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue,
             companionId: specialist?.companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: company.decisions,
+                                          product: productDossier?.contextBlock,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
             reviseNote: reviseNote, current: current, deptKey: task.dept,
@@ -3856,7 +3923,8 @@ final class CompanyStore: ObservableObject {
             companyId: companyId, language: language.rawValue,
             companionId: companionId ?? company.companionId,
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks,
-                                         decisions: company.decisions, library: company.library,
+                                         decisions: company.decisions, product: productDossier?.contextBlock,
+                                         library: company.library,
                                          query: instruction, focusDepartment: nil,
                                          memoryEnabled: company.founderPrefs.memoryEnabled),
             history: [], userMessage: instruction, deptKey: deptKey)

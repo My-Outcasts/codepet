@@ -10,8 +10,10 @@ import Foundation
 /// interview in Task 8, never invented here.
 enum FounderContextMapper {
 
-    static func founder(from brief: CompanyBrief) -> VCFounder {
-        VCFounder(profile: profile(from: brief),
+    /// `product`: `ProductDossier.contextBlock`, appended to the profile — the room's prompt
+    /// renders the profile verbatim as FOUNDER CONTEXT, which is where the product belongs.
+    static func founder(from brief: CompanyBrief, product: String? = nil) -> VCFounder {
+        VCFounder(profile: profile(from: brief) + ((product?.isEmpty ?? true) ? "" : "\n\n" + product!),
                   stage: stage(from: brief),
                   constraints: constraints(from: brief))
     }

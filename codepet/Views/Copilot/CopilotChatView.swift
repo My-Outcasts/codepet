@@ -1140,6 +1140,10 @@ struct CopilotChatView: View {
                     if !companyStore.activeAgentRuns.isEmpty {
                         AgentsWorkingRow(runs: companyStore.activeAgentRuns).id("agents")
                     }
+                    // The linked folder is being read into a product dossier.
+                    if companyStore.isReadingProductFolder {
+                        ProductReadingRow().id("product-reading")
+                    }
                     // A Team Build's planner is working (the room has ended, no plan yet).
                     if companyStore.isPlanningTeamBuild {
                         TeamPlanningRow().id("team-planning")

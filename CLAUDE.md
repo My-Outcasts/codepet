@@ -75,6 +75,16 @@ real multi-file project instead of a decision.
   deny — `acceptEdits` otherwise auto-accepts edits in every added dir, and only an `Edit(...)`
   rule covers all file-editing tools (`Write(...)` is reported unmatched). Both measured on
   2.1.282 against the exact generated command. The department steps still see no folder
+- **The team knows the product through a `ProductDossier`** (2026-09-25). Linking a folder
+  starts ONE read-only `claude -p` pass (`--restricted`, Read/Glob/Grep, ~80 s on this repo)
+  that writes a product summary + up to 12 image paths, cached per account and folder under
+  `~/.codepet/accounts/<uid>/dossiers/`. The text rides `ChatContext.compose(product:)` (chat,
+  every department run, live lines), the room's founder profile, and the planner's company
+  facts; the build prompt gets it plus a quality bar, and the images are copied into
+  `public/product/`. Written by a model, not scraped, because this repo's README still
+  describes the retired learning game. A Team build press waits for it. Before it existed a
+  "landing page for Codepet" came out as one headline and an email box — the room had said
+  "Nothing is on record about what codepet is" and chose the smallest page
 - Web projects are Next.js 15 (App Router, TS, Tailwind v4, pinned versions). The build is
   file-only; the APP runs `npm install` + `npm run build` after it, gives one file-only repair
   pass on failure, and writes `BUILD-ERRORS.md` if it still fails (`ProjectAssembler.verifyBuild`)

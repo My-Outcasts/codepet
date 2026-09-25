@@ -126,6 +126,9 @@ struct ProjectAssembler {
 
     /// The founder's linked folder, readable as reference and never changed. Empty when none.
     var referenceDirs: [String] = []
+    /// What the team knows about the product (`ProductDossier`); its images are copied into
+    /// `public/product/` before the build so the page can show the real product.
+    var dossier: ProductDossier?
 
     static let buildTimeout: TimeInterval = 900
     static let maxTurns = 40
@@ -161,7 +164,10 @@ struct ProjectAssembler {
         do { docs = try writeDocs(run, into: dir) } catch { return .failure("Could not write the team's docs") }
 
         let reference = referenceDirs.filter(CLIRunner.isShellSafePath)
-        if let failure = await coder.run(prompt: TeamBuildPrompt.prompt(for: run, docs: docs, reference: reference),
+        let assets = copyProductAssets(into: dir)
+        if !assets.isEmpty { onLog("copied \(assets.count) product image\(assets.count == 1 ? "" : "s")") }
+        if let failure = await coder.run(prompt: TeamBuildPrompt.prompt(for: run, docs: docs, reference: reference,
+                                                                        dossier: dossier, assets: assets),
                                          dir: dir.path, readOnlyDirs: reference,
                                          allowedTools: TeamBuildPrompt.allowedTools, maxTurns: Self.maxTurns,
                                          timeout: Self.buildTimeout, onEvent: onLog) {
@@ -179,6 +185,37 @@ struct ProjectAssembler {
         _ = await git(["add", "-A"], dir)
         _ = await git(["commit", "-m", "Initial project from Codepet Team Build"], dir)   // failure is not fatal
         return .success(path: dir.path)
+    }
+
+    /// Copies the dossier's images into `public/product/`, returning the project-relative paths.
+    /// Re-validated here — the dossier is read back from disk — and names de-duplicated, since
+    /// two `logo.png`s from different folders would otherwise overwrite each other.
+    func copyProductAssets(into dir: URL) -> [String] {
+        guard let d = dossier, !d.assets.isEmpty else { return [] }
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: d.folder).standardizedFileURL.path + "/"
+        let dest = dir.appendingPathComponent("public/product")
+        guard (try? fm.createDirectory(at: dest, withIntermediateDirectories: true)) != nil else { return [] }
+        var out: [String] = []
+        for src in d.assets.prefix(ProductDossier.maxAssets) {
+            let path = URL(fileURLWithPath: src).standardizedFileURL.path
+            guard path.hasPrefix(root),
+                  ProductDossier.imageExtensions.contains((path as NSString).pathExtension.lowercased()),
+                  let size = (try? fm.attributesOfItem(atPath: path))?[.size] as? Int,
+                  size > 0, size <= ProductDossier.maxAssetBytes else { continue }
+            var name = TeamSlug.make((path as NSString).deletingPathExtension.components(separatedBy: "/").last ?? "image")
+                + "." + (path as NSString).pathExtension.lowercased()
+            var n = 1
+            while fm.fileExists(atPath: dest.appendingPathComponent(name).path) {
+                n += 1
+                name = TeamSlug.make((path as NSString).deletingPathExtension.components(separatedBy: "/").last ?? "image")
+                    + "-\(n)." + (path as NSString).pathExtension.lowercased()
+            }
+            if (try? fm.copyItem(atPath: path, toPath: dest.appendingPathComponent(name).path)) != nil {
+                out.append("public/product/\(name)")
+            }
+        }
+        return out
     }
 
     /// `node_modules` and `.next` must never reach the commit — a guarantee, not something the
@@ -321,8 +358,9 @@ struct ProjectAssembler {
 
     /// `command` in `dir` through a login shell (npm lives on the founder's PATH), output sent to
     /// a temp file rather than a pipe: npm prints far past the 64 KB pipe buffer, and a child
-    /// blocked on a full pipe never exits. Returns the last 4000 characters of that output.
-    nonisolated static func runShell(_ command: String, _ dir: URL, timeout: TimeInterval) async -> (ok: Bool, tail: String) {
+    /// blocked on a full pipe never exits. Returns the last `tailChars` characters of that output.
+    nonisolated static func runShell(_ command: String, _ dir: URL, timeout: TimeInterval,
+                                     tailChars: Int = 4000) async -> (ok: Bool, tail: String) {
         let log = FileManager.default.temporaryDirectory.appendingPathComponent("codepet-build-\(UUID().uuidString).log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: log) }
@@ -363,7 +401,7 @@ struct ProjectAssembler {
             if proc.isRunning { proc.terminate() }
         }
         let out = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
-        return (ok, String(out.suffix(4000)))
+        return (ok, String(out.suffix(tailChars)))
     }
 
     /// `environment` is a test seam: nil means the founder's login-shell environment.

@@ -40,3 +40,41 @@ struct TeamPlanningRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+/// "Reading your product folder…" while `CompanyStore.isReadingProductFolder` — the one-time
+/// read-only pass that writes the `ProductDossier` (about a minute and a half on the Codepet repo).
+/// A Team build press waits on it, so without this row the button would look like it did nothing.
+struct ProductReadingRow: View {
+    @Environment(\.uiLanguage) private var lang
+    @State private var startedAt = Date()
+
+    var body: some View {
+        HStack {
+            MessageCard(hue: CodepetTheme.accentPurple) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(lang == .vi ? "Đang đọc thư mục sản phẩm…" : "Reading your product folder…")
+                                .font(CodepetTheme.inter(13, weight: .semibold))
+                                .foregroundColor(CodepetTheme.primaryText)
+                            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                                Text(TeamBuildCopy.clock(ctx.date.timeIntervalSince(startedAt)))
+                                    .font(CodepetTheme.inter(11, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(CodepetTheme.accentPurple)
+                            }
+                        }
+                        Text(lang == .vi ? "Một lần cho mỗi thư mục — để cả đội biết sản phẩm của bạn là gì. Chỉ đọc, không sửa."
+                                         : "Once per folder, so the team knows what your product is. Read-only.")
+                            .font(CodepetTheme.inter(11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

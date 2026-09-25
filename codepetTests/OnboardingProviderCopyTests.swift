@@ -34,4 +34,19 @@ final class OnboardingProviderCopyTests: XCTestCase {
         XCTAssertNotEqual(OnboardingProviderStep.gateSubtitle(lang: .en),
                           OnboardingProviderStep.gateSubtitle(lang: .vi))
     }
+
+    // MARK: - CP-012: the gate's own heading and button were English in every language
+
+    /// Found 22 Sep verifying CP-006 side by side: the subtitle was localised but the heading
+    /// above it was a literal, so a Vietnamese founder read English over Vietnamese.
+    func testTheHeadingIsLocalised() {
+        XCTAssertEqual(OnboardingProviderStep.gateHeading(lang: .en), "One more thing before you start")
+        XCTAssertEqual(OnboardingProviderStep.gateHeading(lang: .vi), "Còn một bước nữa trước khi bắt đầu")
+    }
+
+    /// Same screen, same bug: the install row's copy button was a literal too.
+    func testTheCopyCommandButtonIsLocalised() {
+        XCTAssertEqual(OnboardingProviderStep.copyCommandLabel(lang: .en), "Copy command")
+        XCTAssertEqual(OnboardingProviderStep.copyCommandLabel(lang: .vi), "Sao chép lệnh")
+    }
 }

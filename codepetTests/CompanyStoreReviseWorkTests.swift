@@ -178,6 +178,19 @@ final class CompanyStoreReviseWorkTests: XCTestCase {
         XCTAssertEqual(s.company.tasks.count, 2)
     }
 
+    /// The card must say the item was UPDATED — the store records what approval actually did.
+    func testApprovingARevisionMarksTheCardAsHavingReplacedAnItem() async throws {
+        let s = store(reply: editorial)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("make it more editorial", language: .en)
+        await s.confirmRoadmapProposal(messageId: try XCTUnwrap(offerId(s)), language: .en)
+        let card = try XCTUnwrap(s.chatMessages.last { $0.draft != nil }?.id)
+
+        await s.approveDraft(messageId: card)
+
+        XCTAssertEqual(s.chatMessages.first { $0.id == card }?.draftReplacedItem, true)
+    }
+
     /// The revise chips on the revision's OWN card rebuild the draft from the run result. If that
     /// rebuild forgot `supersedes`, a founder who tweaked the revision once before approving would
     /// get the old bug back: a second Library item.

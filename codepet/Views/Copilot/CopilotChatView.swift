@@ -2602,7 +2602,7 @@ struct CopilotBubble: View {
                     if message.draftApproved {
                         HStack(spacing: 5) {
                             Image(systemName: "checkmark.circle.fill")
-                            Text(lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library")
+                            Text(DraftCardCopy.approvedLabel(lang, replacedItem: message.draftReplacedItem))
                         }
                         .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentTeal)

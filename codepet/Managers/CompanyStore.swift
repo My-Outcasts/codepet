@@ -3266,6 +3266,14 @@ final class CompanyStore: ObservableObject {
             proposal = nil
         }
         guard let proposal else { return }
+        // The room already answered this turn (CP-029). Its card owns the answer and its single
+        // action, and the reply this offer belongs to is folded to "Codepet's first take". The
+        // attach search below skips the room's own message, so without this the offer landed as
+        // its own bubble UNDER the room: a second purple button beside "Lock this decision in".
+        if let reply = chatMessages.lastIndex(where: { $0.role == .companion && $0.vcRun == nil }),
+           FirstTakeRule.isFolded(chatMessages[reply]) {
+            return
+        }
         // A second identical offer would let the founder confirm one and leave an orphan that
         // completes a task twice or adds a duplicate — the same guard `proposeRun` makes.
         guard !chatMessages.contains(where: {

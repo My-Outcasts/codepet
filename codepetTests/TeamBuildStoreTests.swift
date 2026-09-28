@@ -131,6 +131,7 @@ enum TeamBuildFixture {
                       librarySaverDelayNanos: UInt64 = 5_000_000,
                       planner: (() -> WorkPlan)? = nil,
                       room roomOverride: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
+                      usageLedger: UsageLedgering? = nil,
                       initial: CompanyState = CompanyState(brief: CompanyBrief(), departments: [], library: [],
                                                            stage: .idea, companionId: "byte", onboardedAt: Date()))
     -> CompanyStore {
@@ -161,7 +162,8 @@ enum TeamBuildFixture {
                 return planner?() ?? plan
             },
             teamRunsSaver: { cid, runs in probe.saves.append((cid, runs)); return true },
-            assemblerFactory: { ProjectAssembler(root: root, coder: FakeCoder(), git: { _, _ in true }) })
+            assemblerFactory: { ProjectAssembler(root: root, coder: FakeCoder(), git: { _, _ in true }) },
+            usageLedger: usageLedger)
     }
 
     /// Polls rather than sleeping a fixed time: returns as soon as `condition` holds, false on

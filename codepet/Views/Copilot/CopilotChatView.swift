@@ -1682,6 +1682,10 @@ struct CopilotBubble: View {
             }
         } else if let draft = message.draft {
             draftCard(draft)
+        // The room answered this question too (CP-029): the reply is its first take, folded
+        // to one line, and none of the offer branches below may draw beside the room's card.
+        } else if !FirstTakeRule.drawsOwnOffer(message) {
+            textBubble
         // An action now rides on the reply it belongs to and is drawn inside that
         // reply's card (see `inlineActions`). These three branches remain only for
         // the fallback the store still writes: an action with no reply to attach to,
@@ -2481,7 +2485,7 @@ struct CopilotBubble: View {
         if message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && message.attachments.isEmpty {
             EmptyView()
-        } else if message.supersededByRoom && !isMe {
+        } else if FirstTakeRule.isFolded(message) {
             firstTakeRow
         } else if isMe {
             // The founder's own words, quietly.

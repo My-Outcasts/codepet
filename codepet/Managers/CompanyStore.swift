@@ -371,6 +371,9 @@ final class CompanyStore: ObservableObject {
     /// the coding run's, so a view observing only this store re-renders as the run moves.
     @Published private(set) var teamRun: TeamRunCoordinator?
     private var teamRunBag: AnyCancellable?
+    /// Runs the founder discarded (CP-034). The coordinator's saves are queued, so a stop's own
+    /// save can land after Discard; the save closure drops any snapshot whose id is here.
+    private var discardedTeamRunIds: Set<String> = []
     /// The Team build press waiting for its room. Set by `startTeamBuild` immediately before it
     /// convenes, TAKEN (read and cleared) by `startVirtualCompanyRun` when that room starts, and
     /// cleared again after `sendChat` returns — so a press whose room never started (a busy
@@ -2457,6 +2460,8 @@ final class CompanyStore: ObservableObject {
             },
             save: { [weak self] snapshot in
                 guard let self, self.companyId == cid else { return }
+                // A queued save from before Discard must not put the run back (CP-034).
+                guard !self.discardedTeamRunIds.contains(snapshot.id) else { return }
                 var runs = self.company.teamRuns.filter { $0.id != snapshot.id }
                 runs.append(snapshot)
                 // Bounded: the list lives inside the company doc and is rewritten whole, so a
@@ -2501,6 +2506,17 @@ final class CompanyStore: ObservableObject {
     /// [Stop] on the team card. Says nothing in chat: the card shows Cancelled, and a deliberate
     /// stop is not a failure.
     func stopTeamRun() { teamRun?.stop() }
+    /// [Discard] on a stopped run (CP-034): take it off the chat and out of the saved list, so the
+    /// card stops holding a dead run. Only a stopped run; anything else still has work in it.
+    /// The project folder, if assembly had started, is left on disk.
+    func discardTeamRun() async {
+        guard let cid = companyId, let run = teamRun?.run, run.phase == .cancelled else { return }
+        discardedTeamRunIds.insert(run.id)
+        teamRunBag = nil
+        teamRun = nil
+        company.teamRuns.removeAll { $0.id == run.id }
+        _ = await teamRunsSaver(cid, company.teamRuns)
+    }
     /// [Continue] on a run restored with interrupted steps.
     func continueTeamRun(language: AppLanguage = .en) async {
         guard let cid = companyId, teamRun != nil, teamGrantHeld(cid, language: language) else { return }

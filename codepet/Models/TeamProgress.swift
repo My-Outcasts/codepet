@@ -59,3 +59,24 @@ extension TeamBuildCopy {
         return lang == .vi ? "Xem cả \(count) bước" : "See all \(count) steps"
     }
 }
+
+extension TeamBuildCopy {
+    /// What a stopped run did, in one sentence (CP-034). The card used to show every row marked
+    /// Cancelled — what did NOT happen — and nothing to do next.
+    static func stoppedSummary(_ run: TeamRun, lang: AppLanguage) -> String {
+        let vi = lang == .vi
+        let done = run.plan.steps.filter { run.state($0.id)?.status == .done }
+        let started = run.steps.contains { $0.startedAt != nil }
+        guard !done.isEmpty else {
+            if !started { return vi ? "Đã huỷ trước khi bắt đầu. Chưa có gì chạy." : "Cancelled before it started. Nothing ran." }
+            return vi ? "Đã dừng trước khi bước nào xong. Chưa có gì được làm."
+                      : "Stopped before any step finished. Nothing was built."
+        }
+        var seen = Set<String>()
+        let names = done.map { deptName($0.dept) }.filter { seen.insert($0).inserted }
+        let who = names.count == 1 ? names[0]
+            : names.dropLast().joined(separator: ", ") + (vi ? " và " : " and ") + names.last!
+        return vi ? "Đã dừng sau \(done.count)/\(run.plan.steps.count) bước. Phần việc của \(who) vẫn được giữ ở đây."
+                  : "Stopped after \(done.count) of \(run.plan.steps.count) steps. \(who)'s work is kept here."
+    }
+}

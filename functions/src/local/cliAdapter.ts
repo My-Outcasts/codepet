@@ -267,6 +267,7 @@ function spawnCli(adapter: CliAdapter, opts: {
   prompt: string;
   model?: string;
   effort?: string;
+  thinking?: "off";
 }): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codepet-cli-"));
   const args = adapter.args(opts);
@@ -279,6 +280,11 @@ function spawnCli(adapter: CliAdapter, opts: {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
+  // `claude -p` thinks by default and has no flag to stop it; this variable is how. A phase that
+  // asks for no thinking is one the API path runs without it (Haiku never thinks unless asked),
+  // and on Haiku `--effort` is not an alternative — it errors. Measured on 2.1.283: 0 thinking
+  // tokens with it, 5,128 of 5,671 output tokens without it on the meeting's router.
+  if (opts.thinking === "off") env.MAX_THINKING_TOKENS = "0";
 
   return new Promise((resolve, reject) => {
     const child = spawn(cliShell.path, [...cliShell.flags, `${adapter.binary} ${args.map(quote).join(" ")}`], {
@@ -325,6 +331,7 @@ export async function runCliEnvelope(adapter: CliAdapter, opts: {
   prompt: string;
   model?: string;
   effort?: string;
+  thinking?: "off";
 }): Promise<{ envelope: any; stdout: string }> {
   const { stdout, stderr, code } = await spawnCli(adapter, opts);
 

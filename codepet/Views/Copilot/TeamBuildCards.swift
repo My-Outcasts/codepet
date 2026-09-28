@@ -161,6 +161,8 @@ struct TeamRunCard: View {
 
     @EnvironmentObject private var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
+    /// "See all N steps" on a compacted card (CP-033).
+    @State private var showAllSteps = false
 
     var body: some View {
         if let run = coordinator.run {
@@ -186,24 +188,98 @@ struct TeamRunCard: View {
                     .monospacedDigit()
                     .foregroundColor(CodepetTheme.mutedText)
             }
+            let compact = TeamProgress.compacts(run.phase)
             if !run.plan.summary.isEmpty {
+                // Two lines while compacted: the brief is context, and the whole of it is one
+                // click away in the plan the founder already approved.
                 Text(run.plan.summary)
                     .font(CodepetTheme.inter(12.5))
                     .foregroundColor(CodepetTheme.mutedText)
+                    .lineLimit(compact && !showAllSteps ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Only the rows tick; the footer (which reads the disk on `.ready`) does not.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(run.plan.steps) { step in
-                        row(step, run: run, now: context.date)
-                        if step.id == WorkPlan.buildStepId, run.phase == .assembling {
-                            buildActivity
+                    if compact {
+                        progressSummary(run, now: context.date)
+                    }
+                    if !compact || showAllSteps {
+                        ForEach(run.plan.steps) { step in
+                            row(step, run: run, now: context.date)
+                            if step.id == WorkPlan.buildStepId, run.phase == .assembling {
+                                buildActivity
+                            }
                         }
+                    } else if run.phase == .assembling {
+                        buildActivity
                     }
                 }
             }
+            if compact {
+                Button { withAnimation(.easeOut(duration: 0.15)) { showAllSteps.toggle() } } label: {
+                    Text(TeamBuildCopy.allSteps(run.plan.steps.count, expanded: showAllSteps, lang: lang)
+                         + (showAllSteps ? "" : " ›"))
+                        .font(CodepetTheme.inter(12, weight: .medium))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                }
+                .buttonStyle(.plain)
+                .cursorOnHover(.pointingHand)
+            }
             footer(run)
+        }
+    }
+
+    /// The compacted card's head (CP-033): one segment per step, then who is working now with
+    /// its clock, and what comes next. Clicking the live line opens that step's detail.
+    @ViewBuilder private func progressSummary(_ run: TeamRun, now: Date) -> some View {
+        let p = TeamProgress(run)
+        HStack(spacing: 3) {
+            ForEach(Array(p.segments.enumerated()), id: \.offset) { _, s in
+                Capsule().fill(segmentColor(s)).frame(height: 5)
+            }
+        }
+        .accessibilityLabel(lang == .vi ? "\(p.doneCount) trên \(p.total) bước xong"
+                                        : "\(p.doneCount) of \(p.total) steps done")
+        if let live = TeamBuildCopy.liveLine(p, lang: lang) {
+            Button { if let s = p.current.first { onSelect(s.id) } } label: {
+                HStack(spacing: 8) {
+                    if p.current.count == 1, let s = p.current.first { TeamPetAvatar(dept: s.dept) }
+                    Text(live)
+                        .font(CodepetTheme.inter(13))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 6)
+                    if p.current.count == 1, let s = p.current.first {
+                        TeamStatusPill(status: .running,
+                                       text: TeamBuildCopy.status(.running, elapsed: elapsed(run.state(s.id), now: now),
+                                                                  lang: lang))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverAffordance(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        if let next = TeamBuildCopy.nextLine(p, lang: lang) {
+            Text(next)
+                .font(CodepetTheme.inter(11.5))
+                .foregroundColor(CodepetTheme.mutedText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private func segmentColor(_ s: TeamStepStatus) -> Color {
+        switch s {
+        case .done: return CodepetTheme.accentTeal
+        case .running: return CodepetTheme.accentPurple
+        case .failed: return Color.red
+        case .blocked, .interrupted: return CodepetTheme.accentGold
+        // Not `hairline`: on the card's purple tint a hairline-coloured segment was invisible
+        // (seen on screen, 28 Sep), so the strip read as 3 segments of a 7-step run.
+        case .waiting, .cancelled: return CodepetTheme.mutedText.opacity(0.35)
         }
     }
 

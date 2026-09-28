@@ -3320,6 +3320,17 @@ final class CompanyStore: ObservableObject {
         flushActiveThread()
     }
 
+    /// Restore an earlier version of a Library item from its version menu — replace in place,
+    /// same id, and the version it replaces is kept so the restore can be undone the same way
+    /// (`LibraryFiling.restore`). Nothing is saved when the item or version is not there.
+    func restoreVersion(itemId: String, historyIndex: Int) async {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let next = LibraryFiling.restore(versionAt: historyIndex, of: itemId, in: company.library, now: now)
+        guard next != company.library else { return }
+        company.library = next
+        if let cid = companyId { _ = await librarySaver(cid, company.library) }
+    }
+
     /// The newest approved Library items the chat model may offer to revise (CP-025): newest
     /// first by `createdAt`, capped at 15, and only those whose task still exists — a revise pass
     /// re-runs that task. nil (not `[]`) when there are none, so the key stays off the wire.

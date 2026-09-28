@@ -187,16 +187,11 @@ struct VCRunCards: View {
             // Contract: `error` is terminal and no `done` follows — after a failed
             // run this is the ONLY signal the founder gets that the room stopped.
             if let err = state.terminalError { terminalErrorCard(err) }
-            // Spec §4.3: the founder has a right to know what the answer cost them —
-            // including when the answer never arrived. Telemetry is emitted on the
-            // escape hatch and on a budget stop too, so this is the one place it belongs.
-            if let cost = state.telemetry?.costEstimateUsd { costRow(cost) }
+            // No cost line here (CP-028). A meeting runs on the founder's own Claude plan, so
+            // "This run cost $0.457" was an API-price estimate printed as if it were a bill,
+            // under every room. The figure is still recorded — `CompanyStore` adds it to
+            // `UsageLedger` when the room ends — and Settings → Usage shows the day's total.
         }
-    }
-
-    private func costRow(_ cost: Double) -> some View {
-        Text(String(format: (lang == .vi ? "Phiên này tốn $%.3f" : "This run cost $%.3f"), cost))
-            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTheme.mutedText)
     }
 
     /// CONFLICT / BLOCKER / TENSION / ALIGNED are wire values, not founder-facing copy.
@@ -1034,9 +1029,8 @@ struct VCRunCards: View {
                 // The recommendation in full, the next action, the kill criteria and what nobody
                 // knew — in the reader every other document in the app opens into (founder's
                 // call: "the call should read like every other document").
-                // The cost line is NOT here: a run that failed or was budget-stopped
-                // still cost the founder money and never reaches this card. It renders
-                // once, for every outcome, at the bottom of the stack (`costRow`).
+                // No cost line anywhere in the room (CP-028): each room's estimate goes to
+                // `UsageLedger` when it ends, and Settings → Usage shows the day's total.
                 //
                 // One row, primary first. `Read the full call` used to be a FULL-WIDTH
                 // bordered button stacked ABOVE `Lock this decision in` — two competing

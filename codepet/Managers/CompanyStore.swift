@@ -399,6 +399,12 @@ final class CompanyStore: ObservableObject {
     static var defaultThreadArchive: ChatThreadArchiving {
         AppEnvironment.isRunningTests ? NullChatThreadArchive() : FileChatThreadArchive()
     }
+    /// Where each room's estimated cost is added up for Settings → Usage (CP-028). In-memory
+    /// under the test host so no suite writes a meeting into the founder's real preferences.
+    private let usageLedger: UsageLedgering
+    static var defaultUsageLedger: UsageLedgering {
+        AppEnvironment.isRunningTests ? InMemoryUsageLedger() : DefaultsUsageLedger()
+    }
     private let assemblerFactory: () -> ProjectAssembler
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
@@ -495,7 +501,8 @@ final class CompanyStore: ObservableObject {
          dossierCache: ProductDossierCache? = nil,
          // Defaulted in the init BODY, same reason as `vcRunner`: `CLIProjectRunner` is
          // `@MainActor`, which a nonisolated default-argument context cannot construct.
-         assemblerFactory: (() -> ProjectAssembler)? = nil) {
+         assemblerFactory: (() -> ProjectAssembler)? = nil,
+         usageLedger: UsageLedgering? = nil) {
         self.loader = loader
         self.saver = saver
         self.roadmapFetcher = roadmapFetcher
@@ -544,6 +551,7 @@ final class CompanyStore: ObservableObject {
         self.teamPlanner = teamPlanner
         self.teamRunsSaver = teamRunsSaver
         self.threadArchive = threadArchive ?? Self.defaultThreadArchive
+        self.usageLedger = usageLedger ?? Self.defaultUsageLedger
         self.dossierGenerator = dossierGenerator
             ?? (AppEnvironment.isRunningTests ? { _ in nil } : { await ProductDossier.generate(folder: $0) })
         self.dossierCache = dossierCache ?? (AppEnvironment.isRunningTests ? nil : ProductDossierCache())
@@ -2621,6 +2629,9 @@ final class CompanyStore: ObservableObject {
             }
             // Declined, failed before routing, or cancelled: no card is coming, so the row ends
             // with the run rather than ticking over whatever the chat says next.
+            // Once per room, at its end: a repeated telemetry frame only replaces the state's
+            // copy, so this cannot double-count.
+            if let cost = state.telemetry?.costEstimateUsd { self?.usageLedger.record(costUsd: cost, at: Date()) }
             if teamBuild != nil { self?.isConveningTeamRoom = false }
             if let teamBuild { self?.teamBuildRoomEnded(state, pending: teamBuild) }
             // The room lands after its turn's flush; without this its conclusion reaches the

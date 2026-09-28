@@ -78,3 +78,41 @@ struct ProductReadingRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+/// "Bringing the team together…" while a Team Build's router picks the room
+/// (`CompanyStore.isConveningTeamRoom`). The router is its own `claude -p` call and takes about a
+/// minute, and the room has no card of its own until it answers — so without this row a press
+/// showed byte's first reply and then nothing, which testers read as a frozen Team Build (CP-027).
+struct TeamConveningRow: View {
+    @Environment(\.uiLanguage) private var lang
+    @State private var startedAt = Date()
+
+    var body: some View {
+        HStack {
+            MessageCard(hue: CodepetTheme.accentPurple) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(TeamBuildCopy.conveningTitle(lang))
+                                .font(CodepetTheme.inter(13, weight: .semibold))
+                                .foregroundColor(CodepetTheme.primaryText)
+                            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                                Text(TeamBuildCopy.clock(ctx.date.timeIntervalSince(startedAt)))
+                                    .font(CodepetTheme.inter(11, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(CodepetTheme.accentPurple)
+                            }
+                        }
+                        Text(TeamBuildCopy.conveningDetail(lang))
+                            .font(CodepetTheme.inter(11))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

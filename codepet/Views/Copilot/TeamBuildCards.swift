@@ -28,6 +28,17 @@ enum TeamBuildButton {
 
 /// Copy for the team card and its detail panel.
 enum TeamBuildCopy {
+    /// The row shown while a Team Build's router picks who joins the room (CP-027). Says only what
+    /// is true at that moment: nobody has started work yet, so it names the choosing, not a team.
+    static func conveningTitle(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đang gọi cả đội…" : "Bringing the team together…"
+    }
+
+    static func conveningDetail(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đang chọn những phòng ban sẽ tham gia. Thường mất khoảng một phút."
+                    : "Choosing which departments should weigh in. This usually takes about a minute."
+    }
+
     /// A step's status pill. A running step shows its elapsed time (`m:ss`) instead of a word —
     /// the one thing a founder watching a 3-minute step wants to know is that it is still moving.
     static func status(_ s: TeamStepStatus, elapsed: TimeInterval?, lang: AppLanguage) -> String {

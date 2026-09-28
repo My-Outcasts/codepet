@@ -343,6 +343,24 @@ describe("ingestLine", () => {
     expect(seen).toContain("\n\n");
   });
 
+  /**
+   * Build 4, 28 Sep: "I'll look.PlusMenu.swift line 128…". Block indices restart with every
+   * assistant MESSAGE, and a tool call ends one message and starts another — measured on 2.1.283,
+   * both texts arrive at index 1 (thinking is 0). So the index test alone saw one block and
+   * glued the status line to the answer. A `message_start` after text is a break too.
+   */
+  it("does not run the text before a tool call into the text after it", () => {
+    const acc = fresh();
+    const seen: string[] = [];
+    const messageStart = JSON.stringify({ type: "stream_event", event: { type: "message_start" } });
+    ingestLine(messageStart, acc, (t) => seen.push(t));
+    ingestLine(delta("I'll look.", 1), acc, (t) => seen.push(t));
+    ingestLine(messageStart, acc, (t) => seen.push(t));
+    ingestLine(delta("PlusMenu.swift line 128", 1), acc, (t) => seen.push(t));
+    expect(acc.text).toBe("I'll look.\n\nPlusMenu.swift line 128");
+    expect(seen).toContain("\n\n");
+  });
+
   /** Deltas WITHIN one block are a single sentence being typed — never separated. */
   it("does not break inside a block", () => {
     const acc = fresh();

@@ -3,7 +3,8 @@ import * as os from "os";
 import * as path from "path";
 
 import {
-  ClaudeCliError, claudeAdapter, installSigtermHandler, runCli, setCliShell, terminateLiveChildren,
+  ClaudeCliError, claudeAdapter, installSigtermHandler, runCli, runCliEnvelope, setCliShell,
+  terminateLiveChildren,
   type CliAdapter,
 } from "../local/cliAdapter";
 
@@ -139,6 +140,27 @@ describe("runCli", () => {
       .rejects.toThrow(ClaudeCliError);
     await expect(runCli(adapter, { systemPrompt: "S", prompt: "P" }))
       .rejects.toThrow(/unexpected argument/);
+  }, 20000);
+
+  /**
+   * `thinking: "off"` reaches `claude` as `MAX_THINKING_TOKENS=0` — there is no flag for it, and
+   * `--effort` is not an option on Haiku 4.5, which rejects it. MEASURED on 2.1.283: without it
+   * the meeting's router (Haiku) spent 5,128 of 5,671 output tokens thinking and took 66 s to
+   * answer a ~2 KB routing object, which is the whole of build 4's "Team Build looks frozen"
+   * gap. The API never thinks on Haiku unless asked, so this is the local path matching it.
+   */
+  test("thinking off reaches the CLI as MAX_THINKING_TOKENS=0, and only when asked", async () => {
+    const adapter = fakeCli(`printf '{"result":"%s"}' "\${MAX_THINKING_TOKENS-unset}"`);
+    const off = await runCliEnvelope(adapter, { systemPrompt: "S", prompt: "P", thinking: "off" });
+    expect(off.envelope.result).toBe("0");
+    const prev = process.env.MAX_THINKING_TOKENS;
+    delete process.env.MAX_THINKING_TOKENS;
+    try {
+      const dflt = await runCliEnvelope(adapter, { systemPrompt: "S", prompt: "P" });
+      expect(dflt.envelope.result).toBe("unset");
+    } finally {
+      if (prev !== undefined) process.env.MAX_THINKING_TOKENS = prev;
+    }
   }, 20000);
 
   /** Is `pid` still a live process? `kill(pid, 0)` signals nothing and throws if it is gone. */

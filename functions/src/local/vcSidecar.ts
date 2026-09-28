@@ -72,6 +72,7 @@ export const localAgentCaller: AgentCaller = async (args) => {
     prompt: agentPrompt({ userMessage: args.userMessage, tool: args.tool }),
     model: args.model,
     effort: args.effort,
+    thinking: args.thinking,
   });
   return {
     input: extractJson(envelope.result),

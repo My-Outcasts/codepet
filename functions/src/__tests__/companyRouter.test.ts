@@ -182,6 +182,25 @@ describe("runIntake", () => {
     expect(routing.decision).toBe("multi_agent");
   });
 
+  /**
+   * Routing asks for no thinking. The API never thinks on Haiku unless asked, so the cloud path
+   * always routed without it — but `claude -p` thinks by default, and on build 4 the local router
+   * spent 5,128 thinking tokens and 66–96 s producing a routing object, with nothing on screen
+   * until it landed (the room card waits for `routing`). Declared by the phase, like `effort`.
+   */
+  test("asks for no thinking — the room card waits on this one call", async () => {
+    const seen: any[] = [];
+    await runIntake({
+      founder,
+      rawRequest: "Should I add team seats?",
+      call: async (args) => {
+        seen.push(args);
+        return { input: validInput(), usage: zeroUsage };
+      }
+    });
+    expect(seen[0].thinking).toBe("off");
+  });
+
   test("sends no effort — ROUTER_MODEL is Haiku, which rejects the field", async () => {
     // Not a cost choice: Haiku 4.5 returns an API error when `effort` is
     // present, so routing (which runs on every single request) would fail

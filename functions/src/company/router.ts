@@ -203,6 +203,13 @@ export type AgentCaller = (args: {
    * rejects `effort` outright rather than ignoring it.
    */
   effort?: Effort;
+  /**
+   * `"off"` for a phase that must not think at all. The API path needs nothing for it — Haiku
+   * never thinks unless asked, and no caller here asks — but `claude -p` thinks by default, so
+   * the local caller turns it off (`MAX_THINKING_TOKENS=0`). Only the router sets it: the room
+   * card waits on that one call, and thinking made it 66–96 s instead of seconds (build 4).
+   */
+  thinking?: "off";
 }) => Promise<{
   input: unknown;
   usage: TokenUsage;
@@ -276,6 +283,8 @@ export async function runIntake(args: {
     // Routing is classification and it runs on every single request, so the
     // cheapest tier is enough. Synthesis is where the top tier earns its cost.
     model: ROUTER_MODEL,
+    // Classification against a fixed schema; the API path never thought here either.
+    thinking: "off",
     system: composeAgentSystem({
       agent: "chief_of_staff",
       founder: args.founder,

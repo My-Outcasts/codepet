@@ -37,6 +37,7 @@ export async function runClaudeJson(opts: {
   prompt: string;
   model?: string;
   effort?: string;
+  thinking?: "off";
 }): Promise<any> {
   const { envelope } = await runCliEnvelope(claudeAdapter, opts);
   return envelope;

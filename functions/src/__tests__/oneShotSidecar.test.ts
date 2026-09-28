@@ -355,6 +355,55 @@ describe("runTask op", () => {
     }));
   });
 
+  /**
+   * Build 4, 28 Sep: "make the waitlist page warmer" on an approved LIVE site came back as a
+   * DRAFT doc, and approving it overwrote the site. The revise prompt said "Keep the same kind"
+   * without ever saying which kind, and sent only the markdown body — never the site payload it
+   * was supposed to keep. So the model guessed, and guessed `doc`.
+   */
+  describe("a revise pass keeps the kind it revises", () => {
+    const sitePayload = { brand: "Waitlist", headline: "Join the private beta" };
+    const revise = {
+      ...body, revise_note: "Make the tone warmer", current: "# Waitlist copy",
+      current_kind: "site", current_payload: sitePayload,
+    };
+
+    it("names the current kind and hands over its payload", () => {
+      const prompt = op.plan(revise).prompt;
+      expect(prompt).toContain('kind "site"');
+      expect(prompt).toContain("Join the private beta");
+    });
+
+    /** The app encodes `DeliverablePayload` with each rich kind NESTED under its own key
+     *  (`{"site": {...}}`), while the schema the model answers in is flat. Handing the nested
+     *  form over would invite a nested answer, which `coercePayload` cannot read. */
+    it("unwraps the app's nested payload to the flat shape the schema asks for", () => {
+      const prompt = op.plan({ ...revise, current_payload: { site: sitePayload } }).prompt;
+      expect(prompt).toContain('{"brand":"Waitlist"');
+      expect(prompt).not.toContain('{"site":');
+    });
+
+    it("pins the kind even when the model answers with another one", () => {
+      const out = op.respond(revise, { kind: "doc", title: "Waitlist", body: "# Warmer" },
+                             { model: "m", nowISO: "t" }) as any;
+      expect(out.kind).toBe("site");
+    });
+
+    it("pins nothing on a first run — current_kind means nothing without a revise", () => {
+      const out = op.respond({ ...body, current_kind: "site" },
+                             { kind: "doc", title: "Launch email", body: "# Hello" },
+                             { model: "m", nowISO: "t" }) as any;
+      expect(out.kind).toBe("doc");
+    });
+
+    it("never pins a kind outside the department's contract", () => {
+      const out = op.respond({ ...revise, current_kind: "sheet" },
+                             { kind: "doc", title: "Waitlist", body: "# Warmer" },
+                             { model: "m", nowISO: "t" }) as any;
+      expect(out.kind).toBe("doc");
+    });
+  });
+
   it("refuses a payload with no task title", () => {
     expect(() => op.plan({ ...body, task_title: "   " })).toThrow(OneShotBadRequest);
     expect(() => op.plan({ language: "en" })).toThrow(OneShotBadRequest);

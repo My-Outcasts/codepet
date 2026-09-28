@@ -1144,6 +1144,10 @@ struct CopilotChatView: View {
                     if companyStore.isReadingProductFolder {
                         ProductReadingRow().id("product-reading")
                     }
+                    // A Team Build's router is choosing the room; no room card exists yet.
+                    if companyStore.isConveningTeamRoom {
+                        TeamConveningRow().id("team-convening")
+                    }
                     // A Team Build's planner is working (the room has ended, no plan yet).
                     if companyStore.isPlanningTeamBuild {
                         TeamPlanningRow().id("team-planning")
@@ -1178,6 +1182,10 @@ struct CopilotChatView: View {
             .onChange(of: companyStore.isCompanionTyping) { _, typing in
                 scrollGeneration &+= 1
                 if typing { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            .onChange(of: companyStore.isConveningTeamRoom) { _, convening in
+                scrollGeneration &+= 1
+                if convening { withAnimation { proxy.scrollTo("team-convening", anchor: .bottom) } }
             }
             .onChange(of: companyStore.isPlanningTeamBuild) { _, planning in
                 scrollGeneration &+= 1

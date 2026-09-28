@@ -86,6 +86,42 @@ enum TeamBuildFixture {
         }
     }
 
+    /// Holds a room between `run_started` and its routing frame, for as long as a test needs —
+    /// the stretch where the real router spends 60-70 s on its own `claude -p` call.
+    final class Gate {
+        private var cont: CheckedContinuation<Void, Never>?
+        var isWaiting: Bool { cont != nil }
+        func wait() async { await withCheckedContinuation { cont = $0 } }
+        func open() { cont?.resume(); cont = nil }
+    }
+
+    /// `room`, but parked at the gate before routing. `fails: true` ends the stream with an error
+    /// instead of routing, the way a dead sidecar does.
+    /// `hold` parks it again after routing, so a test can look at the store while the room is on
+    /// screen and still running — otherwise the run ends at once and its end-of-run cleanup
+    /// hides whether the hand-off itself did anything.
+    static func gatedRoom(_ decision: String, gate: Gate, hold: Gate? = nil, fails: Bool = false,
+                          probe: Probe)
+    -> (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
+        { _ in
+            probe.vcCalls += 1
+            return AsyncThrowingStream { cont in
+                Task {
+                    cont.yield(.runStarted(runId: "r1"))
+                    await gate.wait()
+                    if fails { cont.finish(throwing: VirtualCompanyRunError.malformedResponse); return }
+                    cont.yield(.routing(routing(decision)))
+                    if let hold { await hold.wait() }
+                    if decision == "multi_agent" {
+                        cont.yield(.brief(aBrief("Ship a single landing page")))
+                        cont.yield(.done(runId: "r1", unresolved: false, skipped: nil))
+                    }
+                    cont.finish()
+                }
+            }
+        }
+    }
+
     static let failingStreamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { _ in
         AsyncThrowingStream { $0.finish(throwing: CompanyChatStreamError.notSignedIn) }
     }
@@ -94,6 +130,7 @@ enum TeamBuildFixture {
                       grant: Bool = true, runnerDelayNanos: UInt64 = 0, plannerDelayNanos: UInt64 = 0,
                       librarySaverDelayNanos: UInt64 = 5_000_000,
                       planner: (() -> WorkPlan)? = nil,
+                      room roomOverride: ((VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error>)? = nil,
                       initial: CompanyState = CompanyState(brief: CompanyBrief(), departments: [], library: [],
                                                            stage: .idea, companionId: "byte", onboardedAt: Date()))
     -> CompanyStore {
@@ -103,7 +140,7 @@ enum TeamBuildFixture {
             tasksSaver: { _, _ in true },
             chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
             chatStreamer: failingStreamer,
-            vcRunner: room(decision, briefs: briefs, probe: probe),
+            vcRunner: roomOverride ?? room(decision, briefs: briefs, probe: probe),
             taskRunner: { req in
                 probe.runs.append(req)
                 if runnerDelayNanos > 0 { try? await Task.sleep(nanoseconds: runnerDelayNanos) }
@@ -658,5 +695,63 @@ final class TeamBuildStoreTests: XCTestCase {
         XCTAssertFalse(s.teamBuildAvailable)
         await s.hydrate(companyId: "other")
         XCTAssertTrue(s.teamBuildAvailable, "account B's button is disabled by account A's plan")
+    }
+
+    // MARK: - CP-027: the press is visible until the room lands
+
+    /// Between the press and the router's hand-off the room has no message of its own, so for the
+    /// 60-70 s the router takes there was nothing on screen but byte's first reply — the build 4
+    /// "Team Build looks frozen" report. `isConveningTeamRoom` covers exactly that stretch.
+    func testATeamBuildShowsAsConveningUntilTheRouterHandsOff() async {
+        let probe = F.Probe(), gate = F.Gate(), hold = F.Gate()
+        let s = F.store(probe: probe, root: root,
+                        room: F.gatedRoom("multi_agent", gate: gate, hold: hold, probe: probe))
+        await s.hydrate(companyId: "u")
+        XCTAssertFalse(s.isConveningTeamRoom, "nothing is convening before the press")
+
+        await s.startTeamBuild("pants page", language: .en)
+        let parked = await F.waitFor { gate.isWaiting }
+        XCTAssertTrue(parked, "the room never reached its routing call")
+        XCTAssertTrue(s.isConveningTeamRoom, "while the router decides, the press must show")
+
+        gate.open()
+        let landed = await F.waitFor { s.chatMessages.contains { $0.vcRun != nil } && hold.isWaiting }
+        XCTAssertTrue(landed, "the room card never landed")
+        XCTAssertFalse(s.isConveningTeamRoom, "the room card takes over once it is on screen")
+        hold.open()
+        let planned = await F.waitFor { s.teamRun?.run?.phase == .planned }
+        XCTAssertTrue(planned, "the run never reached its plan")
+    }
+
+    /// The router can send the ask elsewhere (the escape hatch). No room is coming, so the
+    /// convening row must not outlive that answer.
+    func testConveningEndsWhenTheRouterDeclinesTheRoom() async {
+        let probe = F.Probe(), gate = F.Gate()
+        let s = F.store(probe: probe, root: root, room: F.gatedRoom("single_agent", gate: gate, probe: probe))
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let parked = await F.waitFor { gate.isWaiting }
+        XCTAssertTrue(parked, "the room never reached its routing call")
+
+        gate.open()
+        let cleared = await F.waitFor { !s.isConveningTeamRoom }
+        XCTAssertTrue(cleared, "a declined room left the convening row up")
+        XCTAssertFalse(s.chatMessages.contains { $0.vcRun != nil }, "precondition: no room was shown")
+    }
+
+    /// A sidecar that dies before routing leaves no room at all. The row must end with the run,
+    /// or it would tick forever above "The team couldn't finish meeting".
+    func testConveningEndsWhenTheRoomFailsBeforeRouting() async {
+        let probe = F.Probe(), gate = F.Gate()
+        let s = F.store(probe: probe, root: root,
+                        room: F.gatedRoom("multi_agent", gate: gate, fails: true, probe: probe))
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let parked = await F.waitFor { gate.isWaiting }
+        XCTAssertTrue(parked, "the room never reached its routing call")
+
+        gate.open()
+        let cleared = await F.waitFor { !s.isConveningTeamRoom }
+        XCTAssertTrue(cleared, "a failed room left the convening row up")
     }
 }

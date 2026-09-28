@@ -384,6 +384,12 @@ final class CompanyStore: ObservableObject {
     /// the transcript's "Planning the work…" row reads. Deliberately NOT `planningTeamBuildId !=
     /// nil`: that also covers the room itself, which has its own card.
     @Published private(set) var isPlanningTeamBuild = false
+    /// True from the moment a Team Build's room starts until that room is on screen — its own
+    /// message lands on the router's hand-off — or it ends without one (the router declined, the
+    /// run failed). The router is its own `claude -p` call and takes 60-70 s, and until it
+    /// answers the room has no message: before this row that stretch showed nothing but byte's
+    /// first reply, which read as a frozen Team Build (build 4 test board, CP-027).
+    @Published private(set) var isConveningTeamRoom = false
     private let teamPlanner: (TeamPlanRequest) async -> WorkPlan?
     private let teamRunsSaver: (String, [TeamRun]) async -> Bool
     /// The thread list between launches — see `ChatThreadArchive`.
@@ -599,6 +605,7 @@ final class CompanyStore: ObservableObject {
             pendingTeamBuild = nil
             planningTeamBuildId = nil
             isPlanningTeamBuild = false
+            isConveningTeamRoom = false
             // This account's own history. The conversation on screen starts new — RECENT
             // holds the rest — so a relaunch never drops the founder mid-thread with a card
             // whose live half is gone.
@@ -2577,6 +2584,7 @@ final class CompanyStore: ObservableObject {
         // Taken here, synchronously, so the Team build press belongs to THIS room and no other.
         let teamBuild = pendingTeamBuild
         pendingTeamBuild = nil
+        if teamBuild != nil { isConveningTeamRoom = true }
         let vcTask = Task { [weak self] () -> Void in
             var state = VirtualCompanyRunState()
             do {
@@ -2588,6 +2596,8 @@ final class CompanyStore: ObservableObject {
                     guard let self else { return }
                     await self.publishRunProgress(state, roomMessageId: roomMessageId,
                                                   anchorId: anchorId, cid: cid, language: language)
+                    // The room's own card is on screen from this frame on and carries the wait.
+                    if teamBuild != nil, state.handsOffToRoom { self.isConveningTeamRoom = false }
                 }
             } catch {
                 // A failed run must never damage the chat (spec §7). 503 is the kill
@@ -2609,6 +2619,9 @@ final class CompanyStore: ObservableObject {
                 await self?.publishRunProgress(state, roomMessageId: roomMessageId,
                                                anchorId: anchorId, cid: cid, language: language)
             }
+            // Declined, failed before routing, or cancelled: no card is coming, so the row ends
+            // with the run rather than ticking over whatever the chat says next.
+            if teamBuild != nil { self?.isConveningTeamRoom = false }
             if let teamBuild { self?.teamBuildRoomEnded(state, pending: teamBuild) }
             // The room lands after its turn's flush; without this its conclusion reaches the
             // archive only if the founder sends another message.
@@ -4368,6 +4381,7 @@ final class CompanyStore: ObservableObject {
         pendingTeamBuild = nil
         planningTeamBuildId = nil
         isPlanningTeamBuild = false
+        isConveningTeamRoom = false
         // Session state about the OUTGOING founder. Leaving it true would mean the
         // next account — empty brief, nothing on record — is never asked at all,
         // because `hydrate` only ever sets it from the incoming company's flag and a

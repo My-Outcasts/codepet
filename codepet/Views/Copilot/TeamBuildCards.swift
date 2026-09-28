@@ -189,13 +189,14 @@ struct TeamRunCard: View {
                     .foregroundColor(CodepetTheme.mutedText)
             }
             let compact = TeamProgress.compacts(run.phase)
+            let stopped = run.phase == .cancelled
             if !run.plan.summary.isEmpty {
                 // Two lines while compacted: the brief is context, and the whole of it is one
                 // click away in the plan the founder already approved.
                 Text(run.plan.summary)
                     .font(CodepetTheme.inter(12.5))
                     .foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit(compact && !showAllSteps ? 2 : nil)
+                    .lineLimit((compact || stopped) && !showAllSteps ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Only the rows tick; the footer (which reads the disk on `.ready`) does not.
@@ -203,8 +204,14 @@ struct TeamRunCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     if compact {
                         progressSummary(run, now: context.date)
+                    } else if stopped {
+                        // What happened, not six "Cancelled" pills (CP-034).
+                        Text(TeamBuildCopy.stoppedSummary(run, lang: lang))
+                            .font(CodepetTheme.inter(13))
+                            .foregroundColor(CodepetTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    if !compact || showAllSteps {
+                    if !(compact || stopped) || showAllSteps {
                         ForEach(run.plan.steps) { step in
                             row(step, run: run, now: context.date)
                             if step.id == WorkPlan.buildStepId, run.phase == .assembling {
@@ -216,7 +223,7 @@ struct TeamRunCard: View {
                     }
                 }
             }
-            if compact {
+            if compact || stopped {
                 Button { withAnimation(.easeOut(duration: 0.15)) { showAllSteps.toggle() } } label: {
                     Text(TeamBuildCopy.allSteps(run.plan.steps.count, expanded: showAllSteps, lang: lang)
                          + (showAllSteps ? "" : " ›"))
@@ -396,7 +403,12 @@ struct TeamRunCard: View {
                 }
             }
         case .cancelled:
-            if interrupted { continueButton }
+            HStack(spacing: 8) {
+                if interrupted { continueButton }
+                TeamCardButton(title: vi ? "Bỏ lượt này" : "Discard") {
+                    Task { await companyStore.discardTeamRun() }
+                }
+            }
         }
     }
 

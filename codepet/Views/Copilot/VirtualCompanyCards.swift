@@ -34,7 +34,7 @@ struct VCProgressRow: View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small).scaleEffect(0.7)
             Text(stage.label(lang))
-                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                .font(CodepetTheme.inter(12, weight: .semibold))
                 .foregroundColor(CodepetTheme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 6)
@@ -266,7 +266,7 @@ struct VCRunCards: View {
                         // not there. Real state only (rule 8).
                         HStack(alignment: .firstTextBaseline, spacing: 5) {
                             Text("\(done)")
-                                .font(CodepetTheme.inter(24, weight: .semibold))
+                                .font(CodepetTheme.inter(22, weight: .semibold))
                                 .tracking(-0.6)
                                 .monospacedDigit()
                                 .foregroundColor(CodepetTheme.primaryText)
@@ -339,7 +339,7 @@ struct VCRunCards: View {
             HStack(spacing: 5) {
                 ForEach(roster, id: \.agentId) { meta in
                     Text(displayName(meta).uppercased())
-                        .font(CodepetTheme.inter(8.5, weight: .semibold))
+                        .font(CodepetTheme.inter(10, weight: .semibold))
                         .tracking(0.7)
                         .foregroundColor(answered(meta.agentId) ? accent(meta) : CodepetTokens.faint)
                         .lineLimit(1)
@@ -354,7 +354,7 @@ struct VCRunCards: View {
     private func footCell(key: String, value: String, unit: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key)
-                .font(CodepetTheme.inter(9, weight: .semibold)).tracking(1)
+                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                 .foregroundColor(CodepetTokens.faint)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
@@ -404,7 +404,7 @@ struct VCRunCards: View {
             // a personal name, so setting it in full weight stays inside the rule.
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayName(entry.meta).uppercased())
-                    .font(CodepetTheme.inter(11.5, weight: .semibold))
+                    .font(CodepetTheme.inter(11, weight: .semibold))
                     .tracking(0.6)
                     .foregroundColor(accent(entry.meta))
                     .lineLimit(1)
@@ -513,7 +513,7 @@ struct VCRunCards: View {
             }
             if !agreed.isEmpty {
                 Text(agreedLine(agreed))
-                    .font(CodepetTheme.inter(12.5))
+                    .font(CodepetTheme.inter(12))
                     .foregroundColor(hue)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -634,7 +634,7 @@ struct VCRunCards: View {
         case .failed:    fg = Color.red;                 bg = Color.red.opacity(0.14)
         }
         return Text(status.label(lang))
-            .font(CodepetTheme.inter(9, weight: .semibold))
+            .font(CodepetTheme.inter(10, weight: .semibold))
             .foregroundColor(fg)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(bg))
@@ -649,7 +649,7 @@ struct VCRunCards: View {
             ForEach(routing.agentMeta, id: \.agentId) { meta in
                 if let why = routing.reasonPerAgent[meta.agentId] {
                     Text("✓ \(displayName(meta)) — \(why)")
-                        .font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                        .font(CodepetTheme.inter(13)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -661,7 +661,7 @@ struct VCRunCards: View {
                 // on every redraw of a live card.
                 ForEach(routing.excluded.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
                     Text("✗ \(roleName(entry.key)) — \(entry.value)")
-                        .font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                        .font(CodepetTheme.inter(13)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -669,7 +669,7 @@ struct VCRunCards: View {
             if !routing.missingInfo.isEmpty {
                 Text((lang == .vi ? "Còn thiếu: " : "Missing: ")
                      + routing.missingInfo.joined(separator: "; "))
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                    .font(CodepetTheme.inter(13)).lineSpacing(5)
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -681,7 +681,7 @@ struct VCRunCards: View {
             VStack(alignment: .leading, spacing: 8) {
                 label(lang == .vi ? "CÂU HỎI THẬT" : "THE REAL QUESTION")
                 Text(routing.realQuestion)
-                    .font(CodepetTheme.inter(16.5, weight: .semibold)).lineSpacing(6)
+                    .font(CodepetTheme.inter(15, weight: .semibold)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.primaryText)
                 ForEach(routing.agentMeta, id: \.agentId) { meta in
                     if let why = routing.reasonPerAgent[meta.agentId] {
@@ -703,14 +703,14 @@ struct VCRunCards: View {
                     label(lang == .vi ? "KHÔNG MỜI, VÌ" : "NOT IN THE ROOM, BECAUSE")
                     ForEach(routing.excluded.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
                         Text("✗ \(roleName(entry.key)) — \(entry.value)")
-                            .font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                            .font(CodepetTheme.inter(13)).lineSpacing(5)
                             .foregroundColor(CodepetTheme.mutedText)
                     }
                 }
                 if !routing.missingInfo.isEmpty {
                     Text((lang == .vi ? "Còn thiếu: " : "Missing: ")
                          + routing.missingInfo.joined(separator: "; "))
-                        .font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                        .font(CodepetTheme.inter(13)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.mutedText)
                 }
             }
@@ -772,7 +772,7 @@ struct VCRunCards: View {
                         // name is a large part of why the current cards feel heavy. In the
                         // screenshots "Finance" renders bigger than the decision headline
                         // above it, which inverts the hierarchy. A row needs a row-sized name.
-                        Text(name).font(CodepetTheme.inter(13.5, weight: .semibold))
+                        Text(name).font(CodepetTheme.inter(13, weight: .semibold))
                             .foregroundColor(CodepetTheme.primaryText)
                         Text(stance)
                             .font(CodepetTheme.inter(11, weight: .semibold))
@@ -789,10 +789,10 @@ struct VCRunCards: View {
                 .cursorOnHover(.pointingHand)
                 if open {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(position).font(CodepetTheme.inter(14.5)).lineSpacing(6)
+                        Text(position).font(CodepetTheme.inter(14)).lineSpacing(6)
                             .foregroundColor(CodepetTheme.bodyText)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(cost).font(CodepetTheme.inter(13.5)).lineSpacing(5)
+                        Text(cost).font(CodepetTheme.inter(13)).lineSpacing(5)
                             .foregroundColor(CodepetTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                         if let blocker {
@@ -853,7 +853,7 @@ struct VCRunCards: View {
                 }
                 if !agreed.isEmpty {
                     Text(agreedLine(agreed))
-                        .font(CodepetTheme.inter(12.5))
+                        .font(CodepetTheme.inter(12))
                         .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
@@ -916,7 +916,7 @@ struct VCRunCards: View {
                     // furniture around an absence (founder screenshot, Aug 6). One muted line now.
                     if Self.isUnusable(turn) {
                         Text(unusableLine(turn.agent))
-                            .font(CodepetTheme.inter(12.5)).foregroundColor(CodepetTokens.faint)
+                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTokens.faint)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text("\(displayName(agentId: turn.agent)): \(turn.preciseDisagreement)")
@@ -924,14 +924,14 @@ struct VCRunCards: View {
                         // Each field only earns its heading when it has something under it.
                         if !turn.proposal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text((lang == .vi ? "Đề xuất: " : "Proposes: ") + turn.proposal)
-                                .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                                .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                         }
                         // Contract rule 4: show each side's what_would_change_my_mind —
                         // it teaches that disagreement is settled by evidence, not authority.
                         if !turn.whatWouldChangeMyMind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text((lang == .vi ? "Điều gì sẽ đổi ý họ: " : "What would change their mind: ")
                                  + turn.whatWouldChangeMyMind)
-                                .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                                .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                         }
                     }
                 }
@@ -947,7 +947,7 @@ struct VCRunCards: View {
                 label(verdict.planIsSound
                       ? (lang == .vi ? "NGƯỜI PHẢN BIỆN — ĐỒNG Ý" : "THE CHALLENGER — ENDORSES")
                       : (lang == .vi ? "NGƯỜI PHẢN BIỆN" : "THE CHALLENGER"))
-                Text(verdict.loadBearingAssumption).font(CodepetTheme.inter(14.5, weight: .medium)).lineSpacing(6)
+                Text(verdict.loadBearingAssumption).font(CodepetTheme.inter(15, weight: .medium)).lineSpacing(6)
                     .foregroundColor(CodepetTheme.primaryText)
                 if verdict.planIsSound {
                     Text(lang == .vi ? "Đã kiểm — kế hoạch vững." : "Stress-tested — the plan holds.")
@@ -957,7 +957,7 @@ struct VCRunCards: View {
                         .foregroundColor(CodepetTheme.bodyText)
                 }
                 Text((lang == .vi ? "Cách kiểm rẻ nhất: " : "Cheapest test: ") + verdict.cheapestTest)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 if !verdict.objections.isEmpty {
                     label(lang == .vi ? "CÁC PHẢN BÁC" : "OBJECTIONS")
                     ForEach(Array(verdict.objections.enumerated()), id: \.offset) { idx, objection in
@@ -966,10 +966,10 @@ struct VCRunCards: View {
                     }
                 }
                 Text((lang == .vi ? "Nếu thất bại: " : "If this fails: ") + verdict.failurePostMortem)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
                 Text((lang == .vi ? "Ai không có trong phòng: " : "Who's not in the room: ")
                      + verdict.whoIsNotInTheRoom)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
             }
         }
     }
@@ -993,7 +993,7 @@ struct VCRunCards: View {
                 // first sentence IS the call; everything after it is reasoning, and reasoning
                 // belongs in the reader.
                 Text(BriefDocument.headline(brief.recommendation))
-                    .font(CodepetTheme.inter(16, weight: .semibold)).lineSpacing(4)
+                    .font(CodepetTheme.inter(15, weight: .semibold)).lineSpacing(4)
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 // Contract rule 7: confidence as dots, not a number. The REASON moves to the
@@ -1042,7 +1042,7 @@ struct VCRunCards: View {
                     } else if state.canLockIn {
                         Button(action: onLockIn) {
                             Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
-                                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                                .font(CodepetTheme.inter(12, weight: .semibold))
                                 .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                                 .padding(.horizontal, 14).padding(.vertical, 9)
                                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1057,7 +1057,7 @@ struct VCRunCards: View {
                                 Image(systemName: "doc.text").font(.system(size: 11, weight: .semibold))
                                 Text(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call")
                             }
-                            .font(CodepetTheme.inter(12.5, weight: .semibold))
+                            .font(CodepetTheme.inter(12, weight: .semibold))
                             .foregroundColor(CodepetTheme.accentPurple)
                         }
                         .buttonStyle(.plain)
@@ -1072,7 +1072,7 @@ struct VCRunCards: View {
 
     // Written for the founder by the backend — shown verbatim (contract).
     private func stoppedRow(_ reason: String) -> some View {
-        Text(reason).font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+        Text(reason).font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
     }
 
     // Contract: `error` is terminal, no `done` follows — this is the only signal
@@ -1090,7 +1090,7 @@ struct VCRunCards: View {
 
     private func errorRow(_ meta: VCAgentMeta, _ error: String) -> some View {
         Text("\(displayName(meta)): \(error)")
-            .font(CodepetTheme.inter(13.5)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
+            .font(CodepetTheme.inter(13)).lineSpacing(5).foregroundColor(CodepetTheme.mutedText)
     }
 
     private func label(_ text: String) -> some View {

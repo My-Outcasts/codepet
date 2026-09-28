@@ -92,6 +92,10 @@ export interface RunTaskArgs {
   reviseNote?: string;
   /** The current draft's body being revised. Required alongside reviseNote for a revise pass. */
   current?: string;
+  /** The kind of the deliverable being revised, and its structured payload. Without them "keep
+   *  the same kind" names no kind: a LIVE site revised from its body alone came back a doc. */
+  currentKind?: string;
+  currentPayload?: unknown;
   /** Owning department key of the task, so the deliverable comes from that function's
    *  expertise rather than generic company context. Unknown/absent → no department block. */
   deptKey?: string | null;
@@ -126,6 +130,20 @@ const orList = (xs: readonly string[]): string =>
       ? `${xs[0]} or ${xs[1]}`
       : `${xs.slice(0, -1).join(", ")}, or ${xs[xs.length - 1]}`;
 
+/**
+ * The kind a revise pass must keep, or undefined. Only a REAL revise (note and current body both
+ * present — the same guard the prompt uses), only a kind the vocabulary knows, and only one the
+ * task's department may still produce: pinning a kind the contract closed would put back exactly
+ * what `coerceKindForDepartment` exists to take out.
+ */
+export function revisePin(args: {
+  reviseNote?: string; current?: string; currentKind?: string; deptKey?: string | null;
+}): string | undefined {
+  const k = typeof args.currentKind === "string" ? args.currentKind.trim() : "";
+  if (!args.reviseNote?.trim() || !args.current?.trim() || !DELIVERABLE_KINDS.has(k)) return undefined;
+  return coerceKindForDepartment(args.deptKey, k) === k ? k : undefined;
+}
+
 /** Build the companion-voiced generation prompt for a single roadmap task. */
 export function buildRunTaskPrompt(args: RunTaskArgs): string {
   const c = companionFor(args.companionId);
@@ -155,9 +173,25 @@ export function buildRunTaskPrompt(args: RunTaskArgs): string {
   const current = clip(args.current, 6000);
   // Only a real revise pass when we have BOTH the note and the draft it applies to — mirrors
   // web's guard (lib/ai/runTaskPrompt.ts). Without both, behavior is identical to today.
+  // A revise that knows the kind it is revising names it, and hands over the payload the kind
+  // renders from — a site IS its payload; the body is only its copy. An unknown kind keeps the
+  // original wording rather than naming something the contract does not have.
+  const pinned = revisePin(args);
+  // The app nests each rich kind's fields under the kind's own key (`{"site": {...}}`); the
+  // schema the model answers in is flat, so the nested form is unwrapped before it is shown.
+  const raw = args.currentPayload && typeof args.currentPayload === "object"
+    ? args.currentPayload as Record<string, unknown> : undefined;
+  const nested = pinned && raw && raw[pinned] && typeof raw[pinned] === "object" ? raw[pinned] : raw;
+  const payloadJson = pinned && nested ? clip(JSON.stringify(nested), 4000) : "";
   const revise =
     reviseNote && current
-      ? `\n\nYou are REVISING an existing deliverable. Current version:\n${current}\n\nApply this change: ${reviseNote}. Keep the same kind and intent; return the full revised deliverable (not a diff).`
+      ? pinned
+        ? `\n\nYou are REVISING an existing deliverable of kind "${pinned}". Current version:\n${current}` +
+          (payloadJson ? `\n\nIts current structured payload:\n${payloadJson}` : "") +
+          `\n\nApply this change: ${reviseNote}. Keep kind "${pinned}" and the same intent` +
+          (STRUCTURED_KINDS.has(pinned) ? `, and return the full revised \`payload\` for it too` : "") +
+          `; return the full revised deliverable (not a diff).`
+        : `\n\nYou are REVISING an existing deliverable. Current version:\n${current}\n\nApply this change: ${reviseNote}. Keep the same kind and intent; return the full revised deliverable (not a diff).`
       : "";
 
   // The department this task belongs to, as expertise. A run has always been performed BY a
@@ -425,13 +459,15 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
 export function coerceDeliverable(
   raw: unknown,
   taskTitle: string,
-  deptKey?: string | null
+  deptKey?: string | null,
+  /** A revise pass's kind (`revisePin`): the answer keeps it whatever kind the model named. */
+  pinKind?: string
 ): Deliverable | null {
   const r = (raw ?? {}) as Record<string, unknown>;
   const body = typeof r.body === "string" ? r.body.trim() : "";
   if (!body) return null;
 
-  const rawKind = typeof r.kind === "string" ? r.kind.trim() : "";
+  const rawKind = pinKind ?? (typeof r.kind === "string" ? r.kind.trim() : "");
   // The contract judges the kind first, then the kind vocabulary catches what is left. An
   // out-of-contract kind becomes `doc` — see `coerceKindForDepartment`, which explains why the
   // department's speciality is the wrong answer once the payload has been dropped. `doc` is also

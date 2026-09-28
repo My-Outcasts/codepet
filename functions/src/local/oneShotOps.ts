@@ -96,6 +96,7 @@ import {
   buildRunTaskPrompt,
   coerceDeliverable,
   parseUpstream,
+  revisePin,
 } from "../runTaskCore";
 import {
   OVERVIEW_TOOL,
@@ -367,6 +368,8 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
           taskDetail: typeof body.task_detail === "string" ? body.task_detail : "",
           reviseNote: typeof body.revise_note === "string" ? body.revise_note : undefined,
           current: typeof body.current === "string" ? body.current : undefined,
+          currentKind: typeof body.current_kind === "string" ? body.current_kind : undefined,
+          currentPayload: body.current_payload,
           deptKey,
           // The third place. Miss it and the local path — the DEFAULT for a founder running
           // on their own Claude plan — silently drops the field on the transport nobody curls.
@@ -386,11 +389,16 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       // `dept_key` narrowed exactly as `plan` above narrows it, for the same reason: the
       // department's output contract has to judge the reply on this transport too, and the
       // local path is the default for a founder running on their own Claude plan.
-      const deliverable = coerceDeliverable(
-        parsed,
-        taskTitle,
-        typeof body?.dept_key === "string" ? body.dept_key : undefined
-      );
+      const deptKey = typeof body?.dept_key === "string" ? body.dept_key : undefined;
+      // Narrowed exactly as `plan` narrows it, so the kind the prompt asked to keep is the kind
+      // the answer is held to — the model cannot be forced to a field value on this transport.
+      const pin = revisePin({
+        reviseNote: typeof body?.revise_note === "string" ? body.revise_note : undefined,
+        current: typeof body?.current === "string" ? body.current : undefined,
+        currentKind: typeof body?.current_kind === "string" ? body.current_kind : undefined,
+        deptKey,
+      });
+      const deliverable = coerceDeliverable(parsed, taskTitle, deptKey, pin);
       if (!deliverable) throw new OneShotUnusableAnswer("no deliverable in the reply");
       return deliverable;
     },

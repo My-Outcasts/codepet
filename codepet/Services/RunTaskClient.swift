@@ -117,6 +117,11 @@ struct RunTaskRequest: Codable {
     /// The current draft body, sent alongside `reviseNote` so the CF revises in
     /// place instead of regenerating from scratch. `nil` on a blind redo/first run.
     var current: String? = nil
+    /// The kind and payload of what is being revised, sent alongside `current`. The prompt used
+    /// to say "keep the same kind" without naming one, and a LIVE site revised from its markdown
+    /// body alone came back a doc (build 4, 28 Sep). `nil` on a blind redo/first run.
+    var currentKind: String? = nil
+    var currentPayload: DeliverablePayload? = nil
     /// The owning department of the task being run (a `DepartmentCatalog` key), so the
     /// deliverable is produced with that department's expertise rather than generic
     /// company context. nil for a legacy dept-less task, which omits the key entirely.
@@ -145,6 +150,8 @@ struct RunTaskRequest: Codable {
         case taskDetail = "task_detail"
         case reviseNote = "revise_note"
         case current
+        case currentKind = "current_kind"
+        case currentPayload = "current_payload"
         case deptKey = "dept_key"
         // A stored property missing from this enum is not a compile error and not a runtime
         // error — it is simply never encoded. `UpstreamWorkTests` encodes the whole request

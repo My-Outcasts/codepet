@@ -53,13 +53,33 @@ struct MarkdownView: View {
                 .lineSpacing(DeliverableStyle.leading)
                 .foregroundColor(CodepetTheme.bodyText)
         case let .table(header, alignments, rows):
-            // Scrolls sideways rather than squeezing: a five-column cost table in a 460pt
-            // sheet would otherwise wrap every cell to a word per line — the run-on problem
-            // again in a different shape.
-            ScrollView(.horizontal, showsIndicators: false) {
-                MarkdownTableView(header: header, alignments: alignments, rows: rows,
-                                  inline: inline)
-                    .padding(.vertical, 2)
+            // FIT first, scroll last. Each candidate narrows the cells a step, and the first whose
+            // ideal width fits is the one drawn — so a 4-column cost table wraps its cells inside
+            // a 460pt sheet instead of parking its $ columns off to the right. That is what build 4
+            // shipped: always a hidden-indicator scroll at 240pt a cell, so "Rate assumed" and
+            // "Per session" were reachable only by a sideways trackpad swipe nobody knew to make.
+            // Below `MarkdownTableView.fitCaps.last` a cell is a word per line — the run-on
+            // problem in a different shape — so past that it scrolls, and SAYS so: a visible
+            // scroller and a fade at the trailing edge.
+            ViewThatFits(in: .horizontal) {
+                ForEach(MarkdownTableView.fitCaps, id: \.self) { cap in
+                    MarkdownTableView(header: header, alignments: alignments, rows: rows,
+                                      inline: inline, maxCell: cap)
+                        .padding(.vertical, 2)
+                }
+                ScrollView(.horizontal, showsIndicators: true) {
+                    MarkdownTableView(header: header, alignments: alignments, rows: rows,
+                                      inline: inline, maxCell: MarkdownTableView.fitCaps.last ?? 90)
+                        .padding(.vertical, 2)
+                        .padding(.trailing, 28)
+                        .padding(.bottom, 10)   // room for the scroller under the last row
+                }
+                .overlay(alignment: .trailing) {
+                    LinearGradient(colors: [CodepetTheme.surface.opacity(0), CodepetTheme.surface],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 28)
+                        .allowsHitTesting(false)
+                }
             }
         }
     }
@@ -91,6 +111,8 @@ struct MarkdownTableView: View {
     /// `MarkdownView`'s inline renderer, so cells get the same emphasis and blank tinting.
     let inline: (String) -> Text
     var maxCell: CGFloat = 240
+    /// The cell caps `MarkdownView` tries in turn, widest first, before it falls back to a scroll.
+    static let fitCaps: [CGFloat] = [240, 180, 140, 110, 90]
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {

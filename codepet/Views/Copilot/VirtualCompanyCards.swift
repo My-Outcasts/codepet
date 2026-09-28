@@ -59,6 +59,12 @@ struct VCRunCards: View {
     /// cannot un-consume it.
     let lockedIn: Bool
     let onLockIn: () -> Void
+    /// Set by the chat (CP-032): the landed room shows department chips and one "How the team
+    /// decided" link, and the four disclosures move into the side panel this opens. Nil keeps
+    /// the disclosures inline — a surface with nowhere to open a panel loses nothing.
+    var onOpenRecord: ((RoomRecordTab) -> Void)? = nil
+    /// Set by `RoomRecordPanel`: render that tab's content instead of the chat cards.
+    var recordTab: RoomRecordTab? = nil
     #if DEBUG
     /// Test seam only. `Disclosure`'s `open` is `@State`, seeded once at first render —
     /// a render test builds a fresh view hierarchy every time, so there is no other way
@@ -117,7 +123,13 @@ struct VCRunCards: View {
 
     private var cards: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let brief = state.brief {
+            if let tab = recordTab {
+                recordContent(tab)
+            } else if let brief = state.brief, let open = onOpenRecord {
+                theCall(brief)
+                landedDisagreement(brief)
+                recordChips(open)
+            } else if let brief = state.brief {
                 theCall(brief)
                 // ONE card, not two — see `landedDisagreement`. `conflictCard` is now the
                 // in-flight rendering only, where there is no narrative to duplicate.
@@ -448,6 +460,64 @@ struct VCRunCards: View {
     /// Every department's full position, verbatim and individually — contract rule 2 forbids
     /// summarising them into one paragraph, and a disclosure is a place to put them, not a
     /// licence to condense them.
+    /// The landed room's way into its record (CP-032): one chip per department, with a dot for
+    /// how it came out, and one link. A chip opens the stances; the link does too.
+    private func recordChips(_ open: @escaping (RoomRecordTab) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            WrapLayout(spacing: 6, rowSpacing: 6) {
+                ForEach(RoomRecord.chips(state), id: \.agentId) { chip in
+                    Button { open(.stances) } label: {
+                        HStack(spacing: 6) {
+                            Circle().fill(outcomeColor(chip.outcome)).frame(width: 6, height: 6)
+                            Text(displayName(chip.meta))
+                                .font(CodepetTheme.inter(12, weight: .medium))
+                                .foregroundColor(CodepetTheme.bodyText)
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(CodepetTheme.surface))
+                        .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .cursorOnHover(.pointingHand)
+                    .help(chip.outcome == .noAnswer ? "" : stanceLabel(state.positions[chip.agentId]?.stance ?? ""))
+                }
+            }
+            Button { open(.stances) } label: {
+                Text(RoomRecord.linkTitle(lang))
+                    .font(CodepetTheme.inter(13, weight: .medium))
+                    .foregroundColor(CodepetTheme.accentPurple)
+            }
+            .buttonStyle(.plain)
+            .cursorOnHover(.pointingHand)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func outcomeColor(_ o: RoomRecord.Outcome) -> Color {
+        switch o {
+        case .agreed: return CodepetTheme.accentGreen
+        case .withConditions: return CodepetTheme.accentGold
+        case .against: return CodepetTheme.accentOrange
+        case .noAnswer: return CodepetTheme.mutedText
+        }
+    }
+
+    /// One tab of the side panel. Every view here already existed inside the four disclosures;
+    /// only where it is drawn changed.
+    @ViewBuilder private func recordContent(_ tab: RoomRecordTab) -> some View {
+        switch tab {
+        case .stances:
+            departmentsSaid
+        case .disagreements:
+            if let brief = state.brief { landedDisagreement(brief) }
+            if !state.conflicts.isEmpty { conflictCard }
+        case .record:
+            if let routing = state.routing { routingCard(routing) }
+            ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+            if let verdict = state.verdict { verdictCard(verdict) }
+        }
+    }
+
     private var departmentsSaid: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(state.agents.enumerated()), id: \.element.agentId) { i, meta in
@@ -1163,3 +1233,54 @@ struct VCRunCards: View {
         }
     }
 }
+
+/// "How the team decided" (CP-032): the landed room's record, in the side column the pane
+/// already uses for a Team Build step, or a sheet in the dock.
+struct RoomRecordPanel: View {
+    let state: VirtualCompanyRunState
+    @Binding var tab: RoomRecordTab
+    let onClose: () -> Void
+
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(lang == .vi ? "Cả đội đã quyết định thế nào" : "How the team decided")
+                    .font(CodepetTheme.inter(CodepetType.title3, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                .buttonStyle(.plain)
+                .help(lang == .vi ? "Đóng" : "Close")
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+            HStack(spacing: 2) {
+                ForEach(RoomRecordTab.allCases) { t in
+                    Button { tab = t } label: {
+                        Text(t.title(state, lang: lang))
+                            .font(CodepetTheme.inter(12, weight: tab == t ? .semibold : .regular))
+                            .foregroundColor(tab == t ? CodepetTheme.primaryText : CodepetTheme.mutedText)
+                            .padding(.horizontal, 8).padding(.vertical, 6)
+                            .overlay(alignment: .bottom) {
+                                if tab == t { Rectangle().fill(CodepetTheme.accentPurple).frame(height: 2) }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            Divider().overlay(CodepetTheme.hairline)
+            ScrollView {
+                VCRunCards(state: state, lockedIn: false, onLockIn: {}, recordTab: tab)
+                    .padding(.horizontal, 6).padding(.vertical, 12)
+            }
+        }
+        .background(CodepetTheme.pageBackground)
+    }
+}
+

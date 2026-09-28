@@ -23,6 +23,8 @@ struct CopilotChatView: View {
     @State private var showHistory = false
     /// The Team Build step whose detail is open — a side column in the pane, a sheet in the dock.
     @State private var teamDetailStepId: String?
+    /// A landed room's record, open in the side column (pane) or a sheet (dock) — CP-032.
+    @State private var roomRecord: RoomRecordSelection?
     /// The team run last drawn at the transcript's bottom, and the conversation it was drawn in
     /// (`transcriptKey`). Keeps a restored run's card on screen through Stop and Approve, which
     /// move it out of the "active or ready" set that put it there — in THAT conversation only
@@ -172,7 +174,8 @@ struct CopilotChatView: View {
         // each site would be asking two different questions and getting two different
         // answers — and these two must line up exactly.
         GeometryReader { geo in
-            let column = ChatColumn.textWidth(forBox: geo.size.width - (showsTeamSideColumn ? Self.teamSideWidth : 0),
+            let column = ChatColumn.textWidth(forBox: geo.size.width - (showsTeamSideColumn ? Self.teamSideWidth : 0)
+                                                  - (showsRoomRecordColumn ? Self.roomRecordWidth : 0),
                                               surface: surface)
             VStack(spacing: 0) {
                 // Two-mode has no dock to collapse and no history icon: the rail's
@@ -240,6 +243,11 @@ struct CopilotChatView: View {
                             TeamStepDetailPanel(coordinator: c, stepId: id) { teamDetailStepId = nil }
                                 .frame(width: Self.teamSideWidth)
                         }
+                        if showsRoomRecordColumn, let run = roomRecordState {
+                            Divider().overlay(CodepetTheme.hairline)
+                            RoomRecordPanel(state: run, tab: roomRecordTab) { roomRecord = nil }
+                                .frame(width: Self.roomRecordWidth)
+                        }
                     }
                 }
             }
@@ -247,6 +255,15 @@ struct CopilotChatView: View {
         }
         // A newer run replaces the old one: its step ids mean nothing any more.
         .onChange(of: companyStore.teamRun?.run?.id) { _, _ in teamDetailStepId = nil }
+        // One side column at a time: opening a step closes the room's record, and back.
+        .onChange(of: teamDetailStepId) { _, id in if id != nil { roomRecord = nil } }
+        .onChange(of: roomRecord?.id) { _, id in if id != nil { teamDetailStepId = nil } }
+        .sheet(item: roomRecordSheet) { _ in
+            if let run = roomRecordState {
+                RoomRecordPanel(state: run, tab: roomRecordTab) { roomRecord = nil }
+                    .frame(minWidth: 380, idealWidth: 460, minHeight: 460, idealHeight: 620)
+            }
+        }
         .sheet(item: teamDetailSheet) { sel in
             if let c = companyStore.teamRun {
                 TeamStepDetailPanel(coordinator: c, stepId: sel.id) { teamDetailStepId = nil }
@@ -863,6 +880,28 @@ struct CopilotChatView: View {
     }
 
     static let teamSideWidth: CGFloat = 320
+    /// Wider than a step's detail: the record holds whole negotiation rounds.
+    static let roomRecordWidth: CGFloat = 380
+
+    /// The open record's room, looked up live so a room still settling updates in the panel;
+    /// nil once its message is gone (a thread switch), which closes the column.
+    private var roomRecordState: VirtualCompanyRunState? {
+        guard let id = roomRecord?.id else { return nil }
+        return companyStore.chatMessages.first { $0.id == id }?.vcRun
+    }
+
+    private var roomRecordTab: Binding<RoomRecordTab> {
+        Binding(get: { roomRecord?.tab ?? .stances }, set: { roomRecord?.tab = $0 })
+    }
+
+    private var showsRoomRecordColumn: Bool {
+        surface == .twoMode && roomRecordState != nil && !showHistory && !isEmptyState
+    }
+
+    private var roomRecordSheet: Binding<RoomRecordSelection?> {
+        Binding(get: { surface == .dock && roomRecordState != nil ? roomRecord : nil },
+                set: { roomRecord = $0 })
+    }
 
     /// The side column shows only in the pane, only on the transcript (not History, not the
     /// empty hero), and only while there is a run to resolve the step against.
@@ -1098,7 +1137,8 @@ struct CopilotChatView: View {
                         CopilotBubble(message: m,
                                       isLast: idx == companyStore.chatMessages.count - 1,
                                       scrollGeneration: scrollGeneration,
-                                      onTeamStepSelect: { teamDetailStepId = $0 })
+                                      onTeamStepSelect: { teamDetailStepId = $0 },
+                                      onRoomRecord: { roomRecord = RoomRecordSelection(id: $0, tab: $1) })
                             .padding(.top, ChatRhythm.extraGap(after: previousRole, before: m.role))
                             .id(m.id)
                         if surface.showsCodingRunCard,
@@ -1499,6 +1539,8 @@ struct CopilotBubble: View {
     let scrollGeneration: Int
     /// A row of a Team Build card was clicked — the owner opens that step's detail.
     var onTeamStepSelect: (String) -> Void = { _ in }
+    /// A landed room's chip or "How the team decided" was pressed (CP-032).
+    var onRoomRecord: (String, RoomRecordTab) -> Void = { _, _ in }
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     /// The draft card's chrome is scheme-dependent (`cardChrome`), so the bubble needs it.
@@ -1667,11 +1709,13 @@ struct CopilotBubble: View {
             // then the room.
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
-                VCRunCards(state: run, lockedIn: message.actionConsumed) {
-                    Task {
-                        await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
-                    }
-                }
+                VCRunCards(state: run, lockedIn: message.actionConsumed,
+                           onLockIn: {
+                               Task {
+                                   await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
+                               }
+                           },
+                           onOpenRecord: { onRoomRecord(message.id, $0) })
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let teamRunId = message.teamRunId {

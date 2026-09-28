@@ -535,6 +535,7 @@ struct TeamStepDetail: View {
 
     @Environment(\.uiLanguage) private var lang
     @State private var openDraft: Deliverable?
+    @State private var showFullAsk = false
 
     var body: some View {
         let vi = lang == .vi
@@ -562,24 +563,8 @@ struct TeamStepDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            section(vi ? "Yêu cầu:" : "Asked for:") {
-                Text(step.instruction)
-                    .font(CodepetTheme.inter(13))
-                    .foregroundColor(CodepetTheme.bodyText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-
-            if !step.dependsOn.isEmpty {
-                section(vi ? "Nhận từ:" : "Receives from:") {
-                    ForEach(step.dependsOn, id: \.self) { id in
-                        if let dep = run.plan.steps.first(where: { $0.id == id }) {
-                            upstream(dep)
-                        }
-                    }
-                }
-            }
-
+            // RESULT FIRST (CP-035). It used to sit under a ~380-word raw instruction and the
+            // upstream steps' pasted markdown, at the bottom of the panel.
             if status == .done, let draft = state?.draft {
                 section(vi ? "Kết quả:" : "Result:") {
                     if DraftPayloadPreview.hasStructuredPreview(draft) {
@@ -590,16 +575,59 @@ struct TeamStepDetail: View {
                                 Text(draft.title)
                                     .font(CodepetTheme.inter(13, weight: .semibold))
                                     .foregroundColor(CodepetTheme.primaryText)
-                                Text(draft.body)
+                                // `Text(String)` prints markdown literally; strip it to prose.
+                                Text(DraftPreview.plain(draft.body, title: draft.title))
                                     .font(CodepetTheme.inter(12.5))
                                     .foregroundColor(CodepetTheme.bodyText)
                                     .lineLimit(10)
                                     .multilineTextAlignment(.leading)
+                                Text(vi ? "Mở toàn bộ ›" : "Open in full ›")
+                                    .font(CodepetTheme.inter(12, weight: .medium))
+                                    .foregroundColor(CodepetTheme.accentPurple)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            section(vi ? "Yêu cầu:" : "Asked for:") {
+                Text(StepAskSummary.summary(step.instruction))
+                    .font(CodepetTheme.inter(13))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if StepAskSummary.isShortened(step.instruction) {
+                    Button { withAnimation(.easeOut(duration: 0.15)) { showFullAsk.toggle() } } label: {
+                        Text(showFullAsk ? (vi ? "Ẩn yêu cầu đầy đủ" : "Hide the full instruction")
+                                         : (vi ? "Yêu cầu đầy đủ gửi cho \(TeamBuildCopy.deptName(step.dept)) ›"
+                                               : "Full instruction sent to \(TeamBuildCopy.deptName(step.dept)) ›"))
+                            .font(CodepetTheme.inter(12, weight: .medium))
+                            .foregroundColor(CodepetTheme.accentPurple)
+                    }
+                    .buttonStyle(.plain)
+                    .cursorOnHover(.pointingHand)
+                    if showFullAsk {
+                        Text(step.instruction)
+                            .font(CodepetTheme.inter(12))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            if !step.dependsOn.isEmpty {
+                // Chips, not pasted markdown: which steps fed this one, and whether each is in.
+                section(vi ? "Dùng kết quả của:" : "Uses work from:") {
+                    WrapLayout(spacing: 6, rowSpacing: 6) {
+                        ForEach(step.dependsOn, id: \.self) { id in
+                            if let dep = run.plan.steps.first(where: { $0.id == id }) {
+                                upstreamChip(dep)
+                            }
+                        }
                     }
                 }
             }
@@ -623,25 +651,29 @@ struct TeamStepDetail: View {
         }
     }
 
-    private func upstream(_ dep: WorkStep) -> some View {
-        let body = run.state(dep.id)?.draft?.body
-        return VStack(alignment: .leading, spacing: 4) {
+    /// One step this step builds on: its department and title, and whether its work is in yet.
+    /// Tapping a finished one opens that work.
+    private func upstreamChip(_ dep: WorkStep) -> some View {
+        let draft = run.state(dep.id)?.draft
+        return Button { if let draft { openDraft = draft } } label: {
             HStack(spacing: 6) {
                 TeamPetAvatar(dept: dep.dept, size: 16)
-                Text(TeamBuildCopy.deptName(dep.dept))
-                    .font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-            }
-            HStack(spacing: 8) {
-                Rectangle().fill(CodepetTheme.accentPurple.opacity(0.5)).frame(width: 2)
-                Text(body.map { String($0.prefix(160)) + ($0.count > 160 ? "…" : "") }
-                     ?? (lang == .vi ? "Chưa có" : "Not ready yet"))
+                Text("\(TeamBuildCopy.deptName(dep.dept)) · \(dep.title)")
                     .font(CodepetTheme.inter(12))
-                    .italic(body != nil)
-                    .foregroundColor(body == nil ? CodepetTheme.mutedText : CodepetTheme.bodyText)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundColor(draft == nil ? CodepetTheme.mutedText : CodepetTheme.primaryText)
+                    .lineLimit(1)
+                if draft == nil {
+                    Text(lang == .vi ? "chưa xong" : "not ready")
+                        .font(CodepetTheme.inter(11))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
             }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Capsule().fill(CodepetTheme.surface))
+            .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .disabled(draft == nil)
     }
 }
 

@@ -498,15 +498,13 @@ struct VCRunCards: View {
         return VStack(alignment: .leading, spacing: 8) {
             label(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
                                 : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
-            if !pairs.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(pairs.enumerated()), id: \.offset) { _, c in
-                        Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b))"
-                             + " · \(kindLabel(c.kind))")
-                            .font(CodepetTheme.inter(12.5, weight: .semibold))
-                            .foregroundColor(hue)
-                    }
-                }
+            // One sentence, not one orange line per pair (CP-030): six "A ↔ B · blocker" rows
+            // for what the narrative below calls two fights. The pairs stay in the full record.
+            if let split = SplitSummary.line(pairs, name: { displayName(agentId: $0) }, lang: lang) {
+                Text(split)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(hue)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !real.isEmpty {
                 Text(real).font(CodepetTheme.inter(14)).lineSpacing(6)

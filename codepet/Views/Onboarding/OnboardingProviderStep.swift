@@ -58,6 +58,24 @@ enum OnboardingProviderStep {
         lang == .vi ? "Sao chép lệnh" : "Copy command"
     }
 
+    /// A provider row's state, per language. These were literals too — the render of the merged
+    /// CP-012 fix still read "Not installed" on both rows of the Vietnamese gate.
+    static func stateLabel(install: CLIStatus.Install, auth: CLIStatus.Auth, probing: Bool,
+                           lang: AppLanguage) -> String {
+        let vi = lang == .vi
+        if probing && install == .missing { return vi ? "Đang kiểm tra…" : "Checking…" }
+        switch install {
+        case .missing:
+            return vi ? "Chưa cài" : "Not installed"
+        case .present:
+            switch auth {
+            case .loggedIn: return vi ? "Đã đăng nhập" : "Signed in"
+            case .loggedOut: return vi ? "Đã cài — chưa đăng nhập" : "Installed — not signed in"
+            case .unknown: return vi ? "Đã cài" : "Installed"
+            }
+        }
+    }
+
     static func gateSubtitle(lang: AppLanguage) -> String {
         lang == .vi
             ? "Codepet chạy mọi việc trên CLI bạn đã có — Claude Code hoặc Codex. Hãy cài một trong hai; Codepet sẽ hỏi bạn trước khi dùng tới hạn mức của bạn."
@@ -129,17 +147,7 @@ struct OnboardingProviderGateView: View {
     /// in `authorised` (always `false` here, since onboarding asks for no grant and would
     /// otherwise misreport a signed-in founder as blocked on "authorise").
     private func stateLabel(for s: CLIStatus) -> String {
-        if probing && s.install == .missing { return "Checking…" }
-        switch s.install {
-        case .missing:
-            return "Not installed"
-        case .present:
-            switch s.auth {
-            case .loggedIn: return "Signed in"
-            case .loggedOut: return "Installed — not signed in"
-            case .unknown: return "Installed"
-            }
-        }
+        OnboardingProviderStep.stateLabel(install: s.install, auth: s.auth, probing: probing, lang: lang)
     }
 
     @ViewBuilder private func installBox(for provider: AIProvider) -> some View {

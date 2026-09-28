@@ -49,4 +49,28 @@ final class OnboardingProviderCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingProviderStep.copyCommandLabel(lang: .en), "Copy command")
         XCTAssertEqual(OnboardingProviderStep.copyCommandLabel(lang: .vi), "Sao chép lệnh")
     }
+
+    private static let signedIn = CLIStatus.Auth.loggedIn(
+        .init(email: nil, authMethod: nil, apiProvider: nil, subscriptionType: nil, orgName: nil))
+
+    /// Found rendering the merged fix (25 Sep): the rows' state labels were literals too, so the
+    /// Vietnamese gate still read "Not installed" on both rows.
+    func testTheRowStateLabelsAreLocalised() {
+        typealias S = OnboardingProviderStep
+        XCTAssertEqual(S.stateLabel(install: .missing, auth: .unknown, probing: false, lang: .vi), "Chưa cài")
+        XCTAssertEqual(S.stateLabel(install: .missing, auth: .unknown, probing: true, lang: .vi), "Đang kiểm tra…")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: Self.signedIn, probing: false, lang: .vi), "Đã đăng nhập")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: .loggedOut, probing: false, lang: .vi), "Đã cài — chưa đăng nhập")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: .unknown, probing: false, lang: .vi), "Đã cài")
+    }
+
+    /// English is unchanged, word for word.
+    func testTheEnglishStateLabelsAreUnchanged() {
+        typealias S = OnboardingProviderStep
+        XCTAssertEqual(S.stateLabel(install: .missing, auth: .unknown, probing: false, lang: .en), "Not installed")
+        XCTAssertEqual(S.stateLabel(install: .missing, auth: .unknown, probing: true, lang: .en), "Checking…")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: Self.signedIn, probing: false, lang: .en), "Signed in")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: .loggedOut, probing: false, lang: .en), "Installed — not signed in")
+        XCTAssertEqual(S.stateLabel(install: .present(version: "1"), auth: .unknown, probing: false, lang: .en), "Installed")
+    }
 }

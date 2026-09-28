@@ -3049,7 +3049,7 @@ final class CompanyStore: ObservableObject {
     /// A revise pass of approved work — see `reviseDelivered`.
     private struct RevisePass {
         let note: String
-        let current: String
+        let current: Deliverable
         let supersedes: String
     }
 
@@ -3328,7 +3328,7 @@ final class CompanyStore: ObservableObject {
               let task = company.tasks.first(where: { $0.id == item.sourceTaskId }) else { return }
         dockCollapsed = false
         _ = await produceDraftInline(for: task, cid: companyId, language: language,
-                                     revise: RevisePass(note: note, current: item.body,
+                                     revise: RevisePass(note: note, current: item,
                                                         supersedes: item.id))
         flushActiveThread()
     }
@@ -3574,7 +3574,7 @@ final class CompanyStore: ObservableObject {
         let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
                                                   reviseNote: reviseNote,
-                                                  current: reviseNote != nil ? draft.body : nil))
+                                                  current: reviseNote != nil ? draft : nil))
         // Re-check approved too: an Approve that raced this re-run must win (don't
         // overwrite the just-approved draft's body under an "Added to Library" label).
         guard companyId == cid,
@@ -3599,7 +3599,7 @@ final class CompanyStore: ObservableObject {
         let cid = companyId
         let provider = currentProvider(for: cid)
         let result = await taskRunner(runRequest(for: task, language: language,
-                                                 reviseNote: reviseNote, current: draft.body))
+                                                 reviseNote: reviseNote, current: draft))
         guard companyId == cid,
               let j = company.tasks.firstIndex(where: { $0.id == taskId }),
               !company.tasks[j].done, company.tasks[j].drafted,
@@ -3614,7 +3614,7 @@ final class CompanyStore: ObservableObject {
     /// `extraUpstream` is prepended to what the library yields, for a chained run whose
     /// upstream draft is deliberately not filed yet (`runChained`).
     private func runRequest(for task: RoadmapTask, language: AppLanguage,
-                             reviseNote: String? = nil, current: String? = nil,
+                             reviseNote: String? = nil, current: Deliverable? = nil,
                              extraUpstream: [UpstreamWork] = []) -> RunTaskRequest {
         // The pet the execute log and the draft card have always credited for this run — now
         // it is also the one generating it. `taskSpecialist` deliberately keeps the host case
@@ -3636,7 +3636,10 @@ final class CompanyStore: ObservableObject {
                                           product: productDossier?.contextBlock,
                                           memoryEnabled: company.founderPrefs.memoryEnabled),
             taskId: task.id, taskTitle: task.title, taskDetail: task.detail,
-            reviseNote: reviseNote, current: current, deptKey: task.dept,
+            // What is being revised travels whole — body, kind and payload — or not at all, so a
+            // caller cannot send the body and forget the kind it must keep.
+            reviseNote: reviseNote, current: current?.body,
+            currentKind: current?.kind.rawValue, currentPayload: current?.payload, deptKey: task.dept,
             upstream: upstream.isEmpty ? nil : Array(upstream.prefix(UpstreamWork.cap)))
     }
 

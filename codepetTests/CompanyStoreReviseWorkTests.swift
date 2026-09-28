@@ -147,6 +147,38 @@ final class CompanyStoreReviseWorkTests: XCTestCase {
         XCTAssertTrue(s.company.tasks[0].done, "the original task stays done")
     }
 
+    /// Build 4, 28 Sep: revising an approved LIVE site came back a DRAFT doc and overwrote it.
+    /// The run was told to "keep the same kind" and never told which kind — it got the body only.
+    /// It carries the item's kind and payload now, and both reach the wire under their own keys.
+    func testTheRevisePassCarriesTheItemsKindAndPayload() async throws {
+        // Any payload does: this pins that it travels, not what a site's fields are.
+        let site = DeliverablePayload(call: "Join the private beta")
+        var live = landing
+        live.payload = site
+        var runs: [RunTaskRequest] = []
+        let s = store(reply: editorial, library: [live, pricing], runs: { runs.append($0) })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("make it warmer", language: .en)
+
+        await s.confirmRoadmapProposal(messageId: try XCTUnwrap(offerId(s)), language: .en)
+
+        let run = try XCTUnwrap(runs.first)
+        XCTAssertEqual(run.currentKind, "site")
+        XCTAssertEqual(run.currentPayload, site)
+        let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(run)) as? [String: Any])
+        XCTAssertEqual(wire["current_kind"] as? String, "site")
+        XCTAssertNotNil(wire["current_payload"], "a stored property missing from CodingKeys is never sent")
+    }
+
+    /// A first run sends neither key: nothing is being revised, so there is no kind to keep.
+    func testAFirstRunSendsNoCurrentKind() throws {
+        let req = RunTaskRequest(companyId: "u", language: "en", companionId: "byte", context: "",
+                                 taskId: "t", taskTitle: "T", taskDetail: "")
+        let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(req)) as? [String: Any])
+        XCTAssertNil(wire["current_kind"])
+        XCTAssertNil(wire["current_payload"])
+    }
+
     func testADoublePressSpendsOnce() async throws {
         var runs = 0
         let s = store(reply: editorial, runs: { _ in runs += 1 })

@@ -8,7 +8,7 @@ import AppKit
 // `lib/data.ts`. Kept as ONE small table so the whole poster wall reads as one
 // system. Note: the native `DeliverableKind` enum has no `build` kind, so the web
 // "Builds" bucket / build tag simply never appear here (dead-but-harmless entries).
-private enum Lib {
+enum Lib {
     /// Bucket display order — a chip shows only when that bucket has items.
     static let border = ["Sites", "Prototypes", "Models", "Builds",
                          "Posts", "Emails", "Plans", "Outreach", "Docs", "Checklists"]
@@ -30,9 +30,16 @@ private enum Lib {
         }
     }
 
-    /// LIVE_TYPES — these render a filled "Live" pip; everything else is a draft.
+    /// LIVE_TYPES — these render a filled "Live" pip; everything else a hollow "Saved" one.
     /// (web = site, sheet, build; native has no build kind.)
     static func isLive(_ k: DeliverableKind) -> Bool { k == .site || k == .sheet }
+
+    /// The pip's word. Not "Draft": only approved work is ever filed in the Library, so after a
+    /// Team Build approve it read "05 LIVE · 10 DRAFT" with all fifteen approved (build 4, 28 Sep).
+    /// The pip says whether the kind renders live — not whether it was approved.
+    static func status(_ k: DeliverableKind, _ lang: AppLanguage) -> String {
+        isLive(k) ? (lang == .vi ? "Trực tiếp" : "Live") : (lang == .vi ? "Đã lưu" : "Saved")
+    }
 
     /// Per-type accent, mapped from the web LIB_SKIN inks to the nearest theme token.
     static func accent(_ k: DeliverableKind) -> Color {
@@ -82,7 +89,7 @@ private enum Lib {
         case .dms:       return vi ? "tin nhắn tiếp cận" : "outreach DMs"
         case .checklist: return vi ? "danh sách kiểm" : "checklist"
         case .plan:      return vi ? "kế hoạch đổi mã" : "code-change plan"
-        case .doc:       return vi ? "bản nháp" : "draft"
+        case .doc:       return vi ? "tài liệu" : "doc"
         default:         return k.label(lang)
         }
     }
@@ -92,7 +99,7 @@ private func pad2(_ n: Int) -> String { String(format: "%02d", n) }
 
 /// The Library = delivered work. Web-parity poster wall: item-count header, bucket
 /// filter chips, grouped by department (catalog order, unknown/none last), each row a
-/// per-row kind badge + tag + title + 2-line plain-prose desc + live/draft pip. Tapping a row
+/// per-row kind badge + tag + title + 2-line plain-prose desc + live/saved pip. Tapping a row
 /// opens the (unchanged) markdown detail sheet. Empty → an honest empty state.
 struct LibraryView: View {
     @EnvironmentObject var companyStore: CompanyStore
@@ -187,14 +194,14 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: Header (title + subtitle + `NN items · NN live · NN draft`)
+    // MARK: Header (title + subtitle + `NN items · NN live · NN saved`)
 
     private var header: some View {
         let n = items.count
-        let draftN = n - liveN
+        let savedN = n - liveN
         var idx = pad2(n) + " " + (lang == .vi ? "mục" : (n == 1 ? "item" : "items"))
         if liveN > 0 { idx += " · " + pad2(liveN) + " " + (lang == .vi ? "trực tiếp" : "live") }
-        if draftN > 0 { idx += " · " + pad2(draftN) + " " + (lang == .vi ? "nháp" : "draft") }
+        if savedN > 0 { idx += " · " + pad2(savedN) + " " + (lang == .vi ? "đã lưu" : "saved") }
         // web `.lib-mast` — 28px/650 title, 15px description 6px under it, then the
         // uppercase specimen index 12px below that.
         return VStack(alignment: .leading, spacing: 0) {
@@ -319,7 +326,7 @@ private struct LibChip: View {
     }
 }
 
-/// One library row — a 40pt kind badge, tag, title, 2-line desc and a live/draft pip.
+/// One library row — a 40pt kind badge, tag, title, 2-line desc and a live/saved pip.
 struct LibraryRowView: View {
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
@@ -381,14 +388,13 @@ struct LibraryRowView: View {
                 HStack(spacing: 9) {
                     HStack(spacing: 7) {
                         // web `.lib-pip` — filled teal with a soft tint ring when live,
-                        // a hollow --t-4 ring when it's still a draft.
+                        // a hollow --t-4 ring for everything else that is filed.
                         Circle()
                             .fill(live ? CodepetTokens.teal : Color.clear)
                             .overlay(Circle().stroke(live ? Color.clear : CodepetTokens.faint, lineWidth: 1.5))
                             .frame(width: 6, height: 6)
                             .background(live ? Circle().fill(CodepetTokens.tealTint).padding(-2.5) : nil)
-                        Text((live ? (lang == .vi ? "Trực tiếp" : "Live")
-                                   : (lang == .vi ? "Bản nháp" : "Draft")).uppercased())
+                        Text(Lib.status(k, lang).uppercased())
                             .font(CodepetTheme.inter(10, weight: .semibold))
                             .tracking(0.6)
                             .foregroundColor(live ? CodepetTokens.liveGreen : CodepetTokens.faint)

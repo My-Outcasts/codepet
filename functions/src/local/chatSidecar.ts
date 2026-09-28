@@ -295,6 +295,16 @@ export function ingestLine(
   // stream instead of landing in one block after a long silence.
   if (o.type === "stream_event") {
     const ev = o.event;
+    // Block indices restart with every assistant MESSAGE, and a tool call is where one message
+    // ends and the next begins — measured on 2.1.283, the text before and after a Read both sit
+    // at index 1. Without this the index check below sees one block and glues them: "I'll
+    // look.PlusMenu.swift line 128…" (build 4, 28 Sep). No block has index -1, so the first
+    // text of the new message always reads as a new block — and only once text has been seen,
+    // so the first message still opens with no break.
+    if (ev?.type === "message_start") {
+      if (acc.lastTextBlock !== undefined) acc.lastTextBlock = -1;
+      return;
+    }
     if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
       const t = ev.delta.text ?? "";
       if (t) {

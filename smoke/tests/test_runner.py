@@ -142,6 +142,40 @@ class Cli(unittest.TestCase):
             args = cli.parse(["run"])
         self.assertEqual(args.account, "x@y.z")
 
+    def _run_with_dmg(self, argv, install):
+        cli = load_cli()
+        report = mock.Mock()
+        report.verdict.return_value = "green"
+        with mock.patch.object(cli.drive, "is_running", return_value=False), \
+                mock.patch.object(cli.dmg, "install", install), \
+                mock.patch.object(cli, "execute", return_value=(report, "/r")) as ex, \
+                mock.patch.object(cli, "Lock") as lock, \
+                mock.patch.object(cli.slack, "format_message", return_value="msg"), \
+                mock.patch.object(cli.slack, "read_webhook", return_value=None):
+            rc = cli.main(argv)
+        return cli, rc, ex, lock
+
+    def test_dmg_tests_the_installed_copy_as_a_downloaded_build(self):
+        install = mock.Mock(return_value="/w/codepet.app")
+        cli, rc, ex, _ = self._run_with_dmg(
+            ["run", "--account", "a@b.c", "--dmg", "https://x/y.dmg"], install)
+        self.assertEqual(rc, 0)
+        self.assertEqual(install.call_args[0][0], "https://x/y.dmg")
+        self.assertEqual(ex.call_args[0][:2], ("/w/codepet.app", "downloaded build"))
+
+    def test_a_bare_dmg_uses_the_download_page(self):
+        install = mock.Mock(return_value="/w/codepet.app")
+        cli, rc, ex, _ = self._run_with_dmg(["run", "--account", "a@b.c", "--dmg"], install)
+        self.assertEqual(install.call_args[0][0], cli.dmg.DEFAULT_URL)
+
+    def test_a_failed_install_returns_2_without_lock_or_run(self):
+        from smoke.lib.dmg import DmgError
+        install = mock.Mock(side_effect=DmgError("boom"))
+        cli, rc, ex, lock = self._run_with_dmg(["run", "--account", "a@b.c", "--dmg"], install)
+        self.assertEqual(rc, 2)
+        ex.assert_not_called()
+        lock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

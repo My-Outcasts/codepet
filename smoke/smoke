@@ -3,6 +3,7 @@
 
     smoke run                 the installed /Applications/codepet.app
     smoke run --dev PATH      a local build
+    smoke run --dmg [URL]     the shipped disk image (default: the download page)
     smoke run --with-task     also spend credits on a task run
     smoke watch PATH          re-run whenever that build changes
 
@@ -15,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from smoke.lib import drive, slack
+from smoke.lib import dmg, drive, slack
 from smoke.lib.lock import Lock, LockHeld
 from smoke.lib.runner import execute
 
@@ -31,6 +32,8 @@ def parse(argv=None):
     run = sub.add_parser("run")
     run.add_argument("--dev", metavar="PATH", help="a local build instead of the installed app")
     run.add_argument("--with-task", action="store_true", help="also run the task check (costs credits)")
+    run.add_argument("--dmg", nargs="?", const="", default=None, metavar="URL",
+                     help="download and test the shipped image (default: the download page)")
     run.add_argument("--slack", action="store_true", help="post even in --dev mode")
     run.add_argument("--account", default=account)
 
@@ -58,8 +61,17 @@ def main(argv=None):
         print("deferred: your app is running")
         return 2
 
-    app_path = args.dev or INSTALLED
-    mode = "local build" if args.dev else "installed build"
+    if args.dmg is not None:
+        url = args.dmg or dmg.DEFAULT_URL
+        try:
+            app_path = dmg.install(url, os.path.join(here, "runs", "downloaded"))
+        except dmg.DmgError as e:
+            print("could not install from %s: %s" % (url, e))
+            return 2
+        mode = "downloaded build"
+    else:
+        app_path = args.dev or INSTALLED
+        mode = "local build" if args.dev else "installed build"
     try:
         with Lock(os.path.join(here, "runs", ".lock")):
             report, where = execute(app_path, mode, args.with_task, args.account)

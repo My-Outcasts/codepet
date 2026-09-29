@@ -38,6 +38,14 @@ class Parsing(unittest.TestCase):
     def test_parse_drops_the_two_unparseable_rows(self):
         self.assertEqual(len(parse(REAL)), 2)
 
+    def test_a_fault_type_line_is_an_error(self):
+        # Fault (F) is an error type observed in real system logs
+        line = parse_line(
+            "2026-09-24 06:52:11.936 F  codepet[4211:1604] "
+            "[app.murror.codepet:TestFault] something faulted"
+        )
+        self.assertTrue(line.is_error)
+
 
 class FirstError(unittest.TestCase):
     def test_it_reports_category_and_message(self):

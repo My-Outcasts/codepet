@@ -37,7 +37,9 @@ def osascript(script, timeout=20):
     except subprocess.TimeoutExpired:
         raise DriveError("osascript timed out after %ss" % timeout)
     if p.returncode != 0:
-        raise DriveError((p.stderr or "osascript failed").strip().splitlines()[0])
+        lines = (p.stderr or "osascript failed").strip().splitlines()
+        message = lines[0] if lines else "osascript failed"
+        raise DriveError(message)
     return p.stdout.strip()
 
 
@@ -52,6 +54,8 @@ def wait_until(predicate, timeout, interval=0.5):
 
 
 def launch(app_path, args=()):
+    if args and is_running():
+        raise DriveError("app already running; launch flags would be ignored")
     cmd = ["/usr/bin/open", "-a", app_path]
     if args:
         cmd.append("--args")

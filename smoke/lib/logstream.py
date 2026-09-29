@@ -24,7 +24,7 @@ LINE = re.compile(
     r"(?P<message>.*)$"
 )
 
-ERROR_TYPES = ("E", "Er", "Fa")
+ERROR_TYPES = ("E", "F")
 
 
 @dataclass

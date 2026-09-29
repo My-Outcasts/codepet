@@ -49,6 +49,35 @@ class Contains(unittest.TestCase):
             with self.assertRaises(ValueError):
                 contains(d, b"")
 
+    def test_a_file_deleted_between_listing_and_open_is_skipped(self):
+        # LevelDB deletes .log/.ldb files during compaction. If a file
+        # disappears between data_files() glob and _file_contains() open,
+        # skip it gracefully instead of crashing. Other files are still
+        # searched and found.
+        from unittest.mock import patch
+        from smoke.lib import store
+
+        with tempfile.TemporaryDirectory() as d:
+            path1 = os.path.join(d, "001.ldb")
+            path2 = os.path.join(d, "002.ldb")
+            with open(path1, "wb") as f:
+                f.write(b"junk")
+            with open(path2, "wb") as f:
+                f.write(b"needle")
+
+            # Patch data_files to delete path1 after returning the list
+            # (simulating compaction deleting the file)
+            orig_data_files = store.data_files
+            def fake_data_files(db_dir):
+                result = orig_data_files(db_dir)
+                if path1 in result:
+                    os.remove(path1)  # Delete after listing
+                return result
+
+            with patch.object(store, "data_files", side_effect=fake_data_files):
+                # Should find needle in remaining files, not crash on deleted path1
+                self.assertTrue(contains(d, b"needle"))
+
 
 class Count(unittest.TestCase):
     def test_it_totals_across_files(self):
@@ -58,6 +87,33 @@ class Count(unittest.TestCase):
             with open(os.path.join(d, "002.log"), "wb") as f:
                 f.write(b"X")
             self.assertEqual(count(d, b"X"), 3)
+
+    def test_a_file_deleted_between_listing_and_count_is_skipped(self):
+        # LevelDB deletes .log/.ldb files during compaction. If a file
+        # disappears between data_files() glob and open, skip it gracefully.
+        # Count remaining files.
+        from unittest.mock import patch
+        from smoke.lib import store
+
+        with tempfile.TemporaryDirectory() as d:
+            path1 = os.path.join(d, "001.ldb")
+            path2 = os.path.join(d, "002.ldb")
+            with open(path1, "wb") as f:
+                f.write(b"X X")
+            with open(path2, "wb") as f:
+                f.write(b"X")
+
+            # Patch data_files to delete path1 after returning the list
+            orig_data_files = store.data_files
+            def fake_data_files(db_dir):
+                result = orig_data_files(db_dir)
+                if path1 in result:
+                    os.remove(path1)  # Delete after listing
+                return result
+
+            with patch.object(store, "data_files", side_effect=fake_data_files):
+                # Should count only from remaining file (1 X), not crash
+                self.assertEqual(count(d, b"X"), 1)
 
 
 class WaitFor(unittest.TestCase):

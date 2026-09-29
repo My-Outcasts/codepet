@@ -54,7 +54,15 @@ def _file_contains(path, needle, chunk):
 def contains(db_dir, needle, chunk=CHUNK):
     if not needle:
         raise ValueError("an empty needle matches everything")
-    return any(_file_contains(p, needle, chunk) for p in data_files(db_dir))
+    for p in data_files(db_dir):
+        try:
+            if _file_contains(p, needle, chunk):
+                return True
+        except FileNotFoundError:
+            # File was deleted by LevelDB compaction between listing and open.
+            # Skip it and continue searching remaining files.
+            continue
+    return False
 
 
 def count(db_dir, needle):
@@ -62,8 +70,13 @@ def count(db_dir, needle):
         raise ValueError("an empty needle matches everything")
     total = 0
     for path in data_files(db_dir):
-        with open(path, "rb") as f:
-            total += f.read().count(needle)
+        try:
+            with open(path, "rb") as f:
+                total += f.read().count(needle)
+        except FileNotFoundError:
+            # File was deleted by LevelDB compaction between listing and open.
+            # Skip it and continue counting in remaining files.
+            continue
     return total
 
 

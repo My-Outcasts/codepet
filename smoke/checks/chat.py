@@ -20,7 +20,12 @@ NAME = "chat"
 
 
 def mint_token():
-    return uuid.uuid4().hex[:6]
+    while True:
+        token = uuid.uuid4().hex[:6]
+        # Reject palindromes: if token == token[::-1], then reply_needle(token) == token,
+        # so finding it would prove our probe was saved, not that anything replied.
+        if token != token[::-1]:
+            return token
 
 
 def probe_text(token):
@@ -34,7 +39,7 @@ def reply_needle(token):
     return token[::-1].encode("utf-8")
 
 
-def evaluate(sent, probe_persisted, reply_persisted, token, log_error):
+def evaluate(sent, probe_persisted, reply_persisted, token, log_error, timeout=90):
     evidence = [log_error] if log_error else []
     if not sent:
         return Result(NAME, ERROR, 0.0, "could not type the probe into the app", evidence)
@@ -44,7 +49,7 @@ def evaluate(sent, probe_persisted, reply_persisted, token, log_error):
                       "the keystrokes", evidence)
     if not reply_persisted:
         return Result(NAME, FAIL, 0.0,
-                      "no reply persisted for probe %s" % token, evidence)
+                      "no reply persisted for probe %s within %ds" % (token, timeout), evidence)
     return Result(NAME, PASS, 0.0, "reply round-tripped for probe %s" % token, evidence)
 
 
@@ -57,7 +62,7 @@ def run(token, capture, db_dir=store.DEFAULT_DB, timeout=90):
         drive.press_enter()
         sent = True
     except drive.DriveError as e:
-        result = evaluate(False, False, False, token, str(e))
+        result = evaluate(False, False, False, token, str(e), timeout=timeout)
         result.duration = time.time() - started
         return result
 
@@ -66,15 +71,17 @@ def run(token, capture, db_dir=store.DEFAULT_DB, timeout=90):
     # only mean the write is still in the memtable.
     try:
         reply_persisted = store.wait_for(db_dir, reply_needle(token), timeout=timeout)
-        drive.quit_app()
         if not reply_persisted:
             reply_persisted = store.contains(db_dir, reply_needle(token))
         probe_persisted = store.contains(db_dir, token.encode("utf-8"))
     except store.StoreMissing:
-        result = Result(NAME, ERROR, time.time() - started, "no database at %s" % db_dir)
+        result = Result(NAME, ERROR, time.time() - started, "no database at %s" % db_dir,
+                        [first_error(capture.lines())] if first_error(capture.lines()) else [])
         return result
+    finally:
+        drive.quit_app()
 
     result = evaluate(sent, probe_persisted, reply_persisted, token,
-                      first_error(capture.lines()))
+                      first_error(capture.lines()), timeout=timeout)
     result.duration = time.time() - started
     return result

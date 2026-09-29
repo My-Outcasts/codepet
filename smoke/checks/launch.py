@@ -44,15 +44,14 @@ def run(app_path, timeout=45, evidence_dir=None):
 
     try:
         drive.launch(app_path)
-        opened = True
-    except drive.DriveError as e:
+    except drive.DriveError:
         return evaluate(target, False, False, False, time.time() - started)
 
     process_seen = drive.wait_until(drive.is_running, timeout=timeout)
     window_seen = process_seen and drive.wait_until(
         lambda: drive.window_count() > 0, timeout=timeout
     )
-    result = evaluate(target, opened, process_seen, window_seen, time.time() - started)
+    result = evaluate(target, True, process_seen, window_seen, time.time() - started)
 
     # A screenshot is worth more than the sentence "0 windows", and it must be
     # taken NOW -- after teardown there is nothing left to photograph.

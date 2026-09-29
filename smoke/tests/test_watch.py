@@ -2,8 +2,85 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 
 from smoke.lib import build as build_lib
-from smoke.lib.watch import Fingerprint, is_fresh, may_drive, watch_loop
+from smoke.lib.watch import Fingerprint, fingerprint, is_fresh, may_drive, watch_loop
 from smoke.lib.lock import LockHeld
+import os
+import plistlib
+import shutil
+import tempfile
+
+
+def make_bundle(version="5", signed=True, info=None):
+    root = tempfile.mkdtemp()
+    app = os.path.join(root, "codepet.app")
+    os.makedirs(os.path.join(app, "Contents", "_CodeSignature"))
+    with open(os.path.join(app, "Contents", "Info.plist"), "wb") as f:
+        f.write(info if info is not None else plistlib.dumps({"CFBundleVersion": version}))
+    if signed:
+        with open(os.path.join(app, "Contents", "_CodeSignature", "CodeResources"), "w") as f:
+            f.write("<plist/>")
+    return root, app
+
+
+class Fingerprinting(unittest.TestCase):
+    def bundle(self, **kw):
+        root, app = make_bundle(**kw)
+        self.addCleanup(shutil.rmtree, root)
+        return app
+
+    def sig(self, app):
+        return os.path.join(app, "Contents", "_CodeSignature", "CodeResources")
+
+    def test_it_is_the_bundle_version_and_the_signature_mtime(self):
+        app = self.bundle(version="7")
+        os.utime(self.sig(app), (1000.0, 1000.0))
+        self.assertEqual(fingerprint(app), Fingerprint("7", 1000.0))
+
+    def test_an_info_plist_touch_alone_is_not_a_new_build(self):
+        # Info.plist is written early in a build; signing is the last write.
+        app = self.bundle()
+        os.utime(self.sig(app), (1000.0, 1000.0))
+        before = fingerprint(app)
+        os.utime(os.path.join(app, "Contents", "Info.plist"), (2000.0, 2000.0))
+        self.assertFalse(is_fresh(fingerprint(app), before))
+
+    def test_a_new_signature_is_a_new_build(self):
+        app = self.bundle()
+        os.utime(self.sig(app), (1000.0, 1000.0))
+        before = fingerprint(app)
+        os.utime(self.sig(app), (2000.0, 2000.0))
+        self.assertTrue(is_fresh(fingerprint(app), before))
+
+    def test_it_never_runs_codesign(self):
+        app = self.bundle()
+        with patch("subprocess.run", side_effect=AssertionError("subprocess per poll")):
+            fingerprint(app)
+
+    def test_no_bundle_is_build_missing(self):
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint("/no/such/codepet.app")
+
+    def test_an_unsigned_bundle_is_not_settled(self):
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint(self.bundle(signed=False))
+
+    def test_a_half_written_xml_plist_is_not_settled(self):
+        # Truncated XML raises expat's ExpatError, which is NOT a ValueError.
+        full = plistlib.dumps({"CFBundleVersion": "5"})
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint(self.bundle(info=full[:len(full) // 2]))
+
+    def test_a_half_written_binary_plist_is_not_settled(self):
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint(self.bundle(info=b"bplist00\x00\x01"))
+
+    def test_an_empty_plist_is_not_settled(self):
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint(self.bundle(info=b""))
+
+    def test_a_plist_that_is_not_a_dictionary_is_not_settled(self):
+        with self.assertRaises(build_lib.BuildMissing):
+            fingerprint(self.bundle(info=plistlib.dumps(["not", "a", "dict"])))
 
 
 class Freshness(unittest.TestCase):
@@ -187,6 +264,32 @@ class Loop(unittest.TestCase):
 
         # Should run only twice (once per fresh fingerprint)
         self.assertEqual(run_fn.call_count, 2)
+
+    def test_a_missing_bundle_says_waiting_once(self):
+        fingerprint_fn = Mock(side_effect=build_lib.BuildMissing("app"))
+        with patch("builtins.print") as print_mock:
+            watch_loop("/x/codepet.app", "a@b.c", "/here", sleep=lambda s: None,
+                       fingerprint_fn=fingerprint_fn, run=Mock(),
+                       is_running=Mock(return_value=False), max_passes=4)
+        waiting = [c for c in print_mock.call_args_list if "waiting for" in str(c)]
+        self.assertEqual(len(waiting), 1)
+        self.assertIn("/x/codepet.app", str(waiting[0]))
+
+    def test_a_version_change_during_debounce_keeps_debouncing(self):
+        # Same signature mtime, new CFBundleVersion: not settled yet.
+        a, b = Fingerprint("5", 100.0), Fingerprint("6", 100.0)
+        fingerprint_fn = Mock(side_effect=[a, b, b])
+        report = Mock()
+        report.verdict.return_value = "green"
+        run_fn = Mock(return_value=(report, "/where"))
+        with patch("builtins.print"), patch("smoke.lib.watch.Lock"), \
+                patch("smoke.lib.watch.slack.format_message", return_value="m"), \
+                patch("smoke.lib.watch.slack.should_post", return_value=False):
+            watch_loop("/app", "a@b.c", "/here", sleep=lambda s: None,
+                       fingerprint_fn=fingerprint_fn, run=run_fn,
+                       is_running=Mock(return_value=False), max_passes=1)
+        self.assertEqual(fingerprint_fn.call_count, 3)
+        self.assertEqual(run_fn.call_count, 1)
 
     def test_the_uid_reaches_each_run(self):
         fp = Fingerprint("2", 100.0)

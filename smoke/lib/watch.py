@@ -1,12 +1,25 @@
 """Re-run the checks whenever the local build changes.
 
 fswatch is not installed and does not become a prerequisite, so this polls
-Info.plist's mtime and debounces -- a build writes many files, and running
-against a half-written bundle proves nothing.
+and debounces -- a build writes many files, and running against a
+half-written bundle proves nothing.
+
+The fingerprint is the mtime of Contents/_CodeSignature/CodeResources plus
+CFBundleVersion read straight from Info.plist. Signing is the LAST write of
+a build, so CodeResources changing means a build finished; Info.plist's own
+mtime changes early, while the binary is still being linked. Nothing here
+runs codesign: a subprocess every two seconds for the life of a watch is
+cost with no verdict in it (the launch check verifies the signature).
+
+A bundle that is not there yet, an Info.plist that is missing or
+half-written, or a bundle with no CodeResources all count as BuildMissing:
+not settled, keep waiting. The cost is that an unsigned build is never run.
 """
 
 import os
+import plistlib
 import time
+import xml.parsers.expat
 from dataclasses import dataclass
 
 from smoke.lib import build as build_lib
@@ -21,10 +34,24 @@ class Fingerprint:
     mtime: float
 
 
+# plistlib raises InvalidFileException (a ValueError) for a binary plist cut
+# short, and expat's ExpatError -- NOT a ValueError -- for XML cut short.
+UNREADABLE_PLIST = (plistlib.InvalidFileException, ValueError, OSError,
+                    xml.parsers.expat.ExpatError)
+
+
 def fingerprint(app_path):
-    info_plist = os.path.join(app_path, "Contents", "Info.plist")
-    target = build_lib.identify(app_path)
-    return Fingerprint(target.bundle_version, os.path.getmtime(info_plist))
+    contents = os.path.join(app_path, "Contents")
+    try:
+        with open(os.path.join(contents, "Info.plist"), "rb") as f:
+            info = plistlib.load(f)
+        if not isinstance(info, dict):
+            raise ValueError("Info.plist is not a dictionary")
+        signed_at = os.path.getmtime(os.path.join(contents, "_CodeSignature",
+                                                  "CodeResources"))
+    except UNREADABLE_PLIST as e:
+        raise build_lib.BuildMissing("%s: %s" % (app_path, e))
+    return Fingerprint(str(info.get("CFBundleVersion", "?")), signed_at)
 
 
 def is_fresh(current, previous):
@@ -74,6 +101,7 @@ def watch_loop(
     previous_verdict = None
     deferred_for_fp = None
     passes = 0
+    said_waiting = False
     print("watching %s -- ctrl-c to stop" % app_path)
 
     while True:
@@ -84,8 +112,14 @@ def watch_loop(
         try:
             current = fingerprint_fn(app_path)
         except build_lib.BuildMissing:
+            # Once, not every two seconds: a watch started before the first
+            # build would otherwise scroll this line forever.
+            if not said_waiting:
+                print("waiting for %s" % app_path)
+                said_waiting = True
             sleep(poll)
             continue
+        said_waiting = False
 
         if not is_fresh(current, previous_fp):
             sleep(poll)
@@ -101,7 +135,7 @@ def watch_loop(
                 # Bundle removed during debounce; restart polling from top
                 debounce_success = False
                 break
-            if settled.mtime == current.mtime:
+            if settled == current:
                 break
             current = settled
 

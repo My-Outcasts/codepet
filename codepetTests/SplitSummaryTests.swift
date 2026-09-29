@@ -29,8 +29,35 @@ final class SplitSummaryTests: XCTestCase {
     }
 
     func testOnePairIsNamedAsThatPair() {
-        XCTAssertEqual(line([c("product", "design", "TENSION")]), "Product and Design see this differently.")
+        XCTAssertEqual(line([c("product", "design", "CONFLICT")]), "Product and Design see this differently.")
         XCTAssertEqual(line([c("product", "design", "BLOCKER")]), "Product and Design disagree on a hard point.")
+    }
+
+    /// CP-040, the changelog room of 29 Sep: one TENSION pair ("same direction, different
+    /// priority" or two sets of unread conditions) was headlined "Product and Marketing see this
+    /// differently." over a narrative that opened "There is no substantive disagreement". The
+    /// backend itself counts only CONFLICT and BLOCKER as a split (`needsNegotiation`,
+    /// `briefOmitsDissent`), so tension alone gets the line that says what it is.
+    func testTensionAloneIsSameDirectionNotASplit() {
+        XCTAssertEqual(line([c("product", "marketing", "TENSION")]),
+                       "Product and Marketing agree on the direction but not on every condition.")
+        XCTAssertEqual(line([c("product", "marketing", "TENSION")], .vi),
+                       "Product và Marketing cùng hướng nhưng chưa thống nhất mọi điều kiện.")
+    }
+
+    func testSeveralTensionsNameEveryDepartmentOnce() {
+        let cs = [c("product", "marketing", "TENSION"), c("product", "design", "TENSION"),
+                  c("marketing", "design", "TENSION")]
+        XCTAssertEqual(line(cs),
+                       "Product, Marketing and Design agree on the direction but not on every condition.")
+    }
+
+    /// A real split beside tensions is headlined by the split alone: the tension pairs must not
+    /// turn a single objecting department into "no hub".
+    func testARealSplitOutranksTension() {
+        let cs = [c("product", "sales", "BLOCKER"), c("finance", "sales", "BLOCKER"),
+                  c("product", "finance", "TENSION")]
+        XCTAssertEqual(line(cs), "Sales holds a hard objection the others don't share.")
     }
 
     /// The screenshot case: every pair of four departments marked blocker. That is everyone
@@ -45,7 +72,7 @@ final class SplitSummaryTests: XCTestCase {
 
     /// Mixed kinds with no single hub: the departments involved, in first-seen order, once each.
     func testSeveralSplitsNameTheDepartmentsOnce() {
-        let cs = [c("product", "design", "TENSION"), c("marketing", "sales", "CONFLICT")]
+        let cs = [c("product", "design", "CONFLICT"), c("marketing", "sales", "BLOCKER")]
         XCTAssertEqual(line(cs), "Product, Design, Marketing and Sales disagree on parts of this.")
         XCTAssertEqual(line(cs, .vi), "Product, Design, Marketing và Sales bất đồng ở một số điểm.")
     }

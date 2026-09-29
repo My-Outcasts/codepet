@@ -4,7 +4,7 @@
     smoke run                 the installed /Applications/codepet.app
     smoke run --dev PATH      a local build
     smoke run --dmg [URL]     the shipped disk image (default: the download page)
-    smoke run --with-task     also spend credits on a task run
+    smoke run --with-task     ask for the task check (SKIPs for now: not yet verifiable)
     smoke watch PATH          re-run whenever that build changes
 
 The account to check comes from --account or CODEPET_SMOKE_ACCOUNT. The chat
@@ -33,7 +33,7 @@ def parse(argv=None):
 
     run = sub.add_parser("run")
     run.add_argument("--dev", metavar="PATH", help="a local build instead of the installed app")
-    run.add_argument("--with-task", action="store_true", help="also run the task check (costs credits)")
+    run.add_argument("--with-task", action="store_true", help="ask for the task check (currently SKIPs: no record-specific signal yet)")
     run.add_argument("--dmg", nargs="?", const="", default=None, metavar="URL",
                      help="download and test the shipped image (default: the download page)")
     run.add_argument("--settle", type=float, default=8.0, metavar="SECONDS",

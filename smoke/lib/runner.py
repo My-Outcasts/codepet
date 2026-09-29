@@ -80,22 +80,11 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
                 if chat.status in (FAIL, ERROR):
                     results.extend(skip_rest(downstream_of("chat"),
                                              "chat %s" % chat.status))
-                elif with_task:
-                    # Only pay for a relaunch when the task check will really run.
-                    try:
-                        drive.launch(app_path)
-                    except drive.DriveError as e:
-                        results.append(Result(
-                            "task", ERROR, 0.0,
-                            "could not relaunch the app for the task check: %s" % e))
-                    else:
-                        drive.wait_until(drive.is_running, timeout=45)
-                        results.append(_guarded(
-                            "task", task_check.run, chat_check.mint_token(),
-                            capture, True, db_dir=db_dir))
                 else:
-                    results.append(task_check.evaluate(
-                        False, False, False, "", None))
+                    # The task check drives nothing yet (checks/task.py), so a
+                    # requested one costs no relaunch and no credits.
+                    results.append(_guarded("task", task_check.run, "", capture,
+                                            with_task))
         finally:
             drive.quit_app()
 

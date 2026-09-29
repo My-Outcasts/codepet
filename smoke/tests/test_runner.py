@@ -69,10 +69,7 @@ class Execute(unittest.TestCase):
         with mock.patch.object(runner.launch_check, "run", self.check("launch", launch)), \
                 mock.patch.object(runner.chat_check, "run", chat_fn or self.check("chat", chat)), \
                 mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)), \
-                mock.patch.object(runner.task_check, "run", self.check("task", PASS)), \
-                mock.patch.object(runner.task_check, "evaluate",
-                                  lambda req, *a, **k: Result(
-                                      "task", FAIL if req else SKIP, 0.0, "")):
+                mock.patch.object(runner.task_check, "run", self.check("task", SKIP)):
             report, where = runner.execute("/nonexistent.app", "test", with_task,
                                            "a@b.c", runs_root=self.tmp.name)
         return {r.name: r for r in report.results}, where
@@ -133,13 +130,22 @@ class Execute(unittest.TestCase):
             self.assertEqual(json.load(f)["verdict"], "red")
         self.assertTrue(os.path.exists(os.path.join(where, "report.html")))
 
-    def test_a_failed_relaunch_is_a_task_error(self):
-        def launch(app, args=()):
-            raise runner.drive.DriveError("no")
-        self.drive.launch.side_effect = launch
+    def test_a_requested_task_relaunches_nothing(self):
+        # The task check drives nothing yet; a relaunch would cost a launch
+        # and, once typed into, credits -- for a check that can only SKIP.
         got, _ = self.go(with_task=True)
-        self.assertEqual(got["task"].status, ERROR)
-        self.assertIn("could not relaunch", got["task"].detail)
+        self.drive.launch.assert_not_called()
+
+    def test_a_requested_task_reaches_the_real_check_as_a_skip(self):
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", PASS)), \
+                mock.patch.object(runner.chat_check, "run", self.check("chat", PASS)), \
+                mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)):
+            report, _ = runner.execute("/nonexistent.app", "test", True, "a@b.c",
+                                       runs_root=self.tmp.name)
+        task = {r.name: r for r in report.results}["task"]
+        self.assertEqual(task.status, SKIP)
+        self.assertIn("not yet verifiable", task.detail)
+        self.drive.launch.assert_not_called()
 
 
 class Cli(unittest.TestCase):

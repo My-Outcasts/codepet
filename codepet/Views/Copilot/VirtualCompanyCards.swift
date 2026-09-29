@@ -471,12 +471,11 @@ struct VCRunCards: View {
             WrapLayout(spacing: 6, rowSpacing: 6) {
                 ForEach(RoomRecord.chips(state), id: \.agentId) { chip in
                     Button { open(.stances) } label: {
-                        HStack(spacing: 6) {
-                            Circle().fill(outcomeColor(chip.outcome)).frame(width: 6, height: 6)
-                            Text(displayName(chip.meta))
-                                .font(CodepetTheme.inter(12, weight: .medium))
-                                .foregroundColor(CodepetTheme.bodyText)
-                        }
+                        // No outcome dot (CP-036): the call card above is the reply's one
+                        // coloured thing. The outcome is one click away, on the Stances tab.
+                        Text(displayName(chip.meta))
+                            .font(CodepetTheme.inter(12, weight: .medium))
+                            .foregroundColor(CodepetTheme.bodyText)
                         .padding(.horizontal, 9).padding(.vertical, 4)
                         .background(Capsule().fill(CodepetTheme.surface))
                         .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
@@ -495,15 +494,6 @@ struct VCRunCards: View {
             .cursorOnHover(.pointingHand)
         }
         .padding(.horizontal, 12)
-    }
-
-    private func outcomeColor(_ o: RoomRecord.Outcome) -> Color {
-        switch o {
-        case .agreed: return CodepetTheme.accentGreen
-        case .withConditions: return CodepetTheme.accentGold
-        case .against: return CodepetTheme.accentOrange
-        case .noAnswer: return CodepetTheme.mutedText
-        }
     }
 
     /// One tab of the side panel. Every view here already existed inside the four disclosures;
@@ -564,11 +554,9 @@ struct VCRunCards: View {
         // strength, directly under the card it belongs to. It keeps every word it had:
         // the pairs, `the_real_disagreement` VERBATIM (rule 3), and the aligned line.
         //
-        // The hue moved from the container to the pairs text, because it was carrying
-        // information the border cannot carry once the border is gone: orange for a real
-        // disagreement, teal for WHERE THEY AGREE. Losing that flip was the reason this
-        // block is not merged into THE CALL — see the spec's [A1].
-        let hue = pairs.isEmpty ? CodepetTheme.accentTeal : CodepetTheme.accentOrange
+        // Plain ink, no hue (CP-036: one tinted card per message, and here that card is THE
+        // CALL above). The orange/teal flip used to say disagree vs agree; the label above
+        // the line says it now. It is still its own block, not merged into THE CALL — [A1].
         return VStack(alignment: .leading, spacing: 8) {
             label(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
                                 : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
@@ -577,7 +565,7 @@ struct VCRunCards: View {
             if let split = SplitSummary.line(pairs, name: { displayName(agentId: $0) }, lang: lang) {
                 Text(split)
                     .font(CodepetTheme.inter(13, weight: .semibold))
-                    .foregroundColor(hue)
+                    .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !real.isEmpty {
@@ -588,7 +576,7 @@ struct VCRunCards: View {
             if !agreed.isEmpty {
                 Text(agreedLine(agreed))
                     .font(CodepetTheme.inter(12))
-                    .foregroundColor(hue)
+                    .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

@@ -59,6 +59,8 @@ struct VCRunCards: View {
     /// cannot un-consume it.
     let lockedIn: Bool
     let onLockIn: () -> Void
+    /// Lock in the option the founder picked (CP-031). Nil falls back to `onLockIn`.
+    var onLockInChoice: ((VCFounderOption) -> Void)? = nil
     /// Set by the chat (CP-032): the landed room shows department chips and one "How the team
     /// decided" link, and the four disclosures move into the side panel this opens. Nil keeps
     /// the disclosures inline — a surface with nowhere to open a panel loses nothing.
@@ -79,6 +81,8 @@ struct VCRunCards: View {
     @Environment(\.uiLanguage) private var lang
     /// The call, opened in the reader every other document in the app opens into.
     @State private var readingCall: Deliverable?
+    /// Which of the room's two options the founder picked on the call card (CP-031).
+    @State private var pickedOption: Int?
 
     /// TWO shapes, because a run in flight and a run that has landed are different reading
     /// tasks — and the contract binds them differently.
@@ -1090,10 +1094,23 @@ struct VCRunCards: View {
                 // second one directly above the closing paragraph was competing with it
                 // rather than orienting anyone. The extra top padding is what now says
                 // "this is the part you must decide".
-                Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.bodyText)
-                    .fixedSize(horizontal: false, vertical: true)
+                // CP-031: when the room returned the trade-off as two options, the either/or is
+                // the two tiles, each with its consequence — still the whole choice (rule 5), now
+                // something she can press. The paragraph stays in "Read the full call".
+                let options = FounderChoice.options(brief)
+                if let options, !lockedIn {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(Array(options.enumerated()), id: \.offset) { i, o in
+                            optionTile(o, selected: pickedOption == i) { pickedOption = i }
+                        }
+                    }
                     .padding(.top, 4)
+                } else {
+                    Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
                 // The recommendation in full, the next action, the kill criteria and what nobody
                 // knew — in the reader every other document in the app opens into (founder's
                 // call: "the call should read like every other document").
@@ -1109,6 +1126,20 @@ struct VCRunCards: View {
                                                   : "Locked in — this decision now grounds the rest of the app."))
                             .font(CodepetTheme.inter(12, weight: .medium))
                             .foregroundColor(CodepetTheme.accentTeal)
+                    } else if state.canLockIn, let options = FounderChoice.options(brief) {
+                        let pick = pickedOption.map { options[$0] }
+                        Button { if let pick { (onLockInChoice ?? { _ in onLockIn() })(pick) } } label: {
+                            Text(FounderChoice.lockInTitle(pick, lang: lang))
+                                .font(CodepetTheme.inter(12, weight: .semibold))
+                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(CodepetTheme.accentPurple))
+                                .opacity(pick == nil ? 0.45 : 1)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(pick == nil)
+                        .cursorOnHover(pick == nil ? .arrow : .pointingHand)
                     } else if state.canLockIn {
                         Button(action: onLockIn) {
                             Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
@@ -1138,6 +1169,31 @@ struct VCRunCards: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    /// One of the room's two options: a label and what choosing it commits the founder to.
+    private func optionTile(_ o: VCFounderOption, selected: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(o.label)
+                    .font(CodepetTheme.inter(13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                Text(o.consequence)
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? CodepetTheme.accentPurple.opacity(0.14) : CodepetTheme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(selected ? CodepetTheme.accentPurple : CodepetTheme.hairline, lineWidth: selected ? 1.5 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
     }
 
     // Written for the founder by the backend — shown verbatim (contract).

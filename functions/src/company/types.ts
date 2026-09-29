@@ -157,6 +157,19 @@ export interface DecisionBrief {
   what_we_dont_know: string;
   /** True when a conflict could not be resolved. A valid outcome, not a failure. */
   unresolved: boolean;
+  /**
+   * The trade-off as exactly two choices the app can offer as buttons (CP-031). Optional:
+   * absent or malformed, the app falls back to `tradeoff_founder_must_own`, which is still
+   * required and still the either/or in full.
+   */
+  founder_options?: FounderOption[];
+}
+
+export interface FounderOption {
+  /** Two to five words: what the founder picks. */
+  label: string;
+  /** One sentence: what picking it commits them to. */
+  consequence: string;
 }
 
 export interface FounderContext {

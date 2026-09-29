@@ -166,9 +166,13 @@ struct VCBrief: Codable, Hashable {
     let nextAction: VCNextAction
     let whatWeDontKnow: String
     let unresolved: Bool
+    /// The trade-off as exactly two choices to pick from (CP-031). Nil from a backend that
+    /// predates it, or when the room had no clean pair; the card then shows the paragraph.
+    var founderOptions: [VCFounderOption]? = nil
 
     enum CodingKeys: String, CodingKey {
         case recommendation, confidence, unresolved
+        case founderOptions = "founder_options"
         case confidenceReason = "confidence_reason"
         case theRealDisagreement = "the_real_disagreement"
         case tradeoffFounderMustOwn = "tradeoff_founder_must_own"
@@ -176,6 +180,11 @@ struct VCBrief: Codable, Hashable {
         case nextAction = "next_action"
         case whatWeDontKnow = "what_we_dont_know"
     }
+}
+
+struct VCFounderOption: Codable, Hashable {
+    let label: String
+    let consequence: String
 }
 
 struct VCTokenUsage: Codable, Equatable {

@@ -2,8 +2,9 @@
 
 This exists because the artefact under test should be the one a user actually
 downloads, not one already sitting on this Mac. Download, mount, copy and
-de-quarantine are four steps with four ways to go wrong, and doing them by
-hand is what this whole tool is replacing.
+and detach are steps with ways to go wrong, and doing them by hand is what
+this whole tool is replacing. The launch check judges the copy by Gatekeeper
+(spctl), not by the quarantine flag it inherits from the download.
 
 Nothing in /Applications is touched. Replacing an installed app is the
 founder's decision, so the copy lands in a working directory.
@@ -38,6 +39,14 @@ def parse_mount_point(hdiutil_stdout):
     raise DmgError("hdiutil mounted nothing under /Volumes")
 
 
+def parse_device(hdiutil_stdout):
+    for row in (hdiutil_stdout or "").splitlines():
+        for f in row.split("\t"):
+            if f.strip().startswith("/dev/disk"):
+                return f.strip()
+    return None
+
+
 def app_in(mount_point):
     found = glob.glob(os.path.join(mount_point, "*.app"))
     if not found:
@@ -57,14 +66,28 @@ def install(url, workdir):
     if attach.returncode != 0:
         raise DmgError((attach.stderr or "hdiutil attach failed").strip())
 
-    mount_point = parse_mount_point(attach.stdout)
+    device = parse_device(attach.stdout)
+    mount_point = None
+    failure = None
+    target = None
     try:
+        mount_point = parse_mount_point(attach.stdout)
         source = app_in(mount_point)
         target = os.path.join(workdir, os.path.basename(source))
-        if os.path.exists(target):
-            shutil.rmtree(target)
-        shutil.copytree(source, target, symlinks=True)
+        try:
+            if os.path.exists(target):
+                shutil.rmtree(target)
+            shutil.copytree(source, target, symlinks=True)
+        except OSError as e:
+            raise DmgError("could not copy %s: %s" % (source, e))
+    except DmgError as e:
+        failure = e
+        raise
     finally:
-        subprocess.run(["/usr/bin/hdiutil", "detach", mount_point],
-                       capture_output=True)
+        where = mount_point or device
+        if where:
+            d = subprocess.run(["/usr/bin/hdiutil", "detach", where],
+                               capture_output=True)
+            if d.returncode != 0 and failure is None:
+                raise DmgError("could not detach %s" % where)
     return target

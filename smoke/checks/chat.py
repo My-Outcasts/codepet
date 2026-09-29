@@ -14,6 +14,13 @@ The verdict needle is the run token REVERSED. The probe we type contains the
 token; only a genuine reply can contain it backwards. A pass needs our probe
 as a founder message and, later in the same thread, a companion message with
 the reversed token. A needle present in our own message would prove nothing.
+
+Composer focus is NOT verified. We wait `settle` seconds after launch, then
+activate the app and type, trusting the composer to hold keyboard focus. If it
+does not, the probe never reaches the transcript and this reads as ERROR
+("keystrokes did not reach the chat"), not as a broken chat. An app-side flag
+saying the composer is focused would close that gap, but it is a product
+change and the founder's decision.
 """
 
 import time
@@ -24,6 +31,7 @@ from smoke.lib.logstream import first_error
 from smoke.lib.result import ERROR, FAIL, PASS, Result
 
 NAME = "chat"
+SETTLE = 8.0
 
 
 def mint_token():
@@ -66,7 +74,7 @@ def _log_evidence(capture):
     return [line] if line else []
 
 
-def run(token, capture, uid=None, accounts_root=None, timeout=90,
+def run(token, capture, uid=None, accounts_root=None, timeout=90, settle=SETTLE,
         poll=2.0, sleep=time.sleep, now=time.monotonic):
     started = time.time()
 
@@ -77,6 +85,10 @@ def run(token, capture, uid=None, accounts_root=None, timeout=90,
         account_dir = transcript.resolve_account_dir(uid, root=accounts_root)
     except transcript.TranscriptMissing as e:
         return error("no chat transcript to read: %s" % e)
+
+    # A window on screen is not a composer ready for keys: typing into a
+    # launch still in progress drops keystrokes on the floor.
+    sleep(settle)
 
     sent = False
     try:

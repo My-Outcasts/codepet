@@ -198,8 +198,9 @@ class Loop(unittest.TestCase):
                 patch("smoke.lib.watch.slack.should_post", return_value=False):
             watch_loop("/app", "a@b.c", "/here", sleep=lambda s: None,
                        fingerprint_fn=Mock(return_value=fp), run=run_fn,
-                       is_running=Mock(return_value=False), max_passes=1, uid="u42")
+                       is_running=Mock(return_value=False), max_passes=1, uid="u42", settle=3.0)
         self.assertEqual(run_fn.call_args[1]["uid"], "u42")
+        self.assertEqual(run_fn.call_args[1]["settle"], 3.0)
 
     def test_transition_rule_posts_once(self):
         # Transition rule: post only when verdict changes.

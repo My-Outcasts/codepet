@@ -36,6 +36,8 @@ def parse(argv=None):
     run.add_argument("--with-task", action="store_true", help="also run the task check (costs credits)")
     run.add_argument("--dmg", nargs="?", const="", default=None, metavar="URL",
                      help="download and test the shipped image (default: the download page)")
+    run.add_argument("--settle", type=float, default=8.0, metavar="SECONDS",
+                     help="wait this long after launch before typing (default 8)")
     run.add_argument("--slack", action="store_true", help="post even in --dev mode")
     run.add_argument("--account", default=account)
     run.add_argument("--uid", default=None,
@@ -47,6 +49,8 @@ def parse(argv=None):
     watch.add_argument("--account", default=account)
     watch.add_argument("--uid", default=None,
                        help="the Firebase uid whose chat transcript to read")
+    watch.add_argument("--settle", type=float, default=8.0, metavar="SECONDS",
+                       help="wait this long after launch before typing (default 8)")
 
     return p.parse_args(argv)
 
@@ -61,7 +65,7 @@ def main(argv=None):
 
     if args.cmd == "watch":
         from smoke.lib.watch import watch_loop
-        return watch_loop(args.path, args.account, here, uid=args.uid)
+        return watch_loop(args.path, args.account, here, uid=args.uid, settle=args.settle)
 
     # The founder's own app is never ours to quit.
     if drive.is_running():
@@ -82,7 +86,7 @@ def main(argv=None):
     try:
         with Lock(os.path.join(here, "runs", ".lock")):
             report, where = execute(app_path, mode, args.with_task, args.account,
-                                    uid=args.uid)
+                                    uid=args.uid, settle=args.settle)
     except LockHeld:
         print("another smoke run holds the lock; not driving the app")
         return 2

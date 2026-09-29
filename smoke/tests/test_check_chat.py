@@ -164,6 +164,15 @@ class Run(unittest.TestCase):
         self.assertEqual(r.status, ERROR)
         self.assertIn("quit", self.events)
 
+    def test_it_waits_the_default_settle_before_touching_the_ui(self):
+        self.go(on_type=self.app_writes_fixture)
+        self.assertEqual(self.events[0], ("sleep", 8.0))
+        self.assertLess(self.events.index(("sleep", 8.0)), self.events.index("focus"))
+
+    def test_the_settle_is_configurable(self):
+        self.go(on_type=self.app_writes_fixture, settle=2.5)
+        self.assertEqual(self.events[0], ("sleep", 2.5))
+
     def test_it_polls_until_the_reply_lands(self):
         clock = [0.0]
         polls = []
@@ -171,10 +180,10 @@ class Run(unittest.TestCase):
         def sleep(s):
             polls.append(s)
             clock[0] += s
-            if len(polls) == 3:
+            if polls.count(2.0) == 3:
                 self.app_writes_fixture()
 
-        r = self.go(timeout=60, poll=2.0, sleep=sleep, now=lambda: clock[0])
+        r = self.go(timeout=60, poll=2.0, settle=0, sleep=sleep, now=lambda: clock[0])
         self.assertEqual(r.status, PASS, r.detail)
         self.assertEqual(polls.count(2.0), 3)
 

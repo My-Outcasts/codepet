@@ -44,7 +44,7 @@ def _guarded(name, fn, *args, **kw):
 
 
 def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
-            uid=None, accounts_root=None):
+            uid=None, accounts_root=None, settle=chat_check.SETTLE):
     db_dir = db_dir or store.DEFAULT_DB
     runs_root = runs_root or os.path.join(os.path.dirname(__file__), "..", "runs")
     started = time.time()
@@ -69,7 +69,8 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
             else:
                 token = chat_check.mint_token()
                 chat = _guarded("chat", chat_check.run, token, capture,
-                                uid=uid, accounts_root=accounts_root)
+                                uid=uid, accounts_root=accounts_root,
+                                settle=settle)
                 # chat may return early without quitting; auth must read a
                 # released lock whatever happened.
                 drive.quit_app()

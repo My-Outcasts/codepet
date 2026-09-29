@@ -97,6 +97,7 @@ class Execute(unittest.TestCase):
                            runs_root=self.tmp.name, uid="u42", accounts_root="/acc")
         self.assertEqual(seen["uid"], "u42")
         self.assertEqual(seen["accounts_root"], "/acc")
+        self.assertEqual(seen["settle"], 8.0)
 
     def test_a_local_build_is_not_assessed_by_gatekeeper(self):
         self.assertFalse(self._launch_kwargs("local build")["assess_gatekeeper"])
@@ -181,6 +182,13 @@ class Cli(unittest.TestCase):
                 mock.patch.object(cli.slack, "read_webhook", return_value=None):
             cli.main(["run", "--account", "a@b.c", "--dev", "/x.app", "--uid", "u42"])
         self.assertEqual(ex.call_args[1]["uid"], "u42")
+        self.assertEqual(ex.call_args[1]["settle"], 8.0)
+
+    def test_settle_is_a_flag_on_run_and_watch(self):
+        cli = load_cli()
+        self.assertEqual(cli.parse(["run", "--settle", "3"]).settle, 3.0)
+        self.assertEqual(cli.parse(["watch", "/x.app", "--settle", "3"]).settle, 3.0)
+        self.assertEqual(cli.parse(["run"]).settle, 8.0)
 
     def test_watch_gets_the_uid(self):
         cli = load_cli()
@@ -188,6 +196,7 @@ class Cli(unittest.TestCase):
         with mock.patch.object(watch_mod, "watch_loop", return_value=0) as wl:
             cli.main(["watch", "/x.app", "--account", "a@b.c", "--uid", "u42"])
         self.assertEqual(wl.call_args[1]["uid"], "u42")
+        self.assertEqual(wl.call_args[1]["settle"], 8.0)
 
     def _run_with_dmg(self, argv, install):
         cli = load_cli()

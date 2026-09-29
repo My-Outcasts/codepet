@@ -71,6 +71,8 @@ def run(token, capture, db_dir=store.DEFAULT_DB, timeout=90):
     # only mean the write is still in the memtable.
     try:
         reply_persisted = store.wait_for(db_dir, reply_needle(token), timeout=timeout)
+        # Quit the app BEFORE the fallback reads so the memtable flushes
+        drive.quit_app()
         if not reply_persisted:
             reply_persisted = store.contains(db_dir, reply_needle(token))
         probe_persisted = store.contains(db_dir, token.encode("utf-8"))

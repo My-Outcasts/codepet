@@ -87,6 +87,40 @@ class Run(unittest.TestCase):
                                 r = run(token, mock.MagicMock(lines=lambda: []))
                                 self.assertEqual(r.status, ERROR)
                                 mock_quit.assert_called_once()
+                                # Verify evidence includes the log error
+                                self.assertIn("E some error", r.evidence)
+
+    def test_quit_app_is_called_before_fallback_store_read(self):
+        # The fallback store.contains reads only work if the app has quit
+        # (memtable flushes on quit). quit_app() must run BEFORE those reads.
+        from smoke.lib import store
+
+        token = "abc123"
+        call_order = []
+
+        def track_quit(*args, **kwargs):
+            call_order.append("quit_app")
+            return True
+
+        def track_contains(*args, **kwargs):
+            call_order.append("contains")
+            return False
+
+        with mock.patch("smoke.lib.drive.focus"):
+            with mock.patch("smoke.lib.drive.type_text"):
+                with mock.patch("smoke.lib.drive.press_enter"):
+                    with mock.patch("smoke.lib.drive.quit_app", side_effect=track_quit):
+                        with mock.patch("smoke.lib.store.wait_for", return_value=False):
+                            with mock.patch("smoke.lib.store.contains", side_effect=track_contains):
+                                from smoke.checks.chat import run
+                                r = run(token, mock.MagicMock(lines=lambda: []))
+                                # quit_app should be called before the first contains
+                                self.assertIn("quit_app", call_order)
+                                self.assertIn("contains", call_order)
+                                quit_index = call_order.index("quit_app")
+                                first_contains_index = call_order.index("contains")
+                                self.assertLess(quit_index, first_contains_index,
+                                               "quit_app must be called before fallback store.contains reads")
 
 
 if __name__ == "__main__":

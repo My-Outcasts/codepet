@@ -73,6 +73,8 @@ def run(token, capture, requested, db_dir=store.DEFAULT_DB, timeout=300):
 
     try:
         persisted = store.wait_for(db_dir, deliverable_needle(token), timeout=timeout)
+        # Quit the app BEFORE the fallback read so the memtable flushes
+        drive.quit_app()
         if not persisted:
             persisted = store.contains(db_dir, deliverable_needle(token))
     except store.StoreMissing:

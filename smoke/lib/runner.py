@@ -2,6 +2,11 @@
 
 Teardown lives in a finally: a crashed check must not leave the app holding
 the LevelDB lock and blocking the next xcodebuild test.
+
+Two stores are read, and they are not the same store: auth reads the
+Firestore LevelDB (db_dir), chat reads the local chat transcript under
+~/.codepet/accounts/<uid>/ (uid, accounts_root) -- the app stopped writing
+chat to Firestore on 25 September.
 """
 
 import os
@@ -38,7 +43,8 @@ def _guarded(name, fn, *args, **kw):
                       "check crashed: %s: %s" % (type(e).__name__, e))
 
 
-def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
+def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
+            uid=None, accounts_root=None):
     db_dir = db_dir or store.DEFAULT_DB
     runs_root = runs_root or os.path.join(os.path.dirname(__file__), "..", "runs")
     started = time.time()
@@ -63,7 +69,7 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
             else:
                 token = chat_check.mint_token()
                 chat = _guarded("chat", chat_check.run, token, capture,
-                                db_dir=db_dir)
+                                uid=uid, accounts_root=accounts_root)
                 # chat may return early without quitting; auth must read a
                 # released lock whatever happened.
                 drive.quit_app()

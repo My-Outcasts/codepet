@@ -188,6 +188,19 @@ class Loop(unittest.TestCase):
         # Should run only twice (once per fresh fingerprint)
         self.assertEqual(run_fn.call_count, 2)
 
+    def test_the_uid_reaches_each_run(self):
+        fp = Fingerprint("2", 100.0)
+        report = Mock()
+        report.verdict.return_value = "green"
+        run_fn = Mock(return_value=(report, "/where"))
+        with patch("builtins.print"), patch("smoke.lib.watch.Lock"), \
+                patch("smoke.lib.watch.slack.format_message", return_value="m"), \
+                patch("smoke.lib.watch.slack.should_post", return_value=False):
+            watch_loop("/app", "a@b.c", "/here", sleep=lambda s: None,
+                       fingerprint_fn=Mock(return_value=fp), run=run_fn,
+                       is_running=Mock(return_value=False), max_passes=1, uid="u42")
+        self.assertEqual(run_fn.call_args[1]["uid"], "u42")
+
     def test_transition_rule_posts_once(self):
         # Transition rule: post only when verdict changes.
         # Two runs with same verdict post once; third run with different verdict posts again.

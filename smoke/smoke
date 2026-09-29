@@ -7,7 +7,9 @@
     smoke run --with-task     also spend credits on a task run
     smoke watch PATH          re-run whenever that build changes
 
-The account to check comes from --account or CODEPET_SMOKE_ACCOUNT.
+The account to check comes from --account or CODEPET_SMOKE_ACCOUNT. The chat
+transcript is read for --uid, else CODEPET_SMOKE_UID, else the one account
+directory under ~/.codepet/accounts/ if there is exactly one.
 """
 
 import argparse
@@ -36,10 +38,15 @@ def parse(argv=None):
                      help="download and test the shipped image (default: the download page)")
     run.add_argument("--slack", action="store_true", help="post even in --dev mode")
     run.add_argument("--account", default=account)
+    run.add_argument("--uid", default=None,
+                     help="the Firebase uid whose chat transcript to read "
+                          "(default: $CODEPET_SMOKE_UID, else the only account dir)")
 
     watch = sub.add_parser("watch")
     watch.add_argument("path", help="the built .app to watch")
     watch.add_argument("--account", default=account)
+    watch.add_argument("--uid", default=None,
+                       help="the Firebase uid whose chat transcript to read")
 
     return p.parse_args(argv)
 
@@ -54,7 +61,7 @@ def main(argv=None):
 
     if args.cmd == "watch":
         from smoke.lib.watch import watch_loop
-        return watch_loop(args.path, args.account, here)
+        return watch_loop(args.path, args.account, here, uid=args.uid)
 
     # The founder's own app is never ours to quit.
     if drive.is_running():
@@ -74,7 +81,8 @@ def main(argv=None):
         mode = "local build" if args.dev else "installed build"
     try:
         with Lock(os.path.join(here, "runs", ".lock")):
-            report, where = execute(app_path, mode, args.with_task, args.account)
+            report, where = execute(app_path, mode, args.with_task, args.account,
+                                    uid=args.uid)
     except LockHeld:
         print("another smoke run holds the lock; not driving the app")
         return 2

@@ -1,8 +1,13 @@
+import os
+import shutil
 import unittest
 from unittest import mock
 
+from smoke.checks import chat
 from smoke.checks.chat import evaluate, mint_token, probe_text, reply_needle
+from smoke.lib import transcript
 from smoke.lib.result import ERROR, FAIL, PASS
+from smoke.tests.test_transcript import FIXTURE, OTHER_THREAD, REPLIED, account_with
 
 
 class Probe(unittest.TestCase):
@@ -28,99 +33,150 @@ class Probe(unittest.TestCase):
         # If it did, finding it would prove our own message was saved --
         # not that anything replied.
         token = "abc123"
-        self.assertNotIn(reply_needle(token).decode(), probe_text(token))
+        self.assertNotIn(reply_needle(token), probe_text(token))
 
     def test_the_needle_is_the_token_backwards(self):
-        self.assertEqual(reply_needle("abc123"), b"321cba")
+        self.assertEqual(reply_needle("abc123"), "321cba")
 
 
 class Evaluate(unittest.TestCase):
-    def test_a_reply_that_reached_the_store_passes(self):
-        r = evaluate(sent=True, probe_persisted=True, reply_persisted=True,
+    def test_a_reply_in_the_transcript_passes(self):
+        r = evaluate(sent=True, probe_seen=True, reply_seen=True,
                      token="f3a91c", log_error=None)
         self.assertEqual(r.status, PASS)
 
     def test_no_reply_fails_and_names_the_timeout(self):
-        r = evaluate(sent=True, probe_persisted=True, reply_persisted=False,
+        r = evaluate(sent=True, probe_seen=True, reply_seen=False,
                      token="f3a91c", log_error=None, timeout=120)
         self.assertEqual(r.status, FAIL)
         self.assertIn("f3a91c", r.detail)
         self.assertIn("120", r.detail)
 
     def test_no_reply_fails_and_quotes_the_app(self):
-        r = evaluate(sent=True, probe_persisted=True, reply_persisted=False,
+        r = evaluate(sent=True, probe_seen=True, reply_seen=False,
                      token="f3a91c",
                      log_error="ChatTransport: non-streaming retry refused: billing")
         self.assertEqual(r.status, FAIL)
         self.assertIn("f3a91c", r.detail)
         self.assertIn("ChatTransport", r.evidence[0])
 
-    def test_a_probe_that_never_persisted_means_we_never_typed_it(self):
-        # Our own message not reaching the store means the UI never received
+    def test_a_probe_missing_from_the_transcript_means_we_never_typed_it(self):
+        # Our own message not reaching the transcript means the UI never received
         # the keystrokes -- a harness problem, not a broken chat pipeline.
-        r = evaluate(sent=True, probe_persisted=False, reply_persisted=False,
+        r = evaluate(sent=True, probe_seen=False, reply_seen=False,
                      token="f3a91c", log_error=None)
         self.assertEqual(r.status, ERROR)
-        self.assertIn("never reached", r.detail)
+        self.assertIn("keystrokes did not reach the chat", r.detail)
 
     def test_failing_to_type_at_all_is_an_error(self):
-        r = evaluate(sent=False, probe_persisted=False, reply_persisted=False,
+        r = evaluate(sent=False, probe_seen=False, reply_seen=False,
                      token="f3a91c", log_error=None)
         self.assertEqual(r.status, ERROR)
+
+
+def no_log():
+    return mock.MagicMock(lines=lambda: [])
 
 
 class Run(unittest.TestCase):
-    def test_store_missing_quits_the_app_and_returns_error_with_evidence(self):
-        # If store.wait_for raises StoreMissing, quit_app() must still run.
-        from smoke.lib import store, drive
+    """chat.run end to end against the hand-traced transcript fixture.
 
-        token = "abc123"
-        with mock.patch("smoke.lib.drive.focus"):
-            with mock.patch("smoke.lib.drive.type_text"):
-                with mock.patch("smoke.lib.drive.press_enter"):
-                    with mock.patch("smoke.lib.drive.quit_app") as mock_quit:
-                        with mock.patch("smoke.lib.store.wait_for") as mock_wait:
-                            mock_wait.side_effect = store.StoreMissing()
-                            with mock.patch("smoke.checks.chat.first_error") as mock_first_error:
-                                mock_first_error.return_value = "E some error"
-                                from smoke.checks.chat import run
-                                r = run(token, mock.MagicMock(lines=lambda: []))
-                                self.assertEqual(r.status, ERROR)
-                                mock_quit.assert_called_once()
-                                # Verify evidence includes the log error
-                                self.assertIn("E some error", r.evidence)
+    Only the UI is faked. The "app" is a side effect that writes the fixture
+    into the account directory the way ChatThreadArchive would.
+    """
 
-    def test_quit_app_is_called_before_fallback_store_read(self):
-        # The fallback store.contains reads only work if the app has quit
-        # (memtable flushes on quit). quit_app() must run BEFORE those reads.
-        from smoke.lib import store
+    def setUp(self):
+        self.root, self.dir = account_with(fixture=None)
+        self.addCleanup(shutil.rmtree, self.root)
+        self.path = os.path.join(self.dir, transcript.FILENAME)
+        self.events = []
+        self.typed = []
 
-        token = "abc123"
-        call_order = []
+    def app_writes_fixture(self, *a, **k):
+        shutil.copy(FIXTURE, self.path)
 
-        def track_quit(*args, **kwargs):
-            call_order.append("quit_app")
+    def go(self, token=REPLIED, on_type=None, on_quit=None, uid="uid123", **kw):
+        events, typed = self.events, self.typed
+
+        def type_text(text):
+            events.append("type")
+            typed.append(text)
+            if on_type:
+                on_type()
+
+        def quit_app(*a, **k):
+            events.append("quit")
+            if on_quit:
+                on_quit()
             return True
 
-        def track_contains(*args, **kwargs):
-            call_order.append("contains")
-            return False
+        kw.setdefault("timeout", 0)
+        kw.setdefault("sleep", lambda s: events.append(("sleep", s)))
+        with mock.patch.object(chat.drive, "focus", lambda: events.append("focus")), \
+                mock.patch.object(chat.drive, "type_text", type_text), \
+                mock.patch.object(chat.drive, "press_enter", lambda: events.append("enter")), \
+                mock.patch.object(chat.drive, "quit_app", quit_app):
+            return chat.run(token, no_log(), uid=uid, accounts_root=self.root, **kw)
 
-        with mock.patch("smoke.lib.drive.focus"):
-            with mock.patch("smoke.lib.drive.type_text"):
-                with mock.patch("smoke.lib.drive.press_enter"):
-                    with mock.patch("smoke.lib.drive.quit_app", side_effect=track_quit):
-                        with mock.patch("smoke.lib.store.wait_for", return_value=False):
-                            with mock.patch("smoke.lib.store.contains", side_effect=track_contains):
-                                from smoke.checks.chat import run
-                                r = run(token, mock.MagicMock(lines=lambda: []))
-                                # quit_app should be called before the first contains
-                                self.assertIn("quit_app", call_order)
-                                self.assertIn("contains", call_order)
-                                quit_index = call_order.index("quit_app")
-                                first_contains_index = call_order.index("contains")
-                                self.assertLess(quit_index, first_contains_index,
-                                               "quit_app must be called before fallback store.contains reads")
+    def test_a_reply_in_the_transcript_passes(self):
+        r = self.go(on_type=self.app_writes_fixture)
+        self.assertEqual(r.status, PASS, r.detail)
+        self.assertIn(REPLIED, r.detail)
+
+    def test_a_probe_with_no_reply_in_its_thread_fails(self):
+        r = self.go(token=OTHER_THREAD, on_type=self.app_writes_fixture)
+        self.assertEqual(r.status, FAIL, r.detail)
+
+    def test_a_probe_that_never_reached_the_transcript_is_an_error(self):
+        r = self.go(on_type=None)
+        self.assertEqual(r.status, ERROR)
+        self.assertIn("keystrokes did not reach the chat", r.detail)
+
+    def test_the_verdict_is_read_after_quit(self):
+        # The reply only lands as the app quits (an async save draining).
+        # A verdict taken from the live poll alone would call this a FAIL.
+        r = self.go(on_quit=self.app_writes_fixture)
+        self.assertEqual(r.status, PASS, r.detail)
+
+    def test_the_app_is_quit_once_the_reply_is_seen(self):
+        self.go(on_type=self.app_writes_fixture)
+        self.assertIn("quit", self.events)
+        self.assertLess(self.events.index("type"), self.events.index("quit"))
+
+    def test_an_unresolvable_account_is_an_error_and_drives_nothing(self):
+        r = self.go(uid="nobody")
+        self.assertEqual(r.status, ERROR)
+        self.assertIn("no chat transcript", r.detail)
+        self.assertNotIn("type", self.events)
+
+    def test_an_unreadable_transcript_after_quit_is_an_error(self):
+        def corrupt():
+            with open(self.path, "w") as f:
+                f.write("{not json")
+        r = self.go(on_type=self.app_writes_fixture, on_quit=corrupt)
+        self.assertEqual(r.status, ERROR)
+        self.assertIn("could not read the chat transcript", r.detail)
+
+    def test_a_drive_error_is_an_error_and_still_quits(self):
+        def fail():
+            raise chat.drive.DriveError("assistive access dropped")
+        r = self.go(on_type=fail)
+        self.assertEqual(r.status, ERROR)
+        self.assertIn("quit", self.events)
+
+    def test_it_polls_until_the_reply_lands(self):
+        clock = [0.0]
+        polls = []
+
+        def sleep(s):
+            polls.append(s)
+            clock[0] += s
+            if len(polls) == 3:
+                self.app_writes_fixture()
+
+        r = self.go(timeout=60, poll=2.0, sleep=sleep, now=lambda: clock[0])
+        self.assertEqual(r.status, PASS, r.detail)
+        self.assertEqual(polls.count(2.0), 3)
 
 
 if __name__ == "__main__":

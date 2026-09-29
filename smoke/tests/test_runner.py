@@ -84,6 +84,20 @@ class Execute(unittest.TestCase):
                            runs_root=self.tmp.name)
         return m.call_args[1]
 
+    def test_the_uid_reaches_the_chat_check(self):
+        seen = {}
+
+        def chat_run(*a, **k):
+            seen.update(k)
+            return Result("chat", PASS, 0.0, "")
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", PASS)), \
+                mock.patch.object(runner.chat_check, "run", chat_run), \
+                mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)):
+            runner.execute("/nonexistent.app", "test", False, "a@b.c",
+                           runs_root=self.tmp.name, uid="u42", accounts_root="/acc")
+        self.assertEqual(seen["uid"], "u42")
+        self.assertEqual(seen["accounts_root"], "/acc")
+
     def test_a_local_build_is_not_assessed_by_gatekeeper(self):
         self.assertFalse(self._launch_kwargs("local build")["assess_gatekeeper"])
 
@@ -155,6 +169,25 @@ class Cli(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CODEPET_SMOKE_ACCOUNT": "x@y.z"}):
             args = cli.parse(["run"])
         self.assertEqual(args.account, "x@y.z")
+
+    def test_uid_is_passed_to_execute(self):
+        cli = load_cli()
+        report = mock.Mock()
+        report.verdict.return_value = "green"
+        with mock.patch.object(cli.drive, "is_running", return_value=False), \
+                mock.patch.object(cli, "execute", return_value=(report, "/r")) as ex, \
+                mock.patch.object(cli, "Lock"), \
+                mock.patch.object(cli.slack, "format_message", return_value="msg"), \
+                mock.patch.object(cli.slack, "read_webhook", return_value=None):
+            cli.main(["run", "--account", "a@b.c", "--dev", "/x.app", "--uid", "u42"])
+        self.assertEqual(ex.call_args[1]["uid"], "u42")
+
+    def test_watch_gets_the_uid(self):
+        cli = load_cli()
+        import smoke.lib.watch as watch_mod
+        with mock.patch.object(watch_mod, "watch_loop", return_value=0) as wl:
+            cli.main(["watch", "/x.app", "--account", "a@b.c", "--uid", "u42"])
+        self.assertEqual(wl.call_args[1]["uid"], "u42")
 
     def _run_with_dmg(self, argv, install):
         cli = load_cli()

@@ -4,15 +4,22 @@ This is the check that proves app -> the founder's local Claude Code -> model ->
 unit test can: CompanyStore is driven through injected closures, and the
 local Claude Code runs under the founder's own plan and configuration.
 
+The verdict is read from the app's local chat transcript,
+~/.codepet/accounts/<uid>/company_chats.json (see smoke/lib/transcript.py).
+It is NOT read from the Firestore LevelDB: since 25 September the app keeps
+chat in that file and "never Firestore" (codepet/Services/ChatThreadArchive.swift:5-10),
+so a LevelDB scan could only ever have missed.
+
 The verdict needle is the run token REVERSED. The probe we type contains the
-token; only a genuine reply can contain it backwards. A needle present in our
-own message would prove nothing.
+token; only a genuine reply can contain it backwards. A pass needs our probe
+as a founder message and, later in the same thread, a companion message with
+the reversed token. A needle present in our own message would prove nothing.
 """
 
 import time
 import uuid
 
-from smoke.lib import drive, store
+from smoke.lib import drive, transcript
 from smoke.lib.logstream import first_error
 from smoke.lib.result import ERROR, FAIL, PASS, Result
 
@@ -36,54 +43,76 @@ def probe_text(token):
 
 
 def reply_needle(token):
-    return token[::-1].encode("utf-8")
+    return token[::-1]
 
 
-def evaluate(sent, probe_persisted, reply_persisted, token, log_error, timeout=90):
+def evaluate(sent, probe_seen, reply_seen, token, log_error, timeout=90):
     evidence = [log_error] if log_error else []
     if not sent:
         return Result(NAME, ERROR, 0.0, "could not type the probe into the app", evidence)
-    if not probe_persisted:
+    if not probe_seen:
         return Result(NAME, ERROR, 0.0,
-                      "the probe never reached the store -- the app did not receive "
-                      "the keystrokes", evidence)
-    if not reply_persisted:
+                      "probe %s is not in the chat transcript -- the keystrokes did "
+                      "not reach the chat" % token, evidence)
+    if not reply_seen:
         return Result(NAME, FAIL, 0.0,
-                      "no reply persisted for probe %s within %ds" % (token, timeout), evidence)
+                      "no reply to probe %s in the chat transcript within %ds"
+                      % (token, timeout), evidence)
     return Result(NAME, PASS, 0.0, "reply round-tripped for probe %s" % token, evidence)
 
 
-def run(token, capture, db_dir=store.DEFAULT_DB, timeout=90):
+def _log_evidence(capture):
+    line = first_error(capture.lines())
+    return [line] if line else []
+
+
+def run(token, capture, uid=None, accounts_root=None, timeout=90,
+        poll=2.0, sleep=time.sleep, now=time.monotonic):
     started = time.time()
+
+    def error(detail):
+        return Result(NAME, ERROR, time.time() - started, detail, _log_evidence(capture))
+
+    try:
+        account_dir = transcript.resolve_account_dir(uid, root=accounts_root)
+    except transcript.TranscriptMissing as e:
+        return error("no chat transcript to read: %s" % e)
+
     sent = False
     try:
-        drive.focus()
-        drive.type_text(probe_text(token))
-        drive.press_enter()
-        sent = True
-    except drive.DriveError as e:
-        result = evaluate(False, False, False, token, str(e), timeout=timeout)
-        result.duration = time.time() - started
-        return result
+        try:
+            drive.focus()
+            drive.type_text(probe_text(token))
+            drive.press_enter()
+            sent = True
+        except drive.DriveError as e:
+            result = evaluate(False, False, False, token, str(e), timeout=timeout)
+            result.duration = time.time() - started
+            return result
 
-    # Poll the raw files while the app runs -- a hit is trustworthy and
-    # returns in seconds. Then quit and read ONCE more, because a miss may
-    # only mean the write is still in the memtable.
-    try:
-        reply_persisted = store.wait_for(db_dir, reply_needle(token), timeout=timeout)
-        # Quit the app BEFORE the fallback reads so the memtable flushes
-        drive.quit_app()
-        if not reply_persisted:
-            reply_persisted = store.contains(db_dir, reply_needle(token))
-        probe_persisted = store.contains(db_dir, token.encode("utf-8"))
-    except store.StoreMissing:
-        result = Result(NAME, ERROR, time.time() - started, "no database at %s" % db_dir,
-                        [first_error(capture.lines())] if first_error(capture.lines()) else [])
-        return result
+        # Poll while the app runs -- saves are atomic, so a live read is safe
+        # and a hit returns in seconds. It only decides when to stop waiting.
+        deadline = now() + timeout
+        while True:
+            try:
+                if transcript.load(account_dir).reply_seen(token):
+                    break
+            except transcript.TranscriptMissing:
+                pass  # a mid-run read is not the verdict; the one after quit is
+            if now() >= deadline:
+                break
+            sleep(poll)
     finally:
         drive.quit_app()
 
-    result = evaluate(sent, probe_persisted, reply_persisted, token,
+    # The VERDICT is read after quit: saves are queued async
+    # (ChatThreadArchive.swift:52), so only a quit app has finished writing.
+    try:
+        final = transcript.load(account_dir)
+    except transcript.TranscriptMissing as e:
+        return error("could not read the chat transcript: %s" % e)
+
+    result = evaluate(sent, final.probe_seen(token), final.reply_seen(token), token,
                       first_error(capture.lines()), timeout=timeout)
     result.duration = time.time() - started
     return result

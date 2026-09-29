@@ -56,6 +56,7 @@ def watch_loop(
     post_fn=None,
     read_webhook_fn=None,
     max_passes=None,
+    uid=None,
 ):
     if fingerprint_fn is None:
         fingerprint_fn = fingerprint
@@ -118,7 +119,7 @@ def watch_loop(
 
         try:
             with Lock(os.path.join(here, "runs", ".lock")):
-                report, where = run(app_path, "local build", False, account)
+                report, where = run(app_path, "local build", False, account, uid=uid)
         except LockHeld:
             sleep(poll)
             continue

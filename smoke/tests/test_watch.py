@@ -78,15 +78,13 @@ class Loop(unittest.TestCase):
 
     def test_execute_exception_does_not_raise(self):
         # If a run crashes, consume the build and keep watching.
+        # Same fingerprint repeats; without previous_fp = current, run would be retried.
         fp1 = Fingerprint("2", 100.0)
-        fp2 = Fingerprint("2", 101.0)
-        # Pass 1: fp1 (outer) + fp1 (debounce), run crashes
-        # Pass 2: fp2 (outer) + fp2 (debounce), run succeeds
-        # Pass 3: fp2 (outer, not fresh), continues
-        fingerprint_fn = Mock(side_effect=[fp1, fp1, fp2, fp2, fp2])
-        report_mock = Mock()
-        report_mock.verdict.return_value = "green"
-        run_fn = Mock(side_effect=[RuntimeError("test crash"), (report_mock, "/where")])
+        # Pass 1: fp1 (outer) + fp1 (debounce), run crashes, previous_fp = fp1
+        # Pass 2: fp1 (outer, not fresh), continues without running
+        # Pass 3: fp1 (outer, not fresh), continues without running
+        fingerprint_fn = Mock(return_value=fp1)
+        run_fn = Mock(side_effect=[RuntimeError("test crash")])
         is_running_fn = Mock(return_value=False)
         post_fn = Mock(return_value=(True, ""))
 
@@ -111,8 +109,8 @@ class Loop(unittest.TestCase):
                             max_passes=3,
                         )
 
-        # Should have tried to run twice
-        self.assertEqual(run_fn.call_count, 2)
+        # Should have run exactly once; without previous_fp = current, would run 3 times
+        self.assertEqual(run_fn.call_count, 1)
         # Should have printed the crash
         printed = str(print_mock.call_args_list)
         self.assertIn("run crashed", printed)
@@ -191,18 +189,22 @@ class Loop(unittest.TestCase):
         self.assertEqual(run_fn.call_count, 2)
 
     def test_transition_rule_posts_once(self):
-        # Two runs with same verdict should post only once (transition rule).
+        # Transition rule: post only when verdict changes.
+        # Two runs with same verdict post once; third run with different verdict posts again.
         fp1 = Fingerprint("2", 100.0)
         fp2 = Fingerprint("2", 101.0)
-        # Pass 1: fp1 (outer) + fp1 (debounce), run succeeds (green)
-        # Pass 2: fp2 (outer) + fp2 (debounce), run succeeds (green, same verdict)
-        # Pass 3 would start but max_passes=2 stops after pass 2
-        fingerprint_fn = Mock(side_effect=[fp1, fp1, fp2, fp2])
+        fp3 = Fingerprint("2", 102.0)
+        # Pass 1: fp1 + run (green) -> should_post True (first) -> post
+        # Pass 2: fp2 + run (green) -> should_post False (same verdict) -> no post
+        # Pass 3: fp3 + run (red) -> should_post True (verdict changed) -> post
+        fingerprint_fn = Mock(side_effect=[fp1, fp1, fp2, fp2, fp3, fp3])
         report1 = Mock()
         report1.verdict.return_value = "green"
         report2 = Mock()
         report2.verdict.return_value = "green"
-        run_fn = Mock(side_effect=[(report1, "/where"), (report2, "/where")])
+        report3 = Mock()
+        report3.verdict.return_value = "red"
+        run_fn = Mock(side_effect=[(report1, "/where"), (report2, "/where"), (report3, "/where")])
         is_running_fn = Mock(return_value=False)
         read_webhook_fn = Mock(return_value="http://hook")
         post_fn = Mock(return_value=(True, ""))
@@ -213,26 +215,27 @@ class Loop(unittest.TestCase):
         with patch("builtins.print"):
             with patch("smoke.lib.watch.Lock") as lock_mock:
                 with patch("smoke.lib.watch.slack.format_message", return_value="test message"):
-                    with patch("smoke.lib.watch.slack.should_post", side_effect=[True, False]):
-                        lock_mock.return_value.__enter__ = Mock(return_value=None)
-                        lock_mock.return_value.__exit__ = Mock(return_value=None)
-                        watch_loop(
-                            "/app",
-                            "account@test.com",
-                            "/here",
-                            sleep=sleep_mock,
-                            fingerprint_fn=fingerprint_fn,
-                            run=run_fn,
-                            is_running=is_running_fn,
-                            post_fn=post_fn,
-                            read_webhook_fn=read_webhook_fn,
-                            max_passes=2,
-                        )
+                    lock_mock.return_value.__enter__ = Mock(return_value=None)
+                    lock_mock.return_value.__exit__ = Mock(return_value=None)
+                    # Use real should_post, not mocked; it reads verdict change from previous_verdict
+                    watch_loop(
+                        "/app",
+                        "account@test.com",
+                        "/here",
+                        sleep=sleep_mock,
+                        fingerprint_fn=fingerprint_fn,
+                        run=run_fn,
+                        is_running=is_running_fn,
+                        post_fn=post_fn,
+                        read_webhook_fn=read_webhook_fn,
+                        max_passes=3,
+                    )
 
-        # Should have run twice (two fingerprint changes)
-        self.assertEqual(run_fn.call_count, 2)
-        # Should have posted only once (verdict unchanged on second run)
-        self.assertEqual(post_fn.call_count, 1)
+        # Should have run three times (three fingerprint changes)
+        self.assertEqual(run_fn.call_count, 3)
+        # Should have posted twice: on first run (verdict=None->green) and on verdict change (green->red)
+        # Without previous_verdict tracking, would post three times
+        self.assertEqual(post_fn.call_count, 2)
 
 
 if __name__ == "__main__":

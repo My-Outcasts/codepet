@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Codepet smoke test.
+
+    smoke run                 the installed /Applications/codepet.app
+    smoke run --dev PATH      a local build
+    smoke run --with-task     also spend credits on a task run
+    smoke watch PATH          re-run whenever that build changes
+
+The account to check comes from --account or CODEPET_SMOKE_ACCOUNT.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from smoke.lib import drive, slack
+from smoke.lib.lock import Lock, LockHeld
+from smoke.lib.runner import execute
+
+INSTALLED = "/Applications/codepet.app"
+WEBHOOK = "~/.config/codepet-smoke/webhook.txt"
+
+
+def parse(argv=None):
+    account = os.environ.get("CODEPET_SMOKE_ACCOUNT")
+    p = argparse.ArgumentParser(prog="smoke")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    run = sub.add_parser("run")
+    run.add_argument("--dev", metavar="PATH", help="a local build instead of the installed app")
+    run.add_argument("--with-task", action="store_true", help="also run the task check (costs credits)")
+    run.add_argument("--slack", action="store_true", help="post even in --dev mode")
+    run.add_argument("--account", default=account)
+
+    watch = sub.add_parser("watch")
+    watch.add_argument("path", help="the built .app to watch")
+    watch.add_argument("--account", default=account)
+
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse(argv)
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    if not args.account:
+        print("no account: pass --account or set CODEPET_SMOKE_ACCOUNT")
+        return 2
+
+    if args.cmd == "watch":
+        from smoke.lib.watch import watch_loop
+        return watch_loop(args.path, args.account, here)
+
+    # The founder's own app is never ours to quit.
+    if drive.is_running():
+        print("deferred: your app is running")
+        return 2
+
+    app_path = args.dev or INSTALLED
+    mode = "local build" if args.dev else "installed build"
+    try:
+        with Lock(os.path.join(here, "runs", ".lock")):
+            report, where = execute(app_path, mode, args.with_task, args.account)
+    except LockHeld:
+        print("another smoke run holds the lock; not driving the app")
+        return 2
+
+    text = slack.format_message(report)
+    print(text)
+    print("\nreport: %s" % where)
+
+    if not args.dev or args.slack:
+        url = slack.read_webhook(WEBHOOK)
+        if not url:
+            print("no webhook at %s -- not posted" % WEBHOOK)
+        else:
+            ok, detail = slack.post(url, text)
+            print(detail)
+
+    return 0 if report.verdict() == "green" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

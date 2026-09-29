@@ -24,7 +24,10 @@ def load_cli():
 
 
 class Ordering(unittest.TestCase):
-    def test_the_checks_run_in_dependency_order(self):
+    def test_the_declared_report_order_is_launch_auth_chat_task(self):
+        # This is the order a REPORT reads in. Execution order differs (auth
+        # reads the store only after chat has quit the app); see
+        # Execute.test_the_checks_execute_launch_chat_auth_task.
         self.assertEqual(order(), ["launch", "auth", "chat", "task"])
 
     def test_a_failed_launch_skips_everything_after_it(self):
@@ -96,6 +99,13 @@ class Execute(unittest.TestCase):
         self.assertEqual(seen["uid"], "u42")
         self.assertEqual(seen["accounts_root"], "/acc")
         self.assertEqual(seen["settle"], 8.0)
+
+    def test_the_checks_execute_launch_chat_auth_task(self):
+        got, _ = self.go(with_task=True)
+        ran = [c for c in self.calls if c != "quit"]
+        self.assertEqual(ran, ["launch", "chat", "auth", "task"])
+        # ...and the report still reads in the declared order.
+        self.assertEqual(list(got), order())
 
     def test_a_local_build_is_not_assessed_by_gatekeeper(self):
         self.assertFalse(self._launch_kwargs("local build")["assess_gatekeeper"])

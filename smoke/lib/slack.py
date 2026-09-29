@@ -33,10 +33,12 @@ def _cap_and_escape(text, limit=300):
 
 
 def format_message(report):
+    # The label and mode come from a bundle's Info.plist and a CLI string;
+    # a "<" in either would be read by Slack as markup.
     head = "%s Codepet smoke — %s  ·  %s  ·  %s" % (
         VERDICT_MARK.get(report.verdict(), "⚠️"),
-        report.build.label(),
-        report.mode,
+        report.build.label().translate(_SLACK_ESCAPE),
+        report.mode.translate(_SLACK_ESCAPE),
         _duration(report.duration()),
     )
     lines = [head]

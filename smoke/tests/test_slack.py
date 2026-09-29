@@ -30,6 +30,16 @@ class Formatting(unittest.TestCase):
         # the app's own words, so the channel answers "what broke"
         self.assertIn("non-streaming retry refused: billing", text)
 
+    def test_the_header_escapes_slack_markup(self):
+        build = Build("/x.app", "1.0 <beta>", "2&3", "app.murror.codepet",
+                      True, "valid on disk", False, 0.0)
+        report = Report(build=build, results=[Result("launch", PASS, 1.0, "fine")],
+                        mode="local <build> & co", started=0.0, finished=1.0)
+        head = format_message(report).split("\n")[0]
+        self.assertIn("1.0 &lt;beta&gt; (2&amp;3)", head)
+        self.assertIn("local &lt;build&gt; &amp; co", head)
+        self.assertNotIn("<", head)
+
     def test_a_green_run_leads_with_green(self):
         text = format_message(a_report([Result("launch", PASS, 3.1, "fine")]))
         self.assertTrue(text.startswith("\U0001F7E2"))

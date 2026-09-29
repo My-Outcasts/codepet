@@ -141,12 +141,47 @@ struct MarkdownTableView: View {
             .foregroundColor(isHeader ? CodepetTheme.primaryText : CodepetTheme.bodyText)
             .multilineTextAlignment(alignment.text)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: maxCell, alignment: alignment.frame)
+            .modifier(CappedWidth(cap: maxCell, alignment: alignment.frame))
             .gridColumnAlignment(alignment.horizontal)
     }
 
     private func rule(_ color: Color) -> some View {
         Rectangle().fill(color).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+    }
+}
+
+/// `.frame(maxWidth:)` for a cell that must measure the way it draws. Inside the horizontal
+/// `ScrollView` a table is asked for its IDEAL size, and `.frame(maxWidth:)` passes that "no
+/// width" on to the text — which answers one line tall — then draws it wrapped at the cap. A
+/// header wrapped to three lines sat in a one-line row, clipped at the top and over row 1
+/// (CP-039). This measures AND places the text at the same capped width.
+private struct CappedWidth: ViewModifier {
+    let cap: CGFloat
+    let alignment: Alignment
+
+    func body(content: Content) -> some View {
+        CappedWidthLayout(cap: cap) { content }
+            .frame(maxWidth: cap, alignment: alignment)
+    }
+}
+
+private struct CappedWidthLayout: Layout {
+    let cap: CGFloat
+
+    private func width(_ proposal: ProposedViewSize) -> CGFloat {
+        min(proposal.width ?? cap, cap)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        return child.sizeThatFits(ProposedViewSize(width: width(proposal), height: nil))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                       cache: inout ()) {
+        guard let child = subviews.first else { return }
+        child.place(at: bounds.origin, anchor: .topLeading,
+                    proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
 

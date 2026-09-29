@@ -1,0 +1,48 @@
+[
+  {
+    "id": "7C1E0B7A-0000-4000-8000-00000000000A",
+    "title": "smoke test a1b2c3d4e5f6 -- reply with t…",
+    "createdAt": 1790000000000,
+    "updatedAt": 1790000060000,
+    "kind": "ask",
+    "messages": [
+      {"id": "m-a1", "fromFounder": true, "createdAt": 1790000000000,
+       "text": "smoke test a1b2c3d4e5f6 -- reply with this code written backwards, nothing else: a1b2c3d4e5f6",
+       "draftApproved": false},
+      {"id": "m-a2", "fromFounder": false, "createdAt": 1790000030000,
+       "text": "6f5e4d3c2b1a", "draftApproved": false,
+       "companionId": "byte", "deptName": "Chief of Staff"}
+    ]
+  },
+  {
+    "id": "7C1E0B7A-0000-4000-8000-00000000000B",
+    "title": "smoke test 0badc0ffee11 -- reply with t…",
+    "createdAt": 1790000100000,
+    "updatedAt": 1790000100000,
+    "kind": "ask",
+    "messages": [
+      {"id": "m-b1", "fromFounder": true, "createdAt": 1790000100000,
+       "text": "smoke test 0badc0ffee11 -- reply with this code written backwards, nothing else: 0badc0ffee11",
+       "draftApproved": false}
+    ]
+  },
+  {
+    "id": "7C1E0B7A-0000-4000-8000-00000000000C",
+    "createdAt": 1790000200000,
+    "updatedAt": 1790000260000,
+    "kind": "dev",
+    "messages": [
+      {"id": "m-c0", "fromFounder": false, "createdAt": 1790000200000,
+       "text": "An earlier reply that happens to say 11eeff0cdab0 and 4a3a2a1a0c0c.",
+       "draftApproved": false, "draftReplacedItem": true},
+      {"id": "m-c1", "fromFounder": true, "createdAt": 1790000210000,
+       "text": "smoke test c0c0a1a2a3a4 -- reply with this code written backwards, nothing else: c0c0a1a2a3a4",
+       "draftApproved": false},
+      {"id": "m-d1", "fromFounder": true, "createdAt": 1790000220000,
+       "text": "smoke test d00d12345678 -- reply with this code written backwards, nothing else: d00d12345678",
+       "draftApproved": false},
+      {"id": "m-d2", "fromFounder": true, "createdAt": 1790000230000,
+       "text": "I will type it myself: 87654321d00d", "draftApproved": false}
+    ]
+  }
+]

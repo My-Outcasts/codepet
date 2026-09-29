@@ -1,0 +1,133 @@
+"""Run the checks in order, and never invent a verdict.
+
+Teardown lives in a finally: a crashed check must not leave the app holding
+the LevelDB lock and blocking the next xcodebuild test.
+
+Two stores are read, and they are not the same store: auth reads the
+Firestore LevelDB (db_dir), chat reads the local chat transcript under
+~/.codepet/accounts/<uid>/ (uid, accounts_root) -- the app stopped writing
+chat to Firestore on 25 September.
+"""
+
+import os
+import time
+
+from smoke.checks import auth as auth_check
+from smoke.checks import chat as chat_check
+from smoke.checks import launch as launch_check
+from smoke.checks import task as task_check
+from smoke.lib import build as build_lib
+from smoke.lib import drive, store
+from smoke.lib.logstream import Capture
+from smoke.lib.report import Report, run_dir, write_html, write_json
+from smoke.lib.result import ERROR, FAIL, Result, skip_rest
+
+ORDER = ["launch", "auth", "chat", "task"]
+
+
+def order():
+    return list(ORDER)
+
+
+def downstream_of(name):
+    return ORDER[ORDER.index(name) + 1:]
+
+
+def _guarded(name, fn, *args, **kw):
+    """A check that blows up is an ERROR result, never an escape."""
+    t0 = time.time()
+    try:
+        return fn(*args, **kw)
+    except Exception as e:  # not BaseException: let Ctrl-C through
+        return Result(name, ERROR, time.time() - t0,
+                      "check crashed: %s: %s" % (type(e).__name__, e))
+
+
+def _runs_root(runs_root):
+    return os.path.abspath(runs_root or os.path.join(os.path.dirname(__file__), "..", "runs"))
+
+
+STILL_RUNNING = ("the smoke-launched app is still running -- it did not quit. "
+                 "Quit it before the next run; it is not the founder's session.")
+
+
+def still_running_note(report):
+    """The line to print when this run could not quit what it launched."""
+    return STILL_RUNNING if getattr(report, "app_left_running", False) is True else None
+
+
+def _finish(target, results, mode, started, where, app_left_running=False):
+    """The one place a run becomes a report on disk -- every path ends here."""
+    # Put the results back in declared order so the report always reads the same.
+    results.sort(key=lambda r: ORDER.index(r.name) if r.name in ORDER else 99)
+    report = Report(build=target, results=results, mode=mode,
+                    started=started, finished=time.time(),
+                    app_left_running=app_left_running)
+    write_json(report, os.path.join(where, "report.json"))
+    write_html(report, os.path.join(where, "report.html"))
+    return report, where
+
+
+def report_failed_launch(label, mode, launch, runs_root=None):
+    """A run that failed before there was an app to open -- a --dmg install.
+
+    It is still a run: it gets a report on disk and goes through the same
+    Slack path as any other, so a broken download page reaches the channel
+    instead of dying in a terminal nobody is watching.
+    """
+    started = time.time()
+    where = run_dir(_runs_root(runs_root))
+    target = build_lib.Build(label, "?", "?", "?", False, "not installed", False, 0.0)
+    results = [launch] + skip_rest(downstream_of("launch"), "launch %s" % launch.status)
+    return _finish(target, results, mode, started, where)
+
+
+def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
+            uid=None, accounts_root=None, settle=chat_check.SETTLE):
+    db_dir = db_dir or store.DEFAULT_DB
+    started = time.time()
+    where = run_dir(_runs_root(runs_root))
+    results = []
+
+    try:
+        target = build_lib.identify(app_path)
+    except build_lib.BuildMissing:
+        target = build_lib.Build(app_path, "?", "?", "?", False,
+                                 "no bundle at %s" % app_path, False, 0.0)
+
+    with Capture(os.path.join(where, "log.txt")) as capture:
+        try:
+            first = _guarded("launch", launch_check.run, app_path,
+                             evidence_dir=where,
+                             assess_gatekeeper=(mode != "local build"))
+            results.append(first)
+            if first.status in (FAIL, ERROR):
+                results.extend(skip_rest(downstream_of("launch"),
+                                         "launch %s" % first.status))
+            else:
+                token = chat_check.mint_token()
+                chat = _guarded("chat", chat_check.run, token, capture,
+                                uid=uid, accounts_root=accounts_root,
+                                settle=settle)
+                # chat may return early without quitting; auth must read a
+                # released lock whatever happened -- and if the app will not
+                # quit, reading underneath it is how phantom results happen.
+                if drive.quit_app():
+                    results.append(_guarded("auth", auth_check.run, account,
+                                            db_dir=db_dir))
+                else:
+                    results.append(Result("auth", ERROR, 0.0,
+                                          "app did not quit; store not read"))
+                results.append(chat)
+                if chat.status in (FAIL, ERROR):
+                    results.extend(skip_rest(downstream_of("chat"),
+                                             "chat %s" % chat.status))
+                else:
+                    # The task check drives nothing yet (checks/task.py), so a
+                    # requested one costs no relaunch and no credits.
+                    results.append(_guarded("task", task_check.run, "", capture,
+                                            with_task))
+        finally:
+            left_running = not drive.quit_app()
+
+    return _finish(target, results, mode, started, where, app_left_running=left_running)

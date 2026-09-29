@@ -7,6 +7,17 @@ Slack, plus a watch mode that re-runs it against local builds. The existing unit
 and any dashboard over historical test results are explicitly NOT in this spec; see
 *Out of scope*.
 
+> **Amendment (29 Sep).** The chat check is verified from the app's local chat transcript,
+> `~/.codepet/accounts/<uid>/company_chats.json`, not from the Firestore LevelDB. On 25 Sep
+> the app stopped writing chat to Firestore: threads persist as "a local JSON file per
+> account, never Firestore" (`codepet/Services/ChatThreadArchive.swift:5-10`), so a LevelDB
+> scan for the reply could never have found it. A pass needs the probe as a founder message
+> and, later in the same thread, a companion message carrying the reversed token; the
+> verdict is read after quit because saves are queued async (`ChatThreadArchive.swift:52`).
+> The uid comes from `--uid`, else `CODEPET_SMOKE_UID`, else the only account directory.
+> Auth still reads the LevelDB, as a presence check. Wherever this document says chat is
+> judged from the LevelDB, this note supersedes it.
+
 ## Why this exists
 
 On 24 September the founder uninstalled Codepet to install a fresh build from

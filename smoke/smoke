@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Codepet smoke test.
+
+    smoke run                 the installed /Applications/codepet.app
+    smoke run --dev PATH      a local build
+    smoke run --dmg [URL]     the shipped disk image (default: the download page)
+    smoke run --with-task     ask for the task check (SKIPs for now: not yet verifiable)
+    smoke watch PATH          re-run whenever that build changes
+
+The account to check comes from --account or CODEPET_SMOKE_ACCOUNT. The chat
+transcript is read for --uid, else CODEPET_SMOKE_UID, else the one account
+directory under ~/.codepet/accounts/ if there is exactly one.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from smoke.lib import dmg, drive, slack
+from smoke.lib.lock import Lock, LockHeld
+from smoke.lib.result import Result
+from smoke.lib.runner import execute, report_failed_launch, still_running_note
+
+INSTALLED = "/Applications/codepet.app"
+WEBHOOK = "~/.config/codepet-smoke/webhook.txt"
+
+
+def parse(argv=None):
+    account = os.environ.get("CODEPET_SMOKE_ACCOUNT")
+    p = argparse.ArgumentParser(prog="smoke")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    run = sub.add_parser("run")
+    run.add_argument("--dev", metavar="PATH", help="a local build instead of the installed app")
+    run.add_argument("--with-task", action="store_true", help="ask for the task check (currently SKIPs: no record-specific signal yet)")
+    run.add_argument("--dmg", nargs="?", const="", default=None, metavar="URL",
+                     help="download and test the shipped image (default: the download page)")
+    run.add_argument("--settle", type=float, default=8.0, metavar="SECONDS",
+                     help="wait this long after launch before typing (default 8)")
+    run.add_argument("--slack", action="store_true", help="post even in --dev mode")
+    run.add_argument("--account", default=account)
+    run.add_argument("--uid", default=None,
+                     help="the Firebase uid whose chat transcript to read "
+                          "(default: $CODEPET_SMOKE_UID, else the only account dir)")
+
+    watch = sub.add_parser("watch")
+    watch.add_argument("path", help="the built .app to watch")
+    watch.add_argument("--account", default=account)
+    watch.add_argument("--uid", default=None,
+                       help="the Firebase uid whose chat transcript to read")
+    watch.add_argument("--settle", type=float, default=8.0, metavar="SECONDS",
+                       help="wait this long after launch before typing (default 8)")
+
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse(argv)
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    if not args.account:
+        print("no account: pass --account or set CODEPET_SMOKE_ACCOUNT")
+        return 2
+
+    if args.cmd == "watch":
+        from smoke.lib.watch import watch_loop
+        return watch_loop(args.path, args.account, here, uid=args.uid, settle=args.settle)
+
+    # The founder's own app is never ours to quit.
+    if drive.is_running():
+        print("deferred: your app is running")
+        return 2
+
+    report = None
+    if args.dmg is not None:
+        url = args.dmg or dmg.DEFAULT_URL
+        mode = "downloaded build"
+        try:
+            app_path = dmg.install(url, os.path.join(here, "runs", "downloaded"))
+        except dmg.DmgError as e:
+            # Still a run with a verdict: a dead download link or a rejected
+            # image is exactly what the channel needs to hear about.
+            print("could not install from %s: %s" % (url, e))
+            report, where = report_failed_launch(
+                url, mode, Result("launch", e.status, 0.0, str(e)))
+    else:
+        app_path = args.dev or INSTALLED
+        mode = "local build" if args.dev else "installed build"
+    if report is None:
+        try:
+            with Lock(os.path.join(here, "runs", ".lock")):
+                report, where = execute(app_path, mode, args.with_task, args.account,
+                                        uid=args.uid, settle=args.settle)
+        except LockHeld:
+            print("another smoke run holds the lock; not driving the app")
+            return 2
+
+    text = slack.format_message(report)
+    print(text)
+    print("\nreport: %s" % where)
+    note = still_running_note(report)
+    if note:
+        print(note)
+
+    if not args.dev or args.slack:
+        url = slack.read_webhook(WEBHOOK)
+        if not url:
+            print("no webhook at %s -- not posted" % WEBHOOK)
+        else:
+            ok, detail = slack.post(url, text)
+            print(detail)
+
+    return 0 if report.verdict() == "green" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -291,6 +291,19 @@ class Loop(unittest.TestCase):
         self.assertEqual(fingerprint_fn.call_count, 3)
         self.assertEqual(run_fn.call_count, 1)
 
+    def test_watch_says_when_the_app_it_launched_is_still_running(self):
+        report = Mock()
+        report.verdict.return_value = "red"
+        report.app_left_running = True
+        with patch("builtins.print") as p, patch("smoke.lib.watch.Lock"), \
+                patch("smoke.lib.watch.slack.format_message", return_value="m"), \
+                patch("smoke.lib.watch.slack.should_post", return_value=False):
+            watch_loop("/app", "a@b.c", "/here", sleep=lambda s: None,
+                       fingerprint_fn=Mock(return_value=Fingerprint("2", 1.0)),
+                       run=Mock(return_value=(report, "/w")),
+                       is_running=Mock(return_value=False), max_passes=1)
+        self.assertIn("smoke-launched app is still running", str(p.call_args_list))
+
     def test_the_uid_reaches_each_run(self):
         fp = Fingerprint("2", 100.0)
         report = Mock()

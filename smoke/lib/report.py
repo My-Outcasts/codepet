@@ -18,6 +18,9 @@ class Report:
     mode: str = "installed build"
     started: float = 0.0
     finished: float = 0.0
+    # The app this run launched would not quit. The founder has to know: it
+    # holds the LevelDB lock and will look like THEIR app to the next run.
+    app_left_running: bool = False
 
     def verdict(self):
         return run_verdict(self.results)
@@ -31,6 +34,7 @@ class Report:
             "mode": self.mode,
             "duration": self.duration(),
             "started": self.started,
+            "app_left_running": self.app_left_running,
             "build": self.build.to_dict(),
             "results": [r.to_dict() for r in self.results],
         }

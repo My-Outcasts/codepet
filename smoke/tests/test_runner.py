@@ -50,7 +50,8 @@ class Execute(unittest.TestCase):
         self.check = check
         self.drive = mock.Mock()
         self.drive.DriveError = runner.drive.DriveError
-        self.drive.quit_app.side_effect = lambda *a, **k: rec.append("quit")
+        self.quit_ok = True
+        self.drive.quit_app.side_effect = lambda *a, **k: rec.append("quit") or self.quit_ok
 
         @contextlib.contextmanager
         def fake_capture(path):
@@ -111,6 +112,34 @@ class Execute(unittest.TestCase):
     def test_the_app_is_quit_before_auth_reads_the_db(self):
         got, _ = self.go(chat=ERROR)
         self.assertLess(self.calls.index("quit"), self.calls.index("auth"))
+
+    def test_an_app_that_will_not_quit_is_an_auth_error_and_the_store_is_not_read(self):
+        self.quit_ok = False
+        got, where = self.go()
+        self.assertEqual(got["auth"].status, ERROR)
+        self.assertEqual(got["auth"].detail, "app did not quit; store not read")
+        self.assertNotIn("auth", self.calls)
+
+    def test_an_app_that_will_not_quit_is_recorded_on_the_report(self):
+        self.quit_ok = False
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", PASS)), \
+                mock.patch.object(runner.chat_check, "run", self.check("chat", PASS)), \
+                mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)):
+            report, where = runner.execute("/nonexistent.app", "test", False, "a@b.c",
+                                           runs_root=self.tmp.name)
+        self.assertTrue(report.app_left_running)
+        self.assertEqual(runner.still_running_note(report), runner.STILL_RUNNING)
+        with open(os.path.join(where, "report.json")) as f:
+            self.assertTrue(json.load(f)["app_left_running"])
+
+    def test_a_clean_quit_leaves_no_note(self):
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", PASS)), \
+                mock.patch.object(runner.chat_check, "run", self.check("chat", PASS)), \
+                mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)):
+            report, _ = runner.execute("/nonexistent.app", "test", False, "a@b.c",
+                                       runs_root=self.tmp.name)
+        self.assertFalse(report.app_left_running)
+        self.assertIsNone(runner.still_running_note(report))
 
     def test_a_failed_chat_skips_the_task_even_when_requested(self):
         got, _ = self.go(chat=FAIL, with_task=True)
@@ -189,6 +218,19 @@ class Cli(unittest.TestCase):
             cli.main(["run", "--account", "a@b.c", "--dev", "/x.app", "--uid", "u42"])
         self.assertEqual(ex.call_args[1]["uid"], "u42")
         self.assertEqual(ex.call_args[1]["settle"], 8.0)
+
+    def test_the_cli_says_when_the_app_it_launched_is_still_running(self):
+        cli = load_cli()
+        report = mock.Mock()
+        report.verdict.return_value = "red"
+        report.app_left_running = True
+        with mock.patch.object(cli.drive, "is_running", return_value=False), \
+                mock.patch.object(cli, "execute", return_value=(report, "/r")), \
+                mock.patch.object(cli, "Lock"), \
+                mock.patch.object(cli.slack, "format_message", return_value="msg"), \
+                mock.patch("builtins.print") as p:
+            cli.main(["run", "--account", "a@b.c", "--dev", "/x.app"])
+        self.assertIn("smoke-launched app is still running", str(p.call_args_list))
 
     def test_settle_is_a_flag_on_run_and_watch(self):
         cli = load_cli()

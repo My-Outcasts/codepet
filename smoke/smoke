@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from smoke.lib import dmg, drive, slack
 from smoke.lib.lock import Lock, LockHeld
 from smoke.lib.result import Result
-from smoke.lib.runner import execute, report_failed_launch
+from smoke.lib.runner import execute, report_failed_launch, still_running_note
 
 INSTALLED = "/Applications/codepet.app"
 WEBHOOK = "~/.config/codepet-smoke/webhook.txt"
@@ -100,6 +100,9 @@ def main(argv=None):
     text = slack.format_message(report)
     print(text)
     print("\nreport: %s" % where)
+    note = still_running_note(report)
+    if note:
+        print(note)
 
     if not args.dev or args.slack:
         url = slack.read_webhook(WEBHOOK)

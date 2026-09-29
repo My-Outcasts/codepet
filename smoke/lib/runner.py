@@ -47,12 +47,22 @@ def _runs_root(runs_root):
     return os.path.abspath(runs_root or os.path.join(os.path.dirname(__file__), "..", "runs"))
 
 
-def _finish(target, results, mode, started, where):
+STILL_RUNNING = ("the smoke-launched app is still running -- it did not quit. "
+                 "Quit it before the next run; it is not the founder's session.")
+
+
+def still_running_note(report):
+    """The line to print when this run could not quit what it launched."""
+    return STILL_RUNNING if getattr(report, "app_left_running", False) is True else None
+
+
+def _finish(target, results, mode, started, where, app_left_running=False):
     """The one place a run becomes a report on disk -- every path ends here."""
     # Put the results back in declared order so the report always reads the same.
     results.sort(key=lambda r: ORDER.index(r.name) if r.name in ORDER else 99)
     report = Report(build=target, results=results, mode=mode,
-                    started=started, finished=time.time())
+                    started=started, finished=time.time(),
+                    app_left_running=app_left_running)
     write_json(report, os.path.join(where, "report.json"))
     write_html(report, os.path.join(where, "report.html"))
     return report, where
@@ -100,10 +110,14 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
                                 uid=uid, accounts_root=accounts_root,
                                 settle=settle)
                 # chat may return early without quitting; auth must read a
-                # released lock whatever happened.
-                drive.quit_app()
-                results.append(_guarded("auth", auth_check.run, account,
-                                        db_dir=db_dir))
+                # released lock whatever happened -- and if the app will not
+                # quit, reading underneath it is how phantom results happen.
+                if drive.quit_app():
+                    results.append(_guarded("auth", auth_check.run, account,
+                                            db_dir=db_dir))
+                else:
+                    results.append(Result("auth", ERROR, 0.0,
+                                          "app did not quit; store not read"))
                 results.append(chat)
                 if chat.status in (FAIL, ERROR):
                     results.extend(skip_rest(downstream_of("chat"),
@@ -114,6 +128,6 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
                     results.append(_guarded("task", task_check.run, "", capture,
                                             with_task))
         finally:
-            drive.quit_app()
+            left_running = not drive.quit_app()
 
-    return _finish(target, results, mode, started, where)
+    return _finish(target, results, mode, started, where, app_left_running=left_running)

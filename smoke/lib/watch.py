@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from smoke.lib import build as build_lib
 from smoke.lib import drive, slack
 from smoke.lib.lock import Lock, LockHeld
-from smoke.lib.runner import execute
+from smoke.lib.runner import execute, still_running_note
 
 
 @dataclass
@@ -169,6 +169,9 @@ def watch_loop(
         previous_fp = current
         text = slack.format_message(report)
         print(text)
+        note = still_running_note(report)
+        if note:
+            print(note)
 
         verdict = report.verdict()
         if slack.should_post("watch", verdict, previous_verdict):

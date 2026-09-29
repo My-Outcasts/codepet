@@ -11,9 +11,21 @@ import Foundation
 /// room's full record.
 enum SplitSummary {
     static func line(_ conflicts: [VCConflict], name: (String) -> String, lang: AppLanguage) -> String? {
-        let pairs = conflicts.filter { $0.kind != "ALIGNED" }
-        guard !pairs.isEmpty else { return nil }
         let vi = lang == .vi
+        // Only CONFLICT and BLOCKER are a split — the backend's own rule (`needsNegotiation`,
+        // `briefOmitsDissent`). TENSION is "same direction, different priority" or two sets of
+        // conditions nobody compared, and headlining it "see this differently" put a split over
+        // a narrative that said there was none (CP-040, the 29 Sep changelog room).
+        let pairs = conflicts.filter { $0.kind == "CONFLICT" || $0.kind == "BLOCKER" }
+        guard !pairs.isEmpty else {
+            let tension = conflicts.filter { $0.kind == "TENSION" }
+            guard !tension.isEmpty else { return nil }
+            var depts: [String] = []
+            for p in tension { for d in [p.a, p.b] where !depts.contains(d) { depts.append(d) } }
+            let list = listed(depts.map(name), vi: vi)
+            return vi ? "\(list) cùng hướng nhưng chưa thống nhất mọi điều kiện."
+                      : "\(list) agree on the direction but not on every condition."
+        }
 
         var depts: [String] = []
         for p in pairs { for d in [p.a, p.b] where !depts.contains(d) { depts.append(d) } }

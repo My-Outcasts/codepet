@@ -43,12 +43,40 @@ def _guarded(name, fn, *args, **kw):
                       "check crashed: %s: %s" % (type(e).__name__, e))
 
 
+def _runs_root(runs_root):
+    return os.path.abspath(runs_root or os.path.join(os.path.dirname(__file__), "..", "runs"))
+
+
+def _finish(target, results, mode, started, where):
+    """The one place a run becomes a report on disk -- every path ends here."""
+    # Put the results back in declared order so the report always reads the same.
+    results.sort(key=lambda r: ORDER.index(r.name) if r.name in ORDER else 99)
+    report = Report(build=target, results=results, mode=mode,
+                    started=started, finished=time.time())
+    write_json(report, os.path.join(where, "report.json"))
+    write_html(report, os.path.join(where, "report.html"))
+    return report, where
+
+
+def report_failed_launch(label, mode, launch, runs_root=None):
+    """A run that failed before there was an app to open -- a --dmg install.
+
+    It is still a run: it gets a report on disk and goes through the same
+    Slack path as any other, so a broken download page reaches the channel
+    instead of dying in a terminal nobody is watching.
+    """
+    started = time.time()
+    where = run_dir(_runs_root(runs_root))
+    target = build_lib.Build(label, "?", "?", "?", False, "not installed", False, 0.0)
+    results = [launch] + skip_rest(downstream_of("launch"), "launch %s" % launch.status)
+    return _finish(target, results, mode, started, where)
+
+
 def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
             uid=None, accounts_root=None, settle=chat_check.SETTLE):
     db_dir = db_dir or store.DEFAULT_DB
-    runs_root = runs_root or os.path.join(os.path.dirname(__file__), "..", "runs")
     started = time.time()
-    where = run_dir(os.path.abspath(runs_root))
+    where = run_dir(_runs_root(runs_root))
     results = []
 
     try:
@@ -88,10 +116,4 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
         finally:
             drive.quit_app()
 
-    # Put the results back in declared order so the report always reads the same.
-    results.sort(key=lambda r: ORDER.index(r.name) if r.name in ORDER else 99)
-    report = Report(build=target, results=results, mode=mode,
-                    started=started, finished=time.time())
-    write_json(report, os.path.join(where, "report.json"))
-    write_html(report, os.path.join(where, "report.html"))
-    return report, where
+    return _finish(target, results, mode, started, where)

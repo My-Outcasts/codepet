@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from smoke.lib import dmg, drive, slack
 from smoke.lib.lock import Lock, LockHeld
-from smoke.lib.runner import execute
+from smoke.lib.result import Result
+from smoke.lib.runner import execute, report_failed_launch
 
 INSTALLED = "/Applications/codepet.app"
 WEBHOOK = "~/.config/codepet-smoke/webhook.txt"
@@ -72,24 +73,29 @@ def main(argv=None):
         print("deferred: your app is running")
         return 2
 
+    report = None
     if args.dmg is not None:
         url = args.dmg or dmg.DEFAULT_URL
+        mode = "downloaded build"
         try:
             app_path = dmg.install(url, os.path.join(here, "runs", "downloaded"))
         except dmg.DmgError as e:
+            # Still a run with a verdict: a dead download link or a rejected
+            # image is exactly what the channel needs to hear about.
             print("could not install from %s: %s" % (url, e))
-            return 2
-        mode = "downloaded build"
+            report, where = report_failed_launch(
+                url, mode, Result("launch", e.status, 0.0, str(e)))
     else:
         app_path = args.dev or INSTALLED
         mode = "local build" if args.dev else "installed build"
-    try:
-        with Lock(os.path.join(here, "runs", ".lock")):
-            report, where = execute(app_path, mode, args.with_task, args.account,
-                                    uid=args.uid, settle=args.settle)
-    except LockHeld:
-        print("another smoke run holds the lock; not driving the app")
-        return 2
+    if report is None:
+        try:
+            with Lock(os.path.join(here, "runs", ".lock")):
+                report, where = execute(app_path, mode, args.with_task, args.account,
+                                        uid=args.uid, settle=args.settle)
+        except LockHeld:
+            print("another smoke run holds the lock; not driving the app")
+            return 2
 
     text = slack.format_message(report)
     print(text)

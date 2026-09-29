@@ -230,13 +230,59 @@ class Cli(unittest.TestCase):
         cli, rc, ex, _ = self._run_with_dmg(["run", "--account", "a@b.c", "--dmg"], install)
         self.assertEqual(install.call_args[0][0], cli.dmg.DEFAULT_URL)
 
-    def test_a_failed_install_returns_2_without_lock_or_run(self):
+    def _failed_install(self, error):
+        cli = load_cli()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        real = runner.report_failed_launch
+
+        def failed(label, mode, launch):
+            return real(label, mode, launch, runs_root=tmp.name)
+        with mock.patch.object(cli.drive, "is_running", return_value=False), \
+                mock.patch.object(cli.dmg, "install", mock.Mock(side_effect=error)), \
+                mock.patch.object(cli, "report_failed_launch", failed), \
+                mock.patch.object(cli, "execute") as ex, \
+                mock.patch.object(cli, "Lock") as lock, \
+                mock.patch.object(cli.slack, "read_webhook", return_value="http://hook"), \
+                mock.patch.object(cli.slack, "post", return_value=(True, "posted")) as post, \
+                mock.patch("builtins.print"):
+            rc = cli.main(["run", "--account", "a@b.c", "--dmg"])
+        return rc, ex, lock, post
+
+    def test_a_404_install_is_a_launch_fail_that_reaches_slack(self):
         from smoke.lib.dmg import DmgError
-        install = mock.Mock(side_effect=DmgError("boom"))
-        cli, rc, ex, lock = self._run_with_dmg(["run", "--account", "a@b.c", "--dmg"], install)
-        self.assertEqual(rc, 2)
+        rc, ex, lock, post = self._failed_install(
+            DmgError("could not download https://x: HTTP 404", FAIL))
+        self.assertEqual(rc, 1)
         ex.assert_not_called()
         lock.assert_not_called()
+        text = post.call_args[0][1]
+        self.assertTrue(text.startswith("\U0001F534"))
+        self.assertIn("HTTP 404", text)
+        self.assertIn("❌ Launch", text)
+
+    def test_another_install_failure_is_a_launch_error_that_reaches_slack(self):
+        from smoke.lib.dmg import DmgError
+        rc, _, _, post = self._failed_install(DmgError("hdiutil attach failed"))
+        self.assertEqual(rc, 1)
+        self.assertIn("⚠️ Launch", post.call_args[0][1])
+
+
+class FailedLaunchReport(unittest.TestCase):
+    def test_it_writes_a_report_with_the_rest_skipped(self):
+        with tempfile.TemporaryDirectory() as root:
+            report, where = runner.report_failed_launch(
+                "https://x/Codepet.dmg", "downloaded build",
+                Result("launch", FAIL, 0.0, "the disk image is not signed/notarized: x"),
+                runs_root=root)
+            got = {r.name: r.status for r in report.results}
+            self.assertEqual(got, {"launch": FAIL, "auth": SKIP, "chat": SKIP, "task": SKIP})
+            self.assertEqual([r.name for r in report.results], order())
+            with open(os.path.join(where, "report.json")) as f:
+                data = json.load(f)
+            self.assertEqual(data["verdict"], "red")
+            self.assertEqual(data["mode"], "downloaded build")
+            self.assertTrue(os.path.exists(os.path.join(where, "report.html")))
 
 
 if __name__ == "__main__":

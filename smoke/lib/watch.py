@@ -42,41 +42,92 @@ def may_drive(app_running, we_launched_it):
     return True, ""
 
 
-def watch_loop(app_path, account, here, poll=2.0, debounce=3.0):
+def watch_loop(
+    app_path,
+    account,
+    here,
+    poll=2.0,
+    debounce=3.0,
+    *,
+    sleep=time.sleep,
+    fingerprint_fn=None,
+    run=None,
+    is_running=None,
+    post_fn=None,
+    read_webhook_fn=None,
+    max_passes=None,
+):
+    if fingerprint_fn is None:
+        fingerprint_fn = fingerprint
+    if run is None:
+        run = execute
+    if is_running is None:
+        is_running = drive.is_running
+    if post_fn is None:
+        post_fn = slack.post
+    if read_webhook_fn is None:
+        read_webhook_fn = slack.read_webhook
+
     previous_fp = None
     previous_verdict = None
+    deferred_for_fp = None
+    passes = 0
     print("watching %s -- ctrl-c to stop" % app_path)
 
     while True:
+        passes += 1
+        if max_passes is not None and passes > max_passes:
+            break
+
         try:
-            current = fingerprint(app_path)
+            current = fingerprint_fn(app_path)
         except build_lib.BuildMissing:
-            time.sleep(poll)
+            sleep(poll)
             continue
 
         if not is_fresh(current, previous_fp):
-            time.sleep(poll)
+            sleep(poll)
             continue
 
         # Debounce: wait for the build to stop writing.
+        debounce_success = True
         while True:
-            time.sleep(debounce)
-            settled = fingerprint(app_path)
+            sleep(debounce)
+            try:
+                settled = fingerprint_fn(app_path)
+            except build_lib.BuildMissing:
+                # Bundle removed during debounce; restart polling from top
+                debounce_success = False
+                break
             if settled.mtime == current.mtime:
                 break
             current = settled
 
-        may, why = may_drive(drive.is_running(), we_launched_it=False)
+        if not debounce_success:
+            sleep(poll)
+            continue
+
+        may, why = may_drive(is_running(), we_launched_it=False)
         if not may:
-            print(why)
-            time.sleep(poll)
+            # Print once per fingerprint, not every pass
+            if deferred_for_fp != current:
+                print(why)
+                deferred_for_fp = current
+            sleep(poll)
             continue
 
         try:
             with Lock(os.path.join(here, "runs", ".lock")):
-                report, where = execute(app_path, "local build", False, account)
+                report, where = run(app_path, "local build", False, account)
         except LockHeld:
-            time.sleep(poll)
+            sleep(poll)
+            continue
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print("run crashed: %s: %s" % (type(e).__name__, e))
+            previous_fp = current
+            sleep(poll)
             continue
 
         previous_fp = current
@@ -85,8 +136,8 @@ def watch_loop(app_path, account, here, poll=2.0, debounce=3.0):
 
         verdict = report.verdict()
         if slack.should_post("watch", verdict, previous_verdict):
-            url = slack.read_webhook("~/.config/codepet-smoke/webhook.txt")
+            url = read_webhook_fn("~/.config/codepet-smoke/webhook.txt")
             if url:
-                ok, detail = slack.post(url, text)
+                ok, detail = post_fn(url, text)
                 print(detail)
         previous_verdict = verdict

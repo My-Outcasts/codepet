@@ -37,7 +37,7 @@ class Report:
 
 
 def run_dir(root, when=None):
-    stamp = time.strftime("%Y-%m-%d-%H%M%S", time.localtime(when or time.time()))
+    stamp = time.strftime("%Y-%m-%d-%H%M%S", time.localtime(when if when is not None else time.time()))
     path = os.path.join(root, stamp)
     os.makedirs(path, exist_ok=True)
     return path

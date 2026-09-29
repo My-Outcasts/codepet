@@ -1,9 +1,10 @@
 import unittest
+from unittest import mock
 
 from smoke.lib.build import Build
 from smoke.lib.report import Report
 from smoke.lib.result import ERROR, FAIL, PASS, SKIP, Result
-from smoke.lib.slack import format_message, should_post
+from smoke.lib.slack import format_message, should_post, post, read_webhook
 
 
 def a_report(results, mode="installed build"):
@@ -36,6 +37,101 @@ class Formatting(unittest.TestCase):
     def test_an_errored_run_is_not_green(self):
         text = format_message(a_report([Result("launch", ERROR, 1.0, "no windows")]))
         self.assertFalse(text.startswith("\U0001F7E2"))
+
+    def test_evidence_on_pass_result_is_not_emitted(self):
+        report = a_report([
+            Result("launch", PASS, 1.0, "fine", ["evidence here"]),
+        ])
+        text = format_message(report)
+        self.assertNotIn("evidence here", text)
+
+    def test_a_1000_char_evidence_line_is_capped_at_300(self):
+        long_evidence = "x" * 1000
+        report = a_report([
+            Result("chat", FAIL, 1.0, "failed", [long_evidence]),
+        ])
+        text = format_message(report)
+        self.assertIn("x" * 299 + "…", text)
+        self.assertNotIn("x" * 300, text)
+
+    def test_multiline_evidence_emits_only_first_line(self):
+        report = a_report([
+            Result("chat", FAIL, 1.0, "failed", ["line 1\nline 2\nline 3"]),
+        ])
+        text = format_message(report)
+        self.assertIn("line 1", text)
+        self.assertNotIn("line 2", text)
+
+    def test_slack_markup_is_escaped_in_detail_and_evidence(self):
+        report = a_report([
+            Result("chat", FAIL, 1.0, "detail with <tag> & symbol", ["evidence with > bracket"]),
+        ])
+        text = format_message(report)
+        self.assertIn("&lt;tag&gt;", text)
+        self.assertIn("&amp;", text)
+        self.assertIn("&gt;", text)
+
+
+class PostErrors(unittest.TestCase):
+    @mock.patch("smoke.lib.slack.urllib.request.urlopen")
+    def test_timeout_error_returns_false_without_exposing_secret(self, mock_urlopen):
+        mock_urlopen.side_effect = TimeoutError("timed out")
+        ok, msg = post("https://hooks.slack.com/SECRET", "text")
+        self.assertFalse(ok)
+        self.assertNotIn("SECRET", msg)
+        self.assertIn("TimeoutError", msg)
+
+    @mock.patch("smoke.lib.slack.urllib.request.urlopen")
+    def test_connection_reset_error_returns_false_without_exposing_secret(self, mock_urlopen):
+        mock_urlopen.side_effect = ConnectionResetError("connection reset")
+        ok, msg = post("https://hooks.slack.com/SECRET", "text")
+        self.assertFalse(ok)
+        self.assertNotIn("SECRET", msg)
+        self.assertIn("ConnectionResetError", msg)
+
+    @mock.patch("smoke.lib.slack.urllib.request.urlopen")
+    def test_value_error_returns_false_without_exposing_secret(self, mock_urlopen):
+        mock_urlopen.side_effect = ValueError("bad url https://hooks.slack.com/SECRET")
+        ok, msg = post("https://hooks.slack.com/SECRET", "text")
+        self.assertFalse(ok)
+        self.assertNotIn("SECRET", msg)
+        self.assertIn("ValueError", msg)
+
+    @mock.patch("smoke.lib.slack.urllib.request.urlopen")
+    def test_response_status_302_returns_false_with_status(self, mock_urlopen):
+        mock_resp = mock.Mock()
+        mock_resp.status = 302
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+        ok, msg = post("https://hooks.slack.com/test", "text")
+        self.assertFalse(ok)
+        self.assertIn("302", msg)
+
+    @mock.patch("smoke.lib.slack.urllib.request.urlopen")
+    def test_response_status_200_returns_true(self, mock_urlopen):
+        mock_resp = mock.Mock()
+        mock_resp.status = 200
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+        ok, msg = post("https://hooks.slack.com/test", "text")
+        self.assertTrue(ok)
+        self.assertIn("posted", msg)
+
+
+class ReadWebhookErrors(unittest.TestCase):
+    def test_directory_path_returns_none(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            result = read_webhook(d)
+            self.assertIsNone(result)
+
+    def test_invalid_utf8_bytes_returns_none(self):
+        import tempfile
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "webhook")
+            with open(path, "wb") as f:
+                f.write(b"\xff\xfe invalid utf-8")
+            result = read_webhook(path)
+            self.assertIsNone(result)
 
 
 class TransitionRule(unittest.TestCase):

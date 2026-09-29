@@ -44,7 +44,8 @@ class Files(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "report.html")
             write_html(a_report([Result("launch", PASS), Result("chat", FAIL, 0, "no reply")]), path)
-            html = open(path, encoding="utf-8").read()
+            with open(path, encoding="utf-8") as f:
+                html = f.read()
             self.assertIn("1.0 (2)", html)
             self.assertIn("no reply", html)
             self.assertIn("<html", html)

@@ -17,7 +17,7 @@ class Formatting(unittest.TestCase):
     def test_a_failing_run_leads_with_red_and_the_build(self):
         report = a_report([
             Result("launch", PASS, 3.1, "signed, Gatekeeper accepts, window in 3.1s"),
-            Result("auth", PASS, 0.2, "session restored for nguyen@murror.app"),
+            Result("auth", PASS, 0.2, "account present in the local store (nguyen@murror.app)"),
             Result("chat", FAIL, 90.0, "no reply persisted for probe f3a91c",
                    ["ChatTransport: non-streaming retry refused: billing"]),
             Result("task", SKIP, 0.0, "skipped (chat failed)"),

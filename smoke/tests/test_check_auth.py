@@ -8,12 +8,15 @@ class Evaluate(unittest.TestCase):
     def test_a_persisted_account_passes_and_names_it(self):
         r = evaluate(found=True, account="nguyen@murror.app")
         self.assertEqual(r.status, PASS)
-        self.assertEqual(r.detail, "session restored for nguyen@murror.app")
+        self.assertEqual(r.detail, "account present in the local store (nguyen@murror.app)")
+        # A presence check must not claim a live session; chat proves that.
+        self.assertNotIn("session", r.detail)
 
     def test_no_account_in_the_store_is_a_real_failure(self):
         r = evaluate(found=False, account="nguyen@murror.app")
         self.assertEqual(r.status, FAIL)
-        self.assertIn("no session", r.detail)
+        self.assertIn("not found in the local store", r.detail)
+        self.assertIn("nguyen@murror.app", r.detail)
 
 
 class Run(unittest.TestCase):

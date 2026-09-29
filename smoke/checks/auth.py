@@ -1,4 +1,11 @@
-"""Check 2 -- did the session survive to the store?
+"""Check 2 -- is the account present in the local store?
+
+This is a PRESENCE check, and says no more than that: the account email
+appears somewhere in the Firestore LevelDB. It does not prove a live session
+-- an email can outlive a sign-out in cached documents. What proves a
+signed-in app is the chat check: a reply only round-trips for a founder the
+app has signed in. So auth PASS reads "account present", never "session
+restored".
 
 Read AFTER the app quits. LevelDB holds a single-process lock, and reading
 underneath a live app is how this codebase has produced phantom results.
@@ -17,8 +24,8 @@ NAME = "auth"
 
 def evaluate(found, account):
     if found:
-        return Result(NAME, PASS, 0.0, "session restored for %s" % account)
-    return Result(NAME, FAIL, 0.0, "no session for %s in the local store" % account)
+        return Result(NAME, PASS, 0.0, "account present in the local store (%s)" % account)
+    return Result(NAME, FAIL, 0.0, "account %s not found in the local store" % account)
 
 
 def run(account, db_dir=store.DEFAULT_DB):

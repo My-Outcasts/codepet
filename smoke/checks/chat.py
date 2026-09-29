@@ -32,15 +32,32 @@ from smoke.lib.result import ERROR, FAIL, PASS, Result
 
 NAME = "chat"
 SETTLE = 8.0
+TOKEN_LEN = 12
+MAX_MINTS = 20
 
 
 def mint_token():
     while True:
-        token = uuid.uuid4().hex[:6]
+        token = uuid.uuid4().hex[:TOKEN_LEN]
         # Reject palindromes: if token == token[::-1], then reply_needle(token) == token,
         # so finding it would prove our probe was saved, not that anything replied.
         if token != token[::-1]:
             return token
+
+
+def fresh_token(token, before, mint=None):
+    """Re-mint while the reversed needle is ALREADY in the transcript.
+
+    A reply needle that pre-exists the run would pass without anything
+    replying. 12 hex chars make that vanishingly rare, which is exactly why
+    it gets a guard instead of a belief.
+    """
+    mint = mint or mint_token
+    for _ in range(MAX_MINTS):
+        if not before.contains(reply_needle(token)):
+            return token
+        token = mint()
+    raise RuntimeError("could not mint a token absent from the transcript")
 
 
 def probe_text(token):
@@ -89,6 +106,11 @@ def run(token, capture, uid=None, accounts_root=None, timeout=90, settle=SETTLE,
     # A window on screen is not a composer ready for keys: typing into a
     # launch still in progress drops keystrokes on the floor.
     sleep(settle)
+
+    try:
+        token = fresh_token(token, transcript.load(account_dir))
+    except transcript.TranscriptMissing as e:
+        return error("could not read the chat transcript: %s" % e)
 
     sent = False
     try:

@@ -21,13 +21,18 @@ class Probe(unittest.TestCase):
         with mock.patch("smoke.checks.chat.uuid.uuid4") as mock_uuid:
             # Return a palindrome first, then a non-palindrome
             mock_uuid.side_effect = [
-                mock.MagicMock(hex="abccba123456789abcdef0123456789"),  # palindrome at [:6] = "abccba"
-                mock.MagicMock(hex="abcdef123456789abcdef0123456789"),  # non-palindrome at [:6] = "abcdef"
+                mock.MagicMock(hex="abcdeffedcba99999999999999999999"),  # palindrome at [:12]
+                mock.MagicMock(hex="abcdef0123456789abcdef0123456789"),  # non-palindrome
             ]
             token = mint_token()
             # Should loop past the palindrome and return the non-palindrome
-            self.assertEqual(token, "abcdef")
+            self.assertEqual(token, "abcdef012345")
             self.assertNotEqual(token, token[::-1])
+
+    def test_a_token_is_twelve_hex_chars(self):
+        token = mint_token()
+        self.assertEqual(len(token), 12)
+        int(token, 16)
 
     def test_the_reply_needle_does_not_appear_in_the_probe_we_type(self):
         # If it did, finding it would prove our own message was saved --
@@ -37,6 +42,24 @@ class Probe(unittest.TestCase):
 
     def test_the_needle_is_the_token_backwards(self):
         self.assertEqual(reply_needle("abc123"), "321cba")
+
+
+class FreshToken(unittest.TestCase):
+    def test_a_token_whose_reply_is_already_in_the_transcript_is_reminted(self):
+        before = transcript.Transcript([transcript.Thread("t", [
+            transcript.Message(False, "old reply " + REPLIED[::-1])])])
+        self.assertEqual(chat.fresh_token(REPLIED, before, mint=lambda: "0123456789ab"),
+                         "0123456789ab")
+
+    def test_it_keeps_reminting_until_the_needle_is_absent(self):
+        before = transcript.Transcript([transcript.Thread("t", [
+            transcript.Message(False, "%s %s" % (REPLIED[::-1], "ba9876543210"))])])
+        mints = iter(["0123456789ab", "fedcba012345"])
+        self.assertEqual(chat.fresh_token(REPLIED, before, mint=lambda: next(mints)),
+                         "fedcba012345")
+
+    def test_an_absent_needle_keeps_the_token(self):
+        self.assertEqual(chat.fresh_token(REPLIED, transcript.Transcript([])), REPLIED)
 
 
 class Evaluate(unittest.TestCase):
@@ -172,6 +195,16 @@ class Run(unittest.TestCase):
     def test_the_settle_is_configurable(self):
         self.go(on_type=self.app_writes_fixture, settle=2.5)
         self.assertEqual(self.events[0], ("sleep", 2.5))
+
+    def test_a_needle_already_in_the_transcript_is_never_typed(self):
+        # The fixture is on disk BEFORE typing: REPLIED's reply is already
+        # there, so typing REPLIED would pass without anything replying.
+        self.app_writes_fixture()
+        with mock.patch.object(chat, "mint_token", return_value="0123456789ab"):
+            r = self.go(token=REPLIED)
+        self.assertNotIn(REPLIED, self.typed[0])
+        self.assertIn("0123456789ab", self.typed[0])
+        self.assertEqual(r.status, ERROR)  # nothing wrote the new probe
 
     def test_it_polls_until_the_reply_lands(self):
         clock = [0.0]

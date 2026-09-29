@@ -54,7 +54,8 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
     with Capture(os.path.join(where, "log.txt")) as capture:
         try:
             first = _guarded("launch", launch_check.run, app_path,
-                             evidence_dir=where)
+                             evidence_dir=where,
+                             assess_gatekeeper=(mode != "local build"))
             results.append(first)
             if first.status in (FAIL, ERROR):
                 results.extend(skip_rest(downstream_of("launch"),

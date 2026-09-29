@@ -77,6 +77,20 @@ class Execute(unittest.TestCase):
                                            "a@b.c", runs_root=self.tmp.name)
         return {r.name: r for r in report.results}, where
 
+    def _launch_kwargs(self, mode):
+        m = mock.Mock(return_value=Result("launch", FAIL, 0.0, ""))
+        with mock.patch.object(runner.launch_check, "run", m):
+            runner.execute("/nonexistent.app", mode, False, "a@b.c",
+                           runs_root=self.tmp.name)
+        return m.call_args[1]
+
+    def test_a_local_build_is_not_assessed_by_gatekeeper(self):
+        self.assertFalse(self._launch_kwargs("local build")["assess_gatekeeper"])
+
+    def test_an_installed_or_downloaded_build_is_assessed(self):
+        self.assertTrue(self._launch_kwargs("installed build")["assess_gatekeeper"])
+        self.assertTrue(self._launch_kwargs("downloaded build")["assess_gatekeeper"])
+
     def test_a_failed_launch_skips_the_rest(self):
         got, _ = self.go(launch=FAIL)
         self.assertEqual([got[n].status for n in ("auth", "chat", "task")], [SKIP] * 3)

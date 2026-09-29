@@ -57,6 +57,19 @@ def parse_quarantine(xattr_stdout):
     return "com.apple.quarantine" in (xattr_stdout or "")
 
 
+def parse_spctl(returncode, output):
+    """spctl prints its verdict to stderr; exit 0 means Gatekeeper accepts."""
+    lines = [l.strip() for l in (output or "").splitlines() if l.strip()]
+    detail = lines[0] if lines else "no output from spctl"
+    return returncode == 0, detail
+
+
+def assess_gatekeeper(app_path):
+    r = subprocess.run(["/usr/sbin/spctl", "-a", "-t", "exec", "-vv", app_path],
+                       capture_output=True, text=True)
+    return parse_spctl(r.returncode, r.stderr or r.stdout)
+
+
 def identify(app_path):
     info = read_info(app_path)
     cs = subprocess.run(

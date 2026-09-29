@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from smoke.lib.build import (
-    Build, BuildMissing, identify, parse_codesign, parse_quarantine, read_info,
+    Build, BuildMissing, identify, parse_codesign, parse_quarantine, parse_spctl, assess_gatekeeper, read_info,
 )
 
 
@@ -58,6 +58,29 @@ class Identity(unittest.TestCase):
     def test_a_missing_bundle_raises(self):
         with self.assertRaises(BuildMissing):
             identify("/Applications/NoSuchThing.app")
+
+
+class Spctl(unittest.TestCase):
+    def test_zero_is_accepted_with_first_line(self):
+        self.assertEqual(parse_spctl(0, "\n/x.app: accepted\nsource=Notarized\n"),
+                         (True, "/x.app: accepted"))
+
+    def test_nonzero_is_rejected(self):
+        ok, detail = parse_spctl(3, "/x.app: rejected\nsource=no usable signature\n")
+        self.assertFalse(ok)
+        self.assertEqual(detail, "/x.app: rejected")
+
+    def test_empty_output_still_has_a_detail(self):
+        self.assertFalse(parse_spctl(3, "")[0])
+        self.assertTrue(parse_spctl(3, "")[1])
+
+    def test_assess_runs_spctl_on_exec(self):
+        from unittest import mock
+        done = mock.Mock(returncode=0, stderr="/x.app: accepted\n", stdout="")
+        with mock.patch("smoke.lib.build.subprocess.run", return_value=done) as run:
+            self.assertEqual(assess_gatekeeper("/x.app"), (True, "/x.app: accepted"))
+        self.assertEqual(run.call_args[0][0],
+                         ["/usr/sbin/spctl", "-a", "-t", "exec", "-vv", "/x.app"])
 
 
 if __name__ == "__main__":

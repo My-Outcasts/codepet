@@ -8,6 +8,7 @@ import {
   DecisionBrief,
   DevilsAdvocateVerdict,
   FounderContext,
+  FounderOption,
   NegotiationRound,
   TokenUsage
 } from "./types";
@@ -65,6 +66,24 @@ export const BRIEF_TOOL = {
       unresolved: {
         type: "boolean",
         description: "True if a trade-off could not be resolved. A valid, honest outcome."
+      },
+      // Optional and LAST, for the reason the field order above records: it is the field the
+      // model may drop, and dropping it costs only the buttons (CP-031).
+      founder_options: {
+        type: "array",
+        minItems: 2,
+        maxItems: 2,
+        description:
+          "The trade-off above as exactly two choices, so the founder can pick one. Each has a label of two to five words and a one-sentence consequence of choosing it. Both must be real options a department argued for.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            consequence: { type: "string" }
+          },
+          required: ["label", "consequence"],
+          additionalProperties: false
+        }
       }
     },
     required: [
@@ -233,8 +252,28 @@ export function parseBriefToolInput(input: unknown): DecisionBrief | { error: st
     kill_criteria: killCriteria.map((k) => k.trim()),
     next_action: { action: actionText.trim(), owner: owner.trim() },
     what_we_dont_know: str("what_we_dont_know"),
-    unresolved: raw.unresolved === true
+    unresolved: raw.unresolved === true,
+    ...founderOptions(raw.founder_options)
   };
+}
+
+/**
+ * Exactly two options with a label and a consequence each, or nothing. Never an error: the
+ * options are a presentation of `tradeoff_founder_must_own`, which is already required, so a
+ * malformed pair must not sink a brief that cost the whole run to produce.
+ */
+function founderOptions(raw: unknown): { founder_options?: FounderOption[] } {
+  if (!Array.isArray(raw) || raw.length !== 2) return {};
+  const options: FounderOption[] = [];
+  for (const o of raw) {
+    if (typeof o !== "object" || o === null) return {};
+    const label = (o as Record<string, unknown>).label;
+    const consequence = (o as Record<string, unknown>).consequence;
+    if (typeof label !== "string" || typeof consequence !== "string") return {};
+    if (!label.trim() || !consequence.trim()) return {};
+    options.push({ label: label.trim(), consequence: consequence.trim() });
+  }
+  return { founder_options: options };
 }
 
 /** Phrases that mean the brief smoothed the conflict away instead of showing it. */

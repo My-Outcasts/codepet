@@ -516,3 +516,42 @@ describe("runSynthesis", () => {
     expect(missingBriefFields(briefInput())).toEqual([]);
   });
 });
+
+// CP-031: the founder's choice as two options the app can offer as buttons.
+describe("founder_options", () => {
+  const two = [
+    { label: "Message test", consequence: "Measure understanding and signups; no pricing questions for 30 days." },
+    { label: "Demand test", consequence: "Add Sales's pricing question; fewer, noisier signups." }
+  ];
+
+  test("is declared in the tool schema but never required", () => {
+    const props = BRIEF_TOOL.input_schema.properties as Record<string, unknown>;
+    expect(props).toHaveProperty("founder_options");
+    expect(BRIEF_TOOL.input_schema.required as string[]).not.toContain("founder_options");
+  });
+
+  test("passes exactly two well-formed options through, trimmed", () => {
+    const brief = parseBriefToolInput(briefInput({
+      founder_options: two.map((o) => ({ label: `  ${o.label} `, consequence: o.consequence }))
+    })) as DecisionBrief;
+    expect(brief.founder_options).toEqual(two);
+  });
+
+  test("drops the field instead of failing the brief when it is malformed", () => {
+    for (const bad of [
+      [two[0]],                                         // one option is not a choice
+      [...two, { label: "Both", consequence: "x" }],    // three is a menu, not an either/or
+      [{ label: "", consequence: "x" }, two[1]],        // a blank label
+      [{ label: "A" }, two[1]],                         // a missing consequence
+      "Message test or demand test"                     // prose
+    ]) {
+      const brief = parseBriefToolInput(briefInput({ founder_options: bad }));
+      expect(brief).not.toHaveProperty("error");
+      expect(brief).not.toHaveProperty("founder_options");
+    }
+  });
+
+  test("is absent when the model does not send it", () => {
+    expect(parseBriefToolInput(briefInput())).not.toHaveProperty("founder_options");
+  });
+});

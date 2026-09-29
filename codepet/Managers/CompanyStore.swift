@@ -2788,9 +2788,10 @@ final class CompanyStore: ObservableObject {
     ///
     /// `messageId` is the run's own message, which is also the idempotency key: a second
     /// tap (or a double-click) does nothing rather than appending a second chip.
-    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState, messageId: String) async {
+    func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState, messageId: String,
+                                      choice: VCFounderOption? = nil) async {
         guard let runId = state.runId,
-              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId),
+              let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId, choice: choice),
               let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[i].actionConsumed else { return }
         chatMessages[i].actionConsumed = true

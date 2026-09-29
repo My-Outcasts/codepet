@@ -135,12 +135,15 @@ struct VirtualCompanyRunState: Equatable {
 /// and the brief exists precisely to hand the founder a trade-off nobody else can
 /// make. Recording it before they decide would put words in their mouth.
 enum VirtualCompanyDecision {
-    static func extracted(from state: VirtualCompanyRunState, runId: String) -> ExtractedDecision? {
+    static func extracted(from state: VirtualCompanyRunState, runId: String,
+                          choice: VCFounderOption? = nil) -> ExtractedDecision? {
         guard let brief = state.brief else { return nil }
         let topic = state.routing?.realQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // A blank recommendation would record a decision that says nothing, and ground
-        // every later chat turn on it.
-        let statement = brief.recommendation.trimmingCharacters(in: .whitespacesAndNewlines)
+        // every later chat turn on it. When the founder picked one of the room's two options
+        // (CP-031), the pick IS the decision.
+        let statement = choice.map { "\($0.label): \($0.consequence)" }
+            ?? brief.recommendation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !topic.isEmpty, !statement.isEmpty else { return nil }
         return ExtractedDecision(topic: topic,
                                  statement: statement,

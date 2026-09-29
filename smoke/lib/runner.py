@@ -28,6 +28,16 @@ def downstream_of(name):
     return ORDER[ORDER.index(name) + 1:]
 
 
+def _guarded(name, fn, *args, **kw):
+    """A check that blows up is an ERROR result, never an escape."""
+    t0 = time.time()
+    try:
+        return fn(*args, **kw)
+    except Exception as e:  # not BaseException: let Ctrl-C through
+        return Result(name, ERROR, time.time() - t0,
+                      "check crashed: %s: %s" % (type(e).__name__, e))
+
+
 def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
     db_dir = db_dir or store.DEFAULT_DB
     runs_root = runs_root or os.path.join(os.path.dirname(__file__), "..", "runs")
@@ -43,21 +53,25 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
 
     with Capture(os.path.join(where, "log.txt")) as capture:
         try:
-            first = launch_check.run(app_path, evidence_dir=where)
+            first = _guarded("launch", launch_check.run, app_path,
+                             evidence_dir=where)
             results.append(first)
             if first.status in (FAIL, ERROR):
                 results.extend(skip_rest(downstream_of("launch"),
                                          "launch %s" % first.status))
             else:
                 token = chat_check.mint_token()
-                chat = chat_check.run(token, capture, db_dir=db_dir)
-                # chat quits the app, so auth reads a released lock.
-                results.append(auth_check.run(account, db_dir=db_dir))
+                chat = _guarded("chat", chat_check.run, token, capture,
+                                db_dir=db_dir)
+                # chat may return early without quitting; auth must read a
+                # released lock whatever happened.
+                drive.quit_app()
+                results.append(_guarded("auth", auth_check.run, account,
+                                        db_dir=db_dir))
                 results.append(chat)
                 if chat.status in (FAIL, ERROR):
-                    results.append(task_check.evaluate(
-                        with_task, False, False, token, None))
-                    results[-1].detail = "skipped (chat %s)" % chat.status
+                    results.extend(skip_rest(downstream_of("chat"),
+                                             "chat %s" % chat.status))
                 elif with_task:
                     # Only pay for a relaunch when the task check will really run.
                     try:
@@ -68,8 +82,9 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None):
                             "could not relaunch the app for the task check: %s" % e))
                     else:
                         drive.wait_until(drive.is_running, timeout=45)
-                        results.append(task_check.run(
-                            chat_check.mint_token(), capture, True, db_dir=db_dir))
+                        results.append(_guarded(
+                            "task", task_check.run, chat_check.mint_token(),
+                            capture, True, db_dir=db_dir))
                 else:
                     results.append(task_check.evaluate(
                         False, False, False, "", None))

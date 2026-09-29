@@ -1,8 +1,14 @@
 import importlib.machinery
 import importlib.util
 import os
+import contextlib
+import json
+import tempfile
 import unittest
 from unittest import mock
+
+from smoke.lib import runner
+from smoke.lib.result import ERROR, FAIL, PASS, SKIP, Result
 
 from smoke.lib.runner import downstream_of, order
 
@@ -26,6 +32,85 @@ class Ordering(unittest.TestCase):
 
     def test_a_failed_chat_skips_only_the_task(self):
         self.assertEqual(downstream_of("chat"), ["task"])
+
+
+class Execute(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        rec = self.calls
+
+        def check(name, status):
+            def run(*a, **k):
+                rec.append(name)
+                return Result(name, status, 0.0, "")
+            return run
+
+        self.check = check
+        self.drive = mock.Mock()
+        self.drive.DriveError = runner.drive.DriveError
+        self.drive.quit_app.side_effect = lambda *a, **k: rec.append("quit")
+
+        @contextlib.contextmanager
+        def fake_capture(path):
+            yield mock.Mock()
+
+        self.patches = [
+            mock.patch.object(runner, "drive", self.drive),
+            mock.patch.object(runner, "Capture", fake_capture),
+            mock.patch.object(runner.chat_check, "mint_token", lambda: "tok"),
+        ]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def go(self, launch=PASS, chat=PASS, with_task=False, chat_fn=None):
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", launch)), \
+                mock.patch.object(runner.chat_check, "run", chat_fn or self.check("chat", chat)), \
+                mock.patch.object(runner.auth_check, "run", self.check("auth", PASS)), \
+                mock.patch.object(runner.task_check, "run", self.check("task", PASS)), \
+                mock.patch.object(runner.task_check, "evaluate",
+                                  lambda req, *a, **k: Result(
+                                      "task", FAIL if req else SKIP, 0.0, "")):
+            report, where = runner.execute("/nonexistent.app", "test", with_task,
+                                           "a@b.c", runs_root=self.tmp.name)
+        return {r.name: r for r in report.results}, where
+
+    def test_a_failed_launch_skips_the_rest(self):
+        got, _ = self.go(launch=FAIL)
+        self.assertEqual([got[n].status for n in ("auth", "chat", "task")], [SKIP] * 3)
+        self.assertNotIn("chat", self.calls)
+
+    def test_the_app_is_quit_before_auth_reads_the_db(self):
+        got, _ = self.go(chat=ERROR)
+        self.assertLess(self.calls.index("quit"), self.calls.index("auth"))
+
+    def test_a_failed_chat_skips_the_task_even_when_requested(self):
+        got, _ = self.go(chat=FAIL, with_task=True)
+        self.assertEqual(got["task"].status, SKIP)
+        self.assertIn("chat", got["task"].detail)
+        self.assertNotIn("task", self.calls)
+
+    def test_a_crashing_check_is_reported_not_raised(self):
+        def boom(*a, **k):
+            raise RuntimeError("kaboom")
+        got, where = self.go(chat_fn=boom)
+        self.assertEqual(got["chat"].status, ERROR)
+        self.assertIn("check crashed", got["chat"].detail)
+        self.assertEqual(got["task"].status, SKIP)
+        self.assertIn("quit", self.calls)
+        with open(os.path.join(where, "report.json")) as f:
+            self.assertEqual(json.load(f)["verdict"], "red")
+        self.assertTrue(os.path.exists(os.path.join(where, "report.html")))
+
+    def test_a_failed_relaunch_is_a_task_error(self):
+        def launch(app, args=()):
+            raise runner.drive.DriveError("no")
+        self.drive.launch.side_effect = launch
+        got, _ = self.go(with_task=True)
+        self.assertEqual(got["task"].status, ERROR)
+        self.assertIn("could not relaunch", got["task"].detail)
 
 
 class Cli(unittest.TestCase):

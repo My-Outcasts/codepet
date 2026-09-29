@@ -1715,6 +1715,12 @@ struct CopilotBubble: View {
                                    await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
                                }
                            },
+                           onLockInChoice: { pick in
+                               Task {
+                                   await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id,
+                                                                                    choice: pick)
+                               }
+                           },
                            onOpenRecord: { onRoomRecord(message.id, $0) })
             }
             .frame(maxWidth: .infinity, alignment: .leading)

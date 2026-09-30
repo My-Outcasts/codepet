@@ -312,3 +312,104 @@ describe("dms audience", () => {
     expect(msgSchema().description).not.toContain("persona");
   });
 });
+
+/**
+ * Additive fields (CP-002 C, spec Layer 2): checklist owner/due and no 5-7 cap, doc
+ * `rules_out` + per-section `source`, post `platform`/`limit`, email `subject`/`to`. Every one is
+ * optional on the way in, so each legacy shape must still coerce to exactly what it did.
+ */
+describe("additive fields", () => {
+  const prompt = (deptKey?: string) => buildRunTaskPrompt({
+    companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey,
+  } as any);
+  const props = (d: string) => (deliverableTool(d).input_schema as any).properties.payload.properties;
+
+  describe("checklist", () => {
+    it("keeps owner and due when given, and omits them when not", () => {
+      expect(coercePayload("checklist", { items: [
+        { t: "Buy domain", done: true, owner: "you", due: "today" },
+        { t: "Draft FAQ", done: false, owner: "", due: "" },
+        { t: "Ship", done: false },
+      ] })).toEqual({ items: [
+        { t: "Buy domain", done: true, owner: "you", due: "today" },
+        { t: "Draft FAQ", done: false },
+        { t: "Ship", done: false },
+      ] });
+    });
+    it("is no longer cut off at seven steps", () => {
+      const items = Array.from({ length: 20 }, (_, i) => ({ t: `Step ${i + 1}`, done: false }));
+      expect((coercePayload("checklist", { items }) as any).items).toHaveLength(20);
+    });
+    it("the prompt drops the 5-7 rule and asks for owner/due without inventing them", () => {
+      expect(prompt("ops")).not.toContain("exactly 5-7");
+      expect(prompt("ops")).toMatch(/- checklist: .*`owner`.*`due`/);
+      expect(props("ops").items.description).not.toContain("5-7");
+      expect(Object.keys(props("ops").items.items.properties)).toEqual(["t", "done", "owner", "due"]);
+      expect(props("ops").items.items.required).toEqual(["t", "done"]);
+    });
+  });
+
+  describe("doc", () => {
+    const base = { call: "Charge $8", sections: [{ h: "Why", p: "Because." }], next: [] };
+    it("a legacy doc coerces exactly as before", () => {
+      expect(coercePayload("doc", base)).toEqual(base);
+    });
+    it("keeps rules_out and a section's source", () => {
+      expect(coercePayload("doc", { ...base, rules_out: ["A free tier", ""], sections: [{ h: "Why", p: "Because.", source: "the pricing interviews" }] }))
+        .toEqual({ ...base, rules_out: ["A free tier"], sections: [{ h: "Why", p: "Because.", source: "the pricing interviews" }] });
+    });
+    it("a legal clause never carries a source", () => {
+      expect(coercePayload("legal", { sections: [{ h: "Term", p: "Two years.", source: "x" }] }))
+        .toEqual({ sections: [{ h: "Term", p: "Two years." }] });
+    });
+    it("the prompt and schema offer rules_out to a doc department", () => {
+      expect(prompt("eng")).toMatch(/- doc: .*`rules_out\[\]`/);
+      expect(props("eng")).toHaveProperty("rules_out");
+      expect(Object.keys(props("eng").sections.items.properties)).toEqual(["h", "p", "source"]);
+    });
+  });
+
+  describe("post", () => {
+    it("is a structured kind now: the platform and its limit reach the deliverable", () => {
+      expect(coerceDeliverable({ kind: "post", title: "T", body: "hi", payload: { platform: "X", limit: 280 } }, "task", "mkt"))
+        .toEqual({ kind: "post", title: "T", body: "hi", payload: { platform: "X", limit: 280 } });
+    });
+    it("a known platform's limit is the server's, not the model's", () => {
+      expect(coercePayload("post", { platform: "Twitter", limit: 5000 })).toEqual({ platform: "X", limit: 280 });
+      expect(coercePayload("post", { platform: "linkedin" })).toEqual({ platform: "LinkedIn", limit: 3000 });
+      expect(coercePayload("post", { platform: "Bluesky", limit: 9 })).toEqual({ platform: "Bluesky", limit: 300 });
+    });
+    it("an unknown platform keeps a sane model limit, or none", () => {
+      expect(coercePayload("post", { platform: "Farcaster", limit: 320 })).toEqual({ platform: "Farcaster", limit: 320 });
+      expect(coercePayload("post", { platform: "Farcaster", limit: -1 })).toEqual({ platform: "Farcaster" });
+      expect(coercePayload("post", { platform: "Farcaster", limit: "320" })).toEqual({ platform: "Farcaster" });
+    });
+    it("no platform, no payload: a legacy post files on its body", () => {
+      expect(coercePayload("post", { limit: 280 })).toBeNull();
+      expect(coerceDeliverable({ kind: "post", title: "T", body: "hi" }, "task", "mkt")).toEqual({ kind: "post", title: "T", body: "hi" });
+    });
+    it("only departments that may post are told how", () => {
+      expect(prompt("mkt")).toMatch(/- post: .*`platform`/);
+      expect(prompt("fin")).not.toMatch(/- post: /);
+      expect(props("fin")).not.toHaveProperty("platform");
+    });
+  });
+
+  describe("email", () => {
+    it("keeps subject and to", () => {
+      expect(coercePayload("email", { subject: "Your beta invite", to: "the two who asked to pay" }))
+        .toEqual({ subject: "Your beta invite", to: "the two who asked to pay" });
+    });
+    it("to is optional, subject is not", () => {
+      expect(coercePayload("email", { subject: "Hi" })).toEqual({ subject: "Hi" });
+      expect(coercePayload("email", { to: "x" })).toBeNull();
+    });
+    it("an address is not a recipient description and is dropped", () => {
+      expect(coercePayload("email", { subject: "Hi", to: "sarah@acme.com" })).toEqual({ subject: "Hi" });
+    });
+    it("the prompt forbids an invented recipient", () => {
+      expect(prompt("sales")).toMatch(/- email: .*`subject`.*`to`.*never an invented name/);
+      expect(prompt("design")).not.toMatch(/- email: /);
+    });
+  });
+});

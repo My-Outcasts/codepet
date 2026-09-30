@@ -1,0 +1,125 @@
+import SwiftUI
+import XCTest
+@testable import codepet
+
+/// CP-002 C: checklist owner/due, doc `rules_out` + section `source`, post platform/limit, email
+/// subject/to. Every field is optional, so each legacy shape must decode, export and hand a Team
+/// Build exactly what it did before.
+final class AdditiveFieldsTests: XCTestCase {
+
+    private func decode(_ kind: String, _ payload: String, body: String = "BODY") throws -> Deliverable {
+        let json = #"{"id":"d","kind":""# + kind + #"","title":"T","body":""# + body + #"","payload":"# + payload + "}"
+        return try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
+    }
+    private func exported(_ d: Deliverable) throws -> String {
+        try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+    }
+
+    // MARK: - checklist
+
+    func testChecklistOwnerAndDueDecodeAndRenderOnOneLine() throws {
+        let d = try decode("checklist", #"{"items":[{"t":"Buy domain","done":true,"owner":"you","due":"today"},{"t":"Ship","done":false}]}"#)
+        let items = try XCTUnwrap(d.payload?.items)
+        XCTAssertEqual(items[0].markdownLine, "- [x] Buy domain — you · today")
+        XCTAssertEqual(items[1].markdownLine, "- [ ] Ship", "a legacy step reads exactly as before")
+        XCTAssertTrue(try exported(d).contains("- [x] Buy domain — you · today\n- [ ] Ship\n"))
+        XCTAssertTrue(DeliverableMarkdown.render(d, dept: "Ops", instruction: "x").contains("- [x] Buy domain — you · today"))
+    }
+
+    func testOnlyOneOfOwnerOrDue() {
+        XCTAssertEqual(ChecklistItem(t: "a", done: false, due: "day 3").meta, "day 3")
+        XCTAssertEqual(ChecklistItem(t: "a", done: false, owner: "Design").meta, "Design")
+        XCTAssertNil(ChecklistItem(t: "a", done: false, owner: "  ", due: "").meta)
+    }
+
+    // MARK: - doc
+
+    func testDocRulesOutAndSourceExport() throws {
+        let d = try decode("doc", #"{"call":"Charge $8","sections":[{"h":"Why","p":"Because.","source":"the pricing interviews"}],"next":[],"rules_out":["A free tier"]}"#)
+        XCTAssertEqual(d.payload?.rulesOutItems, ["A free tier"])
+        let text = try exported(d)
+        XCTAssertTrue(text.contains("## Why\n\nBecause.\n\n_Source: the pricing interviews_\n"), text)
+        XCTAssertTrue(text.contains("## Rules out\n\n- A free tier\n"), text)
+        let md = DeliverableMarkdown.render(d, dept: "Fin", instruction: "x")
+        XCTAssertTrue(md.contains("_Source: the pricing interviews_") && md.contains("## Rules out"), md)
+    }
+
+    func testALegacyDocExportsWithoutEitherHeading() throws {
+        let text = try exported(try decode("doc", #"{"call":"Charge $8","sections":[{"h":"Why","p":"Because."}],"next":[]}"#))
+        XCTAssertFalse(text.contains("Rules out"), text)
+        XCTAssertFalse(text.contains("Source:"), text)
+    }
+
+    // MARK: - post
+
+    func testPostLengthUnderAndOver() {
+        XCTAssertEqual(PostLength(body: "hello", limit: 280)?.label(.en), "5 / 280 characters")
+        let over = PostLength(body: String(repeating: "a", count: 300), limit: 280)
+        XCTAssertEqual(over?.over, 20)
+        XCTAssertEqual(over?.label(.en), "300 / 280 characters — 20 over")
+        XCTAssertNil(PostLength(body: "x", limit: nil), "no limit, no count — a legacy post shows nothing new")
+        XCTAssertNil(PostLength(body: "x", limit: 0))
+    }
+
+    func testPostExportStaysTheBodyAloneAndTeamBuildNamesThePlatform() throws {
+        let d = try decode("post", #"{"platform":"X","limit":280}"#, body: "We shipped.")
+        XCTAssertEqual(try exported(d), "We shipped.\n", "the export is what gets pasted")
+        let md = DeliverableMarkdown.render(d, dept: "Mkt", instruction: "x")
+        XCTAssertTrue(md.contains("**Platform:** X (limit 280 characters)\n\nWe shipped."), md)
+        XCTAssertFalse(md.contains("## Notes"), "the body is carried once, not again under Notes")
+    }
+
+    // MARK: - email
+
+    func testEmailExportLeadsWithSubjectAndTo() throws {
+        let d = try decode("email", #"{"subject":"Your beta invite","to":"the two who asked to pay"}"#, body: "Hi [name]")
+        XCTAssertEqual(try exported(d), "Subject: Your beta invite\nTo: the two who asked to pay\n\nHi [name]\n")
+        let md = DeliverableMarkdown.render(d, dept: "Sales", instruction: "x")
+        XCTAssertTrue(md.contains("**Subject:** Your beta invite\n**To:** the two who asked to pay\n\nHi [name]"), md)
+        XCTAssertFalse(md.contains("## Notes"), md)
+    }
+
+    func testALegacyEmailExportsItsBodyAlone() throws {
+        let d = Deliverable(kind: .email, title: "T", body: "Hi there")
+        XCTAssertEqual(try exported(d), "Hi there\n")
+        XCTAssertEqual(DeliverableMarkdown.render(d, dept: "Sales", instruction: "x"),
+                       "# T\n\n**Department:** Sales\n**Asked for:** x\n\nHi there")
+    }
+
+    /// The flat payload keys must round-trip under the server's spelling, `rules_out` included.
+    func testTheNewKeysRoundTripUnderTheWireNames() throws {
+        let p = DeliverablePayload(rulesOut: ["a"], platform: "X", limit: 280, subject: "s", to: "t")
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(p)) as? [String: Any])
+        XCTAssertEqual(Set(obj.keys), ["rules_out", "platform", "limit", "subject", "to"])
+        XCTAssertEqual(try JSONDecoder().decode(DeliverablePayload.self, from: JSONEncoder().encode(p)), p)
+    }
+
+    // MARK: - checklist progress (design review, 30 Sep)
+
+    func testProgressLabelReadsAsWords() {
+        XCTAssertEqual(ChecklistViewer.progressLabel(done: 1, of: 4, .en), "1 of 4 done")
+        XCTAssertEqual(ChecklistViewer.progressLabel(done: 1, of: 4, .vi), "Đã xong 1/4")
+    }
+
+    /// The track is drawn by hand so it renders offscreen, where `ProgressView` drew a
+    /// placeholder. A render that is all one colour would mean the fill never drew.
+    @MainActor
+    func testTrackRendersItsFillOffscreen() throws {
+        let r = ImageRenderer(content: ChecklistProgressTrack(fraction: 0.5).frame(width: 200)
+            .environment(\.colorScheme, .light))
+        r.scale = 1
+        let rep = try XCTUnwrap(r.nsImage?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        XCTAssertEqual(rep.pixelsHigh, Int(ChecklistProgressTrack.height))
+        let left = try XCTUnwrap(rep.colorAt(x: 40, y: 2)), right = try XCTUnwrap(rep.colorAt(x: 160, y: 2))
+        XCTAssertNotEqual(left, right, "filled half and empty half drew the same colour")
+    }
+
+    // MARK: - email recipient line (design review, 30 Sep: inside the card)
+
+    func testRecipientLine() {
+        XCTAssertEqual(RecipientLine.text("the two who asked to pay", .en), "To: the two who asked to pay")
+        XCTAssertEqual(RecipientLine.text("x", .vi), "Gửi tới: x")
+        XCTAssertEqual(RecipientLine.text("  ", .en), "")
+        XCTAssertEqual(RecipientLine.text(nil, .en), "")
+    }
+}

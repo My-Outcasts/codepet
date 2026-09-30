@@ -78,6 +78,10 @@ enum DeliverableAction {
 struct DeliverableFrame<Content: View>: View {
     let eyebrow: String
     var heading: String = ""
+    /// A small muted line under the heading, inside the card — an email's "To:" (founder design
+    /// review, 30 Sep: under the card it read detached from the email it addresses). Empty draws
+    /// nothing.
+    var subheading: String = ""
     var action: DeliverableAction = .none
     /// The deliverable to export, or nil for a frame that offers no export.
     ///
@@ -110,6 +114,15 @@ struct DeliverableFrame<Content: View>: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
+            }
+
+            if !subheading.isEmpty {
+                Text(subheading)
+                    .font(.pixelSystem(size: DeliverableStyle.footnote))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
             }
 
             DeliverableRule().padding(.vertical, 14)

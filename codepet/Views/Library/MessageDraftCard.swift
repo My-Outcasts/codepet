@@ -41,9 +41,12 @@ enum MessageDraftStyle {
 /// this, `.dms` without its structured payload fell through to raw `MarkdownView`, which is
 /// precisely the undifferentiated prose the Aug 10 report was about.
 struct MessageDraftViewer: View {
+
     let eyebrow: String
     let heading: String
     let text: String
+    /// Who an email is for, drawn inside the card under the subject. nil or empty draws nothing.
+    var recipient: String? = nil
     /// The deliverable to export, or nil where there is none to file — the chat draft card
     /// uses this same view before anything has been approved, and has no `Deliverable` to
     /// hand `DeliverableFrame`. Library call sites (`.email`, payload-less `.dms`) pass one.
@@ -55,6 +58,7 @@ struct MessageDraftViewer: View {
         DeliverableFrame(
             eyebrow: eyebrow,
             heading: heading,
+            subheading: RecipientLine.text(recipient, lang),
             action: .copy(text),
             export: export,
             footer: deliverableBlanksFooter(text, verb: .send, lang: lang),

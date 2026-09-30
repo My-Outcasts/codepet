@@ -51,18 +51,17 @@ enum MessageTranscript {
         for drafted in m.drafts {
             let heading = drafted.heading.trimmingCharacters(in: .whitespacesAndNewlines)
             if !heading.isEmpty { out.append(markdown ? "### \(heading)" : heading) }
+            // An email's heading is its subject, so the recipient has no other carrier and rides
+            // as its own line directly under it — where the card draws it (`MessageDraftViewer`'s
+            // `recipient`, inside the card since the 30 Sep design review; it used to follow the
+            // body because the view put it below the card). Subject, To, body is also the order
+            // the Library's email export writes.
+            if drafted.channel == "email" {
+                let line = RecipientLine.text(drafted.to, lang)
+                if !line.isEmpty { out.append(line) }
+            }
             let body = drafted.body.trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty { out.append(body) }
-            // An email's heading is its subject, so the recipient has no other carrier and
-            // rides as its own line — AFTER the body, because that is where the view puts it
-            // (`MessageDraftViewer` draws heading + body, then the "To:" line below the card,
-            // CopilotChatView:949-958). Emitted before the body it pastes as a header stranded
-            // inside the message.
-            if drafted.channel == "email",
-               let to = drafted.to?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !to.isEmpty {
-                out.append((lang == .vi ? "Gửi tới: " : "To: ") + to)
-            }
         }
 
         if let draft = m.draft {

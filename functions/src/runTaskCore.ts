@@ -112,11 +112,13 @@ export interface RunTaskArgs {
  * both wastes the prompt and re-offers the kind the contract just closed.
  */
 const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
-  ["checklist", "Build a concrete setup/launch checklist — exactly 5-7 actionable steps in order (`items[].t`), each with `done` true only for obvious already-satisfied prerequisites."],
-  ["doc", "`call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions."],
+  ["checklist", "Build a concrete setup/launch checklist — every actionable step it really takes, in order (`items[].t`), each with `done` true only for obvious already-satisfied prerequisites. Give a step an `owner` (a role, a department, or \"you\" for the founder) and a `due` (\"today\", \"before launch\", \"day 3\") where the company context makes them clear; leave either empty rather than invent one."],
+  ["doc", "`call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions; `rules_out[]` = 0-3 options this decision forecloses, so it can be revisited; a section may carry `source` = what it rests on (a fact from the company context or an upstream deliverable), empty if nothing specific."],
   ["legal", "`sections[]` = the document's clauses in order, as many as it needs, each {h,p}: `h` a short clause heading WITHOUT a number (the app numbers them), `p` the clause text. The `body` carries the same document in full."],
   ["plan", "an HONEST code-change plan — `goal` (one line), `steps[]` (3-5 ordered), `changes[]` = {area, edit} in plain terms (no fabricated file paths), `verify[]` (future-tense checks), `risks` (one line). Never claim it shipped."],
   ["dms", "2-4 outreach message TEMPLATES, `messages[]` = {audience, note, msg}. `audience` is a TYPE of person or a place (\"lapsed journaler\", \"r/CasualConversation\"), never an invented name: the founder may send these, and a made-up recipient reads exactly like a real one. `note` = why this audience is worth writing to; `msg` = the warm, specific message, with `[name]` where the founder will put a real recipient."],
+  ["post", "`platform` = where it will be published (\"X\", \"LinkedIn\", \"Threads\"…). The `body` is the post itself and must fit that platform's length limit; `limit` = that limit in characters if you know it."],
+  ["email", "`subject` = the subject line (never repeated as a heading in the body); `to` = who it is for, in the founder's own words or as a type of person (\"the two who asked to pay\", \"beta testers who went quiet\"), never an invented name and never an address — empty if unknown. The `body` is the email itself."],
   ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
   ["sheet", "a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input."],
   ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
@@ -259,10 +261,13 @@ export interface Deliverable {
   payload?: DeliverablePayload;
 }
 
-export interface ChecklistItem { t: string; done: boolean; }
+export interface ChecklistItem { t: string; done: boolean; owner?: string; due?: string; }
 export interface ChecklistPayload { items: ChecklistItem[]; }
-export interface DocSection { h: string; p: string; }
-export interface DocPayload { call: string; sections: DocSection[]; next: string[]; }
+export interface DocSection { h: string; p: string; source?: string; }
+export interface DocPayload { call: string; sections: DocSection[]; next: string[]; rules_out?: string[]; }
+export interface PostPayload { platform: string; limit?: number; }
+/** `to` describes a recipient; it is never an address and never an invented person. */
+export interface EmailPayload { subject: string; to?: string; }
 export interface LegalPayload { sections: DocSection[]; }
 export interface PlanChange { area: string; edit: string; }
 export interface PlanPayload { goal: string; steps: string[]; changes: PlanChange[]; verify: string[]; risks: string; }
@@ -310,6 +315,8 @@ export type DeliverablePayload =
   | ChecklistPayload
   | DocPayload
   | LegalPayload
+  | PostPayload
+  | EmailPayload
   | PlanPayload
   | DmsPayload
   | CalendarPayload
@@ -317,7 +324,7 @@ export type DeliverablePayload =
   | SitePayload
   | ScreensPayload;
 
-const STRUCTURED_KINDS = new Set(["checklist", "doc", "legal", "plan", "dms", "calendar", "sheet", "site", "screens"]);
+const STRUCTURED_KINDS = new Set(["checklist", "doc", "legal", "post", "email", "plan", "dms", "calendar", "sheet", "site", "screens"]);
 /** Illustrations the native screens viewer can render. Keep in sync with web's SCREEN_ARTS. */
 const SCREEN_ARTS = new Set(["connect", "session", "recap"]);
 const s = (v: unknown, n = 600) => (typeof v === "string" ? v.trim().slice(0, n) : "");
@@ -327,6 +334,16 @@ const strArr = (v: unknown, n = 12, len = 400): string[] =>
  *  viewer numbers clauses itself, so a heading that kept it would read "1. 1. Definitions". A
  *  number only counts when a separator follows it: "2FA requirements" is a heading, not clause 2. */
 const CLAUSE_NUMBER = /^(?:(?:section|clause|article)\s+|§\s*)?\d+(?:\.\d+)*(?:[.):]|\s+[—–-])?\s+/i;
+/** Character limits for the platforms a post names most often, as of 2026. */
+const POST_PLATFORMS: ReadonlyArray<{ label: string; names: readonly string[]; limit: number }> = [
+  { label: "X", names: ["x", "twitter", "x (twitter)", "x/twitter"], limit: 280 },
+  { label: "LinkedIn", names: ["linkedin"], limit: 3000 },
+  { label: "Threads", names: ["threads"], limit: 500 },
+  { label: "Bluesky", names: ["bluesky", "bsky"], limit: 300 },
+  { label: "Mastodon", names: ["mastodon"], limit: 500 },
+  { label: "Instagram", names: ["instagram"], limit: 2200 },
+];
+const EMAIL_ADDRESS = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /** Sanitize the raw payload for a kind; null if it lacks the kind's required content. */
@@ -334,17 +351,44 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
   const r = (raw ?? {}) as Record<string, unknown>;
   if (kind === "checklist") {
     const items = (Array.isArray(r.items) ? r.items : [])
-      .map((it) => { const o = (it ?? {}) as Record<string, unknown>; return { t: s(o.t, 300), done: o.done === true }; })
-      .filter((it) => it.t).slice(0, 7);
+      .map((it) => {
+        const o = (it ?? {}) as Record<string, unknown>;
+        const owner = s(o.owner, 60); const due = s(o.due, 60);
+        // Omitted rather than "", so a checklist without them coerces exactly as it always did.
+        return { t: s(o.t, 300), done: o.done === true, ...(owner && { owner }), ...(due && { due }) };
+      })
+      .filter((it) => it.t).slice(0, 30);
     return items.length ? { items } : null;
   }
   if (kind === "doc") {
     const call = s(r.call, 600);
     const sections = (Array.isArray(r.sections) ? r.sections : [])
-      .map((it) => { const o = (it ?? {}) as Record<string, unknown>; return { h: s(o.h, 120), p: s(o.p, 1200) }; })
+      .map((it) => {
+        const o = (it ?? {}) as Record<string, unknown>;
+        const source = s(o.source, 200);
+        return { h: s(o.h, 120), p: s(o.p, 1200), ...(source && { source }) };
+      })
       .filter((x) => x.h && x.p).slice(0, 6);
     const next = strArr(r.next, 3, 200);
-    return call && sections.length ? { call, sections, next } : null;
+    const rules_out = strArr(r.rules_out, 3, 200);
+    return call && sections.length ? { call, sections, next, ...(rules_out.length && { rules_out }) } : null;
+  }
+  if (kind === "post") {
+    const platform = s(r.platform, 40);
+    if (!platform) return null;
+    // A known platform's limit is ours, not the model's: a wrong limit would pass a post that
+    // fails on publish, which is the one thing the field exists to catch.
+    const known = POST_PLATFORMS.find((p) => p.names.includes(platform.toLowerCase()));
+    if (known) return { platform: known.label, limit: known.limit };
+    const limit = num(r.limit);
+    return limit !== null && Number.isInteger(limit) && limit >= 20 && limit <= 100000 ? { platform, limit } : { platform };
+  }
+  if (kind === "email") {
+    const subject = s(r.subject, 200);
+    if (!subject) return null;
+    const to = s(r.to, 120);
+    // An address is not "who it is for", and a model that writes one has most likely made it up.
+    return to && !EMAIL_ADDRESS.test(to) ? { subject, to } : { subject };
   }
   if (kind === "legal") {
     // No `call`: a clause document has no decision up front, and a doc's cap of six blocks
@@ -522,6 +566,11 @@ export const DELIVERABLE_SYSTEM =
 export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   items: ["checklist"],
   call: ["doc"],
+  rules_out: ["doc"],
+  platform: ["post"],
+  limit: ["post"],
+  subject: ["email"],
+  to: ["email"],
   sections: ["doc", "legal"],
   next: ["doc"],
   goal: ["plan"],
@@ -573,11 +622,16 @@ export const DELIVERABLE_TOOL = {
         additionalProperties: true,
         description: "Structured fields for the chosen kind. Fill ONLY the fields for that kind (see the per-kind guide in the prompt); omit for kinds without a structured form.",
         properties: {
-          items: { type: "array", description: "checklist: 5-7 ordered steps.",
-            items: { type: "object", additionalProperties: false, properties: { t: { type: "string" }, done: { type: "boolean" } }, required: ["t", "done"] } },
+          items: { type: "array", description: "checklist: every step in order, each with an optional owner and due.",
+            items: { type: "object", additionalProperties: false, properties: { t: { type: "string" }, done: { type: "boolean" }, owner: { type: "string" }, due: { type: "string" } }, required: ["t", "done"] } },
           call: { type: "string", description: "doc: the decision up front (1-2 sentences)." },
           sections: { type: "array", description: "doc/legal: labeled {h,p} blocks (a legal heading carries no number).",
-            items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
+            items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" }, source: { type: "string" } }, required: ["h", "p"] } },
+          rules_out: { type: "array", description: "doc: 0-3 options this decision forecloses.", items: { type: "string" } },
+          platform: { type: "string", description: "post: where it will be published." },
+          limit: { type: "number", description: "post: that platform's length limit in characters." },
+          subject: { type: "string", description: "email: the subject line." },
+          to: { type: "string", description: "email: who it is for, described, never an invented name or an address." },
           next: { type: "array", description: "doc: 1-3 next actions.", items: { type: "string" } },
           goal: { type: "string", description: "plan: one-line goal." },
           changes: { type: "array", description: "plan: areas touched.",

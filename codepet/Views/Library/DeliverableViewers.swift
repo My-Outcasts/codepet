@@ -48,7 +48,7 @@ struct ChecklistViewer: View {
     /// The list as pasteable markdown — a checklist is something a founder moves into their own
     /// tracker, and before this the only way out of the app was retyping it.
     private var copyText: String {
-        items.map { "- [\($0.done ? "x" : " ")] \($0.t)" }.joined(separator: "\n")
+        items.map(\.markdownLine).joined(separator: "\n")
     }
 
     /// Founder decision (I4): Export takes what is on screen, matching Copy — so a founder who
@@ -64,6 +64,11 @@ struct ChecklistViewer: View {
         return d
     }
 
+    /// "1 of 4 done" — the count as words, above the track it describes (founder, 30 Sep).
+    static func progressLabel(done: Int, of total: Int, _ lang: AppLanguage) -> String {
+        lang == .vi ? "Đã xong \(done)/\(total)" : "\(done) of \(total) done"
+    }
+
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
                          action: .copy(copyText),
@@ -73,19 +78,12 @@ struct ChecklistViewer: View {
                          otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
                          onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(lang == .vi ? "Tiến độ" : "Progress")
-                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                        Spacer()
-                        Text("\(doneCount)/\(items.count)")
-                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundColor(CodepetTheme.primaryText)
-                    }
-                    ProgressView(value: progress)
-                        .tint(CodepetTheme.accentPurple)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(Self.progressLabel(done: doneCount, of: items.count, lang))
+                        .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.mutedText)
+                    ChecklistProgressTrack(fraction: progress)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -96,12 +94,21 @@ struct ChecklistViewer: View {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: items[i].done ? "checkmark.square.fill" : "square")
                                     .foregroundColor(items[i].done ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
-                                Text(items[i].t)
-                                    .font(.pixelSystem(size: DeliverableStyle.body))
-                                    .lineSpacing(DeliverableStyle.leading)
-                                    .foregroundColor(items[i].done ? CodepetTheme.mutedText : CodepetTheme.bodyText)
-                                    .strikethrough(items[i].done, color: CodepetTheme.mutedText)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(items[i].t)
+                                        .font(.pixelSystem(size: DeliverableStyle.body))
+                                        .lineSpacing(DeliverableStyle.leading)
+                                        .foregroundColor(items[i].done ? CodepetTheme.mutedText : CodepetTheme.bodyText)
+                                        .strikethrough(items[i].done, color: CodepetTheme.mutedText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    // Who and when, where the step has them (CP-002 C) — what
+                                    // makes a checklist something a team can run.
+                                    if let meta = items[i].meta {
+                                        Text(meta)
+                                            .font(.pixelSystem(size: DeliverableStyle.footnote))
+                                            .foregroundColor(CodepetTheme.mutedText)
+                                    }
+                                }
                                 Spacer(minLength: 0)
                             }
                             .padding(12)
@@ -123,6 +130,33 @@ struct ChecklistViewer: View {
                 }
             }
         }
+    }
+}
+
+/// A checklist's progress: a 4pt rounded hairline track with a purple fill.
+///
+/// Drawn by hand rather than with `ProgressView`, which rendered as the stock macOS bar — out of
+/// place in a card set in the app's own type and hairlines (founder design review, 30 Sep) — and
+/// which `ImageRenderer` cannot draw at all, so every offscreen render of this viewer showed a
+/// placeholder where the bar should be.
+struct ChecklistProgressTrack: View {
+    let fraction: Double
+    static let height: CGFloat = 4
+
+    var body: some View {
+        Capsule()
+            .fill(CodepetTheme.hairline)
+            .frame(height: Self.height)
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(CodepetTheme.accentPurple)
+                        .frame(width: geo.size.width * min(max(fraction, 0), 1))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: fraction)
+            .accessibilityElement()
+            .accessibilityValue(Text("\(Int((min(max(fraction, 0), 1) * 100).rounded())) percent"))
     }
 }
 
@@ -156,11 +190,25 @@ struct DocViewer: View {
     /// names it was written for.
     private typealias Doc = DeliverableStyle
 
+    /// What the decision forecloses (CP-002 C). Read off the payload rather than passed in, so
+    /// the one call site that builds this viewer did not have to change.
+    private var rulesOut: [String] { deliverable.payload?.rulesOutItems ?? [] }
+
+    private func sourceLabel(_ source: String) -> String {
+        (lang == .vi ? "Nguồn: " : "Source: ") + source
+    }
+
     /// The document as pasteable prose. The lead, then each section under its own heading, then
     /// the next-steps as bullets — the same order the eye reads it in.
     private var copyText: String {
         var out = [call]
-        for s in sections { out.append("\(s.h)\n\(s.p)") }
+        for s in sections {
+            out.append("\(s.h)\n\(s.p)" + (s.sourceText.map { "\n" + sourceLabel($0) } ?? ""))
+        }
+        if !rulesOut.isEmpty {
+            out.append((lang == .vi ? "Loại trừ" : "Rules out") + "\n"
+                       + rulesOut.map { "• \($0)" }.joined(separator: "\n"))
+        }
         if !next.isEmpty {
             out.append(((lang == .vi ? "Tiếp theo" : "Next")) + "\n"
                        + next.map { "• \($0)" }.joined(separator: "\n"))
@@ -199,6 +247,27 @@ struct DocViewer: View {
                         }
                         DeliverableHeading(text: section.h)
                         DeliverableProse(text: section.p)
+                        if let source = section.sourceText {
+                            Text(sourceLabel(source))
+                                .font(.pixelSystem(size: Doc.footnote))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                if !rulesOut.isEmpty {
+                    VStack(alignment: .leading, spacing: Doc.headingToBody) {
+                        DeliverableRule()
+                            .padding(.bottom, Doc.betweenSections - Doc.headingToBody - 8)
+                        DeliverableHeading(text: lang == .vi ? "Loại trừ" : "Rules out")
+                        ForEach(Array(rulesOut.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .top, spacing: 9) {
+                                Text("•").font(.pixelSystem(size: Doc.body))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                DeliverableProse(text: line)
+                            }
+                        }
                     }
                 }
 
@@ -573,7 +642,8 @@ struct PostViewer: View {
 
     var body: some View {
         DeliverableFrame(
-            eyebrow: lang == .vi ? "Bài đăng" : "Social post",
+            eyebrow: (lang == .vi ? "Bài đăng" : "Social post")
+                + (deliverable.payload?.postPlatform.map { " · \($0)" } ?? ""),
             action: .copy(deliverable.body),
             export: deliverable,
             footer: deliverableBlanksFooter(deliverable.body, verb: .post, lang: lang),
@@ -582,7 +652,17 @@ struct PostViewer: View {
             otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
             onReRun: companyStore.reRunHandler(for: deliverable, language: lang)
         ) {
-            MarkdownView(markdown: deliverable.body)
+            VStack(alignment: .leading, spacing: 10) {
+                MarkdownView(markdown: deliverable.body)
+                // Checked as it renders (CP-002 C): a post that reads fine here and is refused
+                // on publish is the failure this line exists to catch before the founder pastes.
+                if let length = PostLength(body: deliverable.body, limit: deliverable.payload?.limit) {
+                    Text(length.label(lang))
+                        .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundColor(length.over > 0 ? CodepetTheme.accentOrange : CodepetTheme.mutedText)
+                }
+            }
         }
     }
 }
@@ -897,9 +977,13 @@ struct EmailViewer: View {
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
+        // The subject is the heading, and who it is for sits under it inside the card — the same
+        // layout a chat email draft has (`CopilotChatView.draftedMessages`), so an email reads the
+        // same wherever it appears. Legacy: no subject, the title heads it and no "To:" line.
         MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
-                           heading: deliverable.title,
+                           heading: deliverable.payload?.emailSubject ?? deliverable.title,
                            text: deliverable.body,
+                           recipient: deliverable.payload?.emailTo,
                            export: deliverable)
     }
 }

@@ -27,7 +27,7 @@ enum DeliverableMarkdown {
             return header + d.body
         }
 
-        let structured = structuredSection(kind: d.kind, payload: payload)
+        let structured = structuredSection(kind: d.kind, payload: payload, body: d.body)
 
         var out = header
         if !structured.isEmpty {
@@ -37,10 +37,11 @@ enum DeliverableMarkdown {
         // `body` is written by the same generation pass as `payload` — the runTask prompt says
         // "ALWAYS write the markdown body", then "ALSO fill payload" for a structured kind — so
         // where the structured render already says everything `body` does, appending it again
-        // under a `## Notes` heading would just double the document. Only append it when it is
-        // not (byte-for-byte, after trimming) identical to what was just rendered.
+        // under a `## Notes` heading would just double the document. Only append it when the
+        // structured render does not already carry it (after trimming) — identical, or, for an
+        // email or a post whose body rides under its header lines, contained.
         let bodyTrimmed = d.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !bodyTrimmed.isEmpty && bodyTrimmed != structured.trimmingCharacters(in: .whitespacesAndNewlines) {
+        if !bodyTrimmed.isEmpty && !structured.contains(bodyTrimmed) {
             out += "## Notes\n\n" + d.body
         }
 
@@ -53,7 +54,8 @@ enum DeliverableMarkdown {
     /// or a structured kind whose matching payload fields are absent/empty) — `render` falls
     /// back to `d.body` in that case, the same "empty payload guard" every kind gets in
     /// `DeliverableExport`.
-    private static func structuredSection(kind: DeliverableKind, payload: DeliverablePayload) -> String {
+    private static func structuredSection(kind: DeliverableKind, payload: DeliverablePayload,
+                                          body: String) -> String {
         switch kind {
         case .checklist: return checklistSection(payload)
         case .doc:       return docSection(payload)
@@ -64,14 +66,24 @@ enum DeliverableMarkdown {
         case .site:      return siteSection(payload)
         case .screens:   return screensSection(payload)
         case .legal:     return LegalClauses.clauses(in: payload).map(LegalClauses.markdown) ?? ""
-        case .post, .email, .text, .other:
+        // The message itself IS the body for these two, so it rides inside the structured part
+        // under its header lines, and `render` sees it there and adds no `## Notes` copy.
+        case .email:
+            guard let subject = payload.emailSubject else { return "" }
+            return "**Subject:** \(subject)" + (payload.emailTo.map { "\n**To:** \($0)" } ?? "")
+                + "\n\n" + body
+        case .post:
+            guard let platform = payload.postPlatform else { return "" }
+            return "**Platform:** \(platform)" + (payload.limit.map { " (limit \($0) characters)" } ?? "")
+                + "\n\n" + body
+        case .text, .other:
             return ""
         }
     }
 
     private static func checklistSection(_ p: DeliverablePayload) -> String {
         guard let items = p.items, !items.isEmpty else { return "" }
-        return items.map { "- [\($0.done ? "x" : " ")] \($0.t)" }.joined(separator: "\n")
+        return items.map(\.markdownLine).joined(separator: "\n")
     }
 
     private static func docSection(_ p: DeliverablePayload) -> String {
@@ -79,6 +91,10 @@ enum DeliverableMarkdown {
         var out = call
         for s in p.sections ?? [] where !s.h.isEmpty || !s.p.isEmpty {
             out += "\n\n## \(s.h)\n\n\(s.p)"
+            if let source = s.sourceText { out += "\n\n_Source: \(source)_" }
+        }
+        if !p.rulesOutItems.isEmpty {
+            out += "\n\n## Rules out\n\n" + p.rulesOutItems.map { "- \($0)" }.joined(separator: "\n")
         }
         let next = p.next ?? []
         if !next.isEmpty {

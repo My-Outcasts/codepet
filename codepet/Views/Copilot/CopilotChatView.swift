@@ -2235,22 +2235,15 @@ struct CopilotBubble: View {
     /// The founder's Aug 10 report was that a message written in chat was indistinguishable
     /// from ordinary prose. Sharing `MessageDraftViewer` with the deliverable viewers is the
     /// point: wherever a message appears, it looks like a message. A `to` on an email — whose
-    /// heading is already its subject — is carried as its own small line so nothing is lost.
+    /// heading is already its subject — sits under that subject inside the card (founder design
+    /// review, 30 Sep; it used to trail below the card and read detached from it).
     @ViewBuilder private var draftedMessages: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(message.drafts.enumerated()), id: \.offset) { _, draft in
-                VStack(alignment: .leading, spacing: 6) {
-                    MessageDraftViewer(eyebrow: draft.eyebrow(lang),
-                                       heading: draft.heading,
-                                       text: draft.body)
-                    if draft.channel == "email",
-                       let to = draft.to?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !to.isEmpty {
-                        Text((lang == .vi ? "Gửi tới: " : "To: ") + to)
-                            .font(.pixelSystem(size: 11))
-                            .foregroundColor(CodepetTheme.mutedText)
-                    }
-                }
+                MessageDraftViewer(eyebrow: draft.eyebrow(lang),
+                                   heading: draft.heading,
+                                   text: draft.body,
+                                   recipient: draft.channel == "email" ? draft.to : nil)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -288,10 +288,20 @@ struct DeliverablePayload: Codable, Hashable {
         risks = (try? c.decodeIfPresent(String.self, forKey: .risks)) ?? nil
         messages = (try? c.decodeIfPresent([DmMessage].self, forKey: .messages)) ?? nil
 
-        calendar = try? CalendarPayload(from: decoder)
-        sheet = try? SheetPayload(from: decoder)
-        site = try? SitePayload(from: decoder)
-        screens = try? ScreensPayload(from: decoder)
+        // Two forms reach this decoder. The server sends these four kinds FLAT (`{"price": …}`),
+        // but the synthesized encoder writes each one NESTED under its own key
+        // (`{"sheet": {"price": …}}`) — and that is the form `CompanyData.saveLibrary` stores.
+        // Reading only the flat form dropped every one of these payloads on the next load, so a
+        // filed site fell back to its markdown copy (`PayloadReloadTests`). Nested first, because
+        // it is unambiguous; flat second, because a colliding key from another kind can pass it.
+        calendar = (try? c.decodeIfPresent(CalendarPayload.self, forKey: .calendar)) ?? nil
+            ?? (try? CalendarPayload(from: decoder))
+        sheet = (try? c.decodeIfPresent(SheetPayload.self, forKey: .sheet)) ?? nil
+            ?? (try? SheetPayload(from: decoder))
+        site = (try? c.decodeIfPresent(SitePayload.self, forKey: .site)) ?? nil
+            ?? (try? SitePayload(from: decoder))
+        screens = (try? c.decodeIfPresent(ScreensPayload.self, forKey: .screens)) ?? nil
+            ?? (try? ScreensPayload(from: decoder))
     }
 }
 

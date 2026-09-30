@@ -54,3 +54,12 @@ struct PostLength: Equatable {
             : (lang == .vi ? "\(count) / \(limit) ký tự" : "\(count) / \(limit) characters")
     }
 }
+
+/// "To: the two who asked to pay" — an email's recipient line, as the card draws it and as the
+/// chat transcript copies it. "" when there is no recipient, so callers can skip it.
+enum RecipientLine {
+    static func text(_ recipient: String?, _ lang: AppLanguage) -> String {
+        guard let r = nonEmpty(recipient) else { return "" }
+        return (lang == .vi ? "Gửi tới: " : "To: ") + r
+    }
+}

@@ -977,20 +977,14 @@ struct EmailViewer: View {
     @Environment(\.uiLanguage) private var lang
 
     var body: some View {
-        // The subject is the heading, and who it is for rides as its own small line under the
-        // card — the same layout a chat email draft already has (`CopilotChatView.draftedMessages`),
-        // so an email reads the same wherever it appears. Legacy: no subject, the title heads it.
-        VStack(alignment: .leading, spacing: 6) {
-            MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
-                               heading: deliverable.payload?.emailSubject ?? deliverable.title,
-                               text: deliverable.body,
-                               export: deliverable)
-            if let to = deliverable.payload?.emailTo {
-                Text((lang == .vi ? "Gửi tới: " : "To: ") + to)
-                    .font(.pixelSystem(size: 11))
-                    .foregroundColor(CodepetTheme.mutedText)
-            }
-        }
+        // The subject is the heading, and who it is for sits under it inside the card — the same
+        // layout a chat email draft has (`CopilotChatView.draftedMessages`), so an email reads the
+        // same wherever it appears. Legacy: no subject, the title heads it and no "To:" line.
+        MessageDraftViewer(eyebrow: lang == .vi ? "Email nháp" : "Email draft",
+                           heading: deliverable.payload?.emailSubject ?? deliverable.title,
+                           text: deliverable.body,
+                           recipient: deliverable.payload?.emailTo,
+                           export: deliverable)
     }
 }
 

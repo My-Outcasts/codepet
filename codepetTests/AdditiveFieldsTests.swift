@@ -113,4 +113,13 @@ final class AdditiveFieldsTests: XCTestCase {
         let left = try XCTUnwrap(rep.colorAt(x: 40, y: 2)), right = try XCTUnwrap(rep.colorAt(x: 160, y: 2))
         XCTAssertNotEqual(left, right, "filled half and empty half drew the same colour")
     }
+
+    // MARK: - email recipient line (design review, 30 Sep: inside the card)
+
+    func testRecipientLine() {
+        XCTAssertEqual(RecipientLine.text("the two who asked to pay", .en), "To: the two who asked to pay")
+        XCTAssertEqual(RecipientLine.text("x", .vi), "Gửi tới: x")
+        XCTAssertEqual(RecipientLine.text("  ", .en), "")
+        XCTAssertEqual(RecipientLine.text(nil, .en), "")
+    }
 }

@@ -173,8 +173,8 @@ final class MessageTranscriptTests: XCTestCase {
     }
 
     /// Email drafts that have both a subject and a recipient must carry both — the subject
-    /// in the heading and the recipient as its own line, matching where the view renders them
-    /// (CopilotChatView:752-758), so nothing is lost to the clipboard.
+    /// in the heading and the recipient as its own line, matching where the card draws them
+    /// (`MessageDraftViewer`'s `recipient`), so nothing is lost to the clipboard.
     func testPlainOnAnEmailDraftIncludesSubjectAndRecipient() {
         var m = reply("Here's the draft.")
         m.drafts = [MessageDraftDTO(channel: "email", to: "founder@x.com",
@@ -183,9 +183,9 @@ final class MessageTranscriptTests: XCTestCase {
         XCTAssertTrue(out.contains("Pricing update"))
         XCTAssertTrue(out.contains("To: founder@x.com"))
         XCTAssertTrue(out.contains("Here's the new pricing."))
-        // Order matters as much as presence. The view draws the card (heading, then body)
-        // and puts "To:" BELOW it, so a recipient emitted above the body pastes as a header
-        // stranded inside the message. `.contains` alone cannot see that.
+        // Order matters as much as presence. Since the 30 Sep design review the card draws the
+        // subject, then "To:" under it inside the card, then the body — the same order as a mail
+        // client and as the Library's email export. `.contains` alone cannot see that.
         let subject = out.range(of: "Pricing update")
         let body = out.range(of: "Here's the new pricing.")
         let recipient = out.range(of: "To: founder@x.com")
@@ -193,8 +193,9 @@ final class MessageTranscriptTests: XCTestCase {
         XCTAssertNotNil(body)
         XCTAssertNotNil(recipient)
         XCTAssertTrue(subject!.lowerBound < body!.lowerBound, "subject leads the body")
-        XCTAssertTrue(body!.lowerBound < recipient!.lowerBound,
-                      "the recipient sits under the body, where the view puts it")
+        XCTAssertTrue(subject!.lowerBound < recipient!.lowerBound, "the recipient follows the subject")
+        XCTAssertTrue(recipient!.lowerBound < body!.lowerBound,
+                      "the recipient sits above the body, where the card puts it")
     }
 
     /// The recipient label must be localised to Vietnamese when requested.

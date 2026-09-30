@@ -64,6 +64,11 @@ struct ChecklistViewer: View {
         return d
     }
 
+    /// "1 of 4 done" — the count as words, above the track it describes (founder, 30 Sep).
+    static func progressLabel(done: Int, of total: Int, _ lang: AppLanguage) -> String {
+        lang == .vi ? "Đã xong \(done)/\(total)" : "\(done) of \(total) done"
+    }
+
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Danh sách" : "Checklist",
                          action: .copy(copyText),
@@ -73,19 +78,12 @@ struct ChecklistViewer: View {
                          otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
                          onReRun: companyStore.reRunHandler(for: deliverable, language: lang)) {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(lang == .vi ? "Tiến độ" : "Progress")
-                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                        Spacer()
-                        Text("\(doneCount)/\(items.count)")
-                            .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundColor(CodepetTheme.primaryText)
-                    }
-                    ProgressView(value: progress)
-                        .tint(CodepetTheme.accentPurple)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(Self.progressLabel(done: doneCount, of: items.count, lang))
+                        .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.mutedText)
+                    ChecklistProgressTrack(fraction: progress)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -132,6 +130,33 @@ struct ChecklistViewer: View {
                 }
             }
         }
+    }
+}
+
+/// A checklist's progress: a 4pt rounded hairline track with a purple fill.
+///
+/// Drawn by hand rather than with `ProgressView`, which rendered as the stock macOS bar — out of
+/// place in a card set in the app's own type and hairlines (founder design review, 30 Sep) — and
+/// which `ImageRenderer` cannot draw at all, so every offscreen render of this viewer showed a
+/// placeholder where the bar should be.
+struct ChecklistProgressTrack: View {
+    let fraction: Double
+    static let height: CGFloat = 4
+
+    var body: some View {
+        Capsule()
+            .fill(CodepetTheme.hairline)
+            .frame(height: Self.height)
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(CodepetTheme.accentPurple)
+                        .frame(width: geo.size.width * min(max(fraction, 0), 1))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: fraction)
+            .accessibilityElement()
+            .accessibilityValue(Text("\(Int((min(max(fraction, 0), 1) * 100).rounded())) percent"))
     }
 }
 

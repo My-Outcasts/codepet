@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import codepet
 
@@ -91,5 +92,25 @@ final class AdditiveFieldsTests: XCTestCase {
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(p)) as? [String: Any])
         XCTAssertEqual(Set(obj.keys), ["rules_out", "platform", "limit", "subject", "to"])
         XCTAssertEqual(try JSONDecoder().decode(DeliverablePayload.self, from: JSONEncoder().encode(p)), p)
+    }
+
+    // MARK: - checklist progress (design review, 30 Sep)
+
+    func testProgressLabelReadsAsWords() {
+        XCTAssertEqual(ChecklistViewer.progressLabel(done: 1, of: 4, .en), "1 of 4 done")
+        XCTAssertEqual(ChecklistViewer.progressLabel(done: 1, of: 4, .vi), "Đã xong 1/4")
+    }
+
+    /// The track is drawn by hand so it renders offscreen, where `ProgressView` drew a
+    /// placeholder. A render that is all one colour would mean the fill never drew.
+    @MainActor
+    func testTrackRendersItsFillOffscreen() throws {
+        let r = ImageRenderer(content: ChecklistProgressTrack(fraction: 0.5).frame(width: 200)
+            .environment(\.colorScheme, .light))
+        r.scale = 1
+        let rep = try XCTUnwrap(r.nsImage?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        XCTAssertEqual(rep.pixelsHigh, Int(ChecklistProgressTrack.height))
+        let left = try XCTUnwrap(rep.colorAt(x: 40, y: 2)), right = try XCTUnwrap(rep.colorAt(x: 160, y: 2))
+        XCTAssertNotEqual(left, right, "filled half and empty half drew the same colour")
     }
 }

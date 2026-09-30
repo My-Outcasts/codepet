@@ -123,20 +123,24 @@ describe("coercePayload", () => {
   });
 
   describe("calendar", () => {
+    // CP-002 E1: weeks became phases. These are the legacy tests, rewritten for the lift — a
+    // `weeks[]` payload now arrives as `phases[]`, with day → when and kind → format.
     const validWeek = { label: "Week 1", items: [{ day: "Mon", kind: "Thread", body: "Post about X" }] };
-    it("accepts a valid 2-week payload", () => {
+    it("a valid 2-week payload is lifted into two phases", () => {
       const p: any = coercePayload("calendar", { weeks: [validWeek, { label: "Week 2", items: [{ day: "Thu", kind: "Clip", body: "Demo" }] }] });
-      expect(p.weeks).toHaveLength(2);
-      expect(p.weeks[0]).toEqual({ label: "Week 1", items: [{ day: "Mon", kind: "Thread", body: "Post about X" }] });
+      expect(p.phases).toHaveLength(2);
+      expect(p.phases[0]).toEqual({ label: "Week 1", from: "", to: "", items: [{ when: "Mon", format: "Thread", body: "Post about X" }] });
+      expect(p).not.toHaveProperty("weeks");
     });
     it("drops malformed items and returns null when nothing valid remains", () => {
       expect(coercePayload("calendar", { weeks: [{ label: "Week 1", items: [{ day: "", kind: "x", body: "" }] }] })).toBeNull();
       expect(coercePayload("calendar", { weeks: [] })).toBeNull();
       expect(coercePayload("calendar", null)).toBeNull();
     });
-    it("clips over-count to 2 weeks", () => {
-      const p: any = coercePayload("calendar", { weeks: [validWeek, validWeek, validWeek] });
-      expect(p.weeks).toHaveLength(2);
+    // Was "clips over-count to 2 weeks". The demo's launch runway has five, and lost three.
+    it("no longer clips at two", () => {
+      const p: any = coercePayload("calendar", { weeks: [validWeek, validWeek, validWeek, validWeek, validWeek] });
+      expect(p.phases).toHaveLength(5);
     });
   });
 
@@ -213,7 +217,7 @@ describe("buildRunTaskPrompt structured guide", () => {
     expect(p).toContain("ALSO fill `payload`");
     expect(p).toMatch(/checklist:.*items/);
     expect(p).toMatch(/dms:.*messages/);
-    expect(p).toMatch(/calendar:.*weeks/);
+    expect(p).toMatch(/calendar:.*phases/);
     expect(p).toMatch(/sheet:.*inputs.*outputs.*formula/);
     expect(p).toMatch(/site:.*steps/);
     expect(p).toMatch(/screens:.*connect.*session.*recap/);
@@ -511,5 +515,38 @@ describe("sheet model", () => {
     expect(props).toHaveProperty("inputs");
     expect(props).toHaveProperty("outputs");
     for (const gone of ["price", "waitlist", "conversion", "churn"]) expect(props).not.toHaveProperty(gone);
+  });
+});
+
+/** CP-002 E1: a calendar is a plan in phases (founder decisions, 30 Sep: items keep when/format). */
+describe("calendar phases", () => {
+  const item = (o: object = {}) => ({ when: "T-5", format: "verify", channel: "", owner: "", body: "Deletion deletes", ...o });
+  const cal = (r: unknown) => coercePayload("calendar", r) as any;
+
+  it("keeps phases with a span, and items with where and who", () => {
+    expect(cal({ phases: [{ label: "Five days out", from: "T-5", to: "T-3", items: [item({ channel: "X", owner: "Marketing" })] }] }))
+      .toEqual({ phases: [{ label: "Five days out", from: "T-5", to: "T-3", items: [
+        { when: "T-5", format: "verify", channel: "X", owner: "Marketing", body: "Deletion deletes" }] }] });
+  });
+  it("omits empty channel and owner, so a legacy item reads as before", () => {
+    expect(cal({ phases: [{ label: "P", from: "", to: "", items: [item()] }] }).phases[0].items[0])
+      .toEqual({ when: "T-5", format: "verify", body: "Deletion deletes" });
+  });
+  it("an item needs text; a phase needs a label and an item", () => {
+    expect(cal({ phases: [{ label: "", items: [item()] }, { label: "P", items: [item({ body: "" })] }] })).toBeNull();
+  });
+  it("caps at 8 phases of 8 items", () => {
+    const got = cal({ phases: Array.from({ length: 10 }, (_, i) => ({ label: `P${i}`, items: Array.from({ length: 10 }, () => item()) })) });
+    expect(got.phases).toHaveLength(8);
+    expect(got.phases[0].items).toHaveLength(8);
+  });
+  it("the prompt asks for phases with relative spans, never dates, and drops the two-week rule", () => {
+    const p = buildRunTaskPrompt({ companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey: "mkt" } as any);
+    expect(p).toMatch(/- calendar: .*`phases\[\]`.*`when`.*`format`.*`channel`.*`owner`/);
+    expect(p).not.toContain("exactly 2");
+    expect(p).toMatch(/never a calendar date/);
+    const props = (deliverableTool("mkt").input_schema as any).properties.payload.properties;
+    expect(props).toHaveProperty("phases");
+    expect(props).not.toHaveProperty("weeks");
   });
 });

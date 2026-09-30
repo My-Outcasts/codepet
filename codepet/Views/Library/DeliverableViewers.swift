@@ -669,94 +669,147 @@ struct PostViewer: View {
 
 // MARK: - CalendarViewer
 
-/// Renders a calendar payload: for each `week`, a section with the week's
-/// `label`, then an adaptive grid of item cards — each showing `day`, a
-/// `kind` chip (mirrors DmsViewer's note-chip idiom), and the `body` line.
-/// Mirrors web's CalendarViewer (components/artifact/viewers.tsx) in spirit.
+/// Renders a calendar payload as a plan in phases (CP-002 E1, layout approved in the founder's
+/// design review, 30 Sep): a timeline rail — dot, phase name, relative span — beside each phase's
+/// item cards, each showing `when`, a `format` chip, a `channel` chip and the `owner` where the
+/// item has them, then the text. It was exactly two weeks; the demo's launch runway had five
+/// phases and the server kept two. The eyebrow says "Plan", not "Content calendar", because a
+/// launch runway is one too.
 struct CalendarViewer: View {
     let payload: CalendarPayload
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
     @EnvironmentObject private var companyStore: CompanyStore
+    /// Measured, for the rail-beside-items / stacked switch (see `SheetViewer` for why not
+    /// `ViewThatFits`). Starts wide, the Library's usual size.
+    @State private var width: CGFloat = 760
 
-    /// Widened from 150. A post's `body` is a sentence, and at reading size a 150pt column broke
-    /// it across four or five lines — the grid was sized for the 11pt setting it used to be in.
+    /// Widened from 150. An item's `body` is a sentence, and at reading size a 150pt column broke
+    /// it across four or five lines.
     private let columns = [GridItem(.adaptive(minimum: 210), spacing: 10, alignment: .top)]
 
-    /// The calendar as pasteable prose — a founder schedules these somewhere else.
-    private var copyText: String {
-        payload.weeks.map { week in
-            week.label + "\n"
-            + week.items.map { "\($0.day) · \($0.kind) — \($0.body)" }.joined(separator: "\n")
+    /// The plan as pasteable prose — a founder schedules these somewhere else.
+    static func copyText(_ payload: CalendarPayload) -> String {
+        payload.phases.map { phase in
+            phase.label + (phase.span.isEmpty ? "" : " (\(phase.span))") + "\n"
+            + phase.items.map { "\($0.tags) — \($0.body)" }.joined(separator: "\n")
         }.joined(separator: "\n\n")
     }
 
     var body: some View {
-        DeliverableFrame(eyebrow: lang == .vi ? "Lịch nội dung" : "Content calendar",
-                         action: payload.weeks.isEmpty ? .none : .copy(copyText),
+        DeliverableFrame(eyebrow: lang == .vi ? "Kế hoạch" : "Plan",
+                         action: payload.phases.isEmpty ? .none : .copy(Self.copyText(payload)),
                          export: deliverable,
                          provenance: deliverable.producedBy,
                          lang: lang,
                          otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
                          onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
                          measured: false) {
-            if payload.weeks.isEmpty {
-                // An empty state is a sentence addressed to the founder, not a caption. It was
-                // 12pt muted, smaller than anything around it, in a card whose whole content it is.
+            if payload.phases.isEmpty {
+                // An empty state is a sentence addressed to the founder, not a caption.
                 DeliverableProse(text: lang == .vi ? "Chưa có mục nào." : "No entries yet.",
                                  tintBlanks: false,
                                  color: CodepetTheme.mutedText)
             } else {
-                weeksList
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(payload.phases.enumerated()), id: \.offset) { idx, phase in
+                        phaseRow(phase, isLast: idx == payload.phases.count - 1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             }
         }
     }
 
-    private var weeksList: some View {
-        VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
-            ForEach(Array(payload.weeks.enumerated()), id: \.offset) { idx, week in
-                VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
-                    if idx > 0 {
-                        DeliverableRule()
-                            .padding(.bottom, DeliverableStyle.betweenSections
-                                              - DeliverableStyle.headingToBody - 8)
-                    }
-                    DeliverableHeading(text: week.label)
-
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                        ForEach(Array(week.items.enumerated()), id: \.offset) { _, item in
-                            VStack(alignment: .leading, spacing: 7) {
-                                HStack(spacing: 6) {
-                                    Text(item.day)
-                                        .font(.pixelSystem(size: DeliverableStyle.footnote,
-                                                           weight: .semibold))
-                                        .foregroundColor(CodepetTheme.mutedText)
-                                    Spacer(minLength: 4)
-                                    Text(item.kind)
-                                        .font(.pixelSystem(size: 9, weight: .medium))
-                                        .foregroundColor(CodepetTheme.accentPurple)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
-                                }
-                                DeliverableProse(text: item.body)
-                            }
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
-                                    .fill(CodepetTheme.surface)
-                            )
-                            // `surface` inside `surface` had no edge to hold it (Aug 6).
-                            .overlay(
-                                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
-                                    .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
-                            )
-                        }
-                    }
+    /// A phase: the rail (dot, name, span) beside its items when there is room, above them when
+    /// not. The rail's line runs down to the next phase's dot, which is what makes it a timeline.
+    @ViewBuilder
+    private func phaseRow(_ phase: CalendarPhase, isLast: Bool) -> some View {
+        let wide = width >= 560
+        let rail = HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                Circle().fill(CodepetTheme.accentPurple).frame(width: 9, height: 9).padding(.top, 5)
+                if wide && !isLast {
+                    Rectangle().fill(CodepetTheme.accentPurple.opacity(0.25)).frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(phase.label)
+                    .font(.pixelSystem(size: 14.5, weight: .bold))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !phase.span.isEmpty {
+                    Text(phase.span)
+                        .font(.pixelSystem(size: 12))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.mutedText)
                 }
             }
         }
+        let items = LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            ForEach(Array(phase.items.enumerated()), id: \.offset) { _, item in itemCard(item) }
+        }
+        // The gap to the next phase sits on the items, not the row, so the rail's line runs
+        // through it and meets the next dot instead of stopping 22pt short.
+        if wide {
+            HStack(alignment: .top, spacing: 20) {
+                rail.frame(width: 160, alignment: .topLeading).frame(maxHeight: .infinity, alignment: .top)
+                items.padding(.bottom, isLast ? 0 : 22)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: 10) { rail; items }
+                .padding(.bottom, isLast ? 0 : 22)
+        }
+    }
+
+    private func itemCard(_ item: CalendarItem) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                if !item.when.isEmpty {
+                    Text(item.when)
+                        .font(.pixelSystem(size: DeliverableStyle.footnote, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.primaryText)
+                }
+                if !item.format.isEmpty {
+                    Text(item.format)
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(CodepetTheme.accentPurple)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(CodepetTheme.accentPurple.opacity(0.1)))
+                }
+                if !item.channel.isEmpty {
+                    Text(item.channel)
+                        .font(.pixelSystem(size: 10, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .overlay(Capsule().strokeBorder(CodepetTheme.hairline, lineWidth: 1))
+                }
+                Spacer(minLength: 4)
+                if !item.owner.isEmpty {
+                    Text(item.owner)
+                        .font(.pixelSystem(size: 11))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .lineLimit(1)
+                }
+            }
+            DeliverableProse(text: item.body)
+        }
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                .fill(CodepetTheme.surface)
+        )
+        // `surface` inside `surface` had no edge to hold it (Aug 6).
+        .overlay(
+            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
+        )
     }
 }
 

@@ -45,41 +45,104 @@ struct DmMessage: Codable, Hashable {
     }
 }
 
-// calendar
+// calendar — a plan in phases (CP-002 E1)
+
+/// One thing on the plan. `when` and `format` were `day` and `kind` before CP-002 E1, and still
+/// decode from those keys, so a calendar filed then keeps every field it had (founder decision,
+/// 30 Sep). `channel` and `owner` are the spec's additions, empty when the plan did not say.
 struct CalendarItem: Codable, Hashable {
-    var day: String
-    var kind: String
+    var when: String
+    var format: String
+    var channel: String
+    var owner: String
     var body: String
 
-    private enum CodingKeys: String, CodingKey { case day, kind, body }
+    init(when: String, format: String, channel: String = "", owner: String = "", body: String) {
+        self.when = when; self.format = format; self.channel = channel; self.owner = owner; self.body = body
+    }
 
-    /// All fields are soft-optional here: a missing `day`/`kind`/`body` on one item
-    /// degrades to "" rather than throwing and nuking the whole calendar payload.
-    /// The genuinely-required anchor lives one level up, at `CalendarPayload.weeks`.
+    private enum CodingKeys: String, CodingKey { case when, format, channel, owner, body, day, kind }
+
+    /// Soft on every field: a missing one degrades to "" rather than nuking the whole plan.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        day = try c.decodeIfPresent(String.self, forKey: .day) ?? ""
-        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        when = try c.decodeIfPresent(String.self, forKey: .when) ?? c.decodeIfPresent(String.self, forKey: .day) ?? ""
+        format = try c.decodeIfPresent(String.self, forKey: .format) ?? c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        channel = try c.decodeIfPresent(String.self, forKey: .channel) ?? ""
+        owner = try c.decodeIfPresent(String.self, forKey: .owner) ?? ""
         body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(when, forKey: .when)
+        try c.encode(format, forKey: .format)
+        if !channel.isEmpty { try c.encode(channel, forKey: .channel) }
+        if !owner.isEmpty { try c.encode(owner, forKey: .owner) }
+        try c.encode(body, forKey: .body)
+    }
 }
-struct CalendarWeek: Codable, Hashable {
+
+/// A stretch of the plan: "Week 1", "Five days out", "Ship day". `from`/`to` are relative labels
+/// ("T-5", "Day 8") or empty — never dates, because the plan is relative and the app does not
+/// invent a date (the rule the .ics export already follows).
+struct CalendarPhase: Codable, Hashable {
     var label: String
+    var from: String
+    var to: String
     var items: [CalendarItem]
 
-    private enum CodingKeys: String, CodingKey { case label, items }
+    init(label: String, from: String = "", to: String = "", items: [CalendarItem]) {
+        self.label = label; self.from = from; self.to = to; self.items = items
+    }
 
-    /// Soft: a missing `label` or `items` on one week degrades to "" / [] rather than
-    /// throwing. The required anchor is `CalendarPayload.weeks` (below), which stays a
-    /// plain `decode` — a payload with no `weeks` key at all still throws → `.calendar`
-    /// stays nil via `try?` in `DeliverablePayload`.
+    private enum CodingKeys: String, CodingKey { case label, from, to, items }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        from = try c.decodeIfPresent(String.self, forKey: .from) ?? ""
+        to = try c.decodeIfPresent(String.self, forKey: .to) ?? ""
         items = try c.decodeIfPresent([CalendarItem].self, forKey: .items) ?? []
     }
+
+    /// "T-5 → T-3", "T-5", or "" — the span as the viewer prints it.
+    var span: String {
+        switch (from.isEmpty, to.isEmpty) {
+        case (false, false): return from == to ? from : "\(from) → \(to)"
+        case (false, true):  return from
+        case (true, false):  return to
+        default:             return ""
+        }
+    }
 }
-struct CalendarPayload: Codable, Hashable { var weeks: [CalendarWeek] }
+
+/// A plan in phases. It was exactly two weeks of 2-3 posts; the demo's launch runway already
+/// abused the week labels as phases ("Blocking", "Ship day") and the server cut it at two.
+/// A legacy `weeks[]` decodes as one phase per week with no span. Written as `phases` only, so a
+/// re-saved calendar migrates itself. Throws when neither key is present, which keeps a
+/// non-calendar payload (decoded from the same flat container) from growing one.
+struct CalendarPayload: Codable, Hashable {
+    var phases: [CalendarPhase]
+
+    init(phases: [CalendarPhase]) { self.phases = phases }
+
+    private enum CodingKeys: String, CodingKey { case phases, weeks }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if c.contains(.phases) {
+            phases = try c.decode([CalendarPhase].self, forKey: .phases)
+        } else {
+            phases = try c.decode([CalendarPhase].self, forKey: .weeks)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(phases, forKey: .phases)
+    }
+}
 
 // sheet
 // `SheetPayload` and its parts live in `SheetModel.swift` since CP-002 D (any model, not four

@@ -81,7 +81,7 @@ struct DraftPayloadPreview: View {
         case .checklist: return !(p.items ?? []).isEmpty
         case .doc:       return !(p.call ?? "").isEmpty || !(p.sections ?? []).isEmpty
         case .plan:      return !(p.goal ?? "").isEmpty
-        case .calendar:  return !(p.calendar?.weeks ?? []).isEmpty
+        case .calendar:  return !(p.calendar?.phases ?? []).isEmpty
         default:         return false
         }
     }
@@ -372,7 +372,7 @@ struct DraftPayloadPreview: View {
     /// blocks matches how `checklist` and `dms` truncate, so the three read alike.
     private func calendar(_ c: CalendarPayload) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            ForEach(Array(c.weeks.prefix(3).enumerated()), id: \.offset) { _, week in
+            ForEach(Array(c.phases.prefix(3).enumerated()), id: \.offset) { _, week in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: "calendar")
                         .font(.system(size: 10))
@@ -389,9 +389,9 @@ struct DraftPayloadPreview: View {
                     Spacer(minLength: 0)
                 }
             }
-            if c.weeks.count > 3 {
-                Text(lang == .vi ? "+\(c.weeks.count - 3) giai đoạn nữa"
-                                 : "+\(c.weeks.count - 3) more")
+            if c.phases.count > 3 {
+                Text(lang == .vi ? "+\(c.phases.count - 3) giai đoạn nữa"
+                                 : "+\(c.phases.count - 3) more")
                     .font(.pixelSystem(size: 10.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentPurple)
             }

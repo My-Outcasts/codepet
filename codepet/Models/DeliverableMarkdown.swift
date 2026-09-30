@@ -63,7 +63,8 @@ enum DeliverableMarkdown {
         case .sheet:     return sheetSection(payload)
         case .site:      return siteSection(payload)
         case .screens:   return screensSection(payload)
-        case .post, .email, .legal, .text, .other:
+        case .legal:     return LegalClauses.clauses(in: payload).map(LegalClauses.markdown) ?? ""
+        case .post, .email, .text, .other:
             return ""
         }
     }

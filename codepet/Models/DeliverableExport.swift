@@ -64,9 +64,11 @@ enum DeliverableExport {
             return [siteFile(d, base: base)]
         // `.screens` sits here deliberately: a `.png` per screen needs `ImageRenderer` over a
         // live view, which is a separate plan. Until then `.screens` exports its markdown
-        // `body`, same as `.legal`/`.text`/`.other` — the per-screen fields are intentionally
+        // `body`, same as `.text`/`.other` — the per-screen fields are intentionally
         // not in the file.
-        case .legal, .text, .other, .screens:
+        case .legal:
+            return [md(base, titled(d, LegalClauses.of(d).map(LegalClauses.markdown) ?? d.body))]
+        case .text, .other, .screens:
             return [md(base, titled(d, d.body))]
         }
     }

@@ -481,8 +481,11 @@ struct DmsViewer: View {
 // MARK: - LegalViewer
 
 /// Renders a `.legal` deliverable as a formal document: a "Legal draft" eyebrow with Copy, the
-/// markdown `body` at reading size, and the not-legal-advice line as the card's footer. This kind
-/// carries no structured payload — content comes straight from `title` + `body`.
+/// numbered clauses at reading size, and the not-legal-advice line as the card's footer.
+///
+/// Clauses come from `payload.sections` (CP-002 A), set the way `DocViewer` sets its sections —
+/// same heading, prose and rule — with the number from `LegalClauses`. A legal draft filed before
+/// that carries no payload, and still renders its markdown `body` exactly as it always did.
 ///
 /// Three things moved. **Copy came into the card**: it used to trail underneath as a loose pill,
 /// which is the page furniture the Aug 10 message pass diagnosed and fixed — for messages only,
@@ -498,7 +501,7 @@ struct LegalViewer: View {
     var body: some View {
         DeliverableFrame(
             eyebrow: lang == .vi ? "Bản nháp pháp lý" : "Legal draft",
-            action: .copy(deliverable.body),
+            action: .copy(clauses.map(LegalClauses.plainText) ?? deliverable.body),
             export: deliverable,
             footer: lang == .vi ? "Bản nháp — không phải tư vấn pháp lý."
                                 : "Draft — not legal advice.",
@@ -507,9 +510,27 @@ struct LegalViewer: View {
             otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
             onReRun: companyStore.reRunHandler(for: deliverable, language: lang)
         ) {
-            MarkdownView(markdown: deliverable.body)
+            if let clauses {
+                VStack(alignment: .leading, spacing: DeliverableStyle.betweenSections) {
+                    ForEach(Array(clauses.enumerated()), id: \.offset) { idx, clause in
+                        VStack(alignment: .leading, spacing: DeliverableStyle.headingToBody) {
+                            if idx > 0 {
+                                DeliverableRule()
+                                    .padding(.bottom, DeliverableStyle.betweenSections
+                                             - DeliverableStyle.headingToBody - 8)
+                            }
+                            DeliverableHeading(text: LegalClauses.heading(idx, clause))
+                            DeliverableProse(text: clause.p)
+                        }
+                    }
+                }
+            } else {
+                MarkdownView(markdown: deliverable.body)
+            }
         }
     }
+
+    private var clauses: [DocSection]? { LegalClauses.of(deliverable) }
 }
 
 // MARK: - PostViewer

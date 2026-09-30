@@ -114,6 +114,7 @@ export interface RunTaskArgs {
 const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
   ["checklist", "Build a concrete setup/launch checklist — exactly 5-7 actionable steps in order (`items[].t`), each with `done` true only for obvious already-satisfied prerequisites."],
   ["doc", "`call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions."],
+  ["legal", "`sections[]` = the document's clauses in order, as many as it needs, each {h,p}: `h` a short clause heading WITHOUT a number (the app numbers them), `p` the clause text. The `body` carries the same document in full."],
   ["plan", "an HONEST code-change plan — `goal` (one line), `steps[]` (3-5 ordered), `changes[]` = {area, edit} in plain terms (no fabricated file paths), `verify[]` (future-tense checks), `risks` (one line). Never claim it shipped."],
   ["dms", "exactly 4 personalized 1:1 outreach `messages[]` = {name (persona placeholder), note (why a strong target), msg (warm specific DM)}."],
   ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
@@ -262,6 +263,7 @@ export interface ChecklistItem { t: string; done: boolean; }
 export interface ChecklistPayload { items: ChecklistItem[]; }
 export interface DocSection { h: string; p: string; }
 export interface DocPayload { call: string; sections: DocSection[]; next: string[]; }
+export interface LegalPayload { sections: DocSection[]; }
 export interface PlanChange { area: string; edit: string; }
 export interface PlanPayload { goal: string; steps: string[]; changes: PlanChange[]; verify: string[]; risks: string; }
 export interface DmMessage { name: string; note: string; msg: string; }
@@ -306,6 +308,7 @@ export interface ScreensPayload { screens: Screen[]; }
 export type DeliverablePayload =
   | ChecklistPayload
   | DocPayload
+  | LegalPayload
   | PlanPayload
   | DmsPayload
   | CalendarPayload
@@ -313,12 +316,16 @@ export type DeliverablePayload =
   | SitePayload
   | ScreensPayload;
 
-const STRUCTURED_KINDS = new Set(["checklist", "doc", "plan", "dms", "calendar", "sheet", "site", "screens"]);
+const STRUCTURED_KINDS = new Set(["checklist", "doc", "legal", "plan", "dms", "calendar", "sheet", "site", "screens"]);
 /** Illustrations the native screens viewer can render. Keep in sync with web's SCREEN_ARTS. */
 const SCREEN_ARTS = new Set(["connect", "session", "recap"]);
 const s = (v: unknown, n = 600) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 const strArr = (v: unknown, n = 12, len = 400): string[] =>
   Array.isArray(v) ? v.map((x) => s(x, len)).filter(Boolean).slice(0, n) : [];
+/** A clause heading's own numbering — "1.", "§2", "Section 3:", "4)", "Clause 5 —". The legal
+ *  viewer numbers clauses itself, so a heading that kept it would read "1. 1. Definitions". A
+ *  number only counts when a separator follows it: "2FA requirements" is a heading, not clause 2. */
+const CLAUSE_NUMBER = /^(?:(?:section|clause|article)\s+|§\s*)?\d+(?:\.\d+)*(?:[.):]|\s+[—–-])?\s+/i;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /** Sanitize the raw payload for a kind; null if it lacks the kind's required content. */
@@ -337,6 +344,14 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
       .filter((x) => x.h && x.p).slice(0, 6);
     const next = strArr(r.next, 3, 200);
     return call && sections.length ? { call, sections, next } : null;
+  }
+  if (kind === "legal") {
+    // No `call`: a clause document has no decision up front, and a doc's cap of six blocks
+    // would cut a real policy off halfway through.
+    const sections = (Array.isArray(r.sections) ? r.sections : [])
+      .map((it) => { const o = (it ?? {}) as Record<string, unknown>; return { h: s(o.h, 120).replace(CLAUSE_NUMBER, ""), p: s(o.p, 2400) }; })
+      .filter((x) => x.h && x.p).slice(0, 30);
+    return sections.length ? { sections } : null;
   }
   if (kind === "plan") {
     const goal = s(r.goal, 300);
@@ -558,7 +573,7 @@ export const DELIVERABLE_TOOL = {
           items: { type: "array", description: "checklist: 5-7 ordered steps.",
             items: { type: "object", additionalProperties: false, properties: { t: { type: "string" }, done: { type: "boolean" } }, required: ["t", "done"] } },
           call: { type: "string", description: "doc: the decision up front (1-2 sentences)." },
-          sections: { type: "array", description: "doc/legal: labeled {h,p} blocks.",
+          sections: { type: "array", description: "doc/legal: labeled {h,p} blocks (a legal heading carries no number).",
             items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
           next: { type: "array", description: "doc: 1-3 next actions.", items: { type: "string" } },
           goal: { type: "string", description: "plan: one-line goal." },

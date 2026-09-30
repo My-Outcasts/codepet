@@ -240,21 +240,22 @@ enum DeliverableExport {
     /// Two files, because a content calendar is read two ways: as a table to edit, and as
     /// events to drop into the calendar the founder actually lives in.
     ///
-    /// **The .ics carries no dates.** `CalendarItem.day` is "Mon", not 2026-09-14 — the
+    /// **The .ics carries no dates.** `CalendarItem.when` is "Mon" or "T-5", not 2026-09-14 — the
     /// generator produces a relative schedule, and inventing absolute dates would be
     /// inventing data (the rule `PostViewer` states: never render what the app does not
     /// know). Each event is therefore an all-day VEVENT on a floating day counted from the
     /// export date, and the description says so. A founder who wants real dates moves them
     /// once, in their own calendar.
     private static func calendarFiles(_ d: Deliverable, base: String, locale: Locale) -> [ExportFile] {
-        guard let weeks = d.payload?.calendar?.weeks, !weeks.isEmpty else {
+        guard let phases = d.payload?.calendar?.phases, !phases.isEmpty else {
             return [md(base, titled(d, d.body))]
         }
 
-        var csv = "week,day,kind,body\n"
-        for w in weeks {
-            for i in w.items {
-                csv += "\(csvQuoted(w.label)),\(csvQuoted(i.day)),\(csvQuoted(i.kind)),\(csvQuoted(i.body))\n"
+        var csv = "phase,from,to,when,format,channel,owner,body\n"
+        for p in phases {
+            for i in p.items {
+                csv += [p.label, p.from, p.to, i.when, i.format, i.channel, i.owner, i.body]
+                    .map(csvQuoted).joined(separator: ",") + "\n"
             }
         }
         // Plain values read better than quoted ones where the field cannot contain a comma,
@@ -269,16 +270,19 @@ enum DeliverableExport {
         // happens, so it does not need to vary per event.
         let stamp = icsTimestamp(Date())
         var n = 0
-        for (wi, w) in weeks.enumerated() {
-            for i in w.items {
+        for (wi, p) in phases.enumerated() {
+            for i in p.items {
                 n += 1
-                let day = icsDate(weekIndex: wi, dayLabel: i.day, locale: locale)
+                // One phase counts as one week from the export date, as a week always did. A
+                // phase can be longer; the dates stay floating either way and say so.
+                let day = icsDate(weekIndex: wi, dayLabel: i.when, locale: locale)
                 ics += "BEGIN:VEVENT\r\n"
                 ics += icsFolded("UID:\(d.id)-\(n)@codepet.murror.app") + "\r\n"
                 ics += icsFolded("DTSTAMP:\(stamp)") + "\r\n"
                 ics += icsFolded("DTSTART;VALUE=DATE:\(day)") + "\r\n"
                 ics += icsFolded("SUMMARY:\(icsEscaped(i.body))") + "\r\n"
-                ics += icsFolded("DESCRIPTION:\(icsEscaped("\(w.label) · \(i.day) · \(i.kind) — day is relative to export"))") + "\r\n"
+                let detail = [p.label, i.when, i.format, i.channel, i.owner].filter { !$0.isEmpty }.joined(separator: " · ")
+                ics += icsFolded("DESCRIPTION:\(icsEscaped("\(detail) — day is relative to export"))") + "\r\n"
                 ics += "END:VEVENT\r\n"
             }
         }

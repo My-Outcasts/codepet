@@ -142,7 +142,7 @@ final class DemoTypedPayloadsTests: XCTestCase {
         XCTAssertEqual(entry.kind, "calendar")
         let json = try XCTUnwrap(entry.payloadJSON, "the launch calendar carries no payload")
         let payload = try JSONDecoder().decode(DeliverablePayload.self, from: Data(json.utf8))
-        let weeks = try XCTUnwrap(payload.calendar?.weeks, "the calendar payload decoded to nil")
+        let weeks = try XCTUnwrap(payload.calendar?.phases, "the calendar payload decoded to nil")
         XCTAssertEqual(weeks.count, 5, "T-7, T-5, T-2, T-0, T+7")
         XCTAssertEqual(weeks.flatMap(\.items).count, 11)
         XCTAssertTrue(weeks[0].items[0].body.contains("clinician"),

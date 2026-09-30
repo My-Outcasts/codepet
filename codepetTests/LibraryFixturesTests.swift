@@ -85,8 +85,8 @@ final class LibraryFixturesTests: XCTestCase {
     func testSubPayloadsAreNotEmptyShells() {
         let all = LibraryFixtures.all
         let calendar = all.first { $0.kind == .calendar }?.payload?.calendar
-        XCTAssertEqual(calendar?.weeks.count, 2)
-        XCTAssertFalse(calendar?.weeks.first?.items.isEmpty ?? true)
+        XCTAssertEqual(calendar?.phases.count, 2, "a legacy two-week fixture lifts into two phases")
+        XCTAssertFalse(calendar?.phases.first?.items.isEmpty ?? true)
 
         let screens = all.first { $0.kind == .screens }?.payload?.screens
         XCTAssertEqual(screens?.screens.count, 3)

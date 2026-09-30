@@ -344,16 +344,16 @@ final class DeliverableExportTests: XCTestCase {
         XCTAssertEqual(names, ["content-calendar.csv", "content-calendar.ics"])
     }
 
-    /// Every field is quoted, including week/day/kind. They are model-authored strings and
-    /// can contain a comma; a reader never sees the difference and a stray comma cannot shift
-    /// a column.
-    func testCalendarCsvHasOneRowPerItemWithItsWeek() throws {
+    /// Every field is quoted. They are model-authored strings and can contain a comma; a
+    /// reader never sees the difference and a stray comma cannot shift a column. A legacy
+    /// two-week payload exports as two phases with no span, its day and kind kept (CP-002 E1).
+    func testCalendarCsvHasOneRowPerItemWithItsPhase() throws {
         let d = deliverable(.calendar, title: "Content calendar", payload: try calendarPayload())
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
-        XCTAssertTrue(csv.hasPrefix("week,day,kind,body\n"), csv)
+        XCTAssertTrue(csv.hasPrefix("phase,from,to,when,format,channel,owner,body\n"), csv)
         XCTAssertEqual(csv.components(separatedBy: "\n").filter { !$0.isEmpty }.count, 4,
                        "header + 3 items — got:\n\(csv)")
-        XCTAssertTrue(csv.contains("\"Week 1\",\"Mon\",\"thread\",\"Why I'm building a journal that answers\""), csv)
+        XCTAssertTrue(csv.contains("\"Week 1\",\"\",\"\",\"Mon\",\"thread\",\"\",\"\",\"Why I'm building a journal that answers\""), csv)
     }
 
     /// An .ics with no VEVENT is a file that opens to nothing.

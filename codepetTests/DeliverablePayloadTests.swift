@@ -38,8 +38,9 @@ final class DeliverablePayloadTests: XCTestCase {
         }}
         """#
         let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
-        XCTAssertEqual(back.payload?.calendar?.weeks.first?.label, "Week 1")
-        XCTAssertEqual(back.payload?.calendar?.weeks.first?.items.first?.day, "Mon")
+        // A legacy `weeks` payload lifts into phases; `day` is read as `when` (CP-002 E1).
+        XCTAssertEqual(back.payload?.calendar?.phases.first?.label, "Week 1")
+        XCTAssertEqual(back.payload?.calendar?.phases.first?.items.first?.when, "Mon")
         XCTAssertNil(back.payload?.steps)
         XCTAssertNil(back.payload?.site)
         XCTAssertNil(back.payload?.sheet)

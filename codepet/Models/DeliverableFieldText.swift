@@ -63,3 +63,11 @@ enum RecipientLine {
         return (lang == .vi ? "Gửi tới: " : "To: ") + r
     }
 }
+
+extension CalendarItem {
+    /// "T-5 · verify · X · Marketing" — whichever of the four the item has, in that order. One
+    /// definition for Copy and the Team Build markdown; the viewer draws the same four as chips.
+    var tags: String {
+        [when, format, channel, owner].compactMap(nonEmpty).joined(separator: " · ")
+    }
+}

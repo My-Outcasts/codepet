@@ -132,10 +132,10 @@ enum DeliverableMarkdown {
     }
 
     private static func calendarSection(_ p: DeliverablePayload) -> String {
-        guard let weeks = p.calendar?.weeks, !weeks.isEmpty else { return "" }
-        return weeks.map { week in
-            "## \(week.label)\n\n" + week.items
-                .map { "- **\($0.day) · \($0.kind):** \($0.body)" }.joined(separator: "\n")
+        guard let phases = p.calendar?.phases, !phases.isEmpty else { return "" }
+        return phases.map { phase in
+            "## \(phase.label)" + (phase.span.isEmpty ? "" : " (\(phase.span))") + "\n\n" + phase.items
+                .map { "- **\($0.tags):** \($0.body)" }.joined(separator: "\n")
         }.joined(separator: "\n\n")
     }
 

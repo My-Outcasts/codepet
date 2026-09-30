@@ -120,7 +120,7 @@ const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
   ["dms", "2-4 outreach message TEMPLATES, `messages[]` = {audience, note, msg}. `audience` is a TYPE of person or a place (\"lapsed journaler\", \"r/CasualConversation\"), never an invented name: the founder may send these, and a made-up recipient reads exactly like a real one. `note` = why this audience is worth writing to; `msg` = the warm, specific message, with `[name]` where the founder will put a real recipient."],
   ["post", "`platform` = where it will be published (\"X\", \"LinkedIn\", \"Threads\"…). The `body` is the post itself and must fit that platform's length limit; `limit` = that limit in characters if you know it."],
   ["email", "`subject` = the subject line (never repeated as a heading in the body); `to` = who it is for, in the founder's own words or as a type of person (\"the two who asked to pay\", \"beta testers who went quiet\"), never an invented name and never an address — empty if unknown. The `body` is the email itself."],
-  ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
+  ["calendar", "a plan in phases — a content calendar, a launch runway, a rollout — `phases[]` = 1-8 {label, from, to, items[]}: `label` names the phase (\"Week 1\", \"Five days out\", \"Ship day\"), `from`/`to` its span as relative labels (\"T-5\", \"Day 8\"), never a calendar date; each phase's `items[]` = 1-8 {when, format, channel, owner, body}: `when` a relative day (\"Mon\", \"T-5\"), `format` what it is (thread, email, review), `channel` where it goes (\"X\", \"App Store\") and `owner` who does it (a department or \"you\") where known, else empty; `body` the item itself, specific to this company."],
   ["sheet", "a live model of whatever the task is about (pricing, costs, a runway, a funnel) — `inputs[]` = 2-8 assumptions the founder can move, each {key, name, unit, val, min, max, step}: `key` a short snake_case id, `unit` \"$\", \"%\" (8 means 8%), \"users\", \"mo\" or a short word, `val` a realistic default inside a sensible `min`-`max` range; `outputs[]` = 1-8 results, the most important FIRST, each {key, name, unit, formula}. A `formula` uses input keys, other output keys, numbers, + - * / ^ ( ) and min, max, round, ceil, floor — e.g. `round(waitlist * conversion / 100)`. Never write an output's value; the app computes it from the formula. `summary` = one paragraph on what the model shows at the defaults."],
   ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
   ["screens", "exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order."],
@@ -275,9 +275,10 @@ export interface PlanPayload { goal: string; steps: string[]; changes: PlanChang
 /** `audience`, not `name`: a template addressed to a type, never an invented recipient. */
 export interface DmMessage { audience: string; note: string; msg: string; }
 export interface DmsPayload { messages: DmMessage[]; }
-export interface CalendarItem { day: string; kind: string; body: string; }
-export interface CalendarWeek { label: string; items: CalendarItem[]; }
-export interface CalendarPayload { weeks: CalendarWeek[]; }
+/** `when`/`format` were `day`/`kind` before CP-002 E1, and a legacy `weeks[]` is lifted into them. */
+export interface CalendarItem { when: string; format: string; channel?: string; owner?: string; body: string; }
+export interface CalendarPhase { label: string; from: string; to: string; items: CalendarItem[]; }
+export interface CalendarPayload { phases: CalendarPhase[]; }
 export interface SheetInputField { val: number; min: number; max: number; step: number; }
 /** One assumption the founder can move. */
 export interface SheetVariable { key: string; name: string; unit: string; val: number; min: number; max: number; step: number; }
@@ -343,6 +344,7 @@ const POST_PLATFORMS: ReadonlyArray<{ label: string; names: readonly string[]; l
   { label: "Mastodon", names: ["mastodon"], limit: 500 },
   { label: "Instagram", names: ["instagram"], limit: 2200 },
 ];
+const CALENDAR_MAX = 8;
 const SHEET_KEY = /^[a-z][a-z0-9_]{0,23}$/;
 const SHEET_MAX = 8;
 
@@ -494,19 +496,31 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
     return messages.length ? { messages } : null;
   }
   if (kind === "calendar") {
-    const weeks = (Array.isArray(r.weeks) ? r.weeks : [])
-      .map((w) => {
-        const o = (w ?? {}) as Record<string, unknown>;
-        const label = s(o.label, 40);
+    // A legacy `weeks[]` (the fixed two-week calendar) is one phase per week with no span, its
+    // `day` read as `when` and its `kind` as `format` — so nothing a founder saw is lost.
+    const legacy = !Array.isArray(r.phases) && Array.isArray(r.weeks);
+    const raw = (legacy ? r.weeks : r.phases) as unknown[] | undefined;
+    const phases = (Array.isArray(raw) ? raw : [])
+      .map((ph) => {
+        const o = (ph ?? {}) as Record<string, unknown>;
         const items = (Array.isArray(o.items) ? o.items : [])
-          .map((it) => { const io = (it ?? {}) as Record<string, unknown>; return { day: s(io.day, 20), kind: s(io.kind, 40), body: s(io.body, 300) }; })
-          .filter((x) => x.day && x.body)
-          .slice(0, 4);
-        return { label, items };
+          .map((it) => {
+            const io = (it ?? {}) as Record<string, unknown>;
+            const channel = s(io.channel, 40), owner = s(io.owner, 40);
+            return {
+              when: s(legacy ? io.day : io.when, 20),
+              format: s(legacy ? io.kind : io.format, 40),
+              ...(channel && { channel }), ...(owner && { owner }),
+              body: s(io.body, 300),
+            };
+          })
+          .filter((x) => x.body)
+          .slice(0, CALENDAR_MAX);
+        return { label: s(o.label, 40), from: legacy ? "" : s(o.from, 20), to: legacy ? "" : s(o.to, 20), items };
       })
-      .filter((w) => w.label && w.items.length)
-      .slice(0, 2);
-    return weeks.length ? { weeks } : null;
+      .filter((p) => p.label && p.items.length)
+      .slice(0, CALENDAR_MAX);
+    return phases.length ? { phases } : null;
   }
   if (kind === "sheet") {
     const summary = s(r.summary, 800);
@@ -663,7 +677,7 @@ export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   risks: ["plan"],
   steps: ["plan", "site"],
   messages: ["dms"],
-  weeks: ["calendar"],
+  phases: ["calendar"],
   inputs: ["sheet"],
   outputs: ["sheet"],
   summary: ["sheet"],
@@ -722,11 +736,13 @@ export const DELIVERABLE_TOOL = {
           risks: { type: "string", description: "plan: one-line main risk." },
           messages: { type: "array", description: "dms: 2-4 message templates, each addressed to an audience (a type of person), never an invented name.",
             items: { type: "object", additionalProperties: false, properties: { audience: { type: "string" }, note: { type: "string" }, msg: { type: "string" } }, required: ["audience", "note", "msg"] } },
-          weeks: { type: "array", description: "calendar: exactly 2 weeks, each with a label and 2-3 posts.",
+          phases: { type: "array", description: "calendar: 1-8 phases of a plan, each with a relative span and its items.",
             items: { type: "object", additionalProperties: false, properties: {
-              label: { type: "string" },
-              items: { type: "array", items: { type: "object", additionalProperties: false, properties: { day: { type: "string" }, kind: { type: "string" }, body: { type: "string" } }, required: ["day", "kind", "body"] } },
-            }, required: ["label", "items"] } },
+              label: { type: "string" }, from: { type: "string" }, to: { type: "string" },
+              items: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+                when: { type: "string" }, format: { type: "string" }, channel: { type: "string" }, owner: { type: "string" }, body: { type: "string" },
+              }, required: ["when", "format", "body"] } },
+            }, required: ["label", "from", "to", "items"] } },
           inputs: { type: "array", description: "sheet: 2-8 assumptions the founder can move.",
             items: { type: "object", additionalProperties: false, properties: {
               key: { type: "string" }, name: { type: "string" }, unit: { type: "string" },

@@ -111,7 +111,7 @@ enum DeliverableMarkdown {
 
     private static func dmsSection(_ p: DeliverablePayload) -> String {
         guard let messages = p.messages, !messages.isEmpty else { return "" }
-        return messages.map { "### \($0.name)\n\n**Why:** \($0.note)\n\n\($0.msg)" }
+        return messages.map { "### Template for: \($0.audience)\n\n**Why:** \($0.note)\n\n\($0.msg)" }
             .joined(separator: "\n\n")
     }
 

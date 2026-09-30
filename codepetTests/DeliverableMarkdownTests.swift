@@ -75,11 +75,11 @@ final class DeliverableMarkdownTests: XCTestCase {
     func testDmsPayloadRendersEveryMessageWithItsNameAndNote() {
         let d = Deliverable(kind: .dms, title: "Outreach", body: "ignored for dms",
                              payload: DeliverablePayload(messages: [
-                                DmMessage(name: "Alex", note: "Early adopter in the target segment",
+                                DmMessage(audience: "Alex", note: "Early adopter in the target segment",
                                           msg: "Hey Alex, we're building something you might like."),
                              ]))
         let md = DeliverableMarkdown.render(d, dept: "Sales", instruction: "Draft outreach DMs")
-        XCTAssertTrue(md.contains("### Alex"))
+        XCTAssertTrue(md.contains("### Template for: Alex"))
         XCTAssertTrue(md.contains("Early adopter in the target segment"))
         XCTAssertTrue(md.contains("Hey Alex, we're building something you might like."))
     }

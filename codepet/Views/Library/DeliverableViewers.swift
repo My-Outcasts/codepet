@@ -361,6 +361,11 @@ struct PlanViewer: View {
 /// It has to line up with the message cards below it, and those get their inset from
 /// `deliverableCardChrome`; nothing was holding the two together.
 struct DmsSetHeader: View {
+    static func templateNote(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Mỗi mẫu viết cho một kiểu người, không phải một người thật. Hãy điền tên thật trước khi gửi."
+                    : "Each is written to a type of person, not a real one. Put a real name in before you send."
+    }
+
     let messages: [DmMessage]
     let deliverable: Deliverable
     @Environment(\.uiLanguage) private var lang
@@ -368,7 +373,7 @@ struct DmsSetHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                DeliverableEyebrow(text: lang == .vi ? "Tiếp cận" : "Outreach")
+                DeliverableEyebrow(text: lang == .vi ? "Mẫu tiếp cận" : "Outreach templates")
                 Spacer(minLength: 12)
                 HStack(spacing: 10) {
                     DeliverableCopyButton(text: DmsViewer.copyAllText(messages))
@@ -376,6 +381,13 @@ struct DmsSetHeader: View {
                 }
             }
             DeliverableRule().padding(.vertical, 14)
+            // Said once for the set, not per card: every message here is addressed to a type of
+            // person, and the founder must not mistake one for a message to a real prospect.
+            Text(DmsSetHeader.templateNote(lang))
+                .font(.pixelSystem(size: 11.5))
+                .foregroundColor(CodepetTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
         }
         // The SAME inset the message cards get from `deliverableCardChrome`, taken from the
         // same constant. Without it the eyebrow and the rule drew flush to the sheet edge,
@@ -385,7 +397,7 @@ struct DmsSetHeader: View {
 }
 
 
-/// Renders a dms payload as one message card per recipient: the name as the heading with its
+/// Renders a dms payload as one TEMPLATE card per audience (CP-002 B): the audience as the heading with its
 /// `note` chip and Copy on the header row, the message at reading size with its blanks tinted,
 /// then the blanks note and a local "Mark sent" toggle (view-only).
 ///
@@ -399,12 +411,12 @@ struct DmsViewer: View {
     @Environment(\.uiLanguage) private var lang
 
     /// The whole set as pasteable text, matching what `DeliverableExport.dmsFiles(_:base:)`
-    /// writes per recipient — same building block (`To:` / `Why:` / the message), so Copy and
+    /// writes per template — same building block (`For:` / `Why:` / the message), so Copy and
     /// Export can never hand the founder different documents for the same set. A pure static so
     /// a test can assert the two stay in lockstep without going through `NSPasteboard`.
     static func copyAllText(_ messages: [DmMessage]) -> String {
         messages
-            .map { "To: \($0.name)\nWhy: \($0.note)\n\n\($0.msg)" }
+            .map { "For: \($0.audience)\nWhy: \($0.note)\n\n\($0.msg)" }
             .joined(separator: "\n\n---\n\n")
     }
 
@@ -427,13 +439,13 @@ struct DmsViewer: View {
     private func card(index i: Int, message: DmMessage) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                DeliverableEyebrow(text: lang == .vi ? "Tin nhắn" : "Message")
+                DeliverableEyebrow(text: lang == .vi ? "Mẫu" : "Template")
                 Spacer(minLength: 12)
                 DeliverableCopyButton(text: message.msg)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(message.name)
+                Text(message.audience)
                     .font(.pixelSystem(size: DeliverableStyle.heading, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)

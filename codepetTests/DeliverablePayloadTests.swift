@@ -156,7 +156,7 @@ final class DeliverablePayloadTests: XCTestCase {
     func testDmsPayloadStillDecodes() throws {
         let json = #"{"id":"dm1","kind":"dms","title":"DM","body":"md","payload":{"messages":[{"name":"Ana","note":"warm intro","msg":"Hey!"}]}}"#
         let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
-        XCTAssertEqual(back.payload?.messages?.first?.name, "Ana")
+        XCTAssertEqual(back.payload?.messages?.first?.audience, "Ana", "a legacy `name` decodes as the audience")
         XCTAssertNil(back.payload?.site)
     }
 

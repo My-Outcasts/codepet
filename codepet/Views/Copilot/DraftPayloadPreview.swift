@@ -321,7 +321,7 @@ struct DraftPayloadPreview: View {
     private func dms(_ messages: [DmMessage]) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             if let first = messages.first {
-                Text(first.name)
+                Text(first.audience)
                     .font(.pixelSystem(size: 11.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
                 Text(first.msg)
@@ -331,8 +331,8 @@ struct DraftPayloadPreview: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if messages.count > 1 {
-                Text(lang == .vi ? "\(messages.count) người nhận"
-                                 : "\(messages.count) recipients")
+                Text(lang == .vi ? "\(messages.count) mẫu tin nhắn"
+                                 : "\(messages.count) templates")
                     .font(.pixelSystem(size: 10.5, weight: .semibold))
                     .foregroundColor(CodepetTheme.accentPurple)
             }

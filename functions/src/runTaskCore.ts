@@ -116,7 +116,7 @@ const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
   ["doc", "`call` = the decision/recommendation in 1-2 sentences up front; `sections[]` = 2-5 labeled {h,p} reasoning blocks (why it's right, tradeoffs, what's out); `next[]` = 1-3 next actions."],
   ["legal", "`sections[]` = the document's clauses in order, as many as it needs, each {h,p}: `h` a short clause heading WITHOUT a number (the app numbers them), `p` the clause text. The `body` carries the same document in full."],
   ["plan", "an HONEST code-change plan — `goal` (one line), `steps[]` (3-5 ordered), `changes[]` = {area, edit} in plain terms (no fabricated file paths), `verify[]` (future-tense checks), `risks` (one line). Never claim it shipped."],
-  ["dms", "exactly 4 personalized 1:1 outreach `messages[]` = {name (persona placeholder), note (why a strong target), msg (warm specific DM)}."],
+  ["dms", "2-4 outreach message TEMPLATES, `messages[]` = {audience, note, msg}. `audience` is a TYPE of person or a place (\"lapsed journaler\", \"r/CasualConversation\"), never an invented name: the founder may send these, and a made-up recipient reads exactly like a real one. `note` = why this audience is worth writing to; `msg` = the warm, specific message, with `[name]` where the founder will put a real recipient."],
   ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
   ["sheet", "a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input."],
   ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
@@ -266,7 +266,8 @@ export interface DocPayload { call: string; sections: DocSection[]; next: string
 export interface LegalPayload { sections: DocSection[]; }
 export interface PlanChange { area: string; edit: string; }
 export interface PlanPayload { goal: string; steps: string[]; changes: PlanChange[]; verify: string[]; risks: string; }
-export interface DmMessage { name: string; note: string; msg: string; }
+/** `audience`, not `name`: a template addressed to a type, never an invented recipient. */
+export interface DmMessage { audience: string; note: string; msg: string; }
 export interface DmsPayload { messages: DmMessage[]; }
 export interface CalendarItem { day: string; kind: string; body: string; }
 export interface CalendarWeek { label: string; items: CalendarItem[]; }
@@ -365,8 +366,10 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
   }
   if (kind === "dms") {
     const messages = (Array.isArray(r.messages) ? r.messages : [])
-      .map((it) => { const o = (it ?? {}) as Record<string, unknown>; return { name: s(o.name, 80), note: s(o.note, 200), msg: s(o.msg, 1200) }; })
-      .filter((x) => x.name && x.msg).slice(0, 4);
+      // A legacy payload (and a model still answering the old prompt) says `name`; it is lifted
+      // into `audience` so nothing downstream ever sees the old key.
+      .map((it) => { const o = (it ?? {}) as Record<string, unknown>; return { audience: s(o.audience, 80) || s(o.name, 80), note: s(o.note, 200), msg: s(o.msg, 1200) }; })
+      .filter((x) => x.audience && x.msg).slice(0, 4);
     return messages.length ? { messages } : null;
   }
   if (kind === "calendar") {
@@ -581,8 +584,8 @@ export const DELIVERABLE_TOOL = {
             items: { type: "object", additionalProperties: false, properties: { area: { type: "string" }, edit: { type: "string" } }, required: ["area", "edit"] } },
           verify: { type: "array", description: "plan: future-tense verification checks.", items: { type: "string" } },
           risks: { type: "string", description: "plan: one-line main risk." },
-          messages: { type: "array", description: "dms: exactly 4 persona DMs.",
-            items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, note: { type: "string" }, msg: { type: "string" } }, required: ["name", "note", "msg"] } },
+          messages: { type: "array", description: "dms: 2-4 message templates, each addressed to an audience (a type of person), never an invented name.",
+            items: { type: "object", additionalProperties: false, properties: { audience: { type: "string" }, note: { type: "string" }, msg: { type: "string" } }, required: ["audience", "note", "msg"] } },
           weeks: { type: "array", description: "calendar: exactly 2 weeks, each with a label and 2-3 posts.",
             items: { type: "object", additionalProperties: false, properties: {
               label: { type: "string" },

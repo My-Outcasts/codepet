@@ -4,7 +4,43 @@ import Foundation
 struct ChecklistItem: Codable, Hashable { var t: String; var done: Bool }
 struct DocSection: Codable, Hashable { var h: String; var p: String }
 struct PlanChange: Codable, Hashable { var area: String; var edit: String }
-struct DmMessage: Codable, Hashable { var name: String; var note: String; var msg: String }
+/// One outreach message TEMPLATE, addressed to an audience — "lapsed journaler",
+/// "r/CasualConversation" — never to a person (CP-002 B). The prompt used to ask for a "persona
+/// placeholder" `name`, so the Library showed messages to people who do not exist, looking
+/// exactly like messages to real prospects; the founder might have sent one.
+///
+/// Decodes the legacy `name` into `audience`, so every set filed before the change still opens,
+/// now labelled as templates too — nothing in an old `name` says whether it was invented, so
+/// the honest reading is the conservative one. Encodes `audience` only, so a re-saved set
+/// migrates itself.
+struct DmMessage: Codable, Hashable {
+    var audience: String
+    var note: String
+    var msg: String
+
+    init(audience: String, note: String, msg: String) {
+        self.audience = audience
+        self.note = note
+        self.msg = msg
+    }
+
+    private enum CodingKeys: String, CodingKey { case audience, name, note, msg }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let audience = try c.decodeIfPresent(String.self, forKey: .audience) ?? ""
+        self.audience = audience.isEmpty ? try c.decode(String.self, forKey: .name) : audience
+        note = try c.decode(String.self, forKey: .note)
+        msg = try c.decode(String.self, forKey: .msg)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(audience, forKey: .audience)
+        try c.encode(note, forKey: .note)
+        try c.encode(msg, forKey: .msg)
+    }
+}
 
 // calendar
 struct CalendarItem: Codable, Hashable {

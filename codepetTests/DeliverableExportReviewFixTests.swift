@@ -223,7 +223,7 @@ final class DeliverableExportReviewFixTests: XCTestCase {
     /// `EngineeringResultBarLayoutTests` documents: rendering at the view's own width clips
     /// overflow away and makes the assertion vacuous.
     func testDmsSetHeaderIsInsetToMatchTheMessageCards() throws {
-        let messages = [DmMessage(name: "Ari", note: "runs the newsletter", msg: "hello there")]
+        let messages = [DmMessage(audience: "Ari", note: "runs the newsletter", msg: "hello there")]
         let d = deliverable(.dms, title: "Outreach",
                             payload: DeliverablePayload(messages: messages))
 

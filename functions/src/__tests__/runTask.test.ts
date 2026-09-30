@@ -1,4 +1,4 @@
-import { buildRunTaskPrompt, coerceDeliverable, coercePayload, DELIVERABLE_KINDS } from "../runTaskCore";
+import { buildRunTaskPrompt, coerceDeliverable, coercePayload, deliverableTool, DELIVERABLE_KINDS } from "../runTaskCore";
 
 describe("buildRunTaskPrompt", () => {
   const base = {
@@ -270,5 +270,45 @@ describe("legal sections", () => {
     expect(p("fin")).toMatch(/- legal: /);
     expect(p("eng")).not.toMatch(/- legal: /);
     expect(p("design")).not.toMatch(/- legal: /);
+  });
+});
+
+/**
+ * `dms` are addressed to an audience, not an invented person (CP-002 B, spec "dms invents
+ * people"). The prompt used to ask for four messages whose `name` was a "persona placeholder",
+ * so Sales handed the founder messages to people who do not exist, rendered like real prospects.
+ */
+describe("dms audience", () => {
+  const sales = () => buildRunTaskPrompt({
+    companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey: "sales",
+  } as any);
+  const msgSchema = () => (deliverableTool("sales").input_schema as any).properties.payload.properties.messages;
+
+  it("keeps an audience and never emits a name", () => {
+    expect(coercePayload("dms", { messages: [{ audience: "lapsed journaler", note: "quit over streaks", msg: "Hi [name]" }] }))
+      .toEqual({ messages: [{ audience: "lapsed journaler", note: "quit over streaks", msg: "Hi [name]" }] });
+  });
+
+  it("lifts a legacy `name` into `audience`", () => {
+    const p: any = coercePayload("dms", { messages: [{ name: "privacy-first buyer", note: "n", msg: "m" }] });
+    expect(p.messages).toEqual([{ audience: "privacy-first buyer", note: "n", msg: "m" }]);
+    expect(p.messages[0]).not.toHaveProperty("name");
+  });
+
+  it("prefers `audience` when both arrive", () => {
+    const p: any = coercePayload("dms", { messages: [{ name: "Sarah Chen", audience: "indie baker", note: "", msg: "m" }] });
+    expect(p.messages[0].audience).toBe("indie baker");
+  });
+
+  it("the prompt asks for an audience and no longer asks for a persona", () => {
+    expect(sales()).toMatch(/- dms: .*`audience`/);
+    expect(sales()).not.toContain("persona placeholder");
+    expect(sales()).not.toMatch(/\{name \(/);
+  });
+
+  it("the schema declares audience, not name", () => {
+    expect(Object.keys(msgSchema().items.properties)).toEqual(["audience", "note", "msg"]);
+    expect(msgSchema().items.required).toEqual(["audience", "note", "msg"]);
+    expect(msgSchema().description).not.toContain("persona");
   });
 });

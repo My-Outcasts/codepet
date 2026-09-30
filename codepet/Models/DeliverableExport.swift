@@ -144,8 +144,8 @@ enum DeliverableExport {
         let messages = d.payload?.messages ?? []
         guard !messages.isEmpty else { return [txt(base, d.body)] }
         return messages.enumerated().map { i, m in
-            let who = slug(m.name, fallback: "recipient")
-            let text = "To: \(m.name)\nWhy: \(m.note)\n\n\(m.msg)"
+            let who = slug(m.audience, fallback: "template")
+            let text = "For: \(m.audience)\nWhy: \(m.note)\n\n\(m.msg)"
             return ExportFile(name: "\(base)-\(i + 1)-\(who).txt", data: Data((text + "\n").utf8))
         }
     }

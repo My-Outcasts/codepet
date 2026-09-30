@@ -145,9 +145,9 @@ final class DeliverableExportTests: XCTestCase {
     func testDmsExportsOneFilePerMessageBecauseEachGoesToSomeoneElse() throws {
         let d = deliverable(.dms, title: "Early access",
                             payload: DeliverablePayload(messages: [
-                                DmMessage(name: "Lapsed journaler", note: "quit over streaks",
+                                DmMessage(audience: "Lapsed journaler", note: "quit over streaks",
                                           msg: "We cut the streak counter. Want the first build?"),
-                                DmMessage(name: "Privacy-first buyer", note: "asked about training",
+                                DmMessage(audience: "Privacy-first buyer", note: "asked about training",
                                           msg: "Nothing leaves your phone unless you ask."),
                             ]))
         let files = DeliverableExport.files(for: d)
@@ -173,9 +173,9 @@ final class DeliverableExportTests: XCTestCase {
     /// happen to agree.
     func testDmsCopyAllAgreesWithWhatExportWrites() throws {
         let messages = [
-            DmMessage(name: "Lapsed journaler", note: "quit over streaks",
+            DmMessage(audience: "Lapsed journaler", note: "quit over streaks",
                       msg: "We cut the streak counter. Want the first build?"),
-            DmMessage(name: "Privacy-first buyer", note: "asked about training",
+            DmMessage(audience: "Privacy-first buyer", note: "asked about training",
                       msg: "Nothing leaves your phone unless you ask."),
         ]
         let d = deliverable(.dms, title: "Early access", payload: DeliverablePayload(messages: messages))
@@ -185,12 +185,12 @@ final class DeliverableExportTests: XCTestCase {
 
         XCTAssertEqual(files.count, messages.count)
         for message in messages {
-            XCTAssertTrue(copyAll.contains(message.name), "copy-all is missing recipient \(message.name)")
-            XCTAssertTrue(copyAll.contains(message.note), "copy-all is missing the note for \(message.name)")
-            XCTAssertTrue(copyAll.contains(message.msg), "copy-all is missing the message for \(message.name)")
+            XCTAssertTrue(copyAll.contains(message.audience), "copy-all is missing recipient \(message.audience)")
+            XCTAssertTrue(copyAll.contains(message.note), "copy-all is missing the note for \(message.audience)")
+            XCTAssertTrue(copyAll.contains(message.msg), "copy-all is missing the message for \(message.audience)")
             XCTAssertTrue(exportedTexts.contains {
-                $0.contains(message.name) && $0.contains(message.note) && $0.contains(message.msg)
-            }, "no exported file carries the same recipient+note+message trio as copy-all for \(message.name)")
+                $0.contains(message.audience) && $0.contains(message.note) && $0.contains(message.msg)
+            }, "no exported file carries the same recipient+note+message trio as copy-all for \(message.audience)")
         }
     }
 

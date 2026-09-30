@@ -171,42 +171,42 @@ enum DeliverableExport {
     /// author considered plausible, and the outputs carry their formulas so the reader can
     /// disagree with the derivation rather than only with the result.
     ///
-    /// **The six output rows come from `SheetModel.compute`, the same pure model
-    /// `SheetViewer` renders on screen.** This file used to hand-derive `subscribers`/`mrr`
-    /// itself, which meant the CSV could disagree with the viewer — `SheetModel` floors
-    /// `price` at 1 and `churn` at 1%, so e.g. a `price` of 0 shows a non-zero MRR on screen
-    /// while the old hand arithmetic wrote `mrr,0`. Calling the model instead buys the CSV
-    /// the same one-renderer guarantee `testExportedHtmlIsByteIdenticalToWhatTheViewerRenders`
-    /// buys the site export, and stops the file quietly dropping four of the six figures the
-    /// founder reads (`arr`, `ltv`, `life`, `breakeven`).
+    /// **Output values come from `SheetPayload.evaluate`, the same evaluator `SheetViewer`
+    /// renders with** — never from the server's `value` — so the CSV cannot disagree with the
+    /// screen. Since CP-002 D a sheet declares its own inputs and outputs, so both tables are
+    /// read off the payload instead of six hand-written rows; a sheet filed before then was lifted
+    /// on decode and exports its old six figures, now with the `costs` input they always used.
     private static func sheetFile(_ d: Deliverable, base: String) -> ExportFile {
         guard let s = d.payload?.sheet else {
             return md(base, titled(d, d.body))
         }
-        func row(_ name: String, _ i: SheetInput) -> String {
-            "\(name),\(n(i.val)),\(n(i.min)),\(n(i.max)),\(n(i.step))\n"
+        let results = s.evaluate(s.defaults)
+        var out = "input,name,unit,value,min,max,step\n"
+        for i in s.inputs {
+            // Inputs at full precision: `n` keeps two decimals, which is right for a currency
+            // RESULT and destroys an assumption like $0.0021 per minute (it printed "0.00").
+            out += "\(i.key),\(csvQuoted(i.name)),\(csvQuoted(i.unit)),\(precise(i.val)),\(precise(i.min)),\(precise(i.max)),\(precise(i.step))\n"
         }
-
-        var out = "input,value,min,max,step\n"
-        out += row("price", s.price)
-        out += row("waitlist", s.waitlist)
-        out += row("conversion", s.conversion)
-        out += row("churn", s.churn)
-
-        let m = SheetModel.compute(price: s.price.val, waitlist: s.waitlist.val,
-                                    conversion: s.conversion.val, churn: s.churn.val)
-        out += "\noutput,value,formula\n"
-        out += "paid,\(n(Double(m.paid))),round(waitlist * conversion / 100)\n"
-        out += "mrr,\(n(m.mrr)),paid * price (price floored at 1)\n"
-        out += "arr,\(n(m.arr)),mrr * 12\n"
-        out += "ltv,\(n(Double(m.ltv))),round(price / (churn / 100)) (price floored at 1; churn floored at 1%)\n"
-        out += "life,\(n(Double(m.life))),round(1 / (churn / 100)) (churn floored at 1%)\n"
-        out += "breakeven,\(n(Double(m.breakeven))),ceil(2500 / price) (price floored at 1)\n"
-
+        out += "\noutput,name,unit,value,formula\n"
+        for o in s.outputs {
+            let v = results[o.key].map { $0.isFinite ? n($0) : "" } ?? ""
+            out += "\(o.key),\(csvQuoted(o.name)),\(csvQuoted(o.unit)),\(v),\(csvQuoted(o.formula))\n"
+        }
         if let summary = s.summary, !summary.isEmpty {
             out += "\nsummary,\(csvQuoted(summary))\n"
         }
         return ExportFile(name: "\(base).csv", data: Data(out.utf8))
+    }
+
+    /// An input value as written: whole numbers bare, anything else to six decimals with the
+    /// trailing zeros dropped. Never scientific notation, for the same reason as `n`.
+    private static func precise(_ v: Double) -> String {
+        guard v.isFinite else { return "" }
+        if v == v.rounded(), abs(v) < 1e15 { return String(Int64(v)) }
+        var t = String(format: "%.6f", v)
+        while t.hasSuffix("0") { t.removeLast() }
+        if t.hasSuffix(".") { t.removeLast() }
+        return t
     }
 
     /// A CSV number: whole values print without a decimal, and everything else prints in

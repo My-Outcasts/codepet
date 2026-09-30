@@ -142,16 +142,20 @@ describe("coercePayload", () => {
 
   describe("sheet", () => {
     const okInput = { val: 12, min: 6, max: 20, step: 1 };
-    it("accepts a valid 4-input payload", () => {
-      const p = coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, churn: okInput, summary: "It shows healthy growth." });
-      expect(p).toEqual({ price: okInput, waitlist: okInput, conversion: okInput, churn: okInput, summary: "It shows healthy growth." });
+    it("a valid 4-input payload is lifted into the model shape (CP-002 D)", () => {
+      const p: any = coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, churn: okInput, summary: "It shows healthy growth." });
+      expect(p.inputs.slice(0, 4).map((i: any) => [i.key, i.val, i.min, i.max, i.step]))
+        .toEqual(["price", "waitlist", "conversion", "churn"].map((k) => [k, 12, 6, 20, 1]));
+      expect(p.summary).toBe("It shows healthy growth.");
     });
     it("returns null when an input is missing or non-numeric", () => {
       expect(coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, churn: { val: "x", min: 1, max: 2, step: 1 }, summary: "s" })).toBeNull();
       expect(coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, summary: "s" })).toBeNull();
     });
-    it("returns null when summary is missing", () => {
-      expect(coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, churn: okInput })).toBeNull();
+    // Was "returns null when summary is missing". A model is still a model without its paragraph,
+    // and the Failed rule (PR F) is about unusable payloads, not unfinished prose.
+    it("summary is optional", () => {
+      expect((coercePayload("sheet", { price: okInput, waitlist: okInput, conversion: okInput, churn: okInput }) as any).summary).toBe("");
     });
   });
 
@@ -210,7 +214,7 @@ describe("buildRunTaskPrompt structured guide", () => {
     expect(p).toMatch(/checklist:.*items/);
     expect(p).toMatch(/dms:.*messages/);
     expect(p).toMatch(/calendar:.*weeks/);
-    expect(p).toMatch(/sheet:.*price.*waitlist.*conversion.*churn/);
+    expect(p).toMatch(/sheet:.*inputs.*outputs.*formula/);
     expect(p).toMatch(/site:.*steps/);
     expect(p).toMatch(/screens:.*connect.*session.*recap/);
   });
@@ -411,5 +415,101 @@ describe("additive fields", () => {
       expect(prompt("sales")).toMatch(/- email: .*`subject`.*`to`.*never an invented name/);
       expect(prompt("design")).not.toMatch(/- email: /);
     });
+  });
+});
+
+/**
+ * `sheet` becomes any model (CP-002 D): free `inputs[]`, `outputs[]` written as formulas, and
+ * the old fixed four lifted into that shape. Founder decisions (30 Sep): formulas always shown,
+ * the hidden $2,500 of monthly costs becomes a fifth input, and at most 8 inputs and 8 outputs.
+ */
+describe("sheet model", () => {
+  const inp = (key: string, val = 5, extra: object = {}) => ({ key, name: key.toUpperCase(), unit: "", val, min: 0, max: 100, step: 1, ...extra });
+  const out = (key: string, formula: string, extra: object = {}) => ({ key, name: key.toUpperCase(), unit: "", formula, ...extra });
+  const sheet = (r: unknown) => coercePayload("sheet", r) as any;
+
+  it("keeps declared inputs and computes each output's value itself", () => {
+    const got = sheet({ inputs: [inp("a", 3), inp("b", 4)], outputs: [out("total", "a * b", { value: 999 })], summary: "s" });
+    expect(got.inputs.map((i: any) => i.key)).toEqual(["a", "b"]);
+    expect(got.outputs).toEqual([{ key: "total", name: "TOTAL", unit: "", formula: "a * b", value: 12 }]);
+    expect(got.summary).toBe("s");
+  });
+
+  it("a headline may be built from outputs listed after it", () => {
+    const got = sheet({ inputs: [inp("a", 2)], outputs: [out("head", "x + 1"), out("x", "a * 10")] });
+    expect(got.outputs.map((o: any) => [o.key, o.value])).toEqual([["head", 21], ["x", 20]]);
+  });
+
+  it("drops an output whose formula does not check out, and anything built on it", () => {
+    const got = sheet({ inputs: [inp("a")], outputs: [
+      out("ok", "a * 2"), out("bad", "sqrt(a)"), out("onbad", "bad + 1"), out("ghost", "nope"), out("loop", "loop + 1"),
+    ] });
+    expect(got.outputs.map((o: any) => o.key)).toEqual(["ok"]);
+  });
+
+  it("drops an output that is not finite at the defaults", () => {
+    const got = sheet({ inputs: [inp("a", 0)], outputs: [out("ok", "a + 1"), out("div", "1 / a")] });
+    expect(got.outputs.map((o: any) => o.key)).toEqual(["ok"]);
+  });
+
+  it("cleans inputs: bad keys, duplicates, broken ranges; clamps val into range", () => {
+    const got = sheet({ inputs: [
+      inp("Price"), inp("ok", 500), inp("ok"), inp("flip", 1, { min: 10, max: 2 }), inp("nostep", 1, { step: 0 }), inp("bad key"),
+    ], outputs: [out("o", "ok")] });
+    expect(got.inputs.map((i: any) => [i.key, i.val])).toEqual([["price", 5], ["ok", 100]]);
+  });
+
+  it("an output key may not shadow an input", () => {
+    expect(sheet({ inputs: [inp("a")], outputs: [out("a", "a * 2"), out("b", "a")] }).outputs.map((o: any) => o.key)).toEqual(["b"]);
+  });
+
+  it("caps at 8 inputs and 8 outputs", () => {
+    const got = sheet({
+      inputs: Array.from({ length: 10 }, (_, i) => inp(`i${i}`)),
+      outputs: Array.from({ length: 10 }, (_, i) => out(`o${i}`, `i0 + ${i}`)),
+    });
+    expect([got.inputs.length, got.outputs.length]).toEqual([8, 8]);
+  });
+
+  it("null without an input or without an output that survives", () => {
+    expect(sheet({ inputs: [], outputs: [out("o", "1")] })).toBeNull();
+    expect(sheet({ inputs: [inp("a")], outputs: [out("o", "zzz")] })).toBeNull();
+  });
+
+  describe("legacy lift", () => {
+    const four = {
+      price: { val: 6, min: 0, max: 20, step: 1 }, waitlist: { val: 400, min: 50, max: 5000, step: 50 },
+      conversion: { val: 8, min: 1, max: 40, step: 1 }, churn: { val: 9, min: 1, max: 25, step: 1 }, summary: "s",
+    };
+    it("becomes five inputs, the fifth being the $2,500 that was hidden", () => {
+      const got = sheet(four);
+      expect(got.inputs.map((i: any) => i.key)).toEqual(["price", "waitlist", "conversion", "churn", "costs"]);
+      expect(got.inputs[4]).toMatchObject({ name: "Monthly costs", unit: "$", val: 2500 });
+      expect(got.legacy).toBe(true);
+    });
+    it("reproduces the six numbers the old fixed model computed", () => {
+      // SheetModel.compute(6, 400, 8, 9): paid 32, mrr 192, arr 2304, ltv 67, life 11, breakeven 417.
+      const v = Object.fromEntries(sheet(four).outputs.map((o: any) => [o.key, o.value]));
+      expect(v).toEqual({ mrr: 192, paid: 32, arr: 2304, ltv: 67, life: 11, breakeven: 417 });
+    });
+    it("keeps the old floors: price at 1, churn at 1%", () => {
+      const v = Object.fromEntries(sheet({ ...four, price: { val: 0, min: 0, max: 20, step: 1 }, churn: { val: 0, min: 0, max: 25, step: 1 } })
+        .outputs.map((o: any) => [o.key, o.value]));
+      expect(v).toMatchObject({ mrr: 32, ltv: 100, life: 100, breakeven: 2500 });
+    });
+    it("a payload with neither shape is not a sheet", () => {
+      expect(sheet({ price: four.price, summary: "s" })).toBeNull();
+    });
+  });
+
+  it("the prompt asks for inputs and formulas, and no longer fixes the four", () => {
+    const p = buildRunTaskPrompt({ companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey: "fin" } as any);
+    expect(p).toMatch(/- sheet: .*`inputs\[\]`.*`outputs\[\]`.*`formula`/);
+    expect(p).not.toContain("Never add a 5th input");
+    expect(p).not.toContain("4 fixed inputs");
+    const props = (deliverableTool("fin").input_schema as any).properties.payload.properties;
+    expect(props).toHaveProperty("inputs");
+    expect(props).toHaveProperty("outputs");
+    for (const gone of ["price", "waitlist", "conversion", "churn"]) expect(props).not.toHaveProperty(gone);
   });
 });

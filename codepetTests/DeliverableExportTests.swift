@@ -203,7 +203,7 @@ final class DeliverableExportTests: XCTestCase {
     // MARK: - sheet
 
     private func sheetPayload() -> DeliverablePayload {
-        DeliverablePayload(sheet: SheetPayload(
+        DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 6, min: 0, max: 20, step: 1),
             waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
@@ -221,11 +221,11 @@ final class DeliverableExportTests: XCTestCase {
     func testSheetCsvCarriesEveryInputWithItsRange() throws {
         let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
-        XCTAssertTrue(csv.hasPrefix("input,value,min,max,step\n"), csv)
-        XCTAssertTrue(csv.contains("price,6,0,20,1"), csv)
-        XCTAssertTrue(csv.contains("waitlist,1200,0,5000,50"), csv)
-        XCTAssertTrue(csv.contains("conversion,8,0,50,1"), csv)
-        XCTAssertTrue(csv.contains("churn,6,0,30,1"), csv)
+        XCTAssertTrue(csv.hasPrefix("input,name,unit,value,min,max,step\n"), csv)
+        XCTAssertTrue(csv.contains("price,\"Pro price / mo\",\"$\",6,0,20,1"), csv)
+        XCTAssertTrue(csv.contains("waitlist,\"Waitlist size\",\"users\",1200,0,5000,50"), csv)
+        XCTAssertTrue(csv.contains("conversion,\"Waitlist → paid\",\"%\",8,0,50,1"), csv)
+        XCTAssertTrue(csv.contains("churn,\"Monthly churn\",\"%\",6,0,30,1"), csv)
     }
 
     /// The point of exporting a model rather than a number: the reader can see how it was
@@ -233,19 +233,19 @@ final class DeliverableExportTests: XCTestCase {
     ///
     /// **This is the sheet CSV's equivalent of `testExportedHtmlIsByteIdenticalToWhatTheViewerRenders`**
     /// — it exists to stop the CSV growing a second renderer that can silently disagree with
-    /// `SheetViewer`. All six of `SheetModel.compute`'s fields must appear, computed by
-    /// calling the model itself, not by re-deriving them here.
+    /// `SheetViewer`. A lifted sheet's six results must equal the OLD `SheetModel.compute`, the
+    /// reference the lift is held to (`SheetLiftTests`), each carried with its formula.
     func testSheetCsvOutputsMatchSheetModelForEveryField() throws {
         let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
         let m = SheetModel.compute(price: 6, waitlist: 1200, conversion: 8, churn: 6)
-        XCTAssertTrue(csv.contains("output,value,formula"), csv)
-        XCTAssertTrue(csv.contains("paid,\(m.paid),"), "got:\n\(csv)")
-        XCTAssertTrue(csv.contains("mrr,\(Int(m.mrr)),"), "got:\n\(csv)")
-        XCTAssertTrue(csv.contains("arr,\(Int(m.arr)),"), "got:\n\(csv)")
-        XCTAssertTrue(csv.contains("ltv,\(m.ltv),"), "got:\n\(csv)")
-        XCTAssertTrue(csv.contains("life,\(m.life),"), "got:\n\(csv)")
-        XCTAssertTrue(csv.contains("breakeven,\(m.breakeven),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("output,name,unit,value,formula"), csv)
+        XCTAssertTrue(csv.contains("paid,\"Paid users\",\"users\",\(m.paid),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,\"Seed MRR\",\"$\",\(Int(m.mrr)),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("arr,\"Run-rate ARR\",\"$\",\(Int(m.arr)),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("ltv,\"LTV / user\",\"$\",\(m.ltv),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("life,\"Churn-adj. life\",\"mo\",\(m.life),"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("breakeven,\"Break-even users\",\"users\",\(m.breakeven),"), "got:\n\(csv)")
     }
 
     /// `SheetModel` floors `price` at 1, so a `price` of 0 does not zero out MRR on screen —
@@ -254,7 +254,7 @@ final class DeliverableExportTests: XCTestCase {
     /// comparing the file to the screen would see the two disagree on the number that matters
     /// most in this export.
     func testSheetCsvMrrUsesTheFlooredPriceNotZero() throws {
-        let payload = DeliverablePayload(sheet: SheetPayload(
+        let payload = DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 0, min: 0, max: 20, step: 1),
             waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
@@ -264,15 +264,15 @@ final class DeliverableExportTests: XCTestCase {
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
         let m = SheetModel.compute(price: 0, waitlist: 1200, conversion: 8, churn: 6)
         XCTAssertGreaterThan(m.mrr, 0, "the model itself must floor price — otherwise this test proves nothing")
-        XCTAssertFalse(csv.contains("mrr,0,"), "the CSV must not disagree with the floored model — got:\n\(csv)")
-        XCTAssertTrue(csv.contains("mrr,\(Int(m.mrr)),"), "got:\n\(csv)")
+        XCTAssertFalse(csv.contains("mrr,\"Seed MRR\",\"$\",0,"), "the CSV must not disagree with the floored model — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,\"Seed MRR\",\"$\",\(Int(m.mrr)),"), "got:\n\(csv)")
     }
 
     /// Closes a carried finding: the decimal branch of the CSV's number formatter was
     /// entirely untested, and `%.4g` silently destroyed large fractional currency
     /// (`n(9999.99)` → `"1e+04"`). Fractional inputs must render in full, fixed-decimal form.
     func testSheetCsvRendersFractionalCurrencyInFullNotScientificNotation() throws {
-        let payload = DeliverablePayload(sheet: SheetPayload(
+        let payload = DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 19.99, min: 0, max: 100, step: 0.01),
             waitlist: SheetInput(val: 5000, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 50, min: 0, max: 50, step: 1),
@@ -280,18 +280,36 @@ final class DeliverableExportTests: XCTestCase {
             summary: nil))
         let d = deliverable(.sheet, title: "Pricing model", payload: payload)
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
-        XCTAssertTrue(csv.contains("price,19.99,"), "got:\n\(csv)")
+        XCTAssertTrue(csv.contains("price,\"Pro price / mo\",\"$\",19.99,"), "got:\n\(csv)")
         XCTAssertFalse(csv.lowercased().contains("e+"), "scientific notation leaked into the CSV — got:\n\(csv)")
         let m = SheetModel.compute(price: 19.99, waitlist: 5000, conversion: 50, churn: 6)
         XCTAssertGreaterThan(m.mrr, 9999, "the fixture must actually exercise a large fractional MRR")
         let expectedMrr = String(format: "%.2f", m.mrr)
-        XCTAssertTrue(csv.contains("mrr,\(expectedMrr),"), "large MRR must render in full — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("mrr,\"Seed MRR\",\"$\",\(expectedMrr),"), "large MRR must render in full — got:\n\(csv)")
     }
 
     func testSheetCsvQuotesTheSummarySoACommaCannotSplitIt() throws {
         let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
         XCTAssertTrue(csv.contains("\"At $6 and 8% conversion the model clears cost.\""), csv)
+    }
+
+    /// A sheet that declares its own model (CP-002 D) exports its own rows, formulas included,
+    /// with values computed by the viewer's evaluator — not the server's `value`, which is
+    /// deliberately wrong here to prove it is not the source.
+    func testANewModelSheetExportsItsOwnInputsAndFormulas() throws {
+        let sheet = SheetPayload(inputs: [
+            SheetVariable(key: "paying", name: "Paying users", unit: "users", val: 32, min: 0, max: 500, step: 1),
+            SheetVariable(key: "cpm", name: "Cost / minute", unit: "$", val: 0.0021, min: 0.0005, max: 0.01, step: 0.0001),
+        ], outputs: [
+            SheetOutput(key: "bill", name: "Inference bill", unit: "$", formula: "paying * 52 * cpm", value: 999),
+        ], summary: "Margin is not the constraint.")
+        let d = deliverable(.sheet, title: "Inference cost", payload: DeliverablePayload(sheet: sheet))
+        let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: d)[0].data, encoding: .utf8))
+        XCTAssertTrue(csv.contains("paying,\"Paying users\",\"users\",32,0,500,1\n"), csv)
+        XCTAssertTrue(csv.contains("cpm,\"Cost / minute\",\"$\",0.0021,0.0005,0.01,0.0001\n"), "an input keeps its precision — got:\n\(csv)")
+        XCTAssertTrue(csv.contains("bill,\"Inference bill\",\"$\",3.49,\"paying * 52 * cpm\"\n"), csv)
+        XCTAssertFalse(csv.contains("999"), "the server's value must not be what is exported")
     }
 
     func testSheetWithNoPayloadFallsBackToMarkdown() {
@@ -523,10 +541,10 @@ final class DeliverableExportTests: XCTestCase {
     }
 
     /// `SheetViewer` reads its sliders' live `@State`, also unreachable from a test — same
-    /// fix, `exportSubject(_:price:waitlist:conversion:churn:)`. Moving a slider changes only
-    /// `SheetInput.val`; `min`/`max`/`step` never move, and the test pins that too.
+    /// fix, `exportSubject(_:values:)`. Moving a slider changes only an input's `val`;
+    /// `min`/`max`/`step` never move, and the test pins that too.
     func testSheetExportSubjectReflectsLiveSliderValues() throws {
-        let payload = DeliverablePayload(sheet: SheetPayload(
+        let payload = DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 20, min: 5, max: 100, step: 1),
             waitlist: SheetInput(val: 500, min: 0, max: 5000, step: 10),
             conversion: SheetInput(val: 10, min: 0, max: 100, step: 1),
@@ -535,21 +553,21 @@ final class DeliverableExportTests: XCTestCase {
         let untouched = deliverable(.sheet, title: "Pricing model", payload: payload)
 
         // Simulates the founder dragging the price and waitlist sliders.
-        let subject = SheetViewer.exportSubject(untouched, price: 35, waitlist: 1200,
-                                                conversion: 10, churn: 4)
+        let subject = SheetViewer.exportSubject(untouched, values: [
+            "price": 35, "waitlist": 1200, "conversion": 10, "churn": 4, "costs": 2500])
 
         let csv = try XCTUnwrap(String(data: DeliverableExport.files(for: subject)[0].data,
                                        encoding: .utf8))
-        XCTAssertTrue(csv.contains("price,35,5,100,1"), csv)
-        XCTAssertTrue(csv.contains("waitlist,1200,0,5000,10"), csv)
+        XCTAssertTrue(csv.contains("price,\"Pro price / mo\",\"$\",35,5,100,1"), csv)
+        XCTAssertTrue(csv.contains("waitlist,\"Waitlist size\",\"users\",1200,0,5000,10"), csv)
         // Untouched inputs carry their range through unchanged.
-        XCTAssertTrue(csv.contains("conversion,10,0,100,1"), csv)
-        XCTAssertTrue(csv.contains("churn,4,0,50,1"), csv)
+        XCTAssertTrue(csv.contains("conversion,\"Waitlist → paid\",\"%\",10,0,100,1"), csv)
+        XCTAssertTrue(csv.contains("churn,\"Monthly churn\",\"%\",4,0,50,1"), csv)
 
         // The original deliverable's export is unaffected.
         let originalCsv = try XCTUnwrap(String(data: DeliverableExport.files(for: untouched)[0].data,
                                                encoding: .utf8))
-        XCTAssertTrue(originalCsv.contains("price,20,5,100,1"), originalCsv)
+        XCTAssertTrue(originalCsv.contains("price,\"Pro price / mo\",\"$\",20,5,100,1"), originalCsv)
     }
 
     // MARK: - RFC 5545 line folding

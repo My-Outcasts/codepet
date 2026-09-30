@@ -82,14 +82,10 @@ struct CalendarWeek: Codable, Hashable {
 struct CalendarPayload: Codable, Hashable { var weeks: [CalendarWeek] }
 
 // sheet
+// `SheetPayload` and its parts live in `SheetModel.swift` since CP-002 D (any model, not four
+// fixed inputs). `SheetInput` stays here: it is the shape of one of the OLD fixed four, which the
+// sheet decoder still reads in order to lift them.
 struct SheetInput: Codable, Hashable { var val: Double; var min: Double; var max: Double; var step: Double }
-struct SheetPayload: Codable, Hashable {
-    var price: SheetInput
-    var waitlist: SheetInput
-    var conversion: SheetInput
-    var churn: SheetInput
-    var summary: String?
-}
 
 // site
 struct SiteContent: Codable, Hashable { var h: String; var p: String }

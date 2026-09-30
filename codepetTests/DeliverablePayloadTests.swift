@@ -59,7 +59,8 @@ final class DeliverablePayloadTests: XCTestCase {
         }}
         """#
         let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
-        XCTAssertEqual(back.payload?.sheet?.price.val, 9)
+        // The old fixed four decode by being lifted (CP-002 D); `SheetLiftTests` covers the lift.
+        XCTAssertEqual(back.payload?.sheet?.inputs.first { $0.key == "price" }?.val, 9)
         XCTAssertEqual(back.payload?.sheet?.summary, "Looks healthy")
         XCTAssertNil(back.payload?.site)
         XCTAssertNil(back.payload?.calendar)

@@ -50,7 +50,7 @@ final class DeliverableExportReviewFixTests: XCTestCase {
     /// price 6, churn 6% — `SheetModel` floors churn at 1% and divides by 100, so
     /// `ltv = round(6 / 0.06) = 100` and `life = round(1 / 0.06) = 17`.
     private func sheetPayload() -> DeliverablePayload {
-        DeliverablePayload(sheet: SheetPayload(
+        DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 6, min: 0, max: 20, step: 1),
             waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
@@ -105,31 +105,42 @@ final class DeliverableExportReviewFixTests: XCTestCase {
 
     // MARK: - 2. the formula column must describe the arithmetic that produced the value
 
-    /// `churn` is a percent in the input block (`churn,6,0,30,1`) and `SheetModel` divides it
-    /// by 100. `round(price / churn)` with those numbers is 1, not the 100 printed beside it.
-    /// The formula column exists so the reader can disagree with the derivation; a wrong
-    /// derivation defeats it.
-    func testSheetCsvLtvAndLifeFormulasDivideChurnByOneHundred() throws {
+    /// The formula column exists so the reader can disagree with the derivation — so it must
+    /// BE the derivation. This used to check for the text "churn / 100", because the formulas
+    /// were hand-written beside hand-derived numbers and once disagreed (`round(price / churn)`
+    /// with churn a percent is 1, not the 100 printed beside it). Since CP-002 D the CSV prints
+    /// the sheet's own formulas, so the check is the real one: evaluate every formula in the file
+    /// against the file's own input block, and it must reproduce the value printed beside it.
+    func testEveryCsvFormulaReproducesItsOwnValue() throws {
         let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
         let csv = try text(DeliverableExport.files(for: d), ext: ".csv")
-        let rows = csv.components(separatedBy: "\n")
-
-        let ltv = try XCTUnwrap(rows.first { $0.hasPrefix("ltv,") })
-        let life = try XCTUnwrap(rows.first { $0.hasPrefix("life,") })
-
-        XCTAssertTrue(ltv.contains("churn / 100"),
-                      "ltv formula does not divide churn by 100: \(ltv)")
-        XCTAssertTrue(life.contains("churn / 100"),
-                      "life formula does not divide churn by 100: \(life)")
-    }
-
-    /// The values are already right; pinned so the formula fix cannot be "corrected" by
-    /// changing the arithmetic instead of the prose.
-    func testSheetCsvLtvAndLifeValuesStillMatchTheModel() throws {
-        let d = deliverable(.sheet, title: "Pricing model", payload: sheetPayload())
-        let csv = try text(DeliverableExport.files(for: d), ext: ".csv")
-        XCTAssertTrue(csv.contains("\nltv,100,"), "ltv value changed:\n\(csv)")
-        XCTAssertTrue(csv.contains("\nlife,17,"), "life value changed:\n\(csv)")
+        let blocks = csv.components(separatedBy: "\n\n")
+        let inputRows = blocks[0].components(separatedBy: "\n").dropFirst()
+        var env: [String: Double] = [:]
+        for row in inputRows {
+            let cols = row.components(separatedBy: ",")
+            env[cols[0]] = Double(cols[cols.count - 4])
+        }
+        XCTAssertEqual(env["churn"], 6, "the input block is what the formulas read")
+        // key,"name","unit",value,"formula" — the formula is the last quoted field.
+        let outputs: [(key: String, value: Double, formula: String)] = try blocks[1]
+            .components(separatedBy: "\n").dropFirst().filter { !$0.isEmpty }
+            .map { row in
+                let key = String(row.prefix { $0 != "," })
+                let value = try XCTUnwrap(Double(row.components(separatedBy: ",")[3]), row)
+                let formula = String(try XCTUnwrap(row.components(separatedBy: ",\"").last).dropLast())
+                return (key, value, formula)
+            }
+        XCTAssertEqual(outputs.count, 6)
+        // Every printed value, so a formula reading another output reads what the file says it is.
+        let computed = env.merging(outputs.map { ($0.key, $0.value) }) { a, _ in a }
+        for o in outputs {
+            let node = try XCTUnwrap(SheetFormula.parse(o.formula), "unparseable formula for \(o.key): \(o.formula)")
+            XCTAssertEqual(node.evaluate(computed), o.value, accuracy: 0.005,
+                           "the formula printed for \(o.key) does not produce the value printed beside it")
+        }
+        XCTAssertEqual(computed["ltv"], 100)
+        XCTAssertEqual(computed["life"], 17)
     }
 
     // MARK: - 3. a wire number must not crash the export
@@ -138,7 +149,7 @@ final class DeliverableExportReviewFixTests: XCTestCase {
     /// from the model-generated payload with no magnitude guard, so one absurd bound hard-
     /// crashed the app the moment the founder pressed Export.
     func testAnAbsurdSliderBoundDoesNotCrashTheExport() throws {
-        let p = DeliverablePayload(sheet: SheetPayload(
+        let p = DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 6, min: 0, max: 1e19, step: 1),
             waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
@@ -157,7 +168,7 @@ final class DeliverableExportReviewFixTests: XCTestCase {
     /// Non-finite input reaches the same formatter. `SheetModel.compute` guards it; the
     /// formatter guarded neither non-finite nor out-of-range.
     func testNonFiniteSliderBoundDoesNotCrashTheExport() throws {
-        let p = DeliverablePayload(sheet: SheetPayload(
+        let p = DeliverablePayload(sheet: SheetPayload.lift(
             price: SheetInput(val: 6, min: -.infinity, max: .infinity, step: .nan),
             waitlist: SheetInput(val: 1200, min: 0, max: 5000, step: 50),
             conversion: SheetInput(val: 8, min: 0, max: 50, step: 1),
@@ -166,7 +177,7 @@ final class DeliverableExportReviewFixTests: XCTestCase {
         let d = deliverable(.sheet, title: "Pricing model", payload: p)
 
         let csv = try text(DeliverableExport.files(for: d), ext: ".csv")
-        XCTAssertTrue(csv.hasPrefix("input,value,min,max,step\n"), csv)
+        XCTAssertTrue(csv.hasPrefix("input,name,unit,value,min,max,step\n"), csv)
     }
 
     // MARK: - 4. the .ics must not silently drop the weekday

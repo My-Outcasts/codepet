@@ -40,14 +40,17 @@ final class DemoTypedPayloadsTests: XCTestCase {
                         + untyped.joined(separator: "\n"))
     }
 
-    func testTheFinanceSheetCarriesItsFourInputs() throws {
+    /// CP-002 D: the inference sheet is the demo's showcase for a model with its OWN inputs.
+    /// It used to borrow the pricing sheet's four sliders while its prose talked about session
+    /// length and cost per minute; now the sliders are what the prose talks about.
+    func testTheFinanceSheetDeclaresItsOwnModel() throws {
         let sheet = try filed("inference")
         XCTAssertEqual(sheet.kind, .sheet)
         let p = try XCTUnwrap(sheet.payload?.sheet, "the sheet payload decoded to nil")
-        XCTAssertEqual(p.price.val, 6)
-        XCTAssertEqual(p.waitlist.val, 400)
-        XCTAssertEqual(p.conversion.val, 8)
-        XCTAssertEqual(p.churn.val, 9)
+        XCTAssertFalse(p.legacy, "this fixture is the new shape, not a lifted one")
+        XCTAssertEqual(p.inputs.map(\.key), ["price", "waitlist", "conversion", "sessions", "minutes", "cpm"])
+        XCTAssertEqual(p.outputs.first?.key, "margin", "the headline is the margin the prose argues about")
+        XCTAssertEqual(p.evaluate(p.defaults).count, p.outputs.count, "every formula computes")
         XCTAssertFalse((p.summary ?? "").isEmpty, "the summary is what the founder reads first")
     }
 
@@ -80,13 +83,16 @@ final class DemoTypedPayloadsTests: XCTestCase {
     func testTheSheetSummaryAgreesWithTheModelItDescribes() throws {
         let sheet = try filed("inference")
         let p = try XCTUnwrap(sheet.payload?.sheet)
-        let m = SheetModel.compute(price: p.price.val, waitlist: p.waitlist.val,
-                                   conversion: p.conversion.val, churn: p.churn.val)
-        XCTAssertEqual(m.paid, 32)
-        XCTAssertEqual(m.mrr, 192)
+        let r = p.evaluate(p.defaults)
+        XCTAssertEqual(r["paying"], 32)
+        XCTAssertEqual(r["mrr"], 192)
+        XCTAssertEqual(try XCTUnwrap(r["per_user"]), 0.11, accuracy: 0.005, "“$0.11 per active user”")
+        XCTAssertEqual(try XCTUnwrap(r["bill"]), 3.5, accuracy: 0.05, "“roughly $3.50 of inference”")
         let summary = try XCTUnwrap(p.summary)
         XCTAssertTrue(summary.contains("32 paying users"), summary)
         XCTAssertTrue(summary.contains("$192"), summary)
+        XCTAssertTrue(summary.contains("$3.50"), summary)
+        XCTAssertTrue(summary.contains("$0.11"), summary)
     }
 
     // MARK: - the point of the branch: export produces the real file
@@ -112,8 +118,8 @@ final class DemoTypedPayloadsTests: XCTestCase {
         XCTAssertTrue(files[0].name.hasSuffix(".csv"),
                       "a payload-less sheet falls back to .md — got \(files[0].name)")
         let csv = try XCTUnwrap(String(data: files[0].data, encoding: .utf8))
-        XCTAssertTrue(csv.contains("input,value,min,max,step"), csv)
-        for output in ["paid", "mrr", "arr", "ltv", "life", "breakeven"] {
+        XCTAssertTrue(csv.contains("input,name,unit,value,min,max,step"), csv)
+        for output in ["margin", "mrr", "paying", "per_user", "bill"] {
             XCTAssertTrue(csv.contains("\n\(output),"), "missing the \(output) row:\n\(csv)")
         }
     }

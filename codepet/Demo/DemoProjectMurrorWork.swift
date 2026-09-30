@@ -463,7 +463,20 @@ extension DemoProject {
                 twenty people have used it for a fortnight.
                 """,
                 payloadJSON: """
-                {"price":{"val":6,"min":0,"max":20,"step":1},"waitlist":{"val":400,"min":50,"max":5000,"step":50},"conversion":{"val":8,"min":1,"max":40,"step":1},"churn":{"val":9,"min":1,"max":25,"step":1},"summary":"At $6 with 8% of 400 converting, 32 paying users produce $192 a month against roughly $3.50 of inference at $0.11 per active user. Margin is not the constraint; conversion is. Session length moves the cost most — ten minutes of writing costs about triple three minutes — which is why pricing should not be built around a session cap."}
+                {"inputs":[
+                  {"key":"price","name":"Practice price / mo","unit":"$","val":6,"min":0,"max":20,"step":1},
+                  {"key":"waitlist","name":"Waitlist size","unit":"users","val":400,"min":50,"max":5000,"step":50},
+                  {"key":"conversion","name":"Waitlist → paid","unit":"%","val":8,"min":1,"max":40,"step":1},
+                  {"key":"sessions","name":"Sessions / week","unit":"","val":4,"min":1,"max":14,"step":1},
+                  {"key":"minutes","name":"Minutes / session","unit":"","val":3,"min":1,"max":15,"step":1},
+                  {"key":"cpm","name":"Inference cost / minute","unit":"$","val":0.0021,"min":0.0005,"max":0.01,"step":0.0001}],
+                 "outputs":[
+                  {"key":"margin","name":"Gross margin","unit":"%","formula":"(mrr - bill) / mrr * 100"},
+                  {"key":"mrr","name":"MRR","unit":"$","formula":"paying * price"},
+                  {"key":"paying","name":"Paying users","unit":"users","formula":"round(waitlist * conversion / 100)"},
+                  {"key":"per_user","name":"Cost / active user","unit":"$","formula":"sessions * 4.33 * minutes * cpm"},
+                  {"key":"bill","name":"Inference bill / mo","unit":"$","formula":"per_user * paying"}],
+                 "summary":"At $6 with 8% of 400 converting, 32 paying users produce $192 a month against roughly $3.50 of inference at $0.11 per active user. Margin is not the constraint; conversion is. Session length moves the cost most — ten minutes of writing costs about triple three minutes — which is why pricing should not be built around a session cap."}
                 """),
 
             DemoDeliverable(

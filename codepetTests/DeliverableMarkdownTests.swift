@@ -98,18 +98,21 @@ final class DeliverableMarkdownTests: XCTestCase {
 
     func testSheetPayloadRendersATableWithEveryInputAndTheSummary() {
         let d = Deliverable(kind: .sheet, title: "Pricing model", body: "ignored for sheet",
-                             payload: DeliverablePayload(sheet: SheetPayload(
+                             payload: DeliverablePayload(sheet: SheetPayload.lift(
                                 price: SheetInput(val: 49, min: 10, max: 99, step: 1),
                                 waitlist: SheetInput(val: 500, min: 0, max: 5000, step: 50),
                                 conversion: SheetInput(val: 5, min: 1, max: 20, step: 1),
                                 churn: SheetInput(val: 3, min: 1, max: 10, step: 1),
                                 summary: "At these defaults the model clears break-even in month two.")))
         let md = DeliverableMarkdown.render(d, dept: "Finance", instruction: "Build the pricing model")
-        XCTAssertTrue(md.contains("| Input | Value | Min | Max | Step |"))
-        XCTAssertTrue(md.contains("| Price | 49 | 10 | 99 | 1 |"))
-        XCTAssertTrue(md.contains("| Waitlist | 500 | 0 | 5000 | 50 |"))
-        XCTAssertTrue(md.contains("| Conversion | 5 | 1 | 20 | 1 |"))
-        XCTAssertTrue(md.contains("| Churn | 3 | 1 | 10 | 1 |"))
+        XCTAssertTrue(md.contains("| Input | Unit | Value | Min | Max | Step |"), md)
+        XCTAssertTrue(md.contains("| Pro price / mo | $ | 49 | 10 | 99 | 1 |"), md)
+        XCTAssertTrue(md.contains("| Waitlist size | users | 500 | 0 | 5000 | 50 |"), md)
+        XCTAssertTrue(md.contains("| Waitlist → paid | % | 5 | 1 | 20 | 1 |"), md)
+        XCTAssertTrue(md.contains("| Monthly churn | % | 3 | 1 | 10 | 1 |"), md)
+        // CP-002 D: a coding agent gets the model, not just the inputs.
+        XCTAssertTrue(md.contains("| Result | Unit | Value | Formula |"), md)
+        XCTAssertTrue(md.contains("| Paid users | users | 25 | `round(waitlist * conversion / 100)` |"), md)
         XCTAssertTrue(md.contains("At these defaults the model clears break-even in month two."))
     }
 

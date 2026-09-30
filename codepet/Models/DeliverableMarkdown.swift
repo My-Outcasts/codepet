@@ -139,19 +139,17 @@ enum DeliverableMarkdown {
         }.joined(separator: "\n\n")
     }
 
+    /// A coding agent building from `docs/` needs the MODEL, not just its numbers: every input
+    /// with its range, and every result with the formula that produces it (CP-002 D).
     private static func sheetSection(_ p: DeliverablePayload) -> String {
         guard let s = p.sheet else { return "" }
-        func row(_ name: String, _ i: SheetInput) -> String {
-            "| \(name) | \(n(i.val)) | \(n(i.min)) | \(n(i.max)) | \(n(i.step)) |"
-        }
-        var out = [
-            "| Input | Value | Min | Max | Step |",
-            "|---|---|---|---|---|",
-            row("Price", s.price),
-            row("Waitlist", s.waitlist),
-            row("Conversion", s.conversion),
-            row("Churn", s.churn),
-        ].joined(separator: "\n")
+        let results = s.evaluate(s.defaults)
+        var out = (["| Input | Unit | Value | Min | Max | Step |", "|---|---|---|---|---|---|"]
+            + s.inputs.map { "| \($0.name) | \($0.unit) | \(n($0.val)) | \(n($0.min)) | \(n($0.max)) | \(n($0.step)) |" })
+            .joined(separator: "\n")
+        out += "\n\n" + (["| Result | Unit | Value | Formula |", "|---|---|---|---|"]
+            + s.outputs.map { "| \($0.name) | \($0.unit) | \(results[$0.key].map { n($0) } ?? "—") | `\($0.formula)` |" })
+            .joined(separator: "\n")
         if let summary = s.summary, !summary.isEmpty {
             out += "\n\n\(summary)"
         }

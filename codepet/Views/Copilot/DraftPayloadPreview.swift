@@ -220,14 +220,38 @@ struct DraftPayloadPreview: View {
 
     // MARK: - sheet
 
-    /// The four fixed inputs, read-only. `SheetPayload` is a pricing MODEL, not a generic
-    /// table — never a fifth row.
+    /// The headline result, then the first few assumptions, read-only (CP-002 D: a sheet declares
+    /// its own inputs now, so this reads them off the payload instead of naming four).
     private func sheet(_ s: SheetPayload) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sheetRow("Price", s.price, prefix: "$")
-            sheetRow("Signups", s.waitlist)
-            sheetRow("Convert", s.conversion, suffix: "%")
-            sheetRow("Churn", s.churn, suffix: "%")
+        let results = s.evaluate(s.defaults)
+        let name: (String, String) -> String = { key, fallback in
+            s.legacy ? (SheetPayload.legacyName(key, lang) ?? fallback) : fallback
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            if let lead = s.outputs.first {
+                HStack(spacing: 8) {
+                    Text(name(lead.key, lead.name))
+                        .font(.pixelSystem(size: 11))
+                        .foregroundColor(CodepetTheme.mutedText)
+                    Text(SheetFormat.value(results[lead.key], unit: lead.unit))
+                        .font(.pixelSystem(size: 12, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.accentPurple)
+                }
+            }
+            ForEach(s.inputs.prefix(4), id: \.key) { v in
+                HStack(spacing: 8) {
+                    Text(name(v.key, v.name))
+                        .font(.pixelSystem(size: 11))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(SheetFormat.input(v.val, unit: v.unit, step: v.step))
+                        .font(.pixelSystem(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundColor(CodepetTheme.primaryText)
+                }
+            }
             if let summary = s.summary, !summary.isEmpty {
                 Text(summary)
                     .font(.pixelSystem(size: 11.5))
@@ -236,32 +260,6 @@ struct DraftPayloadPreview: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-        }
-    }
-
-    private func sheetRow(_ label: String, _ input: SheetInput,
-                          prefix: String = "", suffix: String = "") -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.pixelSystem(size: 11))
-                .foregroundColor(CodepetTheme.mutedText)
-                .frame(width: 52, alignment: .leading)
-            Text("\(prefix)\(Self.trimmed(input.val))\(suffix)")
-                .font(.pixelSystem(size: 11, weight: .semibold))
-                .monospacedDigit()
-                .foregroundColor(CodepetTheme.primaryText)
-                .frame(width: 44, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(CodepetTheme.hairline).frame(height: 3)
-                    Circle()
-                        .fill(CodepetTheme.accentPurple)
-                        .frame(width: 8, height: 8)
-                        .offset(x: max(0, (geo.size.width - 8) * Self.fraction(input)))
-                }
-                .frame(height: 8)
-            }
-            .frame(height: 8)
         }
     }
 

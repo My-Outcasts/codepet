@@ -762,91 +762,61 @@ struct CalendarViewer: View {
 
 // MARK: - SheetViewer
 
-/// Renders a sheet payload as a live financial model: 4 range sliders (price,
-/// waitlist, conversion, churn) seeded from each `SheetInput.val`, ranged
-/// `min...max` and stepped `step`, driving a live recompute via
-/// `SheetModel.compute` — a Swift port of web's `computeSheetModel`
-/// (lib/ai/sheetModel.ts). Sliders are local `@State` only: this is a
-/// read-only deliverable, so nothing here is ever written back to the store.
-/// Also renders the payload's `summary` and a disclaimer footer, matching
-/// web's SheetViewer in spirit.
+/// Renders a sheet payload as a live model (CP-002 D, layout approved in the founder's design
+/// review, 30 Sep): the headline result large with its formula, beside the summary; then the
+/// assumptions as sliders and the other results as a ledger, each with its formula underneath —
+/// always shown, because a model you cannot see into is only a number (founder decision).
+///
+/// It was four fixed sliders and a six-cell grid whatever the sheet was about. Now every slider
+/// and every result comes from the payload, and each result is computed HERE from its formula
+/// (`SheetPayload.evaluate`) against the live sliders — the server's `value` is never shown.
+/// Sliders are local `@State` only; nothing is written back to the store.
 struct SheetViewer: View {
-    @State private var price: Double
-    @State private var waitlist: Double
-    @State private var conversion: Double
-    @State private var churn: Double
-
-    private let priceRange: ClosedRange<Double>
-    private let priceStep: Double
-    private let waitlistRange: ClosedRange<Double>
-    private let waitlistStep: Double
-    private let conversionRange: ClosedRange<Double>
-    private let conversionStep: Double
-    private let churnRange: ClosedRange<Double>
-    private let churnStep: Double
-
-    private let summary: String?
-
+    let payload: SheetPayload
     let deliverable: Deliverable
+    @State private var values: [String: Double]
+    /// The card's content width, measured, for the wide/stacked switch. Starts wide, which is
+    /// the Library's usual size, so the first frame does not flash the stacked layout.
+    @State private var width: CGFloat = 760
 
     @Environment(\.uiLanguage) private var lang
     @EnvironmentObject private var companyStore: CompanyStore
 
     init(payload: SheetPayload, deliverable: Deliverable) {
-        _price = State(initialValue: payload.price.val)
-        _waitlist = State(initialValue: payload.waitlist.val)
-        _conversion = State(initialValue: payload.conversion.val)
-        _churn = State(initialValue: payload.churn.val)
-        priceRange = Self.safeRange(payload.price)
-        priceStep = Swift.max(1, payload.price.step)
-        waitlistRange = Self.safeRange(payload.waitlist)
-        waitlistStep = Swift.max(1, payload.waitlist.step)
-        conversionRange = Self.safeRange(payload.conversion)
-        conversionStep = Swift.max(1, payload.conversion.step)
-        churnRange = Self.safeRange(payload.churn)
-        churnStep = Swift.max(1, payload.churn.step)
-        summary = payload.summary
+        self.payload = payload
         self.deliverable = deliverable
+        _values = State(initialValue: payload.defaults)
     }
 
-    /// A degenerate range (max ≤ min, as could arrive from a malformed payload)
-    /// would crash SwiftUI's `Slider`; fall back to a 1-wide range instead.
-    private static func safeRange(_ input: SheetInput) -> ClosedRange<Double> {
-        input.min < input.max ? input.min...input.max : input.min...(input.min + 1)
+    private var results: [String: Double] { payload.evaluate(values) }
+
+    private func name(_ key: String, _ fallback: String) -> String {
+        payload.legacy ? (SheetPayload.legacyName(key, lang) ?? fallback) : fallback
     }
 
-    private var model: SheetModel {
-        SheetModel.compute(price: price, waitlist: waitlist, conversion: conversion, churn: churn)
+    /// A degenerate range (max ≤ min, as could arrive from a malformed payload) would crash
+    /// SwiftUI's `Slider`; fall back to a 1-wide range instead.
+    private static func safeRange(_ v: SheetVariable) -> ClosedRange<Double> {
+        v.min < v.max ? v.min...v.max : v.min...(v.min + 1)
     }
 
-    /// The model's OUTPUTS, pasteable. The sliders are the founder's to move; the six figures are
-    /// what they take away, and there was no way to get them out of the app.
-    private var copyText: String {
-        var lines = [
-            "\(lang == .vi ? "Người dùng trả phí" : "Paid users"): \(model.paid)",
-            "\(lang == .vi ? "MRR khởi điểm" : "Seed MRR"): \(fmtCurrency(model.mrr))",
-            "\(lang == .vi ? "ARR ước tính" : "Run-rate ARR"): \(fmtCurrency(model.arr))",
-            "\(lang == .vi ? "LTV / người dùng" : "LTV / user"): \(fmtCurrency(Double(model.ltv)))",
-            "\(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life"): \(model.life)mo",
-            "\(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users"): \(model.breakeven)",
-        ]
-        if let summary, !summary.isEmpty { lines.append("\n" + summary) }
+    /// The results, pasteable — what the founder takes away. Formulas ride along, since they are
+    /// what makes the numbers worth arguing with.
+    static func copyText(_ payload: SheetPayload, values: [String: Double], lang: AppLanguage) -> String {
+        let results = payload.evaluate(values)
+        var lines = payload.outputs.map { o in
+            let n = payload.legacy ? (SheetPayload.legacyName(o.key, lang) ?? o.name) : o.name
+            return "\(n): \(SheetFormat.value(results[o.key], unit: o.unit))  (= \(SheetFormula.display(o.formula)))"
+        }
+        if let summary = payload.summary, !summary.isEmpty { lines.append("\n" + summary) }
         return lines.joined(separator: "\n")
     }
 
-    /// Founder decision (I4): Export takes what is on screen, matching Copy — the founder
-    /// moves the sliders to get numbers out, and before this Export re-rendered the untouched
-    /// payload while Copy read the live model. Built as a pure static so it is testable without
-    /// reaching into private `@State`: same identity, only the payload's four `SheetInput.val`
-    /// fields swapped for the live slider values — `min`/`max`/`step` are untouched, because
-    /// only `val` ever moves.
-    static func exportSubject(_ deliverable: Deliverable, price: Double, waitlist: Double,
-                               conversion: Double, churn: Double) -> Deliverable {
+    /// Founder decision (I4): Export takes what is on screen, matching Copy — only each input's
+    /// `val` swapped for the live slider value; ranges and formulas are untouched.
+    static func exportSubject(_ deliverable: Deliverable, values: [String: Double]) -> Deliverable {
         guard var payload = deliverable.payload, var sheet = payload.sheet else { return deliverable }
-        sheet.price.val = price
-        sheet.waitlist.val = waitlist
-        sheet.conversion.val = conversion
-        sheet.churn.val = churn
+        sheet.inputs = sheet.inputs.map { var v = $0; v.val = values[v.key] ?? v.val; return v }
         payload.sheet = sheet
         var d = deliverable
         d.payload = payload
@@ -860,109 +830,216 @@ struct SheetViewer: View {
             : "Projections Codepet drafted from your inputs — not financial advice. Verify the figures before you rely on them."
     }
 
-    /// `measured: false` — the sliders and the six-cell grid lay themselves out, and a 620pt cap
-    /// would squeeze an interactive model into a prose column it is not.
+    /// `measured: false` — two panels lay themselves out, and a 620pt prose cap would squeeze them.
     var body: some View {
         DeliverableFrame(eyebrow: lang == .vi ? "Mô hình tài chính" : "Financial model",
-                         action: .copy(copyText),
-                         export: Self.exportSubject(deliverable, price: price, waitlist: waitlist,
-                                                     conversion: conversion, churn: churn),
+                         action: .copy(Self.copyText(payload, values: values, lang: lang)),
+                         export: Self.exportSubject(deliverable, values: values),
                          footer: disclaimer,
                          provenance: deliverable.producedBy,
                          lang: lang,
                          otherProviderInstalled: companyStore.otherProviderInstalled(for: deliverable),
                          onReRun: companyStore.reRunHandler(for: deliverable, language: lang),
                          measured: false) {
+            // Side by side from 560pt, stacked below. Switched on the measured width rather than
+            // `ViewThatFits`, which sizes a paragraph as one unwrapped line and so never chose the
+            // side-by-side layout for any summary longer than a sentence.
+            let wide = width >= 560
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 12) {
-                    sliderRow(lang == .vi ? "Giá gói Pro / tháng" : "Pro price / mo",
-                              value: $price, range: priceRange, step: priceStep,
-                              display: "$\(Int(price.rounded()))")
-                    sliderRow(lang == .vi ? "Danh sách chờ" : "Waitlist size",
-                              value: $waitlist, range: waitlistRange, step: waitlistStep,
-                              display: "\(Int(waitlist.rounded()))")
-                    sliderRow(lang == .vi ? "Chờ → trả phí" : "Waitlist → paid",
-                              value: $conversion, range: conversionRange, step: conversionStep,
-                              display: "\(Int(conversion.rounded()))%")
-                    sliderRow(lang == .vi ? "Rời bỏ hàng tháng" : "Monthly churn",
-                              value: $churn, range: churnRange, step: churnStep,
-                              display: "\(Int(churn.rounded()))%")
+                if wide {
+                    HStack(alignment: .center, spacing: 20) {
+                        hero.frame(width: min(260, width * 0.36), alignment: .leading)
+                        summaryBox
+                    }
+                    HStack(alignment: .top, spacing: 12) { assumptions; resultsPanel }
+                } else {
+                    hero
+                    summaryBox
+                    assumptions
+                    resultsPanel
                 }
-                .padding(14)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        }
+    }
+
+    // MARK: parts
+
+    @ViewBuilder private var hero: some View {
+        if let lead = payload.outputs.first {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(name(lead.key, lead.name))
+                    .font(.pixelSystem(size: 13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.mutedText)
+                Text(SheetFormat.value(results[lead.key], unit: lead.unit))
+                    .font(.pixelSystem(size: 40, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundColor(CodepetTheme.accentPurple)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                formulaLine(lead.formula)
+            }
+        }
+    }
+
+    @ViewBuilder private var summaryBox: some View {
+        if let summary = payload.summary, !summary.isEmpty {
+            DeliverableProse(text: summary)
+                .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                        .fill(CodepetTheme.surface)
+                    RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                        .fill(CodepetTheme.accentPurple.opacity(0.1))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
-                        .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
-                )
+        }
+    }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
-                    outCell(lang == .vi ? "Người dùng trả phí" : "Paid users", value: "\(model.paid)")
-                    outCell(lang == .vi ? "MRR khởi điểm" : "Seed MRR", value: fmtCurrency(model.mrr), hero: true)
-                    outCell(lang == .vi ? "ARR ước tính" : "Run-rate ARR", value: fmtCurrency(model.arr))
-                    outCell(lang == .vi ? "LTV / người dùng" : "LTV / user", value: fmtCurrency(Double(model.ltv)))
-                    outCell(lang == .vi ? "Tuổi thọ (theo rời bỏ)" : "Churn-adj. life", value: "\(model.life)mo")
-                    outCell(lang == .vi ? "Hòa vốn (số người dùng)" : "Break-even users", value: "\(model.breakeven)")
-                }
+    private var assumptions: some View {
+        panel(title: lang == .vi ? "Giả định" : "Assumptions") {
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(payload.inputs, id: \.key) { v in sliderRow(v) }
+            }
+        }
+    }
 
-                if let summary, !summary.isEmpty {
-                    DeliverableProse(text: summary)
+    private var resultsPanel: some View {
+        panel(title: lang == .vi ? "Kết quả" : "Results") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(payload.outputs.dropFirst().enumerated()), id: \.element.key) { idx, o in
+                    VStack(alignment: .leading, spacing: 0) {
+                        if idx > 0 { DeliverableRule() }
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(name(o.key, o.name))
+                                    .font(.pixelSystem(size: 13.5, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.primaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                formulaLine(o.formula)
+                            }
+                            Spacer(minLength: 8)
+                            Text(SheetFormat.value(results[o.key], unit: o.unit))
+                                .font(.pixelSystem(size: 15, weight: .bold))
+                                .monospacedDigit()
+                                .foregroundColor(CodepetTheme.primaryText)
+                        }
+                        .padding(.vertical, 10)
+                    }
                 }
             }
         }
     }
 
-    private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
-                            step: Double, display: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(.pixelSystem(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.mutedText)
-                Spacer()
-                Text(display)
-                    .font(.pixelSystem(size: 12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-            }
-            Slider(value: value, in: range, step: step)
-                .tint(CodepetTheme.accentPurple)
-        }
-    }
-
-    private func outCell(_ label: String, value: String, hero: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.pixelSystem(size: 10, weight: .medium))
+    private func panel<Content: View>(title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title.uppercased())
+                .font(.pixelSystem(size: 10.5, weight: .bold))
+                .kerning(1)
                 .foregroundColor(CodepetTheme.mutedText)
-            Text(value)
-                .font(.pixelSystem(size: hero ? 16 : 14, weight: .bold))
-                .foregroundColor(hero ? CodepetTheme.accentPurple : CodepetTheme.primaryText)
+            content()
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
                 .fill(CodepetTheme.surface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: CodepetTheme.cardRadius, style: .continuous)
                 .strokeBorder(CodepetTheme.hairline, lineWidth: 1)
         )
     }
 
-    /// Ports web's `fmt` helper (lib/helpers.ts): `$1.4k` above 1000, plain
-    /// dollars below — a bare integer when the rounded value has no fractional
-    /// part (matching JS Number stringification dropping a trailing `.0`).
-    private func fmtCurrency(_ n: Double) -> String {
-        guard n >= 1000 else { return "$\(Int(n.rounded()))" }
-        let k = (n / 100).rounded() / 10
-        if k == k.rounded() {
-            return "$\(Int(k))k"
+    private func sliderRow(_ v: SheetVariable) -> some View {
+        let binding = Binding<Double>(get: { values[v.key] ?? v.val }, set: { values[v.key] = $0 })
+        let step = v.step > 0 ? v.step : 1
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                Text(name(v.key, v.name))
+                    .font(.pixelSystem(size: 13, weight: .semibold))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(SheetFormat.input(binding.wrappedValue, unit: v.unit, step: step))
+                    .font(.pixelSystem(size: 12.5, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Capsule().fill(CodepetTheme.pageBackground))
+                    .overlay(Capsule().strokeBorder(CodepetTheme.hairline, lineWidth: 1))
+            }
+            Slider(value: binding, in: Self.safeRange(v), step: step)
+                .tint(CodepetTheme.accentPurple)
+                .accessibilityLabel(Text(name(v.key, v.name)))
+            HStack {
+                Text(SheetFormat.input(v.min, unit: v.unit, step: step))
+                Spacer()
+                Text(SheetFormat.input(v.max, unit: v.unit, step: step))
+            }
+            .font(.pixelSystem(size: 10.5))
+            .monospacedDigit()
+            .foregroundColor(CodepetTheme.mutedText)
         }
-        return "$\(String(format: "%.1f", k))k"
+    }
+
+    private func formulaLine(_ formula: String) -> some View {
+        Text("= " + SheetFormula.display(formula))
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(CodepetTheme.mutedText)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+    }
+}
+
+/// How a sheet prints a number, per unit. `$` keeps the old viewer's `$1.4k` form above 1000
+/// (a port of web's `fmt`), so a lifted sheet reads as it always did; below 10 a fractional
+/// dollar keeps its cents, because a cost per user of $0.44 is not "$0".
+enum SheetFormat {
+    static func value(_ n: Double?, unit: String) -> String {
+        guard let n, n.isFinite else { return "—" }
+        switch unit {
+        case "$":  return currency(n)
+        case "%":  return "\(Int(n.rounded()))%"
+        case "mo": return "\(Int(n.rounded()))mo"
+        default:   return plain(n, decimals: n == n.rounded() ? 0 : 2)
+        }
+    }
+
+    /// An input's value, to the precision of its step — a $0.0021 per-minute cost must not read "$0".
+    static func input(_ n: Double, unit: String, step: Double) -> String {
+        guard n.isFinite else { return "—" }
+        let d = decimals(of: step)
+        switch unit {
+        case "$":  return d == 0 ? currency(n) : "$" + String(format: "%.\(d)f", n)
+        case "%":  return plain(n, decimals: d) + "%"
+        case "mo": return plain(n, decimals: d) + "mo"
+        default:   return plain(n, decimals: d)
+        }
+    }
+
+    static func decimals(of step: Double) -> Int {
+        guard step.isFinite, step > 0, step < 1 else { return 0 }
+        var d = 0, x = step
+        while d < 6, abs(x - x.rounded()) > 1e-9 { x *= 10; d += 1 }
+        return d
+    }
+
+    private static func currency(_ n: Double) -> String {
+        if abs(n) >= 1000 {
+            let k = (n / 100).rounded() / 10
+            return k == k.rounded() ? "$\(Int(k))k" : "$\(String(format: "%.1f", k))k"
+        }
+        if abs(n) < 10, n != n.rounded() { return "$" + String(format: "%.2f", n) }
+        return "$\(Int(n.rounded()))"
+    }
+
+    private static func plain(_ n: Double, decimals: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "en_US")
+        f.minimumFractionDigits = decimals
+        f.maximumFractionDigits = decimals
+        return f.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 }
 

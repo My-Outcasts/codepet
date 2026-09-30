@@ -2,6 +2,7 @@
 // unit-tested (and verified) without loading the heavy Cloud-Functions module tree.
 // The IO handler lives in runTask.ts and imports from here.
 
+import { evalFormula, formulaRefs, parseFormula, type FormulaNode } from "./sheetFormula";
 import { companionFor } from "./companyChatCore";
 import {
   departmentBrief,
@@ -120,7 +121,7 @@ const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
   ["post", "`platform` = where it will be published (\"X\", \"LinkedIn\", \"Threads\"…). The `body` is the post itself and must fit that platform's length limit; `limit` = that limit in characters if you know it."],
   ["email", "`subject` = the subject line (never repeated as a heading in the body); `to` = who it is for, in the founder's own words or as a type of person (\"the two who asked to pay\", \"beta testers who went quiet\"), never an invented name and never an address — empty if unknown. The `body` is the email itself."],
   ["calendar", "a 2-week build-in-public content calendar — `weeks[]` = exactly 2 {label, items[]}, each week's `items[]` = 2-3 {day, kind, body} posts specific to this company."],
-  ["sheet", "a pricing model — the 4 fixed inputs `price`, `waitlist`, `conversion`, `churn`, each {val, min, max, step} with a realistic default and sensible range, plus `summary` (one paragraph on what the model shows at those defaults). Never add a 5th input."],
+  ["sheet", "a live model of whatever the task is about (pricing, costs, a runway, a funnel) — `inputs[]` = 2-8 assumptions the founder can move, each {key, name, unit, val, min, max, step}: `key` a short snake_case id, `unit` \"$\", \"%\" (8 means 8%), \"users\", \"mo\" or a short word, `val` a realistic default inside a sensible `min`-`max` range; `outputs[]` = 1-8 results, the most important FIRST, each {key, name, unit, formula}. A `formula` uses input keys, other output keys, numbers, + - * / ^ ( ) and min, max, round, ceil, floor — e.g. `round(waitlist * conversion / 100)`. Never write an output's value; the app computes it from the formula. `summary` = one paragraph on what the model shows at the defaults."],
   ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
   ["screens", "exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order."],
 ];
@@ -278,13 +279,12 @@ export interface CalendarItem { day: string; kind: string; body: string; }
 export interface CalendarWeek { label: string; items: CalendarItem[]; }
 export interface CalendarPayload { weeks: CalendarWeek[]; }
 export interface SheetInputField { val: number; min: number; max: number; step: number; }
-export interface SheetPayload {
-  price: SheetInputField;
-  waitlist: SheetInputField;
-  conversion: SheetInputField;
-  churn: SheetInputField;
-  summary: string;
-}
+/** One assumption the founder can move. */
+export interface SheetVariable { key: string; name: string; unit: string; val: number; min: number; max: number; step: number; }
+/** One result, written as a formula; `value` is computed HERE at the defaults, never taken from the model. */
+export interface SheetOutput { key: string; name: string; unit: string; formula: string; value: number; }
+/** `legacy`: lifted from the old fixed four, so the client can localise the names it knows. */
+export interface SheetPayload { inputs: SheetVariable[]; outputs: SheetOutput[]; summary: string; legacy?: true; }
 export interface SiteCard { h: string; p: string; }
 export interface SitePayload {
   title: string;
@@ -343,6 +343,83 @@ const POST_PLATFORMS: ReadonlyArray<{ label: string; names: readonly string[]; l
   { label: "Mastodon", names: ["mastodon"], limit: 500 },
   { label: "Instagram", names: ["instagram"], limit: 2200 },
 ];
+const SHEET_KEY = /^[a-z][a-z0-9_]{0,23}$/;
+const SHEET_MAX = 8;
+
+/**
+ * The old fixed model, as a model. Every sheet filed before CP-002 D has these four inputs, and
+ * the six outputs are exactly what `SheetModel.compute` (Swift) did — same floors (price at 1,
+ * churn at 1%), same rounding — so a lifted sheet shows the same numbers it always did. The one
+ * addition is `costs`: break-even always divided by a hard-coded $2,500 no founder could see or
+ * move, and it is now the fifth input (founder decision, 30 Sep). The Swift decode lifts with the
+ * same table (`SheetPayload.lift`), for sheets already stored.
+ */
+const LEGACY_SHEET_INPUTS: ReadonlyArray<readonly [string, string, string]> = [
+  ["price", "Pro price / mo", "$"], ["waitlist", "Waitlist size", "users"],
+  ["conversion", "Waitlist → paid", "%"], ["churn", "Monthly churn", "%"],
+];
+const LEGACY_SHEET_COSTS = { key: "costs", name: "Monthly costs", unit: "$", val: 2500, min: 0, max: 20000, step: 100 };
+const LEGACY_SHEET_OUTPUTS: ReadonlyArray<readonly [string, string, string, string]> = [
+  ["mrr", "Seed MRR", "$", "paid * max(price, 1)"],
+  ["paid", "Paid users", "users", "round(waitlist * conversion / 100)"],
+  ["arr", "Run-rate ARR", "$", "mrr * 12"],
+  ["ltv", "LTV / user", "$", "round(max(price, 1) / (max(churn, 1) / 100))"],
+  ["life", "Churn-adj. life", "mo", "round(100 / max(churn, 1))"],
+  ["breakeven", "Break-even users", "users", "ceil(costs / max(price, 1))"],
+];
+
+function coerceSheetVariable(v: unknown): SheetVariable | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const key = s(o.key, 24).toLowerCase();
+  const min = num(o.min), max = num(o.max), step = num(o.step), val = num(o.val);
+  if (!SHEET_KEY.test(key) || min === null || max === null || step === null || val === null) return null;
+  if (!(min < max) || !(step > 0)) return null;
+  return { key, name: s(o.name, 40) || key, unit: s(o.unit, 12), val: Math.min(max, Math.max(min, val)), min, max, step };
+}
+
+/** Inputs + raw outputs → the sheet, with every output that cannot be computed dropped. */
+function buildSheet(inputs: SheetVariable[], rawOutputs: unknown[], summary: string, legacy: boolean): SheetPayload | null {
+  if (!inputs.length) return null;
+  const inputKeys = inputs.map((i) => i.key);
+  const seen = new Set(inputKeys);
+  let outs = rawOutputs
+    .map((v) => {
+      const o = (v ?? {}) as Record<string, unknown>;
+      const key = s(o.key, 24).toLowerCase();
+      const formula = s(o.formula, 200);
+      const node = parseFormula(formula);
+      if (!SHEET_KEY.test(key) || seen.has(key) || !node) return null;
+      seen.add(key);
+      return { key, name: s(o.name, 40) || key, unit: s(o.unit, 12), formula, node };
+    })
+    .filter(<T,>(x: T | null): x is T => x !== null)
+    .slice(0, SHEET_MAX);
+  // Kahn's algorithm: place an output once everything it reads is an input or already placed.
+  // Whatever never becomes placeable reads an unknown name, itself, or a cycle — or is built on
+  // one of those — and is dropped. Outputs may refer to one another in any listed order.
+  const inputSet = new Set(inputKeys);
+  const placed: string[] = [];
+  const placedSet = new Set<string>();
+  for (let progress = true; progress;) {
+    progress = false;
+    for (const o of outs) {
+      if (placedSet.has(o.key)) continue;
+      if ([...formulaRefs(o.node)].every((r) => inputSet.has(r) || placedSet.has(r))) {
+        placed.push(o.key); placedSet.add(o.key); progress = true;
+      }
+    }
+  }
+  outs = outs.filter((o) => placedSet.has(o.key));
+  const order = placed;
+  const env: Record<string, number> = Object.fromEntries(inputs.map((i) => [i.key, i.val]));
+  for (const k of order) env[k] = evalFormula((outs.find((o) => o.key === k) as { node: FormulaNode }).node, env);
+  const outputs = outs
+    .filter((o) => Number.isFinite(env[o.key]))
+    .map(({ key, name, unit, formula }) => ({ key, name, unit, formula, value: env[key] as number }));
+  if (!outputs.length) return null;
+  return { inputs, outputs, summary, ...(legacy && { legacy: true as const }) };
+}
+
 const EMAIL_ADDRESS = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -432,19 +509,26 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
     return weeks.length ? { weeks } : null;
   }
   if (kind === "sheet") {
-    const input = (v: unknown): SheetInputField | null => {
-      const o = (v ?? {}) as Record<string, unknown>;
-      const val = num(o.val); const min = num(o.min); const max = num(o.max); const step = num(o.step);
-      return val !== null && min !== null && max !== null && step !== null ? { val, min, max, step } : null;
-    };
-    const price = input(r.price);
-    const waitlist = input(r.waitlist);
-    const conversion = input(r.conversion);
-    const churn = input(r.churn);
     const summary = s(r.summary, 800);
-    return price && waitlist && conversion && churn && summary
-      ? { price, waitlist, conversion, churn, summary }
-      : null;
+    if (Array.isArray(r.inputs)) {
+      const seen = new Set<string>();
+      const inputs = r.inputs.map(coerceSheetVariable)
+        .filter((i): i is SheetVariable => i !== null && !seen.has(i.key) && !!seen.add(i.key))
+        .slice(0, SHEET_MAX);
+      return buildSheet(inputs, Array.isArray(r.outputs) ? r.outputs : [], summary, false);
+    }
+    // The old fixed four — a sheet filed before CP-002 D, or a model still answering the old
+    // prompt. All four must be there, as they always had to be.
+    const legacy = LEGACY_SHEET_INPUTS.map(([key, name, unit]) => {
+      const o = (r[key] ?? {}) as Record<string, unknown>;
+      return coerceSheetVariable({ key, name, unit, val: o.val, min: o.min, max: o.max, step: o.step });
+    });
+    if (legacy.some((i) => i === null)) return null;
+    return buildSheet(
+      [...(legacy as SheetVariable[]), { ...LEGACY_SHEET_COSTS }],
+      LEGACY_SHEET_OUTPUTS.map(([key, name, unit, formula]) => ({ key, name, unit, formula })),
+      summary, true
+    );
   }
   if (kind === "site") {
     const card = (v: unknown): SiteCard | null => {
@@ -580,10 +664,8 @@ export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   steps: ["plan", "site"],
   messages: ["dms"],
   weeks: ["calendar"],
-  price: ["sheet"],
-  waitlist: ["sheet"],
-  conversion: ["sheet"],
-  churn: ["sheet"],
+  inputs: ["sheet"],
+  outputs: ["sheet"],
   summary: ["sheet"],
   title: ["site"],
   brand: ["site"],
@@ -645,14 +727,15 @@ export const DELIVERABLE_TOOL = {
               label: { type: "string" },
               items: { type: "array", items: { type: "object", additionalProperties: false, properties: { day: { type: "string" }, kind: { type: "string" }, body: { type: "string" } }, required: ["day", "kind", "body"] } },
             }, required: ["label", "items"] } },
-          price: { type: "object", description: "sheet: monthly Pro price input {val,min,max,step}.",
-            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
-          waitlist: { type: "object", description: "sheet: waitlist size input {val,min,max,step}.",
-            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
-          conversion: { type: "object", description: "sheet: conversion % input {val,min,max,step}.",
-            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
-          churn: { type: "object", description: "sheet: monthly churn % input {val,min,max,step}.",
-            additionalProperties: false, properties: { val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" } }, required: ["val", "min", "max", "step"] },
+          inputs: { type: "array", description: "sheet: 2-8 assumptions the founder can move.",
+            items: { type: "object", additionalProperties: false, properties: {
+              key: { type: "string" }, name: { type: "string" }, unit: { type: "string" },
+              val: { type: "number" }, min: { type: "number" }, max: { type: "number" }, step: { type: "number" },
+            }, required: ["key", "name", "unit", "val", "min", "max", "step"] } },
+          outputs: { type: "array", description: "sheet: 1-8 results, most important first, each a formula over the inputs and other outputs.",
+            items: { type: "object", additionalProperties: false, properties: {
+              key: { type: "string" }, name: { type: "string" }, unit: { type: "string" }, formula: { type: "string" },
+            }, required: ["key", "name", "unit", "formula"] } },
           summary: { type: "string", description: "sheet: one paragraph on what the model shows at the defaults." },
           title: { type: "string", description: "site: browser tab / SEO title." },
           brand: { type: "string", description: "site: company or product name." },

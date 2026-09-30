@@ -100,8 +100,7 @@ final class LibraryFixturesTests: XCTestCase {
         XCTAssertNotNil(sheet)
         // A degenerate range would crash SwiftUI's Slider — SheetViewer guards it, but a fixture
         // should not be the thing exercising that guard.
-        XCTAssertLessThan(sheet!.price.min, sheet!.price.max)
-        XCTAssertLessThan(sheet!.churn.min, sheet!.churn.max)
+        for v in sheet!.inputs { XCTAssertLessThan(v.min, v.max, v.key) }
     }
 
     /// The payload-less kinds must NOT carry one — `.post` and `.legal` render `title` + `body`,

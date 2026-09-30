@@ -215,3 +215,60 @@ describe("buildRunTaskPrompt structured guide", () => {
     expect(p).toMatch(/screens:.*connect.*session.*recap/);
   });
 });
+
+/**
+ * `legal` fills `sections` (CP-002 A, spec Layer 2).
+ *
+ * Before this the schema documented `sections` as "doc/legal", the prompt never asked Legal to
+ * fill it, `legal` was not a structured kind, and so even a model that filled it anyway had the
+ * payload dropped on the way in. The prompt is the one that was wrong.
+ */
+describe("legal sections", () => {
+  const clause = (h: string, p = "Clause text.") => ({ h, p });
+
+  it("keeps ordered clauses and drops empty ones", () => {
+    expect(coercePayload("legal", { sections: [clause("Definitions"), clause("", "orphan"), clause("Term")] }))
+      .toEqual({ sections: [clause("Definitions"), clause("Term")] });
+  });
+
+  it("strips the model's own numbering, because the viewer numbers them", () => {
+    const got: any = coercePayload("legal", { sections: [
+      clause("1. Definitions"), clause("§2 Term"), clause("Section 3: Governing law"),
+      clause("4) Notices"), clause("Clause 5 — Severability"), clause("2FA requirements"),
+    ] });
+    expect(got.sections.map((x: any) => x.h)).toEqual([
+      "Definitions", "Term", "Governing law", "Notices", "Severability", "2FA requirements",
+    ]);
+  });
+
+  it("does not cap a real policy at a doc's five blocks", () => {
+    const many = Array.from({ length: 14 }, (_, i) => clause(`Clause ${String.fromCharCode(65 + i)}`));
+    expect((coercePayload("legal", { sections: many }) as any).sections).toHaveLength(14);
+  });
+
+  it("is null without a clause, and carries no doc-only fields", () => {
+    expect(coercePayload("legal", { sections: [] })).toBeNull();
+    expect(coercePayload("legal", { call: "c", next: ["n"] })).toBeNull();
+    expect(coercePayload("legal", { call: "c", sections: [clause("Term")] })).toEqual({ sections: [clause("Term")] });
+  });
+
+  it("reaches the stored deliverable instead of being dropped", () => {
+    const out = coerceDeliverable({ kind: "legal", title: "NDA", body: "md", payload: { sections: [clause("Term")] } }, "task", "legal");
+    expect(out).toEqual({ kind: "legal", title: "NDA", body: "md", payload: { sections: [clause("Term")] } });
+  });
+
+  it("a legal deliverable without sections still files on its body (legacy)", () => {
+    expect(coerceDeliverable({ kind: "legal", title: "NDA", body: "md" }, "task", "legal"))
+      .toEqual({ kind: "legal", title: "NDA", body: "md" });
+  });
+
+  it("the prompt asks Legal for sections, and does not ask Engineering", () => {
+    const p = (deptKey: string) => buildRunTaskPrompt({
+      companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey,
+    } as any);
+    expect(p("legal")).toMatch(/- legal: .*`sections\[\]`/);
+    expect(p("fin")).toMatch(/- legal: /);
+    expect(p("eng")).not.toMatch(/- legal: /);
+    expect(p("design")).not.toMatch(/- legal: /);
+  });
+});

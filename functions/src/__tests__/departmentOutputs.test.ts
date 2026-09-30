@@ -379,8 +379,10 @@ describe("a dept-less task's prompt is unchanged", () => {
     expect(p()).not.toContain("This function produces");
   });
 
-  test("still names all eight kinds in the payload guide preamble", () => {
-    expect(p()).toContain("checklist, doc, plan, dms, calendar, sheet, site, or screens");
+  // Nine since CP-002 A: `legal` became a structured kind, and a dept-less task can still choose
+  // it, so it has to be told how to fill its clauses too. The only intended change to this prompt.
+  test("names every structured kind in the payload guide preamble", () => {
+    expect(p()).toContain("checklist, doc, legal, plan, dms, calendar, sheet, site, or screens");
   });
 });
 

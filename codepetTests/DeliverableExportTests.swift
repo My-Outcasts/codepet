@@ -102,8 +102,8 @@ final class DeliverableExportTests: XCTestCase {
     }
 
     /// A kind with no payload still exports — the body is the deliverable. `.legal` is the
-    /// case that matters: its viewer reads only `body`, and the schema's `sections` is dead
-    /// for it (see the spec's Layer 2 note).
+    /// case that matters: every legal draft filed before CP-002 A has no `sections`, so its body
+    /// is all there is. A legal draft WITH clauses is `LegalClausesTests`.
     func testLegalAndTextFallBackToTheMarkdownBody() throws {
         for kind in [DeliverableKind.legal, .text, .other] {
             let d = deliverable(kind, title: "Deletion promise", body: "One tap. Permanent.")

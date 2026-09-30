@@ -52,8 +52,10 @@ enum DeliverableExport {
             return [md(base, checklistMarkdown(d))]
         case .plan:
             return [md(base, planMarkdown(d))]
-        case .post, .email:
+        case .post:
             return [txt(base, d.body)]
+        case .email:
+            return [txt(base, emailText(d))]
         case .dms:
             return dmsFiles(d, base: base)
         case .sheet:
@@ -90,6 +92,11 @@ enum DeliverableExport {
         var out = "# \(d.title)\n\n\(call)\n"
         for s in p.sections ?? [] {
             out += "\n## \(s.h)\n\n\(s.p)\n"
+            if let source = s.sourceText { out += "\n_Source: \(source)_\n" }
+        }
+        if !p.rulesOutItems.isEmpty {
+            out += "\n## Rules out\n\n"
+            for r in p.rulesOutItems { out += "- \(r)\n" }
         }
         let next = p.next ?? []
         if !next.isEmpty {
@@ -102,7 +109,7 @@ enum DeliverableExport {
     private static func checklistMarkdown(_ d: Deliverable) -> String {
         guard let items = d.payload?.items, !items.isEmpty else { return titled(d, d.body) }
         var out = "# \(d.title)\n\n"
-        for i in items { out += "- [\(i.done ? "x" : " ")] \(i.t)\n" }
+        for i in items { out += i.markdownLine + "\n" }
         return out
     }
 
@@ -128,6 +135,16 @@ enum DeliverableExport {
         }
         if let r = p.risks, !r.isEmpty { out += "\n## Risk\n\n\(r)\n" }
         return out
+    }
+
+    /// The subject and recipient above the body, the way a mail client lays them out — so a
+    /// saved email says what goes in the subject field instead of losing it. A legacy email with
+    /// no subject exports its body alone, as before.
+    static func emailText(_ d: Deliverable) -> String {
+        guard let subject = d.payload?.emailSubject else { return d.body }
+        var head = "Subject: \(subject)\n"
+        if let to = d.payload?.emailTo { head += "To: \(to)\n" }
+        return head + "\n" + d.body
     }
 
     private static func txt(_ base: String, _ text: String) -> ExportFile {

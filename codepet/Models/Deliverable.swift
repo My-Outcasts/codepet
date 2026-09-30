@@ -1,8 +1,11 @@
 // codepet/Models/Deliverable.swift
 import Foundation
 
-struct ChecklistItem: Codable, Hashable { var t: String; var done: Bool }
-struct DocSection: Codable, Hashable { var h: String; var p: String }
+/// `owner`/`due` are optional (CP-002 C) — a checklist filed before them has neither, and the
+/// synthesized decode reads an absent optional as nil.
+struct ChecklistItem: Codable, Hashable { var t: String; var done: Bool; var owner: String? = nil; var due: String? = nil }
+/// `source` (CP-002 C) is what a doc section rests on; optional, and never set on a legal clause.
+struct DocSection: Codable, Hashable { var h: String; var p: String; var source: String? = nil }
 struct PlanChange: Codable, Hashable { var area: String; var edit: String }
 /// One outreach message TEMPLATE, addressed to an audience — "lapsed journaler",
 /// "r/CasualConversation" — never to a person (CP-002 B). The prompt used to ask for a "persona
@@ -208,6 +211,13 @@ struct DeliverablePayload: Codable, Hashable {
     var call: String?
     var sections: [DocSection]?
     var next: [String]?
+    var rulesOut: [String]?
+    // post (CP-002 C) — the limit is the server's for a known platform, see `POST_PLATFORMS`
+    var platform: String?
+    var limit: Int?
+    // email (CP-002 C) — `to` describes the recipient; never an address, never invented
+    var subject: String?
+    var to: String?
     // plan
     var goal: String?
     var steps: [String]?
@@ -224,7 +234,8 @@ struct DeliverablePayload: Codable, Hashable {
     var screens: ScreensPayload?
 
     init(items: [ChecklistItem]? = nil, call: String? = nil, sections: [DocSection]? = nil,
-         next: [String]? = nil, goal: String? = nil, steps: [String]? = nil,
+         next: [String]? = nil, rulesOut: [String]? = nil, platform: String? = nil,
+         limit: Int? = nil, subject: String? = nil, to: String? = nil, goal: String? = nil, steps: [String]? = nil,
          changes: [PlanChange]? = nil, verify: [String]? = nil, risks: String? = nil,
          messages: [DmMessage]? = nil, calendar: CalendarPayload? = nil,
          sheet: SheetPayload? = nil, site: SitePayload? = nil, screens: ScreensPayload? = nil) {
@@ -232,6 +243,11 @@ struct DeliverablePayload: Codable, Hashable {
         self.call = call
         self.sections = sections
         self.next = next
+        self.rulesOut = rulesOut
+        self.platform = platform
+        self.limit = limit
+        self.subject = subject
+        self.to = to
         self.goal = goal
         self.steps = steps
         self.changes = changes
@@ -246,6 +262,7 @@ struct DeliverablePayload: Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case items, call, sections, next, goal, steps, changes, verify, risks, messages
+        case rulesOut = "rules_out", platform, limit, subject, to
         case calendar, sheet, site, screens
     }
 
@@ -259,6 +276,11 @@ struct DeliverablePayload: Codable, Hashable {
         call = (try? c.decodeIfPresent(String.self, forKey: .call)) ?? nil
         sections = (try? c.decodeIfPresent([DocSection].self, forKey: .sections)) ?? nil
         next = (try? c.decodeIfPresent([String].self, forKey: .next)) ?? nil
+        rulesOut = (try? c.decodeIfPresent([String].self, forKey: .rulesOut)) ?? nil
+        platform = (try? c.decodeIfPresent(String.self, forKey: .platform)) ?? nil
+        limit = (try? c.decodeIfPresent(Int.self, forKey: .limit)) ?? nil
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? nil
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? nil
         goal = (try? c.decodeIfPresent(String.self, forKey: .goal)) ?? nil
         steps = (try? c.decodeIfPresent([String].self, forKey: .steps)) ?? nil
         changes = (try? c.decodeIfPresent([PlanChange].self, forKey: .changes)) ?? nil

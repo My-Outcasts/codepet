@@ -379,10 +379,11 @@ describe("a dept-less task's prompt is unchanged", () => {
     expect(p()).not.toContain("This function produces");
   });
 
-  // Nine since CP-002 A: `legal` became a structured kind, and a dept-less task can still choose
-  // it, so it has to be told how to fill its clauses too. The only intended change to this prompt.
+  // Eleven since CP-002: `legal` (A), then `post` and `email` (C) became structured kinds, and a
+  // dept-less task can still choose any of them, so it has to be told how to fill each. These are
+  // the only intended changes to this prompt.
   test("names every structured kind in the payload guide preamble", () => {
-    expect(p()).toContain("checklist, doc, legal, plan, dms, calendar, sheet, site, or screens");
+    expect(p()).toContain("checklist, doc, legal, plan, dms, post, email, calendar, sheet, site, or screens");
   });
 });
 
@@ -409,7 +410,7 @@ describe("every payload field is classified", () => {
   });
 
   test("the schema still declares the fields this map was written against", () => {
-    expect(declared.length).toBe(37);
+    expect(declared.length).toBe(42);
   });
 });
 

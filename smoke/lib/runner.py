@@ -114,7 +114,8 @@ def execute(app_path, mode, with_task, account, db_dir=None, runs_root=None,
                 # quit, reading underneath it is how phantom results happen.
                 if drive.quit_app():
                     results.append(_guarded("auth", auth_check.run, account,
-                                            db_dir=db_dir))
+                                            db_dir=db_dir, lines=capture.lines(),
+                                            uid=uid))
                 else:
                     results.append(Result("auth", ERROR, 0.0,
                                           "app did not quit; store not read"))

@@ -150,8 +150,78 @@ struct CalendarPayload: Codable, Hashable {
 // sheet decoder still reads in order to lift them.
 struct SheetInput: Codable, Hashable { var val: Double; var min: Double; var max: Double; var step: Double }
 
-// site
+// site — a hero, typed blocks in any order, a closing CTA (CP-002 E2)
 struct SiteContent: Codable, Hashable { var h: String; var p: String }
+
+struct SiteTier: Codable, Hashable {
+    var name: String
+    var price: String
+    var period: String
+    var points: [String]
+    var cta: String
+    var highlight: Bool
+
+    init(name: String, price: String, period: String = "", points: [String] = [], cta: String = "", highlight: Bool = false) {
+        self.name = name; self.price = price; self.period = period; self.points = points; self.cta = cta; self.highlight = highlight
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, price, period, points, cta, highlight }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        price = try c.decodeIfPresent(String.self, forKey: .price) ?? ""
+        period = try c.decodeIfPresent(String.self, forKey: .period) ?? ""
+        points = try c.decodeIfPresent([String].self, forKey: .points) ?? []
+        cta = try c.decodeIfPresent(String.self, forKey: .cta) ?? ""
+        highlight = try c.decodeIfPresent(Bool.self, forKey: .highlight) ?? false
+    }
+}
+
+/// One section between the hero and the closing CTA. `type` is kept as a string so a future type
+/// decodes rather than failing the page; `SiteViewer` draws the six it knows and skips the rest.
+/// Only the fields a type uses are filled: `items` for steps/features/faq, `text` (+ `by`) for
+/// quote/text, `tiers` for pricing.
+struct SiteBlock: Codable, Hashable {
+    var type: String
+    var eyebrow: String
+    var title: String
+    var items: [SiteContent]
+    var text: String
+    var by: String
+    var tiers: [SiteTier]
+
+    init(type: String, eyebrow: String = "", title: String = "", items: [SiteContent] = [],
+         text: String = "", by: String = "", tiers: [SiteTier] = []) {
+        self.type = type; self.eyebrow = eyebrow; self.title = title; self.items = items
+        self.text = text; self.by = by; self.tiers = tiers
+    }
+
+    private enum CodingKeys: String, CodingKey { case type, eyebrow, title, items, text, by, tiers }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
+        eyebrow = try c.decodeIfPresent(String.self, forKey: .eyebrow) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        items = (try? c.decodeIfPresent([SiteContent].self, forKey: .items)) ?? []
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        by = try c.decodeIfPresent(String.self, forKey: .by) ?? ""
+        tiers = (try? c.decodeIfPresent([SiteTier].self, forKey: .tiers)) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(eyebrow, forKey: .eyebrow)
+        try c.encode(title, forKey: .title)
+        if !items.isEmpty { try c.encode(items, forKey: .items) }
+        if !text.isEmpty { try c.encode(text, forKey: .text) }
+        if !by.isEmpty { try c.encode(by, forKey: .by) }
+        if !tiers.isEmpty { try c.encode(tiers, forKey: .tiers) }
+    }
+}
+
 struct SitePayload: Codable, Hashable {
     var title: String
     var brand: String
@@ -161,37 +231,37 @@ struct SitePayload: Codable, Hashable {
     var sub: String
     var ctaPrimary: String
     var ctaSecondary: String
-    var howEyebrow: String
-    var howTitle: String
-    var steps: [SiteContent]
-    var featEyebrow: String
-    var featTitle: String
-    var features: [SiteContent]
-    var quote: String
-    var quoteBy: String
+    var blocks: [SiteBlock]
     var finalTitle: String
     var finalSub: String
     var finalCta: String
     var accent: String
     var footNote: String
 
-    private enum CodingKeys: String, CodingKey {
-        case title, brand, kicker, headline, headlineHi, sub, ctaPrimary, ctaSecondary
-        case howEyebrow, howTitle, steps, featEyebrow, featTitle, features, quote, quoteBy
-        case finalTitle, finalSub, finalCta, accent, footNote
+    init(title: String, brand: String, kicker: String = "", headline: String, headlineHi: String = "",
+         sub: String = "", ctaPrimary: String, ctaSecondary: String = "", blocks: [SiteBlock],
+         finalTitle: String, finalSub: String = "", finalCta: String, accent: String = "", footNote: String = "") {
+        self.title = title; self.brand = brand; self.kicker = kicker; self.headline = headline
+        self.headlineHi = headlineHi; self.sub = sub; self.ctaPrimary = ctaPrimary; self.ctaSecondary = ctaSecondary
+        self.blocks = blocks; self.finalTitle = finalTitle; self.finalSub = finalSub; self.finalCta = finalCta
+        self.accent = accent; self.footNote = footNote
     }
 
-    /// Custom decode: `title`, `brand`, `headline`, `ctaPrimary`, `finalTitle`,
-    /// `finalCta` are the REQUIRED anchor fields — used unconditionally (no
-    /// `.isEmpty` guard) by `SiteViewer.buildHTML`, so they stay a plain `decode`
-    /// and still THROW when absent. This preserves the steps-collision fix: a PLAN
-    /// payload has neither `title` nor `headline`, so `SitePayload.init` throws and
-    /// `.site` stays nil via `try?` in `DeliverablePayload`.
+    private enum CodingKeys: String, CodingKey {
+        case title, brand, kicker, headline, headlineHi, sub, ctaPrimary, ctaSecondary
+        case blocks, finalTitle, finalSub, finalCta, accent, footNote
+        // the pre-CP-002-E2 flat sections, read only to lift them into `blocks`
+        case howEyebrow, howTitle, steps, featEyebrow, featTitle, features, quote, quoteBy
+    }
+
+    /// `title`, `brand`, `headline`, `ctaPrimary`, `finalTitle`, `finalCta` are the REQUIRED
+    /// anchor fields — used unconditionally by `SiteViewer.buildHTML`, so they stay a plain
+    /// `decode` and still THROW when absent. That is what keeps a PLAN payload (which has
+    /// `steps` but no `title`) from decoding as a site. Everything else is soft.
     ///
-    /// Every other field here is genuinely soft content — each is guarded by
-    /// `.isEmpty` in `buildHTML` (or, for `accent`, by `safeHex`'s fallback) — so a
-    /// CF omitting e.g. `quoteBy` (no testimonial byline) degrades that one field to
-    /// "" / [] instead of throwing away the whole site payload.
+    /// A page filed before CP-002 E2 has flat steps/features/quote and no `blocks`; they are
+    /// lifted into blocks in the order the page always drew them, so `buildHTML` produces the
+    /// same bytes it did (`SiteLegacyParityTests`). Encoding writes `blocks` only.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = try c.decode(String.self, forKey: .title)
@@ -205,17 +275,33 @@ struct SitePayload: Codable, Hashable {
         headlineHi = try c.decodeIfPresent(String.self, forKey: .headlineHi) ?? ""
         sub = try c.decodeIfPresent(String.self, forKey: .sub) ?? ""
         ctaSecondary = try c.decodeIfPresent(String.self, forKey: .ctaSecondary) ?? ""
-        howEyebrow = try c.decodeIfPresent(String.self, forKey: .howEyebrow) ?? ""
-        howTitle = try c.decodeIfPresent(String.self, forKey: .howTitle) ?? ""
-        steps = try c.decodeIfPresent([SiteContent].self, forKey: .steps) ?? []
-        featEyebrow = try c.decodeIfPresent(String.self, forKey: .featEyebrow) ?? ""
-        featTitle = try c.decodeIfPresent(String.self, forKey: .featTitle) ?? ""
-        features = try c.decodeIfPresent([SiteContent].self, forKey: .features) ?? []
-        quote = try c.decodeIfPresent(String.self, forKey: .quote) ?? ""
-        quoteBy = try c.decodeIfPresent(String.self, forKey: .quoteBy) ?? ""
         finalSub = try c.decodeIfPresent(String.self, forKey: .finalSub) ?? ""
         accent = try c.decodeIfPresent(String.self, forKey: .accent) ?? ""
         footNote = try c.decodeIfPresent(String.self, forKey: .footNote) ?? ""
+
+        if c.contains(.blocks) {
+            blocks = (try? c.decode([SiteBlock].self, forKey: .blocks)) ?? []
+        } else {
+            let str = { (k: CodingKeys) in (try? c.decodeIfPresent(String.self, forKey: k)) ?? "" }
+            let cards = { (k: CodingKeys) in (try? c.decodeIfPresent([SiteContent].self, forKey: k)) ?? [] }
+            blocks = [
+                SiteBlock(type: "steps", eyebrow: str(.howEyebrow), title: str(.howTitle), items: cards(.steps)),
+                SiteBlock(type: "features", eyebrow: str(.featEyebrow), title: str(.featTitle), items: cards(.features)),
+                SiteBlock(type: "quote", text: str(.quote), by: str(.quoteBy)),
+            ].filter { !$0.items.isEmpty || !$0.text.isEmpty }
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title); try c.encode(brand, forKey: .brand)
+        try c.encode(kicker, forKey: .kicker); try c.encode(headline, forKey: .headline)
+        try c.encode(headlineHi, forKey: .headlineHi); try c.encode(sub, forKey: .sub)
+        try c.encode(ctaPrimary, forKey: .ctaPrimary); try c.encode(ctaSecondary, forKey: .ctaSecondary)
+        try c.encode(blocks, forKey: .blocks)
+        try c.encode(finalTitle, forKey: .finalTitle); try c.encode(finalSub, forKey: .finalSub)
+        try c.encode(finalCta, forKey: .finalCta); try c.encode(accent, forKey: .accent)
+        try c.encode(footNote, forKey: .footNote)
     }
 }
 

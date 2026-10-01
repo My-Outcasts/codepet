@@ -174,17 +174,29 @@ describe("coercePayload", () => {
       quote: "", quoteBy: "", finalTitle: "Start today", finalSub: "", finalCta: "Sign up",
       accent: "#6E8E68", footNote: "© 2026 Acme",
     };
-    it("accepts a valid full payload", () => {
-      const p = coercePayload("site", base);
-      expect(p).toEqual(base);
+    // CP-002 E2: the flat steps/features/quote are lifted into typed `blocks[]`, in the order
+    // the page always drew them, so an old page renders the same (SiteLegacyParityTests).
+    it("a legacy full payload lifts into blocks, in the old order", () => {
+      const p: any = coercePayload("site", base);
+      expect(p.blocks.map((b: any) => b.type)).toEqual(["steps", "features"]);
+      expect(p.blocks[0]).toEqual({ type: "steps", eyebrow: "How it works", title: "Three steps", items: base.steps });
+      for (const gone of ["steps", "features", "howEyebrow", "howTitle", "featEyebrow", "featTitle", "quote", "quoteBy"]) {
+        expect(p).not.toHaveProperty(gone);
+      }
+      expect(p).toMatchObject({ headline: "Ship faster", finalCta: "Sign up", accent: "#6E8E68" });
     });
-    it("clips steps/features over-count to 3", () => {
+    it("a legacy quote becomes a quote block", () => {
+      const p: any = coercePayload("site", { ...base, quote: "It works.", quoteBy: "a user" });
+      expect(p.blocks[2]).toEqual({ type: "quote", eyebrow: "", title: "", text: "It works.", by: "a user" });
+    });
+    // Was "clips steps/features over-count to 3".
+    it("no longer clips a list at three", () => {
       const p: any = coercePayload("site", { ...base, steps: [...base.steps, { h: "Extra", p: "Extra." }] });
-      expect(p.steps).toHaveLength(3);
+      expect(p.blocks[0].items).toHaveLength(4);
     });
-    it("returns null when a required field is missing", () => {
+    it("returns null when a required field is missing, or there is nothing below the hero", () => {
       expect(coercePayload("site", { ...base, headline: "" })).toBeNull();
-      expect(coercePayload("site", { ...base, steps: [] })).toBeNull();
+      expect(coercePayload("site", { ...base, steps: [], features: [] })).toBeNull();
       expect(coercePayload("site", {})).toBeNull();
     });
   });
@@ -548,5 +560,56 @@ describe("calendar phases", () => {
     const props = (deliverableTool("mkt").input_schema as any).properties.payload.properties;
     expect(props).toHaveProperty("phases");
     expect(props).not.toHaveProperty("weeks");
+  });
+});
+
+/** CP-002 E2: a landing page is a hero, typed blocks in any order, and a closing CTA. */
+describe("site blocks", () => {
+  const hero = { title: "Murror", brand: "Murror", headline: "AI that brings people", ctaPrimary: "Start free", finalTitle: "Start", finalCta: "Go", accent: "#6E8E68" };
+  const site = (blocks: unknown[]) => coercePayload("site", { ...hero, blocks }) as any;
+
+  it("keeps all six types, in the model's order", () => {
+    const got = site([
+      { type: "faq", eyebrow: "Questions", title: "Before you ask", items: [{ h: "Is this therapy?", p: "No." }] },
+      { type: "pricing", title: "Pricing", tiers: [
+        { name: "Free", price: "$0", period: "", points: ["14 days of history"], cta: "Start free", highlight: false },
+        { name: "Practice", price: "$6", period: "/ month", points: ["History forever"], cta: "Start", highlight: true }] },
+      { type: "text", title: "Why", text: "Because." },
+      { type: "quote", text: "It works.", by: "a user" },
+      { type: "steps", title: "How", items: [{ h: "a", p: "b" }] },
+      { type: "features", title: "What", items: [{ h: "c", p: "d" }] },
+    ]);
+    expect(got.blocks.map((b: any) => b.type)).toEqual(["faq", "pricing", "text", "quote", "steps", "features"]);
+    expect(got.blocks[1].tiers[1]).toEqual({ name: "Practice", price: "$6", period: "/ month", points: ["History forever"], cta: "Start", highlight: true });
+  });
+  it("drops an unknown type, and a block with nothing in it", () => {
+    const got = site([{ type: "carousel", title: "x", items: [{ h: "a", p: "b" }] }, { type: "faq", title: "empty", items: [] },
+      { type: "pricing", tiers: [{ name: "", price: "" }] }, { type: "text", text: "kept" }]);
+    expect(got.blocks.map((b: any) => b.type)).toEqual(["text"]);
+  });
+  it("never lets HTML through: text is text", () => {
+    const got = site([{ type: "text", text: "<script>x</script>" }]);
+    expect(got.blocks[0].text).toBe("<script>x</script>"); // stored as-is; SiteViewer escapes every string it writes
+  });
+  it("caps at 8 blocks, 8 items, 4 tiers, 6 points", () => {
+    const items = Array.from({ length: 10 }, (_, i) => ({ h: `h${i}`, p: "p" }));
+    const got = site([...Array.from({ length: 10 }, () => ({ type: "steps", title: "t", items })),]);
+    expect(got.blocks).toHaveLength(8);
+    expect(got.blocks[0].items).toHaveLength(8);
+    const tiers = Array.from({ length: 6 }, (_, i) => ({ name: `T${i}`, price: "$1", points: Array.from({ length: 9 }, (_, j) => `p${j}`), cta: "c" }));
+    const pr = site([{ type: "pricing", tiers }]).blocks[0];
+    expect(pr.tiers).toHaveLength(4);
+    expect(pr.tiers[0].points).toHaveLength(6);
+  });
+  it("the prompt offers the six types and drops the fixed three-and-three", () => {
+    const p = buildRunTaskPrompt({ companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey: "design" } as any);
+    const line = p.split("\n").find((l) => l.startsWith("- site: ")) ?? "";
+    expect(line).toContain("`blocks[]`");
+    for (const t of ["`steps`", "`features`", "`faq`", "`quote`", "`text`", "`pricing`"]) expect(line).toContain(t);
+    expect(p).not.toContain("exactly 3 `steps[]`");
+    expect(p).not.toContain("exactly 3 `features[]`");
+    const props = (deliverableTool("design").input_schema as any).properties.payload.properties;
+    expect(props).toHaveProperty("blocks");
+    for (const gone of ["features", "howEyebrow", "howTitle", "featEyebrow", "featTitle", "quote", "quoteBy"]) expect(props).not.toHaveProperty(gone);
   });
 });

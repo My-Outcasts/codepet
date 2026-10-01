@@ -84,8 +84,10 @@ final class DeliverablePayloadTests: XCTestCase {
         """#
         let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
         XCTAssertEqual(back.payload?.site?.headline, "H")
-        XCTAssertEqual(back.payload?.site?.steps.first?.h, "Step 1")
-        XCTAssertEqual(back.payload?.site?.features.first?.p, "Does a thing")
+        // The flat steps/features/quote lift into typed blocks, in page order (CP-002 E2).
+        XCTAssertEqual(back.payload?.site?.blocks.map(\.type), ["steps", "features", "quote"])
+        XCTAssertEqual(back.payload?.site?.blocks.first?.items.first?.h, "Step 1")
+        XCTAssertEqual(back.payload?.site?.blocks[1].items.first?.p, "Does a thing")
         // The collision: plan's [String] `steps` must NOT populate from a site payload.
         XCTAssertNil(back.payload?.steps)
         XCTAssertNil(back.payload?.calendar)
@@ -110,7 +112,7 @@ final class DeliverablePayloadTests: XCTestCase {
         let back = try JSONDecoder().decode(Deliverable.self, from: Data(json.utf8))
         XCTAssertNotNil(back.payload?.site)
         XCTAssertEqual(back.payload?.site?.title, "T")
-        XCTAssertEqual(back.payload?.site?.quoteBy, "")
+        XCTAssertEqual(back.payload?.site?.blocks.last?.by, "", "a quote with no byline")
         XCTAssertEqual(back.payload?.site?.kicker, "")
         XCTAssertEqual(back.payload?.site?.accent, "")
     }

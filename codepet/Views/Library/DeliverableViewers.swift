@@ -1267,25 +1267,91 @@ struct SiteViewer: View {
         </div></header></div>
         """
 
-        let how = p.steps.isEmpty ? "" : """
-        <div class="wrap" id="how"><section>\
-        <div class="eyebrow">\(esc(p.howEyebrow))</div><h2>\(esc(p.howTitle))</h2>\
-        <div class="steps">\(p.steps.enumerated().map { cell($1, number: $0 + 1) }.joined())</div>\
-        </section></div>
-        """
+        // Blocks in page order (CP-002 E2). The steps, features and quote templates are the ones
+        // this builder always used, byte for byte, with the same `#how`/`#features` anchors — so a
+        // page filed before blocks existed renders the exact HTML it did (`SiteLegacyParityTests`).
+        // The first block of a type takes its canonical anchor; a repeat gets its index.
+        var usedAnchors = Set<String>()
+        func anchor(_ base: String, _ i: Int) -> String {
+            let a = usedAnchors.contains(base) ? "\(base)-\(i + 1)" : base
+            usedAnchors.insert(a)
+            return a
+        }
+        func head(_ b: SiteBlock) -> String {
+            (b.eyebrow.isEmpty ? "" : "<div class=\"eyebrow\">\(esc(b.eyebrow))</div>")
+            + (b.title.isEmpty ? "" : "<h2>\(esc(b.title))</h2>")
+        }
+        var navLinks: [String] = []
+        let rendered: [String] = p.blocks.enumerated().compactMap { i, b in
+            switch b.type {
+            case "steps" where !b.items.isEmpty:
+                let id = anchor("how", i)
+                navLinks.append("<a href=\"#\(id)\">How it works</a>")
+                return """
+                <div class="wrap" id="\(id)"><section>\
+                <div class="eyebrow">\(esc(b.eyebrow))</div><h2>\(esc(b.title))</h2>\
+                <div class="steps">\(b.items.enumerated().map { cell($1, number: $0 + 1) }.joined())</div>\
+                </section></div>
+                """
+            case "features" where !b.items.isEmpty:
+                let id = anchor("features", i)
+                navLinks.append("<a href=\"#\(id)\">Features</a>")
+                return """
+                <div class="wrap" id="\(id)"><section>\
+                <div class="eyebrow">\(esc(b.eyebrow))</div><h2>\(esc(b.title))</h2>\
+                <div class="feat">\(b.items.map { cell($0, number: nil) }.joined())</div>\
+                </section></div>
+                """
+            case "quote" where !b.text.isEmpty:
+                return """
+                <div class="wrap"><section>\(head(b))<p class="quote">\(esc(b.text))\
+                \(b.by.isEmpty ? "" : "<span>\(esc(b.by))</span>")\
+                </p></section></div>
+                """
+            case "faq" where !b.items.isEmpty:
+                let id = anchor("faq", i)
+                navLinks.append("<a href=\"#\(id)\">FAQ</a>")
+                return """
+                <div class="wrap" id="\(id)"><section>\(head(b))\
+                <div class="faq">\(b.items.map { "<div class=\"qa\"><h3>\(esc($0.h))</h3><p>\(esc($0.p))</p></div>" }.joined())</div>\
+                </section></div>
+                """
+            case "pricing" where !b.tiers.isEmpty:
+                let id = anchor("pricing", i)
+                navLinks.append("<a href=\"#\(id)\">Pricing</a>")
+                let tiers = b.tiers.map { t in
+                    "<div class=\"tier\(t.highlight ? " hl" : "")\"><div class=\"tn\">\(esc(t.name))</div>"
+                    + "<div class=\"tp\">\(esc(t.price))\(t.period.isEmpty ? "" : "<small> \(esc(t.period))</small>")</div>"
+                    + (t.points.isEmpty ? "" : "<ul>\(t.points.map { "<li>\(esc($0))</li>" }.joined())</ul>")
+                    + (t.cta.isEmpty ? "" : "<a class=\"btn \(t.highlight ? "p" : "g")\" href=\"#\">\(esc(t.cta))</a>")
+                    + "</div>"
+                }.joined()
+                return """
+                <div class="wrap" id="\(id)"><section>\(head(b))<div class="tiers">\(tiers)</div></section></div>
+                """
+            case "text" where !b.text.isEmpty:
+                return """
+                <div class="wrap"><section>\(head(b))<p class="prose">\(esc(b.text))</p></section></div>
+                """
+            default:
+                return nil // a type this builder does not know draws nothing, never a broken block
+            }
+        }
+        // CSS for the three new types, only on a page that uses one — so an old page's
+        // stylesheet, like its markup, is unchanged.
+        let newTypes: Set<String> = ["faq", "pricing", "text"]
+        let extraCSS = p.blocks.contains { newTypes.contains($0.type) } ? """
+        .faq{max-width:720px;margin:0 auto}.qa{border-top:1px solid var(--line);padding:18px 0}
+        .qa h3{font-size:17px;margin-bottom:6px}.qa p{font-size:15px;color:var(--ink2)}
+        .tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:22px;max-width:900px;margin:0 auto}
+        .tier{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;display:flex;flex-direction:column;gap:12px}
+        .tier.hl{border:2px solid var(--accent)}.tier .tn{font-weight:700}
+        .tier .tp{font-size:34px;font-weight:800}.tier .tp small{font-size:14px;font-weight:500;color:var(--ink2)}
+        .tier ul{padding-left:18px;font-size:14px;color:var(--ink2);display:flex;flex-direction:column;gap:4px;flex:1}
+        .tier .btn{text-align:center}
+        .prose{max-width:680px;margin:0 auto;font-size:17px;color:var(--ink2);text-align:center}
 
-        let feat = p.features.isEmpty ? "" : """
-        <div class="wrap" id="features"><section>\
-        <div class="eyebrow">\(esc(p.featEyebrow))</div><h2>\(esc(p.featTitle))</h2>\
-        <div class="feat">\(p.features.map { cell($0, number: nil) }.joined())</div>\
-        </section></div>
-        """
-
-        let quote = p.quote.isEmpty ? "" : """
-        <div class="wrap"><section><p class="quote">\(esc(p.quote))\
-        \(p.quoteBy.isEmpty ? "" : "<span>\(esc(p.quoteBy))</span>")\
-        </p></section></div>
-        """
+        """ : ""
 
         let final = """
         <div class="wrap"><div class="final"><h2>\(esc(p.finalTitle))</h2>\
@@ -1333,17 +1399,15 @@ struct SiteViewer: View {
         .final .btn.p{background:#fff;color:\(accent2)}
         footer{border-top:1px solid var(--line);padding:26px 0;display:flex;align-items:center;gap:16px;font-size:13px;color:var(--ink2);flex-wrap:wrap}
         footer .logo{font-size:16px}
-        @media(max-width:760px){h1{font-size:36px}.steps,.feat{grid-template-columns:1fr}nav .nl{display:none}}
+        \(extraCSS)@media(max-width:760px){h1{font-size:36px}.steps,.feat{grid-template-columns:1fr}nav .nl{display:none}}
         </style></head><body>
         <div class="wrap"><nav>
           <div class="logo"><span class="b"></span>\(esc(p.brand))</div>
-          <div class="nl">\(p.steps.isEmpty ? "" : "<a href=\"#how\">How it works</a>")\(p.features.isEmpty ? "" : "<a href=\"#features\">Features</a>")</div>
+          <div class="nl">\(navLinks.joined())</div>
           <a class="btn p" href="#">\(esc(p.ctaPrimary))</a>
         </nav></div>
         \(hero)
-        \(how)
-        \(feat)
-        \(quote)
+        \(rendered.joined(separator: "\n"))
         \(final)
         <div class="wrap"><footer>
           <div class="logo"><span class="b"></span>\(esc(p.brand))</div>

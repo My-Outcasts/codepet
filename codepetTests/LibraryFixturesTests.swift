@@ -94,7 +94,7 @@ final class LibraryFixturesTests: XCTestCase {
 
         let site = all.first { $0.kind == .site }?.payload?.site
         XCTAssertFalse(site?.headline.isEmpty ?? true)
-        XCTAssertFalse(site?.steps.isEmpty ?? true)
+        XCTAssertFalse(site?.blocks.isEmpty ?? true)
 
         let sheet = all.first { $0.kind == .sheet }?.payload?.sheet
         XCTAssertNotNil(sheet)

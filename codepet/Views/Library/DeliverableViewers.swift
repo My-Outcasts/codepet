@@ -1616,20 +1616,36 @@ struct ScreensViewer: View {
         .codepetShadow(CodepetTheme.floatingShadow)
     }
 
-    /// Native stand-in illustration per `art` value — deliberately not a
-    /// pixel-match of web's bespoke SVGs (connect/session/recap), just a
-    /// tasteful SF Symbol pairing tinted with the accent purple.
+    /// The illustration slot (CP-002 E3, founder decision 30 Sep). The three values this viewer
+    /// has art for keep their SF Symbol pairing; any other `art` is a description of a picture the
+    /// app cannot draw, shown as a dashed brief that says so — a note for whoever draws it, never a
+    /// stand-in that looks finished. No art draws nothing: the old fallback was a dashed rectangle
+    /// with a question mark, which read as a broken image.
     @ViewBuilder
     private func artStandIn(for art: String) -> some View {
-        switch art {
-        case "connect":
-            artBox(primary: "link", secondary: "person.2")
-        case "session":
-            artBox(primary: "bubble.left.and.bubble.right", secondary: "sparkles")
-        case "recap":
-            artBox(primary: "checkmark.seal", secondary: "chart.bar")
-        default:
-            artBox(primary: "rectangle.dashed", secondary: "questionmark")
+        switch ScreenArt(art) {
+        case .symbols(let primary, let secondary):
+            artBox(primary: primary, secondary: secondary)
+        case .brief(let description):
+            VStack(spacing: 5) {
+                Text(lang == .vi ? "MINH HOẠ" : "ILLUSTRATION")
+                    .font(.pixelSystem(size: 8.5, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundColor(CodepetTheme.accentPurple)
+                Text(description)
+                    .font(.pixelSystem(size: 10.5))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: CodepetTheme.inputRadius, style: .continuous)
+                    .strokeBorder(CodepetTheme.accentPurple.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+            )
+        case .none:
+            Color.clear
         }
     }
 

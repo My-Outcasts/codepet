@@ -208,17 +208,33 @@ describe("coercePayload", () => {
       expect(p.screens).toHaveLength(3);
       expect(p.screens[0]).toEqual(validScreen);
     });
-    it("falls back to a valid enum value when art is invalid", () => {
-      const p: any = coercePayload("screens", { screens: [{ ...validScreen, art: "not-a-real-art" }] });
-      expect(p.screens[0].art).toBe("connect");
+    // CP-002 E3: `art` is a description of the illustration, not one of three enum values. It
+    // used to be forced to "connect" — so a screen asking for a chart was drawn as a link icon.
+    it("keeps any art as written, and no longer forces it to connect", () => {
+      const p: any = coercePayload("screens", { screens: [{ ...validScreen, art: "a week of check-ins filling a grid, Thursday highlighted" }] });
+      expect(p.screens[0].art).toBe("a week of check-ins filling a grid, Thursday highlighted");
+    });
+    it("a screen may have no art at all", () => {
+      const p: any = coercePayload("screens", { screens: [{ ...validScreen, art: "" }] });
+      expect(p.screens[0].art).toBe("");
     });
     it("drops screens missing name/title and returns null when none remain", () => {
       expect(coercePayload("screens", { screens: [{ ...validScreen, name: "", title: "" }] })).toBeNull();
       expect(coercePayload("screens", { screens: [] })).toBeNull();
     });
-    it("clips over-count to 3 screens", () => {
-      const p: any = coercePayload("screens", { screens: [validScreen, validScreen, validScreen, validScreen] });
-      expect(p.screens).toHaveLength(3);
+    // Was "clips over-count to 3 screens".
+    it("keeps up to 8 screens", () => {
+      const p: any = coercePayload("screens", { screens: Array.from({ length: 10 }, () => validScreen) });
+      expect(p.screens).toHaveLength(8);
+    });
+    it("the prompt and schema no longer fix three screens or three illustrations", () => {
+      const p = buildRunTaskPrompt({ companionId: "byte", language: "en", context: "", taskTitle: "T", taskDetail: "", deptKey: "design" } as any);
+      const line = p.split("\n").find((l) => l.startsWith("- screens: ")) ?? "";
+      expect(line).toContain("`art`");
+      expect(line).not.toContain("exactly 3");
+      expect(line).not.toMatch(/connect.*session.*recap/);
+      const art = (deliverableTool("design").input_schema as any).properties.payload.properties.screens.items.properties.art;
+      expect(art).not.toHaveProperty("enum");
     });
   });
 });
@@ -232,7 +248,7 @@ describe("buildRunTaskPrompt structured guide", () => {
     expect(p).toMatch(/calendar:.*phases/);
     expect(p).toMatch(/sheet:.*inputs.*outputs.*formula/);
     expect(p).toMatch(/site:.*steps/);
-    expect(p).toMatch(/screens:.*connect.*session.*recap/);
+    expect(p).toMatch(/screens:.*`art`/);
   });
 });
 

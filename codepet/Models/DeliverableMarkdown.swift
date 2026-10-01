@@ -218,7 +218,7 @@ enum DeliverableMarkdown {
             if !s.kick.isEmpty { block += "\n\n**\(s.kick)**" }
             block += "\n\n\(s.title)"
             if !s.sub.isEmpty { block += "\n\n\(s.sub)" }
-            block += "\n\nArt: \(s.art)"
+            if !s.art.isEmpty { block += "\n\nArt: \(s.art)" }
             if !s.cta.isEmpty { block += "\n\nCTA: \(s.cta)" }
             if !s.note.isEmpty { block += "\n\n_\(s.note)_" }
             return block

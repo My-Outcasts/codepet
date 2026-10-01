@@ -159,6 +159,42 @@ final class CompanyStoreRoadmapTests: XCTestCase {
         XCTAssertFalse(s.company.tasks[0].drafted)
     }
 
+    /// Start must take the founder to the offer. The two-mode shell (the default since 23 Aug) has
+    /// no dock — the conversation is the `.chat` destination — so opening the dock alone left the
+    /// founder on the Roadmap with the card still saying Start, and the offer waiting in a chat they
+    /// never saw (1 Oct, build 6, real account).
+    func testStartInTheTwoModeShellTakesTheFounderToTheOffer() async {
+        let s = proposalStore(runs: {})
+        await s.hydrate(companyId: "u")
+        guard let task = s.company.tasks.first else { return XCTFail("no task") }
+        s.select(.roadmap)
+        s.proposeRun(task, language: .en, twoModeShell: true)
+        XCTAssertEqual(s.view, .chat, "the offer must be on screen")
+    }
+
+    /// A second tap re-uses the open offer — and must still bring it on screen.
+    func testASecondStartAlsoTakesTheFounderToTheOffer() async {
+        let s = proposalStore(runs: {})
+        await s.hydrate(companyId: "u")
+        guard let task = s.company.tasks.first else { return XCTFail("no task") }
+        s.proposeRun(task, language: .en, twoModeShell: true)
+        s.select(.tasks)
+        s.proposeRun(task, language: .en, twoModeShell: true)
+        XCTAssertEqual(s.view, .chat)
+    }
+
+    /// The legacy shell shows the conversation as a dock beside the roadmap, so it stays put.
+    func testStartInTheLegacyShellOpensTheDockInPlace() async {
+        let s = proposalStore(runs: {})
+        await s.hydrate(companyId: "u")
+        guard let task = s.company.tasks.first else { return XCTFail("no task") }
+        s.select(.roadmap)
+        s.dockCollapsed = true
+        s.proposeRun(task, language: .en, twoModeShell: false)
+        XCTAssertEqual(s.view, .roadmap)
+        XCTAssertFalse(s.dockCollapsed)
+    }
+
     /// Confirming is what spends. It also consumes the button, so the offer cannot be taken twice.
     func testConfirmingTheProposalRunsItExactlyOnce() async {
         var ran = 0

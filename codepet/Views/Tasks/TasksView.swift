@@ -170,11 +170,10 @@ struct TasksView: View {
                 companyStore.codingRun.propose(ask: RoadmapDispatch.editCodeAsk(for: t),
                                                plannedFiles: 2, needsBash: false,
                                                link: companyStore.activeProjectLink)
-                // Only the new engineering + linked-project path reveals the copilot;
-                // ordinary run/walkThrough/approve/open taps keep their pre-existing
-                // in-place behaviour on the Tasks board. The copilot is the docked
-                // panel now (not a `.chat` destination), so expand the dock.
-                companyStore.dockCollapsed = false
+                // Reveal the conversation the coding run is proposed in. `revealConversation`
+                // opens the dock in the legacy shell and moves to `.chat` in the two-mode
+                // shell, which has no dock. (`.run` reveals inside `proposeRun`.)
+                companyStore.revealConversation()
             case .showBlocker:     break   // Tasks board has no redirect path; unchanged from prior no-op
             case .none:            break
             }

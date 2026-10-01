@@ -995,7 +995,7 @@ final class CompanyStore: ObservableObject {
                let notice = AttachmentBudget.engineeringUnsupportedMessage(attachments.map(\.filename), language) {
                 chatMessages.append(CopilotMessage(role: .companion, text: notice))
             }
-            dockCollapsed = false     // reveal the dock (no `.chat` destination on main)
+            revealConversation()     // reveal the conversation — dock or `.chat`, whichever shell
             return
         }
         let ask = (founderAsk ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2879,11 +2879,11 @@ final class CompanyStore: ObservableObject {
         // Roadmap can both be pressed for the same task before either is answered.
         guard !chatMessages.contains(where: { $0.chainOffer?.taskId == task.id
                                               && !$0.actionConsumed }) else {
-            dockCollapsed = false
+            revealConversation()
             return true
         }
         appendChainOffer(for: task, dependency: dep, language: language)
-        dockCollapsed = false
+        revealConversation()
         return true
     }
 
@@ -2926,7 +2926,7 @@ final class CompanyStore: ObservableObject {
         // button for the same task must not start a second one.
         runningTaskIds.insert(offer.taskId)
         defer { runningTaskIds.remove(offer.taskId) }
-        dockCollapsed = false
+        revealConversation()
         await produceDraftInline(for: task, cid: cid, language: language)
         flushActiveThread()
     }
@@ -3193,7 +3193,7 @@ final class CompanyStore: ObservableObject {
               !task.done, !task.drafted else { return }
         runningTaskIds.insert(taskId)
         defer { runningTaskIds.remove(taskId) }
-        dockCollapsed = false
+        revealConversation()
 
         var carried: [UpstreamWork] = []
         if let dep = UpstreamWork.firstUnfiled(dependencyOf: task, in: company.tasks,
@@ -3375,7 +3375,7 @@ final class CompanyStore: ObservableObject {
     private func reviseDelivered(libraryId: String, note: String, language: AppLanguage) async {
         guard let item = company.library.first(where: { $0.id == libraryId }),
               let task = company.tasks.first(where: { $0.id == item.sourceTaskId }) else { return }
-        dockCollapsed = false
+        revealConversation()
         _ = await produceDraftInline(for: task, cid: companyId, language: language,
                                      revise: RevisePass(note: note, current: item,
                                                         supersedes: item.id))
@@ -3904,7 +3904,8 @@ final class CompanyStore: ObservableObject {
     /// Every `Start`/`Run` control routes here rather than to `runTask`. Web parity, verified
     /// live Aug 6: clicking a roadmap card opens the copilot and PROPOSES the run; only the
     /// proposal's own button spends anything. See `RunProposal` for why the step exists.
-    func proposeRun(_ task: RoadmapTask, language: AppLanguage) {
+    func proposeRun(_ task: RoadmapTask, language: AppLanguage,
+                    twoModeShell: Bool = TwoModeShell.enabled) {
         guard !runningTaskIds.contains(task.id) else { return }
         if let i = company.tasks.firstIndex(where: { $0.id == task.id }),
            company.tasks[i].done || company.tasks[i].drafted { return }
@@ -3912,7 +3913,7 @@ final class CompanyStore: ObservableObject {
         // confirm one and be left with an orphan offering to run work that is already drafted.
         guard !chatMessages.contains(where: {
             $0.runProposal?.taskId == task.id && !$0.actionConsumed
-        }) else { dockCollapsed = false; return }
+        }) else { revealConversation(twoModeShell: twoModeShell); return }
         let specialist = taskSpecialist(for: task)
         let proposal = RunProposal(taskId: task.id, title: task.title,
                                    deptName: specialist?.deptName,
@@ -3921,8 +3922,21 @@ final class CompanyStore: ObservableObject {
         // and Luna runs it — so no `companionId` here, deliberately.
         chatMessages.append(CopilotMessage(role: .companion, text: proposal.line(language),
                                            runProposal: proposal))
-        dockCollapsed = false
+        revealConversation(twoModeShell: twoModeShell)
         flushActiveThread()
+    }
+
+    /// Put the conversation on screen, whichever shell is showing.
+    ///
+    /// The legacy shell shows it as a dock beside the board, so opening the dock is enough. The
+    /// two-mode shell — the default since 23 Aug — has no dock: the conversation IS the `.chat`
+    /// destination, and `dockCollapsed` does nothing there. Every "reveal the copilot" site still
+    /// only opened the dock, so on 1 Oct pressing Start on a roadmap task left the founder on the
+    /// Roadmap, the card still saying Start, while the offer to run it waited in a chat they never
+    /// saw. A destination that already shows the conversation (Second Brain) is left alone.
+    func revealConversation(twoModeShell: Bool = TwoModeShell.enabled) {
+        dockCollapsed = false
+        if twoModeShell, !TwoModeLayout.showsConversation(for: view) { select(.chat) }
     }
 
     /// Accept a proposal and run it. Consumes the button first, so a double-press cannot start
@@ -3952,7 +3966,7 @@ final class CompanyStore: ObservableObject {
         // and shrinking it on four of the five run surfaces meant the feature mostly wasn't
         // there (founder, Aug 6, against the web). The strip is gone rather than kept as a second
         // answer to one question.
-        dockCollapsed = false
+        revealConversation()
         // Same question the chat path asks, for the same reason — see `offerChainIfNeeded`.
         // The task leaves `runningTaskIds` first: the offer's buttons are disabled while its
         // own task is running, so holding the id here would render the card un-pressable.

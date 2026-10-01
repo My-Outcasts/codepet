@@ -51,8 +51,28 @@ export function slug(s: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function buildRoadmapPrompt(args: { language: string; brief: RoadmapBrief }): string {
+/** At most this many finished titles reach the prompt, each clipped. */
+export const MAX_DONE_TITLES = 30;
+
+/**
+ * Narrow a client-supplied list of finished task titles: strings only, trimmed, clipped,
+ * de-duplicated, capped. Anything else is dropped rather than refused — a re-plan with a bad
+ * `done` field still plans, it just plans without that context.
+ */
+export function narrowDone(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    const t = clip(v, 160);
+    if (t && !out.includes(t)) out.push(t);
+    if (out.length >= MAX_DONE_TITLES) break;
+  }
+  return out;
+}
+
+export function buildRoadmapPrompt(args: { language: string; brief: RoadmapBrief; done?: string[] }): string {
   const { language, brief } = args;
+  const done = narrowDone(args.done);
   const stage = clip(brief?.stage, 40);
   const lines = [
     `Product: ${clip(brief?.projectName, 120) || "(unnamed)"}${brief?.oneLiner ? " — " + clip(brief.oneLiner, 300) : ""}`,
@@ -80,6 +100,13 @@ export function buildRoadmapPrompt(args: { language: string; brief: RoadmapBrief
     "\n\nGenerate 2-4 concrete tasks for EACH of the six phases — find, foundation, build, ship, launch, grow — covering the founder's whole journey from validating the idea through launch and into running & growing the company. The 'grow' phase (shown to the founder as 'Run & Grow') is post-launch: retention, referrals, growth metrics, user-retention playbooks, content/distribution channels. " +
     "For each task give: a short imperative title, a 1-2 sentence detail, a `phase` (exactly one of find, foundation, build, ship, launch, grow), a `who` of exactly 'you' (needs the founder's own judgment, identity, or decisions), 'does' (the companion can produce it autonomously), or 'draft' (the companion drafts it and the founder finalizes), a `dept` — the single owning department, chosen using the department grounding above, exactly one of eng, design, mkt, sales, support, fin, ops, legal — and `deps`: the exact TITLES of any prerequisite tasks from this same list (an empty array if it's an entry point with no prerequisite). " +
     "CHAIN THE PHASES: only 'find'-phase tasks may have empty deps (they are the entry points). EVERY task in foundation, build, ship, launch, or grow MUST list at least one prerequisite from an EARLIER phase in its deps, so the roadmap is one connected chain and nothing in a later phase is workable before its earlier phases are done." +
+    // A re-plan keeps the founder's finished tasks on the board (CompanyStore.keepingDone).
+    // Without this block the model planned the same work again under a new title — on 1 Oct
+    // "Build a list of 25 people who have this problem" landed next to the Done "list of 20".
+    (done.length
+      ? "\n\nALREADY DONE — the founder has finished these and they stay on the board as they are. Do NOT plan any of them again, and do not plan a variant of one (the same work with a different number, wording, or scope). Plan what comes next instead. Their titles are not in your list, so never name them in deps:\n" +
+        done.map((t) => `- ${t}`).join("\n")
+      : "") +
     vi
   );
 }

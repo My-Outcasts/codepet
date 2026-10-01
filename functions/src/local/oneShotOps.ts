@@ -35,6 +35,7 @@ import {
   RoadmapBrief,
   buildRoadmapPrompt,
   coerceRoadmap,
+  narrowDone,
 } from "../generateRoadmapCore";
 import {
   NARRATIVE_TOOL,
@@ -299,7 +300,7 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
       const language = body?.language === "vi" ? "vi" : "en";
       return {
         system: ROADMAP_SYSTEM,
-        prompt: buildRoadmapPrompt({ language, brief }),
+        prompt: buildRoadmapPrompt({ language, brief, done: narrowDone(body?.done) }),
         schema: ROADMAP_TOOL.input_schema,
       };
     },

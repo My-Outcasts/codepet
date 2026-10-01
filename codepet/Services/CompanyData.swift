@@ -421,6 +421,8 @@ enum CompanyData {
     private struct RoadmapRequest: Encodable {
         let language: String
         let brief: CompanyBrief
+        /// Titles of the founder's finished tasks; `narrowDone` in generateRoadmapCore.ts reads it.
+        let done: [String]
     }
     private struct RoadmapResponse: Decodable {
         let tasks: [RoadmapTask]
@@ -432,7 +434,7 @@ enum CompanyData {
     ///
     /// There is no hosted fallback: `generateRoadmap` spent the Anthropic key Codepet no
     /// longer holds.
-    static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage) async -> [RoadmapTask] {
+    static func fetchRoadmap(brief: CompanyBrief, language: AppLanguage, done: [String]) async -> [RoadmapTask] {
         #if DEBUG
         // The canned roadmap, with a beat of delay so the analysis screen plays
         // rather than snapping. `generateRoadmap` treats [] as "no change", so
@@ -450,7 +452,7 @@ enum CompanyData {
         case .local(let provider):
             do {
                 let body = try JSONEncoder().encode(
-                    RoadmapRequest(language: language.rawValue, brief: brief))
+                    RoadmapRequest(language: language.rawValue, brief: brief, done: done))
                 let out = try await LocalOneShotRunner.run(op: "generateRoadmap", body: body, provider: provider)
                 return try JSONDecoder().decode(RoadmapResponse.self, from: out).tasks
             } catch {

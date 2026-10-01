@@ -101,7 +101,7 @@ final class MockFlowTests: XCTestCase {
         PrototypeMode.store.set(true, forKey: "CODEPET_MOCK_FLOW")
         var brief = CompanyBrief()
         brief.projectName = "Codepet"
-        let tasks = await CompanyData.fetchRoadmap(brief: brief, language: .en)
+        let tasks = await CompanyData.fetchRoadmap(brief: brief, language: .en, done: [])
         XCTAssertFalse(tasks.isEmpty, "the demo's board would be empty")
     }
 

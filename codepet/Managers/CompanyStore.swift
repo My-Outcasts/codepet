@@ -236,7 +236,8 @@ final class CompanyStore: ObservableObject {
     /// Injectable so tests can supply a stub without Firestore.
     private let loader: (String) async -> CompanyState
     private let saver: (String, CompanyBrief) async -> Bool
-    private let roadmapFetcher: (CompanyBrief, AppLanguage) async -> [RoadmapTask]
+    /// (brief, language, titles of the tasks already Done — so a re-plan does not plan them again)
+    private let roadmapFetcher: (CompanyBrief, AppLanguage, [String]) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
     private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
     /// Streaming counterpart of `chatSender`, injectable the same way (tests
@@ -412,7 +413,7 @@ final class CompanyStore: ObservableObject {
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
-         roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
+         roadmapFetcher: @escaping (CompanyBrief, AppLanguage, [String]) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          // Routed per turn, for the same reason `chatStreamer` is: this is the NON-streaming
          // retry, and wiring it straight to the Cloud Function meant a granted founder whose
@@ -903,14 +904,32 @@ final class CompanyStore: ObservableObject {
     /// fetch discards. An empty result is "no change" (keeps existing tasks).
     /// Language defaults to `.en` (the onboarding scaffold path is English-only); the
     /// Overview board passes the live UI language.
+    ///
+    /// **Done tasks survive a re-plan; only open ones are replaced.** This used to assign the
+    /// fetched plan wholesale, so "Re-plan for my stage" erased finished work: on 1 Oct two
+    /// Done tasks vanished and progress fell from 100% to 0%, while the Library still held
+    /// what they had produced. A generated id is `slug(title)-index`, so a new task can
+    /// collide with a finished one; the finished one wins (see `keepingDone`).
     func generateRoadmap(language: AppLanguage = .en) async {
         let token = hydrationToken
         isGeneratingRoadmap = true
         defer { if token == hydrationToken { isGeneratingRoadmap = false } }
-        let fetched = await roadmapFetcher(company.brief, language)
+        // The finished titles go to the planner too: kept on the board but unknown to the
+        // model, they were planned again under a new title ("list of 25" beside "list of 20").
+        let doneTitles = company.tasks.filter(\.done).map(\.title)
+        let fetched = await roadmapFetcher(company.brief, language, doneTitles)
         guard token == hydrationToken, !fetched.isEmpty else { return }
-        company.tasks = fetched
-        if let cid = companyId { _ = await tasksSaver(cid, fetched) }
+        let tasks = Self.keepingDone(company.tasks, replanned: fetched)
+        company.tasks = tasks
+        if let cid = companyId { _ = await tasksSaver(cid, tasks) }
+    }
+
+    /// The finished tasks of `current`, in order, followed by every task of `replanned` whose
+    /// id is not already taken by one of them.
+    static func keepingDone(_ current: [RoadmapTask], replanned: [RoadmapTask]) -> [RoadmapTask] {
+        let done = current.filter(\.done)
+        let doneIds = Set(done.map(\.id))
+        return done + replanned.filter { !doneIds.contains($0.id) }
     }
 
     /// First-run scaffold: persist the collected brief, then run the fail-open

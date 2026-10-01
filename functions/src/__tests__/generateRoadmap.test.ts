@@ -1,4 +1,4 @@
-import { buildRoadmapPrompt, coerceRoadmap, slug, ROADMAP_PHASES } from "../generateRoadmapCore";
+import { buildRoadmapPrompt, coerceRoadmap, narrowDone, slug, ROADMAP_PHASES, MAX_DONE_TITLES } from "../generateRoadmapCore";
 
 describe("buildRoadmapPrompt", () => {
   const brief = { projectName: "Codepet", oneLiner: "a recap tool", stage: "idea" };
@@ -30,6 +30,34 @@ describe("buildRoadmapPrompt", () => {
     const p = buildRoadmapPrompt({ language: "en", brief: { projectName: "Codepet" } });
     expect(p).toContain("Mandate:");                    // grounding still present
     expect(p).not.toContain("Focus at the");            // no stage focus without a stage
+  });
+});
+
+/**
+ * A re-plan keeps finished tasks on the board, so the planner has to be told about them or it
+ * plans them again — on 1 Oct "Build a list of 25 people who have this problem" landed next to
+ * the Done "Build a list of 20 people who have this problem".
+ */
+describe("buildRoadmapPrompt with finished work", () => {
+  const brief = { projectName: "Codepet" };
+
+  it("names every finished task and forbids planning it or a variant again", () => {
+    const p = buildRoadmapPrompt({ language: "en", brief, done: ["Build a list of 20 people who have this problem"] });
+    expect(p).toContain("ALREADY DONE");
+    expect(p).toContain("- Build a list of 20 people who have this problem");
+    expect(p).toMatch(/do not plan a variant/i);
+  });
+
+  it("adds nothing when nothing is done, so a first plan is unchanged", () => {
+    expect(buildRoadmapPrompt({ language: "en", brief, done: [] })).toBe(buildRoadmapPrompt({ language: "en", brief }));
+    expect(buildRoadmapPrompt({ language: "en", brief })).not.toContain("ALREADY DONE");
+  });
+
+  it("narrows what the client sent: strings only, trimmed, de-duplicated, capped", () => {
+    expect(narrowDone(["  a ", "a", 3, null, "", "b"])).toEqual(["a", "b"]);
+    expect(narrowDone("not a list")).toEqual([]);
+    const many = Array.from({ length: MAX_DONE_TITLES + 5 }, (_, i) => `t${i}`);
+    expect(narrowDone(many)).toHaveLength(MAX_DONE_TITLES);
   });
 });
 

@@ -2720,7 +2720,7 @@ final class CompanyStore: ObservableObject {
             // beneath an unrelated answer, reading as a reply to that instead. Later
             // frames resolve by id, so the position is decided once, here.
             chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
-                                               text: Self.handoffLine(language), vcRun: state),
+                                               text: RoomHandoff.line(language, routing: state.routing), vcRun: state),
                                 at: anchor + 1)
             // The fast answer above is now the room's first take, not the answer. Marked at the
             // moment the room actually lands — not when the fan-out starts — so a run the router
@@ -2731,15 +2731,6 @@ final class CompanyStore: ObservableObject {
         // Behind every guard above, so a discarded run (escape hatch), a killed run
         // (503/429) or one that died before a brief can never trigger it.
         maybeAskVirtualCompanyInterview(state, language: language)
-    }
-
-    /// byte's one line of handoff, spoken above the room's cards. It follows byte's
-    /// own complete answer now, so it reads as a second thought rather than a refusal
-    /// to answer — the founder sees a companion escalating, not a UI mode switch.
-    private static func handoffLine(_ language: AppLanguage) -> String {
-        language == .vi
-            ? "Thật ra cái này cần cả phòng — để mình gọi product với finance vào."
-            : "Actually — this one needs the whole room. Let me bring in product and finance."
     }
 
     /// One log line per failure mode. Every one of these was previously silent except

@@ -77,8 +77,10 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
         XCTAssertEqual(s.chatMessages.map(\.role), [.me, .companion, .companion])
         XCTAssertEqual(s.chatMessages[1].text, "byte's answer")
         XCTAssertNil(s.chatMessages[1].vcRun)
+        // The line names the seats the routing frame carried (`RoomHandoff`) — this fixture
+        // seats product and finance — rather than a constant that named those two every time.
         XCTAssertEqual(s.chatMessages.last?.text,
-                       "Actually — this one needs the whole room. Let me bring in product and finance.")
+                       "Actually — this one needs the whole room. Let me bring in Product and Finance.")
         XCTAssertEqual(s.chatMessages.last?.vcRun?.phase, .finished)
         XCTAssertFalse(s.isStreaming)
         XCTAssertFalse(s.isCompanionTyping)

@@ -164,7 +164,7 @@ export interface RunnableTaskRef {
 export const RUN_TASK_TOOL = {
   name: "run_task",
   description:
-    "Produce a specific roadmap task's real deliverable right now, in this chat, for the founder to approve. Call this only when the founder clearly wants a specific task from the RUNNABLE TASKS list run, done, made, drafted, finished, or executed — e.g. they name the task or say \"do it\" / \"run that for me\" about the task you're discussing. Use the exact task_id from RUNNABLE TASKS (task_title is optional, copied from the same entry, and used only as a fallback match). If it's ambiguous which task they mean, do NOT call this — ask a one-line clarifying question instead of guessing. For questions, advice, or status, just reply — don't call the tool.",
+    "Produce a specific roadmap task's real deliverable right now, in this chat, for the founder to approve. Call this only when the founder clearly wants a specific task from the RUNNABLE TASKS list run, done, made, drafted, finished, or executed — e.g. they name the task or say \"do it\" / \"run that for me\" about the task you're discussing. Use the exact task_id from RUNNABLE TASKS (task_title is optional, copied from the same entry, and used only as a fallback match). If it's ambiguous which task they mean, do NOT call this — ask a one-line clarifying question instead of guessing. For questions, advice, or status, just reply — don't call the tool. Note that a run files ONE deliverable: if they ask for several versions or variants of a message, use draft_message instead, and never tell them a run will produce more than one.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -980,7 +980,7 @@ const MAX_DRAFT_TO = 120;
 export const DRAFT_MESSAGE_TOOL = {
   name: "draft_message",
   description:
-    "Use whenever you write an actual message for the founder to send to a person — a cold email, a reply, a DM, a text. Put the message text ONLY in this tool: do not also write it out in your reply, or the founder sees it twice. Your reply should carry just the framing (what the versions are, why) and any closing question. Call it once with every version you wrote — if you drafted one message for people who already asked and another for everyone else, that is one call with two entries, not two calls. Keep placeholders in square brackets, like [name] or [date], so the founder can see what they must fill in. If the founder is asking for a message that is already a task on their roadmap, prefer run_task so the draft is saved to their Library.",
+    "Use whenever you write an actual message for the founder to send to a person — a cold email, a reply, a DM, a text. Put the message text ONLY in this tool: do not also write it out in your reply, or the founder sees it twice. Your reply should carry just the framing (what the versions are, why) and any closing question. Call it once with every version you wrote — if you drafted one message for people who already asked and another for everyone else, that is one call with two entries, not two calls. Keep placeholders in square brackets, like [name] or [date], so the founder can see what they must fill in. If the founder wants ONE finished message that is already a task on their roadmap, prefer run_task so it is saved to their Library. But a run files ONE deliverable: when they ask for several versions, options or variants, write them here — every version they asked for — even if a matching task exists.",
   input_schema: {
     type: "object",
     additionalProperties: false,

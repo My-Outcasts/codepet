@@ -252,6 +252,6 @@ struct RoadmapView: View {
             dispatch(blocker, depth: 1)
         case .none:             break
         }
-        if RoadmapDispatch.navigatesToChat(action) { companyStore.dockCollapsed = false }
+        if RoadmapDispatch.navigatesToChat(action) { companyStore.revealConversation() }
     }
 }

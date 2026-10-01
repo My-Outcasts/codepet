@@ -287,7 +287,7 @@ describe("a rewritten kind and its payload", () => {
   test("drops the payload it can no longer honour, and says doc rather than sheet", () => {
     const d = coerceDeliverable(raw, "T", "fin");
     expect(d?.kind).toBe("doc");
-    expect(d?.payload).toBeUndefined();
+    expect((d as { payload?: unknown } | null)?.payload).toBeUndefined();
     expect(d?.body).toBe("# Screens");
   });
 
@@ -295,7 +295,7 @@ describe("a rewritten kind and its payload", () => {
   test("keeps the payload when the department may produce that kind", () => {
     const d = coerceDeliverable(raw, "T", "design");
     expect(d?.kind).toBe("screens");
-    expect(d?.payload).toEqual(screensPayload);
+    expect((d as { payload?: unknown } | null)?.payload).toEqual(screensPayload);
   });
 
   test("a reply with no kind at all becomes doc, not the department's speciality", () => {

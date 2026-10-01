@@ -25,6 +25,8 @@ struct RunProposal: Equatable {
     let deptName: String?
     /// The department specialist's `PetCharacter` id, paired with `deptName`.
     let companionId: String?
+    /// Offered after a failed run (CP-002 F): the same task again, labelled "Try again".
+    var retry: Bool = false
 
     /// The proposal sentence, matching the web's phrasing.
     func line(_ lang: AppLanguage) -> String {
@@ -45,6 +47,33 @@ struct RunProposal: Equatable {
     /// left as a second pattern — the founder flagged the shape on the roadmap card, and this card
     /// had exactly the same one.
     func buttonLabel(_ lang: AppLanguage) -> String {
-        lang == .vi ? "Ừ, bắt đầu đi" : "Yes, start it"
+        if retry { return lang == .vi ? "Thử lại" : "Try again" }
+        return lang == .vi ? "Ừ, bắt đầu đi" : "Yes, start it"
+    }
+}
+
+/// What the chat says when a run fails the Failed rule (CP-002 F, copy approved 1 Oct): who did
+/// not make what, and that nothing was saved. It does NOT say nothing was spent — the run used
+/// the founder's Claude plan, and a sentence claiming otherwise would be the app inventing a fact.
+enum RunFailureCopy {
+    static func line(kind: String, deptName: String?, lang: AppLanguage) -> String {
+        let (noun, part): (String, String) = {
+            switch (kind, lang) {
+            case ("sheet", .vi):    return ("mô hình tài chính", "phần mô hình")
+            case ("sheet", _):      return ("financial model", "the model itself")
+            case ("site", .vi):     return ("trang đích", "phần trang")
+            case ("site", _):       return ("landing page", "the page itself")
+            case ("calendar", .vi): return ("kế hoạch", "phần kế hoạch")
+            case ("calendar", _):   return ("plan", "the plan itself")
+            case ("screens", .vi):  return ("các màn hình", "phần màn hình")
+            case ("screens", _):    return ("onboarding screens", "the screens themselves")
+            case (_, .vi):          return ("bản nháp", "nội dung")
+            default:                return ("draft", "its content")
+            }
+        }()
+        if lang == .vi {
+            return "\(deptName ?? "Codepet") chưa hoàn thành được \(noun): câu trả lời thiếu \(part), nên chưa có gì được lưu vào Thư viện."
+        }
+        return "\(deptName ?? "Codepet") couldn't finish the \(noun): its answer was missing \(part), so nothing was saved to your Library."
     }
 }

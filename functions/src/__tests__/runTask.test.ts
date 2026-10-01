@@ -629,3 +629,46 @@ describe("site blocks", () => {
     for (const gone of ["features", "howEyebrow", "howTitle", "featEyebrow", "featTitle", "quote", "quoteBy"]) expect(props).not.toHaveProperty(gone);
   });
 });
+
+/**
+ * The Failed rule (CP-002 F). A sheet, site, calendar or screens whose structure does not
+ * survive coercion used to file as its markdown body: the founder was promised a model and got a
+ * wall of text. Now it fails: nothing is filed, and the answer says which kind was not made.
+ * Founder decision (1 Oct): only these four — a doc, post, email, legal draft, checklist, plan
+ * or outreach still files its text, because its text IS the deliverable.
+ */
+describe("the Failed rule", () => {
+  const raw = (kind: string, payload: unknown = {}) => ({ kind, title: "T", body: "some markdown", payload });
+
+  it.each(["sheet", "site", "calendar", "screens"])("a %s without its structure fails instead of filing its body", (kind) => {
+    expect(coerceDeliverable(raw(kind, { nonsense: true }), "task")).toEqual({ kind, title: "", body: "", failed: "missing_structure" });
+    expect(coerceDeliverable({ kind, title: "T", body: "md" }, "task")).toEqual({ kind, title: "", body: "", failed: "missing_structure" });
+  });
+
+  it.each(["doc", "post", "email", "legal", "checklist", "plan", "dms"])("a %s without its structure still files its text", (kind) => {
+    const out = coerceDeliverable(raw(kind, { nonsense: true }), "task", undefined);
+    expect(out).toEqual({ kind, title: "T", body: "some markdown" });
+  });
+
+  it("a valid sheet is not a failure", () => {
+    const out: any = coerceDeliverable(raw("sheet", { inputs: [{ key: "a", name: "A", unit: "", val: 1, min: 0, max: 2, step: 1 }], outputs: [{ key: "b", name: "B", unit: "", formula: "a" }] }), "task");
+    expect(out.failed).toBeUndefined();
+    expect(out.payload.outputs[0].value).toBe(1);
+  });
+
+  it("an out-of-contract kind still becomes a doc, not a failure", () => {
+    // Finance may not produce `site`: the contract turns it into a doc with its text, which is
+    // the deliberate fallback — the payload was built for the kind the contract closed.
+    const out: any = coerceDeliverable(raw("site", {}), "task", "fin");
+    expect(out).toEqual({ kind: "doc", title: "T", body: "some markdown" });
+  });
+
+  it("a revise pinned to a sheet fails rather than replacing the model with text", () => {
+    expect(coerceDeliverable(raw("doc", { nonsense: true }), "task", "fin", "sheet"))
+      .toEqual({ kind: "sheet", title: "", body: "", failed: "missing_structure" });
+  });
+
+  it("no body at all is still no answer (null), as before", () => {
+    expect(coerceDeliverable({ kind: "sheet", title: "T", body: "" }, "task")).toBeNull();
+  });
+});

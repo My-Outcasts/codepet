@@ -160,12 +160,17 @@ struct RunTaskRequest: Codable {
     }
 }
 
-/// Response body from the runTask Cloud Function — a deliverable as kind + markdown.
+/// Response body from the runTask op — a deliverable as kind + markdown.
+///
+/// `failed` is set when the run produced the wrong thing (CP-002 F): a sheet, site, calendar or
+/// screens whose structure did not survive. `kind` then names what was NOT made, and the body is
+/// empty — `buildDeliverable` refuses it, so no call site can file it.
 struct RunTaskResponse: Codable {
     let kind: String
     let title: String
     let body: String
     var payload: DeliverablePayload?
+    var failed: String? = nil
 }
 
 /// Fail-open client for `runTask`. Returns the decoded response, or `nil` on any error —

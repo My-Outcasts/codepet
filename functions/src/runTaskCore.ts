@@ -329,6 +329,21 @@ export type DeliverablePayload =
   | SitePayload
   | ScreensPayload;
 
+/**
+ * The kinds that cannot exist without their structure (founder decision, 1 Oct): a sheet as text
+ * is not a model, a site as text is not a page, a calendar or screens as text is not what was
+ * asked for. Every other kind's text IS the deliverable, and still files when its payload fails —
+ * a post that did not name its platform is still a post.
+ */
+export const STRUCTURE_REQUIRED_KINDS: ReadonlySet<string> = new Set(["sheet", "site", "calendar", "screens"]);
+
+/**
+ * A run that produced the wrong thing (CP-002 F). Same wire shape as a deliverable, so the app
+ * decodes it with the type it already has; `failed` set and an empty body mean nothing is filed —
+ * `buildDeliverable` refuses it at every call site — and the chat says which kind was not made.
+ */
+export interface RunFailure { kind: string; title: ""; body: ""; failed: "missing_structure"; }
+
 const STRUCTURED_KINDS = new Set(["checklist", "doc", "legal", "post", "email", "plan", "dms", "calendar", "sheet", "site", "screens"]);
 const s = (v: unknown, n = 600) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 const strArr = (v: unknown, n = 12, len = 400): string[] =>
@@ -648,7 +663,7 @@ export function coerceDeliverable(
   deptKey?: string | null,
   /** A revise pass's kind (`revisePin`): the answer keeps it whatever kind the model named. */
   pinKind?: string
-): Deliverable | null {
+): Deliverable | RunFailure | null {
   const r = (raw ?? {}) as Record<string, unknown>;
   const body = typeof r.body === "string" ? r.body.trim() : "";
   if (!body) return null;
@@ -667,6 +682,10 @@ export function coerceDeliverable(
   if (STRUCTURED_KINDS.has(kind)) {
     const payload = coercePayload(kind, (raw as Record<string, unknown>)?.payload);
     if (payload) return { kind, title, body, payload };
+    // The Failed rule (CP-002 F): a kind that IS its structure does not degrade to its markdown.
+    // The founder was promised a model, a page, a plan or a flow; a wall of text is none of those,
+    // and filing it as one is the silent degradation the spec calls a correctness bug.
+    if (STRUCTURE_REQUIRED_KINDS.has(kind)) return { kind, title: "", body: "", failed: "missing_structure" };
   }
   return { kind, title, body };
 }

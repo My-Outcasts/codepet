@@ -383,9 +383,11 @@ export const ONE_SHOT_OPS: Record<string, OneShotOp> = {
     },
     respond(body, parsed) {
       const taskTitle = String(body?.task_title ?? "").trim();
-      // Same coercion, and the same refusal: the handler answers 502 rather than storing a
-      // deliverable it could not read, because a half-parsed one reaches the library and
-      // the founder's approval flow.
+      // No body at all is no answer: throw rather than store a deliverable nothing could read,
+      // because a half-parsed one reaches the library and the founder's approval flow. A sheet,
+      // site, calendar or screens whose structure did not survive is NOT thrown: it comes back as
+      // a `RunFailure` (`failed: "missing_structure"`, CP-002 F), so the app can say which thing
+      // was not made instead of a generic error — and files nothing either way.
       // `dept_key` narrowed exactly as `plan` above narrows it, for the same reason: the
       // department's output contract has to judge the reply on this transport too, and the
       // local path is the default for a founder running on their own Claude plan.

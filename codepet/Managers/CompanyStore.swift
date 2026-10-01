@@ -3145,6 +3145,19 @@ final class CompanyStore: ObservableObject {
                 }
             }
             return draft
+        } else if let result, result.failed != nil {
+            // The Failed rule (CP-002 F): say which department did not make what, that nothing
+            // was saved, and offer the same run again — the run-proposal card with its button
+            // relabelled, so Try again retires once pressed like every other proposal.
+            var retry = RunProposal(taskId: task.id, title: task.title, deptName: specialist?.deptName,
+                                    companionId: specialist?.companionId)
+            retry.retry = true
+            chatMessages.append(CopilotMessage(
+                role: .companion,
+                text: RunFailureCopy.line(kind: result.kind, deptName: specialist?.deptName, lang: language),
+                companionId: specialist?.companionId, deptName: specialist?.deptName,
+                runProposal: retry))
+            return nil
         } else {
             chatMessages.append(CopilotMessage(role: .companion, text: language == .vi
                 ? "Không tạo được ngay bây giờ — thử lại nhé."
@@ -3690,7 +3703,9 @@ final class CompanyStore: ObservableObject {
     private func buildDeliverable(from result: RunTaskResponse?, task: RoadmapTask,
                                   producedBy: AIProvider?) -> Deliverable? {
         let body = result?.body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let result, !body.isEmpty else { return nil }
+        // A failed run (CP-002 F) files nothing, at every call site — it has no body, and this
+        // guard says why rather than leaving it to the empty-body check by accident.
+        guard let result, result.failed == nil, !body.isEmpty else { return nil }
         let title = result.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return Deliverable(
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),

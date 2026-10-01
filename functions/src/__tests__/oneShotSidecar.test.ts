@@ -281,6 +281,14 @@ describe("generateRoadmap op", () => {
       .toBe(buildRoadmapPrompt({ language: "en", brief }));
   });
 
+  /** The client sends the finished titles; the op must hand them to the same builder. */
+  it("passes the finished task titles through to the prompt", () => {
+    const done = ["Build a list of 20 people who have this problem"];
+    expect(op.plan({ language: "en", brief, done }).prompt)
+      .toBe(buildRoadmapPrompt({ language: "en", brief, done }));
+    expect(op.plan({ language: "en", brief, done }).prompt).toContain("ALREADY DONE");
+  });
+
   it("refuses a payload with no brief", () => {
     expect(() => op.plan({ language: "en" })).toThrow(OneShotBadRequest);
     expect(() => op.plan({ language: "en", brief: [] })).toThrow(OneShotBadRequest);

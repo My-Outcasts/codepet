@@ -236,7 +236,8 @@ final class CompanyStore: ObservableObject {
     /// Injectable so tests can supply a stub without Firestore.
     private let loader: (String) async -> CompanyState
     private let saver: (String, CompanyBrief) async -> Bool
-    private let roadmapFetcher: (CompanyBrief, AppLanguage) async -> [RoadmapTask]
+    /// (brief, language, titles of the tasks already Done — so a re-plan does not plan them again)
+    private let roadmapFetcher: (CompanyBrief, AppLanguage, [String]) async -> [RoadmapTask]
     private let tasksSaver: (String, [RoadmapTask]) async -> Bool
     private let chatSender: (CompanyChatRequest) async -> CompanyChatReply?
     /// Streaming counterpart of `chatSender`, injectable the same way (tests
@@ -412,7 +413,7 @@ final class CompanyStore: ObservableObject {
 
     init(loader: @escaping (String) async -> CompanyState = CompanyData.load,
          saver: @escaping (String, CompanyBrief) async -> Bool = CompanyData.saveBrief,
-         roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
+         roadmapFetcher: @escaping (CompanyBrief, AppLanguage, [String]) async -> [RoadmapTask] = CompanyData.fetchRoadmap,
          tasksSaver: @escaping (String, [RoadmapTask]) async -> Bool = CompanyData.saveTasks,
          // Routed per turn, for the same reason `chatStreamer` is: this is the NON-streaming
          // retry, and wiring it straight to the Cloud Function meant a granted founder whose
@@ -913,7 +914,10 @@ final class CompanyStore: ObservableObject {
         let token = hydrationToken
         isGeneratingRoadmap = true
         defer { if token == hydrationToken { isGeneratingRoadmap = false } }
-        let fetched = await roadmapFetcher(company.brief, language)
+        // The finished titles go to the planner too: kept on the board but unknown to the
+        // model, they were planned again under a new title ("list of 25" beside "list of 20").
+        let doneTitles = company.tasks.filter(\.done).map(\.title)
+        let fetched = await roadmapFetcher(company.brief, language, doneTitles)
         guard token == hydrationToken, !fetched.isEmpty else { return }
         let tasks = Self.keepingDone(company.tasks, replanned: fetched)
         company.tasks = tasks

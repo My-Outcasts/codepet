@@ -6,7 +6,7 @@ import XCTest
 final class CompanyStoreOnboardingTests: XCTestCase {
     private func store(loader: @escaping (String) async -> CompanyState,
                        saver: @escaping (String, CompanyBrief) async -> Bool = { _, _ in true },
-                       roadmapFetcher: @escaping (CompanyBrief, AppLanguage) async -> [RoadmapTask] = { _, _ in [] },
+                       roadmapFetcher: @escaping (CompanyBrief, AppLanguage, [String]) async -> [RoadmapTask] = { _, _, _ in [] },
                        enricher: @escaping (CompanyBrief) async throws -> CompanyBrief = { $0 }) -> CompanyStore {
         CompanyStore(loader: loader, saver: saver, roadmapFetcher: roadmapFetcher, enricher: enricher)
     }
@@ -88,7 +88,7 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         let s = CompanyStore(
             loader: { _ in .empty },
             saver: { _, b in savedBrief = b; return true },
-            roadmapFetcher: { brief, _ in roadmapSawSummary = brief.summary; return [] },
+            roadmapFetcher: { brief, _, _ in roadmapSawSummary = brief.summary; return [] },
             enricher: { raw in var e = raw; e.summary = "ENRICHED"; return e }
         )
         await s.hydrate(companyId: "u")
@@ -111,7 +111,7 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         let s = CompanyStore(
             loader: { _ in .empty },
             saver: { _, b in savedBrief = b; return true },
-            roadmapFetcher: { _, _ in [] },
+            roadmapFetcher: { _, _, _ in [] },
             enricher: { raw in var e = raw; e.summary = "ENRICHED"; return e }
         )
         await s.hydrate(companyId: "u")
@@ -132,7 +132,7 @@ final class CompanyStoreOnboardingTests: XCTestCase {
         let s = CompanyStore(
             loader: { _ in .empty },
             saver: { _, b in savedBrief = b; return true },
-            roadmapFetcher: { _, _ in [] },
+            roadmapFetcher: { _, _, _ in [] },
             enricher: { _ in throw E() }
         )
         await s.hydrate(companyId: "u")

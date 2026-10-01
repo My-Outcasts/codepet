@@ -29,6 +29,38 @@ final class CompanyStoreRoadmapTests: XCTestCase {
         XCTAssertEqual(s.company.tasks.map(\.id), ["keep"])   // empty fetch → no change
         XCTAssertEqual(saveCount, 0)                          // fail-open path never persists
     }
+    /// Re-plan must not erase finished work. On 1 Oct a founder pressed "Re-plan for my stage"
+    /// with 2 Done tasks on the board; both vanished and progress fell from 100% to 0%, while
+    /// the Library still held what those tasks had produced.
+    func testReplanKeepsDoneTasksAndReplacesOpenOnes() async {
+        var saved: [RoadmapTask] = []
+        let seeded = CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                                  companionId: "byte", onboardedAt: Date(),
+                                  tasks: [task("shipped", done: true), task("stale")])
+        let s = CompanyStore(loader: { _ in seeded }, saver: { _, _ in true },
+                             roadmapFetcher: { _, _ in [self.task("n1"), self.task("n2")] },
+                             tasksSaver: { _, ts in saved = ts; return true })
+        await s.hydrate(companyId: "u")
+        await s.generateRoadmap()
+        XCTAssertEqual(s.company.tasks.map(\.id), ["shipped", "n1", "n2"])
+        XCTAssertTrue(s.company.tasks[0].done)
+        XCTAssertEqual(saved.map(\.id), ["shipped", "n1", "n2"], "what is kept must also be persisted")
+    }
+    /// Generated ids are `slug(title)-index`, so a new plan can re-propose a task the founder has
+    /// already finished under the same id. The finished one wins: two tasks with one id would make
+    /// every id lookup ambiguous, and re-opening it would undo the founder's work.
+    func testReplanDropsANewTaskThatCollidesWithADoneOne() async {
+        let seeded = CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,
+                                  companionId: "byte", onboardedAt: Date(),
+                                  tasks: [task("same-0", done: true)])
+        let s = CompanyStore(loader: { _ in seeded }, saver: { _, _ in true },
+                             roadmapFetcher: { _, _ in [self.task("same-0"), self.task("n1")] },
+                             tasksSaver: { _, _ in true })
+        await s.hydrate(companyId: "u")
+        await s.generateRoadmap()
+        XCTAssertEqual(s.company.tasks.map(\.id), ["same-0", "n1"])
+        XCTAssertTrue(s.company.tasks[0].done)
+    }
     func testToggleTaskDoneFlipsAndPersists() async {
         var saved: [RoadmapTask] = []
         let seeded = CompanyState(brief: CompanyBrief(), departments: [], library: [], stage: .idea,

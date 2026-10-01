@@ -903,14 +903,29 @@ final class CompanyStore: ObservableObject {
     /// fetch discards. An empty result is "no change" (keeps existing tasks).
     /// Language defaults to `.en` (the onboarding scaffold path is English-only); the
     /// Overview board passes the live UI language.
+    ///
+    /// **Done tasks survive a re-plan; only open ones are replaced.** This used to assign the
+    /// fetched plan wholesale, so "Re-plan for my stage" erased finished work: on 1 Oct two
+    /// Done tasks vanished and progress fell from 100% to 0%, while the Library still held
+    /// what they had produced. A generated id is `slug(title)-index`, so a new task can
+    /// collide with a finished one; the finished one wins (see `keepingDone`).
     func generateRoadmap(language: AppLanguage = .en) async {
         let token = hydrationToken
         isGeneratingRoadmap = true
         defer { if token == hydrationToken { isGeneratingRoadmap = false } }
         let fetched = await roadmapFetcher(company.brief, language)
         guard token == hydrationToken, !fetched.isEmpty else { return }
-        company.tasks = fetched
-        if let cid = companyId { _ = await tasksSaver(cid, fetched) }
+        let tasks = Self.keepingDone(company.tasks, replanned: fetched)
+        company.tasks = tasks
+        if let cid = companyId { _ = await tasksSaver(cid, tasks) }
+    }
+
+    /// The finished tasks of `current`, in order, followed by every task of `replanned` whose
+    /// id is not already taken by one of them.
+    static func keepingDone(_ current: [RoadmapTask], replanned: [RoadmapTask]) -> [RoadmapTask] {
+        let done = current.filter(\.done)
+        let doneIds = Set(done.map(\.id))
+        return done + replanned.filter { !doneIds.contains($0.id) }
     }
 
     /// First-run scaffold: persist the collected brief, then run the fail-open

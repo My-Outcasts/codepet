@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
+from smoke.lib import drive
 from smoke.lib.drive import as_applescript_string, wait_until, launch, osascript, DriveError
 
 
@@ -80,6 +81,61 @@ class WaitUntil(unittest.TestCase):
 
     def test_it_gives_up_and_says_so(self):
         self.assertFalse(wait_until(lambda: False, timeout=0.2, interval=0.05))
+
+
+class Keystrokes(unittest.TestCase):
+    def test_nothing_is_typed_when_another_app_is_frontmost(self):
+        # A keystroke goes to whatever is in front. Typing into a Simulator
+        # that took focus mid-run is the failure this refuses.
+        with patch.object(drive, "is_frontmost", return_value=False), \
+                patch.object(drive, "osascript") as run:
+            with self.assertRaises(DriveError):
+                drive.type_text("probe")
+            with self.assertRaises(DriveError):
+                drive.press_enter()
+            run.assert_not_called()
+
+    def test_it_types_when_codepet_is_frontmost(self):
+        with patch.object(drive, "is_frontmost", return_value=True), \
+                patch.object(drive, "osascript") as run:
+            drive.type_text("probe")
+            self.assertIn('keystroke "probe"', run.call_args[0][0])
+
+
+class OpenComposer(unittest.TestCase):
+    def scripts(self, present, splash):
+        sent = []
+        with patch.object(drive, "composer_present", lambda: next(present)), \
+                patch.object(drive, "on_splash", return_value=splash), \
+                patch.object(drive, "osascript", sent.append):
+            drive.open_composer(timeout=1, sleep=lambda s: None)
+        return sent
+
+    def test_the_splash_button_is_pressed_when_no_composer_is_on_screen(self):
+        sent = self.scripts(iter([False, True]), splash=True)
+        self.assertIn("click button 1 of group 1 of window 1", sent[0])
+        self.assertIn("set focused of " + drive.COMPOSER, sent[1])
+
+    def test_an_already_open_composer_is_only_focused(self):
+        sent = self.scripts(iter([True]), splash=False)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("set focused of " + drive.COMPOSER, sent[0])
+
+    def test_no_button_is_pressed_off_the_splash(self):
+        # Home has many buttons; button 1 there is not "Let's go".
+        sent = self.scripts(iter([False, True]), splash=False)
+        self.assertFalse(any("click button" in s for s in sent))
+
+    def test_no_composer_after_launch_is_a_drive_error(self):
+        with patch.object(drive, "composer_present", return_value=False), \
+                patch.object(drive, "on_splash", return_value=True), \
+                patch.object(drive, "osascript"):
+            with self.assertRaises(DriveError):
+                drive.open_composer(timeout=0.1, sleep=lambda s: None)
+
+    def test_no_script_clicks_a_screen_point(self):
+        sent = self.scripts(iter([False, True]), splash=True)
+        self.assertFalse(any("click at" in s for s in sent))
 
 
 if __name__ == "__main__":

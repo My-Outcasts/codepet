@@ -14,9 +14,9 @@ FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
 # The fixture is hand-written from the Swift Codable types (see the docstring
 # of smoke/lib/transcript.py for the citations), never copied from a real file.
 REPLIED = "a1b2c3d4e5f6"        # probe, then a companion reply, same thread
-OTHER_THREAD = "0badc0ffee11"   # reversed token only in a DIFFERENT thread
-BEFORE = "c0c0a1a2a3a4"         # reversed token BEFORE the probe, same thread
-FOUNDER_ECHO = "d00d12345678"   # the founder, not the companion, typed it reversed
+OTHER_THREAD = "0badc0ffee11"   # capitals only in a DIFFERENT thread
+BEFORE = "c0c0a1a2a3a4"         # capitals BEFORE the probe, same thread
+FOUNDER_ECHO = "d00d12345678"   # the founder, not the companion, typed the capitals
 
 
 def account_with(fixture=FIXTURE):
@@ -42,22 +42,30 @@ class Schema(unittest.TestCase):
         self.assertTrue(self.t.probe_seen(REPLIED))
         self.assertTrue(self.t.reply_seen(REPLIED))
 
-    def test_a_reversed_token_in_another_thread_is_not_a_reply(self):
+    def test_capitals_in_another_thread_are_not_a_reply(self):
         self.assertTrue(self.t.probe_seen(OTHER_THREAD))
-        self.assertTrue(self.t.contains(OTHER_THREAD[::-1]))
+        self.assertTrue(self.t.contains(OTHER_THREAD.upper()))
         self.assertFalse(self.t.reply_seen(OTHER_THREAD))
 
-    def test_a_reversed_token_before_the_probe_is_not_a_reply(self):
+    def test_capitals_before_the_probe_are_not_a_reply(self):
         self.assertTrue(self.t.probe_seen(BEFORE))
         self.assertFalse(self.t.reply_seen(BEFORE))
 
-    def test_the_founder_typing_it_reversed_is_not_a_reply(self):
+    def test_the_founder_typing_the_capitals_is_not_a_reply(self):
         self.assertTrue(self.t.probe_seen(FOUNDER_ECHO))
         self.assertFalse(self.t.reply_seen(FOUNDER_ECHO))
 
     def test_a_companion_message_is_not_a_probe(self):
-        # The reversed REPLIED token is only in a companion message.
-        self.assertFalse(self.t.probe_seen(REPLIED[::-1]))
+        # The REPLIED needle is only in a companion message.
+        self.assertFalse(self.t.probe_seen(REPLIED.upper()))
+
+    def test_a_lower_case_echo_is_not_a_reply(self):
+        # The needle is matched case-sensitively; a reply that only repeats
+        # the probe's lower-case token proves nothing.
+        t = transcript.Transcript([transcript.Thread("t", [
+            transcript.Message(True, "probe a1b2c3d4e5f6"),
+            transcript.Message(False, "a1b2c3d4e5f6")])])
+        self.assertFalse(t.reply_seen("a1b2c3d4e5f6"))
 
     def test_an_empty_needle_is_refused(self):
         with self.assertRaises(ValueError):

@@ -94,13 +94,94 @@ def focus():
     osascript('tell application id %s to activate' % as_applescript_string(BUNDLE_ID))
 
 
+# The composer's place in the accessibility tree, read off a live build 6 on 1 Oct.
+# It is absent on the splash and on every other screen, which is what lets its
+# presence double as "the chat is on screen".
+COMPOSER = "text field 1 of scroll area 2 of group 1 of window 1"
+
+
+def _in_process(expr):
+    return 'tell application "System Events" to tell process %s to %s' % (
+        as_applescript_string(PROCESS_NAME), expr)
+
+
+def is_frontmost():
+    try:
+        return osascript(_in_process("get frontmost")) == "true"
+    except DriveError:
+        return False
+
+
+def composer_present():
+    try:
+        return osascript(_in_process("exists " + COMPOSER)) == "true"
+    except DriveError:
+        return False
+
+
+def on_splash():
+    """The splash is the one screen with no composer and a single button."""
+    try:
+        return osascript(_in_process(
+            "count buttons of group 1 of window 1")) == "1" and not composer_present()
+    except DriveError:
+        return False
+
+
+def open_composer(timeout=20.0, sleep=time.sleep):
+    """Get from launch to a focused composer, or raise DriveError.
+
+    Every launch opens on SplashView, which continues on a click and on no key
+    (Views/SplashView.swift), so keystrokes typed at it vanish. And on the home
+    screen the composer does not take focus by itself. Both cost a run that
+    typed a probe into nothing.
+
+    Both steps go through the accessibility tree, never a screen point. A
+    `click at` the window's middle reaches SwiftUI's onTapGesture as an AX
+    press, which it ignores (three tries, 1 Oct, the splash stayed up), and a
+    fixed point once landed in another app because the window was on a second
+    display at x=-1410. Pressing the splash's one button works wherever the
+    window is.
+    """
+    if not composer_present():
+        if on_splash():
+            osascript(_in_process("click button 1 of group 1 of window 1"))
+        if not wait_until(composer_present, timeout=timeout):
+            raise DriveError("no chat composer on screen %ds after launch" % timeout)
+    osascript(_in_process("set focused of %s to true" % COMPOSER))
+    sleep(0.5)
+
+
+def enter_text(text):
+    """Put text in the composer through the accessibility tree.
+
+    Not keystrokes: they go through the input method, and with Vietnamese
+    Telex active on 1 Oct the probe arrived as "smoke tét ... reply with thí
+    code". A hex token can be rewritten the same way. Setting the value
+    reaches SwiftUI's binding (measured on build 6: sent, replied in 6 s).
+    """
+    if not is_frontmost():
+        raise DriveError("codepet is not the frontmost app; not writing into another app")
+    osascript(_in_process("set value of %s to %s" % (COMPOSER, as_applescript_string(text))))
+
+
+def composer_text():
+    return osascript(_in_process("get value of " + COMPOSER))
+
+
 def type_text(text):
+    # A keystroke goes to whatever is frontmost. On 1 Oct a Simulator window
+    # took focus mid-run; typing then would have sent the probe into it.
+    if not is_frontmost():
+        raise DriveError("codepet is not the frontmost app; not typing into another app")
     osascript(
         'tell application "System Events" to keystroke %s' % as_applescript_string(text)
     )
 
 
 def press_enter():
+    if not is_frontmost():
+        raise DriveError("codepet is not the frontmost app; not pressing Enter in another app")
     osascript('tell application "System Events" to key code 36')
 
 

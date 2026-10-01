@@ -10,17 +10,19 @@ It is NOT read from the Firestore LevelDB: since 25 September the app keeps
 chat in that file and "never Firestore" (codepet/Services/ChatThreadArchive.swift:5-10),
 so a LevelDB scan could only ever have missed.
 
-The verdict needle is the run token REVERSED. The probe we type contains the
-token; only a genuine reply can contain it backwards. A pass needs our probe
-as a founder message and, later in the same thread, a companion message with
-the reversed token. A needle present in our own message would prove nothing.
+The verdict needle is the run token IN CAPITALS (transcript.reply_needle).
+The probe we type contains the token in lower case; only a genuine reply can
+contain it upper-cased. A pass needs our probe as a founder message and, later
+in the same thread, a companion message with the needle. A needle present in
+our own message would prove nothing.
 
-Composer focus is NOT verified. We wait `settle` seconds after launch, then
-activate the app and type, trusting the composer to hold keyboard focus. If it
-does not, the probe never reaches the transcript and this reads as ERROR
-("keystrokes did not reach the chat"), not as a broken chat. An app-side flag
-saying the composer is focused would close that gap, but it is a product
-change and the founder's decision.
+We wait `settle` seconds after launch, activate the app, click past the
+splash, focus the composer (drive.open_composer), write the probe into it
+(drive.enter_text), and read it back before pressing Enter.
+Trusting the composer to hold focus never worked: every launch opens on a
+splash that ignores keys, so until 1 Oct this check could not pass on any
+build. If the probe still never reaches the transcript, this reads as ERROR
+("keystrokes did not reach the chat"), not as a broken chat.
 """
 
 import time
@@ -39,14 +41,14 @@ MAX_MINTS = 20
 def mint_token():
     while True:
         token = uuid.uuid4().hex[:TOKEN_LEN]
-        # Reject palindromes: if token == token[::-1], then reply_needle(token) == token,
-        # so finding it would prove our probe was saved, not that anything replied.
-        if token != token[::-1]:
+        # Reject all-digit tokens: their capitals are themselves, so finding the
+        # needle would prove our probe was saved, not that anything replied.
+        if reply_needle(token) != token:
             return token
 
 
 def fresh_token(token, before, mint=None):
-    """Re-mint while the reversed needle is ALREADY in the transcript.
+    """Re-mint while the reply needle is ALREADY in the transcript.
 
     A reply needle that pre-exists the run would pass without anything
     replying. 12 hex chars make that vanishingly rare, which is exactly why
@@ -62,13 +64,12 @@ def fresh_token(token, before, mint=None):
 
 def probe_text(token):
     return (
-        "smoke test %s -- reply with this code written backwards, nothing else: %s"
+        "smoke test %s -- reply with this code in capital letters, nothing else: %s"
         % (token, token)
     )
 
 
-def reply_needle(token):
-    return token[::-1]
+reply_needle = transcript.reply_needle
 
 
 def evaluate(sent, probe_seen, reply_seen, token, log_error, timeout=90):
@@ -116,7 +117,13 @@ def run(token, capture, uid=None, accounts_root=None, timeout=90, settle=SETTLE,
     try:
         try:
             drive.focus()
-            drive.type_text(probe_text(token))
+            drive.open_composer()
+            drive.enter_text(probe_text(token))
+            # Read the composer back before sending: if the keys went
+            # anywhere else, say so here instead of waiting 90 s for a
+            # transcript that was never going to change.
+            if token not in drive.composer_text():
+                raise drive.DriveError("the probe did not land in the chat composer")
             drive.press_enter()
             sent = True
         except drive.DriveError as e:

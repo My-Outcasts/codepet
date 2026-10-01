@@ -85,6 +85,20 @@ class Execute(unittest.TestCase):
                            runs_root=self.tmp.name)
         return m.call_args[1]
 
+    def test_the_captured_log_and_uid_reach_the_auth_check(self):
+        seen = {}
+
+        def auth_run(*a, **k):
+            seen.update(k)
+            return Result("auth", PASS, 0.0, "")
+        with mock.patch.object(runner.launch_check, "run", self.check("launch", PASS)), \
+                mock.patch.object(runner.chat_check, "run", self.check("chat", PASS)), \
+                mock.patch.object(runner.auth_check, "run", auth_run):
+            runner.execute("/nonexistent.app", "test", False, "a@b.c",
+                           runs_root=self.tmp.name, uid="u42")
+        self.assertEqual(seen["uid"], "u42")
+        self.assertIn("lines", seen)
+
     def test_the_uid_reaches_the_chat_check(self):
         seen = {}
 

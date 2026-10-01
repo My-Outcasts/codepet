@@ -169,24 +169,36 @@ enum DeliverableMarkdown {
         hero += "\n\n\(ctas)"
         parts.append(hero)
 
-        if !s.steps.isEmpty {
-            let title = s.howTitle.isEmpty ? "How it works" : s.howTitle
-            let eyebrow = s.howEyebrow.isEmpty ? "" : "_\(s.howEyebrow)_\n\n"
-            parts.append("\(eyebrow)### \(title)\n\n" + s.steps.enumerated()
-                .map { "\($0.offset + 1). **\($0.element.h)** — \($0.element.p)" }.joined(separator: "\n"))
-        }
-
-        if !s.features.isEmpty {
-            let title = s.featTitle.isEmpty ? "Features" : s.featTitle
-            let eyebrow = s.featEyebrow.isEmpty ? "" : "_\(s.featEyebrow)_\n\n"
-            parts.append("\(eyebrow)### \(title)\n\n" + s.features
-                .map { "- **\($0.h):** \($0.p)" }.joined(separator: "\n"))
-        }
-
-        if !s.quote.isEmpty {
-            var q = "> \(s.quote)"
-            if !s.quoteBy.isEmpty { q += "\n>\n> — \(s.quoteBy)" }
-            parts.append(q)
+        // Each block in page order (CP-002 E2). Steps, features and quote render exactly as they
+        // did when they were fixed fields, so an old page's docs/ file is unchanged.
+        for block in s.blocks {
+            let eyebrow = block.eyebrow.isEmpty ? "" : "_\(block.eyebrow)_\n\n"
+            let heading = { (fallback: String) in "\(eyebrow)### \(block.title.isEmpty ? fallback : block.title)\n\n" }
+            switch block.type {
+            case "steps" where !block.items.isEmpty:
+                parts.append(heading("How it works") + block.items.enumerated()
+                    .map { "\($0.offset + 1). **\($0.element.h)** — \($0.element.p)" }.joined(separator: "\n"))
+            case "features" where !block.items.isEmpty:
+                parts.append(heading("Features") + block.items
+                    .map { "- **\($0.h):** \($0.p)" }.joined(separator: "\n"))
+            case "faq" where !block.items.isEmpty:
+                parts.append(heading("Questions") + block.items
+                    .map { "**\($0.h)**\n\n\($0.p)" }.joined(separator: "\n\n"))
+            case "pricing" where !block.tiers.isEmpty:
+                parts.append(heading("Pricing") + block.tiers.map { t in
+                    "- **\(t.name)\(t.highlight ? " (recommended)" : "") — \(t.price)\(t.period.isEmpty ? "" : " \(t.period)")**"
+                    + t.points.map { "\n  - \($0)" }.joined()
+                    + (t.cta.isEmpty ? "" : "\n  - CTA: \(t.cta)")
+                }.joined(separator: "\n"))
+            case "quote" where !block.text.isEmpty:
+                var q = "> \(block.text)"
+                if !block.by.isEmpty { q += "\n>\n> — \(block.by)" }
+                parts.append(q)
+            case "text" where !block.text.isEmpty:
+                parts.append((block.title.isEmpty && block.eyebrow.isEmpty ? "" : heading("")) + block.text)
+            default:
+                continue
+            }
         }
 
         var final = "## \(s.finalTitle)"

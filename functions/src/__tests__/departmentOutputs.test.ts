@@ -410,7 +410,7 @@ describe("every payload field is classified", () => {
   });
 
   test("the schema still declares the fields this map was written against", () => {
-    expect(declared.length).toBe(40);
+    expect(declared.length).toBe(34);
   });
 });
 

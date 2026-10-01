@@ -122,7 +122,7 @@ const PAYLOAD_GUIDE: ReadonlyArray<readonly [string, string]> = [
   ["email", "`subject` = the subject line (never repeated as a heading in the body); `to` = who it is for, in the founder's own words or as a type of person (\"the two who asked to pay\", \"beta testers who went quiet\"), never an invented name and never an address — empty if unknown. The `body` is the email itself."],
   ["calendar", "a plan in phases — a content calendar, a launch runway, a rollout — `phases[]` = 1-8 {label, from, to, items[]}: `label` names the phase (\"Week 1\", \"Five days out\", \"Ship day\"), `from`/`to` its span as relative labels (\"T-5\", \"Day 8\"), never a calendar date; each phase's `items[]` = 1-8 {when, format, channel, owner, body}: `when` a relative day (\"Mon\", \"T-5\"), `format` what it is (thread, email, review), `channel` where it goes (\"X\", \"App Store\") and `owner` who does it (a department or \"you\") where known, else empty; `body` the item itself, specific to this company."],
   ["sheet", "a live model of whatever the task is about (pricing, costs, a runway, a funnel) — `inputs[]` = 2-8 assumptions the founder can move, each {key, name, unit, val, min, max, step}: `key` a short snake_case id, `unit` \"$\", \"%\" (8 means 8%), \"users\", \"mo\" or a short word, `val` a realistic default inside a sensible `min`-`max` range; `outputs[]` = 1-8 results, the most important FIRST, each {key, name, unit, formula}. A `formula` uses input keys, other output keys, numbers, + - * / ^ ( ) and min, max, round, ceil, floor — e.g. `round(waitlist * conversion / 100)`. Never write an output's value; the app computes it from the formula. `summary` = one paragraph on what the model shows at the defaults."],
-  ["site", "copy for a one-page landing site — `title`, `brand`, `headline`, `sub`, `ctaPrimary`, `howEyebrow`, `howTitle`, exactly 3 `steps[]` = {h,p}, `featEyebrow`, `featTitle`, exactly 3 `features[]` = {h,p}, `finalTitle`, `finalCta`, `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, quote, quoteBy, finalSub). Never write HTML."],
+  ["site", "copy for a one-page landing site — the hero (`title`, `brand`, `headline`, `sub`, `ctaPrimary`), then `blocks[]` = 1-8 sections in page order, each {type, eyebrow, title} plus its content: `steps` (numbered) or `features` or `faq` → `items[]` = {h,p} (for faq, h is the question and p the answer); `quote` → `text`, `by`; `text` → `text`; `pricing` → `tiers[]` = 1-4 {name, price (as written, e.g. \"$6\"), period, points[], cta, highlight}. Then the closing `finalTitle`, `finalCta`, and `accent` (6-digit hex). Use empty strings for unused optional fields (kicker, headlineHi, ctaSecondary, finalSub). Only use a price the company context or an upstream deliverable states. Never write HTML."],
   ["screens", "exactly 3 onboarding `screens[]` = {name, time, kick, title, sub, art, cta, note}, with `art` set to \"connect\", \"session\", \"recap\" in that order."],
 ];
 
@@ -287,6 +287,17 @@ export interface SheetOutput { key: string; name: string; unit: string; formula:
 /** `legacy`: lifted from the old fixed four, so the client can localise the names it knows. */
 export interface SheetPayload { inputs: SheetVariable[]; outputs: SheetOutput[]; summary: string; legacy?: true; }
 export interface SiteCard { h: string; p: string; }
+export interface SiteTier { name: string; price: string; period: string; points: string[]; cta: string; highlight: boolean; }
+/** One section between the hero and the closing CTA (CP-002 E2). Only the fields its type uses are set. */
+export interface SiteBlock {
+  type: "steps" | "features" | "faq" | "quote" | "text" | "pricing";
+  eyebrow: string;
+  title: string;
+  items?: SiteCard[];
+  text?: string;
+  by?: string;
+  tiers?: SiteTier[];
+}
 export interface SitePayload {
   title: string;
   brand: string;
@@ -296,14 +307,7 @@ export interface SitePayload {
   sub: string;
   ctaPrimary: string;
   ctaSecondary: string;
-  howEyebrow: string;
-  howTitle: string;
-  steps: SiteCard[];
-  featEyebrow: string;
-  featTitle: string;
-  features: SiteCard[];
-  quote: string;
-  quoteBy: string;
+  blocks: SiteBlock[];
   finalTitle: string;
   finalSub: string;
   finalCta: string;
@@ -345,6 +349,8 @@ const POST_PLATFORMS: ReadonlyArray<{ label: string; names: readonly string[]; l
   { label: "Instagram", names: ["instagram"], limit: 2200 },
 ];
 const CALENDAR_MAX = 8;
+const SITE_MAX_BLOCKS = 8;
+const SITE_MAX_ITEMS = 8;
 const SHEET_KEY = /^[a-z][a-z0-9_]{0,23}$/;
 const SHEET_MAX = 8;
 
@@ -547,13 +553,46 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
   if (kind === "site") {
     const card = (v: unknown): SiteCard | null => {
       const o = (v ?? {}) as Record<string, unknown>;
-      const h = s(o.h, 80); const p = s(o.p, 300);
+      const h = s(o.h, 120); const p = s(o.p, 400);
       return h && p ? { h, p } : null;
     };
-    const steps = (Array.isArray(r.steps) ? r.steps : [])
-      .map(card).filter((x): x is SiteCard => x !== null).slice(0, 3);
-    const features = (Array.isArray(r.features) ? r.features : [])
-      .map(card).filter((x): x is SiteCard => x !== null).slice(0, 3);
+    const cards = (v: unknown) => (Array.isArray(v) ? v : []).map(card).filter((x): x is SiteCard => x !== null).slice(0, SITE_MAX_ITEMS);
+    const tier = (v: unknown): SiteTier | null => {
+      const o = (v ?? {}) as Record<string, unknown>;
+      const name = s(o.name, 40), price = s(o.price, 20);
+      return name && price
+        ? { name, price, period: s(o.period, 20), points: strArr(o.points, 6, 120), cta: s(o.cta, 40), highlight: o.highlight === true }
+        : null;
+    };
+    const block = (v: unknown): SiteBlock | null => {
+      const o = (v ?? {}) as Record<string, unknown>;
+      const type = s(o.type, 20);
+      const head = { eyebrow: s(o.eyebrow, 60), title: s(o.title, 120) };
+      if (type === "steps" || type === "features" || type === "faq") {
+        const items = cards(o.items);
+        return items.length ? { type, ...head, items } : null;
+      }
+      if (type === "quote" || type === "text") {
+        const text = s(o.text, 1200);
+        if (!text) return null;
+        return type === "quote" ? { type, ...head, text, by: s(o.by, 80) } : { type, ...head, text };
+      }
+      if (type === "pricing") {
+        const tiers = (Array.isArray(o.tiers) ? o.tiers : []).map(tier).filter((x): x is SiteTier => x !== null).slice(0, 4);
+        return tiers.length ? { type, ...head, tiers } : null;
+      }
+      return null; // an unknown type: the page has no way to draw it
+    };
+    // A legacy page — flat steps/features/quote — lifts into blocks in the order it always drew
+    // them, so it renders byte-for-byte as before (SiteLegacyParityTests on the Swift side).
+    const rawBlocks: unknown[] = Array.isArray(r.blocks)
+      ? r.blocks
+      : [
+          { type: "steps", eyebrow: r.howEyebrow, title: r.howTitle, items: r.steps },
+          { type: "features", eyebrow: r.featEyebrow, title: r.featTitle, items: r.features },
+          { type: "quote", eyebrow: "", title: "", text: r.quote, by: r.quoteBy },
+        ];
+    const blocks = rawBlocks.map(block).filter((x): x is SiteBlock => x !== null).slice(0, SITE_MAX_BLOCKS);
     const title = s(r.title, 120);
     const brand = s(r.brand, 80);
     const kicker = s(r.kicker, 80);
@@ -562,27 +601,14 @@ export function coercePayload(kind: string, raw: unknown): DeliverablePayload | 
     const sub = s(r.sub, 300);
     const ctaPrimary = s(r.ctaPrimary, 40);
     const ctaSecondary = s(r.ctaSecondary, 40);
-    const howEyebrow = s(r.howEyebrow, 60);
-    const howTitle = s(r.howTitle, 120);
-    const featEyebrow = s(r.featEyebrow, 60);
-    const featTitle = s(r.featTitle, 120);
-    const quote = s(r.quote, 300);
-    const quoteBy = s(r.quoteBy, 80);
     const finalTitle = s(r.finalTitle, 120);
     const finalSub = s(r.finalSub, 200);
     const finalCta = s(r.finalCta, 40);
     const accent = s(r.accent, 20);
     const footNote = s(r.footNote, 120);
-    const ok = !!(
-      title && brand && headline && sub && ctaPrimary && howEyebrow && howTitle && steps.length &&
-      featEyebrow && featTitle && features.length && finalTitle && finalCta && accent
-    );
+    const ok = !!(title && brand && headline && ctaPrimary && blocks.length && finalTitle && finalCta && accent);
     return ok
-      ? {
-          title, brand, kicker, headline, headlineHi, sub, ctaPrimary, ctaSecondary,
-          howEyebrow, howTitle, steps, featEyebrow, featTitle, features,
-          quote, quoteBy, finalTitle, finalSub, finalCta, accent, footNote,
-        }
+      ? { title, brand, kicker, headline, headlineHi, sub, ctaPrimary, ctaSecondary, blocks, finalTitle, finalSub, finalCta, accent, footNote }
       : null;
   }
   if (kind === "screens") {
@@ -675,7 +701,8 @@ export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   changes: ["plan"],
   verify: ["plan"],
   risks: ["plan"],
-  steps: ["plan", "site"],
+  steps: ["plan"],
+  blocks: ["site"],
   messages: ["dms"],
   phases: ["calendar"],
   inputs: ["sheet"],
@@ -689,13 +716,6 @@ export const PAYLOAD_FIELD_KINDS: Record<string, readonly string[]> = {
   sub: ["site"],
   ctaPrimary: ["site"],
   ctaSecondary: ["site"],
-  howEyebrow: ["site"],
-  howTitle: ["site"],
-  featEyebrow: ["site"],
-  featTitle: ["site"],
-  features: ["site"],
-  quote: ["site"],
-  quoteBy: ["site"],
   finalTitle: ["site"],
   finalSub: ["site"],
   finalCta: ["site"],
@@ -761,15 +781,18 @@ export const DELIVERABLE_TOOL = {
           sub: { type: "string", description: "site: one supporting sentence under the headline." },
           ctaPrimary: { type: "string", description: "site: primary button label." },
           ctaSecondary: { type: "string", description: "site: secondary button label; empty string if only one CTA." },
-          howEyebrow: { type: "string", description: "site: eyebrow over the how-it-works section." },
-          howTitle: { type: "string", description: "site: how-it-works section heading." },
-          steps: { type: "array", description: "plan: 3-5 ordered approach steps (strings). site: exactly 3 how-it-works steps, each {h,p}.", items: {} },
-          featEyebrow: { type: "string", description: "site: eyebrow over the features section." },
-          featTitle: { type: "string", description: "site: features section heading." },
-          features: { type: "array", description: "site: exactly 3 feature cards, each {h,p}.",
-            items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
-          quote: { type: "string", description: "site: one pull-quote/testimonial line; empty string if none." },
-          quoteBy: { type: "string", description: "site: attribution for the quote; empty string if none." },
+          steps: { type: "array", description: "plan: 3-5 ordered approach steps.", items: { type: "string" } },
+          blocks: { type: "array", description: "site: 1-8 typed sections between the hero and the closing CTA.",
+            items: { type: "object", additionalProperties: false, properties: {
+              type: { type: "string", enum: ["steps", "features", "faq", "quote", "text", "pricing"] },
+              eyebrow: { type: "string" }, title: { type: "string" },
+              items: { type: "array", items: { type: "object", additionalProperties: false, properties: { h: { type: "string" }, p: { type: "string" } }, required: ["h", "p"] } },
+              text: { type: "string" }, by: { type: "string" },
+              tiers: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+                name: { type: "string" }, price: { type: "string" }, period: { type: "string" },
+                points: { type: "array", items: { type: "string" } }, cta: { type: "string" }, highlight: { type: "boolean" },
+              }, required: ["name", "price", "period", "points", "cta", "highlight"] } },
+            }, required: ["type", "eyebrow", "title"] } },
           finalTitle: { type: "string", description: "site: closing call-to-action heading." },
           finalSub: { type: "string", description: "site: line under the closing CTA; empty string if none." },
           finalCta: { type: "string", description: "site: closing CTA button label." },

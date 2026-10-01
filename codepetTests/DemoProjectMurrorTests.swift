@@ -172,8 +172,8 @@ final class DemoProjectMurrorTests: XCTestCase {
         XCTAssertEqual(site.brand, "Murror")
         XCTAssertEqual(site.headline, "AI that brings people")
         XCTAssertEqual(site.headlineHi, "closer")
-        XCTAssertEqual(site.steps.count, 3)
-        XCTAssertEqual(site.features.count, 4)
+        XCTAssertEqual(site.blocks.first { $0.type == "steps" }?.items.count, 3)
+        XCTAssertEqual(site.blocks.first { $0.type == "features" }?.items.count, 4)
         XCTAssertFalse(site.finalCta.isEmpty)
     }
 

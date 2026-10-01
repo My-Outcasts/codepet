@@ -744,3 +744,35 @@ enum TeamRunPlacement {
         return run.id == stickyRunId && stickyKey == transcriptKey
     }
 }
+
+/// When the transcript follows a Team Build card, and to where.
+///
+/// The card is ONE message that grows for minutes, and the transcript only scrolled when the
+/// message COUNT changed. On 1 Oct (build 6, real account) a Team Build finished and the chat did
+/// not move: the Approve / Run it / Open in Finder row sat under the composer, and the founder had
+/// no sign the run was waiting on them. The Virtual Company room had the same shape and is followed
+/// by `vcRunCardCount`; this is the Team Build's equivalent.
+enum TeamRunFollow {
+    /// The scroll id `CopilotChatView` gives a run with no message in this thread.
+    static let unanchoredId = "team-run"
+
+    /// Changes exactly when the card gains something to act on or read: a new phase (the plan's
+    /// Go/Cancel on `.planned`, the Approve row on `.ready`, a failure, a cancel) or one more step
+    /// settling. A step merely STARTING does not count — following that would yank a founder who
+    /// scrolled up to read a draft back to the bottom every few seconds.
+    static func key(_ run: TeamRun?) -> String? {
+        guard let run else { return nil }
+        let settled = run.steps.filter {
+            switch $0.status {
+            case .waiting, .running: return false
+            default: return true
+            }
+        }.count
+        return "\(run.id)|\(run.phase.rawValue)|\(settled)"
+    }
+
+    /// The message carrying the run, else the unanchored card at the transcript's foot.
+    static func target(runId: String, messages: [CopilotMessage]) -> String {
+        messages.last(where: { $0.teamRunId == runId })?.id ?? unanchoredId
+    }
+}

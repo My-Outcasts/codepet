@@ -89,6 +89,18 @@ class Thread:
     messages: list = field(default_factory=list)
 
 
+def reply_needle(token):
+    """The token in capitals. Matched case-sensitively, so it is absent from
+    the probe, which carries the token in lower case.
+
+    It was the token reversed until 1 Oct, when a real round trip came back
+    `7595e048f0d` for `7595e0f48f0d`: the chat worked and the model dropped a
+    character reversing hex, so the check read a working build as FAIL.
+    Upper-casing is a copy, which models do not get wrong.
+    """
+    return token.upper()
+
+
 @dataclass
 class Transcript:
     threads: list = field(default_factory=list)
@@ -106,12 +118,12 @@ class Transcript:
 
     def reply_seen(self, token):
         """A founder message with the token, then LATER in the same thread a
-        companion message with the token reversed.
+        companion message with reply_needle(token).
 
-        Same thread and later, because a reversed token sitting in some other
+        Same thread and later, because a needle sitting in some other
         conversation, or before our probe, is not a reply to it.
         """
-        needle = token[::-1]
+        needle = reply_needle(token)
         for t in self.threads:
             asked = False
             for m in t.messages:

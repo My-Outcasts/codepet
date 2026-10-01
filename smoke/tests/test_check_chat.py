@@ -14,20 +14,17 @@ class Probe(unittest.TestCase):
     def test_a_token_is_unique_per_run(self):
         self.assertNotEqual(mint_token(), mint_token())
 
-    def test_palindromes_are_rejected_to_prevent_false_pass(self):
-        # A palindromic token makes reply_needle(token) == token,
-        # so finding it in the store would prove our probe was saved,
-        # not that anything replied. Loop until we get a non-palindrome.
+    def test_all_digit_tokens_are_rejected_to_prevent_false_pass(self):
+        # An all-digit token is its own capitals, so finding the needle would
+        # prove our probe was saved, not that anything replied.
         with mock.patch("smoke.checks.chat.uuid.uuid4") as mock_uuid:
-            # Return a palindrome first, then a non-palindrome
             mock_uuid.side_effect = [
-                mock.MagicMock(hex="abcdeffedcba99999999999999999999"),  # palindrome at [:12]
-                mock.MagicMock(hex="abcdef0123456789abcdef0123456789"),  # non-palindrome
+                mock.MagicMock(hex="12345678901299999999999999999999"),
+                mock.MagicMock(hex="abcdef0123456789abcdef0123456789"),
             ]
             token = mint_token()
-            # Should loop past the palindrome and return the non-palindrome
             self.assertEqual(token, "abcdef012345")
-            self.assertNotEqual(token, token[::-1])
+            self.assertNotEqual(token, reply_needle(token))
 
     def test_a_token_is_twelve_hex_chars(self):
         token = mint_token()
@@ -40,20 +37,23 @@ class Probe(unittest.TestCase):
         token = "abc123"
         self.assertNotIn(reply_needle(token), probe_text(token))
 
-    def test_the_needle_is_the_token_backwards(self):
-        self.assertEqual(reply_needle("abc123"), "321cba")
+    def test_the_needle_is_the_token_in_capitals(self):
+        self.assertEqual(reply_needle("abc123"), "ABC123")
+
+    def test_the_probe_asks_for_capitals(self):
+        self.assertIn("capital letters", probe_text("abc123"))
 
 
 class FreshToken(unittest.TestCase):
     def test_a_token_whose_reply_is_already_in_the_transcript_is_reminted(self):
         before = transcript.Transcript([transcript.Thread("t", [
-            transcript.Message(False, "old reply " + REPLIED[::-1])])])
+            transcript.Message(False, "old reply " + REPLIED.upper())])])
         self.assertEqual(chat.fresh_token(REPLIED, before, mint=lambda: "0123456789ab"),
                          "0123456789ab")
 
     def test_it_keeps_reminting_until_the_needle_is_absent(self):
         before = transcript.Transcript([transcript.Thread("t", [
-            transcript.Message(False, "%s %s" % (REPLIED[::-1], "ba9876543210"))])])
+            transcript.Message(False, "%s %s" % (REPLIED.upper(), "0123456789AB"))])])
         mints = iter(["0123456789ab", "fedcba012345"])
         self.assertEqual(chat.fresh_token(REPLIED, before, mint=lambda: next(mints)),
                          "fedcba012345")
@@ -118,7 +118,7 @@ class Run(unittest.TestCase):
     def app_writes_fixture(self, *a, **k):
         shutil.copy(FIXTURE, self.path)
 
-    def go(self, token=REPLIED, on_type=None, on_quit=None, uid="uid123", **kw):
+    def go(self, token=REPLIED, on_type=None, on_quit=None, uid="uid123", lost=False, **kw):
         events, typed = self.events, self.typed
 
         def type_text(text):
@@ -136,7 +136,9 @@ class Run(unittest.TestCase):
         kw.setdefault("timeout", 0)
         kw.setdefault("sleep", lambda s: events.append(("sleep", s)))
         with mock.patch.object(chat.drive, "focus", lambda: events.append("focus")), \
-                mock.patch.object(chat.drive, "type_text", type_text), \
+                mock.patch.object(chat.drive, "open_composer", lambda: events.append("composer")), \
+                mock.patch.object(chat.drive, "composer_text", lambda: typed[-1] if typed and not lost else ""), \
+                mock.patch.object(chat.drive, "enter_text", type_text), \
                 mock.patch.object(chat.drive, "press_enter", lambda: events.append("enter")), \
                 mock.patch.object(chat.drive, "quit_app", quit_app):
             return chat.run(token, no_log(), uid=uid, accounts_root=self.root, **kw)
@@ -185,6 +187,20 @@ class Run(unittest.TestCase):
             raise chat.drive.DriveError("assistive access dropped")
         r = self.go(on_type=fail)
         self.assertEqual(r.status, ERROR)
+        self.assertIn("quit", self.events)
+
+    def test_the_composer_is_opened_before_anything_is_typed(self):
+        # Typed at the splash, the probe vanishes -- the run this guards was
+        # 1 Oct, where every keystroke went nowhere.
+        self.go(on_type=self.app_writes_fixture)
+        self.assertLess(self.events.index("focus"), self.events.index("composer"))
+        self.assertLess(self.events.index("composer"), self.events.index("type"))
+
+    def test_keys_that_missed_the_composer_are_an_error_and_nothing_is_sent(self):
+        r = self.go(lost=True)
+        self.assertEqual(r.status, ERROR)
+        self.assertIn("the probe did not land in the chat composer", r.evidence)
+        self.assertNotIn("enter", self.events)
         self.assertIn("quit", self.events)
 
     def test_it_waits_the_default_settle_before_touching_the_ui(self):

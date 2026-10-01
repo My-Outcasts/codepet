@@ -24,6 +24,8 @@ import * as path from "path";
 import {
   buildChatRequest,
   resolveActions,
+  needsDraftRetry,
+  buildDraftRetryMessages,
   type ResolvedActions,
   type ChatRequestBody,
 } from "../companyChatCore";
@@ -424,8 +426,6 @@ async function main(): Promise<void> {
     })
   );
 
-  const acc: TurnResult = { text: "", toolUses: [], model: null };
-
   // Every media block this turn carries, written into the run dir so Claude Code can open
   // it. Named by position rather than by the founder's filename: `buildMessages` keeps only
   // what the API needs on a content block, so the filename is not here to use — and a
@@ -474,47 +474,72 @@ async function main(): Promise<void> {
   delete env.ANTHROPIC_AUTH_TOKEN;
 
   const quoted = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-  const child = spawn("/bin/zsh", ["-lc", `claude ${quoted}`], { cwd: dir, env });
 
-  // The turn's prompt goes on stdin, never as an argument: `--allowedTools` above is
-  // variadic and would swallow it. `renderForPrompt` is what carries the history, since
+  // One `claude` run. The prompt goes on stdin, never as an argument: `--allowedTools` above
+  // is variadic and would swallow it. `renderForPrompt` is what carries the history, since
   // `claude -p` takes one prompt rather than a messages array.
-  child.stdin.write(prompt);
-  child.stdin.end();
+  const runTurn = (
+    turnPrompt: string,
+    onDelta: (t: string) => void,
+    onTool: (a: ToolActivity) => void,
+  ): Promise<{ acc: TurnResult; code: number | null; stderr: string }> =>
+    new Promise((resolve) => {
+      const acc: TurnResult = { text: "", toolUses: [], model: null };
+      const child = spawn("/bin/zsh", ["-lc", `claude ${quoted}`], { cwd: dir, env });
+      child.stdin.write(turnPrompt);
+      child.stdin.end();
 
-  let buf = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    buf += chunk;
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      ingestLine(line, acc, (t) => frame("delta", { text: t }), (activity) => frame("tool", activity));
-    }
-  });
+      let buf = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        buf += chunk;
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          ingestLine(line, acc, onDelta, onTool);
+        }
+      });
 
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (c: string) => (stderr += c));
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (c: string) => (stderr += c));
 
-  child.on("close", (code) => {
-    if (buf.trim()) {
-      ingestLine(buf, acc, (t) => frame("delta", { text: t }), (activity) => frame("tool", activity));
-    }
+      child.on("close", (code) => {
+        if (buf.trim()) ingestLine(buf, acc, onDelta, onTool);
+        resolve({ acc, code, stderr });
+      });
+    });
 
-    if (code !== 0 && !acc.text && !acc.toolUses.length) {
-      frame("error", { error: "upstream_failure", detail: stderr.trim() || `claude exited ${code}` });
-      cleanup();
-      return;
-    }
+  const { acc, code, stderr } = await runTurn(
+    prompt, (t) => frame("delta", { text: t }), (activity) => frame("tool", activity));
 
-    // Same resolver the HTTP path uses, against the same lists the prompt was built from.
-    const resolved = resolveActions(
-      acc.toolUses, built.runnable, built.envSetup, built.openTasks, built.delivered);
-    frame("done", doneFrame(resolved, acc.model ?? "claude-code-local"));
+  if (code !== 0 && !acc.text && !acc.toolUses.length) {
+    frame("error", { error: "upstream_failure", detail: stderr.trim() || `claude exited ${code}` });
     cleanup();
-  });
+    return;
+  }
+
+  // Same resolver the HTTP path uses, against the same lists the prompt was built from.
+  const resolved = resolveActions(
+    acc.toolUses, built.runnable, built.envSetup, built.openTasks, built.delivered);
+
+  // CP-024: the reply says it wrote messages, and draft_message never came. Ask once more,
+  // silently — the founder already has the framing, and only the drafts are taken from the
+  // retry, so no other verb can fire twice. A failed or empty retry leaves the turn as it was.
+  if (needsDraftRetry(acc.text, resolved)) {
+    // No saver: the attachments are already on disk from the first run, and the retry only
+    // has to emit a tool call.
+    const retryPrompt = flattenTranscript(buildDraftRetryMessages(built.messages, acc.text), () => null);
+    const retry = await runTurn(retryPrompt, () => {}, () => {});
+    const retried = resolveActions(
+      retry.acc.toolUses, built.runnable, built.envSetup, built.openTasks, built.delivered);
+    process.stderr.write(`chatSidecar: draft retry -> ${retried.drafts?.length ?? 0} draft(s)\n`);
+    if (retried.drafts?.length) resolved.drafts = retried.drafts;
+  }
+
+  frame("done", doneFrame(resolved, acc.model ?? "claude-code-local"));
+  cleanup();
 
   function cleanup(): void {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }

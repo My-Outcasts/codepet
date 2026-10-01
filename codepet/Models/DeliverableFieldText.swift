@@ -71,3 +71,23 @@ extension CalendarItem {
         [when, format, channel, owner].compactMap(nonEmpty).joined(separator: " · ")
     }
 }
+
+/// What a screen's illustration slot shows (CP-002 E3). `art` was one of three values, forced to
+/// "connect" when it was anything else; it is a free description now.
+enum ScreenArt: Equatable {
+    /// One of the three the viewer has art for, as its SF Symbol pairing.
+    case symbols(primary: String, secondary: String)
+    /// Anything else: a description of a picture the app cannot draw.
+    case brief(String)
+    case none
+
+    init(_ art: String) {
+        switch art.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "connect": self = .symbols(primary: "link", secondary: "person.2")
+        case "session": self = .symbols(primary: "bubble.left.and.bubble.right", secondary: "sparkles")
+        case "recap":   self = .symbols(primary: "checkmark.seal", secondary: "chart.bar")
+        case "":        self = .none
+        case let d:     self = .brief(d)
+        }
+    }
+}

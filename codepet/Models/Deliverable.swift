@@ -318,16 +318,17 @@ struct Screen: Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey { case name, time, kick, title, sub, art, cta, note }
 
-    /// `name`, `time`, `title`, `art` stay required (plain `decode`) — the anchor
-    /// fields for a screen. `kick`/`sub`/`cta`/`note` are soft content and degrade to
-    /// "" rather than throwing, so a CF omitting e.g. `note` on one screen doesn't
-    /// nuke the whole screens payload.
+    /// `name`, `time`, `title` stay required (plain `decode`) — the anchor fields for a
+    /// screen. `art` became soft in CP-002 E3: it is a description of the illustration now, and a
+    /// screen may need none. `kick`/`sub`/`cta`/`note` are soft content and degrade to ""
+    /// rather than throwing, so a CF omitting e.g. `note` on one screen doesn't nuke the whole
+    /// screens payload.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         time = try c.decode(String.self, forKey: .time)
         title = try c.decode(String.self, forKey: .title)
-        art = try c.decode(String.self, forKey: .art)
+        art = try c.decodeIfPresent(String.self, forKey: .art) ?? ""
 
         kick = try c.decodeIfPresent(String.self, forKey: .kick) ?? ""
         sub = try c.decodeIfPresent(String.self, forKey: .sub) ?? ""

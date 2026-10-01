@@ -1,5 +1,6 @@
 // codepet/Views/Copilot/CopilotChatView.swift
 import SwiftUI
+import Combine
 import os
 
 /// The Copilot column: a company-grounded chat with the founder's companion —
@@ -34,6 +35,9 @@ struct CopilotChatView: View {
     /// Bumped from the coordinator's publishers so a nested-object change reliably
     /// re-renders the run card live (see the onReceive bridges below).
     @State private var codingRunTick = 0
+    /// Last `TeamRunFollow.key` the transcript scrolled for, so a `$run` emission that changes
+    /// nothing the founder must see does not move the transcript.
+    @State private var teamFollowKey: String?
     /// Bumped by every autoscroll trigger in `messageList` — new messages, the fan-out row,
     /// a growing Virtual Company room, the typing indicator, and the coding run's own start
     /// and step stream — so `CopilotBubble` can reset a stranded `hovering` regardless of
@@ -1195,7 +1199,7 @@ struct CopilotChatView: View {
                     // A Team Build with no message in this thread (restored on relaunch).
                     if let team = unanchoredTeamRun {
                         TeamRunCard(coordinator: team, onSelect: { teamDetailStepId = $0 })
-                            .id("team-run")
+                            .id(TeamRunFollow.unanchoredId)
                             .onAppear { stampStickyTeamRun(team.run) }
                             // The conversation's first message arriving changes its key.
                             .onChange(of: transcriptKey) { _, _ in stampStickyTeamRun(team.run) }
@@ -1246,6 +1250,21 @@ struct CopilotChatView: View {
                 scrollGeneration &+= 1
                 guard count > 0, let id = vcRunMessage?.id else { return }
                 withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+            }
+            // Follow a Team Build card to what it is waiting on (see `TeamRunFollow`). The
+            // coordinator is a nested ObservableObject, so its `$run` is read directly, like the
+            // coding run below; it emits in willSet, hence the deferred read of the committed run.
+            .onReceive(companyStore.teamRun?.$run.eraseToAnyPublisher()
+                       ?? Empty<TeamRun?, Never>().eraseToAnyPublisher()) { _ in
+                DispatchQueue.main.async {
+                    let key = TeamRunFollow.key(companyStore.teamRun?.run)
+                    guard key != teamFollowKey else { return }
+                    teamFollowKey = key
+                    guard key != nil, let run = companyStore.teamRun?.run else { return }
+                    scrollGeneration &+= 1
+                    let target = TeamRunFollow.target(runId: run.id, messages: companyStore.chatMessages)
+                    withAnimation { proxy.scrollTo(target, anchor: .bottom) }
+                }
             }
             // Nested-ObservableObject publishers emit in willSet (before the new value
             // is assigned), so defer one runloop turn to re-render on the committed value —

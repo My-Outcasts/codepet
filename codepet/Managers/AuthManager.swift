@@ -76,30 +76,12 @@ class AuthManager: ObservableObject {
 
     private func friendlyError(_ error: Error, context: String) -> String {
         let nsError = error as NSError
-        let code = nsError.code
-        let domain = nsError.domain
-
-        log.error("\(context, privacy: .public) failed — domain=\(domain, privacy: .public) code=\(code, privacy: .public) description=\(error.localizedDescription, privacy: .public)")
+        // The whole error chain, domains and codes only, at .error so macOS KEEPS it. The line
+        // that used to carry the underlying cause was .debug + .private, which is not persisted —
+        // so a tester's logs could never say why a "Network error" happened (1 Oct 2026).
+        log.error("\(context, privacy: .public) failed — \(AuthErrorMessage.chain(nsError), privacy: .public) description=\(error.localizedDescription, privacy: .public)")
         log.debug("full error: \(nsError, privacy: .private)")
-
-        switch code {
-        case 17004, 17009:
-            return "Incorrect email or password. If you're new, tap 'Create an account' first."
-        case 17011, 17008:
-            return "No account found with this email. Try creating a new account."
-        case 17007:
-            return "An account with this email already exists. Try signing in instead."
-        case 17026:
-            return "Password is too weak. Use at least 6 characters."
-        case 17010:
-            return "Too many attempts. Please wait a moment and try again."
-        case 17020:
-            return "Network error. Check your internet connection and try again."
-        case 17999:
-            return "Connection error. Please check your internet and try again."
-        default:
-            return error.localizedDescription
-        }
+        return AuthErrorMessage.friendly(error)
     }
 
     // MARK: - Email & Password

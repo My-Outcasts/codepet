@@ -1,4 +1,5 @@
 import XCTest
+@testable import codepet
 
 // MARK: - PIN Validation
 // Mirrors: pin = String(newValue.filter { $0.isNumber }.prefix(4))
@@ -79,23 +80,14 @@ class EmailReadyTests: XCTestCase {
 }
 
 // MARK: - AuthManager Friendly Error Codes
-// Mirrors AuthManager.friendlyError (private method) — AuthManager.swift:48-66
-// Tests that each Firebase error code maps to a user-friendly message substring.
+// Calls the REAL mapping (`AuthErrorMessage.friendly`). This used to test a hand-copied mirror of
+// AuthManager's private method, which would have kept passing whatever the app actually said.
 
 class AuthManagerFriendlyErrorTests: XCTestCase {
 
-    // Local mirror of the private mapping — kept in sync with AuthManager.swift:48-66
     private func friendlyError(code: Int, rawDescription: String = "Firebase error \(0)") -> String {
-        switch code {
-        case 17004, 17009: return "Incorrect email or password. If you're new, tap 'Create an account' first."
-        case 17011, 17008: return "No account found with this email. Try creating a new account."
-        case 17007:        return "An account with this email already exists. Try signing in instead."
-        case 17026:        return "Password is too weak. Use at least 6 characters."
-        case 17010:        return "Too many attempts. Please wait a moment and try again."
-        case 17020:        return "Network error. Check your internet connection and try again."
-        case 17999:        return "Connection error. Please check your internet and try again."
-        default:           return rawDescription
-        }
+        AuthErrorMessage.friendly(NSError(domain: AuthErrorMessage.firebaseAuthDomain, code: code,
+                                          userInfo: [NSLocalizedDescriptionKey: rawDescription]))
     }
 
     func test_wrongPassword_17009() {

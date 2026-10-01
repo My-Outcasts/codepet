@@ -1071,6 +1071,85 @@ function stripWrappingQuotes(s: string): string {
   return s;
 }
 
+// ---------------------------------------------------------------------------
+// The skipped draft_message call — detected, and retried once
+// ---------------------------------------------------------------------------
+//
+// CP-024, 1 Oct 2026. Replaying the 24 Sep turn ("I think we can start with the option 1"
+// after an options list) reproduced the recording 1/15 times: the reply said "I wrote you two
+// versions: a short DM … and a slightly longer cold email …" and draft_message was never
+// called. The prompt rightly keeps the messages OUT of the prose, so a skipped call leaves a
+// reply describing drafts that exist nowhere — and the founder reads it as the app losing them.
+//
+// The transport retries once when the reply CLAIMS drafts that did not come back. The claim
+// test is deliberately narrow: a false positive costs a second paid run on an ordinary turn,
+// while a miss only leaves the rare skip as it was. Questions and offers ("Want me to draft
+// three versions?") are never claims, so any sentence ending in "?" is skipped.
+
+const DRAFT_NOUN = "(?:versions?|drafts?|messages?|emails?|dms?|texts?|openers?)";
+const DRAFT_CLAIMS: RegExp[] = [
+  // "I wrote you two versions", "I've written three versions", "I drafted two messages"
+  new RegExp(`\\bi(?:'ve| have)?\\s+(?:wrote|written|drafted|put together)\\b[^.?!]{0,60}?\\b${DRAFT_NOUN}\\b`),
+  // "Here are three versions", "Here's two drafts"
+  new RegExp(`\\bhere(?: are|'s| is)\\b[^.?!]{0,40}?\\b${DRAFT_NOUN}\\b`),
+  // "Three versions below", "your drafts above"
+  new RegExp(`\\b${DRAFT_NOUN}\\s+(?:below|above)\\b`),
+  // "Your three drafts are ready"
+  /\byour\s+(?:\w+\s+)?drafts?\s+(?:are|is)\b/,
+  // "each one is in its own card"
+  /\b(?:in|on) (?:the|its own|their own|separate) cards?\b/,
+];
+
+// Vietnamese marks no tense, so "mình soạn tin nhắn" is a claim or an offer depending on the
+// words around it. 1 Oct: one Vietnamese planning reply fired a retry under the first, looser
+// rule (the retry came back empty, as it should — but it was a paid run for nothing). So the
+// verb only counts with a claim marker (đã, or a number of versions), and a sentence carrying
+// offer words and no completion word is never a claim. No \b: JS word boundaries do not
+// understand Vietnamese letters.
+const VI_DRAFT_CLAIMS: RegExp[] = [
+  /(?:^|\s)(?:mình|tôi|em)\s+(?:đã\s+(?:viết|soạn)|(?:viết|soạn)\s+(?:hai|ba|bốn|\d)\s)[^.?!]{0,40}?(?:bản|tin nhắn|email|thư)/,
+  /(?:bản|tin nhắn|email)[^.?!]{0,40}?(?:bên dưới|ở dưới|bên trên|trong các thẻ|trong thẻ)/,
+  /(?:^|\s)có\s+(?:hai|ba|bốn|\d)\s+bản(?:\s|$|[.,:])/,
+];
+const VI_OFFER = /(?:^|\s)(?:nếu|muốn|có thể|để mình|cần thì|nhé)(?:\s|$|[.,!])/;
+const VI_DONE = /(?:^|\s)(?:đã|rồi|xong)(?:\s|$|[.,:!])/;
+
+/** Whether a reply says, as a statement, that it wrote messages for the founder to send. */
+export function claimsDrafts(text: string): boolean {
+  const norm = (text || "").toLowerCase().replace(/[\u2018\u2019]/g, "'");
+  return norm
+    .split(/(?<=[.!?\u2026])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s && !s.endsWith("?"))
+    .some((s) =>
+      DRAFT_CLAIMS.some((re) => re.test(s)) ||
+      ((!VI_OFFER.test(s) || VI_DONE.test(s)) && VI_DRAFT_CLAIMS.some((re) => re.test(s))));
+}
+
+/**
+ * Retry when the reply claims drafts and none came back. Never over a run: run_task is what
+ * produces the work then, and its deliverable arrives on its own.
+ */
+export function needsDraftRetry(text: string, resolved: ResolvedActions): boolean {
+  if (resolved.drafts?.length) return false;
+  if (resolved.runTaskId) return false;
+  return claimsDrafts(text);
+}
+
+export const DRAFT_RETRY_INSTRUCTION =
+  "Your last reply describes messages you wrote for me, but you did not call draft_message, so I cannot see them. " +
+  "Call draft_message now with exactly the messages your reply describes, one entry per version, each written in full. " +
+  "Do not write any other text. If your reply did not actually describe messages for me to send, call no tool and reply with the single word: none.";
+
+/** The turn replayed with the reply as the model's own words, then the request for the drafts. */
+export function buildDraftRetryMessages(messages: ClaudeMessage[], reply: string): ClaudeMessage[] {
+  return [
+    ...messages,
+    { role: "assistant", content: reply },
+    { role: "user", content: DRAFT_RETRY_INSTRUCTION },
+  ];
+}
+
 // ─── Request assembly, shared by the HTTP handler and the local sidecar ──────
 //
 // Everything below moved out of companyChat.ts on 2026-08-25. It was always pure —

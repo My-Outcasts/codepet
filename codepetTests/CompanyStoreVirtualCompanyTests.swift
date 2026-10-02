@@ -455,6 +455,10 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
                        "the card must not offer the button again")
         XCTAssertEqual(s.chatMessages.count, before + 1)
         XCTAssertEqual(s.chatMessages.last?.noted?.first?.statement, "Price the single-player product first.")
+        // CP-050: the chip leads with the decision, not the room's question; the question stays
+        // on the stored decision.
+        XCTAssertEqual(s.chatMessages.last?.noted?.first?.topic, "Decision")
+        XCTAssertEqual(s.company.decisions.first?.topic, "q")
         XCTAssertEqual(probe.saves, 1)
 
         // A second tap (or a double click) is a no-op, not a second chip.

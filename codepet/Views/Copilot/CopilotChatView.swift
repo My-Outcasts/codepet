@@ -1731,13 +1731,14 @@ struct CopilotBubble: View {
                 VCRunCards(state: run, lockedIn: message.actionConsumed,
                            onLockIn: {
                                Task {
-                                   await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id)
+                                   await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id,
+                                                                                    language: lang)
                                }
                            },
                            onLockInChoice: { pick in
                                Task {
                                    await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id,
-                                                                                    choice: pick)
+                                                                                    choice: pick, language: lang)
                                }
                            },
                            onOpenRecord: { onRoomRecord(message.id, $0) })

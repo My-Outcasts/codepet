@@ -2799,7 +2799,8 @@ final class CompanyStore: ObservableObject {
     /// `messageId` is the run's own message, which is also the idempotency key: a second
     /// tap (or a double-click) does nothing rather than appending a second chip.
     func lockInVirtualCompanyDecision(_ state: VirtualCompanyRunState, messageId: String,
-                                      choice: VCFounderOption? = nil) async {
+                                      choice: VCFounderOption? = nil,
+                                      language: AppLanguage = .en) async {
         guard let runId = state.runId,
               let extracted = VirtualCompanyDecision.extracted(from: state, runId: runId, choice: choice),
               let i = chatMessages.firstIndex(where: { $0.id == messageId }),
@@ -2812,7 +2813,7 @@ final class CompanyStore: ObservableObject {
                                                      scope: activeProjectId)
         chatMessages.append(CopilotMessage(
             role: .companion, text: "",
-            noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
+            noted: [VirtualCompanyDecision.chipFact(for: extracted, language: language)]))
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 

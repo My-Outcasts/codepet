@@ -106,8 +106,17 @@ export function buildSystemPrompt(args: { companionId: string; language: string;
 // The per-request company grounding, returned as a SEPARATE system block. Kept out of
 // buildSystemPrompt so the volatile context never enters the cached prefix — the handler
 // places the cache_control breakpoint on the static block above, and this block after it.
+//
+// CONTEXT_CAP was 4000 from Aug 3, before the product dossier existed. The dossier alone is up
+// to 6000 characters (`ProductDossier.maxSummaryChars`), so from 25 Sep every founder with a
+// linked folder had everything after the product summary clipped away — decisions, roadmap,
+// open tasks, departments, Library — and chat answered "the only thing in your Library is a
+// 20-person target list" beside a Library of ten (build 6, bug #8). The client now composes
+// the dossier LAST, so whatever this cap trims is the tail of the product text.
+export const CONTEXT_CAP = 12000;
+
 export function buildContextBlock(context: string): string {
-  const c = clip(context, 4000) || "The founder hasn't filled in much of a brief yet — keep guidance general and invite them to tell you more.";
+  const c = clip(context, CONTEXT_CAP) || "The founder hasn't filled in much of a brief yet — keep guidance general and invite them to tell you more.";
   // Leading blank line: the model sees the system blocks concatenated with no inserted
   // separator, so this keeps the static block's final sentence from running straight
   // into this heading (".The founder's company:").

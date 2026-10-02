@@ -62,4 +62,19 @@ final class FounderOptionsTests: XCTestCase {
         XCTAssertEqual(d.statement, "Message test: Measure understanding; no pricing questions.")
         XCTAssertEqual(VirtualCompanyDecision.extracted(from: s, runId: "r1")?.statement, "Ship one page this week.")
     }
+
+    /// Build 6, bug #7: the chip reads `topic — statement` in two lines, and the topic is the
+    /// room's whole question, so after Lock in the founder saw the question and not the pick.
+    /// The chip leads with the pick; the decision itself still files under the question.
+    func testTheNotedChipLeadsWithThePick() {
+        let d = ExtractedDecision(topic: "Should we invoice ten founders now or wait for the waitlist to hit a hundred?",
+                                  statement: "Invoice ten founders now: Cash this month; less polish.",
+                                  source: "virtual-company/r1")
+        let pick = VCFounderOption(label: "Invoice ten founders now", consequence: "Cash this month; less polish.")
+        XCTAssertEqual(VirtualCompanyDecision.notedChip(for: d, choice: pick),
+                       RememberedFact(topic: "Invoice ten founders now", statement: "Cash this month; less polish."))
+        // No pick (the plain "Lock this decision in" path): unchanged.
+        XCTAssertEqual(VirtualCompanyDecision.notedChip(for: d, choice: nil),
+                       RememberedFact(topic: d.topic, statement: d.statement))
+    }
 }

@@ -2812,7 +2812,7 @@ final class CompanyStore: ObservableObject {
                                                      scope: activeProjectId)
         chatMessages.append(CopilotMessage(
             role: .companion, text: "",
-            noted: [RememberedFact(topic: extracted.topic, statement: extracted.statement)]))
+            noted: [VirtualCompanyDecision.notedChip(for: extracted, choice: choice)]))
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 

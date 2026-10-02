@@ -149,6 +149,17 @@ enum VirtualCompanyDecision {
                                  statement: statement,
                                  source: "virtual-company/\(runId)")
     }
+
+    /// The 📌 "Noted" chip a lock-in appends. It reads `topic — statement` clamped to two
+    /// lines, and the decision's topic is the room's real question — a sentence or two on its
+    /// own — so the pick was truncated away and the chip showed only the question (build 6,
+    /// bug #7). With a pick, the chip leads with it; the recorded decision is unchanged.
+    static func notedChip(for decision: ExtractedDecision, choice: VCFounderOption?) -> RememberedFact {
+        guard let choice else {
+            return RememberedFact(topic: decision.topic, statement: decision.statement)
+        }
+        return RememberedFact(topic: choice.label, statement: choice.consequence)
+    }
 }
 
 

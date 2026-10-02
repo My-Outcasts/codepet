@@ -109,6 +109,36 @@ enum ChatContext {
             + lines.joined(separator: "\n")
     }
 
+    /// How many titles the inventory lists before it says "and N more".
+    private static let inventoryCap = 30
+
+    /// How much is in the Library, and the titles of whatever the blocks above did not show.
+    ///
+    /// Without it the model saw at most three ranked excerpts plus `DELIVERED WORK`, which
+    /// keeps only items whose roadmap task still exists (a revise pass re-runs it). After a
+    /// re-plan or a Team Build that is almost nothing, so Ask answered "the only thing in your
+    /// Library is a 20-person target list" beside a Library of ten (build 6, bug #8).
+    ///
+    /// `shown` is what the pinned and excerpt blocks already rendered: those titles are NOT
+    /// repeated, for the same reason a pin is excluded from the excerpts — one title twice reads
+    /// as two documents (`ChatContextPinTests`). The count still covers everything.
+    static func composeLibraryInventory(_ library: [Deliverable], shown: Set<String> = []) -> String {
+        let items = library
+            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+        guard !items.isEmpty else { return "" }
+        let head = "The founder's Library holds \(items.count) filed item\(items.count == 1 ? "" : "s")."
+            + " When asked what is in the Library, answer from this count and these titles."
+        let rest = items.filter { !shown.contains($0.id) }
+        guard !rest.isEmpty else { return head + " Every one of them is excerpted above." }
+        let listed = rest.prefix(inventoryCap).map { "- \($0.title) (\($0.kind.rawValue))" }
+        let more = rest.count > inventoryCap ? "\n- …and \(rest.count - inventoryCap) more" : ""
+        let intro = rest.count == items.count
+            ? " All of them, newest first:\n"
+            : " Besides the ones excerpted above, it holds, newest first:\n"
+        return head + intro + listed.joined(separator: "\n") + more
+    }
+
     /// Render a compact per-department status snapshot — one line per department that
     /// has at least one task assigned (fully-untouched departments are skipped), mirroring
     /// web's deptSummary (`- name (status, N to do): focus`).
@@ -215,8 +245,6 @@ enum ChatContext {
                          pinned: [ContextPin] = []) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
-        // Directly under the brief it deepens — see `ProductDossier.contextBlock`.
-        if let product, !product.isEmpty { parts.append(product) }
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
                 + "prioritize \(dep.name) in your answer: \(dep.focus)")
@@ -242,10 +270,19 @@ enum ChatContext {
         // guesses, and the guesses are filtered by it.
         let pinnedBlock = composePinned(pinned, library: library, tasks: tasks)
         if !pinnedBlock.isEmpty { parts.append(pinnedBlock) }
-        let priorBlock = composePriorWork(
-            selectPriorWork(library, query: query,
-                            excluding: Set(pinned.compactMap { $0.deliverableId })))
+        let pinnedIds = Set(pinned.compactMap { $0.deliverableId })
+        let prior = selectPriorWork(library, query: query, excluding: pinnedIds)
+        let priorBlock = composePriorWork(prior)
         if !priorBlock.isEmpty { parts.append(priorBlock) }
+        // Last, because it names what the two blocks above left out.
+        let inventory = composeLibraryInventory(library, shown: pinnedIds.union(prior.map(\.id)))
+        if !inventory.isEmpty { parts.append(inventory) }
+        // LAST, and that is load-bearing. The backend clips the whole context
+        // (`CONTEXT_CAP`, companyChatCore.ts) and the dossier is up to 6000 characters. It used
+        // to sit under the brief, and with the old 4000 cap it pushed every block below it —
+        // decisions, roadmap, Library — out of the prompt for any founder with a linked folder
+        // (build 6, bug #8). At the end, a clip trims the product text, not the company's state.
+        if let product, !product.isEmpty { parts.append(product) }
         return parts.joined(separator: "\n")
     }
 }

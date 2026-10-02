@@ -3,7 +3,7 @@
 // The IO handler lives in runTask.ts and imports from here.
 
 import { evalFormula, formulaRefs, parseFormula, type FormulaNode } from "./sheetFormula";
-import { companionFor } from "./companyChatCore";
+import { companionFor, CONTEXT_CAP } from "./companyChatCore";
 import {
   departmentBrief,
   DEPARTMENT_NAMES,
@@ -151,7 +151,8 @@ export function revisePin(args: {
 /** Build the companion-voiced generation prompt for a single roadmap task. */
 export function buildRunTaskPrompt(args: RunTaskArgs): string {
   const c = companionFor(args.companionId);
-  const context = clip(args.context, 4000);
+  // Same cap as chat, same reason — see CONTEXT_CAP in companyChatCore.
+  const context = clip(args.context, CONTEXT_CAP);
   const taskTitle = clip(args.taskTitle, 200);
   const taskDetail = clip(args.taskDetail, 1000);
   // Which kinds this run is allowed to produce. A department declares its own contract

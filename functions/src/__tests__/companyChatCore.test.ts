@@ -2,6 +2,7 @@ import {
   companionFor,
   buildSystemPrompt,
   buildContextBlock,
+  CONTEXT_CAP,
   buildMessages,
   buildRunnableBlock,
   buildSetupBlock,
@@ -56,6 +57,15 @@ describe("buildContextBlock", () => {
   });
   it("falls back to a general note when context is empty", () => {
     expect(buildContextBlock("")).toMatch(/brief yet/i);
+  });
+  /**
+   * Build 6, bug #8: at 4000 the product dossier (up to 6000 chars) pushed decisions, roadmap
+   * and Library out of every turn. A block sitting 9000 characters in must survive.
+   */
+  it("keeps a block that sits past the old 4000-char cap", () => {
+    const ctx = "Brief.\n" + "x".repeat(9000) + "\nThe founder's Library holds 10 filed items.";
+    expect(buildContextBlock(ctx)).toContain("Library holds 10 filed items");
+    expect(CONTEXT_CAP).toBeGreaterThanOrEqual(12000);
   });
   it("starts with a blank-line separator (system blocks concatenate with no gap)", () => {
     expect(buildContextBlock("x").startsWith("\n\n")).toBe(true);

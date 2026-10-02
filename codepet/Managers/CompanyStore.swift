@@ -137,6 +137,18 @@ final class CompanyStore: ObservableObject {
     /// on would leave the REAL `claude` adapter behind a UI insisting it was mocked —
     /// the exact half-right state the paired flags were shaped to prevent, except
     /// this one spends the founder's own subscription.
+    /// Departments with work running now — read by the Company page so a department that is
+    /// building reads "working", not "later" (`DepartmentCatalog.workingKeys`). Observable
+    /// because `teamRunBag`, `codingRunBag` and `engineeringRunBag` re-publish their runs here.
+    var workingDepartmentKeys: Set<String> {
+        let codeRunning = _codingRun?.run?.phase == .running
+            || [.preparing, .running].contains(engineeringRunStore?.phase)
+        return DepartmentCatalog.workingKeys(
+            teamRun: teamRun?.run,
+            producingDeptNames: chatMessages.filter(\.producing).compactMap(\.deptName),
+            codeRunning: codeRunning)
+    }
+
     private var _codingRun: CodingRunCoordinator?
     var codingRun: CodingRunCoordinator {
         if let c = _codingRun { return c }

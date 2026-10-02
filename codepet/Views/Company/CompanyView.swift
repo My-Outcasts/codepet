@@ -17,7 +17,8 @@ struct CompanyView: View {
 
     private var summaries: [DepartmentSummary] {
         DepartmentCatalog.summaries(tasks: companyStore.company.tasks,
-                                    departments: DepartmentCatalog.roster)
+                                    departments: DepartmentCatalog.roster,
+                                    working: companyStore.workingDepartmentKeys)
     }
 
     var body: some View {
@@ -194,7 +195,7 @@ struct CompanyView: View {
         let ink: Color
         let fill: Color
         switch st {
-        case .attention: ink = deptAccent;               fill = deptAccent.opacity(0.13)
+        case .working, .attention: ink = deptAccent;     fill = deptAccent.opacity(0.13)
         case .ready:     ink = CodepetTokens.readyGreen; fill = CodepetTokens.readyGreen.opacity(0.10)
         case .idle, .later: ink = CodepetTokens.faint;   fill = CodepetTokens.well
         }
@@ -212,6 +213,9 @@ struct CompanyView: View {
 
     private func taskLine(_ s: DepartmentSummary) -> String {
         if s.status == .later { return lang == .vi ? "Sẽ đến sau khi bạn tiến bộ" : "Comes later as you progress" }
+        if s.status == .working, s.currentTaskTitle == nil {
+            return lang == .vi ? "Đang làm việc cho bạn" : "Working on something for you now"
+        }
         return s.currentTaskTitle ?? (lang == .vi ? "Đã xong hết" : "All clear")
     }
 

@@ -177,4 +177,18 @@ final class FirstApprovalNoteTests: XCTestCase {
                                                  draftApproved: false),
             "the demo must still teach the rule")
     }
+
+    // MARK: - The Team Build card (build 6, bug #6)
+
+    /// The Team Build card's ready footer printed the note unconditionally, so it kept telling a
+    /// founder who had already approved drafts what Approve does. It now goes through the same
+    /// decision as the draft card; this goes red if the footer stops asking.
+    func testTheTeamBuildNoteRetiresAfterTheFirstApproval() {
+        XCTAssertEqual(TeamBuildCopy.readyNote(hasApproved: false, .en),
+                       "Not saved yet — approving files it in your Library.")
+        XCTAssertEqual(TeamBuildCopy.readyNote(hasApproved: false, .vi),
+                       "Chưa lưu — duyệt để đưa vào Thư viện.")
+        XCTAssertNil(TeamBuildCopy.readyNote(hasApproved: true, .en))
+        XCTAssertNil(TeamBuildCopy.readyNote(hasApproved: true, .vi))
+    }
 }

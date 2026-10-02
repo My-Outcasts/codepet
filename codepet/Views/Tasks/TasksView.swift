@@ -183,6 +183,27 @@ struct TasksView: View {
         .buttonStyle(.plain))
     }
 
+    @ViewBuilder private func deptName(_ t: RoadmapTask) -> some View {
+        if let d = DepartmentCatalog.find(t.dept)?.name {
+            Text(d)
+                .font(CodepetTheme.inter(12.5, weight: .bold))
+                .foregroundColor(CodepetTheme.primaryText)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
+    /// Same pattern as DepartmentDetailView's task card — a locked (`.blocked`) card must read
+    /// as locked here too, not look identical to a runnable one.
+    @ViewBuilder private func statusPill(_ t: RoadmapTask, status: TaskStatus) -> some View {
+        if !t.done {
+            Text(status.label(lang)).font(CodepetTheme.inter(11, weight: .medium))
+                .foregroundColor(taskStatusTint(status))
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
+        }
+    }
+
     /// The card's contents, shared by the tappable and the blocked rendering.
     ///
     /// web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT leads in
@@ -190,31 +211,29 @@ struct TasksView: View {
     /// --t-3); native had the two reversed.
     private func cardBody(_ t: RoadmapTask, status: TaskStatus) -> some View {
         Group {
-            VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    if let d = DepartmentCatalog.find(t.dept)?.name {
-                        Text(d)
-                            .font(CodepetTheme.inter(12.5, weight: .bold))
-                            .foregroundColor(CodepetTheme.primaryText)
+            // The pill shares the DEPARTMENT row, and the title gets the card's full width below
+            // it. It used to sit beside the title at `fixedSize`, so in a four-column board the
+            // title was squeezed until words broke mid-letter ("Marketin/g", "willingnes/s") —
+            // build 6 end-to-end test, bug #10.
+            VStack(alignment: .leading, spacing: 3) {
+                // Side by side when both fit; otherwise the pill drops under the name rather
+                // than truncating "Engineering" to "Engin…".
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        deptName(t)
+                        Spacer(minLength: 0)
+                        statusPill(t, status: status)
                     }
-                    Text(t.title)
-                        .font(CodepetTheme.inter(12.5, weight: .medium))
-                        .foregroundColor(CodepetTheme.mutedText)
-                        .lineSpacing(12.5 * 0.34)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        deptName(t)
+                        statusPill(t, status: status)
+                    }
                 }
-                Spacer(minLength: 8)
-                // Same pattern as DepartmentDetailView's task card — a locked (`.blocked`)
-                // card must read as locked here too, not look identical to a runnable one.
-                if !t.done {
-                    Text(status.label(lang)).font(CodepetTheme.inter(11, weight: .medium))
-                        .foregroundColor(taskStatusTint(status))
-                        .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
-                }
-            }
+                Text(t.title)
+                    .font(CodepetTheme.inter(12.5, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .lineSpacing(12.5 * 0.34)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)

@@ -55,7 +55,7 @@ export const BRIEF_TOOL = {
       the_real_disagreement: {
         type: "string",
         description:
-          "Who opposed, on what grounds, quoted closely enough that the founder can judge for themselves. Never average opposing views into a middle position nobody argued for. If nobody disagreed, say so explicitly."
+          "Who is on each side and the one point they split on, in at most two sentences (about 50 words). Name the departments; quote a short phrase only where it is sharper than a summary. Each department's full position is shown to the founder separately, so this names the split rather than re-arguing it. Never average opposing views into a middle position nobody argued for. If nobody disagreed, say so explicitly in one sentence."
       },
       tradeoff_founder_must_own: {
         type: "string",
@@ -301,7 +301,8 @@ export function briefOmitsDissent(brief: DecisionBrief, conflicts: Conflict[]): 
   return CONSENSUS_TELLS.some((tell) => text.includes(tell));
 }
 
-const SYNTHESIS_INSTRUCTION = `Perform your SYNTHESIS duties.
+// Exported for its test (CP-048): the instruction and the tool field must agree on the length.
+export const SYNTHESIS_INSTRUCTION = `Perform your SYNTHESIS duties.
 
 THE REAL QUESTION AT STAKE:
 <real_question>
@@ -316,7 +317,9 @@ CONFLICT DETECTION FOUND:
 morning? Produce all six components.
 
 Never average opposing views into a middle position that nobody argued for.
-Quote the disagreement closely enough that the founder can judge it themselves.
+State the real disagreement in at most two sentences (about 50 words): who is on each side and
+the one point they split on. The founder sees each department's full position separately, so name
+the split here rather than re-arguing it.
 Do not bury dissent in a footnote.
 
 Call record_decision_brief.`;

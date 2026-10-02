@@ -16,9 +16,15 @@ struct Department: Identifiable, Hashable {
 }
 
 enum DepartmentStatus {
+    /// Something is running for this department right now — a Team Build step, a chat run, a
+    /// code run. Outranks every roadmap-derived status: Engineering read "LATER" on the Company
+    /// page while it was building the founder's project, because it had no roadmap tasks
+    /// (build 6 end-to-end test, bug #10).
+    case working
     case attention, ready, idle, later
     func label(_ lang: AppLanguage) -> String {
         switch self {
+        case .working:   return lang == .vi ? "đang làm" : "working"
         case .attention: return lang == .vi ? "cần bạn" : "needs you"
         case .ready:     return lang == .vi ? "sẵn sàng" : "ready"
         case .idle:      return lang == .vi ? "nhàn rỗi" : "idle"
@@ -27,6 +33,7 @@ enum DepartmentStatus {
     }
     var tint: Color {
         switch self {
+        case .working:   return CodepetTheme.accentPurple
         case .attention: return CodepetTheme.accentBlue
         case .ready:     return CodepetTheme.accentTeal
         case .idle:      return CodepetTheme.mutedText
@@ -96,22 +103,50 @@ enum DepartmentCatalog {
     /// `departments` defaults to the whole catalog — chat grounding
     /// (`ChatContext.composeDepartments`) must still see every department a task can be
     /// tagged with; the Company view passes `roster`.
+    /// `working` holds the keys of departments with something running now
+    /// (`CompanyStore.workingDepartmentKeys`); it outranks what the roadmap says.
     static func summaries(tasks: [RoadmapTask],
-                          departments: [Department] = all) -> [DepartmentSummary] {
+                          departments: [Department] = all,
+                          working: Set<String> = []) -> [DepartmentSummary] {
         departments.map { dep in
             let mine = tasks.filter { $0.dept == dep.key }
+            let isWorking = working.contains(dep.key)
             if mine.isEmpty {
-                return DepartmentSummary(department: dep, status: .later, pending: 0, currentTaskTitle: nil)
+                return DepartmentSummary(department: dep, status: isWorking ? .working : .later,
+                                         pending: 0, currentTaskTitle: nil)
             }
             let open = mine.filter { !$0.done }
             let statuses = open.map { RoadmapEngine.status(for: $0, in: tasks) }
             let status: DepartmentStatus =
-                statuses.contains(.needsYou) ? .attention
+                isWorking ? .working
+                : statuses.contains(.needsYou) ? .attention
                 : statuses.contains(.codepetCanDo) ? .ready
                 : .idle
             return DepartmentSummary(department: dep, status: status,
                                      pending: open.count, currentTaskTitle: open.first?.title)
         }
+    }
+
+    /// The departments with something running right now, for `summaries(working:)`.
+    ///
+    /// - a Team Build step that is running, by its `dept`; the build/assemble phase is
+    ///   Engineering's
+    /// - a chat run's "producing…" placeholder, by the department name it carries
+    /// - a code run (Build / Code mode), which is Engineering's
+    static func workingKeys(teamRun: TeamRun?, producingDeptNames: [String],
+                            codeRunning: Bool) -> Set<String> {
+        var keys = Set<String>()
+        if let run = teamRun {
+            for step in run.plan.steps where run.state(step.id)?.status == .running {
+                keys.insert(step.dept)
+            }
+            if run.phase == .assembling { keys.insert("eng") }
+        }
+        for name in producingDeptNames {
+            if let d = all.first(where: { $0.name == name }) { keys.insert(d.key) }
+        }
+        if codeRunning { keys.insert("eng") }
+        return keys
     }
 
     static func needToday(_ summaries: [DepartmentSummary]) -> Int {

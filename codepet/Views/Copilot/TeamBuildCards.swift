@@ -28,6 +28,13 @@ enum TeamBuildButton {
 
 /// Copy for the team card and its detail panel.
 enum TeamBuildCopy {
+    /// Whether the ready card shows "Not saved yet" (CP-049). Same rule as the chat draft card:
+    /// it is a one-time lesson that retires on the founder's FIRST approval, account-wide. The
+    /// ready footer is only drawn before this run is approved, so `draftApproved` is false here.
+    static func showsNotFiledNote(firstApprovalAt: Date?) -> Bool {
+        DraftCardCopy.shouldShowNotFiledNote(hasApproved: firstApprovalAt != nil, draftApproved: false)
+    }
+
     /// The row shown while a Team Build's router picks who joins the room (CP-027). Says only what
     /// is true at that moment: nobody has started work yet, so it names the choosing, not a team.
     static func conveningTitle(_ lang: AppLanguage) -> String {
@@ -439,10 +446,12 @@ struct TeamRunCard: View {
                 }
                 projectButtons(path)
             }
-            Text(DraftCardCopy.notFiledNote(lang))
-                .font(CodepetTheme.inter(11.5))
-                .foregroundColor(CodepetTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
+            if TeamBuildCopy.showsNotFiledNote(firstApprovalAt: companyStore.company.firstApprovalAt) {
+                Text(DraftCardCopy.notFiledNote(lang))
+                    .font(CodepetTheme.inter(11.5))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

@@ -69,6 +69,16 @@ enum TeamBuildCopy {
         DepartmentCatalog.find(key)?.name ?? key
     }
 
+    /// The "not saved yet" line under a ready project's Approve, or nil once the founder has
+    /// approved anything. Same one-time lesson as the draft card, through the same decision
+    /// (`DraftCardCopy.shouldShowNotFiledNote`): this footer used to print it unconditionally,
+    /// so a founder who had filed ten drafts was still told what Approve does (build 6, bug #6).
+    /// `draftApproved` is false because the footer only exists before Approve (`.ready`).
+    static func readyNote(hasApproved: Bool, _ lang: AppLanguage) -> String? {
+        DraftCardCopy.shouldShowNotFiledNote(hasApproved: hasApproved, draftApproved: false)
+            ? DraftCardCopy.notFiledNote(lang) : nil
+    }
+
     /// Department names of `step`'s dependencies, in `dependsOn` order, each once — the build
     /// step depends on every department step, and two Marketing steps should not read
     /// "Marketing, Marketing".
@@ -439,10 +449,13 @@ struct TeamRunCard: View {
                 }
                 projectButtons(path)
             }
-            Text(DraftCardCopy.notFiledNote(lang))
-                .font(CodepetTheme.inter(11.5))
-                .foregroundColor(CodepetTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
+            if let note = TeamBuildCopy.readyNote(
+                hasApproved: companyStore.company.firstApprovalAt != nil, lang) {
+                Text(note)
+                    .font(CodepetTheme.inter(11.5))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

@@ -118,7 +118,8 @@ class Run(unittest.TestCase):
     def app_writes_fixture(self, *a, **k):
         shutil.copy(FIXTURE, self.path)
 
-    def go(self, token=REPLIED, on_type=None, on_quit=None, uid="uid123", lost=False, **kw):
+    def go(self, token=REPLIED, on_type=None, on_quit=None, uid="uid123", lost=False,
+           quits=True, **kw):
         events, typed = self.events, self.typed
 
         def type_text(text):
@@ -131,7 +132,7 @@ class Run(unittest.TestCase):
             events.append("quit")
             if on_quit:
                 on_quit()
-            return True
+            return quits
 
         kw.setdefault("timeout", 0)
         kw.setdefault("sleep", lambda s: events.append(("sleep", s)))
@@ -147,6 +148,21 @@ class Run(unittest.TestCase):
         r = self.go(on_type=self.app_writes_fixture)
         self.assertEqual(r.status, PASS, r.detail)
         self.assertIn(REPLIED, r.detail)
+
+    def test_the_smoke_chat_is_removed_after_the_verdict(self):
+        # Bug #11: every run left a "smoke test ..." chat in the founder's RECENT.
+        r = self.go(on_type=self.app_writes_fixture)
+        self.assertEqual(r.status, PASS, r.detail)
+        self.assertFalse(transcript.load(self.dir).probe_seen(REPLIED))
+        self.assertTrue(any("removed" in e for e in r.evidence), r.evidence)
+
+    def test_nothing_is_scrubbed_while_the_app_is_still_running(self):
+        # A live app re-saves its own copy over the file; scrubbing then is pointless at
+        # best, and the verdict must not depend on it.
+        r = self.go(on_type=self.app_writes_fixture, quits=False)
+        self.assertEqual(r.status, PASS, r.detail)
+        self.assertTrue(transcript.load(self.dir).probe_seen(REPLIED))
+        self.assertTrue(any("did not quit" in e for e in r.evidence), r.evidence)
 
     def test_a_probe_with_no_reply_in_its_thread_fails(self):
         r = self.go(token=OTHER_THREAD, on_type=self.app_writes_fixture)

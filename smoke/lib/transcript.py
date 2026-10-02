@@ -26,6 +26,8 @@ File shape (ChatThreadArchive.swift:51, :65):
 
 import json
 import os
+import re
+import tempfile
 from dataclasses import dataclass, field
 
 ACCOUNTS_ROOT = os.path.expanduser("~/.codepet/accounts")
@@ -178,3 +180,73 @@ def load(account_dir):
     except (UnicodeDecodeError, ValueError) as e:
         raise TranscriptUnreadable("%s is not JSON: %s" % (path, e))
     return _parse(raw)
+
+
+# The exact probe smoke/checks/chat.py types (probe_text), token captured and required to
+# repeat. Exact on purpose: scrub() deletes what this matches from a founder's real
+# transcript, so a founder who happened to write "smoke test" must never match.
+PROBE_RE = re.compile(
+    r"^smoke test ([0-9a-f]{8,32}) -- reply with this code in capital letters, "
+    r"nothing else: \1$")
+
+
+def is_probe(text):
+    return bool(PROBE_RE.match(text))
+
+
+def _scrub_threads(raw):
+    """(threads without smoke turns, how many messages went).
+
+    A smoke turn is a founder message that is a probe, plus every companion message after
+    it up to the next founder message -- the reply, and anything the app attached to it.
+    A thread left with no messages is dropped, so RECENT loses its "smoke test ..." row.
+    Everything else is passed through untouched, field for field.
+    """
+    kept, removed = [], 0
+    for t in raw:
+        messages, skipping = [], False
+        for m in t.get("messages", []):
+            if m.get("fromFounder") is True:
+                skipping = is_probe(m.get("text", ""))
+            if skipping:
+                removed += 1
+            else:
+                messages.append(m)
+        if messages:
+            kept.append(dict(t, messages=messages) if len(messages) != len(t["messages"]) else t)
+    return kept, removed
+
+
+def scrub(account_dir):
+    """Remove every smoke turn from the account's transcript; return how many messages went.
+
+    Build 6 end-to-end test, bug #11: every smoke run left a "smoke test ..." chat in the
+    founder's RECENT list, on the founder's real account.
+
+    Call ONLY with the app quit. The app holds its threads in memory and re-saves the
+    whole list (ChatThreadArchive.save), so a scrub under a running app is overwritten by
+    its next save. The write is atomic (temp file + rename), like the app's own (:55).
+    Leftovers from earlier runs match too, so the first scrub also clears those.
+    """
+    path = os.path.join(account_dir, FILENAME)
+    try:
+        with open(path, "rb") as f:
+            raw = json.loads(f.read().decode("utf-8"))
+    except FileNotFoundError:
+        return 0
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise TranscriptMissing("could not read %s: %s" % (path, e))
+    _parse(raw)  # refuse to rewrite a file that is not the shape the app writes
+    kept, removed = _scrub_threads(raw)
+    if not removed:
+        return 0
+    fd, tmp = tempfile.mkstemp(dir=account_dir, prefix=".company_chats.", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(kept, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return removed

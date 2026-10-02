@@ -144,7 +144,7 @@ def run(token, capture, uid=None, accounts_root=None, timeout=90, settle=SETTLE,
                 break
             sleep(poll)
     finally:
-        drive.quit_app()
+        quit_cleanly = drive.quit_app()
 
     # The VERDICT is read after quit: saves are queued async
     # (ChatThreadArchive.swift:52), so only a quit app has finished writing.
@@ -155,5 +155,16 @@ def run(token, capture, uid=None, accounts_root=None, timeout=90, settle=SETTLE,
 
     result = evaluate(sent, final.probe_seen(token), final.reply_seen(token), token,
                       first_error(capture.lines()), timeout=timeout)
+    # The verdict is read; now take our turns back out of the founder's RECENT list
+    # (bug #11). Only once the app is gone -- a live app re-saves its own copy over us.
+    if quit_cleanly:
+        try:
+            removed = transcript.scrub(account_dir)
+            if removed:
+                result.evidence.append("removed %d smoke message(s) from the chat history" % removed)
+        except transcript.TranscriptMissing as e:
+            result.evidence.append("could not clean up the smoke chat: %s" % e)
+    else:
+        result.evidence.append("app did not quit; smoke chat left in RECENT")
     result.duration = time.time() - started
     return result

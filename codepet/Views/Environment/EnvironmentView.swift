@@ -1,6 +1,22 @@
 // codepet/Views/Environment/EnvironmentView.swift
 import SwiftUI
 
+/// Whether a toolkit item is ON, for every Environment surface (CP-054).
+///
+/// A connector with a real consent flow is on only when the SERVER holds its token
+/// (`connectedProviders`); anything else is the local `enabledTools` flag. Before this the
+/// Recommended card read the local flag for connectors too — and GitHub ships `defaultOn`, so
+/// every new company saw "✓ Connected" there beside a "Connect" button in Browse all, with no
+/// token at all (Dominich's build 6 report, 1 Oct).
+enum ToolOnState {
+    static func isOn(_ item: ToolItem, enabled: Set<String>, connected: Set<String>) -> Bool {
+        if item.category == .connectors, let provider = ConnectorProvider(rawValue: item.id) {
+            return connected.contains(provider.toolId)
+        }
+        return enabled.contains(item.id)
+    }
+}
+
 /// The Environment = the company's toolkit, laid out like the web `EnvironmentView`:
 /// the companion's recommendation strip (`.env-byte`), a grid of recommended cards
 /// (`.erec`/`.rcard`), then "Browse all" — one card per category (`.env-card`) whose
@@ -12,6 +28,9 @@ struct EnvironmentView: View {
 
     private var isDark: Bool { scheme == .dark }
     private var enabled: Set<String> { companyStore.company.enabledTools }
+    private func isOn(_ item: ToolItem) -> Bool {
+        ToolOnState.isOn(item, enabled: enabled, connected: companyStore.connectedProviders)
+    }
     /// web `recs` = every recommended item that is actually built. An unbuilt item
     /// stays visible in Browse all, labelled — a catalog may show the future, but a
     /// card promising a benefit may only offer what exists.
@@ -19,7 +38,7 @@ struct EnvironmentView: View {
     // Recommended-but-off connectors — the accounts still needing a founder to connect
     // them (same "needs you" tag basis the recommendation cards show).
     private var needsYouCount: Int {
-        recs.filter { $0.category == .connectors && !enabled.contains($0.id) }.count
+        recs.filter { $0.category == .connectors && !isOn($0) }.count
     }
     private var stageLabel: String {
         let s = (companyStore.company.brief.stage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,7 +218,7 @@ struct EnvironmentView: View {
 
     private func recCard(_ item: ToolItem) -> some View {
         let rc = item.category.tint
-        let on = enabled.contains(item.id)
+        let on = isOn(item)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {   // .rc-top
                 Text(item.badge)
@@ -241,7 +260,16 @@ struct EnvironmentView: View {
                             .foregroundColor(CodepetTheme.bodyText)
                     }
                 } else {
-                    Button { Task { await companyStore.toggleTool(id: item.id) } } label: {
+                    Button {
+                        // A real connector goes through consent, the same as its Browse all
+                        // row: flipping the local flag here is what let this card claim
+                        // "Connected" with no token behind it (CP-054).
+                        if item.category == .connectors, let provider = ConnectorProvider(rawValue: item.id) {
+                            Task { _ = await companyStore.connectProvider(provider) }
+                        } else {
+                            Task { await companyStore.toggleTool(id: item.id) }
+                        }
+                    } label: {
                         Text(item.category.enableVerb(lang))   // .rc-btn
                             .font(CodepetTheme.inter(12.5, weight: .semibold))
                             .foregroundColor(rc)
@@ -283,7 +311,7 @@ struct EnvironmentView: View {
 
     private func categorySection(_ cat: ToolCategory) -> some View {
         let items = Toolkit.items(in: cat)
-        let onCount = items.filter { enabled.contains($0.id) }.count
+        let onCount = items.filter { isOn($0) }.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {   // .ereg-h
                 Text(cat.label(lang).uppercased())
@@ -300,7 +328,7 @@ struct EnvironmentView: View {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                     if i > 0 { Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1) }
-                    ToolRowView(item: item, isOn: enabled.contains(item.id))
+                    ToolRowView(item: item, isOn: isOn(item))
                 }
                 Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1)
                 notSureRow(cat)
@@ -357,10 +385,9 @@ struct ToolRowView: View {
 
     /// A real connector reports the server's view of whether a token exists. Only
     /// a local toggle may report the local flag.
-    private var on: Bool {
-        if let provider { return companyStore.connectedProviders.contains(provider.toolId) }
-        return isOn
-    }
+    /// The caller decides with `ToolOnState.isOn`, so this row and the Recommended card can
+    /// never disagree about a connector (CP-054).
+    private var on: Bool { isOn }
 
     var body: some View {
         HStack(spacing: 13) {

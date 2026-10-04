@@ -95,7 +95,7 @@ final class MockDeptReplyTests: XCTestCase {
         XCTAssertEqual(seen.count, 8, "expected 8 distinct department replies, got \(seen.count)")
     }
 
-    /// Marketing and Sales are both cast to nova, and Operations and Legal both to glitch. The
+    /// Marketing and Sales are both cast to nova (Operations and Legal shared glitch until CP-058). The
     /// reply is keyed off the DEPARTMENT, not off the pet, so each pair must still differ —
     /// this is the assertion that would catch a `switch` written over `companionId`.
     ///
@@ -114,7 +114,7 @@ final class MockDeptReplyTests: XCTestCase {
 
         let ops = try await text(neutral, dept: "ops")
         let legal = try await text(neutral, dept: "legal")
-        XCTAssertNotEqual(ops, legal, "glitch answers Operations and Legal identically")
+        XCTAssertNotEqual(ops, legal, "Operations and Legal answer identically (glitch shared them until CP-058)")
 
         let fin = try await text(neutral, dept: "fin")
         let support = try await text(neutral, dept: "support")

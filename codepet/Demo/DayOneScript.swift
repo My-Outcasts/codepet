@@ -141,7 +141,7 @@ enum DayOneScript {
             frames: "I want to be careful here. Someone struggling at 2am doesn't need a chatbot being "
                 + "clever, and what the app says then has to be written down, not improvised.",
             reports: "What it says, when it says it, and what it refuses to handle — written as policy "
-                + "rather than left to a prompt. Glitch reads this next: holding those words is a legal "
+                + "rather than left to a prompt. Null reads this next: holding those words is a legal "
                 + "question too."
         ),
         "legal": (
@@ -252,8 +252,8 @@ enum DayOneScript {
             "design": "Byte in Engineering — what it runs on",
             "eng": "Crash in Finance — what it costs",
             "fin": "Sage in Support — what happens at 2am",
-            "support": "Glitch in Legal — holding what people write",
-            "legal": "Glitch again, in Operations — shipping without breaking it",
+            "support": "Null in Legal — holding what people write",
+            "legal": "Glitch in Operations — shipping without breaking it",
             "ops": "nothing: hand the tenth question back to her",
         ]
         guard let next = nextUp[chapterDept] else { return nil }
@@ -542,30 +542,30 @@ enum DayOneScript {
          + "founder-only task later asks a clinician to read."),
 
         ("Support · Sage", 2.8, .petSays(deptKey: "support", line: .reports),
-         "Written down as policy rather than left to a prompt. Glitch reads it next."),
+         "Written down as policy rather than left to a prompt. Null reads it next."),
 
-        ("Legal · Glitch", 2.2, .petSays(deptKey: "legal", line: .asks),
-         "Glitch reads Sage's policy before answering."),
+        ("Legal · Null", 2.2, .petSays(deptKey: "legal", line: .asks),
+         "Null reads Sage's policy before answering."),
 
-        ("Legal · Glitch", 2.6, .petSays(deptKey: "legal", line: .frames),
-         "Glitch reads Sage's policy first. Holding what people write is a legal question too."),
+        ("Legal · Null", 2.6, .petSays(deptKey: "legal", line: .frames),
+         "Null reads Sage's policy first. Holding what people write is a legal question too."),
 
-        // Link 8 — Legal · Glitch.
-        ("Legal · Glitch", 2.6, .runTask("mur-deletion"),
-         "Glitch turns the crisis policy and the stack decision into a promise: one tap, "
+        // Link 8 — Legal · Null.
+        ("Legal · Null", 2.6, .runTask("mur-deletion"),
+         "Null turns the crisis policy and the stack decision into a promise: one tap, "
          + "permanent, no email."),
-        ("Legal · Glitch", 2.8, .approveNewestDraft,
+        ("Legal · Null", 2.8, .approveNewestDraft,
          "The promise comes before the privacy policy that formalises it — which is still "
          + "sitting on her board, unwritten."),
 
-        ("Legal · Glitch", 2.8, .petSays(deptKey: "legal", line: .reports),
-         "The deletion promise in plain language, before any paperwork. Same voice for the last one."),
+        ("Legal · Null", 2.8, .petSays(deptKey: "legal", line: .reports),
+         "The deletion promise in plain language, before any paperwork. Glitch takes the last one."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .asks),
-         "Mona's last question before the day hands one back — Glitch answers again."),
+         "Mona's last question before the day hands one back — Glitch answers it."),
 
         ("Operations · Glitch", 2.2, .petSays(deptKey: "ops", line: .frames),
-         "Still Glitch. Legal was what she owes them; Operations is not breaking it while she keeps her word."),
+         "Glitch, in Operations. Legal was what she owes them; this is not breaking it while she keeps her word."),
 
         // Link 9 — Operations · Glitch.
         ("Operations · Glitch", 2.6, .runTask("mur-rhythm"),

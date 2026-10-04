@@ -436,16 +436,16 @@ final class TwoModeHeroTests: XCTestCase {
         XCTAssertFalse(DepartmentCatalog.roster.contains { $0.key == "product" })
     }
 
-    /// Six pets cover eight departments. That is the design (nova takes Marketing
-    /// and Sales, glitch Operations and Legal) — if this ever became 1:1 the roster
-    /// would be claiming eight characters we do not have.
+    /// Seven pets cover eight departments: nova still takes Marketing and Sales, and null took
+    /// Legal from glitch in CP-058 (4 Oct). It stays smaller than the roster until an eighth pet
+    /// is drawn — if it became 1:1 now the roster would be claiming a character we do not have.
     func testTheCastIsSmallerThanTheRoster() {
         let pets = Set(DepartmentCatalog.roster.compactMap {
             DepartmentCompanions.companionId(for: $0.key)
         })
         XCTAssertLessThan(pets.count, DepartmentCatalog.roster.count)
-        XCTAssertEqual(pets, ["byte", "crash", "luna", "nova", "sage", "glitch"],
-                       "six voices across eight departments")
+        XCTAssertEqual(pets, ["byte", "crash", "luna", "nova", "sage", "glitch", "null"],
+                       "seven voices across eight departments")
     }
 
     // MARK: - Developer wakes on EITHER door

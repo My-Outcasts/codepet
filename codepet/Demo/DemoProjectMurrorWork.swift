@@ -10,7 +10,7 @@ import Foundation
 /// to exist.
 ///
 /// Each body is written in its pet's register rather than one house voice: `crash` (Finance) is
-/// blunt, `sage` (Support) is patient, `glitch` (Ops/Legal) is precise about edges, `luna`
+/// blunt, `sage` (Support) is patient, `glitch` (Ops) is precise about edges, `null` (Legal) watches the gaps, `luna`
 /// (Design) talks about how it feels, `nova` (Marketing/Sales) leads with the promise, `byte`
 /// (Engineering) is concrete about mechanics. A demo where all eight sound identical would show
 /// eight cards and one pet.
@@ -364,7 +364,7 @@ extension DemoProject {
                 {"weeks":[{"label":"Blocking","items":[{"day":"T-7","kind":"review","body":"The crisis path is reviewed by a clinician. Not tested by us — reviewed. Unsigned, the launch moves; everything below is negotiable and this is not."}]},{"label":"Five days out","items":[{"day":"T-5","kind":"legal","body":"Privacy policy live and linked from the first screen, not buried in a footer"},{"day":"T-5","kind":"verify","body":"Deletion actually deletes — verified against the database, not against the UI"},{"day":"T-5","kind":"verify","body":"Crisis resources correct for every region the App Store will serve"}]},{"label":"Two days out","items":[{"day":"T-2","kind":"copy","body":"Landing page copy frozen; the email capture tested from a phone on cellular"},{"day":"T-2","kind":"outreach","body":"Three outreach messages sent, not drafted"},{"day":"T-2","kind":"rehearse","body":"Rollback rehearsed once, with a stopwatch"}]},{"label":"Ship day","items":[{"day":"T-0","kind":"ship","body":"Ship in the morning, not at night. Somebody has to be awake for the first replies."},{"day":"T-0","kind":"watch","body":"Watch the crisis path specifically for the first 24 hours"}]},{"label":"First week after","items":[{"day":"T+7","kind":"read","body":"Read every entry that triggered the crisis path. All of them, by hand."},{"day":"T+7","kind":"kill","body":"Kill criterion: if the crisis path misfires on anything that is not a crisis, turn the detection off and ship without it."}]}]}
                 """),
 
-            // ── glitch · Legal ──────────────────────────────────────────────────────────────
+            // ── null · Legal ───────────────────────────────────────────────────────────────
             DemoDeliverable(
                 keywords: ["privacy", "policy", "terms"],
                 kind: "legal",

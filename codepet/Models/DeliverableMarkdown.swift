@@ -76,7 +76,7 @@ enum DeliverableMarkdown {
             guard let platform = payload.postPlatform else { return "" }
             return "**Platform:** \(platform)" + (payload.limit.map { " (limit \($0) characters)" } ?? "")
                 + "\n\n" + body
-        case .text, .other:
+        case .text, .other, .project:
             return ""
         }
     }

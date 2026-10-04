@@ -453,8 +453,11 @@ struct DeliverablePayload: Codable, Hashable {
 
 /// A deliverable kind — mirrors the web StructuredKind, plus `.other` for unknown
 /// values. Rendering is uniform (markdown); kind drives only the badge + icon.
+///
+/// `.project` is client-only (CP-056): an approved Team Build's folder on disk. No run produces
+/// it, so the server never sends it. Before it existed the project was filed as `.other`.
 enum DeliverableKind: String, Codable, CaseIterable {
-    case doc, post, email, legal, screens, sheet, site, dms, calendar, checklist, plan, text, other
+    case doc, post, email, legal, screens, sheet, site, dms, calendar, checklist, plan, text, project, other
 
     /// Map an arbitrary string to a known kind, unknown → `.other`.
     init(raw: String) { self = DeliverableKind(rawValue: raw) ?? .other }
@@ -479,6 +482,7 @@ enum DeliverableKind: String, Codable, CaseIterable {
         case .checklist: return lang == .vi ? "Danh sách" : "Checklist"
         case .plan:      return lang == .vi ? "Kế hoạch" : "Plan"
         case .text:      return lang == .vi ? "Văn bản" : "Text"
+        case .project:   return lang == .vi ? "Dự án" : "Project"
         case .other:     return lang == .vi ? "Khác" : "Other"
         }
     }
@@ -497,6 +501,7 @@ enum DeliverableKind: String, Codable, CaseIterable {
         case .checklist: return "checklist"
         case .plan:      return "map"
         case .text:      return "text.alignleft"
+        case .project:   return "folder"
         case .other:     return "doc"
         }
     }
@@ -591,6 +596,9 @@ struct Deliverable: Codable, Hashable, Identifiable {
         projectPath = try c.decodeIfPresent(String.self, forKey: .projectPath)
         supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
         versions = try c.decodeIfPresent([DeliverableVersion].self, forKey: .versions)
+        // A Team Build project filed before `.project` existed was stored as "other". The folder
+        // on disk is what makes it a project, so it reads as one on load (CP-056).
+        if kind == .other, projectPath != nil { kind = .project }
     }
 
     // Written explicitly to match the custom decoder above — a custom `init(from:)` suppresses

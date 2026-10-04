@@ -2570,7 +2570,7 @@ final class CompanyStore: ObservableObject {
             if let d = run.state(step.id)?.draft { await fileApproval(d, taskId: nil) }
         }
         // Sourced to the build step, so the Library groups the project under Engineering.
-        let project = Deliverable(kind: .other, title: run.plan.title,
+        let project = Deliverable(kind: .project, title: run.plan.title,
                                   body: Self.whatThisIs(inClaudeMdAt: path) ?? run.plan.summary,
                                   createdAt: ISOTime.utc(Date()),
                                   sourceTaskId: WorkStep.sourceTaskId(runId: run.id, stepId: WorkPlan.buildStepId),

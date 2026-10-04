@@ -22,11 +22,12 @@ final class LibraryFixturesTests: XCTestCase {
     /// to cover it — which is exactly what happened first time round: `.email` and `.dms` were
     /// omitted, and `.dms` is the one viewer that overrides the no-card-in-a-sheet rule.
     ///
-    /// `.other` is the single allowed omission: it shares `DeliverableBodyView`'s `default`
-    /// branch with `.text`, so it would be a duplicate row rather than new coverage.
+    /// `.other` is an allowed omission: it shares `DeliverableBodyView`'s `default` branch with
+    /// `.text`, so it would be a duplicate row rather than new coverage. `.project` (CP-056) is the
+    /// other: it renders through that same branch, plus an Open in Finder button for its folder.
     func testEveryKindWithItsOwnViewerIsSeeded() {
         let seeded = Set(LibraryFixtures.all.map(\.kind))
-        let missing = DeliverableKind.allCases.filter { $0 != .other && !seeded.contains($0) }
+        let missing = DeliverableKind.allCases.filter { $0 != .other && $0 != .project && !seeded.contains($0) }
         XCTAssertTrue(missing.isEmpty,
                       "not seeded, so unauditable: \(missing.map(\.rawValue).joined(separator: ", "))")
     }

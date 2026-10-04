@@ -70,7 +70,8 @@ enum DeliverableExport {
         // not in the file.
         case .legal:
             return [md(base, titled(d, LegalClauses.of(d).map(LegalClauses.markdown) ?? d.body))]
-        case .text, .other, .screens:
+        // `.project` exports its body (the CLAUDE.md summary); the project itself is the folder.
+        case .text, .other, .screens, .project:
             return [md(base, titled(d, d.body))]
         }
     }

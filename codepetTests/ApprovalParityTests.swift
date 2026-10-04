@@ -145,7 +145,7 @@ final class ApprovalParityTests: XCTestCase {
                        ["Write the message", "Design the page"])
         let project = try XCTUnwrap(s.company.library.first { $0.projectPath != nil })
         XCTAssertEqual(project.projectPath, path)
-        XCTAssertEqual(project.kind, .other)
+        XCTAssertEqual(project.kind, .project, "CP-056: a Team Build files as a Project, not Other")
         XCTAssertEqual(project.title, "Pants page")
         XCTAssertFalse(project.body.isEmpty)
         XCTAssertFalse(project.body.contains("## "), "the body is the What-this-is section, not the whole CLAUDE.md")

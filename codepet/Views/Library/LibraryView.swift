@@ -6,8 +6,8 @@ import AppKit
 //
 // Mirrors LIB_TAG / LIB_BUCKET / LIB_BORDER / LIVE_TYPES / LIB_SKIN from the web
 // `lib/data.ts`. Kept as ONE small table so the whole poster wall reads as one
-// system. Note: the native `DeliverableKind` enum has no `build` kind, so the web
-// "Builds" bucket / build tag simply never appear here (dead-but-harmless entries).
+// system. The web "Builds" bucket is filled by `.project` (CP-056): an approved Team
+// Build's folder, which used to be filed as `.other` and sorted into "Docs".
 enum Lib {
     /// Bucket display order — a chip shows only when that bucket has items.
     static let border = ["Sites", "Prototypes", "Models", "Builds",
@@ -26,6 +26,7 @@ enum Lib {
         case .dms:                     return "Outreach"
         case .legal, .doc:             return "Docs"
         case .checklist:               return "Checklists"
+        case .project:                 return "Builds"
         default:                       return "Docs"
         }
     }
@@ -71,6 +72,7 @@ enum Lib {
         case .dms:       return "Dm"
         case .plan:      return "Pl"
         case .checklist: return "Ch"
+        case .project:   return "Pj"
         default:         return "Dr"
         }
     }
@@ -90,6 +92,7 @@ enum Lib {
         case .checklist: return vi ? "danh sách kiểm" : "checklist"
         case .plan:      return vi ? "kế hoạch đổi mã" : "code-change plan"
         case .doc:       return vi ? "tài liệu" : "doc"
+        case .project:   return vi ? "dự án" : "project"
         default:         return k.label(lang)
         }
     }

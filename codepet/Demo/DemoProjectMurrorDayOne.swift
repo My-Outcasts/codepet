@@ -25,7 +25,7 @@ extension DemoProject {
         "mur-stack",        // Engineering · Byte — what do I build it on?
         "mur-unitcost",     // Finance · Crash    — what will this cost me a month?
         "mur-crisis",       // Support · Sage     — what if someone's struggling at 2am?
-        "mur-deletion",     // Legal · Glitch     — am I in trouble for holding their words?
+        "mur-deletion",     // Legal · Null       — am I in trouble for holding their words?
         "mur-rhythm",       // Operations · Glitch— how do I ship without breaking it?
     ]
 

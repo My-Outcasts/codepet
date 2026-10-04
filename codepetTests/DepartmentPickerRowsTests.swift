@@ -23,21 +23,25 @@ final class DepartmentPickerRowsTests: XCTestCase {
         XCTAssertEqual(nova.petName, "Nova")
     }
 
-    func testGlitchCarriesOperationsAndLegalInOneRow() throws {
+    /// CP-058 (4 Oct): Legal moved from glitch to null, so each now speaks for one department.
+    func testGlitchCarriesOperationsAndNullCarriesLegal() throws {
         let glitch = try XCTUnwrap(DepartmentPickerRows.rows.first { $0.petId == "glitch" })
-        XCTAssertEqual(glitch.departments.map(\.key), ["ops", "legal"])
+        XCTAssertEqual(glitch.departments.map(\.key), ["ops"])
+        let null = try XCTUnwrap(DepartmentPickerRows.rows.first { $0.petId == "null" })
+        XCTAssertEqual(null.departments.map(\.key), ["legal"])
     }
 
     /// Pet order follows first appearance in the roster, so the visual order the
     /// founder already knows is preserved by the redesign rather than reshuffled.
     func testPetOrderFollowsFirstAppearanceInTheRoster() {
         XCTAssertEqual(DepartmentPickerRows.rows.map(\.petId),
-                       ["byte", "luna", "nova", "sage", "crash", "glitch"])
+                       ["byte", "luna", "nova", "sage", "crash", "glitch", "null"])
     }
 
-    /// Six rows for eight departments — the duplication the redesign removes.
-    func testSixRowsForEightDepartments() {
-        XCTAssertEqual(DepartmentPickerRows.rows.count, 6)
+    /// Seven rows for eight departments since CP-058 gave Legal to null; only nova still
+    /// carries two (Marketing and Sales) until an eighth pet exists.
+    func testSevenRowsForEightDepartments() {
+        XCTAssertEqual(DepartmentPickerRows.rows.count, 7)
         XCTAssertEqual(DepartmentMenu.rosterOrder.count, 8)
     }
 

@@ -17,7 +17,7 @@ final class DayOneScriptTests: XCTestCase {
     /// otherwise Byte's legitimate encore reads as the same bug the test exists to catch.
     private let chainChapters: Set<String> = [
         "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
-        "Finance · Crash", "Support · Sage", "Legal · Glitch", "Operations · Glitch",
+        "Finance · Crash", "Support · Sage", "Legal · Null", "Operations · Glitch",
     ]
 
     /// Link 1 is founder-only, so it is RECORDED, not run. The other eight are run and approved.
@@ -316,7 +316,7 @@ final class DayOneScriptTests: XCTestCase {
             // links the folder, without which a code run lands in `.noProject`.
             "Marketing · Nova", "Sales · Nova", "Design · Luna",
             "Environment · Byte", "Code · Byte", "Redesign · Luna",
-            "Engineering · Byte", "Finance · Crash", "Support · Sage", "Legal · Glitch",
+            "Engineering · Byte", "Finance · Crash", "Support · Sage", "Legal · Null",
             "Operations · Glitch",
         ])
     }

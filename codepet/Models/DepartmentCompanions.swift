@@ -30,7 +30,10 @@ enum DepartmentCompanions {
         "support": "sage",   // calm, patient, methodical
         "fin": "crash",      // runway is a shipping constraint, not an essay
         "ops": "glitch",     // DevOps — automation
-        "legal": "glitch",   // rules & edges
+        // CP-058 (Mona, 4 Oct): each department its own pet. null was cast to nothing; it
+        // "watches the things you're not paying attention to", which is what Legal does. Sales
+        // still shares nova until an eighth pet is drawn.
+        "legal": "null",     // the gaps nobody is watching
     ]
 
     static func companionId(for deptKey: String) -> String? { map[deptKey] }

@@ -31,15 +31,17 @@ enum Lib {
         }
     }
 
-    /// LIVE_TYPES — these render a filled "Live" pip; everything else a hollow "Saved" one.
-    /// (web = site, sheet, build; native has no build kind.)
+    /// LIVE_TYPES — these render a filled "Interactive" pip; everything else a hollow "Saved"
+    /// one. (web = site, sheet, build.) The web says "Live"; native says "Interactive" because
+    /// "live" read as "published on the internet" to a founder who doesn't code (5 Oct test) —
+    /// a Library site is a page on this Mac that previews in the app.
     static func isLive(_ k: DeliverableKind) -> Bool { k == .site || k == .sheet }
 
     /// The pip's word. Not "Draft": only approved work is ever filed in the Library, so after a
     /// Team Build approve it read "05 LIVE · 10 DRAFT" with all fifteen approved (build 4, 28 Sep).
     /// The pip says whether the kind renders live — not whether it was approved.
     static func status(_ k: DeliverableKind, _ lang: AppLanguage) -> String {
-        isLive(k) ? (lang == .vi ? "Trực tiếp" : "Live") : (lang == .vi ? "Đã lưu" : "Saved")
+        isLive(k) ? (lang == .vi ? "Tương tác" : "Interactive") : (lang == .vi ? "Đã lưu" : "Saved")
     }
 
     /// Per-type accent, mapped from the web LIB_SKIN inks to the nearest theme token.
@@ -81,9 +83,9 @@ enum Lib {
     static func tag(_ k: DeliverableKind, _ lang: AppLanguage) -> String {
         let vi = lang == .vi
         switch k {
-        case .site:      return vi ? "web trực tiếp" : "live site"
+        case .site:      return vi ? "trang web" : "web page"
         case .screens:   return vi ? "nguyên mẫu" : "prototype"
-        case .sheet:     return vi ? "mô hình trực tiếp" : "live model"
+        case .sheet:     return vi ? "mô hình tương tác" : "interactive model"
         case .post:      return vi ? "bài đăng" : "social post"
         case .email:     return "email"
         case .calendar:  return vi ? "kế hoạch nội dung" : "content plan"
@@ -203,7 +205,7 @@ struct LibraryView: View {
         let n = items.count
         let savedN = n - liveN
         var idx = pad2(n) + " " + (lang == .vi ? "mục" : (n == 1 ? "item" : "items"))
-        if liveN > 0 { idx += " · " + pad2(liveN) + " " + (lang == .vi ? "trực tiếp" : "live") }
+        if liveN > 0 { idx += " · " + pad2(liveN) + " " + (lang == .vi ? "tương tác" : "interactive") }
         if savedN > 0 { idx += " · " + pad2(savedN) + " " + (lang == .vi ? "đã lưu" : "saved") }
         // web `.lib-mast` — 28px/650 title, 15px description 6px under it, then the
         // uppercase specimen index 12px below that.

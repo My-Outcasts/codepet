@@ -28,11 +28,11 @@ struct OverviewIntroSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(LinearGradient(colors: [CodepetTokens.accentDeep, accent],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                // The Codepet mark. This was a bare gradient square, which read as an image that
+                // failed to load.
+                Image("codepet-logo")
+                    .resizable().interpolation(.none).scaledToFit()
                     .frame(width: 40, height: 40)
-                    .shadow(color: accent.opacity(0.7), radius: 11, x: 0, y: 8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("CODEPET")
                         .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1.26)
@@ -69,6 +69,9 @@ struct OverviewIntroSheet: View {
                 .padding(.bottom, 10)
 
             VStack(alignment: .leading, spacing: 11) {
+                Text(nextMoveIntro).font(CodepetTheme.inter(13.5))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
                 ForEach(bullets, id: \.1) { color, head, body in
                     HStack(alignment: .top, spacing: 10) {
                         Circle().fill(color).frame(width: 8, height: 8).padding(.top, 6)
@@ -113,18 +116,21 @@ struct OverviewIntroSheet: View {
         return s
     }
 
+    /// "The glowing card is your next move — press “<its real button>” on it."
+    private var nextMoveIntro: String {
+        let label = beacon.map {
+            RoadmapBoardCopy.panelActionLabel(for: RoadmapEngine.status(for: $0, in: tasks), lang)
+        }
+        let head = lang == .vi ? "Thẻ đang sáng là nước đi tiếp theo" : "The glowing card is your next move"
+        return "\(head) — \(RoadmapBoardCopy.nextMoveLine(actionLabel: label, lang))"
+    }
+
+    /// The same five states, colours and names as the KEY beside the board.
     private var bullets: [(Color, String, String)] {
-        [
-            (RoadmapPalette.done,
-             lang == .vi ? "Xanh là đã xong" : "Green is done",
-             lang == .vi ? "bạn đã đi được bao xa." : "how far you’ve already come."),
-            (accent,
-             lang == .vi ? "Thẻ đang sáng là nước đi tiếp theo" : "The glowing card is your next move",
-             lang == .vi ? "nhấn Bắt đầu và tôi sẽ làm." : "hit Start and I’ll get to work."),
-            (CodepetTheme.mutedText,
-             lang == .vi ? "Thẻ mờ là đang khoá" : "Greyed-out steps are locked",
-             lang == .vi ? "chúng mở khi bạn xong các bước phụ thuộc."
-                         : "they unlock as you finish what they depend on."),
-        ]
+        RoadmapBoardCopy.keyStatuses.map {
+            (RoadmapPalette.tint(for: $0),
+             RoadmapBoardCopy.keyLabel(for: $0, lang),
+             RoadmapBoardCopy.keyMeaning(for: $0, lang))
+        }
     }
 }

@@ -159,6 +159,52 @@ enum RoadmapBoardCopy {
         }
     }
 
+    // MARK: The KEY, and the sheet that explains it
+
+    /// The board's five states, in KEY order. The KEY beside the board and the "How to read
+    /// this map" sheet both read this — the sheet once explained three colours beside a KEY of
+    /// five, leaving blue and orange (the two that ask something of the founder) unexplained.
+    static let keyStatuses: [TaskStatus] = [.done, .codepetCanDo, .needsYou, .needsApproval, .blocked]
+
+    static func keyLabel(for status: TaskStatus, _ lang: AppLanguage) -> String {
+        switch status {
+        case .done:          return lang == .vi ? "Xong" : "Done"
+        case .codepetCanDo:  return lang == .vi ? "Codepet làm được" : "Codepet can do this"
+        case .needsYou:      return lang == .vi ? "Cần bạn nhập" : "Needs your input"
+        case .needsApproval: return lang == .vi ? "Cần duyệt" : "Needs approval"
+        case .blocked:       return lang == .vi ? "Cần bước trước" : "Needs earlier steps"
+        }
+    }
+
+    /// What each colour means for the founder, in the sheet's plain voice.
+    static func keyMeaning(for status: TaskStatus, _ lang: AppLanguage) -> String {
+        switch status {
+        case .done:
+            return lang == .vi ? "bạn đã đi được bao xa." : "how far you’ve already come."
+        case .codepetCanDo:
+            return lang == .vi ? "đội của bạn tự làm được, chỉ cần bạn bấm."
+                               : "your team can do it on its own; just say go."
+        case .needsYou:
+            return lang == .vi ? "việc chỉ bạn làm được; Codepet sẽ chỉ bạn từng bước."
+                               : "only you can do it; Codepet walks you through it."
+        case .needsApproval:
+            return lang == .vi ? "đã có bản nháp để đọc và duyệt."
+                               : "a draft is ready to read and approve."
+        case .blocked:
+            return lang == .vi ? "đang khoá, mở khi bạn xong các bước phụ thuộc."
+                               : "locked until you finish what they depend on."
+        }
+    }
+
+    /// The sheet's "your next move" line. Names the button the glowing card ACTUALLY shows
+    /// (`panelActionLabel`) — it said "hit Start" while the card read "Add your input".
+    static func nextMoveLine(actionLabel: String?, _ lang: AppLanguage) -> String {
+        guard let label = actionLabel else {
+            return lang == .vi ? "bấm vào nó để xem cần làm gì." : "click it to see what it needs."
+        }
+        return lang == .vi ? "bấm “\(label)” trên thẻ đó." : "press “\(label)” on it."
+    }
+
     static func markComplete(_ lang: AppLanguage) -> String {
         lang == .vi ? "Mình đã làm việc này rồi" : "I already did this"
     }

@@ -213,13 +213,10 @@ struct OverviewChromeRow: View {
         .padding(.top, 2)
     }
 
+    /// Shared with `OverviewIntroSheet`, which explains these same five.
     private var keyItems: [(String, Color)] {
-        [
-            (lang == .vi ? "Xong" : "Done", RoadmapPalette.done),
-            (lang == .vi ? "Codepet làm được" : "Codepet can do this", RoadmapPalette.canDo),
-            (lang == .vi ? "Cần bạn nhập" : "Needs your input", RoadmapPalette.needsYou),
-            (lang == .vi ? "Cần duyệt" : "Needs approval", RoadmapPalette.approve),
-            (lang == .vi ? "Cần bước trước" : "Needs earlier steps", RoadmapPalette.blocked),
-        ]
+        RoadmapBoardCopy.keyStatuses.map {
+            (RoadmapBoardCopy.keyLabel(for: $0, lang), RoadmapPalette.tint(for: $0))
+        }
     }
 }

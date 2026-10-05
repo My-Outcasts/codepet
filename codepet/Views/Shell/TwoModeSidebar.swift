@@ -217,6 +217,15 @@ struct TwoModeSidebar: View {
         }
     }
 
+    /// While a reply streams the store ignores New and thread switches (`newChat` /
+    /// `switchThread` guard it: repointing the buffer mid-turn drops the reply). The dock's
+    /// header already showed that; this rail did not, so its buttons looked live and did
+    /// nothing — which read as the app freezing (5 Oct test, #10).
+    private var chatLocked: Bool {
+        ChatSwitching.isLocked(isStreaming: companyStore.isStreaming,
+                               isCompanionTyping: companyStore.isCompanionTyping)
+    }
+
     private var newButton: some View {
         Button {
             companyStore.newChat()
@@ -235,6 +244,9 @@ struct TwoModeSidebar: View {
                 .hoverAffordance(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(chatLocked)
+        .opacity(chatLocked ? 0.5 : 1)
+        .help(chatLocked ? ChatSwitching.waitHint(lang) : "")
     }
 
     /// Ask lists recent threads; Developer lists the repo and its sessions.
@@ -266,12 +278,16 @@ struct TwoModeSidebar: View {
                     // while capping the one list that could fill it — and this is the
                     // only thread switcher on this surface.
                     ForEach(searching ? all : Array(all.prefix(Self.recentShown))) { thread in
+                        let isActive = thread.id == companyStore.activeThreadId
                         row(symbol: "bubble.left",
                             label: thread.title ?? untitled,
-                            selected: thread.id == companyStore.activeThreadId) {
+                            selected: isActive) {
                             companyStore.switchThread(thread.id)
                             companyStore.view = .chat
                         }
+                        .disabled(chatLocked && !isActive)
+                        .opacity(chatLocked && !isActive ? 0.5 : 1)
+                        .help(chatLocked && !isActive ? ChatSwitching.waitHint(lang) : "")
                     }
                     // Without this, threads past the cap are UNREACHABLE: `showHistory`
                     // lives in `CopilotChatView` and was toggled only by the dock header
@@ -325,12 +341,16 @@ struct TwoModeSidebar: View {
                         emptyLine(lang == .vi ? "Chưa có phiên nào." : "No sessions yet.")
                     }
                     ForEach(sessions.prefix(Self.recentShown)) { session in
+                        let isActive = session.id == companyStore.activeThreadId
                         row(symbol: "chevron.left.forwardslash.chevron.right",
                             label: session.title ?? (lang == .vi ? "Phiên mới" : "New session"),
-                            selected: session.id == companyStore.activeThreadId) {
+                            selected: isActive) {
                             companyStore.switchThread(session.id)
                             companyStore.view = .chat
                         }
+                        .disabled(chatLocked && !isActive)
+                        .opacity(chatLocked && !isActive ? 0.5 : 1)
+                        .help(chatLocked && !isActive ? ChatSwitching.waitHint(lang) : "")
                     }
                 }
             }
@@ -492,5 +512,18 @@ struct TwoModeSidebar: View {
         case .library: return companyStore.company.library.count
         default:       return nil
         }
+    }
+}
+
+/// When the founder may leave the conversation on screen: not while a reply is arriving.
+/// One rule for every New / thread-switch control (the dock header and this rail), matching
+/// the guard `CompanyStore.newChat()` and `switchThread(_:)` apply themselves.
+enum ChatSwitching {
+    static func isLocked(isStreaming: Bool, isCompanionTyping: Bool) -> Bool {
+        isStreaming || isCompanionTyping
+    }
+
+    static func waitHint(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đợi câu trả lời xong đã" : "Wait for the reply to finish"
     }
 }

@@ -117,9 +117,12 @@ enum DepartmentCatalog {
             }
             let open = mine.filter { !$0.done }
             let statuses = open.map { RoadmapEngine.status(for: $0, in: tasks) }
+            // A draft awaiting approval needs the founder as much as a founder-only task does.
+            // It matched no branch here and fell through to IDLE — Marketing read "idle" with a
+            // draft sitting unread (5 Oct test).
             let status: DepartmentStatus =
                 isWorking ? .working
-                : statuses.contains(.needsYou) ? .attention
+                : statuses.contains(.needsYou) || statuses.contains(.needsApproval) ? .attention
                 : statuses.contains(.codepetCanDo) ? .ready
                 : .idle
             return DepartmentSummary(department: dep, status: status,

@@ -30,4 +30,15 @@ final class DepartmentCatalogTests: XCTestCase {
         XCTAssertEqual(s.first { $0.department.key == "legal" }!.status, .later) // zero tasks
         XCTAssertEqual(DepartmentCatalog.needToday(s), 1)   // only eng is attention
     }
+
+    /// 5 Oct, testing as a non-technical founder: Marketing had a draft waiting for approval and
+    /// the Company page called it IDLE — `needsApproval` matched no branch and fell through. An
+    /// unread draft is the founder's move, so it needs them.
+    func testDraftAwaitingApprovalNeedsTheFounder() {
+        let drafted = RoadmapTask(id: "m", title: "m", detail: "", phase: .find, who: .does,
+                                  dependsOn: [], done: false, drafted: true, dept: "mkt")
+        let s = DepartmentCatalog.summaries(tasks: [drafted])
+        XCTAssertEqual(s.first { $0.department.key == "mkt" }!.status, .attention)
+        XCTAssertEqual(DepartmentCatalog.needToday(s), 1)
+    }
 }

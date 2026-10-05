@@ -3556,7 +3556,8 @@ final class CompanyStore: ObservableObject {
     /// two drifted. Both paths now call `fileApproval`, and a test asserts they agree.
     func approveDraft(messageId: String) async {
         guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
-              let draft = chatMessages[i].draft, !chatMessages[i].draftApproved else { return }
+              let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
+              !chatMessages[i].draftDiscarded else { return }
         chatMessages[i].draftApproved = true
         // Decided against the Library BEFORE filing changes it — the same rule `file` applies.
         chatMessages[i].draftReplacedItem = LibraryFiling.replaces(draft, in: company.library)
@@ -3564,6 +3565,23 @@ final class CompanyStore: ObservableObject {
         // would offer Approve again, and a second approval files the draft twice.
         flushActiveThread()
         await fileApproval(draft, taskId: draft.sourceTaskId)
+    }
+
+    /// Throw away a chat draft from its card — the chat counterpart of `discardTaskDraft`.
+    ///
+    /// A chat run also stashes its draft on the task (`produceDraftInline`), so the board's copy
+    /// goes too when it is this same draft; a task holding a NEWER draft (a board re-run) keeps
+    /// it. Nothing is filed and `fileApproval` is not called.
+    func discardDraft(messageId: String) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let draft = chatMessages[i].draft, !chatMessages[i].draftApproved,
+              !chatMessages[i].draftDiscarded else { return }
+        chatMessages[i].draftDiscarded = true
+        flushActiveThread()
+        if let tid = draft.sourceTaskId,
+           let t = company.tasks.first(where: { $0.id == tid }), t.draft?.id == draft.id {
+            await discardTaskDraft(id: tid)
+        }
     }
 
     /// The one approval path: file the deliverable in the library exactly once, complete its task,

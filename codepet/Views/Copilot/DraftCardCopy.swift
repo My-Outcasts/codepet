@@ -39,6 +39,19 @@ enum DraftCardCopy {
         return lang == .vi ? "Đã thêm vào Thư viện" : "Added to Library"
     }
 
+    // Discard — shared by the chat card and `TaskDraftPreview`, so both say the same thing.
+    static func discardButton(_ lang: AppLanguage) -> String { lang == .vi ? "Bỏ bản nháp" : "Discard draft" }
+    static func discardQuestion(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Bỏ bản nháp này?" : "Discard this draft?"
+    }
+    static func discardExplainer(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Không có gì được lưu vào Thư viện. Bạn có thể chạy lại việc này bất cứ lúc nào."
+                    : "Nothing is filed in your Library. You can run this task again any time."
+    }
+    static func discardedLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đã bỏ — không lưu gì" : "Discarded — nothing filed"
+    }
+
     static func notFiledNote(_ lang: AppLanguage) -> String {
         lang == .vi
             ? "Chưa lưu — duyệt để đưa vào Thư viện."

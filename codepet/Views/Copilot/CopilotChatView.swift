@@ -1580,6 +1580,8 @@ struct CopilotBubble: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var appState: AppState
     @State private var showDetail = false
+    /// The draft card's Discard confirmation — one stray click must not throw a draft away.
+    @State private var confirmDiscard = false
     /// Expansion of the finished run's "What <Name> did" log on a draft card.
     @State private var showSteps = false
     /// Expansion of the fast answer once a room has superseded it — see `firstTakeRow`.
@@ -2841,7 +2843,7 @@ struct CopilotBubble: View {
                     //
                     // Retires on the founder's FIRST approval, account-wide: it is a one-time
                     // lesson, and a founder who learned it on the board does not need it here.
-                    if DraftCardCopy.shouldShowNotFiledNote(
+                    if !message.draftDiscarded, DraftCardCopy.shouldShowNotFiledNote(
                         hasApproved: companyStore.company.firstApprovalAt != nil,
                         draftApproved: message.draftApproved) {
                         Text(DraftCardCopy.notFiledNote(lang))
@@ -2860,6 +2862,13 @@ struct CopilotBubble: View {
                         if DraftCardCopy.isLatestFiled(message.id, in: companyStore.chatMessages) {
                             nextStepRow(DraftCardCopy.nextStep(in: companyStore.company.tasks))
                         }
+                    } else if message.draftDiscarded {
+                        HStack(spacing: 5) {
+                            Image(systemName: "xmark.circle")
+                            Text(DraftCardCopy.discardedLabel(lang))
+                        }
+                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                        .foregroundColor(CodepetTheme.mutedText)
                     } else {
                         // DECIDE, then adjust. Approve/Redo settle the draft; the revise chips
                         // only nudge it. They used to sit 8pt apart at 10pt and 9pt, so five
@@ -2882,6 +2891,20 @@ struct CopilotBubble: View {
                                     .background(Capsule().stroke(CodepetTheme.hairline))
                                     .hoverAffordance(Capsule())
                             }.buttonStyle(.plain)
+                            Button { confirmDiscard = true } label: {
+                                Text(DraftCardCopy.discardButton(lang))
+                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .hoverAffordance(Capsule())
+                            }.buttonStyle(.plain)
+                            .confirmationDialog(DraftCardCopy.discardQuestion(lang), isPresented: $confirmDiscard) {
+                                Button(DraftCardCopy.discardButton(lang), role: .destructive) {
+                                    Task { await companyStore.discardDraft(messageId: message.id) }
+                                }
+                            } message: {
+                                Text(DraftCardCopy.discardExplainer(lang))
+                            }
                         }
                         .padding(.top, DraftCardMetrics.decideGap - DraftCardMetrics.blockGap)
 

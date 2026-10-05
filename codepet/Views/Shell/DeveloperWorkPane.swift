@@ -195,12 +195,11 @@ struct DeveloperWorkPane: View {
     // MARK: - Session bar
 
     /// The four facts the prototype puts above every run: which backend, which
-    /// folder, which branch, and what it costs. Local is stated as **0 credits**
-    /// because that is the whole argument for it — it is the founder's own CLI.
+    /// folder, which branch, and what it costs. Local says it runs on the founder's own
+    /// Claude plan — the whole argument for it (`DeveloperPaneCopy.backendChip`).
     private var sessionBar: some View {
         HStack(spacing: 7) {
-            chip(local ? "▣ " + (lang == .vi ? "Cục bộ · 0 tín dụng" : "Local · 0 credits")
-                       : "☁ " + (lang == .vi ? "Đám mây · tín dụng" : "Cloud · credits"),
+            chip(DeveloperPaneCopy.backendChip(local: local, lang),
                  tint: local ? CodepetTheme.accentGreen : CodepetTheme.accentGold)
             if let link = companyStore.activeProjectLink {
                 chip(Project.nameFromPath(link.path), tint: nil)
@@ -292,10 +291,7 @@ struct DeveloperWorkPane: View {
     @ViewBuilder private var stageBody: some View {
         switch stage {
         case .idle:
-            hint(lang == .vi
-                 ? "Mô tả một tác vụ bên dưới. Ở trong Developer CHÍNH LÀ ý định — không có chế độ nào phải chọn."
-                 : "Describe a task below. Being in Developer *is* the intent — "
-                 + "there is no mode to pick.")
+            hint(DeveloperPaneCopy.idleHint(lang))
         case .dormant:
             hint(lang == .vi
                  ? "Chưa liên kết thư mục nào, nên không có chỗ nào để chạy."
@@ -584,7 +580,7 @@ struct DeveloperWorkPane: View {
     private var ceiling: some View {
         VStack(alignment: .leading, spacing: 5) {
             Rectangle().fill(CodepetTokens.cardEdge).frame(height: 1)
-            Text((lang == .vi ? "KHÔNG BAO GIỜ, Ở BẤT KỲ MỨC NÀO" : "NEVER, AT ANY TIER"))
+            Text(DeveloperPaneCopy.neverHeading(lang))
                 .font(CodepetTheme.inter(CodepetType.footnote)).tracking(1)
                 .foregroundStyle(CodepetTokens.faint)
                 .padding(.top, 4)
@@ -594,5 +590,34 @@ struct DeveloperWorkPane: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 6)
+    }
+}
+
+/// The CODE tab's standing words, kept pure so `DeveloperPaneCopyTests` can pin them.
+///
+/// Each replaced something a founder who does not code tripped on (5 Oct test): a literal
+/// "*is*" (`hint` renders a String, not markdown), the pane's internal name "Developer" under
+/// a tab labelled CODE, a green "Local · 0 credits" that read as an empty balance, and
+/// "NEVER, AT ANY TIER" — tiers nothing on screen explains.
+enum DeveloperPaneCopy {
+    /// True to the flow: a task first shows the `.plan` card (Run / Cancel), and nothing runs
+    /// before Run.
+    static func idleHint(_ lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Mô tả điều bạn muốn thay đổi trong dự án này. Codepet lên kế hoạch trước và không đổi gì cho đến khi bạn bấm Chạy."
+            : "Describe what you want changed in this project. Codepet shows you a plan first "
+            + "and changes nothing until you press Run."
+    }
+
+    /// Local runs spend the founder's own Claude plan, not Codepet credits.
+    static func backendChip(local: Bool, _ lang: AppLanguage) -> String {
+        local
+            ? "▣ " + (lang == .vi ? "Trên máy này · dùng gói Claude của bạn" : "On this Mac · uses your Claude plan")
+            : "☁ " + (lang == .vi ? "Đám mây · dùng tín dụng" : "Cloud · uses credits")
+    }
+
+    /// Heads the hard limits (`ApprovalTier.ceiling`) that hold whatever the founder allows.
+    static func neverHeading(_ lang: AppLanguage) -> String {
+        lang == .vi ? "CODEPET SẼ KHÔNG BAO GIỜ" : "CODEPET WILL NEVER"
     }
 }

@@ -477,6 +477,7 @@ struct CopilotChatView: View {
         companyStore.chatMessages.isEmpty && companyStore.activeAgentRuns.isEmpty
             && !TeamRunPlacement.showsUnanchored(run: companyStore.teamRun?.run,
                                                  messageRunIds: messageTeamRunIds,
+                                                 elsewhereRunIds: otherThreadTeamRunIds,
                                                  stickyRunId: nil, stickyKey: nil,
                                                  transcriptKey: transcriptKey)
     }
@@ -931,6 +932,7 @@ struct CopilotChatView: View {
     private var unanchoredTeamRun: TeamRunCoordinator? {
         guard let c = companyStore.teamRun,
               TeamRunPlacement.showsUnanchored(run: c.run, messageRunIds: messageTeamRunIds,
+                                               elsewhereRunIds: otherThreadTeamRunIds,
                                                stickyRunId: stickyTeamRunId, stickyKey: stickyTranscriptKey,
                                                transcriptKey: transcriptKey) else { return nil }
         return c
@@ -938,6 +940,14 @@ struct CopilotChatView: View {
 
     private var messageTeamRunIds: Set<String> {
         Set(companyStore.chatMessages.compactMap(\.teamRunId))
+    }
+
+    /// Runs carried by the founder's other threads — where such a run renders inline, so it
+    /// is not also drawn at the foot of this one. The active thread is excluded: its archived
+    /// copy can lag `chatMessages`, which `messageTeamRunIds` already covers.
+    private var otherThreadTeamRunIds: Set<String> {
+        Set(companyStore.threads.lazy.filter { $0.id != companyStore.activeThreadId }
+            .flatMap(\.messages).compactMap(\.teamRunId))
     }
 
     /// Which conversation is on screen, for scoping `stickyTeamRunId`: the first message's id.

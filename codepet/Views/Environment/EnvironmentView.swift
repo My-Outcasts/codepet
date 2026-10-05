@@ -17,6 +17,30 @@ enum ToolOnState {
     }
 }
 
+/// The Environment header's words, split so the stage can be bolded.
+///
+/// The stage is an adjective-ish label ("building", "launched"), not a noun, so it is named AS
+/// a stage — the onboarding reveal's "at the **building** stage". It used to drop in where a
+/// noun belongs: "Based on your **building**" (5 Oct test).
+enum EnvironmentHeaderCopy {
+    static func parts(stage: String?, needsYouCount: Int, lang: AppLanguage)
+        -> (lead: String, stage: String, tail: String) {
+        let trimmed = (stage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = (trimmed.isEmpty ? "Building" : trimmed).lowercased()
+        if lang == .vi {
+            let tail = needsYouCount > 0 ? " — bạn chỉ cần kết nối \(needsYouCount) tài khoản." : "."
+            return ("Ở giai đoạn ", label, " này, đây là bộ công cụ mình sẽ thiết lập\(tail)")
+        }
+        let plural = needsYouCount > 1 ? "s" : ""
+        let tail = needsYouCount > 0
+            ? " — you just need to connect \(needsYouCount) account\(plural)."
+            : "."
+        // "I've turned on the skills and agents I can" was here and is gone: no agent can be
+        // on, so the companion was claiming something it had not done.
+        return ("At the ", label, " stage, here's the toolkit I'd set up\(tail)")
+    }
+}
+
 /// The Environment = the company's toolkit, laid out like the web `EnvironmentView`:
 /// the companion's recommendation strip (`.env-byte`), a grid of recommended cards
 /// (`.erec`/`.rcard`), then "Browse all" — one card per category (`.env-card`) whose
@@ -39,10 +63,6 @@ struct EnvironmentView: View {
     // them (same "needs you" tag basis the recommendation cards show).
     private var needsYouCount: Int {
         recs.filter { $0.category == .connectors && !isOn($0) }.count
-    }
-    private var stageLabel: String {
-        let s = (companyStore.company.brief.stage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return (s.isEmpty ? "Building" : s).lowercased()
     }
 
     var body: some View {
@@ -187,23 +207,12 @@ struct EnvironmentView: View {
     private var companionText: Text {
         // 15 to match `introParagraph`'s size — a 13.5 bold span inside a 15pt
         // paragraph reads as a rendering mistake rather than emphasis.
-        let boldStage = Text(stageLabel)
-            .font(CodepetTheme.inter(15, weight: .semibold))
-            .foregroundColor(CodepetTheme.primaryText)
-        if lang == .vi {
-            let tail = needsYouCount > 0 ? " — bạn chỉ cần kết nối \(needsYouCount) tài khoản." : "."
-            return Text("Dựa trên ") + boldStage
-                 + Text(" của bạn, đây là bộ công cụ mình sẽ thiết lập\(tail)")
-        }
-        let plural = needsYouCount > 1 ? "s" : ""
-        let tail = needsYouCount > 0
-            ? " — you just need to connect \(needsYouCount) account\(plural)."
-            : "."
-        // "I've turned on the skills and agents I can" was here and is gone: no
-        // agent can be on, so the companion was claiming something it had not done.
-        // This now matches the VI string, which never made the agents claim.
-        return Text("Based on your ") + boldStage
-             + Text(", here's the toolkit I'd set up\(tail)")
+        let p = EnvironmentHeaderCopy.parts(stage: companyStore.company.brief.stage,
+                                            needsYouCount: needsYouCount, lang: lang)
+        return Text(p.lead)
+             + Text(p.stage).font(CodepetTheme.inter(15, weight: .semibold))
+                 .foregroundColor(CodepetTheme.primaryText)
+             + Text(p.tail)
     }
 
     // MARK: Recommended — web `.erec` grid of `.rcard`s

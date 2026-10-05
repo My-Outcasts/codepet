@@ -110,6 +110,9 @@ struct CopilotMessage: Identifiable, Equatable {
     /// from `LibraryFiling.replaces`, not derived from `draft.supersedes`: a revision whose target
     /// was gone is appended, and must not claim to have updated anything.
     var draftReplacedItem: Bool = false
+    /// The founder threw this draft away from its card (`CompanyStore.discardDraft`). Settles the
+    /// card like `draftApproved` does, so Approve is never offered for discarded work.
+    var draftDiscarded: Bool = false
     /// A run started from a surface and offered here before it happens — see `RunProposal`.
     /// `actionConsumed` hides the button once pressed, the same way it does for `firstRunAction`.
     var runProposal: RunProposal?

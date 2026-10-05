@@ -78,7 +78,7 @@ struct TaskDraftPreview: View {
                 .buttonStyle(.plain)
                 .disabled(busy)
                 Button { confirmDiscard = true } label: {
-                    Text(lang == .vi ? "Bỏ bản nháp" : "Discard draft")
+                    Text(DraftCardCopy.discardButton(lang))
                         .font(.pixelSystem(size: 11, weight: .semibold))
                         .foregroundColor(CodepetTheme.bodyText)
                         .padding(.horizontal, 12).padding(.vertical, 5)
@@ -86,9 +86,8 @@ struct TaskDraftPreview: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
-                .confirmationDialog(lang == .vi ? "Bỏ bản nháp này?" : "Discard this draft?",
-                                    isPresented: $confirmDiscard) {
-                    Button(lang == .vi ? "Bỏ bản nháp" : "Discard draft", role: .destructive) {
+                .confirmationDialog(DraftCardCopy.discardQuestion(lang), isPresented: $confirmDiscard) {
+                    Button(DraftCardCopy.discardButton(lang), role: .destructive) {
                         Task {
                             busy = true
                             await companyStore.discardTaskDraft(id: taskId)
@@ -97,9 +96,7 @@ struct TaskDraftPreview: View {
                         }
                     }
                 } message: {
-                    Text(lang == .vi
-                         ? "Không có gì được lưu vào Thư viện. Bạn có thể chạy lại việc này bất cứ lúc nào."
-                         : "Nothing is filed in your Library. You can run this task again any time.")
+                    Text(DraftCardCopy.discardExplainer(lang))
                 }
                 Spacer()
                 if busy {

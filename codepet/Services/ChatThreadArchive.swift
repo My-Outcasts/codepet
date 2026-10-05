@@ -104,6 +104,8 @@ struct StoredMessage: Codable {
     /// "Updated in your Library" rather than "Added" — a revision that replaced an item.
     /// Optional so a file written before this field still decodes.
     let draftReplacedItem: Bool?
+    /// Optional so a file written before this field still decodes.
+    let draftDiscarded: Bool?
     let companionId: String?
     let deptName: String?
     let execSteps: [ExecStep]?
@@ -127,6 +129,7 @@ struct StoredMessage: Codable {
         id = m.id; fromFounder = m.role == .me; createdAt = m.createdAt; self.text = text
         draft = m.draft; draftApproved = m.draftApproved
         draftReplacedItem = m.draftReplacedItem ? true : nil
+        draftDiscarded = m.draftDiscarded ? true : nil
         companionId = m.companionId; deptName = m.deptName
         execSteps = m.execSteps; upstream = m.upstream
         navChip = m.navChip; noted = m.noted; founderAsk = m.founderAsk; teamRunId = m.teamRunId
@@ -138,6 +141,7 @@ struct StoredMessage: Codable {
                                companionId: companionId, deptName: deptName, execSteps: execSteps,
                                upstream: upstream, founderAsk: founderAsk, teamRunId: teamRunId)
         m.draftReplacedItem = draftReplacedItem ?? false
+        m.draftDiscarded = draftDiscarded ?? false
         return m
     }
 }

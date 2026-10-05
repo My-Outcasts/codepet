@@ -48,6 +48,30 @@ final class CompanyStoreChatRunTests: XCTestCase {
         XCTAssertTrue(s.company.library.isEmpty)                  // draft NOT in library
         XCTAssertFalse(s.isCompanionTyping)
     }
+    /// CP-059, end to end: the turn AFTER a run must tell the model the run produced something.
+    /// The draft card's `text` is "" and the backend drops blank turns, so without this the model
+    /// saw "On it" followed by nothing — and retracted its own run on the next turn.
+    func testTheNextTurnTellsTheModelTheDraftExists() async throws {
+        var sent: [CompanyChatRequest] = []
+        var replies = [CompanyChatReply(text: "On it", runTaskId: "t1"),
+                       CompanyChatReply(text: "ok", runTaskId: nil)]
+        let s = CompanyStore(loader: { _ in self.seeded() }, saver: { _, _ in true },
+                             tasksSaver: { _, _ in true },
+                             chatSender: { req in sent.append(req); return replies.removeFirst() },
+                             chatStreamer: Self.failingStreamer,
+                             taskRunner: { _ in RunTaskResponse(kind: "doc", title: "WTP survey", body: "# Q1") },
+                             librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
+                             decisionExtractor: { _, _ in [] })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("run the survey", language: .en)
+        await s.sendChat("and the next one?", language: .en)
+
+        let follow = try XCTUnwrap(sent.last, "the follow-up was never sent")
+        XCTAssertTrue(follow.history.contains { $0.role == "companion" && $0.text.contains("\"WTP survey\"") },
+                      "the history must carry the draft, or the model believes it ran nothing")
+    }
+
     func testUnknownRunTaskIdNoDraft() async {
         let s = store(reply: CompanyChatReply(text: "hm", runTaskId: "nope"),
                       runner: { _ in RunTaskResponse(kind: "doc", title: "x", body: "# y") })

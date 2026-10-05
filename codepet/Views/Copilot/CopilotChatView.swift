@@ -1446,7 +1446,8 @@ struct ThreadListView: View {
     /// `deleteThread(_:)` guard the same condition independently — this is UI
     /// affordance on top of that store-level guard, not a substitute for it.
     private var isChatBusy: Bool {
-        companyStore.isCompanionTyping || companyStore.isStreaming
+        ChatSwitching.isLocked(isStreaming: companyStore.isStreaming,
+                               isCompanionTyping: companyStore.isCompanionTyping)
     }
 
     var body: some View {

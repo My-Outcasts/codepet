@@ -735,14 +735,22 @@ struct TeamStepSelection: Identifiable, Equatable {
 // MARK: - Placement
 
 /// Whether the store's team run is drawn at the transcript's bottom rather than inline under
-/// its message. Chat threads are in-memory only, so a run restored on relaunch has no message
-/// to sit under; without the bottom card its Continue / Approve would be unreachable.
+/// its message. A run no thread carries (its thread deleted, or started before threads were
+/// archived with `teamRunId`) has no message to sit under; without the bottom card its
+/// Continue / Approve would be unreachable.
 ///
 /// Pure so `TeamRunPlacementTests` can pin it — the decision is where the bugs were.
 enum TeamRunPlacement {
     /// - `messageRunIds`: the `teamRunId`s carried by the current transcript. A run in it renders
     ///   inline, so it is never drawn here too.
-    /// - A run the founder can still act on (active, or ready for Approve) is always shown.
+    /// - `elsewhereRunIds`: the `teamRunId`s carried by the founder's OTHER threads. A run there
+    ///   has a home — it renders inline when the founder opens that thread — so one waiting on
+    ///   the founder (Go, Continue, Approve) is not drawn here. Before this, a finished build
+    ///   awaiting Approve sat at the foot of every conversation, new ones included, for as long
+    ///   as it went unapproved (5 Oct, real account).
+    /// - A run still working (running, assembling) follows the founder everywhere: it lasts
+    ///   minutes and its Stop has to be within reach.
+    /// - Otherwise a run the founder can still act on (active, or ready for Approve) is shown.
     /// - A finished run (filed, cancelled) is shown only where it was already being drawn —
     ///   `stickyRunId` stamped in the conversation `stickyKey` — so the card does not vanish the
     ///   moment it says Cancelled or "Added to Library". Scoped to that conversation: before
@@ -750,10 +758,12 @@ enum TeamRunPlacement {
     /// - `transcriptKey` identifies the conversation on screen (see
     ///   `CopilotChatView.transcriptKey`); pass `stickyRunId: nil` to ask "is there something
     ///   the founder must act on", which is what the empty-state check wants.
-    static func showsUnanchored(run: TeamRun?, messageRunIds: Set<String>, stickyRunId: String?,
+    static func showsUnanchored(run: TeamRun?, messageRunIds: Set<String>,
+                                elsewhereRunIds: Set<String> = [], stickyRunId: String?,
                                 stickyKey: String?, transcriptKey: String?) -> Bool {
         guard let run, !messageRunIds.contains(run.id) else { return false }
-        if run.isActive || run.phase == .ready { return true }
+        if run.phase == .running || run.phase == .assembling { return true }
+        if run.isActive || run.phase == .ready { return !elsewhereRunIds.contains(run.id) }
         return run.id == stickyRunId && stickyKey == transcriptKey
     }
 }

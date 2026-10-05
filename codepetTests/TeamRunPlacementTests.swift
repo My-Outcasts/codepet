@@ -59,4 +59,38 @@ final class TeamRunPlacementTests: XCTestCase {
         XCTAssertFalse(TeamRunPlacement.showsUnanchored(run: run(.filed), messageRunIds: [],
                                                         stickyRunId: nil, stickyKey: nil, transcriptKey: "t1"))
     }
+
+    /// 5 Oct, real account: a finished build waiting on Approve was drawn at the foot of EVERY
+    /// conversation — new ones included, and below every reply. Its own thread carries it
+    /// inline (threads are archived with `teamRunId`), so it belongs there and nowhere else.
+    /// Same for every phase that waits on the founder (Go, Continue, Approve) — those can sit
+    /// for days.
+    func testRunWaitingOnTheFounderCarriedByAnotherThreadIsNotDrawnHere() {
+        for phase in [TeamRunPhase.planned, .failed, .ready] {
+            XCTAssertFalse(TeamRunPlacement.showsUnanchored(run: run(phase), messageRunIds: [],
+                                                            elsewhereRunIds: ["run-1"],
+                                                            stickyRunId: nil, stickyKey: nil,
+                                                            transcriptKey: "t2"), "\(phase)")
+        }
+    }
+
+    /// The fallback the bottom card exists for: no thread carries the run, so Approve must
+    /// stay reachable somewhere.
+    func testReadyRunNoThreadCarriesIsStillDrawn() {
+        XCTAssertTrue(TeamRunPlacement.showsUnanchored(run: run(.ready), messageRunIds: [],
+                                                       elsewhereRunIds: ["other-run"],
+                                                       stickyRunId: nil, stickyKey: nil,
+                                                       transcriptKey: "t2"))
+    }
+
+    /// A run still working keeps following the founder: it lasts minutes, and Stop has to be
+    /// within reach wherever they are.
+    func testWorkingRunCarriedByAnotherThreadStillFollows() {
+        for phase in [TeamRunPhase.running, .assembling] {
+            XCTAssertTrue(TeamRunPlacement.showsUnanchored(run: run(phase), messageRunIds: [],
+                                                           elsewhereRunIds: ["run-1"],
+                                                           stickyRunId: nil, stickyKey: nil,
+                                                           transcriptKey: "t2"), "\(phase)")
+        }
+    }
 }

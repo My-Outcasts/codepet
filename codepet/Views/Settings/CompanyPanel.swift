@@ -31,6 +31,8 @@ struct CompanyPanel: View {
 
     @State private var pickingCompanion = false
     @State private var editingBrief = false
+    @State private var confirmStartOver = false
+    @State private var startingOver = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -61,9 +63,34 @@ struct CompanyPanel: View {
                         .font(CodepetTheme.inter(12, weight: .semibold))
                         .foregroundColor(CodepetTheme.accentPurple)
                 }
+                SettingsDivider()
+                SettingsRow(
+                    label: StartOverCopy.rowLabel(lang),
+                    description: companyStore.startOverBlockedByTeamRun
+                        ? StartOverCopy.blockedByTeamBuild(lang) : StartOverCopy.rowDescription(lang)
+                ) {
+                    Button(StartOverCopy.button(lang)) { confirmStartOver = true }
+                        .buttonStyle(.plain)
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(companyStore.startOverBlockedByTeamRun
+                                         ? CodepetTheme.mutedText : CodepetTheme.accentPurple)
+                        .disabled(companyStore.startOverBlockedByTeamRun)
+                }
             }
 
             if pickingCompanion { companionList }
+        }
+        .confirmationDialog(StartOverCopy.question(lang), isPresented: $confirmStartOver) {
+            Button(StartOverCopy.button(lang)) { startingOver = true }
+        } message: {
+            Text(StartOverCopy.explainer(lang))
+        }
+        .sheet(isPresented: $startingOver) {
+            // The founder's name and role carry over; the business does not.
+            CompanyOnboardingView(prefillBrief: CompanyBrief(founderName: companyStore.company.brief.founderName,
+                                                             role: companyStore.company.brief.role),
+                                  onDone: { startingOver = false },
+                                  startsNewBusiness: { await companyStore.startNewBusiness(brief: $0, language: lang) })
         }
         .sheet(isPresented: $editingBrief) {
             // The same editor the deleted SettingsView opened — not a second brief form.
@@ -94,5 +121,32 @@ struct CompanyPanel: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// The words around "Start a different business". The explainer lists every consequence, since
+/// the action replaces the roadmap and cannot be undone from the app.
+enum StartOverCopy {
+    static func rowLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Công ty khác" : "A different business"
+    }
+    static func rowDescription(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Bắt đầu lại với một công ty mới — lộ trình mới từ đầu."
+                    : "Start over with a new business — a fresh roadmap from scratch."
+    }
+    static func button(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Bắt đầu công ty khác" : "Start a different business"
+    }
+    static func blockedByTeamBuild(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Hãy duyệt hoặc dừng Team build đang chạy trước."
+                    : "Approve or stop your team build first."
+    }
+    static func question(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Bắt đầu một công ty khác?" : "Start a different business?"
+    }
+    static func explainer(_ lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Lộ trình và các quyết định hiện tại sẽ được thay bằng công ty mới, và thư mục dự án được gỡ liên kết. Thư viện cũ vẫn xem được ở mục \"Từ công ty trước\". Lịch sử chat được giữ nguyên."
+            : "Your current roadmap and decisions are replaced by the new business, and the project folder is unlinked. Your old Library stays viewable under \"From your previous business\". Chat history is kept."
     }
 }

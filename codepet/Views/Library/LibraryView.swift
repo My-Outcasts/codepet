@@ -111,6 +111,10 @@ struct LibraryView: View {
     @Environment(\.uiLanguage) private var lang
     @State private var selected: Deliverable?
     @State private var filter: String = "all"   // "all" or a bucket name
+    /// An item from a business the founder started over from — opened read-only: no version
+    /// menu, no Restore, since it is not in the live Library.
+    @State private var selectedPrevious: Deliverable?
+    @State private var showPrevious = false
 
     private var items: [Deliverable] {
         companyStore.company.library.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
@@ -179,9 +183,11 @@ struct LibraryView: View {
                     filterBar
                     ForEach(Array(groups.enumerated()), id: \.offset) { i, g in
                         groupSection(g.dept, g.items)
-                            .padding(.bottom, i == groups.count - 1 ? CodepetTokens.Space.pageBottom : 0)
+                            .padding(.bottom, i == groups.count - 1 && previous.isEmpty
+                                     ? CodepetTokens.Space.pageBottom : 0)
                     }
                 }
+                if !previous.isEmpty { previousSection }
             }
             // The column goes on the WHOLE stack, not on one branch: the masthead,
             // the filter bar and every group have to share one measure or the title
@@ -189,6 +195,7 @@ struct LibraryView: View {
             .pageColumn()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(item: $selectedPrevious) { DeliverableDetailView(deliverable: $0) }
         .sheet(item: $selected) { d in
             // The Library is the one caller that passes these: it owns the item, so it is the one
             // place a version menu and Restore make sense. Every other sheet opens without them.
@@ -197,6 +204,39 @@ struct LibraryView: View {
                 liveItem: { companyStore.company.library.first { $0.id == d.id } },
                 onRestore: { index in await companyStore.restoreVersion(itemId: d.id, historyIndex: index) })
         }
+    }
+
+    // MARK: From your previous business
+
+    private var previous: [Deliverable] {
+        companyStore.company.previousLibrary.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+    }
+
+    /// The work of a business the founder started over from (`CompanyStore.startNewBusiness`).
+    /// Collapsed by default and kept out of the header's counts and the filter chips: it is
+    /// history, not this company's output.
+    private var previousSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { showPrevious.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: showPrevious ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text((lang == .vi ? "Từ công ty trước" : "From your previous business").uppercased())
+                        .font(CodepetTheme.inter(11, weight: .semibold)).tracking(1)
+                    Text("— \(previous.count)").font(CodepetTheme.inter(11))
+                }
+                .foregroundColor(CodepetTheme.mutedText)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if showPrevious {
+                ForEach(previous) { d in
+                    Button { selectedPrevious = d } label: { LibraryRowView(deliverable: d) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 26).padding(.top, 28).padding(.bottom, CodepetTokens.Space.pageBottom)
     }
 
     // MARK: Header (title + subtitle + `NN items · NN live · NN saved`)

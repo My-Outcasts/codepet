@@ -10,10 +10,18 @@ struct CompanyOnboardingView: View {
     private let api: ReflectionAPIClientProtocol = ReflectionAPIClient()
     var prefillBrief: CompanyBrief? = nil
     var onDone: (() -> Void)? = nil
+    /// Set by "Start a different business": Finish hands the brief here instead of finishing
+    /// onboarding, and the sheet stays open with a message when it answers false (nothing
+    /// changed). Planning a whole roadmap takes about a minute, so the button says so.
+    var startsNewBusiness: ((CompanyBrief) async -> Bool)? = nil
+    @State private var planning = false
+    @State private var planFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(uiLanguage == .vi ? "Chào mừng đến Codepet" : "Welcome to Codepet")
+            Text(startsNewBusiness != nil
+                 ? (uiLanguage == .vi ? "Một công ty mới" : "A new business")
+                 : (uiLanguage == .vi ? "Chào mừng đến Codepet" : "Welcome to Codepet"))
                 .font(.pixelSystem(size: 20, weight: .bold))
                 .foregroundColor(CodepetTheme.primaryText)
             Text(uiLanguage == .vi ? "Kể cho tôi về công ty của bạn." : "Tell me about your company.")
@@ -45,6 +53,20 @@ struct CompanyOnboardingView: View {
                 if step < 5 {
                     Button(uiLanguage == .vi ? "Tiếp" : "Next") { step += 1 }
                         .buttonStyle(.plain).foregroundColor(CodepetTheme.accentPurple)
+                } else if let start = startsNewBusiness {
+                    Button(planning ? (uiLanguage == .vi ? "Đang lập lộ trình — khoảng một phút…" : "Planning your roadmap — about a minute…")
+                                    : (uiLanguage == .vi ? "Bắt đầu" : "Start")) {
+                        Task {
+                            planning = true; planFailed = false
+                            let ok = await start(model.buildBrief())
+                            planning = false
+                            if ok { onDone?() } else { planFailed = true }
+                        }
+                    }
+                    .buttonStyle(.plain).foregroundColor(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Capsule().fill(CodepetTheme.accentPurple))
+                    .disabled(planning)
                 } else {
                     Button(model.isSubmitting ? (uiLanguage == .vi ? "Đang lưu…" : "Saving…")
                                               : (uiLanguage == .vi ? "Hoàn tất" : "Finish")) {
@@ -55,6 +77,12 @@ struct CompanyOnboardingView: View {
                     .background(Capsule().fill(CodepetTheme.accentPurple))
                     .disabled(model.isSubmitting)
                 }
+            }
+            if planFailed {
+                Text(uiLanguage == .vi
+                     ? "Chưa lập được lộ trình mới — chưa có gì thay đổi. Thử lại nhé."
+                     : "Couldn't plan the new roadmap — nothing has changed. Try again.")
+                    .font(.pixelSystem(size: 12)).foregroundColor(CodepetTheme.mutedText)
             }
         }
         .padding(28)

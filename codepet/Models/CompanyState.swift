@@ -52,6 +52,11 @@ struct CompanyState: Codable, Hashable {
     /// every field above — every company doc written before this feature existed decodes
     /// without it.
     var teamRuns: [TeamRun]
+    /// The Library of a business the founder has since started over from
+    /// (`CompanyStore.startNewBusiness`). Shown in the Library under its own heading, and read
+    /// by nothing else — no prompt, upstream feed or count sees it, so an old company's work
+    /// cannot leak into the new one's.
+    var previousLibrary: [Deliverable] = []
 
     /// Explicit memberwise init so `tasks`/`enabledTools`/`decisions`/`founderPrefs`/`teamRuns`
     /// can default — existing call sites that predate the roadmap/environment/settings/team-build
@@ -105,6 +110,7 @@ struct CompanyState: Codable, Hashable {
         founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs) ?? .init()
         // Per element: one run that no longer decodes must not lose the whole company.
         teamRuns = TeamRun.decodeLeniently(c, forKey: .teamRuns) ?? []
+        previousLibrary = try c.decodeIfPresent([Deliverable].self, forKey: .previousLibrary) ?? []
     }
 
     static let empty = CompanyState(

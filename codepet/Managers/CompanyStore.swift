@@ -3662,15 +3662,20 @@ final class CompanyStore: ObservableObject {
               let task = company.tasks.first(where: { $0.id == draft.sourceTaskId }) else { return }
         let cid = companyId
         let provider = currentProvider(for: cid)
-        let result = await taskRunner(runRequest(for: task, language: language,
-                                                  reviseNote: reviseNote,
-                                                  current: reviseNote != nil ? draft : nil))
+        let rebuilt: Deliverable?
+        if let reviseNote {
+            rebuilt = await reviseRun(task: task, current: draft, note: reviseNote,
+                                      language: language, provider: provider)
+        } else {
+            rebuilt = buildDeliverable(from: await taskRunner(runRequest(for: task, language: language)),
+                                       task: task, producedBy: provider)
+        }
         // Re-check approved too: an Approve that raced this re-run must win (don't
         // overwrite the just-approved draft's body under an "Added to Library" label).
         guard companyId == cid,
               let j = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[j].draftApproved,
-              var fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+              var fresh = rebuilt else { return }
         // A rebuilt draft is a new Deliverable; without this a revision tweaked once with a chip
         // before approving would lose its link and file a second Library item (CP-025).
         fresh.supersedes = draft.supersedes
@@ -3688,14 +3693,33 @@ final class CompanyStore: ObservableObject {
               let draft = task.draft, !task.done, task.drafted else { return }
         let cid = companyId
         let provider = currentProvider(for: cid)
-        let result = await taskRunner(runRequest(for: task, language: language,
-                                                 reviseNote: reviseNote, current: draft))
+        let revised = await reviseRun(task: task, current: draft, note: reviseNote,
+                                      language: language, provider: provider)
         guard companyId == cid,
               let j = company.tasks.firstIndex(where: { $0.id == taskId }),
               !company.tasks[j].done, company.tasks[j].drafted,
-              let fresh = buildDeliverable(from: result, task: task, producedBy: provider) else { return }
+              let fresh = revised else { return }
         company.tasks[j].draft = fresh
         if let cid { _ = await tasksSaver(cid, company.tasks) }
+    }
+
+    /// One revise pass of `current`, plus — for the Shorter chip only — at most one retry with a
+    /// hard word target when the lead did not shrink (`ReviseLength`). A second miss keeps what it
+    /// got: each retry is another minute of the founder's plan. Callers re-check their own race
+    /// guards after this returns, since it may await twice.
+    private func reviseRun(task: RoadmapTask, current: Deliverable, note: String,
+                           language: AppLanguage, provider: AIProvider?) async -> Deliverable? {
+        let first = buildDeliverable(
+            from: await taskRunner(runRequest(for: task, language: language, reviseNote: note, current: current)),
+            task: task, producedBy: provider)
+        guard let first, ReviseKind.isShorter(note: note),
+              !ReviseLength.shrankEnough(before: current, after: first) else { return first }
+        let retry = buildDeliverable(
+            from: await taskRunner(runRequest(for: task, language: language,
+                                              reviseNote: ReviseLength.firmerNote(after: first, language),
+                                              current: first)),
+            task: task, producedBy: provider)
+        return retry ?? first
     }
 
     /// Build a RunTaskRequest for a task (grounded on brief + roadmap). `reviseNote`/

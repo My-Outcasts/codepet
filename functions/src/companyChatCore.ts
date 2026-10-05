@@ -743,6 +743,16 @@ const OFFER_TRUTH =
   "Word your reply as an offer they can accept (\"Want me to add that?\", \"I can mark that " +
   "done\"), never as something already done: not \"I added\", \"I've marked\" or \"I've queued\".";
 
+/**
+ * CP-061: several add_task calls in one turn arrive as ONE card with ONE "Add all N" button
+ * (CP-060). Nothing said so, and the model kept describing a button per task — 4/4 replays of a
+ * three-task request through the shipped sidecar said "press each one" over a single button.
+ */
+const ADD_ALL_TRUTH =
+  " If the founder asks for several tasks, call add_task once per task: they appear together as " +
+  "one list with a single \"Add all\" button, so say that (\"Press Add all to put them on the " +
+  "roadmap\"), never \"buttons\", \"each one\" or \"press each\".";
+
 export const COMPLETE_TASK_TOOL = {
   name: "complete_task",
   description:
@@ -767,7 +777,7 @@ export const COMPLETE_TASK_TOOL = {
 export const ADD_TASK_TOOL = {
   name: "add_task",
   description:
-    "Offer to add a new task to the roadmap, when the founder describes work they want tracked that is not already on it — e.g. \"add a task to call the two bakeries\", \"we need to write a refund policy\". Write the title as an action the founder or a department can start, in their own words where possible. Do NOT call this for work already on the roadmap, for something you are about to do yourself in this chat, or to break an existing task into sub-steps." + OFFER_TRUTH,
+    "Offer to add a new task to the roadmap, when the founder describes work they want tracked that is not already on it — e.g. \"add a task to call the two bakeries\", \"we need to write a refund policy\". Write the title as an action the founder or a department can start, in their own words where possible. Do NOT call this for work already on the roadmap, for something you are about to do yourself in this chat, or to break an existing task into sub-steps." + OFFER_TRUTH + ADD_ALL_TRUTH,
   input_schema: {
     type: "object",
     additionalProperties: false,

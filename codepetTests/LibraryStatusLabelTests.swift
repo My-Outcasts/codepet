@@ -22,10 +22,24 @@ final class LibraryStatusLabelTests: XCTestCase {
         }
     }
 
-    func testLiveKindsStillSayLive() {
-        XCTAssertEqual(Lib.status(.site, .en), "Live")
-        XCTAssertEqual(Lib.status(.sheet, .vi), "Trực tiếp")
+    /// 5 Oct, testing as a non-technical founder: "LIVE SITE" / "Live" read as "published on
+    /// the internet", but a site in the Library is a page on this Mac that previews in the app.
+    /// The pip now says what it is — something you can click through.
+    func testInteractiveKindsSayInteractive() {
+        XCTAssertEqual(Lib.status(.site, .en), "Interactive")
+        XCTAssertEqual(Lib.status(.sheet, .vi), "Tương tác")
         XCTAssertEqual(Lib.status(.doc, .en), "Saved")
         XCTAssertEqual(Lib.status(.doc, .vi), "Đã lưu")
+    }
+
+    func testNothingInTheLibraryClaimsToBeLive() {
+        for k in DeliverableKind.allCases {
+            for lang in [AppLanguage.en, .vi] {
+                for s in [Lib.status(k, lang), Lib.tag(k, lang)] {
+                    XCTAssertFalse(s.lowercased().contains("live") || s.lowercased().contains("trực tiếp"),
+                                   "\(k) \(lang): \(s)")
+                }
+            }
+        }
     }
 }

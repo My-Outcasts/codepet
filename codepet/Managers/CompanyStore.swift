@@ -4144,6 +4144,21 @@ final class CompanyStore: ObservableObject {
         await fileApproval(draft, taskId: id)
     }
 
+    /// Throw away a task's unapproved draft. The task goes back to runnable — its Start returns,
+    /// so the founder can run it again — and nothing reaches the Library.
+    ///
+    /// The other way out of a draft besides approving it. Before this a bad draft could only be
+    /// approved or revised, while the companion told founders to "approve or reject" it
+    /// (5 Oct test). Not routed through `fileApproval`: nothing is filed, so none of what that
+    /// path records (library, `firstApprovalAt`, decisions) may happen here.
+    func discardTaskDraft(id: String) async {
+        guard let i = company.tasks.firstIndex(where: { $0.id == id }),
+              !company.tasks[i].done, company.tasks[i].drafted else { return }
+        company.tasks[i].drafted = false
+        company.tasks[i].draft = nil
+        if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
+    }
+
     /// Fire-and-forget after an approval: extract durable decisions the deliverable locks
     /// in, merge into memory, persist. Account-guarded + fail-open — a failed extract leaves
     /// decisions unchanged; the approval already happened. `dept` comes from the source task.

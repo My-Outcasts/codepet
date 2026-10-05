@@ -4,8 +4,9 @@ import SwiftUI
 /// Draft-preview sheet shown when a founder taps an "Awaiting your approval" task —
 /// comprehension + control BEFORE action (web parity). Instead of approving blindly,
 /// this renders the generated draft (typed viewer, same as the Library) plus a Revise
-/// row (the shared `ReviseKind` chips) and an Approve button. Approve is the ONLY path
-/// that copies the draft into the Library.
+/// row (the shared `ReviseKind` chips), an Approve button and a Discard. Approve is the ONLY
+/// path that copies the draft into the Library; Discard throws the draft away and reopens the
+/// task (`CompanyStore.discardTaskDraft`).
 ///
 /// Binds to the LIVE task in the store (looked up by id each render) rather than a
 /// captured copy, so a revise re-run refreshes the body in place. The sheet is dismissed
@@ -20,6 +21,9 @@ struct TaskDraftPreview: View {
     @State private var busy = false
     /// True while a revise chip's re-run is in flight, so the spinner can say so.
     @State private var revising = false
+    /// The Discard confirmation. A draft is a minute of the founder's plan; one stray click
+    /// must not throw it away.
+    @State private var confirmDiscard = false
 
     private var task: RoadmapTask? { companyStore.company.tasks.first { $0.id == taskId } }
     private var draft: Deliverable? { task?.draft }
@@ -73,6 +77,30 @@ struct TaskDraftPreview: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
+                Button { confirmDiscard = true } label: {
+                    Text(lang == .vi ? "Bỏ bản nháp" : "Discard draft")
+                        .font(.pixelSystem(size: 11, weight: .semibold))
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Capsule().stroke(CodepetTheme.hairline))
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
+                .confirmationDialog(lang == .vi ? "Bỏ bản nháp này?" : "Discard this draft?",
+                                    isPresented: $confirmDiscard) {
+                    Button(lang == .vi ? "Bỏ bản nháp" : "Discard draft", role: .destructive) {
+                        Task {
+                            busy = true
+                            await companyStore.discardTaskDraft(id: taskId)
+                            busy = false
+                            dismiss()
+                        }
+                    }
+                } message: {
+                    Text(lang == .vi
+                         ? "Không có gì được lưu vào Thư viện. Bạn có thể chạy lại việc này bất cứ lúc nào."
+                         : "Nothing is filed in your Library. You can run this task again any time.")
+                }
                 Spacer()
                 if busy {
                     // Named while a revise runs: it takes about a minute, and a bare spinner in

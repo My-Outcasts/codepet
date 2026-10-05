@@ -178,3 +178,47 @@ struct OnboardingProviderGateView: View {
         provider.installCommand
     }
 }
+
+/// Whether "Analyze my project" must ask for the plan grant first (CP-063).
+///
+/// A founder who reached the analysis with no grant got an empty company: enrichment and
+/// `generateRoadmap` answered `.blocked(.notGranted)`, fail-open returned nothing, and the
+/// reveal fell back to copy that still said "I built your roadmap". "Analyze" is the first
+/// moment the plan is spent, so — like a re-run (`ProviderConsentFlow`) — that is where to ask.
+///
+/// Pure statics, outside any `ObservableObject`, for the same reason as `OnboardingProviderStep`.
+enum OnboardingGrantGate {
+    /// Ask only when something is installed and NOTHING installed is granted. Nothing installed is
+    /// the provider step's job; any granted provider means the analysis can already run.
+    static func shouldAsk(installed: Set<AIProvider>, authorised: (AIProvider) -> Bool) -> Bool {
+        !installed.isEmpty && !installed.contains(where: authorised)
+    }
+
+    /// Claude first — the default transport — then whatever else is installed.
+    static func providerToAsk(installed: Set<AIProvider>) -> AIProvider? {
+        installed.contains(.claudeCode) ? .claudeCode : installed.first
+    }
+
+    /// Shown under the stage slider after "Not now", so the founder knows why she is still here.
+    static func declinedLine(_ provider: AIProvider, lang: AppLanguage) -> String {
+        let plan = provider == .codex ? "ChatGPT" : "Claude"
+        return lang == .vi
+            ? "Codepet cần gói \(plan) của bạn để lập kế hoạch. Bạn có thể bỏ qua phần giới thiệu và cho phép sau."
+            : "Codepet needs your \(plan) plan to build your plan. You can skip onboarding and allow it later."
+    }
+}
+
+/// How long step 8 waits for the real scaffold, and what "Start building" does to it (CP-067).
+///
+/// The scaffold is enrichment then `generateRoadmap`, both one-shot calls on the founder's own
+/// plan, each bounded by `LocalOneShotRunner.defaultTimeout`. The 20 s fallback dates from the
+/// cloud path: on 5 Oct it showed the generic step 8 at ~25 s while the real roadmap took ~80 s,
+/// and "Start building" then cancelled the scaffold, so the founder got an empty company.
+enum OnboardingScaffoldTiming {
+    /// Past both calls' own bounds, so the fallback fires only if the runner itself hangs.
+    static let fallbackSeconds: TimeInterval = 2 * LocalOneShotRunner.defaultTimeout + 30
+    /// A scaffold still running when she presses "Start building" (only possible after the
+    /// fallback) finishes and lands its roadmap; cancelling it is what emptied the company.
+    static let finishCancelsScaffold = false
+    static let stillBuildingLine = "Still building your company — this can take a minute or two."
+}

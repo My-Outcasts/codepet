@@ -288,6 +288,8 @@ final class CompanyStore: ObservableObject {
     private let greetedSaver: (String, Date) async -> Bool
     private let enricher: (CompanyBrief) async throws -> CompanyBrief
     private let decisionsSaver: (String, [DecisionEntry]) async -> Bool
+    /// The one write a start-over makes (`startNewBusiness`).
+    private let newBusinessSaver: (String, NewBusinessWrite) async -> Bool
     private let decisionExtractor: (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision]
     /// Where "already asked this founder for runway + constraints" lives. Per company
     /// id, so it neither nags across launches nor leaks across accounts — see
@@ -468,6 +470,8 @@ final class CompanyStore: ObservableObject {
              return try await ReflectionAPIClient().enrichBrief(brief)
          },
          decisionsSaver: @escaping (String, [DecisionEntry]) async -> Bool = CompanyData.saveDecisions,
+         newBusinessSaver: @escaping (String, NewBusinessWrite) async -> Bool =
+            { await CompanyData.saveNewBusiness(companyId: $0, write: $1) },
          decisionExtractor: @escaping (ApprovedDeliverableDTO, [DecisionEntry]) async -> [ExtractedDecision] = DecisionsClient.extract,
          // Defaulted in the init BODY, same reason as `vcRunner`: the real one closes
          // over `UserDefaults.standard`, and forming it in the nonisolated
@@ -555,6 +559,7 @@ final class CompanyStore: ObservableObject {
         self.greetedSaver = greetedSaver
         self.enricher = enricher
         self.decisionsSaver = decisionsSaver
+        self.newBusinessSaver = newBusinessSaver
         self.decisionExtractor = decisionExtractor
         self.vcInterviewFlag = vcInterviewFlag ?? VirtualCompanyInterviewFlag()
         self.codingMemoryGate = codingMemoryGate ?? { PetMemoryStore.shared.setMemoryEnabled($0) }
@@ -934,6 +939,57 @@ final class CompanyStore: ObservableObject {
         let tasks = Self.keepingDone(company.tasks, replanned: fetched)
         company.tasks = tasks
         if let cid = companyId { _ = await tasksSaver(cid, tasks) }
+    }
+
+    /// Start over with a different business: a new brief and a roadmap planned from scratch.
+    ///
+    /// Found testing as a non-technical founder (5 Oct): asked for a candle shop, the companion
+    /// offered to "rebuild the brief" and the app had no way to. Editing the brief kept the old
+    /// roadmap, Library, decisions and linked folder — all still read into every prompt.
+    ///
+    /// - Plans FIRST. Nothing changes unless a roadmap came back and the one write succeeded,
+    ///   so a failure never leaves a candle brief over an empty board, or the old company wiped
+    ///   for nothing. The planner is told nothing is done: the old company's finished work is
+    ///   not this one's.
+    /// - The old Library moves to `previousLibrary` — kept and viewable, read by no prompt.
+    /// - Decisions are cleared and the project folder unlinked: both describe the old company
+    ///   and ride into every prompt (the folder through its product dossier).
+    /// - Chat history stays; a fresh conversation opens with a first-run greeting.
+    ///
+    /// Not routed through `generateRoadmap`, whose `keepingDone` deliberately keeps finished
+    /// tasks — right for a re-plan of the SAME company, wrong here.
+    @discardableResult
+    func startNewBusiness(brief: CompanyBrief, language: AppLanguage) async -> Bool {
+        guard let cid = companyId, !isStreaming, !isCompanionTyping,
+              !startOverBlockedByTeamRun else { return false }
+        let token = hydrationToken
+        let enriched = (try? await enricher(brief)) ?? brief
+        guard token == hydrationToken else { return false }
+        let fetched = await roadmapFetcher(enriched, language, [])
+        guard token == hydrationToken, !fetched.isEmpty else { return false }
+        let previous = company.previousLibrary + company.library
+        let write = NewBusinessWrite(brief: enriched, tasks: fetched, previousLibrary: previous)
+        guard await newBusinessSaver(cid, write), token == hydrationToken else { return false }
+        company.brief = enriched
+        company.tasks = fetched
+        company.previousLibrary = previous
+        company.library = []
+        company.decisions = []
+        unlinkProject()
+        newChat()
+        seedFirstRunGreeting(language: language)
+        return true
+    }
+
+    /// A Team build of the old company that has not settled (`TeamRun.blocksStartOver`).
+    /// Settings shows why the start-over is unavailable rather than letting it fail.
+    var startOverBlockedByTeamRun: Bool { teamRun?.run?.blocksStartOver ?? false }
+
+    /// Forget the linked project folder: its bookmark, the link, and (through the link's
+    /// `didSet`) the product dossier built from it.
+    func unlinkProject() {
+        if let cid = companyId { UserDefaults.standard.removeObject(forKey: Self.activeProjectBookmarkKey(cid)) }
+        activeProjectLink = nil
     }
 
     /// The finished tasks of `current`, in order, followed by every task of `replanned` whose

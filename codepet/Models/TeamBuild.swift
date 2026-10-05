@@ -75,6 +75,10 @@ struct TeamRun: Codable, Hashable, Identifiable {
     /// Planned, running, assembling or stalled on a failure — anything the founder can still act on
     /// before approval. Gates "one TeamRun per company".
     var isActive: Bool { [.planned, .running, .assembling, .failed].contains(phase) }
+    /// Whether this run must settle before the founder starts a different business. One still
+    /// working, or waiting on Approve, belongs to the old company: approving it after a
+    /// start-over would file the old company's project into the new one's Library.
+    var blocksStartOver: Bool { isActive || phase == .ready }
 
     /// What is persisted into `companies/{uid}.teamRuns`, which lives inside the company doc and
     /// is rewritten whole on every step change — so it must stay far from Firestore's 1 MiB limit,

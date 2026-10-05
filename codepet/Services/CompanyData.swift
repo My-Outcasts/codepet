@@ -20,6 +20,7 @@ struct CompanyDoc: Codable {
     var decisions: [DecisionEntry]?  // JSON-safe; nil → empty
     var founderPrefs: FounderPrefs?  // JSON-safe; nil → defaults (every older doc lacks it)
     var teamRuns: [TeamRun]?  // JSON-safe; nil → empty (every doc written before Team Build)
+    var previousLibrary: [Deliverable]?  // nil → empty (every doc written before start-over)
 }
 
 extension CompanyDoc {
@@ -42,6 +43,7 @@ extension CompanyDoc {
         decisions = try c.decodeIfPresent([DecisionEntry].self, forKey: .decisions)
         founderPrefs = try c.decodeIfPresent(FounderPrefs.self, forKey: .founderPrefs)
         teamRuns = TeamRun.decodeLeniently(c, forKey: .teamRuns)
+        previousLibrary = try c.decodeIfPresent([Deliverable].self, forKey: .previousLibrary)
     }
 }
 
@@ -74,7 +76,7 @@ enum CompanyData {
     /// Pure mapping — testable without Firestore.
     static func state(from doc: CompanyDoc?) -> CompanyState {
         guard let doc = doc else { return .empty }
-        return CompanyState(
+        var state = CompanyState(
             brief: doc.brief ?? CompanyBrief(),
             departments: [],
             library: doc.library ?? [],
@@ -90,6 +92,8 @@ enum CompanyData {
             founderPrefs: doc.founderPrefs ?? FounderPrefs(),
             teamRuns: doc.teamRuns ?? []
         )
+        state.previousLibrary = doc.previousLibrary ?? []
+        return state
     }
 
     /// Pure Firestore payload for a brief write — testable without Firestore.
@@ -216,6 +220,34 @@ enum CompanyData {
         do {
             try await Firestore.firestore().collection("companies").document(companyId)
                 .setData(owned(tasksPayload(tasks), companyId: companyId), merge: true)
+            return true
+        } catch {
+            log.error("write failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    /// Pure Firestore payload for starting over (`CompanyStore.startNewBusiness`): the new brief
+    /// and roadmap, the old Library moved to `previousLibrary`, and the live Library and the
+    /// decisions emptied — in ONE write, so a failure cannot leave half of each company.
+    static func newBusinessPayload(_ w: NewBusinessWrite) -> [String: Any] {
+        func json<T: Encodable>(_ v: T) -> Any? {
+            (try? JSONEncoder().encode(v)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        }
+        var p: [String: Any] = ["library": [Any](), "decisions": [Any](),
+                                "onboardedAt": ISO8601DateFormatter().string(from: Date())]
+        p["brief"] = json(w.brief)
+        p["tasks"] = json(w.tasks) ?? [Any]()
+        p["previousLibrary"] = json(w.previousLibrary) ?? [Any]()
+        return p
+    }
+
+    /// Write a start-over, merge. Fail-soft: false on error.
+    static func saveNewBusiness(companyId: String, write: NewBusinessWrite) async -> Bool {
+        guard PrototypeMode.allowsCloudWrites else { return true }
+        do {
+            try await Firestore.firestore().collection("companies").document(companyId)
+                .setData(owned(newBusinessPayload(write), companyId: companyId), merge: true)
             return true
         } catch {
             log.error("write failed: \(error.localizedDescription, privacy: .public)")
@@ -530,4 +562,11 @@ enum CompanyData {
             return []
         }
     }
+}
+
+/// Everything a start-over persists, in one value so it is written in one call.
+struct NewBusinessWrite {
+    let brief: CompanyBrief
+    let tasks: [RoadmapTask]
+    let previousLibrary: [Deliverable]
 }

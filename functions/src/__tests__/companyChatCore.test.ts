@@ -33,6 +33,13 @@ describe("companionFor", () => {
 
 describe("buildSystemPrompt", () => {
   const base = { companionId: "luna", language: "en" };
+  // 5 Oct: asked about a different business, the companion offered to "rebuild the brief" —
+  // which it cannot do. The app can (Settings → Company), and the prompt names that place.
+  it("points a founder describing a different business at Start a different business", () => {
+    const p = buildSystemPrompt(base);
+    expect(p).toContain("Start a different business");
+    expect(p).toContain("Settings → Company");
+  });
   it("names the chosen companion", () => {
     expect(buildSystemPrompt(base)).toContain("Luna");
   });

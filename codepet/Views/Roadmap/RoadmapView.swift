@@ -136,6 +136,9 @@ struct RoadmapView: View {
                               // button chrome.
                               onStart: { dispatch($0) }, onOpenTask: { panelTask = $0 })
                 .padding(.top, CodepetTokens.Space.headToBody).padding(.horizontal, 26)
+                // Breathing room under the cards: the board below scrolls, and with no gap its
+                // cut-off top row sat flush against them and read as an overlap.
+                .padding(.bottom, 14)
             // NOT `pageColumn()`. The board is a horizontally-scrolling diagram and needs every
             // point of width — capping it would turn its own scroll into a nested one. Its
             // `insetLeading` is already 26, so with the masthead now on 26 the two finally share
@@ -188,40 +191,43 @@ struct RoadmapView: View {
     /// label to keep everything on one row.
     private var header: some View {
         let compact = ShellLayout.compactPageHeader(forWidth: headerWidth)
-        return HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        // The subtitle sits UNDER the title/controls row, at full width. Beside the controls it
+        // got whatever they left — ~230pt in the default 900pt window — and truncated mid-word
+        // ("where you are, w…") at its two-line limit.
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(lang == .vi ? "Tổng quan" : "Overview")
                     .font(CodepetTheme.title()).tracking(-0.5).foregroundColor(CodepetTheme.primaryText)
                     .lineLimit(1)
-                Text(subtitle).font(CodepetTheme.subtitle())
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 760, alignment: .leading)
-            }
-            .layoutPriority(0)
-            Spacer(minLength: 8)
-            HStack(spacing: 10) {
-                Button { showMapIntro = true } label: {
-                    HStack(spacing: 8) {
-                        Text("?").font(CodepetTheme.inter(11, weight: .bold))
-                            .foregroundColor(CodepetTheme.onAccent(accent))
-                            .frame(width: 15, height: 15).background(Circle().fill(accent))
-                        if !compact {
-                            Text(howToReadLabel)
-                                .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(accent)
-                                .lineLimit(1).fixedSize()
+                    .layoutPriority(0)
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    Button { showMapIntro = true } label: {
+                        HStack(spacing: 8) {
+                            Text("?").font(CodepetTheme.inter(11, weight: .bold))
+                                .foregroundColor(CodepetTheme.onAccent(accent))
+                                .frame(width: 15, height: 15).background(Circle().fill(accent))
+                            if !compact {
+                                Text(howToReadLabel)
+                                    .font(CodepetTheme.inter(12.5, weight: .semibold)).foregroundColor(accent)
+                                    .lineLimit(1).fixedSize()
+                            }
                         }
+                        .padding(.horizontal, compact ? 8 : 13).padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(CodepetTokens.accentLine, lineWidth: 1))
                     }
-                    .padding(.horizontal, compact ? 8 : 13).padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTokens.accentTint))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(CodepetTokens.accentLine, lineWidth: 1))
+                    .buttonStyle(.plain)
+                    .help(howToReadLabel)
+                    .accessibilityLabel(howToReadLabel)
+                    overviewToggle
                 }
-                .buttonStyle(.plain)
-                .help(howToReadLabel)
-                .accessibilityLabel(howToReadLabel)
-                overviewToggle
+                .layoutPriority(1)
             }
-            .layoutPriority(1)
+            Text(subtitle).font(CodepetTheme.subtitle())
+                .foregroundColor(CodepetTheme.mutedText)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 760, alignment: .leading)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { headerWidth = $0 }
     }

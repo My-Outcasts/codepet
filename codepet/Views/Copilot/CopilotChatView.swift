@@ -2965,9 +2965,53 @@ enum ReviseKind: CaseIterable {
         }
     }
 
+    /// Whether a revise note is the Shorter chip's, in either language — the one chip whose
+    /// result the store checks (`ReviseLength`).
+    static func isShorter(note: String) -> Bool {
+        [AppLanguage.en, .vi].contains { ReviseKind.shorter.note($0) == note }
+    }
+
     /// Shown beside the spinner while a revise runs (~a minute on the founder's plan).
     static func busyLabel(_ lang: AppLanguage) -> String {
         lang == .vi ? "Đang viết lại — khoảng một phút…" : "Rewriting — about a minute…"
+    }
+}
+
+/// Did "Shorter" actually shorten the part the founder reads first?
+///
+/// Measured 5 Oct on a real doc: three successive notes left its `call` at 7 → 7 → 6 lines,
+/// because the draft carried a section arguing the sentence had to be long. Prose alone does not
+/// hold a model to a length, so the store checks the result and, once, asks again with a word
+/// target. Pure so the rule is tested without a run.
+enum ReviseLength {
+    /// The part "Shorter" must shrink: a doc's `call` when it has one, else the body's first
+    /// paragraph.
+    static func lead(of d: Deliverable) -> String {
+        if let call = d.payload?.call?.trimmingCharacters(in: .whitespacesAndNewlines), !call.isEmpty {
+            return call
+        }
+        let body = d.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.components(separatedBy: "\n\n").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? body
+    }
+
+    static func words(_ s: String) -> Int {
+        s.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    /// At least about a fifth off the lead. A reworded lead of the same length is not shorter.
+    static func shrankEnough(before: Deliverable, after: Deliverable) -> Bool {
+        let was = words(lead(of: before)), now = words(lead(of: after))
+        return was == 0 || Double(now) <= Double(was) * 0.85
+    }
+
+    /// The one retry's note: the lead's length now, and a hard target of two-thirds of it.
+    static func firmerNote(after d: Deliverable, _ lang: AppLanguage) -> String {
+        let now = words(lead(of: d)), target = max(8, now * 2 / 3)
+        return lang == .vi
+            ? "Câu mở đầu hiện có \(now) từ. Viết lại nó trong tối đa \(target) từ — đây là yêu cầu bắt buộc, kể cả khi phần bên dưới lập luận rằng nó cần dài. Giữ nguyên ý; rút gọn phần còn lại tương ứng."
+            : "The opening statement is \(now) words. Rewrite it in at most \(target) words — this is a hard "
+            + "limit, even if a section below argues it must be long. Keep the meaning; tighten the rest to match."
     }
 }
 

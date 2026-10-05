@@ -188,8 +188,12 @@ enum ChatContext {
         // drafts, one click each — was never mentioned.
         if let draft = RoadmapGating.blockingDraft(in: tasks) {
             let unlocks = tasks.filter { !$0.done && $0.dependsOn.contains(draft.id) }.count
+            // CP-059 (5 Oct): this used to say "that approval is what unlocks the rest of the
+            // roadmap" whatever `unlocks` was. With every task already drafted, a Terms of Service
+            // draft nothing depended on was called the key to the whole roadmap, and the model
+            // repeated it for eight turns. Only claim the unlock when something is behind it.
             var line = "\"\(draft.title)\" is work YOU already drafted and it is waiting for the founder's"
-                + " approval — that approval is what unlocks the rest of the roadmap."
+                + " approval."
             if unlocks > 0 {
                 line += " Approving it unblocks \(unlocks) later task\(unlocks == 1 ? "" : "s")."
             }
@@ -197,7 +201,8 @@ enum ChatContext {
             lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do"
                 + " NOT say you are on it, and do not imply anything is being produced. Do NOT offer to walk"
                 + " them through it and do NOT write the deliverable out in the chat: the work is already done"
-                + " and waiting. Ask them to review and approve the draft, and say what that unlocks.")
+                + " and waiting. Ask them to review and approve the draft"
+                + (unlocks > 0 ? ", and say what that unlocks." : "."))
         } else if let mine = RoadmapGating.openFounderTask(in: tasks) {
             lines.append("\"\(mine.title)\" is the founder's own step — it is not something you can do for them.")
             lines.append("If they ask you to run, do, make or finish a task — including \"do it in here\" — do"
@@ -207,6 +212,11 @@ enum ChatContext {
             lines.append("There is genuinely nothing left for you to pick up — say so plainly rather than"
                 + " inventing work, and do not imply anything is being produced.")
         }
+        // CP-059: the gate describes THIS turn. On 5 Oct the model read "nothing is runnable" as
+        // true of the whole conversation and took back runs that had already produced drafts
+        // ("a correction — I wasn't running it"), then flipped again when a task became runnable.
+        lines.append("This is about right now only. Drafts you already filed in this conversation are real"
+            + " — the history marks each one — so do not take them back or call them a mistake.")
         return lines.joined(separator: " ")
     }
 

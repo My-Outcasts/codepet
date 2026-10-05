@@ -181,6 +181,25 @@ final class ChatContextTests: XCTestCase {
         let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
         XCTAssertTrue(ctx.contains("already drafted"))
         XCTAssertFalse(ctx.contains("unblocks"))
+        // CP-059: the claim the check above never caught — "unlocks", not "unblocks". On 5 Oct
+        // a Terms of Service draft that gated nothing was called the key to the whole roadmap,
+        // and the model repeated it for eight turns.
+        XCTAssertFalse(ctx.contains("unlocks the rest of the roadmap"),
+                       "a draft nothing depends on does not unlock anything")
+    }
+
+    /// CP-059: "nothing is runnable" describes THIS turn. On 5 Oct the model read it as true of
+    /// the whole conversation and retracted runs that had already produced drafts ("I wasn't
+    /// running it"). The gate must say the earlier drafts stand.
+    func testTheGateDoesNotLetTheModelRetractDraftsItAlreadyMade() {
+        let tasks = [
+            RoadmapTask(id: "a", title: "TEST: LinkedIn post", detail: "", phase: .find,
+                        who: .does, drafted: true),
+        ]
+        let ctx = ChatContext.compose(brief: CompanyBrief(), tasks: tasks)
+        XCTAssertTrue(ctx.contains("right now"))
+        XCTAssertTrue(ctx.contains("Drafts you already filed in this conversation are real"))
+        XCTAssertTrue(ctx.contains("do not take them back"))
     }
 
     /// The opposite state must stay silent: one runnable task means the CF gets `run_task`,

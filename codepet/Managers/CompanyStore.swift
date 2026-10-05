@@ -2102,7 +2102,7 @@ final class CompanyStore: ObservableObject {
         // 413 while each looked fine alone.
         let replayed = AttachmentBudget.replay(prior.map(\.attachments), alongside: outgoing)
         let history = zip(prior, replayed).map { msg, atts in
-            ChatTurnDTO(role: msg.role == .me ? "me" : "companion", text: msg.text,
+            ChatTurnDTO(role: msg.role == .me ? "me" : "companion", text: ChatHistoryWire.text(for: msg),
                         attachments: AttachmentDTO.wire(atts))
         }
         let cid = companyId

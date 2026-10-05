@@ -30,7 +30,17 @@ SCHEME="${SCHEME:-codepet}"
 CONFIGURATION="${CONFIGURATION:-Release}"
 TEAM_ID="${TEAM_ID:-YL72VTKBR7}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-codepet-notary}"
-VOL_NAME="${VOL_NAME:-Codepet}"
+# The name the mounted disk image shows in Finder. NOT "Codepet": since 5 Oct 2026 this Mac
+# refuses to write /Volumes/Codepet/codepet.app ("could not access /Volumes/Codepet/codepet.app
+# - Operation not permitted", hdiutil: create failed) — the same staging folder builds fine
+# under any other volume name, the same command worked on 2 Oct, macOS did not change, and
+# clearing the LaunchServices entries for that path did not help. Likely a cached record of
+# the app having been opened from a mounted Codepet.dmg; the exact cause is unproven. A name
+# no one has mounted the app under sidesteps it without a reboot.
+VOL_NAME="${VOL_NAME:-Install Codepet}"
+# The FILE name, decoupled from the volume name: the website's download permalink and
+# release-github.sh both need exactly Codepet.dmg.
+DMG_NAME="${DMG_NAME:-Codepet}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
 
 PROJECT="CodePet.xcodeproj"
@@ -103,7 +113,7 @@ codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -E "Authority|Runtime|TeamIdent
 ./scripts/verify-sidecars-bundled.sh "$APP_PATH"
 
 # ── 5. Build the .dmg ─────────────────────────────────────────────────────────
-DMG="$BUILD_DIR/${VOL_NAME}.dmg"
+DMG="$BUILD_DIR/${DMG_NAME}.dmg"
 echo "▶︎ Building $DMG"
 if command -v create-dmg >/dev/null 2>&1; then
   create-dmg \

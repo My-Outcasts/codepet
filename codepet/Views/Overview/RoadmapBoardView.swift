@@ -30,6 +30,10 @@ struct RoadmapBoardView: View {
     /// Scroll-edge fade state, written only by `onScrollGeometryChange`.
     @State private var canScrollLeft = false
     @State private var canScrollRight = false
+    /// Whether board content sits above the visible top. The board opens framed on the current
+    /// move, so in a short window its top row is cut flush under the chrome cards — which read
+    /// as the cards overlapping the map (5 Oct test, 900×732 window). The fade says "scrolled".
+    @State private var canScrollUp = false
 
     /// Phases the founder expanded by hand from their rail. Session-only: the width rule
     /// (`RoadmapFocus`) picks the default set on every layout pass.
@@ -77,13 +81,16 @@ struct RoadmapBoardView: View {
                 .onScrollGeometryChange(for: ScrollEdgeState.self) { geo in
                     ScrollEdgeState(
                         left: geo.contentOffset.x > 0.5,
-                        right: geo.contentOffset.x < geo.contentSize.width - geo.containerSize.width - 0.5)
+                        right: geo.contentOffset.x < geo.contentSize.width - geo.containerSize.width - 0.5,
+                        up: geo.contentOffset.y > 0.5)
                 } action: { _, new in
                     canScrollLeft = new.left
                     canScrollRight = new.right
+                    canScrollUp = new.up
                 }
                 .overlay(alignment: .leading) { edgeFade(leading: true, visible: canScrollLeft) }
                 .overlay(alignment: .trailing) { edgeFade(leading: false, visible: canScrollRight) }
+                .overlay(alignment: .top) { topFade(visible: canScrollUp) }
                 .onAppear {
                     // Open framed on the current move — the founder shouldn't hunt for it.
                     if let id = currentId { frame(proxy, id: id) }
@@ -150,6 +157,21 @@ struct RoadmapBoardView: View {
     private struct ScrollEdgeState: Equatable {
         let left: Bool
         let right: Bool
+        let up: Bool
+    }
+
+    /// The top counterpart of `edgeFade`: board content scrolled up under the chrome row fades
+    /// out instead of ending in a hard cut against the cards above it.
+    @ViewBuilder
+    private func topFade(visible: Bool) -> some View {
+        if visible {
+            LinearGradient(colors: [CodepetTheme.pageBackground, .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 40)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
+                .transition(.opacity.animation(.easeInOut(duration: 0.18)))
+        }
     }
 
     // MARK: phase headers

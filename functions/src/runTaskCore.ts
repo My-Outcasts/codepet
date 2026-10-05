@@ -261,6 +261,12 @@ export interface Deliverable {
   title: string;
   body: string;
   payload?: DeliverablePayload;
+  /**
+   * CP-062: set when the department contract swapped a structured kind the model chose for
+   * `doc` — e.g. a screens task filed under Engineering. `dept` is who makes that kind, so the
+   * card can say "Engineering writes this as a doc — Design makes screens".
+   */
+  coerced?: { from: string; dept: string };
 }
 
 export interface ChecklistItem { t: string; done: boolean; owner?: string; due?: string; }
@@ -679,16 +685,33 @@ export function coerceDeliverable(
 
   const rawTitle = typeof r.title === "string" ? r.title.trim() : "";
   const title = rawTitle || clip(taskTitle, 200) || "Untitled deliverable";
+  const askedFor = typeof r.asked_for === "string" ? r.asked_for.trim() : "";
+  const coerced = kindSwap(rawKind, kind, deptKey, pinKind)
+    ?? (askedFor ? kindSwap(askedFor, kind, deptKey, pinKind) : undefined);
 
   if (STRUCTURED_KINDS.has(kind)) {
     const payload = coercePayload(kind, (raw as Record<string, unknown>)?.payload);
-    if (payload) return { kind, title, body, payload };
+    if (payload) return { kind, title, body, payload, ...(coerced ? { coerced } : {}) };
     // The Failed rule (CP-002 F): a kind that IS its structure does not degrade to its markdown.
     // The founder was promised a model, a page, a plan or a flow; a wall of text is none of those,
     // and filing it as one is the silent degradation the spec calls a correctness bug.
     if (STRUCTURE_REQUIRED_KINDS.has(kind)) return { kind, title: "", body: "", failed: "missing_structure" };
   }
-  return { kind, title, body };
+  return { kind, title, body, ...(coerced ? { coerced } : {}) };
+}
+
+/**
+ * The swap worth telling the founder about (CP-062): a kind that IS its structure — a sheet,
+ * site, calendar or screens — turned into `doc` by the department contract. Any other swap loses
+ * nothing they could see. Not for a pinned revise (its kind was set by the founder's own item)
+ * or a dept-less task (no contract did the swapping). `dept` is the first department whose
+ * PRIMARY outputs include the kind — the one that would have made it.
+ */
+function kindSwap(rawKind: string, kind: string, deptKey: string | null | undefined,
+                  pinKind: string | undefined): { from: string; dept: string } | undefined {
+  if (pinKind || !deptKey || kind === rawKind || !STRUCTURE_REQUIRED_KINDS.has(rawKind)) return undefined;
+  const owner = Object.entries(DEPARTMENT_OUTPUTS).find(([, o]) => o.primary.includes(rawKind))?.[0];
+  return owner && owner !== deptKey ? { from: rawKind, dept: owner } : undefined;
 }
 
 // The forced tool's schema and the system prompt, moved here from the handler when the
@@ -869,6 +892,22 @@ export function deliverableTool(deptKey?: string | null): DeliverableToolShape {
     )
   );
 
+  // CP-062: the structured kinds this department cannot make. The model is only offered the
+  // department's own kinds, so as Engineering it writes a doc and never names `screens` — the
+  // swap below then has nothing to report. `asked_for` lets it say what the TASK wanted.
+  const cannot = [...STRUCTURE_REQUIRED_KINDS].filter((k) => !kinds.includes(k));
+  const askedFor = cannot.length
+    ? {
+        asked_for: {
+          type: "string",
+          enum: cannot,
+          description:
+            "Only if the task itself asks for one of these, which this department does not make: " +
+            "name it. Still write the deliverable as one of the kinds above. Omit otherwise.",
+        },
+      }
+    : {};
+
   return {
     name: DELIVERABLE_TOOL.name,
     description: DELIVERABLE_TOOL.description,
@@ -876,6 +915,7 @@ export function deliverableTool(deptKey?: string | null): DeliverableToolShape {
       ...schema,
       properties: {
         ...schema.properties,
+        ...askedFor,
         // No `enum: []` for a department that declares nothing: an empty enum matches no value,
         // so the forced tool call could never be satisfied. Such a department has no contract to
         // apply, which is the same thing `coerceKindForDepartment` concludes.

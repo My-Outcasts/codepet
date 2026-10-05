@@ -521,6 +521,13 @@ struct DeliverableVersion: Codable, Hashable {
 }
 
 /// A delivered work product. `body` is markdown, rendered uniformly by MarkdownView.
+/// A structured kind the department contract turned into a doc (CP-062): what the model chose,
+/// and the department key that makes that kind. Sent by the run as `coerced`.
+struct KindSwap: Codable, Hashable {
+    let from: String
+    let dept: String
+}
+
 struct Deliverable: Codable, Hashable, Identifiable {
     let id: String
     var kind: DeliverableKind
@@ -549,11 +556,13 @@ struct Deliverable: Codable, Hashable, Identifiable {
     var supersedes: String? = nil
     /// On a Library item: its earlier versions, newest first. Nil until the item is first revised.
     var versions: [DeliverableVersion]? = nil
+    /// On a draft whose kind the department contract swapped for a doc (CP-062). Nil otherwise.
+    var coerced: KindSwap? = nil
 
     init(id: String = UUID().uuidString, kind: DeliverableKind, title: String, body: String,
          createdAt: String? = nil, sourceTaskId: String? = nil, payload: DeliverablePayload? = nil,
          producedBy: AIProvider? = nil, projectPath: String? = nil, supersedes: String? = nil,
-         versions: [DeliverableVersion]? = nil) {
+         versions: [DeliverableVersion]? = nil, coerced: KindSwap? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -565,6 +574,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
         self.projectPath = projectPath
         self.supersedes = supersedes
         self.versions = versions
+        self.coerced = coerced
     }
 
     // `Codable` was fully synthesised before this field — no `CodingKeys` existed, so every
@@ -574,7 +584,7 @@ struct Deliverable: Codable, Hashable, Identifiable {
     // copied verbatim — get one wrong and every stored deliverable fails to decode.
     enum CodingKeys: String, CodingKey {
         case id, kind, title, body, createdAt, sourceTaskId, payload, producedBy, projectPath
-        case supersedes, versions
+        case supersedes, versions, coerced
     }
 
     init(from decoder: Decoder) throws {
@@ -596,6 +606,8 @@ struct Deliverable: Codable, Hashable, Identifiable {
         projectPath = try c.decodeIfPresent(String.self, forKey: .projectPath)
         supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
         versions = try c.decodeIfPresent([DeliverableVersion].self, forKey: .versions)
+        // `try?` for the same reason as `producedBy`: a note must never cost a deliverable.
+        coerced = (try? c.decodeIfPresent(KindSwap.self, forKey: .coerced)) ?? nil
         // A Team Build project filed before `.project` existed was stored as "other". The folder
         // on disk is what makes it a project, so it reads as one on load (CP-056).
         if kind == .other, projectPath != nil { kind = .project }
@@ -619,5 +631,6 @@ struct Deliverable: Codable, Hashable, Identifiable {
         try c.encodeIfPresent(projectPath, forKey: .projectPath)
         try c.encodeIfPresent(supersedes, forKey: .supersedes)
         try c.encodeIfPresent(versions, forKey: .versions)
+        try c.encodeIfPresent(coerced, forKey: .coerced)
     }
 }

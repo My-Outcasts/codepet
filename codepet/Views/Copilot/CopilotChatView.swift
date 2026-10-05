@@ -2857,6 +2857,16 @@ struct CopilotBubble: View {
                         DraftPayloadPreview(deliverable: d) { showDetail = true }
                     }
 
+                    // Why this is a doc when the task asked for screens, a model, a page or a
+                    // calendar (CP-062): the department that ran it does not make that kind.
+                    if let swap = d.coerced,
+                       let note = DraftCardCopy.kindSwapNote(swap, writer: message.deptName, lang) {
+                        Text(note)
+                            .font(.pixelSystem(size: 11.5))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     // "▸ What Nova did · 6 steps" — the run's own log, kept. Web parity
                     // (inline-run transparency): the live execute-log collapses onto the
                     // finished deliverable instead of vanishing with it, so "how did it get

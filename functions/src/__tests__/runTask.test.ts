@@ -660,7 +660,9 @@ describe("the Failed rule", () => {
     // Finance may not produce `site`: the contract turns it into a doc with its text, which is
     // the deliberate fallback — the payload was built for the kind the contract closed.
     const out: any = coerceDeliverable(raw("site", {}), "task", "fin");
-    expect(out).toEqual({ kind: "doc", title: "T", body: "some markdown" });
+    // CP-062: the swap is reported, so the card can say Design makes sites.
+    expect(out).toEqual({ kind: "doc", title: "T", body: "some markdown",
+                          coerced: { from: "site", dept: "design" } });
   });
 
   it("a revise pinned to a sheet fails rather than replacing the model with text", () => {

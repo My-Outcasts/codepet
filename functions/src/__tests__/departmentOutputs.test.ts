@@ -338,7 +338,12 @@ describe("the tool schema carries the contract", () => {
   /** End to end on the transport that actually appends it. */
   test("the local transport no longer re-offers a closed kind", () => {
     const plan = ONE_SHOT_OPS.runTask.plan({ task_title: "Cost of inference", dept_key: "fin" });
-    const sent = `${plan.prompt}\n\n${schemaInstruction(plan.schema)}`;
+    // CP-062: `asked_for` is the ONE place a closed kind may be named — it lists what this
+    // department does NOT make, so the model can say the task wanted one (measured 5 Oct: Finance
+    // still answered `sheet` 3/3 with it present). Everywhere else the guard is unchanged.
+    const { asked_for, ...offered } = (plan.schema as any).properties;
+    expect(asked_for.enum).toContain("screens");
+    const sent = `${plan.prompt}\n\n${schemaInstruction({ ...(plan.schema as any), properties: offered })}`;
     expect(sent).not.toContain("screens");
     expect(sent).toContain("This function produces sheet, doc.");
   });

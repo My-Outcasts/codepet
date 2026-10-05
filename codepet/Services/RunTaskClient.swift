@@ -171,6 +171,8 @@ struct RunTaskResponse: Codable {
     let body: String
     var payload: DeliverablePayload?
     var failed: String? = nil
+    /// The department contract swapped the model's structured kind for a doc (CP-062).
+    var coerced: KindSwap? = nil
 }
 
 /// Fail-open client for `runTask`. Returns the decoded response, or `nil` on any error —

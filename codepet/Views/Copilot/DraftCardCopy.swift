@@ -10,6 +10,28 @@ import Foundation
 /// beside a button marked Approve, with no indication it was unsaved.
 enum DraftCardCopy {
 
+    /// Why a draft is a doc when the founder asked for something with structure (CP-062).
+    ///
+    /// A screens task filed under Engineering comes back as a doc — only Design may make screens
+    /// (`DEPARTMENT_OUTPUTS`) — and on 5 Oct that read as the app ignoring the request. Founder's
+    /// call: keep the doc, say why. Nil for a kind this does not know, so an unexpected value from
+    /// a newer server shows no line rather than a wrong one.
+    static func kindSwapNote(_ swap: KindSwap, writer: String?, _ lang: AppLanguage) -> String? {
+        let things: [String: (en: String, vi: String)] = [
+            "screens": ("screens", "màn hình"), "sheet": ("models", "bảng tính"),
+            "site": ("landing pages", "trang web"), "calendar": ("calendars", "lịch"),
+        ]
+        guard let thing = things[swap.from],
+              let maker = DepartmentCatalog.find(swap.dept)?.name else { return nil }
+        let trimmed = writer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let who: String? = trimmed.isEmpty ? nil : trimmed
+        if lang == .vi {
+            return "\(who ?? "Phòng ban này") viết việc này thành tài liệu — \(maker) mới làm \(thing.vi)."
+        }
+        return "\(who ?? "This department") writes this as a doc — \(maker) makes \(thing.en)."
+    }
+
+
     /// Whether to tell the founder this draft is not filed yet.
     ///
     /// **A pure static, not a condition in `draftCard`'s body.** Same reasoning as

@@ -45,6 +45,11 @@ struct OnboardingView: View {
     /// once `OnboardingProviderStep.passes` is true — never before, and never gated on
     /// anything this flag itself writes, since it writes nothing.
     @State private var awaitingProvider = false
+    /// CP-063: the plan grant asked at "Analyze my project". `grantAsking` drives the alert;
+    /// `grantDeclined` shows why the founder is still on step 5 after "Not now".
+    @State private var grantFlow: ProviderConsentFlow?
+    @State private var grantAsking: AIProvider?
+    @State private var grantDeclined: AIProvider?
     @State private var providerStatus: [AIProvider: CLIStatus] = [:]
     @State private var providerProbing = false
 
@@ -72,7 +77,14 @@ struct OnboardingView: View {
             }
         }
         .background(CodepetTheme.pageBackground.ignoresSafeArea())
-
+        .providerConsentAlert(
+            isPresented: Binding(get: { grantAsking != nil }, set: { if !$0 { grantAsking = nil } }),
+            provider: grantAsking,
+            lang: appState.uiLanguage,
+            message: grantAsking.map { ProviderConsentCopy.planMessage($0, lang: appState.uiLanguage) },
+            onAllow: { grantFlow?.allow(); grantAsking = nil },
+            onDecline: { grantDeclined = grantAsking; grantFlow?.decline(); grantAsking = nil }
+        )
     }
 
     // Two-panel card: art left (42% of the card, as on the web), form right.
@@ -198,6 +210,12 @@ struct OnboardingView: View {
             heading("Where are you today?", "This sets your starting point on the roadmap.")
             OnboardingStageSlider(stageIndex: $d.stageIndex)
                 .padding(.top, 28)   // web `.stagebar { margin-top: 28px }`
+            if let p = grantDeclined {
+                Text(OnboardingGrantGate.declinedLine(p, lang: appState.uiLanguage))
+                    .font(CodepetTheme.body(12)).foregroundColor(OnboardingContent.Palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 18)
+            }
         case 6:
             OnboardingAnalysisView(projectName: d.projName, shown: anShown, done: anDone)
         default:
@@ -249,7 +267,7 @@ struct OnboardingView: View {
         case 2: bigButton("Continue", enabled: !d.role.isEmpty) { step = 3 }
         case 3: bigButton("Continue", enabled: !d.tech.isEmpty) { step = 4 }
         case 4: bigButton("Continue", enabled: !d.projName.trimmed.isEmpty && !d.oneLiner.trimmed.isEmpty) { step = 5 }
-        case 5: bigButton("Analyze my project", enabled: true) { startAnalysis() }
+        case 5: bigButton("Analyze my project", enabled: true) { analyzeTapped() }
         case 6: if anDone && reveal != nil { bigButton("See what I found", enabled: true) { step = 7 } }
         default: bigButton("Start building", enabled: true) { attemptFinish() }
         }
@@ -257,6 +275,25 @@ struct OnboardingView: View {
     }
 
     // MARK: actions
+
+    /// "Analyze my project" is the first spend of the founder's plan, so it asks first when
+    /// nothing installed is granted (CP-063). Allow writes the grant through the same
+    /// `ProviderConsentFlow` chat's Grant button uses, then runs the analysis; Not now runs
+    /// nothing and keeps her on step 5 with a line saying why.
+    private func analyzeTapped() {
+        guard let cid = companyStore.companyId else { startAnalysis(); return }
+        let installed = companyStore.installedProviders.installed
+        let auth = companyStore.claudeAuthorisation
+        guard OnboardingGrantGate.shouldAsk(installed: installed, authorised: { auth.isAuthorised($0, cid) }),
+              let provider = OnboardingGrantGate.providerToAsk(installed: installed) else {
+            startAnalysis(); return
+        }
+        let flow = ProviderConsentFlow(authorisation: auth)
+        grantFlow = flow
+        grantDeclined = nil
+        flow.requestReRun(provider: provider, companyId: cid, run: { startAnalysis() })
+        grantAsking = flow.isAsking ? provider : nil
+    }
 
     private func startAnalysis() {
         step = 6; anShown = 0; anDone = false; reveal = nil

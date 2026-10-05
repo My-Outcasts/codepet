@@ -24,6 +24,15 @@ enum ProviderConsentCopy {
         }
     }
 
+    /// The ask at onboarding's "Analyze my project" (CP-063). Not `message`'s "Re-running here…":
+    /// nothing has run yet, and the first spend is the founder's own plan being built.
+    static func planMessage(_ provider: AIProvider, lang: AppLanguage) -> String {
+        let plan = provider == .codex ? "ChatGPT" : "Claude"
+        return lang == .vi
+            ? "Lập kế hoạch sẽ dùng gói \(plan) của bạn. Cho phép Codepet dùng gói này?"
+            : "Building your plan uses your \(plan) plan. Allow Codepet to spend it?"
+    }
+
     static func allow(lang: AppLanguage) -> String { lang == .vi ? "Cho phép" : "Allow" }
     static func notNow(lang: AppLanguage) -> String { lang == .vi ? "Để sau" : "Not now" }
 }
@@ -106,6 +115,8 @@ private struct ProviderConsentAlertModifier: ViewModifier {
     let lang: AppLanguage
     let onAllow: () -> Void
     let onDecline: () -> Void
+    /// Overrides the "Re-running here…" copy for a caller asking at a different moment (CP-063).
+    var message: String? = nil
 
     func body(content: Content) -> some View {
         content.alert(
@@ -116,7 +127,7 @@ private struct ProviderConsentAlertModifier: ViewModifier {
                 Button(ProviderConsentCopy.allow(lang: lang), action: onAllow)
             },
             message: {
-                Text(ProviderConsentCopy.message(provider ?? .claudeCode, lang: lang))
+                Text(message ?? ProviderConsentCopy.message(provider ?? .claudeCode, lang: lang))
             }
         )
     }
@@ -126,8 +137,9 @@ extension View {
     /// See `ProviderConsentAlertModifier`. `provider` names whose plan the message describes;
     /// pass the SAME provider that was asked about, not one re-derived from anything else.
     func providerConsentAlert(isPresented: Binding<Bool>, provider: AIProvider?, lang: AppLanguage,
+                               message: String? = nil,
                                onAllow: @escaping () -> Void, onDecline: @escaping () -> Void) -> some View {
         modifier(ProviderConsentAlertModifier(isPresented: isPresented, provider: provider, lang: lang,
-                                               onAllow: onAllow, onDecline: onDecline))
+                                               onAllow: onAllow, onDecline: onDecline, message: message))
     }
 }

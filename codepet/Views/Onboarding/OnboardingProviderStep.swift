@@ -178,3 +178,32 @@ struct OnboardingProviderGateView: View {
         provider.installCommand
     }
 }
+
+/// Whether "Analyze my project" must ask for the plan grant first (CP-063).
+///
+/// A founder who reached the analysis with no grant got an empty company: enrichment and
+/// `generateRoadmap` answered `.blocked(.notGranted)`, fail-open returned nothing, and the
+/// reveal fell back to copy that still said "I built your roadmap". "Analyze" is the first
+/// moment the plan is spent, so — like a re-run (`ProviderConsentFlow`) — that is where to ask.
+///
+/// Pure statics, outside any `ObservableObject`, for the same reason as `OnboardingProviderStep`.
+enum OnboardingGrantGate {
+    /// Ask only when something is installed and NOTHING installed is granted. Nothing installed is
+    /// the provider step's job; any granted provider means the analysis can already run.
+    static func shouldAsk(installed: Set<AIProvider>, authorised: (AIProvider) -> Bool) -> Bool {
+        !installed.isEmpty && !installed.contains(where: authorised)
+    }
+
+    /// Claude first — the default transport — then whatever else is installed.
+    static func providerToAsk(installed: Set<AIProvider>) -> AIProvider? {
+        installed.contains(.claudeCode) ? .claudeCode : installed.first
+    }
+
+    /// Shown under the stage slider after "Not now", so the founder knows why she is still here.
+    static func declinedLine(_ provider: AIProvider, lang: AppLanguage) -> String {
+        let plan = provider == .codex ? "ChatGPT" : "Claude"
+        return lang == .vi
+            ? "Codepet cần gói \(plan) của bạn để lập kế hoạch. Bạn có thể bỏ qua phần giới thiệu và cho phép sau."
+            : "Codepet needs your \(plan) plan to build your plan. You can skip onboarding and allow it later."
+    }
+}

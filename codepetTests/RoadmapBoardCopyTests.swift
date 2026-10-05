@@ -210,4 +210,40 @@ final class RoadmapBoardCopyTests: XCTestCase {
         XCTAssertFalse(RoadmapBoardCopy.suggestionReason(dept: nil, unlockCount: 1, lang: .en).isEmpty)
         XCTAssertNotEqual(two, RoadmapBoardCopy.suggestionReason(dept: "Design", unlockCount: 2, lang: .vi))
     }
+
+    // MARK: - The KEY and "How to read this map" (5 Oct)
+
+    /// The sheet explained three colours beside a KEY of five, so blue (needs your input) and
+    /// orange (needs approval) — the two states that ask something of the founder — were never
+    /// explained. Both now read `keyStatuses`; every board state must be in it.
+    func testKeyCoversEveryBoardState() {
+        let key = RoadmapBoardCopy.keyStatuses
+        for s in [TaskStatus.done, .codepetCanDo, .needsYou, .needsApproval, .blocked] {
+            XCTAssertTrue(key.contains(s), "\(s) missing from the key")
+        }
+        XCTAssertEqual(key.count, 5)
+    }
+
+    func testEveryKeyStateIsExplainedInBothLanguages() {
+        for s in RoadmapBoardCopy.keyStatuses {
+            for lang in [AppLanguage.en, .vi] {
+                XCTAssertFalse(RoadmapBoardCopy.keyLabel(for: s, lang).isEmpty, "\(s) \(lang)")
+                XCTAssertFalse(RoadmapBoardCopy.keyMeaning(for: s, lang).isEmpty, "\(s) \(lang)")
+            }
+        }
+    }
+
+    /// The sheet said "hit Start" while the glowing card's button read "Add your input". The
+    /// line now names whatever the button actually says.
+    func testNextMoveLineNamesTheRealButton() {
+        let line = RoadmapBoardCopy.nextMoveLine(actionLabel: "Add your input", .en)
+        XCTAssertTrue(line.contains("Add your input"), line)
+        XCTAssertFalse(line.contains("Start"), line)
+        XCTAssertTrue(RoadmapBoardCopy.nextMoveLine(actionLabel: "Thêm ý của bạn", .vi)
+            .contains("Thêm ý của bạn"))
+    }
+
+    func testNextMoveLineWithNoNextMoveNamesNoButton() {
+        XCTAssertFalse(RoadmapBoardCopy.nextMoveLine(actionLabel: nil, .en).contains("\""))
+    }
 }

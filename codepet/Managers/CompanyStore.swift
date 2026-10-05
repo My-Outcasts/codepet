@@ -3847,7 +3847,7 @@ final class CompanyStore: ObservableObject {
             id: UUID().uuidString, kind: DeliverableKind(raw: result.kind),
             title: title.isEmpty ? task.title : title, body: body,
             createdAt: ISOTime.utc(Date()), sourceTaskId: task.id, payload: result.payload,
-            producedBy: producedBy)
+            producedBy: producedBy, coerced: result.coerced)
     }
 
     /// Which provider will actually run a one-shot op for `cid`, right now — the same

@@ -822,6 +822,8 @@ export interface NewTaskIntent {
 /** Exported so a test can assert it agrees with `DEPT_KEYS` and `DEPARTMENT_OUTPUTS`. */
 export const TASK_DEPTS = ["eng", "design", "mkt", "sales", "support", "fin", "ops", "legal"];
 const MAX_TASK_TITLE = 120;
+/** How many tasks one turn may offer to add (CP-060). One press confirms them all. */
+export const MAX_ADD_TASKS_PER_TURN = 10;
 
 /** The validated intent to add a task. `null` when there is no usable title. */
 export function validateAddTaskToolUse(input: unknown): NewTaskIntent | null {
@@ -1270,6 +1272,11 @@ export interface ResolvedActions {
   remember: RememberedFact[];
   completeTaskId: string | null;
   addTask: NewTaskIntent | null;
+  /**
+   * Every valid add_task call this turn, in order (CP-060). `addTask` stays the first of them
+   * so an older client, which reads only that, behaves exactly as before.
+   */
+  addTasks: NewTaskIntent[];
   reviseWork: ReviseWorkIntent | null;
   drafts: MessageDraftIntent[] | null;
 }
@@ -1286,7 +1293,6 @@ export function resolveActions(
   const setupUse = toolUses.find((t) => t.name === "setup_capability");
   const rememberUse = toolUses.find((t) => t.name === "remember_fact");
   const completeUse = toolUses.find((t) => t.name === "complete_task");
-  const addUse = toolUses.find((t) => t.name === "add_task");
   const draftUse = toolUses.find((t) => t.name === "draft_message");
   const reviseUse = toolUses.find((t) => t.name === "revise_work");
 
@@ -1313,13 +1319,29 @@ export function resolveActions(
   // revise_work is checked FIRST and excludes add_task: a turn carrying both is the exact
   // CP-025 bug — a revision dressed up as a new task — so the revision wins.
   const reviseWork = reviseUse ? validateReviseWorkToolUse(reviseUse.input, delivered) : null;
-  if (!completeTaskId && !reviseWork && addUse) addTask = validateAddTaskToolUse(addUse.input);
+  // CP-060: every add_task, not the first. Asked for eight tasks, the model called add_task
+  // eight times and said "all eight are queued as buttons" — and `find` kept one, so one task was
+  // added. Repeated titles are dropped (a model repeating itself is not two tasks) and a turn is
+  // capped, because the founder confirms the whole list with one press.
+  const addTasks: NewTaskIntent[] = [];
+  if (!completeTaskId && !reviseWork) {
+    const seen = new Set<string>();
+    for (const use of toolUses) {
+      if (use.name !== "add_task" || addTasks.length >= MAX_ADD_TASKS_PER_TURN) continue;
+      const intent = validateAddTaskToolUse(use.input);
+      const key = intent?.title.trim().toLowerCase();
+      if (!intent || !key || seen.has(key)) continue;
+      seen.add(key);
+      addTasks.push(intent);
+    }
+  }
+  addTask = addTasks[0] ?? null;
 
   // Independent of everything above: a drafted message is CONTENT, not an action, so it
   // neither excludes nor is excluded by a verb that mutates something.
   const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
 
-  return { runTaskId, nav, setup, remember, completeTaskId, addTask, reviseWork, drafts };
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask, addTasks, reviseWork, drafts };
 }
 
 

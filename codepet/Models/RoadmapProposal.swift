@@ -21,6 +21,11 @@ enum RoadmapProposal: Equatable {
     /// call, Aug 8, when asked whether chat-created tasks should be able to express dependencies:
     /// "start with no". A model guessing at a dependency graph is how a roadmap becomes unusable.
     case add(NewTask)
+    /// Several new tasks from one message, confirmed with ONE press (CP-060). 5 Oct, build 7:
+    /// asked for eight tasks, the reply promised "all eight are queued as buttons" and showed one
+    /// "Yes, add it", which added the first. Founder's pick, 5 Oct: one list and an "Add all N"
+    /// button. Always 2+ tasks — a single task stays `.add`, word for word.
+    case addAll([NewTask])
     /// Make a new version of work the founder already approved (CP-025). Not a roadmap change at
     /// all — it re-runs the item's own task with the founder's note, and approving the result
     /// replaces the Library item in place. It rides this enum so it gets the same card, the same
@@ -48,6 +53,10 @@ enum RoadmapProposal: Equatable {
             return lang == .vi
                 ? "Mình thêm \"\(task.title)\" vào lộ trình nhé?"
                 : "Want me to add \"\(task.title)\" to the roadmap?"
+        case .addAll(let tasks):
+            return lang == .vi
+                ? "Mình thêm \(tasks.count) việc này vào lộ trình nhé?"
+                : "Want me to add these \(tasks.count) tasks to the roadmap?"
         case .revise(_, let title, _):
             return lang == .vi
                 ? "Mình làm phiên bản mới cho \"\(title)\" nhé?"
@@ -67,6 +76,8 @@ enum RoadmapProposal: Equatable {
             return lang == .vi ? "Ừ, đánh dấu xong" : "Yes, mark it done"
         case .add:
             return lang == .vi ? "Ừ, thêm vào" : "Yes, add it"
+        case .addAll(let tasks):
+            return lang == .vi ? "Thêm cả \(tasks.count)" : "Add all \(tasks.count)"
         case .revise:
             return lang == .vi ? "Ừ, làm bản mới" : "Yes, make a new version"
         }
@@ -80,8 +91,26 @@ enum RoadmapProposal: Equatable {
             return lang == .vi ? "Đã đánh dấu xong" : "Marked done"
         case .add:
             return lang == .vi ? "Đã thêm vào lộ trình" : "Added to the roadmap"
+        case .addAll(let tasks):
+            return lang == .vi ? "Đã thêm \(tasks.count) việc vào lộ trình" : "Added \(tasks.count) tasks to the roadmap"
         case .revise:
             return lang == .vi ? "Đang làm bản mới" : "Making a new version"
         }
+    }
+}
+
+/// How much of an "Add all N" list the card shows (CP-060). The founder approved the version that
+/// shows three and counts the rest, so the card stays one glance however long the list is.
+enum AddAllListLayout {
+    static let visible = 3
+
+    static func shown(_ tasks: [RoadmapProposal.NewTask]) -> [RoadmapProposal.NewTask] {
+        Array(tasks.prefix(visible))
+    }
+
+    static func moreLabel(_ tasks: [RoadmapProposal.NewTask], _ lang: AppLanguage) -> String? {
+        let rest = tasks.count - visible
+        guard rest > 0 else { return nil }
+        return lang == .vi ? "…và \(rest) việc nữa" : "…\(rest) more"
     }
 }

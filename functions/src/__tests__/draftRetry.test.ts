@@ -20,7 +20,7 @@ import {
 
 const none: ResolvedActions = {
   runTaskId: null, nav: null, setup: null, remember: [], completeTaskId: null,
-  addTask: null, reviseWork: null, drafts: null,
+  addTask: null, addTasks: [], reviseWork: null, drafts: null,
 };
 
 describe("claimsDrafts", () => {

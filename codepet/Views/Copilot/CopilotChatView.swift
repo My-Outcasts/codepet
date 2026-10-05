@@ -1925,6 +1925,9 @@ struct CopilotBubble: View {
     @ViewBuilder private func roadmapProposalCard(_ proposal: RoadmapProposal) -> some View {
         VStack(alignment: .leading, spacing: ChatRhythm.proseToAction) {
             textBubble
+            if case .addAll(let tasks) = proposal {
+                addAllList(tasks)
+            }
             if message.actionConsumed {
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark.circle.fill")
@@ -1952,6 +1955,34 @@ struct CopilotBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The tasks an "Add all N" offer would add (CP-060), as the founder approved it on 5 Oct:
+    /// title left, department right, the first three shown and the rest counted.
+    @ViewBuilder private func addAllList(_ tasks: [RoadmapProposal.NewTask]) -> some View {
+        let shown = AddAllListLayout.shown(tasks)
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, task in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("•").foregroundColor(CodepetTheme.mutedText)
+                    Text(task.title)
+                        .foregroundColor(CodepetTheme.bodyText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 12)
+                    if let dept = task.dept {
+                        Text(DepartmentCatalog.find(dept)?.name ?? dept)
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            if let more = AddAllListLayout.moreLabel(tasks, lang) {
+                Text(more).foregroundColor(CodepetTheme.mutedText)
+            }
+        }
+        .font(.pixelSystem(size: DraftCardMetrics.body))
+        .frame(maxWidth: 460, alignment: .leading)
     }
 
     /// Per-message actions, revealed on hover and pinned on the newest reply — the row both

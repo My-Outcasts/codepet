@@ -117,6 +117,70 @@ final class RoadmapVerbsTests: XCTestCase {
         XCTAssertEqual(s.company.tasks[1].who, .does)
     }
 
+    // MARK: - several add_task calls in one turn (CP-060)
+
+    private func dto(_ title: String, _ dept: String) -> AddTaskDTO {
+        AddTaskDTO(title: title, detail: "", dept: dept, owner: "codepet")
+    }
+
+    /// 5 Oct, build 7: asked for eight tasks, the reply said "all eight are queued as buttons" and
+    /// showed ONE "Yes, add it", which added the first. Several tasks are one offer for the list.
+    func testSeveralTasksBecomeOneOfferForTheWholeList() async {
+        let list = [dto("Outreach templates", "mkt"), dto("Beta checklist", "ops"), dto("LinkedIn post", "mkt")]
+        let s = store(CompanyChatReply(text: "Here they are.", addTask: list[0], addTasks: list), tasks: [mine()])
+        await s.hydrate(companyId: "u")
+        await s.sendChat("add these three", language: .en)
+
+        XCTAssertEqual(s.chatMessages.filter { $0.roadmapProposal != nil }.count, 1, "one offer, not three")
+        guard case .addAll(let tasks)? = s.chatMessages.last(where: { $0.roadmapProposal != nil })?.roadmapProposal else {
+            return XCTFail("expected one offer for the whole list")
+        }
+        XCTAssertEqual(tasks.map(\.title), ["Outreach templates", "Beta checklist", "LinkedIn post"])
+        XCTAssertEqual(s.company.tasks.count, 1, "proposing must not add anything")
+    }
+
+    func testConfirmingTheListAddsEveryTaskOnceWithOneSave() async {
+        var saves = 0
+        let list = [dto("Outreach templates", "mkt"), dto("Beta checklist", "ops"), dto("LinkedIn post", "mkt")]
+        let s = store(CompanyChatReply(text: "ok", addTask: list[0], addTasks: list), tasks: [mine()],
+                      taskSaves: { saves += 1 })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("add these", language: .en)
+        guard let id = s.chatMessages.last(where: { $0.roadmapProposal != nil })?.id else {
+            return XCTFail("no proposal")
+        }
+        await s.confirmRoadmapProposal(messageId: id, language: .en)
+        await s.confirmRoadmapProposal(messageId: id, language: .en)
+
+        XCTAssertEqual(s.company.tasks.map(\.title),
+                       ["Talk to 5 potential users", "Outreach templates", "Beta checklist", "LinkedIn post"])
+        XCTAssertEqual(s.company.tasks.dropFirst().map(\.dept), ["mkt", "ops", "mkt"])
+        XCTAssertTrue(s.company.tasks.dropFirst().allSatisfy { $0.dependsOn.isEmpty && $0.who == .does })
+        XCTAssertEqual(Set(s.company.tasks.map(\.id)).count, 4, "every task gets its own id")
+        XCTAssertEqual(saves, 1, "one press, one save — and a second press adds nothing")
+    }
+
+    /// A one-item list is the old offer, word for word — nothing changes for a single task.
+    func testOneTaskStaysTheSingleOffer() async {
+        let one = dto("Draft the refund policy", "legal")
+        let s = store(CompanyChatReply(text: "ok", addTask: one, addTasks: [one]), tasks: [mine()])
+        await s.hydrate(companyId: "u")
+        await s.sendChat("add that", language: .en)
+        guard case .add? = s.chatMessages.last(where: { $0.roadmapProposal != nil })?.roadmapProposal else {
+            return XCTFail("a single task must stay .add")
+        }
+    }
+
+    func testTheListOfferSaysHowManyItAdds() {
+        let p = RoadmapProposal.addAll((1...8).map {
+            RoadmapProposal.NewTask(title: "T\($0)", detail: "", dept: nil, codepetOwned: true)
+        })
+        XCTAssertEqual(p.buttonLabel(.en), "Add all 8")
+        XCTAssertEqual(p.buttonLabel(.vi), "Thêm cả 8")
+        XCTAssertEqual(p.doneLabel(.en), "Added 8 tasks to the roadmap")
+        XCTAssertTrue(p.line(.en).contains("8 tasks"))
+    }
+
     /// Two identical offers would let her confirm one and leave an orphan that adds a duplicate.
     func testTheSameProposalIsNotOfferedTwice() async {
         let s = store(CompanyChatReply(text: "ok", completeTaskId: "t1"), tasks: [mine()])
@@ -186,5 +250,22 @@ final class RoadmapProposalPresentationTests: XCTestCase {
         let p = RoadmapProposal.complete(taskId: "t1", title: "Scope the MVP to the core flow")
         XCTAssertEqual(p.buttonLabel(.en), "Yes, mark it done")
         XCTAssertTrue(p.line(.en).contains("Scope the MVP to the core flow"))
+    }
+}
+
+/// The "Add all N" card shows three tasks and counts the rest (CP-060, founder-approved 5 Oct).
+final class AddAllListLayoutTests: XCTestCase {
+    private func tasks(_ n: Int) -> [RoadmapProposal.NewTask] {
+        (1...n).map { RoadmapProposal.NewTask(title: "T\($0)", detail: "", dept: nil, codepetOwned: true) }
+    }
+
+    func testEightTasksShowThreeAndCountFive() {
+        XCTAssertEqual(AddAllListLayout.shown(tasks(8)).map(\.title), ["T1", "T2", "T3"])
+        XCTAssertEqual(AddAllListLayout.moreLabel(tasks(8), .en), "…5 more")
+    }
+
+    func testThreeOrFewerShowAllWithNoCount() {
+        XCTAssertEqual(AddAllListLayout.shown(tasks(2)).count, 2)
+        XCTAssertNil(AddAllListLayout.moreLabel(tasks(3), .en))
     }
 }

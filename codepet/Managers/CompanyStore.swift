@@ -2304,6 +2304,7 @@ final class CompanyStore: ObservableObject {
                                          setup: reply?.setup, remember: reply?.remember ?? [],
                                          completeTaskId: reply?.completeTaskId,
                                          addTask: reply?.addTask,
+                                         addTasks: reply?.addTasks ?? [],
                                          reviseWork: reply?.reviseWork,
                                          drafts: reply?.drafts ?? [])
             if let i = chatMessages.firstIndex(where: { $0.id == placeholderId }) {
@@ -3365,12 +3366,12 @@ final class CompanyStore: ObservableObject {
             // Only an item the Library still has, whose task still exists: the revise pass re-runs
             // that task, so an offer without one would be a button that can never deliver.
             proposal = .revise(libraryId: item.id, title: item.title, note: revise.note)
-        } else if let add = action.addTask {
-            proposal = .add(RoadmapProposal.NewTask(
-                title: add.title,
-                detail: add.detail ?? "",
-                dept: add.dept,
-                codepetOwned: add.owner == "codepet"))
+        } else if action.addTasks.count > 1 {
+            // CP-060: several tasks in one message are ONE offer for the list, not one per task
+            // and not the first alone. `addTasks` is empty from a server that predates it.
+            proposal = .addAll(action.addTasks.map(Self.newTask))
+        } else if let add = action.addTask ?? action.addTasks.first {
+            proposal = .add(Self.newTask(add))
         } else {
             proposal = nil
         }
@@ -3429,22 +3430,36 @@ final class CompanyStore: ObservableObject {
         case .complete(let taskId, _):
             await toggleTaskDone(id: taskId)
         case .add(let task):
-            let new = RoadmapTask(
-                id: UUID().uuidString,
-                title: task.title,
-                detail: task.detail,
-                // The phase the founder is actually working in, so a new task lands where she can
-                // see it rather than at the end of the map.
-                phase: RoadmapEngine.nextStep(company.tasks)?.phase ?? .find,
-                who: task.codepetOwned ? .does : .you,
-                // No `dependsOn`, ever: founder's call, Aug 8 — a chat-created task is a LEAF.
-                // A model guessing at a dependency graph is how a roadmap becomes unusable.
-                dept: task.dept)
-            company.tasks.append(new)
+            company.tasks.append(roadmapTask(from: task))
+            if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
+        case .addAll(let tasks):
+            // One press, one save. The phase is read once, before any is added, so the whole list
+            // lands together in the phase she was working in when she pressed.
+            let phase = RoadmapEngine.nextStep(company.tasks)?.phase ?? .find
+            company.tasks.append(contentsOf: tasks.map { roadmapTask(from: $0, phase: phase) })
             if let cid = companyId { _ = await tasksSaver(cid, company.tasks) }
         case .revise(let libraryId, _, let note):
             await reviseDelivered(libraryId: libraryId, note: note, language: language)
         }
+    }
+
+    private static func newTask(_ dto: AddTaskDTO) -> RoadmapProposal.NewTask {
+        RoadmapProposal.NewTask(title: dto.title, detail: dto.detail ?? "", dept: dto.dept,
+                                codepetOwned: dto.owner == "codepet")
+    }
+
+    private func roadmapTask(from task: RoadmapProposal.NewTask, phase: RoadmapPhase? = nil) -> RoadmapTask {
+        RoadmapTask(
+            id: UUID().uuidString,
+            title: task.title,
+            detail: task.detail,
+            // The phase the founder is actually working in, so a new task lands where she can
+            // see it rather than at the end of the map.
+            phase: phase ?? RoadmapEngine.nextStep(company.tasks)?.phase ?? .find,
+            who: task.codepetOwned ? .does : .you,
+            // No `dependsOn`, ever: founder's call, Aug 8 — a chat-created task is a LEAF.
+            // A model guessing at a dependency graph is how a roadmap becomes unusable.
+            dept: task.dept)
     }
 
     /// Run a revise pass of an approved Library item: its own task, with the founder's note and the

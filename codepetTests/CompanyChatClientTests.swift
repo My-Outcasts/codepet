@@ -135,6 +135,23 @@ final class CompanyChatClientTests: XCTestCase {
         XCTAssertEqual(action.reviseWork, ReviseWorkDTO(libraryId: "L1", note: "more editorial"))
     }
 
+    /// CP-060: the whole `add_tasks` list must survive the streaming decode — same trap as
+    /// `revise_work` above: a key the private `DonePayload` omits is dropped without a word.
+    func testSendStreamDoneCarriesAddTasks() async throws {
+        CompanyChatMockURLProtocol.reset()
+        CompanyChatMockURLProtocol.responseChunks = [
+            "event: done\ndata: {\"model\":\"m\",\"cache_hit\":false,\"run_task_id\":null,\"add_task\":{\"title\":\"A\",\"detail\":\"\",\"dept\":\"mkt\",\"owner\":\"codepet\"},\"add_tasks\":[{\"title\":\"A\",\"detail\":\"\",\"dept\":\"mkt\",\"owner\":\"codepet\"},{\"title\":\"B\",\"detail\":\"\",\"dept\":\"ops\",\"owner\":\"codepet\"}]}\n\n".data(using: .utf8)!
+        ]
+        var action: ChatDoneAction?
+        for try await ev in CompanyChatClient.sendStream(
+            makeMinimalRequest(), session: mockedCompanyChatSession(), authTokenProvider: { "fake" }
+        ) {
+            if case let .done(_, _, a) = ev { action = a }
+        }
+        XCTAssertEqual(action?.addTasks.map(\.title), ["A", "B"])
+        XCTAssertEqual(action?.addTask?.title, "A")
+    }
+
     func testRequestEncodesRunnable() throws {
         let req = CompanyChatRequest(companyId: "u1", language: "en", companionId: "byte",
                                      context: "ctx", history: [], userMessage: "hi",

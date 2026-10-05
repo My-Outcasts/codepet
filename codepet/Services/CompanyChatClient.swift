@@ -297,6 +297,8 @@ struct CompanyChatResponse: Codable {
     let remember: [RememberedFact]?
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    /// Every task this turn offers to add (CP-060). `addTask` is its first, kept for older servers.
+    let addTasks: [AddTaskDTO]?
     let reviseWork: ReviseWorkDTO?
     let drafts: [MessageDraftDTO]?
 
@@ -308,6 +310,7 @@ struct CompanyChatResponse: Codable {
         case remember
         case completeTaskId = "complete_task_id"
         case addTask = "add_task"
+        case addTasks = "add_tasks"
         case reviseWork = "revise_work"
         case drafts
     }
@@ -324,12 +327,13 @@ struct CompanyChatReply: Equatable {
     let remember: [RememberedFact]
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    let addTasks: [AddTaskDTO]
     let reviseWork: ReviseWorkDTO?
     let drafts: [MessageDraftDTO]
 
     init(text: String, runTaskId: String? = nil, nav: NavAction? = nil,
          setup: SetupAction? = nil, remember: [RememberedFact] = [],
-         completeTaskId: String? = nil, addTask: AddTaskDTO? = nil,
+         completeTaskId: String? = nil, addTask: AddTaskDTO? = nil, addTasks: [AddTaskDTO] = [],
          reviseWork: ReviseWorkDTO? = nil, drafts: [MessageDraftDTO] = []) {
         self.text = text
         self.runTaskId = runTaskId
@@ -338,6 +342,7 @@ struct CompanyChatReply: Equatable {
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.addTasks = addTasks
         self.reviseWork = reviseWork
         self.drafts = drafts
     }
@@ -357,6 +362,9 @@ struct ChatDoneAction: Equatable {
     /// "I finished that, now draft the next one" is one honest turn — but exclusive of each other.
     let completeTaskId: String?
     let addTask: AddTaskDTO?
+    /// Every task the turn offers to add, `addTask` first (CP-060). Two or more become ONE offer
+    /// for the whole list; empty from a server that predates it, which then falls back to `addTask`.
+    let addTasks: [AddTaskDTO]
     /// A new version of approved work, offered for the founder's press (CP-025). The server
     /// resolves it ahead of `addTask` and drops `addTask` when both arrive, so at most one is set.
     let reviseWork: ReviseWorkDTO?
@@ -366,7 +374,7 @@ struct ChatDoneAction: Equatable {
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
          remember: [RememberedFact] = [], completeTaskId: String? = nil,
-         addTask: AddTaskDTO? = nil, reviseWork: ReviseWorkDTO? = nil,
+         addTask: AddTaskDTO? = nil, addTasks: [AddTaskDTO] = [], reviseWork: ReviseWorkDTO? = nil,
          drafts: [MessageDraftDTO] = []) {
         self.runTaskId = runTaskId
         self.nav = nav
@@ -374,6 +382,7 @@ struct ChatDoneAction: Equatable {
         self.remember = remember
         self.completeTaskId = completeTaskId
         self.addTask = addTask
+        self.addTasks = addTasks
         self.reviseWork = reviseWork
         self.drafts = drafts
     }
@@ -464,6 +473,7 @@ enum CompanyChatClient {
         return CompanyChatReply(text: reply, runTaskId: decoded.runTaskId, nav: decoded.nav,
                                  setup: decoded.setup, remember: decoded.remember ?? [],
                                  completeTaskId: decoded.completeTaskId, addTask: decoded.addTask,
+                                 addTasks: decoded.addTasks ?? [],
                                  reviseWork: decoded.reviseWork, drafts: decoded.drafts ?? [])
     }
 
@@ -629,12 +639,14 @@ enum CompanyChatClient {
                 let remember: [RememberedFact]?
                 let completeTaskId: String?
                 let addTask: AddTaskDTO?
+                let addTasks: [AddTaskDTO]?
                 let reviseWork: ReviseWorkDTO?
                 let drafts: [MessageDraftDTO]?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
                     case completeTaskId = "complete_task_id"; case addTask = "add_task"
+                    case addTasks = "add_tasks"
                     case reviseWork = "revise_work"
                     case drafts
                 }
@@ -643,6 +655,7 @@ enum CompanyChatClient {
                 let action = ChatDoneAction(runTaskId: d.runTaskId, nav: d.nav, setup: d.setup,
                                              remember: d.remember ?? [],
                                              completeTaskId: d.completeTaskId, addTask: d.addTask,
+                                             addTasks: d.addTasks ?? [],
                                              reviseWork: d.reviseWork, drafts: d.drafts ?? [])
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             } else {

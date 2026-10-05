@@ -569,6 +569,8 @@ export function doneFrame(r: ResolvedActions, model: string): Record<string, unk
   const done: Record<string, unknown> = { model, cache_hit: false, run_task_id: r.runTaskId };
   if (r.completeTaskId) done.complete_task_id = r.completeTaskId;
   if (r.addTask) done.add_task = r.addTask;
+  // CP-060: the whole list. `add_task` stays beside it for clients that read only that key.
+  if (r.addTasks.length) done.add_tasks = r.addTasks;
   if (r.reviseWork) done.revise_work = { library_id: r.reviseWork.libraryId, note: r.reviseWork.note };
   if (r.drafts) done.drafts = r.drafts;
   if (r.nav) done.nav = r.nav;

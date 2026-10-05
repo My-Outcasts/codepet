@@ -207,3 +207,18 @@ enum OnboardingGrantGate {
             : "Codepet needs your \(plan) plan to build your plan. You can skip onboarding and allow it later."
     }
 }
+
+/// How long step 8 waits for the real scaffold, and what "Start building" does to it (CP-067).
+///
+/// The scaffold is enrichment then `generateRoadmap`, both one-shot calls on the founder's own
+/// plan, each bounded by `LocalOneShotRunner.defaultTimeout`. The 20 s fallback dates from the
+/// cloud path: on 5 Oct it showed the generic step 8 at ~25 s while the real roadmap took ~80 s,
+/// and "Start building" then cancelled the scaffold, so the founder got an empty company.
+enum OnboardingScaffoldTiming {
+    /// Past both calls' own bounds, so the fallback fires only if the runner itself hangs.
+    static let fallbackSeconds: TimeInterval = 2 * LocalOneShotRunner.defaultTimeout + 30
+    /// A scaffold still running when she presses "Start building" (only possible after the
+    /// fallback) finishes and lands its roadmap; cancelling it is what emptied the company.
+    static let finishCancelsScaffold = false
+    static let stillBuildingLine = "Still building your company — this can take a minute or two."
+}

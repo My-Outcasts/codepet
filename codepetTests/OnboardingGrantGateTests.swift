@@ -51,3 +51,24 @@ final class OnboardingGrantGateTests: XCTestCase {
                        "Codepet needs your Claude plan to build your plan. You can skip onboarding and allow it later.")
     }
 }
+
+/// CP-067. The scaffold behind step 8 is two plan calls in a row — enrichment, then
+/// `generateRoadmap` — each bounded at `LocalOneShotRunner.defaultTimeout` (180 s) on the
+/// founder's own Claude plan. A 20 s fallback (sized for the old cloud path) showed the generic
+/// step 8 at ~25 s on 5 Oct while the real roadmap took ~80 s, and "Start building" then
+/// cancelled it, leaving the same empty company as CP-063.
+final class OnboardingScaffoldTimingTests: XCTestCase {
+    func testTheFallbackOutlastsBothPlanCalls() {
+        XCTAssertGreaterThan(OnboardingScaffoldTiming.fallbackSeconds,
+                             2 * LocalOneShotRunner.defaultTimeout)
+    }
+
+    func testStartBuildingDoesNotCancelARunningScaffold() {
+        XCTAssertFalse(OnboardingScaffoldTiming.finishCancelsScaffold)
+    }
+
+    func testTheWaitLineSaysItCanTakeAMinute() {
+        XCTAssertEqual(OnboardingScaffoldTiming.stillBuildingLine,
+                       "Still building your company — this can take a minute or two.")
+    }
+}

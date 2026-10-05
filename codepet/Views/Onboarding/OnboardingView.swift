@@ -247,7 +247,7 @@ struct OnboardingView: View {
                 }
                 .frame(width: 228)
             } else if anDone {   // step 6, animation done but scaffold still resolving
-                Text("Still building your company…")
+                Text(OnboardingScaffoldTiming.stillBuildingLine)
                     .font(CodepetTheme.body(11)).foregroundColor(OnboardingContent.Palette.faint)
             }
             Spacer()
@@ -320,7 +320,7 @@ struct OnboardingView: View {
         // on the analysis screen if the scaffold hangs. If no real reveal has arrived,
         // fall back to the empty (value-props) reveal so the step-7 gate can unlock.
         timeoutTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(OnboardingScaffoldTiming.fallbackSeconds * 1_000_000_000))
             if Task.isCancelled { return }
             if reveal == nil { reveal = .empty }
         }
@@ -378,7 +378,9 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        streamTask?.cancel(); scaffoldTask?.cancel(); timeoutTask?.cancel()
+        streamTask?.cancel(); timeoutTask?.cancel()
+        // CP-067: never cancel a running scaffold here — it finishes and lands the roadmap.
+        if OnboardingScaffoldTiming.finishCancelsScaffold { scaffoldTask?.cancel() }
         let token = companyStore.onboardingToken
         let id = companyStore.company.companionId
         Task {

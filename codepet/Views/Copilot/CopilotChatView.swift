@@ -2934,15 +2934,30 @@ enum ReviseKind: CaseIterable {
     }
 
     /// The `reviseNote` sent to the CF — a full instruction, not the terse chip label.
+    ///
+    /// Shorter and Punchier name the headline explicitly. "Make it shorter" alone trimmed the
+    /// reasoning under a doc and left its `call` — the one sentence the founder was reading —
+    /// untouched (5 Oct test). Naming the headline without a target only dropped its first
+    /// four words; "about two-thirds" is what moved it. Stay under the server's 500-char clip.
     func note(_ lang: AppLanguage) -> String {
         switch (self, lang) {
-        case (.shorter, .vi): return "Làm ngắn gọn hơn"
-        case (.shorter, _): return "Make it shorter"
-        case (.moreDetail, .vi): return "Thêm chi tiết hơn"
-        case (.moreDetail, _): return "Add more detail"
-        case (.punchier, .vi): return "Làm ấn tượng hơn"
-        case (.punchier, _): return "Make it punchier"
+        case (.shorter, .vi):
+            return "Làm ngắn hẳn đi. Rút câu mở đầu hoặc tiêu điểm chính còn khoảng hai phần ba độ dài trước, rồi gọn các phần bên dưới. Giữ nguyên ý."
+        case (.shorter, _):
+            return "Make it noticeably shorter. Cut the headline or opening statement itself to about "
+                 + "two-thirds of its current length first, then tighten everything under it. Keep the meaning."
+        case (.moreDetail, .vi): return "Thêm chi tiết hơn ở các phần bên dưới; câu mở đầu vẫn ngắn gọn."
+        case (.moreDetail, _): return "Add more detail to the supporting sections; keep the opening statement tight."
+        case (.punchier, .vi):
+            return "Làm ấn tượng hơn — viết lại câu mở đầu trước, rồi đến phần còn lại."
+        case (.punchier, _):
+            return "Make it punchier — rewrite the headline or opening statement first, then the rest."
         }
+    }
+
+    /// Shown beside the spinner while a revise runs (~a minute on the founder's plan).
+    static func busyLabel(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Đang viết lại — khoảng một phút…" : "Rewriting — about a minute…"
     }
 }
 

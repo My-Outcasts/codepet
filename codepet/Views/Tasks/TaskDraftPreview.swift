@@ -18,6 +18,8 @@ struct TaskDraftPreview: View {
     /// True while a revise re-run (or the approve) is in flight — disables the whole
     /// action row so a mid-run tap can't race the store's guarded update.
     @State private var busy = false
+    /// True while a revise chip's re-run is in flight, so the spinner can say so.
+    @State private var revising = false
 
     private var task: RoadmapTask? { companyStore.company.tasks.first { $0.id == taskId } }
     private var draft: Deliverable? { task?.draft }
@@ -72,7 +74,18 @@ struct TaskDraftPreview: View {
                 .buttonStyle(.plain)
                 .disabled(busy)
                 Spacer()
-                if busy { ProgressView().controlSize(.mini) }
+                if busy {
+                    // Named while a revise runs: it takes about a minute, and a bare spinner in
+                    // the corner read as nothing happening (5 Oct test).
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        if revising {
+                            Text(ReviseKind.busyLabel(lang))
+                                .font(.pixelSystem(size: 10))
+                                .foregroundColor(CodepetTheme.mutedText)
+                        }
+                    }
+                }
             }
             // Revise chips: one-tap targeted re-runs of THIS draft (same infra + labels
             // as the chat draft card's revise row).
@@ -80,10 +93,10 @@ struct TaskDraftPreview: View {
                 ForEach(ReviseKind.allCases, id: \.self) { kind in
                     Button {
                         Task {
-                            busy = true
+                            busy = true; revising = true
                             await companyStore.reviseTaskDraft(taskId: taskId,
                                                                reviseNote: kind.note(lang), language: lang)
-                            busy = false
+                            busy = false; revising = false
                         }
                     } label: {
                         Text(kind.label(lang))

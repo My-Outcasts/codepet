@@ -2,12 +2,18 @@
 import XCTest
 @testable import codepet
 
-/// CP-036, second half: one tinted card per message. In a landed room the call card is the one
-/// tinted card. Under it, "THE REAL DISAGREEMENT" drew its headline in orange (teal when they
-/// agreed), and each department chip had a green / gold / orange outcome dot, so the reply had
-/// purple, orange and gold competing. Agreed 29 Sep: the disagreement section and the chips sit
-/// on plain ink, and the chips lose their dots (a chip opens the Stances tab, which shows each
-/// outcome). The gold UNRESOLVED badge inside the call card stays as the one warm accent.
+/// CP-036, second half: one accent per message, not competing ones. A landed room used to draw a
+/// purple-tinted call card, an orange (or teal) disagreement headline under it, and department
+/// chips with green / gold / orange outcome dots — purple, orange and gold at once. Agreed 29 Sep
+/// to cut that down; the 6 Oct meeting redesign (mock approved, PR #238) then settled what is left:
+///
+/// - the call card is the quiet surface (`TeamQuietSurface`), not a tinted `MessageCard`;
+/// - the real disagreement keeps ONE warm accent — orange, on its eyebrow and a 2pt rule — and no
+///   other accent colour;
+/// - there are no department chips at all, so no outcome dots (the names ride the confidence line,
+///   and "How the team decided" opens the Stances tab).
+///
+/// The gold UNRESOLVED badge inside the call stays: it is the outcome, not decoration.
 final class RoomOneTintTests: XCTestCase {
     private static func source() -> String {
         let url = URL(fileURLWithPath: #filePath)
@@ -32,23 +38,31 @@ final class RoomOneTintTests: XCTestCase {
         return out.joined(separator: "\n")
     }
 
-    private let accents = ["accentOrange", "accentTeal", "accentGold", "accentGreen", "accentPurple"]
+    private static var code: String {
+        source().split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+    }
 
     func testBothFunctionsWereFound() {
-        XCTAssertTrue(Self.body(of: "landedDisagreement").contains("THE REAL DISAGREEMENT"))
-        XCTAssertTrue(Self.body(of: "recordChips").contains("RoomRecord.chips"))
+        XCTAssertTrue(Self.body(of: "theCall").contains("TeamQuietSurface"))
+        XCTAssertTrue(Self.body(of: "realDisagreement").contains("THE REAL DISAGREEMENT"))
     }
 
-    func testTheDisagreementSectionUsesNoAccentColour() {
-        let code = Self.body(of: "landedDisagreement")
-        XCTAssertEqual(accents.filter { code.contains($0) }, [])
+    func testTheCallIsNotATintedCard() {
+        XCTAssertFalse(Self.body(of: "theCall").contains("MessageCard("), "the call is a tinted card again")
     }
 
-    func testTheChipsHaveNoOutcomeDot() {
-        let code = Self.body(of: "recordChips")
-        XCTAssertFalse(code.contains("Circle()"), "a chip still draws a dot")
-        XCTAssertFalse(code.contains("outcomeColor"), "a chip still colours by outcome")
-        // Purple stays: it is the "How the team decided" link, the app's link colour.
-        XCTAssertEqual(accents.filter { $0 != "accentPurple" && code.contains($0) }, [])
+    /// One warm accent on the disagreement, and nothing else competing with it.
+    func testTheDisagreementUsesOnlyTheWarmAccent() {
+        let body = Self.body(of: "realDisagreement")
+        XCTAssertTrue(body.contains("accentOrange"), "the warm rule is gone")
+        let others = ["accentTeal", "accentGold", "accentGreen", "accentPurple", "accentBlue", "accentPink"]
+        XCTAssertEqual(others.filter { body.contains($0) }, [])
+    }
+
+    func testThereAreNoOutcomeChips() {
+        XCTAssertFalse(Self.code.contains("RoomRecord.chips"), "department chips are back")
+        XCTAssertFalse(Self.code.contains("outcomeColor"), "something colours by outcome again")
     }
 }

@@ -75,7 +75,7 @@ struct MeetingStepStrip: View {
                             .frame(width: 7, height: 7)
                     }
                     Text(title)
-                        .font(CodepetTheme.inter(11.5, weight: i == current ? .medium : .regular))
+                        .font(CodepetTheme.inter(11, weight: i == current ? .medium : .regular))
                         .foregroundColor(i == current ? CodepetTheme.primaryText
                                          : i < current ? CodepetTheme.mutedText : CodepetTokens.faint)
                         .lineLimit(1)
@@ -311,7 +311,7 @@ struct VCRunCards: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(lang == .vi ? "CUỘC HỌP" : "MEETING")
-                            .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                            .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                             .foregroundColor(CodepetTheme.mutedText)
                         Spacer(minLength: 8)
                         if stage != nil { MeetingClock() }
@@ -320,7 +320,7 @@ struct VCRunCards: View {
                         MeetingStepStrip(current: MeetingSteps.current(stage)).padding(.top, 12)
                     }
                     Text(routing.realQuestion)
-                        .font(CodepetTheme.inter(16, weight: .semibold)).lineSpacing(3)
+                        .font(CodepetTheme.inter(15, weight: .semibold)).lineSpacing(3)
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 14)
@@ -338,7 +338,7 @@ struct VCRunCards: View {
                         .buttonStyle(.plain)
                         .cursorOnHover(.pointingHand)
                     }
-                    .font(CodepetTheme.inter(12.5))
+                    .font(CodepetTheme.inter(12))
                     .padding(.top, 8)
                     if showRoomWhy { routingDetail(routing).padding(.top, 10) }
                     if !seats.isEmpty {
@@ -418,7 +418,7 @@ struct VCRunCards: View {
                 TeamPetAvatar(dept: meta.departmentKey ?? "", size: 24)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(displayName(meta))
-                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                     if let position {
                         Text(MeetingWords.stance(position.stance, lang: lang))
@@ -439,7 +439,7 @@ struct VCRunCards: View {
                 HStack(spacing: 8) {
                     TeamPulseDot(size: 7)
                     Text(lang == .vi ? "đang nghĩ" : "thinking")
-                        .font(CodepetTheme.inter(12.5))
+                        .font(CodepetTheme.inter(12))
                         .foregroundColor(CodepetTokens.faint)
                 }
                 .padding(.top, 12)
@@ -454,7 +454,7 @@ struct VCRunCards: View {
                 (Text(lang == .vi ? "Đổi ý nếu " : "Changes its mind if ").fontWeight(.medium)
                     .foregroundColor(CodepetTheme.bodyText)
                  + Text(mind).foregroundColor(CodepetTheme.mutedText))
-                    .font(CodepetTheme.inter(12.5))
+                    .font(CodepetTheme.inter(12))
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
@@ -484,7 +484,7 @@ struct VCRunCards: View {
                         .foregroundColor(hue)
                 }
                 Text(group.reason)
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                    .font(CodepetTheme.inter(13)).lineSpacing(4)
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 2)
@@ -512,7 +512,7 @@ struct VCRunCards: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(open ? text : MeetingWords.lead(text))
-                    .font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                    .font(CodepetTheme.inter(13)).lineSpacing(4)
                     .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
                 if MeetingWords.hasMore(text) {
@@ -1019,7 +1019,7 @@ struct VCRunCards: View {
         return TeamQuietSurface {
             VStack(alignment: .leading, spacing: 0) {
                 Text(lang == .vi ? "QUYẾT ĐỊNH" : "THE CALL")
-                    .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                    .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                     .foregroundColor(CodepetTheme.mutedText)
                 // THE DECISION, in one line — the first sentence is the call; reasoning belongs
                 // in the reader ("Read the full call").
@@ -1050,7 +1050,7 @@ struct VCRunCards: View {
                 // LAST of the reading content — rule 5, and in full.
                 if let options, !lockedIn {
                     Text(lang == .vi ? "Bạn quyết" : "Your call")
-                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                         .padding(.top, 20)
                     HStack(alignment: .top, spacing: 10) {
@@ -1079,7 +1079,7 @@ struct VCRunCards: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
                                : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
-                .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
                 .foregroundColor(pairs.isEmpty ? CodepetTheme.mutedText : CodepetTheme.accentOrange)
             if let split = SplitSummary.line(pairs, name: { displayName(agentId: $0) }, lang: lang) {
                 Text(split)
@@ -1088,7 +1088,7 @@ struct VCRunCards: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !real.isEmpty {
-                Text(real).font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                Text(real).font(CodepetTheme.inter(13)).lineSpacing(4)
                     .foregroundColor(CodepetTheme.bodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1144,7 +1144,7 @@ struct VCRunCards: View {
     private func footerLink(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(CodepetTheme.inter(12.5, weight: .medium))
+                .font(CodepetTheme.inter(12, weight: .medium))
                 .foregroundColor(CodepetTheme.mutedText)
                 .underline(color: CodepetTheme.hairline)
         }
@@ -1155,7 +1155,7 @@ struct VCRunCards: View {
     private func lockButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                .font(CodepetTheme.inter(12, weight: .semibold))
                 .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
                 .padding(.horizontal, 14).frame(height: 30)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(CodepetTheme.accentPurple))
@@ -1175,11 +1175,11 @@ struct VCRunCards: View {
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(o.label)
-                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .font(CodepetTheme.inter(13, weight: .semibold))
                         .foregroundColor(CodepetTheme.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(o.consequence)
-                        .font(CodepetTheme.inter(12.5))
+                        .font(CodepetTheme.inter(12))
                         .foregroundColor(CodepetTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)

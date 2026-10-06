@@ -31,12 +31,12 @@ enum TeamBuildCopy {
     /// The row shown while a Team Build's router picks who joins the room (CP-027). Says only what
     /// is true at that moment: nobody has started work yet, so it names the choosing, not a team.
     static func conveningTitle(_ lang: AppLanguage) -> String {
-        lang == .vi ? "Đang gọi cả đội…" : "Bringing the team together…"
+        lang == .vi ? "Đang gọi cả đội" : "Gathering the team"
     }
 
     static func conveningDetail(_ lang: AppLanguage) -> String {
-        lang == .vi ? "Đang chọn những phòng ban sẽ tham gia. Thường mất khoảng một phút."
-                    : "Choosing which departments should weigh in. This usually takes about a minute."
+        lang == .vi ? "Đang chọn ai sẽ góp ý, thường khoảng một phút"
+                    : "Choosing who should weigh in, usually about a minute"
     }
 
     /// A step's status pill. A running step shows its elapsed time (`m:ss`) instead of a word —
@@ -93,7 +93,7 @@ enum TeamBuildCopy {
 // MARK: - Shared bits
 
 /// A department's pet, drawn the way pixel art is always drawn here: nearest-neighbour.
-private struct TeamPetAvatar: View {
+struct TeamPetAvatar: View {
     let dept: String
     var size: CGFloat = 20
 
@@ -138,33 +138,63 @@ private func elapsed(_ state: TeamStepState?, now: Date) -> TimeInterval? {
     return (state?.finishedAt ?? now).timeIntervalSince(start)
 }
 
-/// A small house button: solid for the primary action, outlined for the rest.
+/// A small house button. `.primary` is the one solid accent on a card; `.secondary` is outlined;
+/// `.quiet` is text only — Cancel and Stop, which must stay one click away without competing
+/// with the action the card is asking for.
 private struct TeamCardButton: View {
+    enum Style { case primary, secondary, quiet }
     let title: String
-    var primary = false
+    var style: Style = .secondary
     let action: () -> Void
+
+    init(title: String, primary: Bool = false, action: @escaping () -> Void) {
+        self.title = title; self.style = primary ? .primary : .secondary; self.action = action
+    }
+
+    init(title: String, style: Style, action: @escaping () -> Void) {
+        self.title = title; self.style = style; self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(CodepetTheme.inter(12, weight: .semibold))
-                .foregroundColor(primary ? .white : CodepetTheme.primaryText)
-                .padding(.horizontal, 10).frame(height: 26)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(primary ? CodepetTheme.accentPurple : Color.clear))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(primary ? Color.clear : CodepetTheme.hairline))
+                .font(CodepetTheme.inter(12.5, weight: style == .quiet ? .medium : .semibold))
+                .foregroundColor(style == .primary ? .white
+                                 : style == .quiet ? CodepetTheme.mutedText : CodepetTheme.primaryText)
+                .padding(.horizontal, style == .quiet ? 2 : 12).frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(style == .primary ? CodepetTheme.accentPurple : Color.clear))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(style == .secondary ? CodepetTheme.hairline : Color.clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
         .fixedSize()
+    }
+}
+
+/// The card's surface (6 Oct design pass): the plain surface with a hairline, not
+/// `MessageCard`'s purple tint and purple border. The accent is kept for what is live now — the
+/// running step, its clock, the one primary button — so it means something when it appears.
+private struct TeamQuietSurface<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CodepetTheme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(CodepetTheme.hairline, lineWidth: 1))
     }
 }
 
 // MARK: - Team card
 
 /// The one card a Team Build lives in, from plan to filed. Which footer it shows is decided by
-/// `run.phase`; the rows above it are the same in every phase.
+/// `run.phase`. The plan reads as stages — First / Then / Last (`TeamPlanStages`) — and the same
+/// layout carries progress once it runs, so expanding a running card shows nothing new to learn.
 struct TeamRunCard: View {
     @ObservedObject var coordinator: TeamRunCoordinator
     let onSelect: (String) -> Void
@@ -173,11 +203,13 @@ struct TeamRunCard: View {
     @Environment(\.uiLanguage) private var lang
     /// "See all N steps" on a compacted card (CP-033).
     @State private var showAllSteps = false
+    /// The project's file list, behind ••• on a finished card.
+    @State private var showFiles = false
 
     var body: some View {
         if let run = coordinator.run {
             HStack {
-                MessageCard(hue: CodepetTheme.accentPurple) { card(run) }
+                TeamQuietSurface { card(run) }
                 Spacer(minLength: 24)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -185,95 +217,137 @@ struct TeamRunCard: View {
     }
 
     private func card(_ run: TeamRun) -> some View {
-        let done = run.steps.filter { $0.status == .done }.count
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(run.plan.title)
-                    .font(CodepetTheme.inter(15, weight: .semibold))
-                    .foregroundColor(CodepetTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 6)
-                Text("\(done)/\(run.plan.steps.count)")
-                    .font(CodepetTheme.inter(11, weight: .semibold))
-                    .monospacedDigit()
+        let compact = TeamProgress.compacts(run.phase)
+        let stopped = run.phase == .cancelled
+        let finished = run.phase == .ready || run.phase == .filed
+        return VStack(alignment: .leading, spacing: 0) {
+            header(run)
+            if let sub = subline(run) {
+                Text(sub)
+                    .font(CodepetTheme.inter(13))
                     .foregroundColor(CodepetTheme.mutedText)
-            }
-            let compact = TeamProgress.compacts(run.phase)
-            let stopped = run.phase == .cancelled
-            if !run.plan.summary.isEmpty {
-                // Two lines while compacted: the brief is context, and the whole of it is one
-                // click away in the plan the founder already approved.
-                Text(run.plan.summary)
-                    .font(CodepetTheme.inter(12.5))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit((compact || stopped) && !showAllSteps ? 2 : nil)
+                    .lineLimit(showAllSteps ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 3)
             }
-            // Only the rows tick; the footer (which reads the disk on `.ready`) does not.
+            // Only the rows tick; the footer (which reads the disk on `.ready`) does not. A
+            // finished card with its steps folded has nothing here, and must not keep the gap.
+            if !finished || showAllSteps {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                VStack(alignment: .leading, spacing: 6) {
-                    if compact {
+                VStack(alignment: .leading, spacing: 10) {
+                    if compact && !finished {
                         progressSummary(run, now: context.date)
                     } else if stopped {
-                        // What happened, not six "Cancelled" pills (CP-034).
+                        // What happened, not six "Cancelled" marks (CP-034).
                         Text(TeamBuildCopy.stoppedSummary(run, lang: lang))
                             .font(CodepetTheme.inter(13))
                             .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if !(compact || stopped) || showAllSteps {
-                        ForEach(run.plan.steps) { step in
-                            row(step, run: run, now: context.date)
-                            if step.id == WorkPlan.buildStepId, run.phase == .assembling {
-                                buildActivity
-                            }
-                        }
-                    } else if run.phase == .assembling {
+                        stages(run, now: context.date)
+                    }
+                    if run.phase == .assembling, !showAllSteps {
                         buildActivity
                     }
                 }
+                .padding(.top, 14)
             }
-            if compact || stopped {
-                Button { withAnimation(.easeOut(duration: 0.15)) { showAllSteps.toggle() } } label: {
-                    Text(TeamBuildCopy.allSteps(run.plan.steps.count, expanded: showAllSteps, lang: lang)
-                         + (showAllSteps ? "" : " ›"))
-                        .font(CodepetTheme.inter(12, weight: .medium))
-                        .foregroundColor(CodepetTheme.accentPurple)
-                }
-                .buttonStyle(.plain)
-                .cursorOnHover(.pointingHand)
+            }
+            if (compact && !finished) || stopped {
+                disclosure(TeamBuildCopy.allSteps(run.plan.steps.count, expanded: showAllSteps, lang: lang))
+                    .padding(.top, 12)
             }
             footer(run)
         }
     }
 
-    /// The compacted card's head (CP-033): one segment per step, then who is working now with
-    /// its clock, and what comes next. Clicking the live line opens that step's detail.
-    @ViewBuilder private func progressSummary(_ run: TeamRun, now: Date) -> some View {
-        let p = TeamProgress(run)
-        HStack(spacing: 3) {
-            ForEach(Array(p.segments.enumerated()), id: \.offset) { _, s in
-                Capsule().fill(segmentColor(s)).frame(height: 5)
+    // MARK: Head
+
+    private func header(_ run: TeamRun) -> some View {
+        let vi = lang == .vi
+        let done = run.steps.filter { $0.status == .done }.count
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(run.plan.title)
+                .font(CodepetTheme.inter(15, weight: .semibold))
+                .foregroundColor(CodepetTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            switch run.phase {
+            case .planned:
+                EmptyView()
+            case .ready:
+                Text(vi ? "Đã xong" : "Ready")
+                    .font(CodepetTheme.inter(12.5, weight: .medium))
+                    .foregroundColor(CodepetTheme.accentTeal)
+            case .filed:
+                Text(vi ? "Đã thêm vào Thư viện" : "Added to Library")
+                    .font(CodepetTheme.inter(12.5, weight: .medium))
+                    .foregroundColor(CodepetTheme.accentTeal)
+            case .running, .assembling, .failed, .cancelled:
+                Text(vi ? "\(done)/\(run.plan.steps.count) bước" : "\(done) of \(run.plan.steps.count)")
+                    .font(CodepetTheme.inter(12.5))
+                    .monospacedDigit()
+                    .foregroundColor(CodepetTheme.mutedText)
+                if run.phase == .running || run.phase == .assembling {
+                    TeamCardButton(title: vi ? "Dừng" : "Stop", style: .quiet) { companyStore.stopTeamRun() }
+                }
             }
         }
-        .accessibilityLabel(lang == .vi ? "\(p.doneCount) trên \(p.total) bước xong"
-                                        : "\(p.doneCount) of \(p.total) steps done")
-        if let live = TeamBuildCopy.liveLine(p, lang: lang) {
+    }
+
+    /// The line under the title: the founder's own words while they decide, and what happened
+    /// once it is built. Nothing while it runs — the live line says more than a restated plan.
+    /// The planner's summary is no longer shown: it is system prose ("With no room decision, …
+    /// planned directly from the founder's request", build 8).
+    private func subline(_ run: TeamRun) -> String? {
+        switch run.phase {
+        case .planned:
+            let ask = run.request.trimmingCharacters(in: .whitespacesAndNewlines)
+            return ask.isEmpty ? nil : ask
+        case .ready, .filed:
+            return TeamBuildCopy.readySummary(run, lang: lang)
+        default:
+            return nil
+        }
+    }
+
+    // MARK: Progress
+
+    /// The compacted card's head (CP-033): a thin bar, who is working now with its clock, and what
+    /// comes next. Clicking the live line opens that step's detail.
+    @ViewBuilder private func progressSummary(_ run: TeamRun, now: Date) -> some View {
+        let p = TeamProgress(run)
+        Capsule()
+            .fill(CodepetTheme.mutedText.opacity(0.18))
+            .frame(height: 3)
+            .overlay(alignment: .leading) {
+                GeometryReader { g in
+                    Capsule().fill(CodepetTheme.accentPurple)
+                        .frame(width: max(6, g.size.width * CGFloat(p.doneCount) / CGFloat(max(1, p.total))))
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(lang == .vi ? "\(p.doneCount) trên \(p.total) bước xong"
+                                            : "\(p.doneCount) of \(p.total) steps done")
+        if !p.current.isEmpty {
             Button { if let s = p.current.first { onSelect(s.id) } } label: {
-                HStack(spacing: 8) {
-                    if p.current.count == 1, let s = p.current.first { TeamPetAvatar(dept: s.dept) }
-                    Text(live)
-                        .font(CodepetTheme.inter(13))
+                HStack(spacing: 10) {
+                    TeamPulseDot()
+                    liveText(p)
+                        .font(CodepetTheme.inter(13.5))
                         .foregroundColor(CodepetTheme.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 6)
                     if p.current.count == 1, let s = p.current.first {
-                        TeamStatusPill(status: .running,
-                                       text: TeamBuildCopy.status(.running, elapsed: elapsed(run.state(s.id), now: now),
-                                                                  lang: lang))
+                        Text(TeamBuildCopy.clock(elapsed(run.state(s.id), now: now) ?? 0))
+                            .font(CodepetTheme.inter(12.5))
+                            .monospacedDigit()
+                            .foregroundColor(CodepetTheme.accentPurple)
                     }
                 }
+                .padding(.vertical, 2)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -281,23 +355,21 @@ struct TeamRunCard: View {
         }
         if let next = TeamBuildCopy.nextLine(p, lang: lang) {
             Text(next)
-                .font(CodepetTheme.inter(11.5))
+                .font(CodepetTheme.inter(12.5))
                 .foregroundColor(CodepetTheme.mutedText)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .padding(.leading, 18)
         }
     }
 
-    private func segmentColor(_ s: TeamStepStatus) -> Color {
-        switch s {
-        case .done: return CodepetTheme.accentTeal
-        case .running: return CodepetTheme.accentPurple
-        case .failed: return Color.red
-        case .blocked, .interrupted: return CodepetTheme.accentGold
-        // Not `hairline`: on the card's purple tint a hairline-coloured segment was invisible
-        // (seen on screen, 28 Sep), so the strip read as 3 segments of a 7-step run.
-        case .waiting, .cancelled: return CodepetTheme.mutedText.opacity(0.35)
+    /// "**Engineering**  Booking flow and pickup-code spec" for one step; the counted form from
+    /// `liveLine` when several run at once.
+    private func liveText(_ p: TeamProgress) -> Text {
+        if p.current.count == 1, let s = p.current.first {
+            return Text(TeamBuildCopy.deptName(s.dept)).fontWeight(.semibold) + Text("  " + s.title)
         }
+        return Text(TeamBuildCopy.liveLine(p, lang: lang) ?? "")
     }
 
     /// The build step can run for 15 minutes; its last few actions are shown on the card itself
@@ -307,51 +379,74 @@ struct TeamRunCard: View {
         return VStack(alignment: .leading, spacing: 2) {
             if lines.isEmpty {
                 Text(lang == .vi ? "Đang đọc tài liệu của cả đội…" : "Reading the team's docs…")
-                    .font(CodepetTheme.inter(11)).foregroundColor(CodepetTheme.mutedText)
+                    .font(CodepetTheme.inter(11.5)).foregroundColor(CodepetTheme.mutedText)
             }
             ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                Text("› " + line)
+                Text(line)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(i == lines.count - 1 ? CodepetTheme.bodyText : CodepetTheme.mutedText)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
-        .padding(.leading, 28)
+        .padding(.leading, 18)
+    }
+
+    // MARK: Stages
+
+    /// The plan as First / Then / Last, each stage a column of one-line steps behind a hairline.
+    /// Before a run starts each step shows its pet; once it runs, its status mark.
+    private func stages(_ run: TeamRun, now: Date) -> some View {
+        let groups = TeamPlanStages.group(run.plan)
+        return VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { i, steps in
+                HStack(alignment: .top, spacing: 10) {
+                    if let label = TeamPlanStages.label(i, of: groups.count, lang: lang) {
+                        Text(label.uppercased())
+                            .font(CodepetTheme.inter(10, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .frame(width: 50, alignment: .leading)
+                            .padding(.top, 5)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(steps) { step in row(step, run: run, now: now) }
+                    }
+                    .padding(.leading, 12)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(CodepetTheme.hairline).frame(width: 1)
+                    }
+                }
+            }
+        }
     }
 
     private func row(_ step: WorkStep, run: TeamRun, now: Date) -> some View {
         let state = run.state(step.id)
         let status = state?.status ?? .waiting
-        let deps = TeamBuildCopy.dependencyNames(step, in: run.plan)
+        let before = run.phase == .planned
         return Button { onSelect(step.id) } label: {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .center, spacing: 8) {
-                    TeamPetAvatar(dept: step.dept)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(TeamBuildCopy.deptName(step.dept))
-                            .font(CodepetTheme.inter(11, weight: .semibold))
-                            .foregroundColor(CodepetTheme.mutedText)
-                        Text(step.title)
-                            .font(CodepetTheme.inter(13))
-                            .foregroundColor(CodepetTheme.primaryText)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
+                HStack(alignment: .center, spacing: 10) {
+                    if before {
+                        TeamPetAvatar(dept: step.dept, size: 18)
+                    } else {
+                        statusMark(status).frame(width: 18, height: 18)
                     }
+                    (Text(step.title)
+                        .font(CodepetTheme.inter(13.5, weight: status == .running ? .medium : .regular))
+                        .foregroundColor(titleColor(status, before: before))
+                     + Text("  " + TeamBuildCopy.deptName(step.dept))
+                        .font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                     Spacer(minLength: 6)
-                    TeamStatusPill(status: status,
-                                   text: TeamBuildCopy.status(status, elapsed: elapsed(state, now: now),
-                                                              lang: lang))
+                    trailing(status, state: state, now: now)
                 }
                 if case .failed(let reason) = status {
                     Text(reason)
-                        .font(CodepetTheme.inter(11))
+                        .font(CodepetTheme.inter(11.5))
                         .foregroundColor(Color.red)
-                        .padding(.leading, 28)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if !deps.isEmpty, status == .waiting || status == .blocked {
-                    Text(TeamBuildCopy.waitsFor(deps, lang: lang))
-                        .font(CodepetTheme.inter(11))
-                        .foregroundColor(CodepetTheme.mutedText)
                         .padding(.leading, 28)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -363,27 +458,82 @@ struct TeamRunCard: View {
         .hoverAffordance(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private func titleColor(_ s: TeamStepStatus, before: Bool) -> Color {
+        if before { return CodepetTheme.primaryText }
+        switch s {
+        case .running, .failed, .blocked, .interrupted: return CodepetTheme.primaryText
+        case .done: return CodepetTheme.bodyText
+        case .waiting, .cancelled: return CodepetTheme.mutedText
+        }
+    }
+
+    @ViewBuilder private func statusMark(_ s: TeamStepStatus) -> some View {
+        switch s {
+        case .done:
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(CodepetTheme.accentTeal)
+        case .running:
+            TeamPulseDot()
+        case .failed:
+            Image(systemName: "exclamationmark").font(.system(size: 11, weight: .bold)).foregroundColor(.red)
+        case .blocked, .interrupted:
+            Image(systemName: "pause.fill").font(.system(size: 8)).foregroundColor(CodepetTheme.accentGold)
+        case .waiting, .cancelled:
+            Circle().fill(CodepetTheme.mutedText.opacity(0.5)).frame(width: 4, height: 4)
+        }
+    }
+
+    /// Time for a step that has some — accent while it runs, muted once done — and a word only
+    /// where a word is news (failed, blocked, interrupted). Waiting says nothing: before this,
+    /// six identical "Waiting" pills said it six times.
+    @ViewBuilder private func trailing(_ s: TeamStepStatus, state: TeamStepState?, now: Date) -> some View {
+        switch s {
+        case .running, .done:
+            if let t = elapsed(state, now: now) {
+                Text(TeamBuildCopy.clock(t))
+                    .font(CodepetTheme.inter(12))
+                    .monospacedDigit()
+                    .foregroundColor(s == .running ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+            }
+        case .failed, .blocked, .interrupted:
+            TeamStatusPill(status: s, text: TeamBuildCopy.status(s, elapsed: nil, lang: lang))
+        case .waiting, .cancelled:
+            EmptyView()
+        }
+    }
+
+    private func disclosure(_ title: String) -> some View {
+        Button { withAnimation(.easeOut(duration: 0.15)) { showAllSteps.toggle() } } label: {
+            Text(title)
+                .font(CodepetTheme.inter(12.5, weight: .medium))
+                .foregroundColor(CodepetTheme.mutedText)
+                .underline(color: CodepetTheme.hairline)
+        }
+        .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
+    }
+
+    // MARK: Footer
+
     @ViewBuilder private func footer(_ run: TeamRun) -> some View {
         let vi = lang == .vi
         let interrupted = run.steps.contains { $0.status == .interrupted }
         switch run.phase {
         case .planned:
-            VStack(alignment: .leading, spacing: 8) {
+            footerRow {
                 Text(vi ? "\(run.plan.steps.count) bước · chạy trên gói Claude của bạn"
                         : "\(run.plan.steps.count) steps · runs on your Claude plan")
-                    .font(CodepetTheme.inter(11.5))
+                    .font(CodepetTheme.inter(12))
                     .foregroundColor(CodepetTheme.mutedText)
-                HStack(spacing: 8) {
-                    TeamCardButton(title: vi ? "Bắt đầu" : "Go", primary: true) {
-                        Task { await companyStore.confirmTeamPlan(language: lang) }
-                    }
-                    TeamCardButton(title: vi ? "Huỷ" : "Cancel") { companyStore.cancelTeamPlan() }
+                Spacer(minLength: 8)
+                TeamCardButton(title: vi ? "Huỷ" : "Cancel", style: .quiet) { companyStore.cancelTeamPlan() }
+                TeamCardButton(title: vi ? "Bắt đầu làm" : "Start building", primary: true) {
+                    Task { await companyStore.confirmTeamPlan(language: lang) }
                 }
             }
         case .running, .assembling:
-            HStack(spacing: 8) {
-                if interrupted { continueButton }
-                TeamCardButton(title: vi ? "Dừng" : "Stop") { companyStore.stopTeamRun() }
+            // Stop lives in the header; only an interrupted run needs a button here.
+            if interrupted {
+                HStack(spacing: 8) { continueButton }.padding(.top, 14)
             }
         case .failed:
             WrapLayout(spacing: 8, rowSpacing: 8) {
@@ -397,20 +547,16 @@ struct TeamRunCard: View {
                     }
                 }
                 if interrupted { continueButton }
-                TeamCardButton(title: vi ? "Dừng" : "Stop") { companyStore.stopTeamRun() }
+                TeamCardButton(title: vi ? "Dừng" : "Stop", style: .quiet) { companyStore.stopTeamRun() }
             }
+            .padding(.top, 14)
         case .ready:
-            if let path = run.projectPath { readyFooter(path) }
+            if let path = run.projectPath { finishedFooter(path, approved: false) }
         case .filed:
             // The project is the deliverable, so filing it must not take away the way into it —
             // before this, the only route back was Library ▸ Engineering ▸ the entry ▸ Finder.
-            VStack(alignment: .leading, spacing: 8) {
-                Label(vi ? "Đã thêm vào Thư viện" : "Added to Library", systemImage: "checkmark.circle.fill")
-                    .font(CodepetTheme.inter(12, weight: .semibold))
-                    .foregroundColor(CodepetTheme.accentTeal)
-                if let path = run.projectPath, FileManager.default.fileExists(atPath: path) {
-                    WrapLayout(spacing: 8, rowSpacing: 8) { projectButtons(path) }
-                }
+            if let path = run.projectPath, FileManager.default.fileExists(atPath: path) {
+                finishedFooter(path, approved: true)
             }
         case .cancelled:
             HStack(spacing: 8) {
@@ -419,7 +565,16 @@ struct TeamRunCard: View {
                     Task { await companyStore.discardTeamRun() }
                 }
             }
+            .padding(.top, 14)
         }
+    }
+
+    private func footerRow<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+            HStack(spacing: 14) { content() }.padding(.top, 12)
+        }
+        .padding(.top, 16)
     }
 
     private var continueButton: some View {
@@ -428,55 +583,87 @@ struct TeamRunCard: View {
         }
     }
 
-    private func readyFooter(_ path: String) -> some View {
+    /// A finished run leads with seeing the page (founder decision, 6 Oct), Approve beside it until
+    /// it is filed. Finder, Claude Code and the raw file list are one menu away — the build-8 card
+    /// printed the whole tree, `node_modules/` and `tsconfig.json` included, above four equal
+    /// buttons.
+    private func finishedFooter(_ path: String, approved: Bool) -> some View {
         let vi = lang == .vi
-        return VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Self.files(at: path), id: \.self) { name in
-                    Text(name)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(CodepetTheme.bodyText)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+        let url = URL(fileURLWithPath: path)
+        let index = url.appendingPathComponent("index.html")
+        let primary = TeamReadyAction.primary(isNodeProject: TeamProjectLauncher.isNodeProject(path),
+                                              hasIndexHTML: FileManager.default.fileExists(atPath: index.path))
+        return VStack(alignment: .leading, spacing: 10) {
+            if showFiles { fileList(path).padding(.top, 14) }
+            footerRow {
+                disclosure(showAllSteps ? TeamBuildCopy.allSteps(0, expanded: true, lang: lang)
+                                        : (vi ? "Xem từng phòng ban đã làm gì" : "See what each department made"))
+                Spacer(minLength: 8)
+                Menu {
+                    Button(vi ? "Mở trong Finder" : "Open in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }
+                    Button(vi ? "Mở bằng Claude Code" : "Open with Claude Code") {
+                        NSWorkspace.shared.open([url],
+                                                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                                configuration: .init())
+                    }
+                    Divider()
+                    Button(showFiles ? (vi ? "Ẩn danh sách tệp" : "Hide files") : (vi ? "Xem danh sách tệp" : "Show files")) {
+                        withAnimation(.easeOut(duration: 0.15)) { showFiles.toggle() }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(vi ? "Thêm" : "More")
+                if !approved, primary != .approve {
+                    TeamCardButton(title: vi ? "Duyệt" : "Approve") {
+                        Task { await companyStore.approveTeamRun() }
+                    }
+                }
+                switch primary {
+                case .runDev:
+                    TeamCardButton(title: vi ? "Mở trang" : "Open the page", primary: true) { TeamProjectLauncher.runDev(path) }
+                case .openIndex:
+                    TeamCardButton(title: vi ? "Mở trang" : "Open the page", primary: true) { NSWorkspace.shared.open(index) }
+                case .approve:
+                    if !approved {
+                        TeamCardButton(title: vi ? "Duyệt" : "Approve", primary: true) {
+                            Task { await companyStore.approveTeamRun() }
+                        }
+                    }
                 }
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CodepetTheme.surface))
-            WrapLayout(spacing: 8, rowSpacing: 8) {
-                TeamCardButton(title: vi ? "Duyệt" : "Approve", primary: true) {
-                    Task { await companyStore.approveTeamRun() }
-                }
-                projectButtons(path)
-            }
-            if let note = TeamBuildCopy.readyNote(
+            if !approved, let note = TeamBuildCopy.readyNote(
                 hasApproved: companyStore.company.firstApprovalAt != nil, lang) {
                 Text(note)
-                    .font(CodepetTheme.inter(11.5))
+                    .font(CodepetTheme.inter(12))
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    /// Open / run the project on disk — the same buttons before and after Approve.
-    @ViewBuilder private func projectButtons(_ path: String) -> some View {
-        let vi = lang == .vi
-        let url = URL(fileURLWithPath: path)
-        let index = url.appendingPathComponent("index.html")
-        if TeamProjectLauncher.isNodeProject(path) {
-            TeamCardButton(title: vi ? "Chạy thử" : "Run it") { TeamProjectLauncher.runDev(path) }
-        } else if FileManager.default.fileExists(atPath: index.path) {
-            TeamCardButton(title: vi ? "Xem trên trình duyệt" : "View in browser") { NSWorkspace.shared.open(index) }
+    private func fileList(_ path: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Self.files(at: path), id: \.self) { name in
+                Text(name)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
-        TeamCardButton(title: vi ? "Mở trong Finder" : "Open in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-        TeamCardButton(title: vi ? "Mở bằng Claude Code" : "Open with Claude Code") {
-            NSWorkspace.shared.open([url],
-                                    withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                                    configuration: .init())
-        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(CodepetTheme.hairline.opacity(0.35)))
     }
 
     /// The department contributions (`docs/…`) first, then what Claude Code wrote at the top

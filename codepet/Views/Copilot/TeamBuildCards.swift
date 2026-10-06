@@ -511,14 +511,23 @@ enum TeamProjectLauncher {
     ///
     /// PATH is the app's own augmented PATH (`LoginShellRunner.spawnEnvironment`): a script
     /// shell does not read `.zshrc`, which is where nvm/fnm put node.
-    static func script(for path: String, pathVar: String = LoginShellRunner.spawnEnvironment()["PATH"] ?? "") -> String {
+    ///
+    /// The script picks the port, not Next.js: with 3000 taken, `next dev` quietly moves to 3001,
+    /// and a hard-coded `open http://localhost:3000` then showed whatever else held 3000 (build 9,
+    /// 6 Oct — an old landing-page dev server). The first free port from `startPort` is passed with
+    /// `-p`, and the page opens once something answers on it, rather than after a fixed 4 s.
+    static func script(for path: String, pathVar: String = LoginShellRunner.spawnEnvironment()["PATH"] ?? "",
+                       startPort: Int = 3000) -> String {
         """
         #!/bin/zsh
         export PATH=\(quote(pathVar)):$PATH
         cd \(quote(path)) || exit 1
         [ -d node_modules ] || npm install --no-audit --no-fund || exit 1
-        (sleep 4; open http://localhost:3000) &
-        exec npm run dev
+        PORT=\(startPort)
+        while nc -z localhost $PORT 2>/dev/null; do PORT=$((PORT + 1)); done
+        (for i in {1..120}; do nc -z localhost $PORT 2>/dev/null && break; sleep 1; done
+         open "http://localhost:$PORT") &
+        exec npm run dev -- -p $PORT
         """
     }
 

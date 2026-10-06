@@ -138,7 +138,7 @@ enum TeamBuildPrompt {
         - **Engineering** — built the project
 
         ## How to run
-        If there is a package.json: `npm install`, then `npm run dev` and open http://localhost:3000.
+        If there is a package.json: `npm install`, then `npm run dev` and open the local address it prints.
         Otherwise open this folder with Claude Code and ask it to set the project up.
 
         ## Next steps

@@ -49,6 +49,8 @@ struct EnvironmentView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
     @Environment(\.colorScheme) private var scheme
+    /// "See what's planned" opened: the unbuilt rows show again in each category.
+    @State private var showPlanned = false
 
     private var isDark: Bool { scheme == .dark }
     private var enabled: Set<String> { companyStore.company.enabledTools }
@@ -311,15 +313,45 @@ struct EnvironmentView: View {
 
     // MARK: Browse all — web `.ebrowse` grid of `.ereg` groups
 
+    /// Only what can be used today, unless "See what's planned" is open (`ToolkitPlanned`). A
+    /// category with nothing usable yet (Agents, today) appears only with the planned list open.
     private var browseAll: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 20)],
-                  alignment: .leading, spacing: 20) {
-            ForEach(ToolCategory.allCases) { cat in categorySection(cat) }
+        let planned = ToolkitPlanned.split(Toolkit.catalog, builtSkills: companyStore.builtSkills).planned
+        return VStack(alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 20)],
+                      alignment: .leading, spacing: 20) {
+                ForEach(ToolCategory.allCases.filter { !rows(in: $0).isEmpty }) { cat in categorySection(cat) }
+            }
+            if let line = ToolkitPlanned.comingLater(planned.map(\.name), lang: lang) {
+                HStack(spacing: 10) {
+                    if !showPlanned {
+                        Text(line)
+                            .font(CodepetTheme.inter(12.5))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
+                    Button { withAnimation(.easeOut(duration: 0.15)) { showPlanned.toggle() } } label: {
+                        Text(showPlanned ? (lang == .vi ? "Ẩn các mục sắp có" : "Hide what's planned")
+                                         : (lang == .vi ? "Xem các mục sắp có" : "See what's planned"))
+                            .font(CodepetTheme.inter(12.5, weight: .medium))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .underline(color: CodepetTheme.hairline)
+                    }
+                    .buttonStyle(.plain)
+                    .cursorOnHover(.pointingHand)
+                }
+                .padding(.horizontal, 4)
+            }
         }
     }
 
-    private func categorySection(_ cat: ToolCategory) -> some View {
+    /// The rows a category shows: what is built, plus what is planned when the founder asked.
+    private func rows(in cat: ToolCategory) -> [ToolItem] {
         let items = Toolkit.items(in: cat)
+        return showPlanned ? items : ToolkitPlanned.split(items, builtSkills: companyStore.builtSkills).available
+    }
+
+    private func categorySection(_ cat: ToolCategory) -> some View {
+        let items = rows(in: cat)
         let onCount = items.filter { isOn($0) }.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {   // .ereg-h

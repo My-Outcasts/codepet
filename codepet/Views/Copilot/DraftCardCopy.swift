@@ -133,3 +133,20 @@ enum DraftCardCopy {
         }
     }
 }
+
+// MARK: - 6 Oct design pass (mock approved)
+
+extension DraftCardCopy {
+    /// One summary per card: the clamped body excerpt only when there is no structured preview.
+    static func showsProsePreview(hasStructuredPreview: Bool) -> Bool { !hasStructuredPreview }
+
+    /// The folded run log's link.
+    static func howMadeLink(who: String, steps: Int, lang: AppLanguage) -> String {
+        lang == .vi ? "\(who) đã làm thế nào · \(steps) bước"
+                    : "How \(who) made it · \(steps) step\(steps == 1 ? "" : "s")"
+    }
+
+    /// Shorter / More detail / Punchier, in one menu instead of a row of chips that slid under
+    /// the composer.
+    static func reviseMenu(_ lang: AppLanguage) -> String { lang == .vi ? "Chỉnh lại" : "Revise" }
+}

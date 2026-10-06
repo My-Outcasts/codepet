@@ -186,3 +186,31 @@ extension ToolItem {
         }
     }
 }
+
+/// Environment's Browse all, 6 Oct design pass (mock approved): what a founder can use today, and
+/// what is planned. A new company saw nine "Not built yet" rows across Skills, Connectors and
+/// Agents — the roadmap shown as a list of things that do not work. They fold into one line now,
+/// with the full list one click away ("See what's planned"), so nothing is hidden for good.
+enum ToolkitPlanned {
+    static func split(_ items: [ToolItem], builtSkills: Set<String>) -> (available: [ToolItem], planned: [ToolItem]) {
+        (items.filter { $0.isBuilt(builtSkills: builtSkills) }, items.filter { !$0.isBuilt(builtSkills: builtSkills) })
+    }
+
+    /// "Coming later: Notion, Figma, Slack and 6 more." Nil when nothing is planned.
+    static func comingLater(_ names: [String], lang: AppLanguage) -> String? {
+        guard !names.isEmpty else { return nil }
+        let vi = lang == .vi
+        let and = vi ? " và " : " and "
+        let shown = Array(names.prefix(3))
+        let rest = names.count - shown.count
+        let list: String
+        if rest > 0 {
+            list = shown.joined(separator: ", ") + and + (vi ? "\(rest) mục khác" : "\(rest) more")
+        } else if shown.count > 1 {
+            list = shown.dropLast().joined(separator: ", ") + and + shown.last!
+        } else {
+            list = shown[0]
+        }
+        return (vi ? "Sắp có: " : "Coming later: ") + list + "."
+    }
+}

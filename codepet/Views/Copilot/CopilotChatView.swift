@@ -2768,40 +2768,37 @@ struct CopilotBubble: View {
     private func whatItDid(_ steps: [ExecStep]) -> some View {
         let who = CodepetBrand.speakerName(companionId: message.companionId)
         return VStack(alignment: .leading, spacing: 6) {
+            // A quiet link since the 6 Oct design pass, not a bordered pill: the log is how the
+            // draft was made, background to the decision the card asks for.
             Button { withAnimation(.easeInOut(duration: 0.15)) { showSteps.toggle() } } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: showSteps ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                    Text(lang == .vi ? "\(who) đã làm gì · \(steps.count) bước"
-                                     : "What \(who) did · \(steps.count) steps")
-                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
-                }
-                .foregroundColor(CodepetTheme.mutedText)
-                .padding(.horizontal, 11).padding(.vertical, 6)
-                .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
-                .hoverAffordance(Capsule())
+                Text(showSteps ? (lang == .vi ? "Ẩn các bước" : "Hide the steps")
+                               : DraftCardCopy.howMadeLink(who: who, steps: steps.count, lang: lang))
+                    .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .medium))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .underline(color: CodepetTheme.hairline)
             }
             .buttonStyle(.plain)
+            .cursorOnHover(.pointingHand)
             if showSteps {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(steps) { step in
-                        let isCheckpoint = step.kind == .checkpoint
                         HStack(alignment: .top, spacing: 6) {
                             if step.kind == .mono {
                                 Text("›").font(.system(size: 10, weight: .bold, design: .monospaced))
                                     .foregroundColor(CodepetTheme.mutedText)
                                     .frame(width: 10, height: 12)
                             } else {
-                                Image(systemName: isCheckpoint ? "circle.fill" : "checkmark")
-                                    .font(.system(size: isCheckpoint ? 6 : 8, weight: .bold))
-                                    .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.accentPurple)
+                                // A checkpoint is a normal step; gold made it read as a warning.
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(CodepetTheme.accentPurple)
                                     .frame(width: 10, height: 12)
                             }
                             Text(step.label)
                                 .font(step.kind == .mono
                                       ? .system(size: DraftCardMetrics.chip, design: .monospaced)
                                       : .pixelSystem(size: DraftCardMetrics.chip))
-                                .foregroundColor(isCheckpoint ? CodepetTheme.accentGold : CodepetTheme.mutedText)
+                                .foregroundColor(CodepetTheme.mutedText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -2820,20 +2817,35 @@ struct CopilotBubble: View {
                     // had a bare `contentShape` and no cursor. The affordance was inverted
                     // (founder, Aug 6), so the block now gets the same hover fill the pills get,
                     // plus the pointing hand.
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Who made it leads, small: the pet and "Support · Doc", as on the Team Build
+                        // and meeting cards (6 Oct design pass). The purple kind icon it replaces
+                        // was the card's only coloured thing above the fold.
                         HStack(spacing: 7) {
-                            Image(systemName: d.kind.icon).foregroundColor(CodepetTheme.accentPurple)
-                            Text(d.title)
-                                .font(.pixelSystem(size: DraftCardMetrics.title, weight: .semibold))
-                                .foregroundColor(CodepetTheme.primaryText)
+                            if let id = message.companionId, let pet = PetCharacter.all[id] {
+                                Image(pet.imageName).resizable().interpolation(.none)
+                                    .aspectRatio(contentMode: .fit).frame(width: 16, height: 16)
+                            }
+                            Text([message.deptName, d.kind.label(lang)].compactMap { $0 }.joined(separator: " · "))
+                                .font(.pixelSystem(size: 11.5))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .lineLimit(1)
                         }
-                        // Markdown syntax used to reach the founder verbatim — see `DraftPreview`.
-                        Text(DraftPreview.plain(d.body, title: d.title))
-                            .font(.pixelSystem(size: DraftCardMetrics.body))
-                            .foregroundColor(CodepetTheme.mutedText)
-                            .lineSpacing(ChatRhythm.lineSpacing)
-                            .lineLimit(DraftCardMetrics.previewLines)
+                        Text(d.title)
+                            .font(.pixelSystem(size: DraftCardMetrics.title, weight: .semibold))
+                            .foregroundColor(CodepetTheme.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
+                        // ONE summary: the body excerpt only when no structured preview follows,
+                        // which already leads with the recommendation (`showsProsePreview`).
+                        // Markdown syntax used to reach the founder verbatim — see `DraftPreview`.
+                        if DraftCardCopy.showsProsePreview(hasStructuredPreview: DraftPayloadPreview.hasStructuredPreview(d)) {
+                            Text(DraftPreview.plain(d.body, title: d.title))
+                                .font(.pixelSystem(size: DraftCardMetrics.body))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .lineSpacing(ChatRhythm.lineSpacing)
+                                .lineLimit(DraftCardMetrics.previewLines)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(6)
@@ -2928,61 +2940,62 @@ struct CopilotBubble: View {
                         // pills read as one undifferentiated cluster with no answer to "which of
                         // these is the point?" (founder, Aug 6). The gap and the rule below carry
                         // that hierarchy; Approve carries it in weight.
-                        HStack(spacing: 9) {
-                            Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
-                                Text(lang == .vi ? "Duyệt" : "Approve")
-                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 16).padding(.vertical, 7)
-                                    .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
-                            }.buttonStyle(.plain)
-                            Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
-                                Text(lang == .vi ? "Làm lại" : "Redo")
-                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
-                                    .foregroundColor(CodepetTheme.bodyText)
-                                    .padding(.horizontal, 16).padding(.vertical, 7)
-                                    .background(Capsule().stroke(CodepetTheme.hairline))
-                                    .hoverAffordance(Capsule())
-                            }.buttonStyle(.plain)
-                            Button { confirmDiscard = true } label: {
-                                Text(DraftCardCopy.discardButton(lang))
-                                    .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
-                                    .foregroundColor(CodepetTheme.mutedText)
-                                    .padding(.horizontal, 12).padding(.vertical, 7)
-                                    .hoverAffordance(Capsule())
-                            }.buttonStyle(.plain)
-                            .confirmationDialog(DraftCardCopy.discardQuestion(lang), isPresented: $confirmDiscard) {
-                                Button(DraftCardCopy.discardButton(lang), role: .destructive) {
-                                    Task { await companyStore.discardDraft(messageId: message.id) }
+                        // One row, quiet on the left and the decision on the right (6 Oct design
+                        // pass): Discard and the Revise menu, then Redo and Approve. The three
+                        // revise chips used to be a second row that slid under the composer; they
+                        // are the same one-tap targeted re-runs, now in one menu.
+                        VStack(alignment: .leading, spacing: 0) {
+                            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                            HStack(spacing: 14) {
+                                Button { confirmDiscard = true } label: {
+                                    Text(DraftCardCopy.discardButton(lang))
+                                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .medium))
+                                        .foregroundColor(CodepetTheme.mutedText)
                                 }
-                            } message: {
-                                Text(DraftCardCopy.discardExplainer(lang))
+                                .buttonStyle(.plain)
+                                .cursorOnHover(.pointingHand)
+                                .confirmationDialog(DraftCardCopy.discardQuestion(lang), isPresented: $confirmDiscard) {
+                                    Button(DraftCardCopy.discardButton(lang), role: .destructive) {
+                                        Task { await companyStore.discardDraft(messageId: message.id) }
+                                    }
+                                } message: {
+                                    Text(DraftCardCopy.discardExplainer(lang))
+                                }
+                                Menu {
+                                    ForEach(ReviseKind.allCases, id: \.self) { kind in
+                                        Button(kind.label(lang)) {
+                                            Task { await companyStore.redoDraft(messageId: message.id, language: lang,
+                                                                                 reviseNote: kind.note(lang)) }
+                                        }
+                                    }
+                                } label: {
+                                    Text(DraftCardCopy.reviseMenu(lang) + " ▾")
+                                        .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .medium))
+                                        .foregroundColor(CodepetTheme.mutedText)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                                Spacer(minLength: 8)
+                                Button { Task { await companyStore.redoDraft(messageId: message.id, language: lang) } } label: {
+                                    Text(lang == .vi ? "Làm lại" : "Redo")
+                                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                                        .foregroundColor(CodepetTheme.bodyText)
+                                        .padding(.horizontal, 14).padding(.vertical, 6)
+                                        .background(Capsule().stroke(CodepetTheme.hairline))
+                                        .hoverAffordance(Capsule())
+                                }.buttonStyle(.plain)
+                                Button { Task { await companyStore.approveDraft(messageId: message.id) } } label: {
+                                    Text(lang == .vi ? "Duyệt" : "Approve")
+                                        .font(.pixelSystem(size: DraftCardMetrics.action, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 6)
+                                        .background(Capsule().fill(CodepetTheme.accentPurple)).hoverAffordance(Capsule())
+                                }.buttonStyle(.plain)
                             }
+                            .padding(.top, 12)
                         }
                         .padding(.top, DraftCardMetrics.decideGap - DraftCardMetrics.blockGap)
-
-                        // Revise chips: one-tap re-runs of THIS draft with a targeted
-                        // instruction (vs. Redo's blind re-run). Same visibility gate as
-                        // Redo — hidden once approved.
-                        VStack(alignment: .leading, spacing: 9) {
-                            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-                            HStack(spacing: 7) {
-                                ForEach(ReviseKind.allCases, id: \.self) { kind in
-                                    Button {
-                                        Task { await companyStore.redoDraft(messageId: message.id, language: lang,
-                                                                             reviseNote: kind.note(lang)) }
-                                    } label: {
-                                        Text(kind.label(lang))
-                                            .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
-                                            .foregroundColor(CodepetTheme.mutedText)
-                                            .padding(.horizontal, 11).padding(.vertical, 5)
-                                            .background(Capsule().stroke(CodepetTheme.hairline))
-                                            .hoverAffordance(Capsule())
-                                    }.buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .padding(.top, 2)
                     }
             }
             .padding(DraftCardMetrics.padding)

@@ -18,7 +18,9 @@ enum TaskColumn: CaseIterable {
     func label(_ lang: AppLanguage) -> String {
         switch self {
         case .upNext:   return lang == .vi ? "Tiếp theo" : "Up next"
-        case .awaiting: return lang == .vi ? "Chờ bạn duyệt" : "Awaiting your approval"
+        // "To approve", not "Awaiting your approval": the long form wrapped the lane header
+        // (6 Oct design pass).
+        case .awaiting: return lang == .vi ? "Chờ duyệt" : "To approve"
         case .yourMove: return lang == .vi ? "Lượt của bạn" : "Your move"
         case .done:     return lang == .vi ? "Xong" : "Done"
         }
@@ -53,6 +55,54 @@ enum TaskColumn: CaseIterable {
     }
 }
 
+/// The board's words and limits (6 Oct design pass, mock approved). Pure so the rules are pinned.
+enum TaskBoard {
+    /// Cards a lane shows before "N more".
+    static let cap = 6
+
+    static func visible(count: Int, expanded: Bool) -> Int { expanded ? count : min(count, cap) }
+
+    static func moreLabel(hidden: Int, lang: AppLanguage) -> String {
+        lang == .vi ? "Thêm \(hidden)" : "\(hidden) more"
+    }
+
+    /// What a waiting card is waiting for, in words: its first unfinished dependency by title, in
+    /// `dependsOn` order, plus how many more. Replaces the "Needs earlier steps" pill, which said
+    /// THAT a card was blocked on every one of 16 cards and never by WHAT. A dependency id that is
+    /// not on the board is not something to wait for, so it is skipped rather than counted.
+    static func waitingLine(_ task: RoadmapTask, in tasks: [RoadmapTask], lang: AppLanguage) -> String? {
+        let open = task.dependsOn.compactMap { id in tasks.first { $0.id == id } }.filter { !$0.done }
+        guard let first = open.first else { return nil }
+        let name = "\u{201C}\(first.title)\u{201D}"
+        let rest = open.count - 1
+        if rest == 0 { return lang == .vi ? "Sau \(name)" : "After \(name)" }
+        return lang == .vi ? "Sau \(name) và \(rest) bước khác" : "After \(name) and \(rest) more"
+    }
+
+    /// An empty lane says what goes there, not "Nothing here".
+    static func emptyText(_ col: TaskColumn, lang: AppLanguage) -> String {
+        let vi = lang == .vi
+        switch col {
+        case .upNext:   return vi ? "Chưa có việc nào" : "Nothing queued"
+        case .awaiting: return vi ? "Bản nháp sẽ nằm ở đây chờ bạn duyệt" : "Drafts land here for your OK"
+        case .yourMove: return vi ? "Không có gì cần bạn lúc này" : "Nothing needs you right now"
+        case .done:     return vi ? "Chưa có gì xong" : "Nothing finished yet"
+        }
+    }
+
+    /// The action a card leads to, shown on the card so it reads as something to press. Nil for a
+    /// waiting card, which has nothing to press.
+    static func actionLabel(_ status: TaskStatus, lang: AppLanguage) -> String? {
+        let vi = lang == .vi
+        switch status {
+        case .needsYou:      return vi ? "Hướng dẫn mình" : "Walk me through it"
+        case .codepetCanDo:  return vi ? "Chạy" : "Run it"
+        case .needsApproval: return vi ? "Xem bản nháp" : "Review the draft"
+        case .blocked, .done: return nil
+        }
+    }
+}
+
 struct TasksView: View {
     @EnvironmentObject var companyStore: CompanyStore
     @Environment(\.uiLanguage) private var lang
@@ -61,6 +111,8 @@ struct TasksView: View {
     /// The awaiting-approval task whose draft is open in the preview sheet. Set by a
     /// tap on an Awaiting card; the sheet shows the draft + Revise/Approve controls.
     @State private var previewTask: RoadmapTask?
+    /// Lanes the founder opened past `TaskBoard.cap`.
+    @State private var expanded: Set<String> = []
 
 
     var body: some View {
@@ -95,48 +147,68 @@ struct TasksView: View {
         companyStore.company.tasks.filter { TaskColumn.column(for: $0, in: companyStore.company.tasks) == col }
     }
 
-    /// One swimlane — web `.kb-col`: a tinted, hairlined 14pt-radius column with a
-    /// fixed head (dot + uppercase label + count badge) over its own scrolling list.
+    /// One lane. Since the 6 Oct design pass the lane keeps its colour but softly: a faint wash and
+    /// a thin edge of its hue instead of the full tint and line, a full-colour dot by its name, and
+    /// the count as plain text on the right instead of a filled badge.
     private func column(_ col: TaskColumn) -> some View {
         let items = tasks(in: col)
+        let key = col.label(.en)
+        let shown = TaskBoard.visible(count: items.count, expanded: expanded.contains(key))
         return VStack(alignment: .leading, spacing: 0) {
-            // web `.kb-colhead { padding: 13px 14px 11px; gap: 8px }`
             HStack(spacing: 8) {
-                Circle().fill(col.dot).frame(width: 8, height: 8)
+                Circle().fill(col.dot).frame(width: 7, height: 7)
                 Text(col.label(lang).uppercased())
-                    .font(CodepetTheme.inter(11.5, weight: .semibold))
-                    .tracking(0.4)
+                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .tracking(0.8)
                     .foregroundColor(CodepetTheme.bodyText)
                     .lineLimit(1)
-                // web `.kb-count` — white on a --t-4 pill, not plain grey text
+                Spacer(minLength: 6)
                 Text("\(items.count)")
-                    .font(CodepetTheme.inter(10.5, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 1.5)
-                    .background(Capsule().fill(CodepetTokens.faint))
-                    .fixedSize()
+                    .font(CodepetTheme.inter(11, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundColor(CodepetTheme.mutedText)
             }
-            .padding(.top, 13).padding(.horizontal, 14).padding(.bottom, 11)
+            .padding(.top, 14).padding(.horizontal, 15).padding(.bottom, 12)
 
-            // web `.kb-list { gap: 10px; padding: 2px 12px 14px; overflow-y: auto }`
             ScrollView {
-                VStack(spacing: CodepetTokens.Space.itemGap) {
+                VStack(spacing: 8) {
                     if items.isEmpty {
-                        Text(lang == .vi ? "Trống" : "Nothing here")
-                            .font(CodepetTheme.inter(12)).foregroundColor(CodepetTokens.faint)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 20)
+                        Text(TaskBoard.emptyText(col, lang: lang))
+                            .font(CodepetTheme.inter(12))
+                            .foregroundColor(col.dot.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 18).padding(.horizontal, 10)
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(col.dot.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                     } else {
-                        ForEach(items) { t in card(t) }
+                        ForEach(items.prefix(shown)) { t in card(t) }
+                        if shown < items.count || expanded.contains(key) && items.count > TaskBoard.cap {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
+                                }
+                            } label: {
+                                Text(expanded.contains(key) ? (lang == .vi ? "Thu gọn" : "Show fewer")
+                                                            : TaskBoard.moreLabel(hidden: items.count - shown, lang: lang))
+                                    .font(CodepetTheme.inter(12, weight: .medium))
+                                    .foregroundColor(CodepetTheme.mutedText)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .cursorOnHover(.pointingHand)
+                        }
                     }
                 }
-                .padding(.top, 2).padding(.horizontal, 12).padding(.bottom, 14)
+                .padding(.top, 0).padding(.horizontal, 12).padding(.bottom, 14)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(col.laneTint))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .stroke(col.laneLine, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(col.dot.opacity(scheme == .dark ? 0.06 : 0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .stroke(col.dot.opacity(scheme == .dark ? 0.16 : 0.2), lineWidth: 1))
     }
 
     private func card(_ t: RoadmapTask) -> some View {
@@ -183,61 +255,42 @@ struct TasksView: View {
         .buttonStyle(.plain))
     }
 
-    @ViewBuilder private func deptName(_ t: RoadmapTask) -> some View {
-        if let d = DepartmentCatalog.find(t.dept)?.name {
-            Text(d)
-                .font(CodepetTheme.inter(12.5, weight: .bold))
-                .foregroundColor(CodepetTheme.primaryText)
-                .lineLimit(1).fixedSize()
-        }
-    }
-
-    /// Same pattern as DepartmentDetailView's task card — a locked (`.blocked`) card must read
-    /// as locked here too, not look identical to a runnable one.
-    @ViewBuilder private func statusPill(_ t: RoadmapTask, status: TaskStatus) -> some View {
-        if !t.done {
-            Text(status.label(lang)).font(CodepetTheme.inter(11, weight: .medium))
-                .foregroundColor(taskStatusTint(status))
-                .lineLimit(1).fixedSize()
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(Capsule().fill(taskStatusTint(status).opacity(0.12)))
-        }
-    }
-
-    /// The card's contents, shared by the tappable and the blocked rendering.
-    ///
-    /// web `.kb-card { radius 12; padding 12px 13px 13px }` — the DEPARTMENT leads in
-    /// full ink (.kb-dept, 700) and the task is the supporting line (.kb-title, 500,
-    /// --t-3); native had the two reversed.
+    /// The card (6 Oct design pass): the department's pet and name small and grey, then the task in
+    /// full ink, then either what it waits for or what pressing it does. The bold department
+    /// heading and the status pill are gone — the pill said "Needs earlier steps" on 16 cards in a
+    /// row and never what they needed.
     private func cardBody(_ t: RoadmapTask, status: TaskStatus) -> some View {
-        Group {
-            // The pill shares the DEPARTMENT row, and the title gets the card's full width below
-            // it. It used to sit beside the title at `fixedSize`, so in a four-column board the
-            // title was squeezed until words broke mid-letter ("Marketin/g", "willingnes/s") —
-            // build 6 end-to-end test, bug #10.
-            VStack(alignment: .leading, spacing: 3) {
-                // Side by side when both fit; otherwise the pill drops under the name rather
-                // than truncating "Engineering" to "Engin…".
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        deptName(t)
-                        Spacer(minLength: 0)
-                        statusPill(t, status: status)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        deptName(t)
-                        statusPill(t, status: status)
-                    }
-                }
-                Text(t.title)
-                    .font(CodepetTheme.inter(12.5, weight: .medium))
+        let waiting = status == .blocked
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                if let dept = t.dept { TeamPetAvatar(dept: dept, size: 15) }
+                Text(DepartmentCatalog.find(t.dept)?.name ?? "")
+                    .font(CodepetTheme.inter(11.5))
                     .foregroundColor(CodepetTheme.mutedText)
-                    .lineSpacing(12.5 * 0.34)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12).padding(.horizontal, 13).padding(.bottom, 13)
-            .cardChrome(radius: 12, dark: scheme == .dark)
+            Text(t.title)
+                .font(CodepetTheme.inter(13))
+                .foregroundColor(waiting ? CodepetTheme.mutedText : CodepetTheme.primaryText)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            if waiting, let line = TaskBoard.waitingLine(t, in: companyStore.company.tasks, lang: lang) {
+                Text(line)
+                    .font(CodepetTheme.inter(11.5))
+                    .foregroundColor(CodepetTokens.faint)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            } else if !t.done, let action = TaskBoard.actionLabel(status, lang: lang) {
+                Text(action)
+                    .font(CodepetTheme.inter(11.5, weight: .semibold))
+                    .foregroundColor(taskStatusTint(status))
+                    .padding(.top, 8)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 11).padding(.horizontal, 12).padding(.bottom, 12)
+        .cardChrome(radius: 12, dark: scheme == .dark)
     }
 }

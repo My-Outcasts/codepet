@@ -33,6 +33,14 @@ enum ProviderConsentCopy {
             : "Building your plan uses your \(plan) plan. Allow Codepet to spend it?"
     }
 
+    /// Chat's Grant button (CP-066): a first grant to answer here, not a re-run of anything.
+    static func chatMessage(_ provider: AIProvider, lang: AppLanguage) -> String {
+        let plan = provider == .codex ? "ChatGPT" : "Claude"
+        return lang == .vi
+            ? "Trả lời ở đây sẽ dùng gói \(plan) của bạn. Cho phép Codepet dùng gói này?"
+            : "Answering here uses your \(plan) plan. Allow Codepet to spend it?"
+    }
+
     static func allow(lang: AppLanguage) -> String { lang == .vi ? "Cho phép" : "Allow" }
     static func notNow(lang: AppLanguage) -> String { lang == .vi ? "Để sau" : "Not now" }
 }

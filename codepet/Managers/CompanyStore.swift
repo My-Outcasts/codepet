@@ -754,6 +754,9 @@ final class CompanyStore: ObservableObject {
         company.brief = brief
         company.onboardedAt = Date()
         isOnboarding = false
+        // The greeting's only other call is at sign-in, before onboarding — when a new account
+        // has no roadmap, so its gate (needs tasks) skipped it and it never came (5 Oct, build 8).
+        await greetIfNeeded(language: language)
         #if DEBUG
         // The demo has been onboarded now. Without this the next hydrate — an
         // account switch, a sign-out and back in — would drop the founder at
@@ -1006,7 +1009,8 @@ final class CompanyStore: ObservableObject {
     /// during the persist/scaffold awaits discards (returns .empty), so one
     /// account's brief/tasks can't land under another's doc. Mirrors the web's
     /// scaffoldFromOnboarding; the reveal is derived from the resulting tasks.
-    func scaffoldFromOnboarding(brief: CompanyBrief, token: Int) async -> OnboardingReveal {
+    func scaffoldFromOnboarding(brief: CompanyBrief, token: Int,
+                                language: AppLanguage = .en) async -> OnboardingReveal {
         guard token == hydrationToken, !Task.isCancelled, let cid = companyId else { return .empty }
         // Enrich (fail-open, mirrors web /api/scaffold): fill summary/audience/etc
         // before planning so a founder who skipped optional fields still gets a
@@ -1020,6 +1024,9 @@ final class CompanyStore: ObservableObject {
         company.brief = enriched
         await generateRoadmap()
         guard token == hydrationToken, !Task.isCancelled else { return .empty }
+        // CP-067 lets "Start building" leave onboarding while this is still running; the
+        // roadmap that lands here is the first moment there is a move to greet her with.
+        if !isOnboarding { await greetIfNeeded(language: language) }
         return OnboardingReveal.build(tasks: company.tasks)
     }
 

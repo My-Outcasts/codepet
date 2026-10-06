@@ -312,7 +312,8 @@ struct OnboardingView: View {
         // Run the real (fail-open) scaffold in parallel; `reveal` stays nil until it
         // resolves so the step-7 gate waits for it (and "Still building…" can show).
         scaffoldTask = Task { @MainActor in
-            let r = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token)
+            let r = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token,
+                                                              language: appState.uiLanguage)
             if Task.isCancelled { return }
             reveal = r
         }
@@ -446,11 +447,24 @@ struct OnboardingView: View {
     }
     private func bigButton(_ title: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: { if enabled { action() } }) {
-            Text(title).font(CodepetTheme.body(13.5, weight: .semibold)).foregroundColor(.white)
-                .padding(.horizontal, 22).padding(.vertical, 11)
-                .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.accentPurple))
-                .opacity(enabled ? 1 : 0.38)
+            OnboardingPrimaryButtonLabel(title: title, enabled: enabled)
         }.buttonStyle(.plain).disabled(!enabled)
+    }
+}
+
+/// The onboarding footer's primary button face. CP-064: in a narrow window the Spacer beside it
+/// gave way and the label wrapped a letter per line ("C o n t i n u e"). One line, its own width.
+struct OnboardingPrimaryButtonLabel: View {
+    let title: String
+    let enabled: Bool
+    var body: some View {
+        Text(title).font(CodepetTheme.body(13.5, weight: .semibold)).foregroundColor(.white)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 22).padding(.vertical, 11)
+            .background(RoundedRectangle(cornerRadius: 10).fill(CodepetTheme.accentPurple))
+            .opacity(enabled ? 1 : 0.38)
+            .fixedSize()
     }
 }
 

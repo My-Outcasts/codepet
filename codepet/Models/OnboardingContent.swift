@@ -75,7 +75,8 @@ enum OnboardingContent {
     /// counts `step + 1` of `total` — matching the web (`OB_TOTAL`), where the cold-open
     /// is counted but renders no footer, so the first question reads "Step 2 of 9".
     static let total = 8
-    static let defaultStageIndex = 2
+    /// "Just an idea" (CP-065, founder 6 Oct): a brand-new founder was preset to "Private beta".
+    static let defaultStageIndex = 0
 
     /// Web CSS theme vars, mapped 1:1. `surface2`/`well`/`faint` alias the shared
     /// `CodepetTokens` values directly — they used to be re-declared here with their

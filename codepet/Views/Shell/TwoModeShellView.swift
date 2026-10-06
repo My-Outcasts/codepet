@@ -282,7 +282,8 @@ struct TwoModeShellView: View {
     /// 0 credits. But green means STATUS in this app — energy level, a positive
     /// delta, Product's department accent — and it is a primary action nowhere, so a
     /// mint CTA read as a control borrowed from another product. The fact survives
-    /// where it belongs, in the ceiling line: "0 credits on your own CLI".
+    /// where it belongs, in the cost line: a folder on this Mac uses the founder's own Claude
+    /// plan (`DeveloperPaneCopy.dormantCost`).
     ///
     /// The ceiling here is the *pricing* one. `no merge · no deploy · no delete ·
     /// no force-push` is the tier ceiling and belongs to the READY state, where a
@@ -291,8 +292,7 @@ struct TwoModeShellView: View {
     private var dormantDeveloper: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(lang == .vi ? "Developer cần một nơi để làm việc"
-                                 : "Developer needs somewhere to work")
+                Text(DeveloperPaneCopy.dormantHeading(lang))
                     .font(CodepetTheme.inter(CodepetType.title3, weight: .semibold))
                     .foregroundStyle(CodepetTheme.primaryText)
                 stateDot(lang == .vi ? "Ngủ đông" : "Dormant", tint: CodepetTheme.mutedText)
@@ -319,11 +319,8 @@ struct TwoModeShellView: View {
                     companyStore.engineeringRepoPrompt = ""
                 }
             }
-            ceiling(
-                title: lang == .vi ? "Dù thế nào" : "Either way",
-                body: lang == .vi
-                    ? "0 tín dụng trên CLI của bạn · tính tín dụng trên đám mây · và trần giới hạn giữ nguyên từ lần chạy đầu tiên"
-                    : "0 credits on your own CLI · credits in the cloud · and the ceiling holds from the first run")
+            ceiling(title: DeveloperPaneCopy.dormantCostTitle(lang),
+                    body: DeveloperPaneCopy.dormantCost(lang))
         }
         // The same column and head the transcript uses, so Developer sits on the two
         // vertical lines every other pane state does.

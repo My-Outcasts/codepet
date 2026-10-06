@@ -106,6 +106,21 @@ final class BriefReadTests: XCTestCase {
         XCTAssertFalse(out.contains("Building"), "English stage label spliced into Vietnamese")
     }
 
+    /// Onboarding's six stages (which the brief wizard now shares) are translated too.
+    func testOnboardingStagesAreTranslatedForVietnamese() {
+        for stage in OnboardingContent.stages {
+            let out = BriefRead.compose(brief: brief(oneLiner: "Một trợ lý", stage: stage), language: .vi)!
+            XCTAssertFalse(out.contains(stage), "English stage \(stage) spliced into Vietnamese")
+        }
+    }
+
+    /// "You're at the just an idea stage." is not a sentence.
+    func testJustAnIdeaReadsAsIdeaInEnglish() {
+        let out = BriefRead.compose(brief: brief(oneLiner: "A coding companion", stage: "Just an idea"),
+                                    language: .en)!
+        XCTAssertTrue(out.contains("at the idea stage"), out)
+    }
+
     /// An unknown stage (an older brief, a hand-edited document) must pass through rather
     /// than vanish or crash. Case-insensitively: the English path lowercases the label so it
     /// reads as prose mid-sentence ("you're at the scaling stage"), which is the point — the

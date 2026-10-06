@@ -10,7 +10,9 @@ final class DeveloperPaneCopyTests: XCTestCase {
     private var all: [String] {
         [AppLanguage.en, .vi].flatMap { l in
             [DeveloperPaneCopy.idleHint(l), DeveloperPaneCopy.backendChip(local: true, l),
-             DeveloperPaneCopy.backendChip(local: false, l), DeveloperPaneCopy.neverHeading(l)]
+             DeveloperPaneCopy.backendChip(local: false, l), DeveloperPaneCopy.neverHeading(l),
+             DeveloperPaneCopy.dormantHeading(l), DeveloperPaneCopy.dormantCostTitle(l),
+             DeveloperPaneCopy.dormantCost(l)]
         }
     }
 
@@ -38,5 +40,19 @@ final class DeveloperPaneCopyTests: XCTestCase {
     func testIdleHintPromisesAPlanFirst() {
         XCTAssertTrue(DeveloperPaneCopy.idleHint(.en).contains("plan"))
         XCTAssertTrue(DeveloperPaneCopy.idleHint(.vi).contains("kế hoạch"))
+    }
+
+    /// Before a folder is linked the tab still said "0 credits on your own CLI · credits in the
+    /// cloud · and the ceiling holds from the first run" (build 8 retest, 6 Oct).
+    func testDormantCostSaysWhatEachPathSpends() {
+        for l in [AppLanguage.en, .vi] {
+            let s = DeveloperPaneCopy.dormantCost(l)
+            XCTAssertFalse(s.contains("0 "), s)
+            XCTAssertFalse(s.contains("CLI"), s)
+            XCTAssertFalse(s.lowercased().contains("ceiling"), s)
+            XCTAssertFalse(s.contains("trần"), s)
+        }
+        XCTAssertTrue(DeveloperPaneCopy.dormantCost(.en).contains("Claude plan"))
+        XCTAssertTrue(DeveloperPaneCopy.dormantCost(.vi).contains("gói Claude"))
     }
 }

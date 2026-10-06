@@ -616,6 +616,25 @@ enum DeveloperPaneCopy {
             : "☁ " + (lang == .vi ? "Đám mây · dùng tín dụng" : "Cloud · uses credits")
     }
 
+    /// The CODE tab before a folder is linked (`TwoModeShellView.dormantDeveloper`). It said
+    /// "Developer needs somewhere to work" over "0 credits on your own CLI · credits in the
+    /// cloud · and the ceiling holds from the first run" — the same internal name, empty-balance
+    /// "0 credits" and unexplained ceiling the linked pane lost in #216, which never reached this
+    /// state (build 8 retest, 6 Oct). Same words as `backendChip` for the same two paths.
+    static func dormantHeading(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Codepet cần một dự án để làm việc" : "Codepet needs a project to work on"
+    }
+
+    static func dormantCostTitle(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Chi phí" : "What it uses"
+    }
+
+    static func dormantCost(_ lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Thư mục trên máy này dùng gói Claude của bạn · repo kết nối chạy trên đám mây và dùng tín dụng"
+            : "A folder on this Mac uses your Claude plan · a connected repo runs in the cloud and uses credits"
+    }
+
     /// Heads the hard limits (`ApprovalTier.ceiling`) that hold whatever the founder allows.
     static func neverHeading(_ lang: AppLanguage) -> String {
         lang == .vi ? "CODEPET SẼ KHÔNG BAO GIỜ" : "CODEPET WILL NEVER"

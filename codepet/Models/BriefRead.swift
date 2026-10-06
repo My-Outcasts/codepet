@@ -21,8 +21,8 @@ enum BriefRead {
     /// The paragraph, or nil when there is nothing worth saying.
     ///
     /// **The anchor rule.** `stage` is the only field that is always present
-    /// (`CompanyOnboardingModel` defaults it to "Building"), so a naive composition would emit
-    /// "You're at the Building stage." for a founder who typed nothing else — telling her what
+    /// (`CompanyOnboardingModel` defaults it to "Just an idea"), so a naive composition would emit
+    /// "You're at the idea stage." for a founder who typed nothing else — telling her what
     /// she picked from a slider and calling it a read. The paragraph therefore requires
     /// `summary` or `oneLiner`; audience and stage are trimmings on that anchor, never the
     /// whole sentence.
@@ -52,19 +52,23 @@ enum BriefRead {
         return (last == "." || last == "!" || last == "?") ? raw : raw + "."
     }
 
-    /// The five values `CompanyOnboardingModel.stages` can produce, translated.
+    /// The values `OnboardingContent.stages` can produce — which both onboarding and the brief
+    /// wizard now write — translated, plus the wizard's older five, which saved briefs still hold.
     ///
-    /// They are English literals in that array, so the Vietnamese read has to map them or it
-    /// splices an English word into a Vietnamese sentence. Anything else — an older brief, a
-    /// hand-edited document — passes through unchanged rather than vanishing.
+    /// They are English literals, so the Vietnamese read has to map them or it splices an
+    /// English word into a Vietnamese sentence. In English, "Just an idea" reads "idea" — "the
+    /// just an idea stage" is not a sentence. Anything else — a hand-edited document — passes
+    /// through unchanged rather than vanishing.
     private static func stageLabel(_ raw: String, vi: Bool) -> String {
-        guard vi else { return raw.lowercased() }
+        guard vi else { return raw == "Just an idea" ? "idea" : raw.lowercased() }
         switch raw {
-        case "Idea":         return "ý tưởng"
+        case "Just an idea", "Idea": return "ý tưởng"
         case "Prototype":    return "nguyên mẫu"
         case "Building":     return "đang xây dựng"
         case "Private beta": return "beta kín"
+        case "Public beta":  return "beta công khai"
         case "Launched":     return "đã ra mắt"
+        case "Growing":      return "tăng trưởng"
         default:             return raw
         }
     }

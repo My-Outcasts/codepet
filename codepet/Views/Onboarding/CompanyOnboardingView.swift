@@ -38,7 +38,10 @@ struct CompanyOnboardingView: View {
                     .font(.pixelSystem(size: 13, weight: .bold)).foregroundColor(CodepetTheme.primaryText)
                 Picker("", selection: $model.stageIndex) {
                     ForEach(Array(CompanyOnboardingModel.stages.enumerated()), id: \.offset) { i, s in Text(s).tag(i) }
-                }.pickerStyle(.segmented).labelsHidden()
+                }
+                // A column, not `.segmented`: onboarding's six stages ("Just an idea" … "Growing")
+                // overflow this 460pt sheet as one row and clipped it on both sides.
+                .pickerStyle(.radioGroup).labelsHidden()
             }
 
             HStack {
@@ -52,7 +55,9 @@ struct CompanyOnboardingView: View {
                 Spacer()
                 if step < 5 {
                     Button(uiLanguage == .vi ? "Tiếp" : "Next") { step += 1 }
-                        .buttonStyle(.plain).foregroundColor(CodepetTheme.accentPurple)
+                        .buttonStyle(.plain)
+                        .foregroundColor(model.canLeave(step: step) ? CodepetTheme.accentPurple : CodepetTheme.mutedText)
+                        .disabled(!model.canLeave(step: step))
                 } else if let start = startsNewBusiness {
                     Button(planning ? (uiLanguage == .vi ? "Đang lập lộ trình — khoảng một phút…" : "Planning your roadmap — about a minute…")
                                     : (uiLanguage == .vi ? "Bắt đầu" : "Start")) {
@@ -66,7 +71,7 @@ struct CompanyOnboardingView: View {
                     .buttonStyle(.plain).foregroundColor(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
-                    .disabled(planning)
+                    .disabled(planning || !model.hasName)
                 } else {
                     Button(model.isSubmitting ? (uiLanguage == .vi ? "Đang lưu…" : "Saving…")
                                               : (uiLanguage == .vi ? "Hoàn tất" : "Finish")) {
@@ -75,7 +80,7 @@ struct CompanyOnboardingView: View {
                     .buttonStyle(.plain).foregroundColor(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     .background(Capsule().fill(CodepetTheme.accentPurple))
-                    .disabled(model.isSubmitting)
+                    .disabled(model.isSubmitting || !model.hasName)
                 }
             }
             if planFailed {

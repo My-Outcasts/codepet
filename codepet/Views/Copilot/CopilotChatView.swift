@@ -2240,6 +2240,8 @@ struct CopilotBubble: View {
             ),
             provider: grantAsking,
             lang: lang,
+            // CP-066: "Re-running here…" was wrong on a first grant — nothing had run.
+            message: grantAsking.map { ProviderConsentCopy.chatMessage($0, lang: lang) },
             onAllow: { grantFlow?.allow(); grantAsking = nil },
             onDecline: { grantFlow?.decline(); grantAsking = nil }
         )

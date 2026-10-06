@@ -1198,9 +1198,12 @@ struct CopilotChatView: View {
                     if companyStore.isReadingProductFolder {
                         ProductReadingRow().id("product-reading")
                     }
-                    // A Team Build's router is choosing the room; no room card exists yet.
+                    // A Team Build's router is choosing the room; no room card exists yet. The
+                    // pets are the same roster Home shows (`DepartmentRoster`), not
+                    // `company.departments` — that is empty for many accounts (Quan's, 6 Oct),
+                    // which left the line with no pets at all.
                     if companyStore.isConveningTeamRoom {
-                        TeamConveningRow(roster: companyStore.company.departments.map(\.key))
+                        TeamConveningRow(roster: DepartmentCatalog.roster.map(\.key))
                             .id("team-convening")
                     }
                     // A Team Build's planner is working (the room has ended, no plan yet).

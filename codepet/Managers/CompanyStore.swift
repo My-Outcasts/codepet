@@ -2432,7 +2432,10 @@ final class CompanyStore: ObservableObject {
         // hit — the pass starts the moment the folder is linked.
         _ = await ensureProductDossier()
         guard companyId == cid, pendingTeamBuild?.id == pending.id else { return }
-        await sendChat(text, language: language, convenesRoom: true)
+        // Chat is told the team has it (`TeamBuildCopy.chatFrame`); her bubble and the room's
+        // question stay her own words, through `founderAsk`.
+        await sendChat(TeamBuildCopy.chatFrame(text, lang: language), language: language,
+                       founderAsk: text, convenesRoom: true)
         // The room, if one started, took the press already (`startVirtualCompanyRun`). If none
         // did, this keeps a stale press from attaching itself to some later Plan-mode room —
         // and releases the planning slot, since no plan is coming.

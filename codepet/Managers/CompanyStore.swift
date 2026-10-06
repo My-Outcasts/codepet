@@ -402,6 +402,10 @@ final class CompanyStore: ObservableObject {
     /// the transcript's "Planning the work…" row reads. Deliberately NOT `planningTeamBuildId !=
     /// nil`: that also covers the room itself, which has its own card.
     @Published private(set) var isPlanningTeamBuild = false
+    /// The departments the room seated, shown as pets on the planning line (6 Oct design pass).
+    /// Empty when no room met — the router sent the ask straight to the planner — and cleared
+    /// with `isPlanningTeamBuild`.
+    @Published private(set) var teamPlanningDepartments: [String] = []
     /// True from the moment a Team Build's room starts until that room is on screen — its own
     /// message lands on the router's hand-off — or it ends without one (the router declined, the
     /// run failed). The router is its own `claude -p` call and takes 60-70 s, and until it
@@ -634,6 +638,7 @@ final class CompanyStore: ObservableObject {
             pendingTeamBuild = nil
             planningTeamBuildId = nil
             isPlanningTeamBuild = false
+            teamPlanningDepartments = []
             isConveningTeamRoom = false
             // This account's own history. The conversation on screen starts new — RECENT
             // holds the rest — so a relaunch never drops the founder mid-thread with a card
@@ -2451,7 +2456,9 @@ final class CompanyStore: ObservableObject {
     }
 
     private func endTeamPlanning(_ id: UUID) {
-        if planningTeamBuildId == id { planningTeamBuildId = nil; isPlanningTeamBuild = false }
+        if planningTeamBuildId == id {
+            planningTeamBuildId = nil; isPlanningTeamBuild = false; teamPlanningDepartments = []
+        }
     }
 
     /// Called once when a Team build's room ends. Synchronous on purpose: planning is launched
@@ -2478,7 +2485,14 @@ final class CompanyStore: ObservableObject {
             return
         }
         // Before the task starts, so the row has no gap between the room's card and the plan's.
-        if planningTeamBuildId == pending.id { isPlanningTeamBuild = true }
+        if planningTeamBuildId == pending.id {
+            // Only a room that met has seats to show; `requestOnly` never convened one.
+            if brief != nil {
+                teamPlanningDepartments = TeamWaiting.departments(
+                    seated: state.routing?.agentMeta.map(\.departmentKey) ?? [])
+            }
+            isPlanningTeamBuild = true
+        }
         Task { [weak self] in await self?.planTeamBuild(pending, brief: brief) }
     }
 
@@ -4597,6 +4611,7 @@ final class CompanyStore: ObservableObject {
         pendingTeamBuild = nil
         planningTeamBuildId = nil
         isPlanningTeamBuild = false
+        teamPlanningDepartments = []
         isConveningTeamRoom = false
         // Session state about the OUTGOING founder. Leaving it true would mean the
         // next account — empty brief, nothing on record — is never asked at all,

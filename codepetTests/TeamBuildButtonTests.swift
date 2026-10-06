@@ -20,13 +20,14 @@ final class TeamBuildButtonTests: XCTestCase {
         XCTAssertEqual(TeamBuildCopy.waitsFor(["Marketing", "Design"], lang: .en), "waits for Marketing, Design")
     }
     /// CP-027: the row shown while the router picks the room. It names what is happening in the
-    /// founder's words, in both languages, and never claims a department has started.
+    /// founder's words, in both languages, and never claims a department has started. Since the
+    /// 6 Oct design pass it is a quiet line with its own pulse and clock, so no trailing ellipsis.
     func testConveningCopyNamesTheWaitInBothLanguages() {
-        XCTAssertEqual(TeamBuildCopy.conveningTitle(.en), "Bringing the team together…")
-        XCTAssertEqual(TeamBuildCopy.conveningTitle(.vi), "Đang gọi cả đội…")
+        XCTAssertEqual(TeamBuildCopy.conveningTitle(.en), "Gathering the team")
+        XCTAssertEqual(TeamBuildCopy.conveningTitle(.vi), "Đang gọi cả đội")
         XCTAssertEqual(TeamBuildCopy.conveningDetail(.en),
-                       "Choosing which departments should weigh in. This usually takes about a minute.")
+                       "Choosing who should weigh in, usually about a minute")
         XCTAssertEqual(TeamBuildCopy.conveningDetail(.vi),
-                       "Đang chọn những phòng ban sẽ tham gia. Thường mất khoảng một phút.")
+                       "Đang chọn ai sẽ góp ý, thường khoảng một phút")
     }
 }

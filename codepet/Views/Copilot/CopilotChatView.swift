@@ -1200,11 +1200,13 @@ struct CopilotChatView: View {
                     }
                     // A Team Build's router is choosing the room; no room card exists yet.
                     if companyStore.isConveningTeamRoom {
-                        TeamConveningRow().id("team-convening")
+                        TeamConveningRow(roster: companyStore.company.departments.map(\.key))
+                            .id("team-convening")
                     }
                     // A Team Build's planner is working (the room has ended, no plan yet).
                     if companyStore.isPlanningTeamBuild {
-                        TeamPlanningRow().id("team-planning")
+                        TeamPlanningRow(departments: companyStore.teamPlanningDepartments)
+                            .id("team-planning")
                     }
                     // A Team Build with no message in this thread (restored on relaunch).
                     if let team = unanchoredTeamRun {
@@ -1220,7 +1222,11 @@ struct CopilotChatView: View {
                     // here (`CompanyStore.currentToolActivity`), and is exactly the case
                     // this row was extended for (8 Sep) so the founder sees a page being
                     // fetched instead of a rotating "cooking" phrase.
-                    if companyStore.isCompanionTyping {
+                    // Not while a Team Build gathers or plans: that line is the signal, and
+                    // "Cooking…" under it was a second one saying less (6 Oct design pass).
+                    if TeamWaiting.showsTypingRow(typing: companyStore.isCompanionTyping,
+                                                  convening: companyStore.isConveningTeamRoom,
+                                                  planning: companyStore.isPlanningTeamBuild) {
                         ChatThinkingRow(activity: companyStore.currentToolActivity).id("typing")
                     }
                 }

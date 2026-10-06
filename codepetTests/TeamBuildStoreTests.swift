@@ -35,8 +35,12 @@ enum TeamBuildFixture {
 
     /// Copied verbatim from `CompanyStoreVirtualCompanyTests`.
     static func routing(_ decision: String) -> VCRouting {
+        // agent_meta as the router sends it: chief of staff carries no department key.
         let json: [String: Any] = ["decision": decision, "agents": ["product", "finance"],
-                                   "real_question": "q", "request_type": "DECISION"]
+                                   "real_question": "q", "request_type": "DECISION",
+                                   "agent_meta": [["agent_id": "chief_of_staff", "department_key": NSNull()],
+                                                  ["agent_id": "product", "department_key": "product"],
+                                                  ["agent_id": "finance", "department_key": "fin"]]]
         return try! JSONDecoder().decode(
             VCRouting.self, from: try! JSONSerialization.data(withJSONObject: json))
     }
@@ -312,6 +316,33 @@ final class TeamBuildStoreTests: XCTestCase {
         let planned = await F.waitFor { s.teamRun?.run?.phase == .planned }
         XCTAssertTrue(planned, "the plan card never appeared")
         XCTAssertFalse(s.isPlanningTeamBuild, "the plan landed")
+    }
+
+    /// The planning line's pets are the room's seats (6 Oct design pass), so the founder sees who
+    /// is splitting the work. They clear when the plan lands, and a press the router sent straight
+    /// to the planner (`single_agent`, no room) shows none rather than a guess.
+    func testPlanningShowsTheDepartmentsTheRoomSeated() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, plannerDelayNanos: 400_000_000)
+        await s.hydrate(companyId: "u")
+        XCTAssertEqual(s.teamPlanningDepartments, [])
+        await s.startTeamBuild("pants page", language: .en)
+        _ = await F.waitFor { probe.plans.count == 1 }
+        XCTAssertTrue(s.isPlanningTeamBuild, "precondition: the planner is working")
+        XCTAssertEqual(s.teamPlanningDepartments, ["product", "fin"], "the room's seats, chief of staff left out")
+        _ = await F.waitFor { s.teamRun?.run?.phase == .planned }
+        XCTAssertEqual(s.teamPlanningDepartments, [], "the plan landed; the line is gone")
+    }
+
+    func testPlanningWithoutARoomShowsNoPets() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, decision: "single_agent", plannerDelayNanos: 400_000_000)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        _ = await F.waitFor { probe.plans.count == 1 }
+        XCTAssertTrue(s.isPlanningTeamBuild, "precondition: single_agent still plans, from the request")
+        XCTAssertEqual(s.teamPlanningDepartments, [])
+        _ = await F.waitFor { s.teamRun?.run?.phase == .planned }
     }
 
     func testIsPlanningTeamBuildIsFalseWhileTheRoomIsStillMeeting() async throws {

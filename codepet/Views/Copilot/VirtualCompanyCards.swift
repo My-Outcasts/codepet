@@ -30,24 +30,74 @@ struct VCProgressRow: View {
     @Environment(\.uiLanguage) private var lang
     @State private var startedAt = Date()
 
+    /// Since the 6 Oct design pass this draws only before the room has a question to show
+    /// (routing). Once it does, the meeting card's step strip and live line carry the stage.
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small).scaleEffect(0.7)
+        HStack(spacing: 10) {
+            TeamPulseDot()
             Text(stage.label(lang))
-                .font(CodepetTheme.inter(12, weight: .semibold))
+                .font(CodepetTheme.inter(13, weight: .medium))
                 .foregroundColor(CodepetTheme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 6)
             TimelineView(.periodic(from: .now, by: 1)) { ctx in
                 Text(TeamBuildCopy.clock(ctx.date.timeIntervalSince(startedAt)))
-                    .font(CodepetTheme.inter(11, weight: .semibold))
+                    .font(CodepetTheme.inter(12))
                     .monospacedDigit()
-                    .foregroundColor(CodepetTheme.accentPurple)
+                    .foregroundColor(CodepetTheme.mutedText)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// The meeting's five steps in one line (`MeetingSteps`): passed steps muted, the current one
+/// in ink with a pulse, later ones faint. Real stage only — nothing advances on a timer (rule 8).
+struct MeetingStepStrip: View {
+    let current: Int
+    @Environment(\.uiLanguage) private var lang
+
+    var body: some View {
+        let titles = MeetingSteps.titles(lang)
+        HStack(spacing: 0) {
+            ForEach(Array(titles.enumerated()), id: \.offset) { i, title in
+                if i > 0 {
+                    Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+                        .frame(minWidth: 8, maxWidth: .infinity).padding(.horizontal, 6)
+                }
+                HStack(spacing: 5) {
+                    if i == current {
+                        TeamPulseDot(size: 7)
+                    } else {
+                        Circle()
+                            .fill(i < current ? CodepetTheme.mutedText : Color.clear)
+                            .overlay(Circle().stroke(i < current ? CodepetTheme.mutedText : CodepetTheme.hairline, lineWidth: 1.5))
+                            .frame(width: 7, height: 7)
+                    }
+                    Text(title)
+                        .font(CodepetTheme.inter(11.5, weight: i == current ? .medium : .regular))
+                        .foregroundColor(i == current ? CodepetTheme.primaryText
+                                         : i < current ? CodepetTheme.mutedText : CodepetTokens.faint)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(CodepetTheme.accentPurple.opacity(0.07)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(titles.indices.contains(current) ? titles[current] : "")
+    }
+}
+
+/// The meeting card's clock, from when the card first appeared.
+private struct MeetingClock: View {
+    @State private var startedAt = Date()
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            Text(TeamBuildCopy.clock(ctx.date.timeIntervalSince(startedAt)))
+                .font(CodepetTheme.inter(12))
+                .monospacedDigit()
+                .foregroundColor(CodepetTokens.faint)
+        }
     }
 }
 
@@ -83,6 +133,8 @@ struct VCRunCards: View {
     @State private var readingCall: Deliverable?
     /// Which of the room's two options the founder picked on the call card (CP-031).
     @State private var pickedOption: Int?
+    /// "Why them, and who sat out" on the meeting card: the routing rationale, opened in place.
+    @State private var showRoomWhy = false
 
     /// TWO shapes, because a run in flight and a run that has landed are different reading
     /// tasks — and the contract binds them differently.
@@ -117,7 +169,10 @@ struct VCRunCards: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 cards
-                if let stage = VCProgressStage.from(state) { VCProgressRow(stage: stage) }
+                // Once the room has a question, its card carries the stage (strip + live line).
+                if state.routing == nil, state.brief == nil, let stage = VCProgressStage.from(state) {
+                    VCProgressRow(stage: stage)
+                }
             }
             Spacer(minLength: 24)
         }
@@ -130,14 +185,12 @@ struct VCRunCards: View {
             if let tab = recordTab {
                 recordContent(tab)
             } else if let brief = state.brief, let open = onOpenRecord {
+                // The record link is the call's footer now (`callFooter`); `open` is read there.
+                let _ = open
                 theCall(brief)
-                landedDisagreement(brief)
-                recordChips(open)
             } else if let brief = state.brief {
+                // The real disagreement is inside the call since the 6 Oct pass (`realDisagreement`).
                 theCall(brief)
-                // ONE card, not two — see `landedDisagreement`. `conflictCard` is now the
-                // in-flight rendering only, where there is no narrative to duplicate.
-                landedDisagreement(brief)
                 let departmentsSaidTitle = (lang == .vi ? "Từng phòng ban đã nói gì"
                                                          : "What each department said")
                                             + " · \(state.agents.count)"
@@ -182,21 +235,15 @@ struct VCRunCards: View {
                 // `liveAgents` still follows, holding ONLY the departments that have answered —
                 // a landed position appears the moment it arrives (founder call, Aug 5) and is
                 // never summarised (rule 2). What left is the redundant "still working" row.
-                if let routing = state.routing { roomHeaderCard(routing) }
-                if state.agents.contains(where: { answered($0.agentId) }) { liveAgents }
-                if !state.conflicts.isEmpty { conflictCard }
-                // Behind a disclosure while the room is still running, matching what already
-                // happens once the brief lands. In flight these dumped inline, and a round is the
-                // longest thing the room produces — several screens of two departments arguing,
-                // above the answer the founder is waiting for (founder, Aug 6).
-                if !state.negotiationRounds.isEmpty {
-                    Disclosure(title: (lang == .vi ? "Họ thương lượng thế nào" : "How they negotiated")
-                                + " · \(state.negotiationRounds.count)") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
-                        }
-                    }
-                }
+                // ONE card for the whole meeting (6 Oct design pass, mock approved): the
+                // question, who is in the room, the departments side by side as their answers
+                // land, where they split, and the live stage. It replaced four stacked cards (the
+                // room header with its counts and bars, an "Answered" card, an orange conflict
+                // card, a progress row). Every word the contract asks for is still on it: each
+                // position (rule 2, clamped at a sentence, never rewritten), the conflicts with
+                // their reasons, each side's what_would_change_my_mind (rule 4), confidence as
+                // dots (rule 7), and the process while it happens (rule 1).
+                if let routing = state.routing { meetingCard(routing) }
                 if let verdict = state.verdict { verdictCard(verdict) }
             }
             if let stopped = state.stoppedReason { stoppedRow(stopped) }
@@ -253,247 +300,233 @@ struct VCRunCards: View {
         answered(agentId) || state.agentErrors[agentId] != nil
     }
 
-    /// THE ROOM, in flight: one card, five elements.
-    ///
-    /// Built with its own chrome rather than `MessageCard`, which applies one uniform inset — this
-    /// card has bands (a recessed footer that reaches the card's edges), so it owns its padding.
-    /// The visual language is MessageCard's exactly: surface, hue at 12%, a same-hue 1pt border,
-    /// radius 12.
-    private func roomHeaderCard(_ routing: VCRouting) -> some View {
-        let hue = CodepetTheme.accentPurple
-        let roster = routing.agentMeta
-        let done = roster.filter { answered($0.agentId) }.count
-        // The working chrome is for WHILE the room works.
-        //
-        // At "4 of 4 answered" the bar is entirely full and the footer is two static counts, so
-        // the card kept its full height while saying nothing it had not already said — the count
-        // alone carries "everyone answered" (founder, Aug 7: this card is for the build phase).
-        // Every department having answered is not the end of the room, though: the brief has not
-        // landed yet, so the card stays as the header the positions hang under, minus the parts
-        // that were only ever about waiting.
-        let working = done < roster.count
-        return VStack(alignment: .leading, spacing: 0) {
+    // MARK: - The meeting card (6 Oct design pass)
+
+    private func meetingCard(_ routing: VCRouting) -> some View {
+        let stage = VCProgressStage.from(state)
+        let seats = MeetingSeats.departments(routing.agentMeta)
+        let names = seats.map { displayName($0) }
+        return HStack(spacing: 0) {
+            TeamQuietSurface {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        label(lang == .vi ? "PHÒNG HỌP" : "THE ROOM")
-                        Spacer(minLength: 6)
-                        // Counted, never estimated — and a count rather than a percentage,
-                        // because a percentage of three departments implies precision that is
-                        // not there. Real state only (rule 8).
-                        HStack(alignment: .firstTextBaseline, spacing: 5) {
-                            Text("\(done)")
-                                .font(CodepetTheme.inter(22, weight: .semibold))
-                                .tracking(-0.6)
-                                .monospacedDigit()
-                                .foregroundColor(CodepetTheme.primaryText)
-                            Text(lang == .vi ? "/ \(roster.count) đã trả lời"
-                                             : "of \(roster.count) answered")
-                                .font(CodepetTheme.inter(11))
-                                .foregroundColor(CodepetTheme.mutedText)
-                        }
-                        .fixedSize()
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(lang == .vi ? "CUỘC HỌP" : "MEETING")
+                            .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                            .foregroundColor(CodepetTheme.mutedText)
+                        Spacer(minLength: 8)
+                        if stage != nil { MeetingClock() }
+                    }
+                    if let stage {
+                        MeetingStepStrip(current: MeetingSteps.current(stage)).padding(.top, 12)
                     }
                     Text(routing.realQuestion)
-                        .font(CodepetTheme.inter(15, weight: .semibold))
-                        .lineSpacing(3)
+                        .font(CodepetTheme.inter(16, weight: .semibold)).lineSpacing(3)
                         .foregroundColor(CodepetTheme.primaryText)
-                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 9)
-                    if working { rosterBar(roster) }
-                }
-                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, working ? 13 : 12)
-
-                // The recessed footer, split in two — reaches the card's edges, so it needs the
-                // card to own its padding (see the note above). Gone once everyone has answered:
-                // "4 departments / 5 sat out" is the same two numbers the disclosure below spells
-                // out in full, and it was earning its space only as context for the waiting.
-                if working {
-                HStack(spacing: 0) {
-                    footCell(key: lang == .vi ? "TRONG PHÒNG" : "IN THE ROOM",
-                             value: "\(roster.count)",
-                             unit: lang == .vi ? "phòng ban" : roster.count == 1 ? "department" : "departments")
-                    Rectangle().fill(CodepetTheme.hairline).frame(width: 1)
-                    footCell(key: lang == .vi ? "KHÔNG MỜI" : "SAT OUT",
-                             value: "\(routing.excluded.count)",
-                             unit: lang == .vi ? "đều có lý do" : "with reasons")
-                }
-                .background(Color.black.opacity(0.16))
-                .overlay(alignment: .top) { Rectangle().fill(CodepetTheme.hairline).frame(height: 1) }
-                }
-
-                // The thirteen paragraphs, behind one full-width control.
-                Disclosure(title: lang == .vi ? "Vì sao chọn những phòng ban này?"
-                                              : "Why these departments?") {
-                    routingDetail(routing)
-                }
-                .padding(14)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(CodepetTheme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(hue.opacity(0.12)))
-            )
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(hue.opacity(0.9), lineWidth: 1))
-    }
-
-    /// One segment per department, filled in that department's colour when its position lands.
-    ///
-    /// The segment is the roster AND the progress — your first reference's segmented bar, except
-    /// each segment means something. Nothing animates toward completion: a segment is empty or
-    /// full, because a partial fill would be the artificial progress rule 8 forbids. Departments
-    /// still thinking pulse their empty track, which is liveness, not progress.
-    private func rosterBar(_ roster: [VCAgentMeta]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                ForEach(roster, id: \.agentId) { meta in
-                    RosterSegment(color: accent(meta), filled: answered(meta.agentId))
-                }
-            }
-            HStack(spacing: 5) {
-                ForEach(roster, id: \.agentId) { meta in
-                    Text(displayName(meta).uppercased())
-                        .font(CodepetTheme.inter(10, weight: .semibold))
-                        .tracking(0.7)
-                        .foregroundColor(answered(meta.agentId) ? accent(meta) : CodepetTokens.faint)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .padding(.top, 13)
-    }
-
-    private func footCell(key: String, value: String, unit: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(key)
-                .font(CodepetTheme.inter(10, weight: .semibold)).tracking(1)
-                .foregroundColor(CodepetTokens.faint)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value)
-                    .font(CodepetTheme.inter(14, weight: .semibold)).monospacedDigit()
-                    .foregroundColor(CodepetTheme.primaryText)
-                Text(unit)
-                    .font(CodepetTheme.inter(11))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14).padding(.vertical, 11)
-    }
-
-    /// The departments that have ANSWERED (or failed). The working ones are the header's segments
-    /// now, so this card no longer repeats them as titled rows.
-    private var liveAgents: some View {
-        let landed = state.agentStatuses.filter { hasLanded($0.meta.agentId) }
-        return MessageCard(hue: CodepetTheme.accentPurple) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text((lang == .vi ? "Đã trả lời" : "Answered") + " · \(landed.count)")
-                        .font(CodepetTheme.inter(10, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundColor(CodepetTheme.mutedText)
-                    ForEach(Array(landed.enumerated()), id: \.offset) { idx, entry in
-                        if idx > 0 { Divider().overlay(CodepetTheme.hairline) }
-                        agentRow(entry)
+                        .padding(.top, 14)
+                    HStack(spacing: 6) {
+                        if !names.isEmpty {
+                            Text(MeetingWords.inTheRoom(names, lang: lang) + " ·")
+                                .foregroundColor(CodepetTheme.mutedText)
+                        }
+                        Button { withAnimation(.easeOut(duration: 0.15)) { showRoomWhy.toggle() } } label: {
+                            Text(showRoomWhy ? (lang == .vi ? "ẩn lý do" : "hide why")
+                                             : (lang == .vi ? "vì sao, và ai không được mời" : "why them, and who sat out"))
+                                .foregroundColor(CodepetTheme.mutedText)
+                                .underline(color: CodepetTheme.hairline)
+                        }
+                        .buttonStyle(.plain)
+                        .cursorOnHover(.pointingHand)
+                    }
+                    .font(CodepetTheme.inter(12.5))
+                    .padding(.top, 8)
+                    if showRoomWhy { routingDetail(routing).padding(.top, 10) }
+                    if !seats.isEmpty {
+                        Rectangle().fill(CodepetTheme.hairline).frame(height: 1).padding(.top, 16)
+                        seatGrid(seats)
+                    }
+                    if !state.conflicts.isEmpty { splitBand.padding(.top, 14) }
+                    if let stage, MeetingSteps.current(stage) >= 2 {
+                        HStack(spacing: 9) {
+                            TeamPulseDot(size: 7)
+                            Text(stage.label(lang))
+                                .font(CodepetTheme.inter(13))
+                                .foregroundColor(CodepetTheme.bodyText)
+                        }
+                        .padding(.top, 16)
+                    }
+                    if !state.negotiationRounds.isEmpty {
+                        Disclosure(title: (lang == .vi ? "Họ thương lượng thế nào" : "How they negotiated")
+                                    + " · \(state.negotiationRounds.count)") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(state.negotiationRounds, id: \.round) { roundCard($0) }
+                            }
+                        }
+                        .padding(.top, 14)
                     }
                 }
+            }
         }
     }
 
-    @ViewBuilder private func agentRow(_ entry: (meta: VCAgentMeta, status: AgentRunStatus)) -> some View {
-        let position = state.positions[entry.meta.agentId]
-        VStack(alignment: .leading, spacing: 8) {
-            // The DEPARTMENT leads, in its own colour and at the run-theater's title size.
-            //
-            // It used to lead with a 20pt circle holding a two-letter badge ("Fi", "Pr", "Mk"),
-            // which read as an initials avatar for a person who does not exist and left the
-            // department itself as smaller, quieter text beside it (founder, Aug 6: "that's the
-            // old version"). The department IS the identity here, so it gets the ink. The badge
-            // is gone rather than restyled — an abbreviation earns its place only when there is
-            // no room for the word, and there is.
-            //
-            // Still no pet sprite and no personal name: contract rule 9. A department NAME is not
-            // a personal name, so setting it in full weight stays inside the rule.
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(displayName(entry.meta).uppercased())
-                    .font(CodepetTheme.inter(11, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundColor(accent(entry.meta))
-                    .lineLimit(1)
-                if let position {
-                    Text(stanceLabel(position.stance))
-                        .font(CodepetTheme.inter(11, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Capsule().fill(accent(entry.meta).opacity(0.12)))
-                        .foregroundColor(accent(entry.meta))
+    /// The departments side by side when the column allows (`MeetingSeats.columnChoices`),
+    /// stacked when it does not — the dock is 380 pt wide.
+    @ViewBuilder private func seatGrid(_ seats: [VCAgentMeta]) -> some View {
+        let choices = MeetingSeats.columnChoices(count: seats.count)
+        ViewThatFits(in: .horizontal) {
+            ForEach(choices, id: \.self) { cols in seatRows(seats, cols: cols) }
+        }
+    }
+
+    private func seatRows(_ seats: [VCAgentMeta], cols: Int) -> some View {
+        let rows = stride(from: 0, to: seats.count, by: cols).map { Array(seats[$0..<min($0 + cols, seats.count)]) }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
+                if r > 0 { Rectangle().fill(CodepetTheme.hairline).frame(height: 1) }
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(Array(row.enumerated()), id: \.element.agentId) { c, meta in
+                        if c > 0 { Rectangle().fill(CodepetTheme.hairline).frame(width: 1) }
+                        seat(meta)
+                            .padding(.leading, c > 0 ? 16 : 0)
+                            .padding(.trailing, c < row.count - 1 ? 16 : 0)
+                            // idealWidth, not just minWidth: ViewThatFits measures IDEAL size, and a
+                            // Text's ideal width is its whole answer on one line — without this, two
+                            // columns never "fit" and the room always stacked (render, 6 Oct).
+                            .frame(minWidth: cols > 1 ? 190 : 0, idealWidth: cols > 1 ? 190 : nil,
+                                   maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    // A short last row keeps its columns the width of the rows above.
+                    ForEach(0..<(cols - row.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One department: its pet and name, its stance in words, confidence as dots (rule 7), the
+    /// answer's first sentence (the rest on click — rule 2, never rewritten), and what would
+    /// change its mind (rule 4) once it has said so in a negotiation turn.
+    ///
+    /// The pet is the department's sprite, never its name: rule 9 forbids human avatars and
+    /// personal names for agents, and a pixel pet beside the word "Design" is neither. Before this
+    /// the room drew no pet at all; the rest of the app already speaks for each department with
+    /// its pet, so the meeting was the one place they disappeared.
+    @ViewBuilder private func seat(_ meta: VCAgentMeta) -> some View {
+        let position = state.positions[meta.agentId]
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 9) {
+                TeamPetAvatar(dept: meta.departmentKey ?? "", size: 24)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(displayName(meta))
+                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                    if let position {
+                        Text(MeetingWords.stance(position.stance, lang: lang))
+                            .font(CodepetTheme.inter(12))
+                            .foregroundColor(CodepetTheme.mutedText)
+                    }
                 }
                 Spacer(minLength: 6)
-                // Contract rule 7: dots, never a number.
-                if let position { VCConfidenceDots(value: position.confidence) } else { statusPill(entry.status) }
+                if let position { VCConfidenceDots(value: position.confidence).padding(.top, 5) }
             }
             if let position {
-                // One line at rest, the whole thing on tap.
-                //
-                // Three departments each printed a full paragraph plus, for two of them, a bold
-                // 🔒 blocker paragraph — five paragraphs before the founder reached the conflict
-                // card, which then printed those same two blockers again VERBATIM (Aug 6:
-                // "displays too much information all at once"). Rule 2 forbids SUMMARISING the
-                // positions into one paragraph; it does not require every one of them open at
-                // once, and the text here is never rewritten — it is the same string, clamped
-                // until asked for. Post-brief `departmentsSaid` has always worked this way.
-                //
-                // The 🔒 line is gone from this row entirely: rule 4 pins the blocker to the
-                // CONFLICT card, which is where the founder can act on it, and printing it in
-                // both places is what made this card feel like a wall.
-                ExpandingPosition(text: position.position)
-            } else if let error = state.agentErrors[entry.meta.agentId] {
+                SeatAnswer(text: position.position).padding(.top, 10)
+            } else if let error = state.agentErrors[meta.agentId] {
                 Text(error).font(CodepetTheme.inter(13)).foregroundColor(Color.red)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            } else {
+                HStack(spacing: 8) {
+                    TeamPulseDot(size: 7)
+                    Text(lang == .vi ? "đang nghĩ" : "thinking")
+                        .font(CodepetTheme.inter(12.5))
+                        .foregroundColor(CodepetTokens.faint)
+                }
+                .padding(.top, 12)
+                // Where the answer will land. Static: a placeholder, not progress (rule 8).
+                VStack(alignment: .leading, spacing: 8) {
+                    Capsule().fill(CodepetTheme.hairline).frame(height: 8).frame(maxWidth: .infinity)
+                    Capsule().fill(CodepetTheme.hairline).frame(height: 8).padding(.trailing, 60)
+                }
+                .padding(.top, 10)
             }
-            // No "still working" branch: `liveAgents` is filtered to departments that have landed,
-            // and the header card's segments are where waiting is shown now. The panel that used to
-            // sit here — spinner, a sentence, and a bar, per department — was mine from Aug 6 and
-            // was most of what made the room feel cluttered.
+            if let mind = MeetingWords.changesMind(meta.agentId, rounds: state.negotiationRounds) {
+                (Text(lang == .vi ? "Đổi ý nếu " : "Changes its mind if ").fontWeight(.medium)
+                    .foregroundColor(CodepetTheme.bodyText)
+                 + Text(mind).foregroundColor(CodepetTheme.mutedText))
+                    .font(CodepetTheme.inter(12.5))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            }
         }
+        .padding(.vertical, 16)
     }
 
-    /// Every department's full position, verbatim and individually — contract rule 2 forbids
-    /// summarising them into one paragraph, and a disclosure is a place to put them, not a
-    /// licence to condense them.
-    /// The landed room's way into its record (CP-032): one chip per department, with a dot for
-    /// how it came out, and one link. A chip opens the stances; the link does too.
-    private func recordChips(_ open: @escaping (RoomRecordTab) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            WrapLayout(spacing: 6, rowSpacing: 6) {
-                ForEach(RoomRecord.chips(state), id: \.agentId) { chip in
-                    Button { open(.stances) } label: {
-                        // No outcome dot (CP-036): the call card above is the reply's one
-                        // coloured thing. The outcome is one click away, on the Stances tab.
-                        Text(displayName(chip.meta))
+    /// Where they split, as a soft warm band inside the meeting card — the orange-bordered card
+    /// it replaces carried the same words. Pairs that share a reason are listed above one copy of
+    /// it (`groupedByReason`); agreements collapse to one naming line, and an all-aligned room
+    /// prints every pair under WHERE THEY AGREE (rule 2: never collapsed into one paragraph).
+    private var splitBand: some View {
+        let allAligned = !state.conflicts.isEmpty && state.conflicts.allSatisfy { $0.kind == "ALIGNED" }
+        let disagreements = allAligned ? state.conflicts : state.conflicts.filter { $0.kind != "ALIGNED" }
+        let agreed = allAligned ? [] : state.conflicts.filter { $0.kind == "ALIGNED" }
+        let hue = allAligned ? CodepetTheme.accentTeal : CodepetTheme.accentOrange
+        return VStack(alignment: .leading, spacing: 6) {
+            if allAligned {
+                Text(lang == .vi ? "Họ đồng ý ở đâu" : "Where they agree")
+                    .font(CodepetTheme.inter(12, weight: .semibold)).foregroundColor(hue)
+            }
+            ForEach(Array(Self.groupedByReason(disagreements).enumerated()), id: \.offset) { _, group in
+                ForEach(Array(group.pairs.enumerated()), id: \.offset) { _, c in
+                    Text("\(displayName(agentId: c.a)) ↔ \(displayName(agentId: c.b)) · \(kindLabel(c.kind))")
+                        .font(CodepetTheme.inter(12, weight: .semibold))
+                        .foregroundColor(hue)
+                }
+                Text(group.reason)
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 2)
+            }
+            if !agreed.isEmpty {
+                Text(agreedLine(agreed))
+                    .font(CodepetTheme.inter(12))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(hue.opacity(0.07)))
+        .overlay(alignment: .leading) { Rectangle().fill(hue).frame(width: 2) }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// An answer's first sentence, the rest on click. The text is never altered (rule 2).
+    private struct SeatAnswer: View {
+        let text: String
+        @Environment(\.uiLanguage) private var lang
+        @State private var open = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(open ? text : MeetingWords.lead(text))
+                    .font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if MeetingWords.hasMore(text) {
+                    Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                        Text(open ? (lang == .vi ? "Thu gọn" : "Less") : (lang == .vi ? "Đọc tiếp" : "More"))
                             .font(CodepetTheme.inter(12, weight: .medium))
-                            .foregroundColor(CodepetTheme.bodyText)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(Capsule().fill(CodepetTheme.surface))
-                        .overlay(Capsule().stroke(CodepetTheme.hairline, lineWidth: 1))
+                            .foregroundColor(CodepetTheme.mutedText)
+                            .underline(color: CodepetTheme.hairline)
                     }
                     .buttonStyle(.plain)
                     .cursorOnHover(.pointingHand)
-                    .help(chip.outcome == .noAnswer ? "" : stanceLabel(state.positions[chip.agentId]?.stance ?? ""))
                 }
             }
-            Button { open(.stances) } label: {
-                Text(RoomRecord.linkTitle(lang))
-                    .font(CodepetTheme.inter(13, weight: .medium))
-                    .foregroundColor(CodepetTheme.accentPurple)
-            }
-            .buttonStyle(.plain)
-            .cursorOnHover(.pointingHand)
         }
-        .padding(.horizontal, 12)
     }
 
     /// One tab of the side panel. Every view here already existed inside the four disclosures;
@@ -583,60 +616,6 @@ struct VCRunCards: View {
         .padding(.horizontal, 12)
     }
 
-    /// A department's position: one line at rest, the full text on tap.
-    ///
-    /// The text is never altered — clamping is not summarising (rule 2). Expanding is the founder
-    /// asking for it, which is the same bargain `departmentsSaid` has always offered after the
-    /// brief lands; this brings the in-flight card in line with it.
-    private struct ExpandingPosition: View {
-        let text: String
-        @State private var open = false
-
-        var body: some View {
-            Button { withAnimation(.easeInOut(duration: 0.16)) { open.toggle() } } label: {
-                Text(text)
-                    .font(CodepetTheme.inter(14)).lineSpacing(6)
-                    .foregroundColor(CodepetTheme.primaryText)
-                    .lineLimit(open ? nil : 1)
-                    .fixedSize(horizontal: false, vertical: open)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .cursorOnHover(.pointingHand)
-        }
-    }
-
-    /// One department's segment in the roster bar.
-    ///
-    /// Two states only — empty or full. There is no in-between, because a segment creeping toward
-    /// full would be inventing progress the backend never reported (rule 8): a room agent thinks,
-    /// and then a position lands. While it is still thinking the empty track breathes, which says
-    /// "alive" without claiming how far along it is.
-    private struct RosterSegment: View {
-        let color: Color
-        let filled: Bool
-        @State private var breathing = false
-
-        var body: some View {
-            Capsule()
-                .fill(filled ? AnyShapeStyle(LinearGradient(
-                        colors: [color.opacity(0.65), color],
-                        startPoint: .leading, endPoint: .trailing))
-                             : AnyShapeStyle(CodepetTokens.well))
-                .frame(height: 5)
-                .frame(maxWidth: .infinity)
-                .opacity(filled ? 1 : (breathing ? 0.95 : 0.5))
-                .animation(.easeInOut(duration: 0.35), value: filled)
-                .onAppear {
-                    guard !filled else { return }
-                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                        breathing = true
-                    }
-                }
-        }
-    }
-
     /// A collapsed section of the room. Closed by default: the founder opens the process she
     /// wants rather than scrolling past all of it to reach the answer.
     private struct Disclosure<Content: View>: View {
@@ -684,22 +663,6 @@ struct VCRunCards: View {
                 if open { content }
             }
         }
-    }
-
-    private func statusPill(_ status: AgentRunStatus) -> some View {
-        let fg: Color
-        let bg: Color
-        switch status {
-        case .working:   fg = CodepetTheme.accentPurple; bg = CodepetTheme.accentPurple.opacity(0.14)
-        case .reviewing: fg = CodepetTheme.accentGold;   bg = CodepetTheme.accentGold.opacity(0.16)
-        case .done:      fg = CodepetTheme.accentTeal;   bg = CodepetTheme.accentTeal.opacity(0.16)
-        case .failed:    fg = Color.red;                 bg = Color.red.opacity(0.14)
-        }
-        return Text(status.label(lang))
-            .font(CodepetTheme.inter(10, weight: .semibold))
-            .foregroundColor(fg)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Capsule().fill(bg))
     }
 
     // Spec §4.3: routing is CONTENT, not a loading state. It is the panel where
@@ -1047,141 +1010,192 @@ struct VCRunCards: View {
     /// `the_real_disagreement` deliberately does NOT live here — it has its own always-visible
     /// block (rule 3) so this card stays the size of a decision rather than a document.
     private func theCall(_ brief: VCBrief) -> some View {
-        MessageCard(hue: CodepetTheme.accentPurple) {
-            VStack(alignment: .leading, spacing: 8) {
-                label(lang == .vi ? "QUYẾT ĐỊNH" : "THE CALL")
-                // THE DECISION, in one line. `recommendation` runs ~200 words and the rest of the
-                // card added ~350 more, all unclamped in a 380pt column (founder, Aug 7). The
-                // first sentence IS the call; everything after it is reasoning, and reasoning
-                // belongs in the reader.
+        // ONE card since the 6 Oct design pass: the call, how sure, the real disagreement
+        // VERBATIM (rule 3) under a warm rule, and the either/or LAST (rule 5). The disagreement
+        // used to be its own block under the call plus a row of department chips; the names now
+        // ride the confidence line and "How the team decided" is a footer link.
+        let names = MeetingSeats.departments(state.routing?.agentMeta ?? state.agents).map { displayName($0) }
+        let options = FounderChoice.options(brief)
+        return TeamQuietSurface {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(lang == .vi ? "QUYẾT ĐỊNH" : "THE CALL")
+                    .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                    .foregroundColor(CodepetTheme.mutedText)
+                // THE DECISION, in one line — the first sentence is the call; reasoning belongs
+                // in the reader ("Read the full call").
                 Text(BriefDocument.headline(brief.recommendation))
-                    .font(CodepetTheme.inter(15, weight: .semibold)).lineSpacing(4)
+                    .font(CodepetTheme.inter(17, weight: .semibold)).lineSpacing(3)
                     .foregroundColor(CodepetTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                // Contract rule 7: confidence as dots, not a number. The REASON moves to the
-                // reader — it was 55 words of grey text indented under the dots.
-                VCConfidenceDots(value: brief.confidence)
+                    .padding(.top, 8)
+                // Rule 7: dots, and a word — never a number.
+                HStack(spacing: 8) {
+                    VCConfidenceDots(value: brief.confidence)
+                    Text(MeetingWords.confidence(brief.confidence, lang: lang)
+                         + (names.isEmpty ? "" : " · " + MeetingWords.list(names, lang: lang)))
+                        .font(CodepetTheme.inter(12))
+                        .foregroundColor(CodepetTheme.mutedText)
+                }
+                .padding(.top, 10)
                 if brief.unresolved {
-                    // Contract rule 6: unresolved is a valid outcome, not an error —
-                    // present it as an honest answer, the trade-off is the founder's to make.
+                    // Rule 6: unresolved is a valid outcome — the trade-off is the founder's.
                     Text(lang == .vi ? "CHƯA NGÃ NGŨ — BẠN QUYẾT" : "UNRESOLVED — YOUR CALL")
                         .font(CodepetTheme.inter(10, weight: .bold)).tracking(0.8)
                         .foregroundColor(CodepetTheme.accentGold)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(CodepetTheme.accentGold.opacity(0.14)))
+                        .padding(.top, 10)
                 }
-                // LAST of the reading content — rule 5, and IN FULL.
-                //
-                // Founder's call, Aug 7, when asked whether to clamp it: "Rule 5 says end on the
-                // either/or." A two-line clamp on a ~100-word trade-off cuts before the "or", and
-                // half a trade-off is not ending on the either/or — it is ending on one option,
-                // which is the "it's up to you" the rule exists to forbid. So the either/or is the
-                // one long thing that stays on the card.
-                // The trade-off keeps its position — LAST of the reading content, rule 5 —
-                // and loses its eyebrow. THE CALL is the only label this card needs; a
-                // second one directly above the closing paragraph was competing with it
-                // rather than orienting anyone. The extra top padding is what now says
-                // "this is the part you must decide".
-                // CP-031: when the room returned the trade-off as two options, the either/or is
-                // the two tiles, each with its consequence — still the whole choice (rule 5), now
-                // something she can press. The paragraph stays in "Read the full call".
-                let options = FounderChoice.options(brief)
+                realDisagreement(brief).padding(.top, 18)
+                // LAST of the reading content — rule 5, and in full.
                 if let options, !lockedIn {
-                    HStack(alignment: .top, spacing: 8) {
+                    Text(lang == .vi ? "Bạn quyết" : "Your call")
+                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .padding(.top, 20)
+                    HStack(alignment: .top, spacing: 10) {
                         ForEach(Array(options.enumerated()), id: \.offset) { i, o in
                             optionTile(o, selected: pickedOption == i) { pickedOption = i }
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 10)
                 } else {
-                    Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(6)
+                    Text(brief.tradeoffFounderMustOwn).font(CodepetTheme.inter(14)).lineSpacing(5)
                         .foregroundColor(CodepetTheme.bodyText)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
+                        .padding(.top, 18)
                 }
-                // The recommendation in full, the next action, the kill criteria and what nobody
-                // knew — in the reader every other document in the app opens into (founder's
-                // call: "the call should read like every other document").
-                // No cost line anywhere in the room (CP-028): each room's estimate goes to
-                // `UsageLedger` when it ends, and Settings → Usage shows the day's total.
-                //
-                // One row, primary first. `Read the full call` used to be a FULL-WIDTH
-                // bordered button stacked ABOVE `Lock this decision in` — two competing
-                // blocks with the secondary action on top. It is a link now.
-                HStack(spacing: 14) {
-                    if lockedIn {
-                        Text("📌 " + (lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
-                                                  : "Locked in — this decision now grounds the rest of the app."))
-                            .font(CodepetTheme.inter(12, weight: .medium))
-                            .foregroundColor(CodepetTheme.accentTeal)
-                    } else if state.canLockIn, let options = FounderChoice.options(brief) {
-                        let pick = pickedOption.map { options[$0] }
-                        Button { if let pick { (onLockInChoice ?? { _ in onLockIn() })(pick) } } label: {
-                            Text(FounderChoice.lockInTitle(pick, lang: lang))
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                                .padding(.horizontal, 14).padding(.vertical, 9)
-                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(CodepetTheme.accentPurple))
-                                .opacity(pick == nil ? 0.45 : 1)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(pick == nil)
-                        .cursorOnHover(pick == nil ? .arrow : .pointingHand)
-                    } else if state.canLockIn {
-                        Button(action: onLockIn) {
-                            Text(lang == .vi ? "Chốt quyết định này" : "Lock this decision in")
-                                .font(CodepetTheme.inter(12, weight: .semibold))
-                                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
-                                .padding(.horizontal, 14).padding(.vertical, 9)
-                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(CodepetTheme.accentPurple))
-                        }
-                        .buttonStyle(.plain)
-                        .cursorOnHover(.pointingHand)
-                    }
-                    if BriefDocument.hasMore(brief) {
-                        Button { readingCall = BriefDocument.document(brief, language: lang) } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc.text").font(.system(size: 11, weight: .semibold))
-                                Text(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call")
-                            }
-                            .font(CodepetTheme.inter(12, weight: .semibold))
-                            .foregroundColor(CodepetTheme.accentPurple)
-                        }
-                        .buttonStyle(.plain)
-                        .cursorOnHover(.pointingHand)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 4)
+                callFooter(brief, options: options)
             }
         }
     }
 
-    /// One of the room's two options: a label and what choosing it commits the founder to.
-    private func optionTile(_ o: VCFounderOption, selected: Bool, onTap: @escaping () -> Void) -> some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(o.label)
+    /// Rule 3: `the_real_disagreement` verbatim, never behind a disclosure — now inside the call
+    /// under a warm rule, so it reads as the thread from the meeting rather than a second panel.
+    private func realDisagreement(_ brief: VCBrief) -> some View {
+        let real = brief.theRealDisagreement.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pairs = state.conflicts.filter { $0.kind != "ALIGNED" }
+        let agreed = state.conflicts.filter { $0.kind == "ALIGNED" }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(pairs.isEmpty ? (lang == .vi ? "HỌ ĐỒNG Ý" : "WHERE THEY AGREE")
+                               : (lang == .vi ? "BẤT ĐỒNG THẬT SỰ" : "THE REAL DISAGREEMENT"))
+                .font(CodepetTheme.inter(10.5, weight: .semibold)).tracking(1)
+                .foregroundColor(pairs.isEmpty ? CodepetTheme.mutedText : CodepetTheme.accentOrange)
+            if let split = SplitSummary.line(pairs, name: { displayName(agentId: $0) }, lang: lang) {
+                Text(split)
                     .font(CodepetTheme.inter(13, weight: .semibold))
                     .foregroundColor(CodepetTheme.primaryText)
-                Text(o.consequence)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !real.isEmpty {
+                Text(real).font(CodepetTheme.inter(13.5)).lineSpacing(4)
+                    .foregroundColor(CodepetTheme.bodyText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !agreed.isEmpty {
+                Text(agreedLine(agreed))
                     .font(CodepetTheme.inter(12))
                     .foregroundColor(CodepetTheme.mutedText)
                     .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
+            }
+        }
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(pairs.isEmpty ? CodepetTheme.hairline : CodepetTheme.accentOrange).frame(width: 2)
+        }
+    }
+
+    /// Links on the left, the one action on the right. "Lock this in" appears only once an option
+    /// is picked, so a stray click on the card can never decide for the founder.
+    private func callFooter(_ brief: VCBrief, options: [VCFounderOption]?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
+            HStack(spacing: 16) {
+                if let open = onOpenRecord {
+                    footerLink(RoomRecord.linkTitle(lang)) { open(.stances) }
+                }
+                if BriefDocument.hasMore(brief) {
+                    footerLink(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call") {
+                        readingCall = BriefDocument.document(brief, language: lang)
+                    }
+                }
+                Spacer(minLength: 8)
+                if lockedIn {
+                    Text(lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
+                                     : "Locked in — this decision now grounds the rest of the app.")
+                        .font(CodepetTheme.inter(12, weight: .medium))
+                        .foregroundColor(CodepetTheme.accentTeal)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if state.canLockIn, let options {
+                    if let i = pickedOption, options.indices.contains(i) {
+                        lockButton(FounderChoice.lockInTitle(options[i], lang: lang)) {
+                            (onLockInChoice ?? { _ in onLockIn() })(options[i])
+                        }
+                    }
+                } else if state.canLockIn {
+                    lockButton(lang == .vi ? "Chốt quyết định này" : "Lock this decision in", action: onLockIn)
+                }
+            }
+            .padding(.top, 12)
+        }
+        .padding(.top, 18)
+    }
+
+    private func footerLink(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(CodepetTheme.inter(12.5, weight: .medium))
+                .foregroundColor(CodepetTheme.mutedText)
+                .underline(color: CodepetTheme.hairline)
+        }
+        .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
+    }
+
+    private func lockButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(CodepetTheme.inter(12.5, weight: .semibold))
+                .foregroundColor(CodepetTheme.onAccent(CodepetTheme.accentPurple))
+                .padding(.horizontal, 14).frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(CodepetTheme.accentPurple))
+        }
+        .buttonStyle(.plain)
+        .cursorOnHover(.pointingHand)
+    }
+
+    /// One of the room's two options: a radio, a label and what choosing it commits the founder to.
+    private func optionTile(_ o: VCFounderOption, selected: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .stroke(selected ? CodepetTheme.accentPurple : CodepetTheme.mutedText.opacity(0.6), lineWidth: 1.5)
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().fill(selected ? CodepetTheme.accentPurple : Color.clear).frame(width: 6, height: 6))
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(o.label)
+                        .font(CodepetTheme.inter(13.5, weight: .semibold))
+                        .foregroundColor(CodepetTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(o.consequence)
+                        .font(CodepetTheme.inter(12.5))
+                        .foregroundColor(CodepetTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? CodepetTheme.accentPurple.opacity(0.14) : CodepetTheme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(selected ? CodepetTheme.accentPurple : CodepetTheme.hairline, lineWidth: selected ? 1.5 : 1))
+            .padding(13)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(selected ? CodepetTheme.accentPurple.opacity(0.10) : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(selected ? CodepetTheme.accentPurple : CodepetTheme.hairline, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .cursorOnHover(.pointingHand)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // Written for the founder by the backend — shown verbatim (contract).

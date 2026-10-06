@@ -13,6 +13,9 @@ enum TeamBuildFixture {
     /// the main actor, same as the suites that read it.
     final class Probe {
         var vcCalls = 0
+        /// What the room was asked, and what chat was sent, in order.
+        var vcRequests: [VirtualCompanyRequest] = []
+        var chats: [CompanyChatRequest] = []
         var plans: [TeamPlanRequest] = []
         var runs: [RunTaskRequest] = []
         var saves: [(cid: String, runs: [TeamRun])] = []
@@ -71,8 +74,9 @@ enum TeamBuildFixture {
     /// the store seals the room as failed.
     static func room(_ decision: String, briefs: Bool = true, probe: Probe)
     -> (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
-        { _ in
+        { req in
             probe.vcCalls += 1
+            probe.vcRequests.append(req)
             return AsyncThrowingStream { cont in
                 Task {
                     cont.yield(.runStarted(runId: "r1"))
@@ -144,7 +148,7 @@ enum TeamBuildFixture {
             saver: { _, _ in true },
             tasksSaver: { _, _ in true },
             chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
-            chatStreamer: failingStreamer,
+            chatStreamer: { req in probe.chats.append(req); return failingStreamer(req) },
             vcRunner: roomOverride ?? room(decision, briefs: briefs, probe: probe),
             taskRunner: { req in
                 probe.runs.append(req)
@@ -342,6 +346,22 @@ final class TeamBuildStoreTests: XCTestCase {
         _ = await F.waitFor { probe.plans.count == 1 }
         XCTAssertTrue(s.isPlanningTeamBuild, "precondition: single_agent still plans, from the request")
         XCTAssertEqual(s.teamPlanningDepartments, [])
+        _ = await F.waitFor { s.teamRun?.run?.phase == .planned }
+    }
+
+    /// 6 Oct (build 8 and main): pressing Team build sent chat the bare request, so the reply that
+    /// runs alongside the room read it as an ordinary ask and answered "I can't build that from
+    /// this chat" / "I've put it up as an offer" — while the team went on to build it. Chat is now
+    /// told the team is taking it on; the founder's bubble and the room's question keep her words.
+    func testTeamBuildTellsChatTheTeamIsTakingItOn() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let chat = try XCTUnwrap(probe.chats.first, "no chat turn went out")
+        XCTAssertEqual(chat.userMessage, TeamBuildCopy.chatFrame("pants page", lang: .en))
+        XCTAssertEqual(s.chatMessages.first { $0.role == .me }?.text, "pants page", "her bubble shows her words")
+        XCTAssertEqual(probe.vcRequests.first?.request, "pants page", "the room is asked her words, unframed")
         _ = await F.waitFor { s.teamRun?.run?.phase == .planned }
     }
 

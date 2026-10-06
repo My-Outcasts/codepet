@@ -34,6 +34,19 @@ enum TeamBuildCopy {
         lang == .vi ? "Đang gọi cả đội" : "Gathering the team"
     }
 
+    /// What chat is sent when Team build is pressed, in place of the bare request (6 Oct). The
+    /// chat turn runs beside the room, and with the bare request it answered as if nothing else
+    /// were happening: "I can't build that from this chat" or "I've put it up as an offer", while
+    /// the team went on to build it. It now knows the team has it, so the reply is a short note
+    /// alongside the build, not a refusal or an `add_task` offer. Her words ride at the end, the
+    /// way `ChatMode.plan` frames a turn; her bubble and the room's question keep them unframed
+    /// (`sendChat`'s `founderAsk`).
+    static func chatFrame(_ text: String, lang: AppLanguage) -> String {
+        lang == .vi
+            ? "Mình vừa bấm Cả đội làm: các phòng ban đang họp và sẽ lập kế hoạch rồi làm thành một project thật để mình duyệt. Đừng từ chối và do not offer nó thành một task trên roadmap. Trả lời ngắn (1–2 câu): xác nhận cả đội đang làm, và nêu một điều cả đội nên lưu ý nếu có. Yêu cầu: \(text)"
+            : "I just pressed Team build: the departments are meeting on this now and will plan it and build it into a real project for me to approve. Don't say you can't build it, and do not offer it as a roadmap task. Reply in one or two sentences: confirm the team is on it, and name one thing they should keep in mind, if there is one. The request: \(text)"
+    }
+
     static func conveningDetail(_ lang: AppLanguage) -> String {
         lang == .vi ? "Đang chọn ai sẽ góp ý, thường khoảng một phút"
                     : "Choosing who should weigh in, usually about a minute"

@@ -30,4 +30,17 @@ final class TeamBuildButtonTests: XCTestCase {
         XCTAssertEqual(TeamBuildCopy.conveningDetail(.vi),
                        "Đang chọn ai sẽ góp ý, thường khoảng một phút")
     }
+
+    /// What chat is told when Team build is pressed: the team is meeting and will build it, so the
+    /// reply must neither refuse nor turn it into a roadmap offer. Her words ride at the end,
+    /// unchanged, the same way `ChatMode.plan` frames a turn.
+    func testTheChatFrameSaysTheTeamIsBuildingIt() {
+        let en = TeamBuildCopy.chatFrame("a locker booking page", lang: .en)
+        XCTAssertTrue(en.hasSuffix("a locker booking page"))
+        XCTAssertTrue(en.contains("Team build"))
+        XCTAssertTrue(en.contains("do not offer"), "must steer away from add_task offers")
+        let vi = TeamBuildCopy.chatFrame("trang đặt tủ", lang: .vi)
+        XCTAssertTrue(vi.hasSuffix("trang đặt tủ"))
+        XCTAssertNotEqual(vi, en)
+    }
 }

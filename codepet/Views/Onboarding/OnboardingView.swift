@@ -312,8 +312,7 @@ struct OnboardingView: View {
         // Run the real (fail-open) scaffold in parallel; `reveal` stays nil until it
         // resolves so the step-7 gate waits for it (and "Still building…" can show).
         scaffoldTask = Task { @MainActor in
-            let r = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token,
-                                                              language: appState.uiLanguage)
+            let r = await companyStore.scaffoldFromOnboarding(brief: capturedBrief, token: token)
             if Task.isCancelled { return }
             reveal = r
         }

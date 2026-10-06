@@ -177,7 +177,7 @@ private struct TeamCardButton: View {
 /// The card's surface (6 Oct design pass): the plain surface with a hairline, not
 /// `MessageCard`'s purple tint and purple border. The accent is kept for what is live now — the
 /// running step, its clock, the one primary button — so it means something when it appears.
-private struct TeamQuietSurface<Content: View>: View {
+struct TeamQuietSurface<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {

@@ -10,7 +10,9 @@ final class OnboardingContentTests: XCTestCase {
         XCTAssertEqual(OnboardingContent.stages.count, 6)
         XCTAssertEqual(OnboardingContent.stageNotes.count, OnboardingContent.stages.count)
         XCTAssertEqual(OnboardingContent.stages[2], "Private beta")
-        XCTAssertEqual(OnboardingContent.defaultStageIndex, 2)
+        // CP-065 (founder, 6 Oct): a new founder starts at the beginning, not on "Private beta".
+        XCTAssertEqual(OnboardingContent.defaultStageIndex, 0)
+        XCTAssertEqual(OnboardingContent.stages[OnboardingContent.defaultStageIndex], "Just an idea")
         XCTAssertEqual(OnboardingContent.categories.count, 8)
         XCTAssertEqual(OnboardingContent.departments.count, 8)
         XCTAssertEqual(OnboardingContent.departments.first?.name, "Engineering")

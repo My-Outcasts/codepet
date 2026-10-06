@@ -14,6 +14,26 @@ final class CompanyOnboardingModelTests: XCTestCase {
         XCTAssertEqual(b.stage, CompanyOnboardingModel.stages[1])
     }
 
+    /// "Start a different business" offered Idea / Prototype / Building / Private beta /
+    /// Launched; onboarding offers six others (build 8 retest, 6 Oct). One list.
+    func testStagesAreOnboardingsStages() {
+        XCTAssertEqual(CompanyOnboardingModel.stages, OnboardingContent.stages)
+        XCTAssertEqual(CompanyOnboardingModel.stages[CompanyOnboardingModel.defaultStageIndex],
+                       "Just an idea")
+    }
+
+    /// Next worked on an empty name, and the new business greeted "your product" (6 Oct).
+    /// Static: an instance crashes the 26.2 test host on dealloc (landmine 3).
+    func testTheNameStepCannotBeLeftEmpty() {
+        let name = CompanyOnboardingModel.nameStep
+        XCTAssertTrue(CompanyOnboardingModel.canLeave(step: name - 1, projectName: ""),
+                      "other steps stay optional")
+        XCTAssertFalse(CompanyOnboardingModel.canLeave(step: name, projectName: ""))
+        XCTAssertFalse(CompanyOnboardingModel.canLeave(step: name, projectName: "  \n"),
+                       "whitespace is not a name")
+        XCTAssertTrue(CompanyOnboardingModel.canLeave(step: name, projectName: "Candle Co"))
+    }
+
     func testSubmitEnrichesAndFinishes() async {
         let m = CompanyOnboardingModel()
         m.projectName = "Codepet"; m.oneLiner = "a recap tool"

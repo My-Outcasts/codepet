@@ -11,11 +11,50 @@ final class CompanyOnboardingModel: ObservableObject {
     @Published var projectName = ""
     @Published var oneLiner = ""
     @Published var audience = ""
-    @Published var stageIndex = 2
+    @Published var stageIndex = CompanyOnboardingModel.defaultStageIndex
     @Published var isSubmitting = false
 
-    /// Onboarding stage labels (mirror the web OB_STAGES ordering).
-    static let stages = ["Idea", "Prototype", "Building", "Private beta", "Launched"]
+    /// The first-run onboarding's own stages, not a second list. This wizard had five of its
+    /// own ("Idea / Prototype / Building / Private beta / Launched") beside onboarding's six, so
+    /// "Start a different business" asked the same question with different answers (build 8
+    /// retest, 6 Oct).
+    static let stages = OnboardingContent.stages
+
+    /// "Just an idea" — the founder's call for a new company (CP-065).
+    static let defaultStageIndex = 0
+
+    /// A stage string back to its index. Briefs saved by the old five-stage list keep a
+    /// sensible place: "Idea" was "Just an idea", and "Building" — this wizard's old default,
+    /// so mostly never chosen — sits between Prototype and Private beta and reads as Prototype.
+    static func stageIndex(for stage: String?) -> Int {
+        guard let stage else { return defaultStageIndex }
+        if let i = stages.firstIndex(of: stage) { return i }
+        switch stage {
+        case "Idea":     return stages.firstIndex(of: "Just an idea") ?? defaultStageIndex
+        case "Building": return stages.firstIndex(of: "Prototype") ?? defaultStageIndex
+        default:         return defaultStageIndex
+        }
+    }
+
+    /// The step that asks the company's name (`CompanyOnboardingView`).
+    static let nameStep = 2
+
+    /// Whether Next may leave `step`. The name may not be skipped: left empty, the new
+    /// business's greeting read "your company for your product is ready" and the map said
+    /// "Your company" (build 8 retest, 6 Oct).
+    func canLeave(step: Int) -> Bool { Self.canLeave(step: step, projectName: projectName) }
+
+    var hasName: Bool { Self.isName(projectName) }
+
+    /// Static so a test needs no instance — this type is a `@MainActor ObservableObject`, and
+    /// deallocating one crashes the XCTest host on Xcode 26.2 (landmine 3).
+    static func canLeave(step: Int, projectName: String) -> Bool {
+        step != nameStep || isName(projectName)
+    }
+
+    static func isName(_ s: String) -> Bool {
+        !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     func buildBrief() -> CompanyBrief {
         func nz(_ s: String) -> String? {
@@ -29,14 +68,14 @@ final class CompanyOnboardingModel: ObservableObject {
     }
 
     /// Prefill the fields from an existing brief (for edit-from-Settings). Maps the
-    /// stage string back to its index; an absent/unknown stage falls to the default.
+    /// stage string back to its index (`stageIndex(for:)`).
     func prefill(from brief: CompanyBrief) {
         founderName = brief.founderName ?? ""
         role = brief.role ?? ""
         projectName = brief.projectName ?? ""
         oneLiner = brief.oneLiner ?? ""
         audience = brief.audience ?? ""
-        stageIndex = brief.stage.flatMap { Self.stages.firstIndex(of: $0) } ?? 2
+        stageIndex = Self.stageIndex(for: brief.stage)
     }
 
     /// Enrich (fail-open) then hand to the store to persist + finish onboarding.

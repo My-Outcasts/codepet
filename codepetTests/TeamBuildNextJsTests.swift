@@ -114,4 +114,48 @@ final class TeamBuildNextJsTests: XCTestCase {
         XCTAssertTrue(s.contains("export PATH='/opt/homebrew/bin':$PATH"))
         XCTAssertTrue(s.contains("exec npm run dev"))
     }
+
+    /// Build 9 (6 Oct): "Run it" opened localhost:3000 while Next.js, finding 3000 taken, had
+    /// started the project on 3001 — so the founder saw whatever else held 3000 (here, an old
+    /// landing-page dev server). The script must open the port the server actually got.
+    ///
+    /// Runs the real script with a stand-in `npm` that listens on the port it is told to use and a
+    /// stand-in `open` that records the URL, with the start port already occupied.
+    func testRunItOpensThePortTheServerGotWhenTheFirstIsTaken() throws {
+        let bin = tmp.appendingPathComponent("bin")
+        let proj = tmp.appendingPathComponent("proj")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: proj.appendingPathComponent("node_modules"),
+                                                withIntermediateDirectories: true)
+        let opened = tmp.appendingPathComponent("opened.txt")
+        // npm run dev -- -p <port>: listen on the last argument, like `next dev -p`.
+        try "#!/bin/zsh\nexec nc -l ${@[-1]}\n".write(to: bin.appendingPathComponent("npm"), atomically: true, encoding: .utf8)
+        try "#!/bin/zsh\nprint -r -- \"$1\" > '\(opened.path)'\n".write(to: bin.appendingPathComponent("open"), atomically: true, encoding: .utf8)
+        for f in ["npm", "open"] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent(f).path)
+        }
+
+        // Occupy a port the way a leftover dev server would.
+        let blocker = Process()
+        blocker.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        let start = 40_000 + Int.random(in: 0..<9_000)
+        blocker.arguments = ["-l", "\(start)"]
+        try blocker.run()
+        defer { blocker.terminate() }
+        Thread.sleep(forTimeInterval: 0.3)
+
+        let script = TeamProjectLauncher.script(for: proj.path, pathVar: bin.path, startPort: start)
+        let run = Process()
+        run.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        run.arguments = ["-c", script]
+        try run.run()
+        defer { run.terminate() }
+
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, (try? String(contentsOf: opened, encoding: .utf8)) == nil {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        let url = try String(contentsOf: opened, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(url, "http://localhost:\(start + 1)", "opened the occupied port, not the one the server got")
+    }
 }

@@ -48,12 +48,18 @@ enum TeamBuildFixture {
             VCRouting.self, from: try! JSONSerialization.data(withJSONObject: json))
     }
 
-    static func aBrief(_ recommendation: String) -> VCBrief {
+    static func aBrief(_ recommendation: String, options: [VCFounderOption]? = nil) -> VCBrief {
         VCBrief(recommendation: recommendation, confidence: 4, confidenceReason: "c",
                 theRealDisagreement: "d", tradeoffFounderMustOwn: "t", killCriteria: ["k"],
                 nextAction: VCNextAction(action: "a", owner: "Founder"),
-                whatWeDontKnow: "u", unresolved: false)
+                whatWeDontKnow: "u", unresolved: false, founderOptions: options)
     }
+
+    /// The two-way call a room ends with when the founder must choose (CP-031), as on 7 Oct.
+    static let twoOptions = [
+        VCFounderOption(label: "Booking first, report attached", consequence: "A sprint later, every report attributable."),
+        VCFounderOption(label: "Tagged report page this week", consequence: "In tenants' hands within days."),
+    ]
 
     /// Marketing writes the message, Design builds on it, then the build step.
     static let plan = WorkPlan(
@@ -72,7 +78,8 @@ enum TeamBuildFixture {
     /// then the brief. For any decision but `multi_agent` the stream ends after routing (the store
     /// breaks out on the escape hatch anyway). `briefs: false` drops the brief and `done` frames so
     /// the store seals the room as failed.
-    static func room(_ decision: String, briefs: Bool = true, probe: Probe)
+    static func room(_ decision: String, briefs: Bool = true, options: [VCFounderOption]? = nil,
+                     probe: Probe)
     -> (VirtualCompanyRequest) -> AsyncThrowingStream<VirtualCompanyEvent, Error> {
         { req in
             probe.vcCalls += 1
@@ -84,7 +91,7 @@ enum TeamBuildFixture {
                     if decision == "multi_agent" {
                         try? await Task.sleep(nanoseconds: 60_000_000)
                         if briefs {
-                            cont.yield(.brief(aBrief("Ship a single landing page")))
+                            cont.yield(.brief(aBrief("Ship a single landing page", options: options)))
                             cont.yield(.done(runId: "r1", unresolved: false, skipped: nil))
                         }
                     }
@@ -135,6 +142,7 @@ enum TeamBuildFixture {
     }
 
     static func store(probe: Probe, root: URL, decision: String = "multi_agent", briefs: Bool = true,
+                      options: [VCFounderOption]? = nil,
                       grant: Bool = true, runnerDelayNanos: UInt64 = 0, plannerDelayNanos: UInt64 = 0,
                       librarySaverDelayNanos: UInt64 = 5_000_000,
                       planner: (() -> WorkPlan)? = nil,
@@ -149,7 +157,7 @@ enum TeamBuildFixture {
             tasksSaver: { _, _ in true },
             chatSender: { _ in CompanyChatReply(text: "byte's answer", runTaskId: nil) },
             chatStreamer: { req in probe.chats.append(req); return failingStreamer(req) },
-            vcRunner: roomOverride ?? room(decision, briefs: briefs, probe: probe),
+            vcRunner: roomOverride ?? room(decision, briefs: briefs, options: options, probe: probe),
             taskRunner: { req in
                 probe.runs.append(req)
                 if runnerDelayNanos > 0 { try? await Task.sleep(nanoseconds: runnerDelayNanos) }
@@ -416,6 +424,69 @@ final class TeamBuildStoreTests: XCTestCase {
         XCTAssertEqual(run.plan.steps.map(\.id), ["s1", "s2", "build"])
         XCTAssertTrue(s.chatMessages.contains { $0.teamRunId == run.id }, "no plan card in the transcript")
         XCTAssertFalse(s.teamBuildAvailable, "a planned run is active, so another must not start")
+    }
+
+    // MARK: - A two-way call: the plan waits for the founder (7 Oct)
+
+    /// Seen twice on 7 Oct: the room ended with "Your call" (two options), Team build planned at
+    /// once from the room's own recommendation, and the founder then locked in the OTHER option.
+    /// The plan card still led with the option she had turned down, and Start building would
+    /// have built it. A room that ends with two options now plans nothing until she picks.
+    func testARoomThatEndsWithTwoOptionsWaitsForTheCall() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, options: F.twoOptions)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let landed = await F.waitFor { s.chatMessages.contains { $0.vcRun?.brief != nil } }
+        XCTAssertTrue(landed, "the room never delivered its call")
+        let said = await F.waitFor { s.chatMessages.contains { $0.text == TeamBuildCopy.awaitingCall(.en) } }
+        XCTAssertTrue(said, "she must be told the plan follows her call")
+        _ = await F.waitFor(timeout: 0.3) { false }
+        XCTAssertTrue(probe.plans.isEmpty, "nothing may be planned before she picks")
+        XCTAssertNil(s.teamRun)
+        XCTAssertFalse(s.isPlanningTeamBuild, "no planning row while it waits on her")
+        XCTAssertTrue(s.teamBuildAvailable, "waiting on her must not hold the Team build button")
+    }
+
+    /// Her pick IS the plan's starting point: the planner and the run see the chosen option as
+    /// the decision, with no open choice left for either to settle on its own.
+    func testLockingInAnOptionPlansFromThePick() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, options: F.twoOptions)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let landed = await F.waitFor { s.chatMessages.contains { $0.text == TeamBuildCopy.awaitingCall(.en) } }
+        XCTAssertTrue(landed)
+        let room = try XCTUnwrap(s.chatMessages.first { $0.vcRun?.brief != nil })
+        let pick = F.twoOptions[1]
+        await s.lockInVirtualCompanyDecision(try XCTUnwrap(room.vcRun), messageId: room.id, choice: pick)
+
+        let planned = await F.waitFor { s.teamRun?.run?.phase == .planned }
+        XCTAssertTrue(planned, "locking in must plan")
+        XCTAssertEqual(probe.plans.count, 1)
+        let brief = try XCTUnwrap(probe.plans.first?.brief)
+        XCTAssertEqual(brief.recommendation, "Tagged report page this week: In tenants' hands within days.")
+        XCTAssertNil(brief.founderOptions, "no open choice may reach the planner")
+        XCTAssertTrue(brief.tradeoffFounderMustOwn.contains("Booking first, report attached"),
+                      "what she turned down is named, so the plan does not drift back to it")
+        XCTAssertEqual(s.teamRun?.run?.brief?.recommendation, brief.recommendation,
+                       "the build step reads the run's brief, so it must carry the pick too")
+    }
+
+    /// Locking in a room that is not the waiting Team build's (a Plan-mode room) plans nothing.
+    func testLockingInAnotherRoomDoesNotPlan() async throws {
+        let probe = F.Probe()
+        let s = F.store(probe: probe, root: root, options: F.twoOptions)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("should we raise prices", language: .en, convenesRoom: true)
+        let landed = await F.waitFor { s.chatMessages.contains { $0.vcRun?.brief != nil } }
+        XCTAssertTrue(landed)
+        let room = try XCTUnwrap(s.chatMessages.first { $0.vcRun?.brief != nil })
+        await s.lockInVirtualCompanyDecision(try XCTUnwrap(room.vcRun), messageId: room.id,
+                                             choice: F.twoOptions[0])
+        _ = await F.waitFor(timeout: 0.3) { false }
+        XCTAssertTrue(probe.plans.isEmpty)
+        XCTAssertFalse(s.chatMessages.contains { $0.text == TeamBuildCopy.awaitingCall(.en) })
     }
 
     func testSingleAgentPlansFromTheRequestAlone() async throws {

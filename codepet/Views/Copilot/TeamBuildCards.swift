@@ -28,6 +28,13 @@ enum TeamBuildButton {
 
 /// Copy for the team card and its detail panel.
 enum TeamBuildCopy {
+    /// Said when a Team build's room ends with a two-way call (7 Oct): nothing is planned until the
+    /// founder picks, because a plan made first had led with the option she then turned down.
+    static func awaitingCall(_ lang: AppLanguage) -> String {
+        lang == .vi ? "Chọn một trong hai hướng ở trên — kế hoạch sẽ theo lựa chọn của bạn."
+                    : "Pick one of the two options above — the plan follows your call."
+    }
+
     /// The row shown while a Team Build's router picks who joins the room (CP-027). Says only what
     /// is true at that moment: nobody has started work yet, so it names the choosing, not a team.
     static func conveningTitle(_ lang: AppLanguage) -> String {

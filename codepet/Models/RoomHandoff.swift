@@ -14,8 +14,19 @@ import Foundation
 /// the line and the card cannot disagree. The challenger and chief of staff are roles, not
 /// departments (contract mapping table) and are never named.
 enum RoomHandoff {
-    static func line(_ language: AppLanguage, routing: VCRouting?) -> String {
+    ///
+    /// **`requested`: the founder asked for the room** (the Team build button). Then there is no
+    /// second thought to voice — "Actually — this one needs the whole room" answered a press she
+    /// had just made (build 10, 7 Oct) — so byte only says who is coming in.
+    static func line(_ language: AppLanguage, routing: VCRouting?, requested: Bool = false) -> String {
         let names = seatedNames(routing)
+        if requested {
+            guard !names.isEmpty else {
+                return language == .vi ? "Mình gọi cả nhóm vào." : "Bringing the team in."
+            }
+            let list = joined(names, and: language == .vi ? "và" : "and")
+            return language == .vi ? "Mình gọi \(list) vào." : "Bringing in \(list)."
+        }
         guard !names.isEmpty else {
             return language == .vi
                 ? "Thật ra cái này cần cả phòng — để mình gọi cả nhóm vào."

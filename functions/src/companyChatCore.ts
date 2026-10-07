@@ -103,7 +103,9 @@ export function buildSystemPrompt(args: { companionId: string; language: string;
     // Static, so it stays inside the cacheable prefix. It repeats the draft_message tool
     // description on purpose: the failure this fixes is the model TYPING a message, and a
     // tool description is only read when the model is already reaching for a tool.
-    `When you write an actual message for them to send to a person — an email, a DM, a text — put it in the draft_message tool instead of typing it into your reply. Your reply then carries only the framing and any question you have. The app renders each draft as its own card they can copy.\n\n` +
+    // "Below": the cards draw under the reply's text (CopilotChatView.inlineActions), and the
+    // model guessed "the draft cards above" on build 10 (7 Oct), pointing at nothing.
+    `When you write an actual message for them to send to a person — an email, a DM, a text — put it in the draft_message tool instead of typing it into your reply. Your reply then carries only the framing and any question you have. The app renders each draft as its own card they can copy, directly below your reply, so if you point to the drafts, say below, never above.\n\n` +
     // Static, like the rest of this prefix. Found 5 Oct: asked about a different business, the
     // companion offered to "rebuild the brief" — something it cannot do, and the founder had no
     // way to either. The app now can, and this names the one place it lives.

@@ -45,6 +45,42 @@ final class ChatThreadArchiveTests: XCTestCase {
         XCTAssertEqual(back[0].messages[1].execSteps?.first?.label, "Read the brief")
     }
 
+    /// 7 Oct, build 10: chat wrote two email drafts as cards (`draft_message`), the app was
+    /// relaunched, and the thread came back as "Both versions are in the draft cards above" over
+    /// nothing. `StoredMessage` kept `draft` (a run's deliverable) but never `drafts` (the
+    /// message cards), so the emails were lost. They are part of what was said; they come back.
+    func testRoundTripKeepsTheMessageDrafts() async {
+        let archive = FileChatThreadArchive(root: tmp)
+        let email = MessageDraftDTO(channel: "email", to: "Building manager",
+                                    subject: "15 minutes about parcels?", body: "Chào anh/chị, …")
+        let dm = MessageDraftDTO(channel: "dm", to: nil, subject: nil, body: "Quick question about lockers")
+        let msgs = [CopilotMessage(role: .me, text: "Draft a short email to building managers"),
+                    CopilotMessage(role: .companion, text: "I wrote two versions.", drafts: [email, dm])]
+        archive.save([thread(msgs)], uid: "uidA")
+        FileChatThreadArchive.drain()
+
+        let back = archive.load(uid: "uidA").first?.messages ?? []
+        XCTAssertEqual(back.count, 2)
+        XCTAssertEqual(back.last?.drafts, [email, dm])
+    }
+
+    /// A reply that is ONLY cards (the model wrote no prose around them) is still worth keeping.
+    func testAMessageThatIsOnlyDraftsIsKept() async {
+        let archive = FileChatThreadArchive(root: tmp)
+        let card = MessageDraftDTO(channel: "text", to: "Linh", subject: nil, body: "See you at 3?")
+        archive.save([thread([CopilotMessage(role: .companion, text: "  ", drafts: [card])])], uid: "uidA")
+        FileChatThreadArchive.drain()
+        XCTAssertEqual(archive.load(uid: "uidA").first?.messages.first?.drafts, [card])
+    }
+
+    /// Files written before this field have no `drafts` key at all; they must still load.
+    func testAFileWithoutDraftsStillLoads() throws {
+        let json = #"[{"id":"t1","title":"Old","createdAt":1000,"updatedAt":2000,"kind":"ask","messages":[{"id":"m1","fromFounder":false,"createdAt":1000,"text":"hello","draftApproved":false}]}]"#
+        let d = JSONDecoder(); d.dateDecodingStrategy = .millisecondsSince1970
+        let threads = try d.decode([StoredThread].self, from: Data(json.utf8))
+        XCTAssertEqual(threads.first?.thread.messages.first?.drafts, [])
+    }
+
     func testLiveOnlyRowsAreNotKept() async {
         let archive = FileChatThreadArchive(root: tmp)
         let msgs = [CopilotMessage(role: .me, text: "hi"),

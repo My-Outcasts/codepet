@@ -49,4 +49,35 @@ final class ChatHistoryWireTests: XCTestCase {
         XCTAssertEqual(ChatHistoryWire.text(for: CopilotMessage(role: .companion, text: "")), "",
                        "a genuinely blank turn stays blank — nothing to invent")
     }
+
+    // MARK: - Message cards (`draft_message`), 7 Oct
+
+    /// Chat's email / DM cards never reached history: the model's own "both versions are in the
+    /// cards" came back with no cards, so "make the email shorter" had nothing to work from.
+    func testMessageCardsAreOnTheWireWithTheirWords() {
+        let email = MessageDraftDTO(channel: "email", to: "Building manager",
+                                    subject: "15 minutes about parcels?", body: "Chào anh/chị, em là Quan.")
+        let m = CopilotMessage(role: .companion, text: "I wrote two versions.", drafts: [email])
+        let wire = ChatHistoryWire.text(for: m)
+        XCTAssertTrue(wire.hasPrefix("I wrote two versions."), "the reply's own words come first")
+        XCTAssertTrue(wire.contains("email"))
+        XCTAssertTrue(wire.contains("Building manager"))
+        XCTAssertTrue(wire.contains("15 minutes about parcels?"))
+        XCTAssertTrue(wire.contains("Chào anh/chị, em là Quan."), "a revision needs the body itself")
+    }
+
+    func testOnlyCardsIsNotBlankOnTheWire() {
+        let dm = MessageDraftDTO(channel: "dm", to: nil, subject: nil, body: "See you at 3?")
+        let wire = ChatHistoryWire.text(for: CopilotMessage(role: .companion, text: "", drafts: [dm]))
+        XCTAssertTrue(wire.contains("See you at 3?"))
+    }
+
+    /// One long email must not ride along in full on every later turn.
+    func testALongCardBodyIsCapped() {
+        let long = String(repeating: "a", count: 5_000)
+        let card = MessageDraftDTO(channel: "email", to: nil, subject: nil, body: long)
+        let wire = ChatHistoryWire.text(for: CopilotMessage(role: .companion, text: "x", drafts: [card]))
+        XCTAssertLessThan(wire.count, 2_000)
+        XCTAssertTrue(wire.contains("…"))
+    }
 }

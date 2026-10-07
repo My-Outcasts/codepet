@@ -88,7 +88,8 @@ struct StoredThread: Codable {
 }
 
 /// The part of a `CopilotMessage` that still means something after a relaunch: what was said,
-/// the draft and whether it was approved, how it was made, and what it built on.
+/// the draft and whether it was approved, the message cards chat drafted (`drafts`), how it was
+/// made, and what it built on.
 ///
 /// Deliberately dropped: every offer and prompt that only works while its turn is live (chain
 /// offer, run/roadmap proposal, grant button, interview question, first-run action, tour offer)
@@ -114,6 +115,10 @@ struct StoredMessage: Codable {
     let noted: [RememberedFact]?
     let founderAsk: String?
     let teamRunId: String?
+    /// The email / DM / text cards chat drafted with `draft_message`. Missing until 7 Oct: a
+    /// relaunch kept the reply's "both versions are in the cards" and lost the cards. Optional so
+    /// a file written before this field still decodes; nil rather than [] when there are none.
+    let drafts: [MessageDraftDTO]?
 
     /// nil for a message with nothing left to show once its live parts are dropped (a producing
     /// row, a room that never concluded, an empty placeholder).
@@ -125,6 +130,7 @@ struct StoredMessage: Codable {
         }
         let hasContent = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || m.draft != nil || m.navChip != nil || !(m.noted ?? []).isEmpty || m.teamRunId != nil
+            || !m.drafts.isEmpty
         guard hasContent else { return nil }
         id = m.id; fromFounder = m.role == .me; createdAt = m.createdAt; self.text = text
         draft = m.draft; draftApproved = m.draftApproved
@@ -133,13 +139,15 @@ struct StoredMessage: Codable {
         companionId = m.companionId; deptName = m.deptName
         execSteps = m.execSteps; upstream = m.upstream
         navChip = m.navChip; noted = m.noted; founderAsk = m.founderAsk; teamRunId = m.teamRunId
+        drafts = m.drafts.isEmpty ? nil : m.drafts
     }
 
     var message: CopilotMessage {
         var m = CopilotMessage(id: id, role: fromFounder ? .me : .companion, createdAt: createdAt, text: text,
                                draft: draft, draftApproved: draftApproved, navChip: navChip, noted: noted,
                                companionId: companionId, deptName: deptName, execSteps: execSteps,
-                               upstream: upstream, founderAsk: founderAsk, teamRunId: teamRunId)
+                               upstream: upstream, drafts: drafts ?? [], founderAsk: founderAsk,
+                               teamRunId: teamRunId)
         m.draftReplacedItem = draftReplacedItem ?? false
         m.draftDiscarded = draftDiscarded ?? false
         return m

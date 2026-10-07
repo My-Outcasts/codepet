@@ -3,9 +3,11 @@ import Foundation
 
 /// One row of the department picker: a pet, and every department it speaks for.
 ///
-/// Nova covers Marketing and Sales; Glitch covers Operations and Legal. The old
+/// Nova once covered Marketing and Sales, and Glitch Operations and Legal. The old
 /// `Menu` iterated departments, so those two pets rendered twice each — same sprite,
-/// same name, nothing saying they were one character with two jobs.
+/// same name, nothing saying they were one character with two jobs. Since CP-058 every
+/// department has its own pet (null for Legal, vega for Sales), so each row has one; the
+/// grouping stays so a future shared pet cannot render twice again.
 struct PetRow: Identifiable, Equatable {
     let petId: String
     let petName: String

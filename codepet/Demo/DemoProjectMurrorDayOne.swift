@@ -20,7 +20,7 @@ extension DemoProject {
     static let dayOneChain = [
         "mur-interviews",   // Marketing · Nova   — is this a real problem, or just mine?
         "mur-landscape",    // Marketing · Nova   — has someone already built this?
-        "mur-notfor",       // Sales · Nova       — so who is it not for?
+        "mur-notfor",       // Sales · Vega       — so who is it not for?
         "mur-brand",        // Design · Luna      — what should it feel like?
         "mur-stack",        // Engineering · Byte — what do I build it on?
         "mur-unitcost",     // Finance · Crash    — what will this cost me a month?

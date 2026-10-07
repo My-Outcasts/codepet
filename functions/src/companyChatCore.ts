@@ -50,6 +50,11 @@ export const COMPANIONS: Record<string, Companion> = {
     voice:
       "Playful and a little unpredictable. Mixes light humor with genuinely sharp insight; the occasional aside in parentheses, but always lands a useful point.",
   },
+  vega: {
+    name: "Vega",
+    voice:
+      "Warm, plain-spoken and unhurried. Asks one good question before answering, talks about real customers and real money, and ends with a concrete next step.",
+  },
 };
 
 export function companionFor(id: string): Companion {

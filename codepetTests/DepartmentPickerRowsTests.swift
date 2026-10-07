@@ -17,10 +17,14 @@ final class DepartmentPickerRowsTests: XCTestCase {
     }
 
     /// The two-department pets are the reason this type exists.
-    func testNovaCarriesMarketingAndSalesInOneRow() throws {
+    /// CP-058 step 2 (7 Oct): Sales moved from nova to vega, so each speaks for one department.
+    func testNovaAndVegaSplitMarketingAndSales() throws {
         let nova = try XCTUnwrap(DepartmentPickerRows.rows.first { $0.petId == "nova" })
-        XCTAssertEqual(nova.departments.map(\.key), ["mkt", "sales"])
+        XCTAssertEqual(nova.departments.map(\.key), ["mkt"])
         XCTAssertEqual(nova.petName, "Nova")
+        let vega = try XCTUnwrap(DepartmentPickerRows.rows.first { $0.petId == "vega" })
+        XCTAssertEqual(vega.departments.map(\.key), ["sales"])
+        XCTAssertEqual(vega.petName, "Vega")
     }
 
     /// CP-058 (4 Oct): Legal moved from glitch to null, so each now speaks for one department.
@@ -35,13 +39,12 @@ final class DepartmentPickerRowsTests: XCTestCase {
     /// founder already knows is preserved by the redesign rather than reshuffled.
     func testPetOrderFollowsFirstAppearanceInTheRoster() {
         XCTAssertEqual(DepartmentPickerRows.rows.map(\.petId),
-                       ["byte", "luna", "nova", "sage", "crash", "glitch", "null"])
+                       ["byte", "luna", "nova", "vega", "sage", "crash", "glitch", "null"])
     }
 
-    /// Seven rows for eight departments since CP-058 gave Legal to null; only nova still
-    /// carries two (Marketing and Sales) until an eighth pet exists.
-    func testSevenRowsForEightDepartments() {
-        XCTAssertEqual(DepartmentPickerRows.rows.count, 7)
+    /// Eight rows for eight departments since CP-058 finished: null took Legal, vega Sales.
+    func testEightRowsForEightDepartments() {
+        XCTAssertEqual(DepartmentPickerRows.rows.count, 8)
         XCTAssertEqual(DepartmentMenu.rosterOrder.count, 8)
     }
 

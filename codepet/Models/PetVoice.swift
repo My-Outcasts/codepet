@@ -51,6 +51,10 @@ enum PetVoice {
             // Junior is a young en-US voice — the only installed HUMAN voice that
             // reads as playful. Not Bahh/Boing/Jester, which are sound effects.
             return VoiceProfile(preferredVoices: ["Junior", "Kathy", "Samantha"], rate: 0.58, pitch: 1.15)
+        case "vega":
+            // The Patient Closer: warm and unhurried, a little low. Not Nova's voice, so Sales
+            // and Marketing no longer sound like the same pet. Fred is en-US male, steady.
+            return VoiceProfile(preferredVoices: ["Fred", "Samantha"], rate: 0.48, pitch: 0.95)
         default:
             // Byte, and the fallback for an unknown pet: the overlay must never be
             // voiceless. Byte speaks for Engineering, the most-heard department, so the

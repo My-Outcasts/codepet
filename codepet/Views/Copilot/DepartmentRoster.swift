@@ -58,9 +58,8 @@ struct DepartmentRoster: View {
     ///
     /// The pet's name leads because that is what the reply will be signed with —
     /// `CopilotChatView.headerName` renders "Nova · Marketing" — so the chip and the
-    /// answer read in the same order. Seven pets cover eight departments (nova takes
-    /// Marketing and Sales; null took Legal from glitch in CP-058), which is a fact about the
-    /// cast worth showing rather than hiding until an eighth pet exists.
+    /// answer read in the same order. Eight pets cover eight departments since CP-058
+    /// (null took Legal from glitch; vega, drawn 7 Oct, took Sales from nova): one pet each.
     private func chip(_ dep: Department) -> some View {
         let on = selected?.key == dep.key
         let pet = DepartmentCompanions.companionId(for: dep.key)

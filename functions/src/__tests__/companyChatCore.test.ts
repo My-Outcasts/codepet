@@ -24,9 +24,11 @@ describe("companionFor", () => {
   it("falls back to byte for an unknown id", () => {
     expect(companionFor("does-not-exist").name).toBe("Byte");
   });
-  it("has all seven starters", () => {
-    for (const id of ["byte", "nova", "crash", "luna", "sage", "glitch", "null"]) {
-      expect(companionFor(id).name.length).toBeGreaterThan(0);
+  // Each pet must have its OWN entry: an unknown id falls back to Byte, so a length check
+  // passed for a pet that was never added (vega, 7 Oct) — it would have been signed "Byte".
+  it("has every pet, each under its own name", () => {
+    for (const id of ["byte", "nova", "crash", "luna", "sage", "glitch", "null", "vega"]) {
+      expect(companionFor(id).name.toLowerCase()).toBe(id);
     }
   });
 });

@@ -173,8 +173,8 @@ Each of these cost real time to learn.
 - **Pixel art:** Always use `.interpolation(.none)` and `Image.NEAREST` for scaling
 - **App icon:** `codepet-official-logo.png` — C at 55% width × 63% height, white background
 
-## Characters (7 starters)
-byte, nova, crash, luna, sage, glitch, null
+## Characters (8 starters)
+byte, nova, crash, luna, sage, glitch, null, vega (Sales, added 7 Oct)
 
 ## Important Files
 - `codepet-official-logo.png` — Final app icon (do not modify)

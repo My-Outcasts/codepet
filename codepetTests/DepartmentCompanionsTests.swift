@@ -31,13 +31,22 @@ final class DepartmentCompanionsTests: XCTestCase {
         XCTAssertEqual(DepartmentCompanions.companionId(for: "fin"), "crash")
     }
 
-    /// Sage no longer doubles up. Nova (Marketing + Sales) and Glitch (Operations + Legal)
-    /// still do, and that is the design.
+    /// Sage no longer doubles up. Since CP-058 no pet does (null took Legal, vega Sales).
     func testSageSpeaksForSupportAlone() {
         let sages = DepartmentCatalog.roster
             .filter { DepartmentCompanions.companionId(for: $0.key) == "sage" }
             .map(\.key)
         XCTAssertEqual(sages, ["support"])
+    }
+
+    /// CP-058 step 2 (7 Oct): Sales has its own pet, so Marketing and Sales no longer read as
+    /// one character. Every roster department now maps to a DIFFERENT pet, each with art.
+    func testSalesIsVegaAndEveryDepartmentHasItsOwnPet() {
+        XCTAssertEqual(DepartmentCompanions.companionId(for: "sales"), "vega")
+        let pets = DepartmentCatalog.roster.compactMap { DepartmentCompanions.companionId(for: $0.key) }
+        XCTAssertEqual(pets.count, DepartmentCatalog.roster.count, "a roster department has no pet")
+        XCTAssertEqual(Set(pets).count, pets.count, "two departments share a pet again")
+        XCTAssertNotNil(PetCharacter.all["vega"], "vega is cast but has no character entry")
     }
 
     func testCompanionIdForByte() {

@@ -26,13 +26,13 @@ enum DepartmentCompanions {
         "eng": "byte",       // data flow, state, algorithms — and the product IS software
         "design": "luna",    // Designer (UX/UI)
         "mkt": "nova",       // Firestarter — launches, energy
-        "sales": "nova",     // growth energy (shares the marketing persona)
+        "sales": "vega",     // the patient closer — listens, then asks for the commitment
         "support": "sage",   // calm, patient, methodical
         "fin": "crash",      // runway is a shipping constraint, not an essay
         "ops": "glitch",     // DevOps — automation
         // CP-058 (Mona, 4 Oct): each department its own pet. null was cast to nothing; it
         // "watches the things you're not paying attention to", which is what Legal does. Sales
-        // still shares nova until an eighth pet is drawn.
+        // shared nova until the eighth pet, vega, was drawn for it (7 Oct).
         "legal": "null",     // the gaps nobody is watching
     ]
 

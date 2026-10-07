@@ -9,7 +9,7 @@ import XCTest
 /// back rather than crashing.
 final class PetVoiceTests: XCTestCase {
 
-    /// **All SEVEN starters, from `PetCharacter.starters`.** An earlier draft of this
+    /// **Every starter, from `PetCharacter.starters`** (eight since vega, 7 Oct). An earlier draft of this
     /// plan listed six and dropped `null` — "The Chaos Gremlin", a real shipped
     /// character with its own `voiceGuide` and its own match score. It fell into
     /// `default` and got byte's exact profile: same voice, same rate, same pitch. The
